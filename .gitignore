@@ -1,0 +1,24 @@
+# Build outputs
+target/
+project/
+project/target/
+
+# IDE and Editor files
+.idea/
+.vscode/
+
+# Scala Metals & Bloop (Language Server)
+.metals/
+.bsp/
+.bloop/
+metals.sbt
+
+# OS files and logs
+*.log
+.DS_Store
+
+*.md
+
+runtime
+
+orphera-agent
