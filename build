@@ -1,0 +1,11 @@
+#!/bin/bash
+
+sbt clean
+
+sbt reload
+
+sbt compile
+
+sbt assembly
+
+native-image --no-fallback -Ob -cp /home/localadmin/orphera-pkg/agent/target/scala-3.8.4/agent-assembly-0.1.0-SNAPSHOT.jar orphera.agent.Main orphera-agent
