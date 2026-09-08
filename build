@@ -6,6 +6,8 @@ sbt reload
 
 sbt compile
 
-sbt assembly
+# sudo java -cp agent/target/scala-3.8.4/agent-assembly-0.1.0-SNAPSHOT.jar orphera.agent.Main
 
-native-image --no-fallback -Ob -cp /home/localadmin/orphera-pkg/agent/target/scala-3.8.4/agent-assembly-0.1.0-SNAPSHOT.jar orphera.agent.Main orphera-agent
+# sbt assembly
+
+# native-image --no-fallback -Ob -cp /home/localadmin/orphera-pkg/agent/target/scala-3.8.4/agent-assembly-0.1.0-SNAPSHOT.jar orphera.agent.Main orphera-agent

@@ -1,54 +1,112 @@
 package orphera.orchestrator
 
 enum Command:
-  case Install(
-      packages: List[String],
-      nodes: Option[List[String]],
-      updateCache: Boolean
-  )
+  case Install(packages: List[String], nodes: Option[List[String]], updateCache: Boolean)
+  case Remove(packages: List[String], nodes: Option[List[String]], purge: Boolean)
+  case AutoRemove(nodes: Option[List[String]], purge: Boolean)
+  case Copy(localPath: String, destPath: String, nodes: Option[List[String]], owner: String, group: String, mode: Int)
+  case NetworkApply(nodes: Option[List[String]], timeoutSeconds: Int)
   case Help
 
 object Cli:
 
   def parse(args: List[String]): Either[String, Command] =
     args match
-      case "install" :: rest =>
-        parseInstall(rest, Nil, None, updateCache = false)
+      case "install" :: rest       => parseInstall(rest, Nil, None, updateCache = false)
+      case "remove" :: rest        => parseRemove(rest, Nil, None, purge = false)
+      case "autoremove" :: rest    => parseAutoRemove(rest, None, purge = false)
+      case "copy" :: local :: dest :: rest => parseCopy(rest, local, dest, None, "", "", 0)
+      case "network-apply" :: rest => parseNetworkApply(rest, None, 60)
       case "help" :: _ | "--help" :: _ | Nil => Right(Command.Help)
       case other => Left(s"Unknown command: ${other.headOption.getOrElse("")}")
 
   private def parseInstall(
-      args: List[String],
-      packages: List[String],
-      nodes: Option[List[String]],
-      updateCache: Boolean
+      args: List[String], packages: List[String], nodes: Option[List[String]], updateCache: Boolean
   ): Either[String, Command] =
     args match
       case Nil =>
         if packages.isEmpty then Left("install requires at least one package")
         else Right(Command.Install(packages, nodes, updateCache))
-
       case "--nodes" :: value :: rest =>
-        parseInstall(
-          rest,
-          packages,
-          Some(value.split(",").toList.map(_.trim)),
-          updateCache
-        )
-
+        parseInstall(rest, packages, Some(value.split(",").toList.map(_.trim)), updateCache)
       case "--update-cache" :: rest =>
         parseInstall(rest, packages, nodes, updateCache = true)
-
       case pkg :: rest =>
         parseInstall(rest, packages :+ pkg, nodes, updateCache)
+
+  private def parseRemove(
+      args: List[String], packages: List[String], nodes: Option[List[String]], purge: Boolean
+  ): Either[String, Command] =
+    args match
+      case Nil =>
+        if packages.isEmpty then Left("remove requires at least one package")
+        else Right(Command.Remove(packages, nodes, purge))
+      case "--nodes" :: value :: rest =>
+        parseRemove(rest, packages, Some(value.split(",").toList.map(_.trim)), purge)
+      case "--purge" :: rest =>
+        parseRemove(rest, packages, nodes, purge = true)
+      case pkg :: rest =>
+        parseRemove(rest, packages :+ pkg, nodes, purge)
+
+  private def parseAutoRemove(
+      args: List[String], nodes: Option[List[String]], purge: Boolean
+  ): Either[String, Command] =
+    args match
+      case Nil => Right(Command.AutoRemove(nodes, purge))
+      case "--nodes" :: value :: rest =>
+        parseAutoRemove(rest, Some(value.split(",").toList.map(_.trim)), purge)
+      case "--purge" :: rest =>
+        parseAutoRemove(rest, nodes, purge = true)
+      case other :: _ =>
+        Left(s"Unknown argument to autoremove: $other")
+
+  private def parseCopy(
+      args: List[String], local: String, dest: String, nodes: Option[List[String]],
+      owner: String, group: String, mode: Int
+  ): Either[String, Command] =
+    args match
+      case Nil => Right(Command.Copy(local, dest, nodes, owner, group, mode))
+      case "--nodes" :: value :: rest =>
+        parseCopy(rest, local, dest, Some(value.split(",").toList.map(_.trim)), owner, group, mode)
+      case "--owner" :: value :: rest =>
+        parseCopy(rest, local, dest, nodes, value, group, mode)
+      case "--group" :: value :: rest =>
+        parseCopy(rest, local, dest, nodes, owner, value, mode)
+      case "--mode" :: value :: rest =>
+        scala.util.Try(Integer.parseInt(value, 8)).toOption match
+          case Some(parsed) => parseCopy(rest, local, dest, nodes, owner, group, parsed)
+          case None => Left(s"Invalid mode: $value (expected octal, e.g. 0644)")
+      case other :: _ =>
+        Left(s"Unknown argument to copy: $other")
+
+  private def parseNetworkApply(
+      args: List[String], nodes: Option[List[String]], timeoutSeconds: Int
+  ): Either[String, Command] =
+    args match
+      case Nil => Right(Command.NetworkApply(nodes, timeoutSeconds))
+      case "--nodes" :: value :: rest =>
+        parseNetworkApply(rest, Some(value.split(",").toList.map(_.trim)), timeoutSeconds)
+      case "--timeout" :: value :: rest =>
+        scala.util.Try(value.toInt).toOption match
+          case Some(parsed) => parseNetworkApply(rest, nodes, parsed)
+          case None => Left(s"Invalid timeout: $value")
+      case other :: _ =>
+        Left(s"Unknown argument to network-apply: $other")
 
   val usage: String =
     """orphera-orchestrator - test CLI for the Orphera agent protocol
       |
       |Usage:
-      |  install <package> [<package> ...] [--nodes host1,host2] [--update-cache]
+      |  install        <package> [<package> ...] [--nodes host1,host2] [--update-cache]
+      |  remove         <package> [<package> ...] [--nodes host1,host2] [--purge]
+      |  autoremove     [--nodes host1,host2] [--purge]
+      |  copy           <local-path> <remote-path> [--owner user] [--group grp] [--mode 0644] [--nodes host1,host2]
+      |  network-apply  [--nodes host1,host2] [--timeout 60]
       |
       |Examples:
       |  install curl vim
-      |  install nginx --nodes web1,web2 --update-cache
+      |  remove nginx --purge --nodes web1
+      |  autoremove --purge
+      |  copy /tmp/test.txt /etc/orphera-test.txt --owner root --group root --mode 0644
+      |  network-apply --nodes web1 --timeout 90
       |""".stripMargin

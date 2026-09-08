@@ -7,7 +7,6 @@ case class Node(
 )
 
 object Inventory:
-
   val all =
     List(
       Node("local-agent", "127.0.0.1")

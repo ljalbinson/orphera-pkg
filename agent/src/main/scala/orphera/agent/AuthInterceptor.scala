@@ -10,10 +10,8 @@ class AuthInterceptor extends ServerInterceptor:
       next: ServerCallHandler[ReqT, RespT]
   ): ServerCall.Listener[ReqT] =
     val provided = Option(headers.get(Auth.TokenKey))
-    if provided.contains(Auth.SharedToken) then next.startCall(call, headers)
+    if provided.contains(Auth.SharedToken) then
+      next.startCall(call, headers)
     else
-      call.close(
-        Status.UNAUTHENTICATED.withDescription("missing or invalid token"),
-        new Metadata()
-      )
+      call.close(Status.UNAUTHENTICATED.withDescription("missing or invalid token"), new Metadata())
       new ServerCall.Listener[ReqT] {}

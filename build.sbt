@@ -1,7 +1,6 @@
 import sbt._
 import Keys._
 import sbtassembly.AssemblyPlugin.autoImport._
-import scalapb.GeneratorOption.*
 
 ThisBuild / scalaVersion := "3.8.4"
 
@@ -15,20 +14,24 @@ lazy val common = project
     )
   )
 
-lazy val orchestrator = project
-  .dependsOn(common)
-  .settings(
-    Compile / run / fork := true,
-    libraryDependencies +=
-      "org.typelevel" %% "cats-effect" % "3.7.1"
-  )
-
 lazy val agent = project
   .dependsOn(common)
   .settings(
     Compile / run / fork := true,
+    Compile / run / baseDirectory := (ThisBuild / baseDirectory).value,
     Compile / mainClass := Some("orphera.agent.Main"),
     assembly / mainClass := Some("orphera.agent.Main")
+  )
+
+lazy val orchestrator = project
+  .dependsOn(common)
+  .settings(
+    Compile / run / fork := true,
+    Compile / run / baseDirectory := (ThisBuild / baseDirectory).value,
+    libraryDependencies ++= Seq(
+      "org.typelevel" %% "cats-effect" % "3.7.1",
+      "co.fs2" %% "fs2-io" % "3.11.0"
+    )
   )
 
 ThisBuild / assemblyMergeStrategy := {
