@@ -38,14 +38,65 @@ shape.
 
 ## Requirements
 
-- JDK 21 (GraalVM or otherwise)
-- sbt 1.10.x (pinned via `project/build.properties` — this project does
-  **not** currently build on sbt 2.x; several dependencies, notably
-  `sbt-fs2-grpc`, aren't yet published for it)
-- `openssl`, for certificate generation
-- `dpkg-deb`, for building the `.deb` package
-- Target hosts: Debian/Ubuntu with `systemd`, `apt`, and (for network
-  config) `systemd-networkd`
+**Build machine:**
+
+- **JDK 21.** Developed and tested against Oracle GraalVM 21.0.9
+  (`21.0.9+7-LTS`) — any standard JDK 21 distribution should compile
+  and run the JVM assembly jars fine; GraalVM is only actually needed
+  if you intend to attempt `native-image` (currently non-functional,
+  see below).
+- **sbt 1.10.7**, pinned via `project/build.properties`. This is a hard
+  requirement, not a suggestion — the project does **not** build on
+  sbt 2.x. `sbt-fs2-grpc` (and several of its transitive plugin
+  dependencies) are not published for sbt 2's plugin toolchain as of
+  this writing; attempting to build under sbt 2 fails at the
+  dependency-resolution stage before any code compiles. If your
+  machine has sbt installed globally at a different version, the
+  `project/build.properties` pin overrides it for this project only —
+  no global sbt downgrade needed.
+- **`protoc`** is *not* a separate manual install — `sbt-protoc`
+  (pulled in transitively via the `Fs2Grpc` sbt plugin) fetches a
+  matching `protoc` binary automatically on first build. No action
+  needed unless your network blocks Maven Central, in which case the
+  first `sbt compile` will fail trying to download it.
+- **`openssl`**, for certificate generation (`make certs`).
+- **`dpkg-deb`**, for building the `.deb` package (`make deb`). This
+  effectively means the `.deb` must be built on a Debian/Ubuntu-family
+  machine (or a container thereof) — it is not cross-buildable from,
+  e.g., macOS without a Linux toolchain available.
+- Internet access to Maven Central / repo1.maven.org for dependency
+  resolution on first build (and after any `build.sbt`/`plugins.sbt`
+  change). Builds are otherwise fully offline once the local
+  `~/.ivy2`/`~/.cache/coursier` caches are warm.
+
+**Target (managed) hosts:**
+
+- Debian/Ubuntu with `systemd` and `apt`.
+- `systemd-networkd` specifically (not `NetworkManager`) if using
+  `network-apply` — the agent shells out to `networkctl reload` and
+  reads/writes `/etc/systemd/network/*.{network,netdev,link}`.
+- A JRE (`default-jre-headless` or equivalent) — pulled in
+  automatically as a `.deb` dependency; no manual install needed if
+  installing via the package.
+- Root privileges for the agent process itself (package management,
+  file ownership changes, network reconfiguration, and reboot all
+  require it) — the systemd unit runs it as `User=root`.
+
+**Orchestrator/control host** (may be the same machine as the build
+machine, or different):
+
+- JDK 21, to run the orchestrator's assembly jar (or `sbt run` it
+  directly from source).
+- SSH client (`ssh`, `scp`) with non-interactive key-based auth
+  configured to target hosts, for `bootstrap`/`teardown` specifically.
+  Password or passphrase-prompting auth will hang rather than fail
+  cleanly — see [Provisioning a new host](#provisioning-a-new-host).
+
+**Known-working combination**, as actually built and run over the
+course of this project: Ubuntu (build/target hosts), Oracle GraalVM
+21.0.9, sbt 1.10.7, Scala 3.8.4. Other JDK 21 distributions and recent
+Debian/Ubuntu releases are expected to work but haven't been
+specifically verified.
 
 ## Building
 
