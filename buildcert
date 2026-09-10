@@ -1,0 +1,12 @@
+cd certs
+
+openssl req -newkey rsa:4096 -nodes \
+  -keyout server.key -out server.csr \
+  -subj "/CN=*.ljalbinson.com" \
+  -addext "subjectAltName=DNS:*.ljalbinson.com,DNS:localhost,IP:127.0.0.1"
+
+openssl x509 -req -in server.csr -CA ca.crt -CAkey ca.key -CAcreateserial \
+  -out server.crt -days 3650 \
+  -extfile <(printf "subjectAltName=DNS:*.ljalbinson.com,DNS:localhost,IP:127.0.0.1")
+
+cd ..

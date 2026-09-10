@@ -9,5 +9,7 @@ case class Node(
 object Inventory:
   val all =
     List(
-      Node("local-agent", "127.0.0.1")
+      Node("tst0", "tst0.ljalbinson.com"),
+      Node("tst1", "tst1.ljalbinson.com"),
+      Node("tst2", "tst2.ljalbinson.com")
     )

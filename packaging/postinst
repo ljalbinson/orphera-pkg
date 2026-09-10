@@ -1,0 +1,5 @@
+#!/bin/sh
+set -e
+systemctl daemon-reload
+systemctl enable orphera-agent.service
+systemctl restart orphera-agent.service

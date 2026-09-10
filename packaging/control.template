@@ -1,0 +1,10 @@
+Package: orphera-agent
+Version: @VERSION@
+Section: admin
+Priority: optional
+Architecture: amd64
+Depends: default-jre-headless (>= 17)
+Maintainer: you@example.com
+Description: Orphera orchestration agent
+ Receives and executes package management, file distribution,
+ and network configuration commands over gRPC.
