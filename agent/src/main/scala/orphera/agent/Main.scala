@@ -26,7 +26,9 @@ object Main extends IOApp.Simple:
           NettyServerBuilder
             .forPort(50051)
             .sslContext(sslContext)
-            .addService(ServerInterceptors.intercept(bound, new AuthInterceptor))
+            .addService(
+              ServerInterceptors.intercept(bound, new AuthInterceptor)
+            )
             .resource[IO]
         }
         .use { server =>

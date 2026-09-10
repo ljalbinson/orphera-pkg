@@ -8,38 +8,55 @@ import fs2.Stream
 import io.grpc.Metadata
 import orphera.common.*
 
-class AgentServiceImpl(networkPending: Ref[IO, Map[String, Fiber[IO, Throwable, Unit]]])
-    extends AgentFs2Grpc[IO, Metadata]:
+class AgentServiceImpl(
+    networkPending: Ref[IO, Map[String, Fiber[IO, Throwable, Unit]]]
+) extends AgentFs2Grpc[IO, Metadata]:
 
   def install(request: InstallPackages, ctx: Metadata): Stream[IO, Event] =
     Stream.eval(Queue.unbounded[IO, Event]).flatMap { queue =>
       Stream.eval(Dispatcher.dispatch(request, queue).start) >>
-        Stream.fromQueueUnterminated(queue).takeThrough(_.kind != Event.Kind.RESULT)
+        Stream
+          .fromQueueUnterminated(queue)
+          .takeThrough(_.kind != Event.Kind.RESULT)
     }
 
   def remove(request: RemovePackages, ctx: Metadata): Stream[IO, Event] =
     Stream.eval(Queue.unbounded[IO, Event]).flatMap { queue =>
       Stream.eval(Dispatcher.dispatchRemove(request, queue).start) >>
-        Stream.fromQueueUnterminated(queue).takeThrough(_.kind != Event.Kind.RESULT)
+        Stream
+          .fromQueueUnterminated(queue)
+          .takeThrough(_.kind != Event.Kind.RESULT)
     }
 
   def runAutoRemove(request: AutoRemove, ctx: Metadata): Stream[IO, Event] =
     Stream.eval(Queue.unbounded[IO, Event]).flatMap { queue =>
       Stream.eval(Dispatcher.dispatchAutoRemove(request, queue).start) >>
-        Stream.fromQueueUnterminated(queue).takeThrough(_.kind != Event.Kind.RESULT)
+        Stream
+          .fromQueueUnterminated(queue)
+          .takeThrough(_.kind != Event.Kind.RESULT)
     }
 
-  def copyFile(request: Stream[IO, FileChunk], ctx: Metadata): Stream[IO, Event] =
+  def copyFile(
+      request: Stream[IO, FileChunk],
+      ctx: Metadata
+  ): Stream[IO, Event] =
     Stream.eval(Queue.unbounded[IO, Event]).flatMap { queue =>
       Stream.eval(FileTransfer.receive(request, queue).start) >>
-        Stream.fromQueueUnterminated(queue).takeThrough(_.kind != Event.Kind.RESULT)
+        Stream
+          .fromQueueUnterminated(queue)
+          .takeThrough(_.kind != Event.Kind.RESULT)
     }
 
   def checkFile(request: FileCheck, ctx: Metadata): IO[FileCheckResult] =
     FileTransfer.check(request)
 
-  def reloadNetwork(request: NetworkReload, ctx: Metadata): IO[NetworkReloadResult] =
+  def reloadNetwork(
+      request: NetworkReload,
+      ctx: Metadata
+  ): IO[NetworkReloadResult] =
     NetworkReloader.reload(request, networkPending)
 
   def confirmNetwork(request: NetworkConfirm, ctx: Metadata): IO[Empty] =
-    NetworkReloader.confirm(request.backupId, networkPending) >> IO.pure(Empty())
+    NetworkReloader.confirm(request.backupId, networkPending) >> IO.pure(
+      Empty()
+    )

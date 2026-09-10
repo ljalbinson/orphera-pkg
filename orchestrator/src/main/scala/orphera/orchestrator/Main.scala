@@ -11,7 +11,9 @@ object Main extends IOApp:
     Cli.parse(args) match
 
       case Left(error) =>
-        IO.println(s"Error: $error") >> IO.println(Cli.usage) >> IO.pure(ExitCode.Error)
+        IO.println(s"Error: $error") >> IO.println(Cli.usage) >> IO.pure(
+          ExitCode.Error
+        )
 
       case Right(Command.Help) =>
         IO.println(Cli.usage) >> IO.pure(ExitCode.Success)
@@ -33,7 +35,14 @@ object Main extends IOApp:
 
       case Right(Command.Copy(local, dest, nodeNames, owner, group, mode)) =>
         withTargets(nodeNames) { targets =>
-          Orchestrator.copyFile(targets, Paths.get(local), dest, owner, group, mode)
+          Orchestrator.copyFile(
+            targets,
+            Paths.get(local),
+            dest,
+            owner,
+            group,
+            mode
+          )
         }
 
       case Right(Command.NetworkApply(nodeNames, timeoutSeconds)) =>
@@ -41,12 +50,15 @@ object Main extends IOApp:
           Orchestrator.applyNetworkConfig(targets, timeoutSeconds)
         }
 
-  private def withTargets(nodeNames: Option[List[String]])(action: List[Node] => IO[Unit]): IO[ExitCode] =
+  private def withTargets(nodeNames: Option[List[String]])(
+      action: List[Node] => IO[Unit]
+  ): IO[ExitCode] =
     val targets = nodeNames match
       case Some(names) => Inventory.all.filter(n => names.contains(n.name))
       case None        => Inventory.all
 
     if targets.isEmpty then
-      IO.println("No matching nodes found in inventory.") >> IO.pure(ExitCode.Error)
-    else
-      action(targets) >> IO.pure(ExitCode.Success)
+      IO.println("No matching nodes found in inventory.") >> IO.pure(
+        ExitCode.Error
+      )
+    else action(targets) >> IO.pure(ExitCode.Success)

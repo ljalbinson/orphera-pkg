@@ -7,14 +7,32 @@ import cats.syntax.all.*
 
 object Orchestrator:
 
-  def installPackages(nodes: List[Node], packages: List[String], updateCache: Boolean = false): IO[Unit] =
+  def installPackages(
+      nodes: List[Node],
+      packages: List[String],
+      updateCache: Boolean = false
+  ): IO[Unit] =
     nodes.parTraverse_ { node =>
-      NodeClient.installPackages(node, packages, updateCache, ConsoleRenderer.render(node, _))
+      NodeClient.installPackages(
+        node,
+        packages,
+        updateCache,
+        ConsoleRenderer.render(node, _)
+      )
     }
 
-  def removePackages(nodes: List[Node], packages: List[String], purge: Boolean = false): IO[Unit] =
+  def removePackages(
+      nodes: List[Node],
+      packages: List[String],
+      purge: Boolean = false
+  ): IO[Unit] =
     nodes.parTraverse_ { node =>
-      NodeClient.removePackages(node, packages, purge, ConsoleRenderer.render(node, _))
+      NodeClient.removePackages(
+        node,
+        packages,
+        purge,
+        ConsoleRenderer.render(node, _)
+      )
     }
 
   def autoRemove(nodes: List[Node], purge: Boolean = false): IO[Unit] =
@@ -31,10 +49,25 @@ object Orchestrator:
       mode: Int
   ): IO[Unit] =
     nodes.parTraverse_ { node =>
-      NodeClient.copyFile(node, localPath, destPath, owner, group, mode, ConsoleRenderer.render(node, _))
+      NodeClient.copyFile(
+        node,
+        localPath,
+        destPath,
+        owner,
+        group,
+        mode,
+        ConsoleRenderer.render(node, _)
+      )
     }
 
-  def applyNetworkConfig(nodes: List[Node], confirmTimeoutSeconds: Int = 60): IO[Unit] =
+  def applyNetworkConfig(
+      nodes: List[Node],
+      confirmTimeoutSeconds: Int = 60
+  ): IO[Unit] =
     nodes.parTraverse_ { node =>
-      NodeClient.applyNetworkConfig(node, confirmTimeoutSeconds, ConsoleRenderer.render(node, _))
+      NodeClient.applyNetworkConfig(
+        node,
+        confirmTimeoutSeconds,
+        ConsoleRenderer.render(node, _)
+      )
     }

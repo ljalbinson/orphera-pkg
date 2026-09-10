@@ -109,18 +109,36 @@ object NodeClient:
 
           _ <-
             if !checkResult.needsCopy then
-              onEvent(Event(Event.Kind.RESULT, s"Skipped: ${checkResult.reason}", exitCode = 0, success = true))
+              onEvent(
+                Event(
+                  Event.Kind.RESULT,
+                  s"Skipped: ${checkResult.reason}",
+                  exitCode = 0,
+                  success = true
+                )
+              )
             else
               val metadataChunk =
-                FileChunk(FileChunk.Payload.Metadata(FileMetadata(destPath, owner, group, mode)))
+                FileChunk(
+                  FileChunk.Payload
+                    .Metadata(FileMetadata(destPath, owner, group, mode))
+                )
 
               val contentChunks =
-                fs2.io.file.Files[IO]
+                fs2.io.file
+                  .Files[IO]
                   .readAll(fs2.io.file.Path.fromNioPath(localPath))
                   .chunkN(64 * 1024)
-                  .map(chunk => FileChunk(FileChunk.Payload.Content(com.google.protobuf.ByteString.copyFrom(chunk.toArray))))
+                  .map(chunk =>
+                    FileChunk(
+                      FileChunk.Payload.Content(
+                        com.google.protobuf.ByteString.copyFrom(chunk.toArray)
+                      )
+                    )
+                  )
 
-              val requestStream = fs2.Stream.emit(metadataChunk) ++ contentChunks
+              val requestStream =
+                fs2.Stream.emit(metadataChunk) ++ contentChunks
 
               stub
                 .copyFile(requestStream, metadata)
@@ -142,18 +160,42 @@ object NodeClient:
         val metadata = authMetadata()
 
         for
-          result <- stub.reloadNetwork(NetworkReload(confirmTimeoutSeconds), metadata)
-          _ <- onEvent(Event(Event.Kind.PROGRESS, s"Reload applied, backup ${result.backupId}"))
+          result <- stub.reloadNetwork(
+            NetworkReload(confirmTimeoutSeconds),
+            metadata
+          )
+          _ <- onEvent(
+            Event(
+              Event.Kind.PROGRESS,
+              s"Reload applied, backup ${result.backupId}"
+            )
+          )
 
           _ <- IO.sleep(3.seconds)
 
-          verifyResult <- stub.checkFile(FileCheck("/etc/hostname", "", "", "", 0), metadata).attempt
+          verifyResult <- stub
+            .checkFile(FileCheck("/etc/hostname", "", "", "", 0), metadata)
+            .attempt
 
           _ <- verifyResult match
             case Right(_) =>
               stub.confirmNetwork(NetworkConfirm(result.backupId), metadata) >>
-                onEvent(Event(Event.Kind.RESULT, "Confirmed — connectivity OK", exitCode = 0, success = true))
+                onEvent(
+                  Event(
+                    Event.Kind.RESULT,
+                    "Confirmed — connectivity OK",
+                    exitCode = 0,
+                    success = true
+                  )
+                )
             case Left(err) =>
-              onEvent(Event(Event.Kind.RESULT, s"Connectivity check failed, not confirming: ${err.getMessage}", exitCode = 1, success = false))
+              onEvent(
+                Event(
+                  Event.Kind.RESULT,
+                  s"Connectivity check failed, not confirming: ${err.getMessage}",
+                  exitCode = 1,
+                  success = false
+                )
+              )
         yield ()
       }

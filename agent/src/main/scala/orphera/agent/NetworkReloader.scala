@@ -25,9 +25,13 @@ object NetworkReloader:
       _ <- backupCurrentConfig(backupDir)
       _ <- runNetworkctlReload()
 
-      timeoutSeconds = if request.confirmTimeoutSeconds > 0 then request.confirmTimeoutSeconds else 60
+      timeoutSeconds =
+        if request.confirmTimeoutSeconds > 0 then request.confirmTimeoutSeconds
+        else 60
 
-      watchdog <- (IO.sleep(timeoutSeconds.seconds) >> rollback(backupDir) >> pending.update(_ - backupId)).start
+      watchdog <- (IO.sleep(timeoutSeconds.seconds) >> rollback(
+        backupDir
+      ) >> pending.update(_ - backupId)).start
       _ <- pending.update(_ + (backupId -> watchdog))
     yield NetworkReloadResult(backupId)
 
@@ -44,24 +48,47 @@ object NetworkReloader:
   private def backupCurrentConfig(backupDir: Path): IO[Unit] =
     IO.blocking {
       if Files.exists(networkDir) then
-        Files.list(networkDir).iterator().asScala
+        Files
+          .list(networkDir)
+          .iterator()
+          .asScala
           .filter(p => trackedExtensions.exists(p.toString.endsWith))
-          .foreach(p => Files.copy(p, backupDir.resolve(p.getFileName), StandardCopyOption.COPY_ATTRIBUTES))
+          .foreach(p =>
+            Files.copy(
+              p,
+              backupDir.resolve(p.getFileName),
+              StandardCopyOption.COPY_ATTRIBUTES
+            )
+          )
     }
 
   private def runNetworkctlReload(): IO[Unit] =
     IO.blocking {
-      val exit = new ProcessBuilder("networkctl", "reload").inheritIO().start().waitFor()
-      if exit != 0 then throw new RuntimeException(s"networkctl reload failed with exit $exit")
+      val exit =
+        new ProcessBuilder("networkctl", "reload").inheritIO().start().waitFor()
+      if exit != 0 then
+        throw new RuntimeException(s"networkctl reload failed with exit $exit")
     }
 
   private def rollback(backupDir: Path): IO[Unit] =
     IO.blocking {
       if Files.exists(networkDir) then
-        Files.list(networkDir).iterator().asScala
+        Files
+          .list(networkDir)
+          .iterator()
+          .asScala
           .filter(p => trackedExtensions.exists(p.toString.endsWith))
           .foreach(Files.delete)
 
-      Files.list(backupDir).iterator().asScala
-        .foreach(p => Files.copy(p, networkDir.resolve(p.getFileName), StandardCopyOption.COPY_ATTRIBUTES))
+      Files
+        .list(backupDir)
+        .iterator()
+        .asScala
+        .foreach(p =>
+          Files.copy(
+            p,
+            networkDir.resolve(p.getFileName),
+            StandardCopyOption.COPY_ATTRIBUTES
+          )
+        )
     } >> runNetworkctlReload()
