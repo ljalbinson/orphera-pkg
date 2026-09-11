@@ -24,6 +24,7 @@ enum Command:
   )
   case NetworkApply(nodes: Option[List[String]], timeoutSeconds: Int)
   case DeployAgent(localPath: String, remotePath: String, nodes: Option[List[String]])
+  case Bootstrap(localPath: String, nodes: Option[List[String]], sshUser: String, sshKeyPath: Option[String], remotePath: String)
   case Help
 
 object Cli:
@@ -38,6 +39,8 @@ object Cli:
         parseCopy(rest, local, dest, None, "", "", 0)
       case "network-apply" :: rest => parseNetworkApply(rest, None, 60)
       case "deploy-agent" :: local :: rest => parseDeployAgent(rest, local, "/tmp/orphera-agent.deb", None)
+      case "bootstrap" :: local :: rest =>
+        parseBootstrap(rest, local, None, "root", None, "/tmp/orphera-agent.deb")
       case "help" :: _ | "--help" :: _ | Nil => Right(Command.Help)
       case other => Left(s"Unknown command: ${other.headOption.getOrElse("")}")
 
@@ -164,6 +167,23 @@ object Cli:
       case other :: _ =>
         Left(s"Unknown argument to deploy-agent: $other")
 
+  private def parseBootstrap(
+      args: List[String], local: String, nodes: Option[List[String]],
+      sshUser: String, sshKeyPath: Option[String], remotePath: String
+  ): Either[String, Command] =
+    args match
+      case Nil => Right(Command.Bootstrap(local, nodes, sshUser, sshKeyPath, remotePath))
+      case "--nodes" :: value :: rest =>
+        parseBootstrap(rest, local, Some(value.split(",").toList.map(_.trim)), sshUser, sshKeyPath, remotePath)
+      case "--ssh-user" :: value :: rest =>
+        parseBootstrap(rest, local, nodes, value, sshKeyPath, remotePath)
+      case "--ssh-key" :: value :: rest =>
+        parseBootstrap(rest, local, nodes, sshUser, Some(value), remotePath)
+      case "--remote-path" :: value :: rest =>
+        parseBootstrap(rest, local, nodes, sshUser, sshKeyPath, value)
+      case other :: _ =>
+        Left(s"Unknown argument to bootstrap: $other")
+
   val usage: String =
     """orphera-orchestrator - test CLI for the Orphera agent protocol
       |
@@ -174,6 +194,7 @@ object Cli:
       |  copy           <local-path> <remote-path> [--owner user] [--group grp] [--mode 0644] [--nodes host1,host2]
       |  network-apply  [--nodes host1,host2] [--timeout 60]
       |  deploy-agent   <local.deb> [--remote-path /tmp/orphera-agent.deb] [--nodes host1,host2]
+      |  bootstrap      <local.deb> --nodes host1,host2 [--ssh-user root] [--ssh-key ~/.ssh/id_ed25519] [--remote-path /tmp/x.deb]
       |
       |Examples:
       |  install curl vim

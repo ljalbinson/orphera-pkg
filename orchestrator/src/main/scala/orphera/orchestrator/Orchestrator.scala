@@ -80,3 +80,16 @@ object Orchestrator:
     nodes.parTraverse_ { node =>
       NodeClient.deployDeb(node, localDebPath, remoteDebPath, ConsoleRenderer.render(node, _))
     }
+
+  def bootstrapAgent(
+      nodes: List[Node],
+      localDebPath: String,
+      sshUser: String,
+      sshKeyPath: Option[String],
+      remotePath: String = "/tmp/orphera-agent.deb"
+  ): IO[Unit] =
+    nodes.parTraverse_ { node =>
+      SshDeployer.bootstrap(node, localDebPath, sshUser, sshKeyPath, remotePath, line =>
+        IO.println(s"[${node.name}] $line")
+      )
+    }

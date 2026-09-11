@@ -55,6 +55,11 @@ object Main extends IOApp:
           Orchestrator.deployDeb(targets, java.nio.file.Paths.get(local), remotePath)
         }
 
+      case Right(Command.Bootstrap(local, nodeNames, sshUser, sshKeyPath, remotePath)) =>
+        withTargets(nodeNames) { targets =>
+          Orchestrator.bootstrapAgent(targets, local, sshUser, sshKeyPath, remotePath)
+        }
+
   private def withTargets(nodeNames: Option[List[String]])(
       action: List[Node] => IO[Unit]
   ): IO[ExitCode] =
