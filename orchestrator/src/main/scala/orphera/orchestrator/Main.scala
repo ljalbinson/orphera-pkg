@@ -50,6 +50,11 @@ object Main extends IOApp:
           Orchestrator.applyNetworkConfig(targets, timeoutSeconds)
         }
 
+      case Right(Command.DeployAgent(local, remotePath, nodeNames)) =>
+        withTargets(nodeNames) { targets =>
+          Orchestrator.deployDeb(targets, java.nio.file.Paths.get(local), remotePath)
+        }
+
   private def withTargets(nodeNames: Option[List[String]])(
       action: List[Node] => IO[Unit]
   ): IO[ExitCode] =

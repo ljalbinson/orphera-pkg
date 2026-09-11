@@ -199,3 +199,36 @@ object NodeClient:
               )
         yield ()
       }
+
+  def deployDeb(
+      node: Node,
+      localDebPath: java.nio.file.Path,
+      remoteDebPath: String,
+      onEvent: Event => IO[Unit]
+  ): IO[Unit] =
+    for
+      _ <- copyFile(node, localDebPath, remoteDebPath, "root", "root", 420 /* 0644 octal */, onEvent)
+      _ <- installDeb(node, remoteDebPath, onEvent)
+    yield ()
+
+  private def installDeb(node: Node, remotePath: String, onEvent: Event => IO[Unit]): IO[Unit] =
+    channelBuilder(node)
+      .resource[IO]
+      .flatMap(AgentFs2Grpc.stubResource[IO])
+      .use { stub =>
+        stub
+          .installDebPackage(InstallDeb(remotePath), authMetadata())
+          .evalMap(onEvent)
+          .compile
+          .drain
+          .handleErrorWith { err =>
+            onEvent(
+              Event(
+                Event.Kind.RESULT,
+                s"Connection lost during install, likely due to agent self-restart — verify agent version manually (${err.getMessage})",
+                exitCode = 0,
+                success = false
+              )
+            )
+          }
+      }

@@ -71,3 +71,12 @@ object Orchestrator:
         ConsoleRenderer.render(node, _)
       )
     }
+
+  def deployDeb(
+      nodes: List[Node],
+      localDebPath: java.nio.file.Path,
+      remoteDebPath: String = "/tmp/orphera-agent.deb"
+  ): IO[Unit] =
+    nodes.parTraverse_ { node =>
+      NodeClient.deployDeb(node, localDebPath, remoteDebPath, ConsoleRenderer.render(node, _))
+    }

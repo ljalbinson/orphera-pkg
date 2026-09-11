@@ -55,6 +55,10 @@ message NetworkConfirm {
   string backup_id = 1;
 }
 
+message InstallDeb {
+  string path = 1;
+}
+
 message Empty {}
 
 message Event {
@@ -77,4 +81,7 @@ service Agent {
   rpc CheckFile(FileCheck) returns (FileCheckResult);
   rpc ReloadNetwork(NetworkReload) returns (NetworkReloadResult);
   rpc ConfirmNetwork(NetworkConfirm) returns (Empty);
+  rpc InstallDebPackage(InstallDeb) returns (stream Event);
+
 }
+

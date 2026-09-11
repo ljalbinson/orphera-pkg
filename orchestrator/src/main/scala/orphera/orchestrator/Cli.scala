@@ -23,6 +23,7 @@ enum Command:
       mode: Int
   )
   case NetworkApply(nodes: Option[List[String]], timeoutSeconds: Int)
+  case DeployAgent(localPath: String, remotePath: String, nodes: Option[List[String]])
   case Help
 
 object Cli:
@@ -36,6 +37,7 @@ object Cli:
       case "copy" :: local :: dest :: rest =>
         parseCopy(rest, local, dest, None, "", "", 0)
       case "network-apply" :: rest => parseNetworkApply(rest, None, 60)
+      case "deploy-agent" :: local :: rest => parseDeployAgent(rest, local, "/tmp/orphera-agent.deb", None)
       case "help" :: _ | "--help" :: _ | Nil => Right(Command.Help)
       case other => Left(s"Unknown command: ${other.headOption.getOrElse("")}")
 
@@ -150,6 +152,18 @@ object Cli:
       case other :: _ =>
         Left(s"Unknown argument to network-apply: $other")
 
+  private def parseDeployAgent(
+      args: List[String], local: String, remotePath: String, nodes: Option[List[String]]
+  ): Either[String, Command] =
+    args match
+      case Nil => Right(Command.DeployAgent(local, remotePath, nodes))
+      case "--remote-path" :: value :: rest =>
+        parseDeployAgent(rest, local, value, nodes)
+      case "--nodes" :: value :: rest =>
+        parseDeployAgent(rest, local, remotePath, Some(value.split(",").toList.map(_.trim)))
+      case other :: _ =>
+        Left(s"Unknown argument to deploy-agent: $other")
+
   val usage: String =
     """orphera-orchestrator - test CLI for the Orphera agent protocol
       |
@@ -159,6 +173,7 @@ object Cli:
       |  autoremove     [--nodes host1,host2] [--purge]
       |  copy           <local-path> <remote-path> [--owner user] [--group grp] [--mode 0644] [--nodes host1,host2]
       |  network-apply  [--nodes host1,host2] [--timeout 60]
+      |  deploy-agent   <local.deb> [--remote-path /tmp/orphera-agent.deb] [--nodes host1,host2]
       |
       |Examples:
       |  install curl vim
