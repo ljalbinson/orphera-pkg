@@ -17,8 +17,6 @@ metals.sbt
 *.log
 .DS_Store
 
-*.md
-
 runtime
 
 orphera-agent
