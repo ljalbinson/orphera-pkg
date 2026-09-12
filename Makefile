@@ -1,14 +1,26 @@
-.PHONY: all clean test assembly pkg-stage pkg-build deb verify
+.PHONY: all release bump-patch _build_all clean test assembly pkg-stage deb verify certs certs-clean
 
-VERSION      := 0.1.0
+VERSION_FILE := VERSION
+VERSION      := $(shell cat $(VERSION_FILE))
 ARCH         := amd64
 PKG_NAME     := orphera-agent
 PKG_DIR      := pkg/$(PKG_NAME)
 DEB_FILE     := $(PKG_NAME)_$(VERSION)_$(ARCH).deb
-JAR_SRC      := agent/target/scala-3.8.4/agent-assembly-$(VERSION)-SNAPSHOT.jar
+JAR_SRC      := agent/target/scala-3.8.4/agent-assembly-$(VERSION).jar
 CERTS_DIR    := certs
 
 all: clean test assembly deb
+
+release: bump-patch
+	$(MAKE) _build_all
+
+_build_all: clean test assembly deb
+	@echo "Released $$(cat $(VERSION_FILE))"
+
+bump-patch:
+	@awk -F. '{printf "%d.%d.%d", $$1, $$2, $$3+1}' $(VERSION_FILE) > $(VERSION_FILE).tmp
+	@mv $(VERSION_FILE).tmp $(VERSION_FILE)
+	@echo "Version bumped: $$(cat $(VERSION_FILE))"
 
 clean:
 	sbt clean

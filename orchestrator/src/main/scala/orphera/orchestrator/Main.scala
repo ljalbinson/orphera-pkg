@@ -52,13 +52,47 @@ object Main extends IOApp:
 
       case Right(Command.DeployAgent(local, remotePath, nodeNames)) =>
         withTargets(nodeNames) { targets =>
-          Orchestrator.deployDeb(targets, java.nio.file.Paths.get(local), remotePath)
+          Orchestrator.deployDeb(
+            targets,
+            java.nio.file.Paths.get(local),
+            remotePath
+          )
         }
 
-      case Right(Command.Bootstrap(local, nodeNames, sshUser, sshKeyPath, remotePath)) =>
+      case Right(
+            Command.Bootstrap(local, nodeNames, sshUser, sshKeyPath, remotePath)
+          ) =>
         withTargets(nodeNames) { targets =>
-          Orchestrator.bootstrapAgent(targets, local, sshUser, sshKeyPath, remotePath)
+          Orchestrator.bootstrapAgent(
+            targets,
+            local,
+            sshUser,
+            sshKeyPath,
+            remotePath
+          )
         }
+
+      case Right(
+            Command.Teardown(nodeNames, sshUser, sshKeyPath, purge, confirmed)
+          ) =>
+        if !confirmed then
+          IO.println(
+            "Refusing to run teardown without --yes (this uninstalls the agent and disables remote management of the host until re-bootstrapped)."
+          ) >>
+            IO.pure(ExitCode.Error)
+        else
+          val targets = Inventory.all.filter(n => nodeNames.contains(n.name))
+          if targets.isEmpty then
+            IO.println("No matching nodes found in inventory.") >> IO.pure(
+              ExitCode.Error
+            )
+          else
+            Orchestrator.teardownAgent(
+              targets,
+              sshUser,
+              sshKeyPath,
+              purge
+            ) >> IO.pure(ExitCode.Success)
 
   private def withTargets(nodeNames: Option[List[String]])(
       action: List[Node] => IO[Unit]

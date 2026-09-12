@@ -3,6 +3,7 @@ import Keys._
 import sbtassembly.AssemblyPlugin.autoImport._
 
 ThisBuild / scalaVersion := "3.8.4"
+ThisBuild / version := IO.read(file("VERSION")).trim
 
 lazy val common = project
   .enablePlugins(Fs2Grpc)

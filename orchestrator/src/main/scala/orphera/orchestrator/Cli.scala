@@ -23,8 +23,25 @@ enum Command:
       mode: Int
   )
   case NetworkApply(nodes: Option[List[String]], timeoutSeconds: Int)
-  case DeployAgent(localPath: String, remotePath: String, nodes: Option[List[String]])
-  case Bootstrap(localPath: String, nodes: Option[List[String]], sshUser: String, sshKeyPath: Option[String], remotePath: String)
+  case DeployAgent(
+      localPath: String,
+      remotePath: String,
+      nodes: Option[List[String]]
+  )
+  case Bootstrap(
+      localPath: String,
+      nodes: Option[List[String]],
+      sshUser: String,
+      sshKeyPath: Option[String],
+      remotePath: String
+  )
+  case Teardown(
+      nodes: List[String],
+      sshUser: String,
+      sshKeyPath: Option[String],
+      purge: Boolean,
+      confirmed: Boolean
+  )
   case Help
 
 object Cli:
@@ -37,10 +54,20 @@ object Cli:
       case "autoremove" :: rest => parseAutoRemove(rest, None, purge = false)
       case "copy" :: local :: dest :: rest =>
         parseCopy(rest, local, dest, None, "", "", 0)
-      case "network-apply" :: rest => parseNetworkApply(rest, None, 60)
-      case "deploy-agent" :: local :: rest => parseDeployAgent(rest, local, "/tmp/orphera-agent.deb", None)
+      case "network-apply" :: rest         => parseNetworkApply(rest, None, 60)
+      case "deploy-agent" :: local :: rest =>
+        parseDeployAgent(rest, local, "/tmp/orphera-agent.deb", None)
       case "bootstrap" :: local :: rest =>
-        parseBootstrap(rest, local, None, "root", None, "/tmp/orphera-agent.deb")
+        parseBootstrap(
+          rest,
+          local,
+          None,
+          "root",
+          None,
+          "/tmp/orphera-agent.deb"
+        )
+      case "teardown" :: rest =>
+        parseTeardown(rest, Nil, "root", None, purge = false, confirmed = false)
       case "help" :: _ | "--help" :: _ | Nil => Right(Command.Help)
       case other => Left(s"Unknown command: ${other.headOption.getOrElse("")}")
 
@@ -156,25 +183,45 @@ object Cli:
         Left(s"Unknown argument to network-apply: $other")
 
   private def parseDeployAgent(
-      args: List[String], local: String, remotePath: String, nodes: Option[List[String]]
+      args: List[String],
+      local: String,
+      remotePath: String,
+      nodes: Option[List[String]]
   ): Either[String, Command] =
     args match
       case Nil => Right(Command.DeployAgent(local, remotePath, nodes))
       case "--remote-path" :: value :: rest =>
         parseDeployAgent(rest, local, value, nodes)
       case "--nodes" :: value :: rest =>
-        parseDeployAgent(rest, local, remotePath, Some(value.split(",").toList.map(_.trim)))
+        parseDeployAgent(
+          rest,
+          local,
+          remotePath,
+          Some(value.split(",").toList.map(_.trim))
+        )
       case other :: _ =>
         Left(s"Unknown argument to deploy-agent: $other")
 
   private def parseBootstrap(
-      args: List[String], local: String, nodes: Option[List[String]],
-      sshUser: String, sshKeyPath: Option[String], remotePath: String
+      args: List[String],
+      local: String,
+      nodes: Option[List[String]],
+      sshUser: String,
+      sshKeyPath: Option[String],
+      remotePath: String
   ): Either[String, Command] =
     args match
-      case Nil => Right(Command.Bootstrap(local, nodes, sshUser, sshKeyPath, remotePath))
+      case Nil =>
+        Right(Command.Bootstrap(local, nodes, sshUser, sshKeyPath, remotePath))
       case "--nodes" :: value :: rest =>
-        parseBootstrap(rest, local, Some(value.split(",").toList.map(_.trim)), sshUser, sshKeyPath, remotePath)
+        parseBootstrap(
+          rest,
+          local,
+          Some(value.split(",").toList.map(_.trim)),
+          sshUser,
+          sshKeyPath,
+          remotePath
+        )
       case "--ssh-user" :: value :: rest =>
         parseBootstrap(rest, local, nodes, value, sshKeyPath, remotePath)
       case "--ssh-key" :: value :: rest =>
@@ -183,6 +230,46 @@ object Cli:
         parseBootstrap(rest, local, nodes, sshUser, sshKeyPath, value)
       case other :: _ =>
         Left(s"Unknown argument to bootstrap: $other")
+
+  private def parseTeardown(
+      args: List[String],
+      nodes: List[String],
+      sshUser: String,
+      sshKeyPath: Option[String],
+      purge: Boolean,
+      confirmed: Boolean
+  ): Either[String, Command] =
+    args match
+      case Nil =>
+        if nodes.isEmpty then
+          Left("teardown requires --nodes (no default — this is destructive)")
+        else
+          Right(Command.Teardown(nodes, sshUser, sshKeyPath, purge, confirmed))
+
+      case "--nodes" :: value :: rest =>
+        parseTeardown(
+          rest,
+          value.split(",").toList.map(_.trim),
+          sshUser,
+          sshKeyPath,
+          purge,
+          confirmed
+        )
+
+      case "--ssh-user" :: value :: rest =>
+        parseTeardown(rest, nodes, value, sshKeyPath, purge, confirmed)
+
+      case "--ssh-key" :: value :: rest =>
+        parseTeardown(rest, nodes, sshUser, Some(value), purge, confirmed)
+
+      case "--purge" :: rest =>
+        parseTeardown(rest, nodes, sshUser, sshKeyPath, purge = true, confirmed)
+
+      case "--yes" :: rest =>
+        parseTeardown(rest, nodes, sshUser, sshKeyPath, purge, confirmed = true)
+
+      case other :: _ =>
+        Left(s"Unknown argument to teardown: $other")
 
   val usage: String =
     """orphera-orchestrator - test CLI for the Orphera agent protocol
@@ -195,6 +282,7 @@ object Cli:
       |  network-apply  [--nodes host1,host2] [--timeout 60]
       |  deploy-agent   <local.deb> [--remote-path /tmp/orphera-agent.deb] [--nodes host1,host2]
       |  bootstrap      <local.deb> --nodes host1,host2 [--ssh-user root] [--ssh-key ~/.ssh/id_ed25519] [--remote-path /tmp/x.deb]
+      |  teardown       --nodes host1,host2 --yes [--purge] [--ssh-user root] [--ssh-key ~/.ssh/id_ed25519]
       |
       |Examples:
       |  install curl vim

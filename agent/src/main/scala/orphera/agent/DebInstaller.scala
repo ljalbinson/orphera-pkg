@@ -10,7 +10,11 @@ object DebInstaller:
   def install(cmd: InstallDeb, queue: Queue[IO, Event]): IO[Unit] =
     run(List("dpkg", "-i", cmd.path), s"Installing ${cmd.path}", queue)
 
-  private def run(command: List[String], stage: String, queue: Queue[IO, Event]): IO[Unit] =
+  private def run(
+      command: List[String],
+      stage: String,
+      queue: Queue[IO, Event]
+  ): IO[Unit] =
     for
       _ <- queue.offer(Event(Event.Kind.PROGRESS, stage))
 
@@ -35,12 +39,18 @@ object DebInstaller:
       _ <- err.joinWithNever
 
       _ <- queue.offer(
-        Event(kind = Event.Kind.RESULT, message = if exit == 0 then "OK" else "FAILED", exitCode = exit, success = exit == 0)
+        Event(
+          kind = Event.Kind.RESULT,
+          message = if exit == 0 then "OK" else "FAILED",
+          exitCode = exit,
+          success = exit == 0
+        )
       )
     yield ()
 
   private def read(reader: BufferedReader, queue: Queue[IO, Event]): IO[Unit] =
     IO.interruptible(reader.readLine()).flatMap {
       case null => IO.unit
-      case line => queue.offer(Event(Event.Kind.OUTPUT, line)) >> read(reader, queue)
+      case line =>
+        queue.offer(Event(Event.Kind.OUTPUT, line)) >> read(reader, queue)
     }

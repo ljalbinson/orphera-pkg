@@ -78,7 +78,12 @@ object Orchestrator:
       remoteDebPath: String = "/tmp/orphera-agent.deb"
   ): IO[Unit] =
     nodes.parTraverse_ { node =>
-      NodeClient.deployDeb(node, localDebPath, remoteDebPath, ConsoleRenderer.render(node, _))
+      NodeClient.deployDeb(
+        node,
+        localDebPath,
+        remoteDebPath,
+        ConsoleRenderer.render(node, _)
+      )
     }
 
   def bootstrapAgent(
@@ -89,7 +94,28 @@ object Orchestrator:
       remotePath: String = "/tmp/orphera-agent.deb"
   ): IO[Unit] =
     nodes.parTraverse_ { node =>
-      SshDeployer.bootstrap(node, localDebPath, sshUser, sshKeyPath, remotePath, line =>
-        IO.println(s"[${node.name}] $line")
+      SshDeployer.bootstrap(
+        node,
+        localDebPath,
+        sshUser,
+        sshKeyPath,
+        remotePath,
+        line => IO.println(s"[${node.name}] $line")
+      )
+    }
+
+  def teardownAgent(
+      nodes: List[Node],
+      sshUser: String,
+      sshKeyPath: Option[String],
+      purgeConfig: Boolean = false
+  ): IO[Unit] =
+    nodes.parTraverse_ { node =>
+      SshDeployer.teardown(
+        node,
+        sshUser,
+        sshKeyPath,
+        purgeConfig,
+        line => IO.println(s"[${node.name}] $line")
       )
     }

@@ -207,11 +207,23 @@ object NodeClient:
       onEvent: Event => IO[Unit]
   ): IO[Unit] =
     for
-      _ <- copyFile(node, localDebPath, remoteDebPath, "root", "root", 420 /* 0644 octal */, onEvent)
+      _ <- copyFile(
+        node,
+        localDebPath,
+        remoteDebPath,
+        "root",
+        "root",
+        420 /* 0644 octal */,
+        onEvent
+      )
       _ <- installDeb(node, remoteDebPath, onEvent)
     yield ()
 
-  private def installDeb(node: Node, remotePath: String, onEvent: Event => IO[Unit]): IO[Unit] =
+  private def installDeb(
+      node: Node,
+      remotePath: String,
+      onEvent: Event => IO[Unit]
+  ): IO[Unit] =
     channelBuilder(node)
       .resource[IO]
       .flatMap(AgentFs2Grpc.stubResource[IO])

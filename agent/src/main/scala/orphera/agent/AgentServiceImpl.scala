@@ -64,5 +64,7 @@ class AgentServiceImpl(
   def installDebPackage(request: InstallDeb, ctx: Metadata): Stream[IO, Event] =
     Stream.eval(Queue.unbounded[IO, Event]).flatMap { queue =>
       Stream.eval(Dispatcher.dispatchInstallDeb(request, queue).start) >>
-        Stream.fromQueueUnterminated(queue).takeThrough(_.kind != Event.Kind.RESULT)
+        Stream
+          .fromQueueUnterminated(queue)
+          .takeThrough(_.kind != Event.Kind.RESULT)
     }
