@@ -74,6 +74,31 @@ object FileTransfer:
       )
     yield ()
 
+  def send(request: FetchFile): Stream[IO, FileData] =
+    val path = Paths.get(request.path)
+
+    Stream.eval(IO.blocking(Files.exists(path))).flatMap { exists =>
+      if !exists then
+        Stream.emit(FileData(FileData.Payload.Error(s"File does not exist: ${request.path}")))
+      else
+        Stream.eval(readMetadata(path)) ++
+          fs2.io.file.Files[IO]
+            .readAll(fs2.io.file.Path.fromNioPath(path))
+            .chunkN(64 * 1024)
+            .map(chunk => FileData(FileData.Payload.Content(com.google.protobuf.ByteString.copyFrom(chunk.toArray))))
+    }.handleErrorWith { err =>
+      Stream.emit(FileData(FileData.Payload.Error(s"Read failed: ${err.getMessage}")))
+    }
+
+  private def readMetadata(path: Path): IO[FileData] =
+    IO.blocking {
+      val view = Files.getFileAttributeView(path, classOf[PosixFileAttributeView])
+      val owner = view.getOwner.getName
+      val group = view.readAttributes().group().getName
+      val mode = permissionsToMode(Files.getPosixFilePermissions(path))
+      FileData(FileData.Payload.Metadata(FileMetadata(path.toString, owner, group, mode)))
+    }
+
   private def applyAttributes(path: Path, metadata: FileMetadata): IO[Unit] =
     IO.blocking {
       val lookup = FileSystems.getDefault.getUserPrincipalLookupService

@@ -4,6 +4,10 @@ import sbtassembly.AssemblyPlugin.autoImport._
 
 ThisBuild / scalaVersion := "3.8.4"
 ThisBuild / version := IO.read(file("VERSION")).trim
+ThisBuild / scalacOptions ++= Seq(
+  "-Werror",
+  "-Wconf:src=src_managed/.*:silent"
+)
 
 lazy val common = project
   .enablePlugins(Fs2Grpc)
@@ -19,9 +23,9 @@ lazy val agent = project
   .dependsOn(common)
   .settings(
     Compile / run / fork := true,
-    Compile / run / baseDirectory := (ThisBuild / baseDirectory).value,
     Compile / mainClass := Some("orphera.agent.Main"),
-    assembly / mainClass := Some("orphera.agent.Main")
+    assembly / mainClass := Some("orphera.agent.Main"),
+    libraryDependencies += "co.fs2" %% "fs2-io" % "3.11.0"
   )
 
 lazy val orchestrator = project

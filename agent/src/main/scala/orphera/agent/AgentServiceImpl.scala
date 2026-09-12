@@ -68,3 +68,6 @@ class AgentServiceImpl(
           .fromQueueUnterminated(queue)
           .takeThrough(_.kind != Event.Kind.RESULT)
     }
+
+  def remoteFetchFile(request: FetchFile, ctx: Metadata): Stream[IO, FileData] =
+    FileTransfer.send(request)

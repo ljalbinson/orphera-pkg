@@ -59,6 +59,18 @@ message InstallDeb {
   string path = 1;
 }
 
+message FetchFile {
+  string path = 1;
+}
+
+message FileData {
+  oneof payload {
+    FileMetadata metadata = 1;
+    bytes content = 2;
+    string error = 3;
+  }
+}
+
 message Empty {}
 
 message Event {
@@ -82,6 +94,6 @@ service Agent {
   rpc ReloadNetwork(NetworkReload) returns (NetworkReloadResult);
   rpc ConfirmNetwork(NetworkConfirm) returns (Empty);
   rpc InstallDebPackage(InstallDeb) returns (stream Event);
-
+  rpc RemoteFetchFile(FetchFile) returns (stream FileData);
 }
 

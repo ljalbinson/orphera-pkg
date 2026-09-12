@@ -244,3 +244,36 @@ object NodeClient:
             )
           }
       }
+
+  def fetchFile(
+      node: Node,
+      remotePath: String,
+      localPath: java.nio.file.Path
+  ): IO[Either[String, FileMetadata]] =
+    channelBuilder(node)
+      .resource[IO]
+      .flatMap(AgentFs2Grpc.stubResource[IO])
+      .use { stub =>
+        stub
+          .remoteFetchFile(FetchFile(remotePath), authMetadata())
+          .compile
+          .toList
+          .flatMap { chunks =>
+            chunks.headOption.flatMap(_.payload.error) match
+
+              case Some(err) =>
+                IO.pure(Left(err))
+
+              case None =>
+                chunks.headOption.flatMap(_.payload.metadata) match
+                  case None =>
+                    IO.pure(Left("No metadata received from agent"))
+                  case Some(metadata) =>
+                    val content = chunks.drop(1).flatMap(_.payload.content)
+                    IO.blocking {
+                      val out = java.nio.file.Files.newOutputStream(localPath)
+                      try content.foreach(c => out.write(c.toByteArray))
+                      finally out.close()
+                    }.as(Right(metadata))
+          }
+      }

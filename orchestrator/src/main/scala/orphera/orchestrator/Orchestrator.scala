@@ -119,3 +119,18 @@ object Orchestrator:
         line => IO.println(s"[${node.name}] $line")
       )
     }
+
+  def fetchFile(
+      nodes: List[Node],
+      remotePath: String,
+      localDir: java.nio.file.Path
+  ): IO[Unit] =
+    nodes.parTraverse_ { node =>
+      val localPath = localDir.resolve(s"${node.name}-${java.nio.file.Paths.get(remotePath).getFileName}")
+      NodeClient.fetchFile(node, remotePath, localPath).flatMap {
+        case Right(metadata) =>
+          IO.println(s"[${node.name}] Fetched ${remotePath} -> $localPath (owner=${metadata.owner}, mode=${metadata.mode}%o)")
+        case Left(err) =>
+          IO.println(s"[${node.name}] FAILED: $err")
+      }
+    }

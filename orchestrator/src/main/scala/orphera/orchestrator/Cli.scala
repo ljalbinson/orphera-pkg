@@ -42,6 +42,7 @@ enum Command:
       purge: Boolean,
       confirmed: Boolean
   )
+  case Fetch(remotePath: String, localDir: String, nodes: Option[List[String]])
   case Help
 
 object Cli:
@@ -68,6 +69,7 @@ object Cli:
         )
       case "teardown" :: rest =>
         parseTeardown(rest, Nil, "root", None, purge = false, confirmed = false)
+      case "fetch" :: remote :: rest => parseFetch(rest, remote, ".", None)
       case "help" :: _ | "--help" :: _ | Nil => Right(Command.Help)
       case other => Left(s"Unknown command: ${other.headOption.getOrElse("")}")
 
@@ -271,6 +273,18 @@ object Cli:
       case other :: _ =>
         Left(s"Unknown argument to teardown: $other")
 
+  private def parseFetch(
+      args: List[String], remote: String, localDir: String, nodes: Option[List[String]]
+  ): Either[String, Command] =
+    args match
+      case Nil => Right(Command.Fetch(remote, localDir, nodes))
+      case "--out" :: value :: rest =>
+        parseFetch(rest, remote, value, nodes)
+      case "--nodes" :: value :: rest =>
+        parseFetch(rest, remote, localDir, Some(value.split(",").toList.map(_.trim)))
+      case other :: _ =>
+        Left(s"Unknown argument to fetch: $other")
+
   val usage: String =
     """orphera-orchestrator - test CLI for the Orphera agent protocol
       |
@@ -283,6 +297,7 @@ object Cli:
       |  deploy-agent   <local.deb> [--remote-path /tmp/orphera-agent.deb] [--nodes host1,host2]
       |  bootstrap      <local.deb> --nodes host1,host2 [--ssh-user root] [--ssh-key ~/.ssh/id_ed25519] [--remote-path /tmp/x.deb]
       |  teardown       --nodes host1,host2 --yes [--purge] [--ssh-user root] [--ssh-key ~/.ssh/id_ed25519]
+      |  fetch          <remote-path> [--out ./local-dir] [--nodes host1,host2]
       |
       |Examples:
       |  install curl vim

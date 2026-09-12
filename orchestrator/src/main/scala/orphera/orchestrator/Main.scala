@@ -94,6 +94,11 @@ object Main extends IOApp:
               purge
             ) >> IO.pure(ExitCode.Success)
 
+      case Right(Command.Fetch(remotePath, localDir, nodeNames)) =>
+        withTargets(nodeNames) { targets =>
+          Orchestrator.fetchFile(targets, remotePath, java.nio.file.Paths.get(localDir))
+        }
+
   private def withTargets(nodeNames: Option[List[String]])(
       action: List[Node] => IO[Unit]
   ): IO[ExitCode] =
