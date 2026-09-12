@@ -218,6 +218,14 @@ explicit targeting — see below).
 | `deploy-agent <local.deb> [--remote-path]` | Push and install an updated agent `.deb` on a host **that already has an agent running** |
 | `bootstrap <local.deb> --nodes ... [--ssh-user] [--ssh-key]` | First-time agent install via SSH, for a host with **no agent yet** |
 | `teardown --nodes ... --yes [--purge]` | Uninstall the agent via SSH. Requires explicit `--nodes` and `--yes` — no fleet-wide default, given the host becomes unmanageable via gRPC afterward |
+| `fetch <remote-path> [--out ./dir]` | Pull a file back from one or more agents into a local directory, one file per node (named `<node>-<filename>`) |
+| `facts [--nodes ...]` | Gather and print basic host facts (OS, kernel, CPU/memory, disks, interfaces) from one or more agents |
+| `playbook <file.yaml>` | Run an ordered, multi-task playbook — see [Playbooks](#playbooks) |
+
+Every `install`/`remove`/`autoremove`/`copy`/`network-apply`/`reboot`
+invocation above is internally just a one-task playbook dispatched
+through the same execution path as `playbook` — see
+[Playbooks](#playbooks) for why that's structured this way.
 
 ## Manifests
 
@@ -246,7 +254,86 @@ copied verbatim. The pre-check (content hash) runs against the
 There is no task ordering, dependency graph, or conditional logic
 between manifest entries — each file is independent and may be pushed
 in parallel. If you need "install X, then push its config, then
-restart the service," that sequencing isn't modeled yet.
+restart the service," see [Playbooks](#playbooks) below, which
+supersedes this for anything order-sensitive. `apply` remains as a
+convenience shorthand for the simple all-files, no-ordering case.
+
+## Playbooks
+
+A playbook is an ordered list of tasks, run per node — unlike a
+manifest's files (which are independent and pushed in parallel),
+tasks within one node's playbook run strictly in sequence, so "install
+nginx, then push its config, then remove the old package" is
+expressible directly. Different nodes still run their full task
+sequences in parallel with each other.
+
+```yaml
+name: web-server-baseline
+
+nodes:
+  - web1
+  - web2
+
+tasks:
+  - name: install nginx
+    install:
+      packages: [nginx]
+      update_cache: true
+
+  - name: push nginx config
+    copy:
+      src: files/nginx.conf
+      dest: /etc/nginx/nginx.conf
+      owner: root
+      group: root
+      mode: "0644"
+
+  - name: remove old apache
+    remove:
+      packages: [apache2]
+      purge: true
+    when: os_id == "ubuntu"
+```
+
+Run with:
+
+```bash
+sbt "orchestrator/run playbook manifests/web-server-baseline.yaml"
+```
+
+**Available task types:** `install`, `remove`, `autoremove`, `copy`,
+`network_apply`, `reboot` — each maps directly onto the corresponding
+CLI command's underlying RPC, so anything the CLI can do, a playbook
+task can do as one step in a sequence.
+
+**`when:` conditions** are simple `key == "value"` / `key != "value"`
+checks against facts gathered from the node immediately before its
+task sequence runs (see [Fact gathering](#fact-gathering)) — not a
+general expression language. Supported keys currently:
+`os_id`, `os_version`, `arch`, `hostname`.
+
+**Failure behavior:** if a task fails, that node's remaining tasks are
+skipped, but other nodes' playbooks continue independently — one
+node's failure doesn't block or slow down the rest of the fleet.
+
+**Facts-unavailable behavior:** if fact-gathering itself fails for a
+node (agent unreachable, etc.), any task on that node with a `when:`
+clause is conservatively skipped rather than causing the whole node's
+playbook to abort; tasks with no condition still run normally. Worth
+being aware of if a task's `when:` is silently never satisfied —
+check whether facts are actually being retrieved from that node before
+assuming the condition itself is wrong.
+
+**Not yet implemented:**
+- Task-to-task data flow (using one task's result in a later task)
+- Handlers/triggers (Ansible-style "restart only if config changed")
+- Includes/imports across playbook files
+- A Scala DSL front-end producing the same underlying task model as an
+  alternative to YAML, for cases wanting compile-time checking and
+  real composability (loops, shared helpers) — designed, not yet built
+- `copy` tasks do not yet run their `src` through the Mustache
+  templating pipeline that `apply`/manifests use — a playbook `copy`
+  task currently pushes `src` verbatim even if it ends in `.mustache`
 
 ## Network config safety
 
@@ -268,6 +355,39 @@ host. It does not protect against config that's valid and confirms
 successfully but causes problems elsewhere (a different host's
 routing, an issue that only appears later) — test on non-critical
 hosts first.
+
+## Fact gathering
+
+`facts [--nodes ...]` retrieves basic host facts via a unary RPC:
+hostname, OS id/version, kernel version, architecture, CPU count,
+memory total, disk mounts (with total/available space), and network
+interfaces (name, IP addresses, MAC).
+
+```bash
+sbt "orchestrator/run facts --nodes web1"
+```
+
+Facts are always read live from the agent — there is no caching or
+TTL on the agent side. `playbook` runs gather facts once per node,
+at the start of that node's task sequence, and reuse the result for
+every `when:` check in that sequence; they are not re-fetched per
+task, and are not persisted anywhere beyond the single orchestrator
+invocation that gathered them.
+
+## File retrieval
+
+`fetch <remote-path> [--out ./dir] [--nodes ...]` pulls a file back
+from one or more agents, writing `<node-name>-<filename>` into the
+output directory (default: current directory) per node, so fetching
+the same path from multiple nodes doesn't collide.
+
+```bash
+sbt "orchestrator/run fetch /etc/nginx/nginx.conf --out /tmp/fetched --nodes web1,web2"
+```
+
+There is currently no path restriction on either `fetch` or `copy` —
+an authenticated orchestrator can read or write any path the agent's
+root user can reach. See [Known gaps](#known-gaps--not-yet-built).
 
 ## Authentication and security notes
 
@@ -321,11 +441,23 @@ auto-updated; remove the entry manually.
 | `make verify` | builds, then prints `.deb` contents/metadata |
 | `make certs DOMAIN=...` | generates CA + wildcard server cert. Refuses to run if `certs/ca.crt` already exists |
 | `make certs-clean` | deletes `certs/` — interactive confirmation required; invalidates every already-deployed agent's trust |
+| `make release` | bumps the patch version in `VERSION`, then runs the full clean/test/assembly/deb chain at the new version |
 
-`certs` and `certs-clean` are intentionally **not** part of the default
-`all` chain — cert (re)generation is a deliberate, infrequent action
-with fleet-wide trust implications, not something that should run as a
-side effect of a routine build.
+`certs`, `certs-clean`, and `release` are intentionally **not** part of
+the default `all` chain. Cert (re)generation is a deliberate,
+infrequent action with fleet-wide trust implications; version bumping
+is likewise something that should be an explicit choice, not a side
+effect of every routine rebuild while iterating. Plain `make`/`make
+all` rebuilds at whatever version `VERSION` currently holds, with no
+change to it.
+
+The version lives in a single `VERSION` file at the repo root, read by
+`build.sbt` (`ThisBuild / version := IO.read(file("VERSION")).trim`)
+so the jar filename, `.deb` filename, and `DEBIAN/control` version all
+stay in sync automatically. Minor/major bumps are manual — edit
+`VERSION` directly when a batch of patch releases constitutes an
+actual feature milestone; `make release` only ever increments the
+patch number.
 
 ## Testing
 
@@ -360,14 +492,37 @@ the author's.
 ## Known gaps / not yet built
 
 - No dynamic/cloud inventory source
-- No task ordering or dependencies within or across manifests
+- No task ordering or dependencies **within manifests** specifically
+  (`apply`) — superseded by playbooks for anything order-sensitive,
+  see [Playbooks](#playbooks)
 - No per-node TLS certs (shared wildcard key across the fleet)
 - No mutual TLS
-- No path allowlisting on `copy`'s destination
+- No path allowlisting on `copy` **or `fetch`** — an authenticated
+  orchestrator can write or read any path the agent's root user can
+  reach
 - No secrets management
 - No automated verification that `deploy-agent` actually succeeded
   (the RPC stream is expected to drop mid-call on a successful
   self-restart, so success can't be inferred from the call outcome
   alone — a follow-up version-check RPC would close this gap)
+- Playbook `copy` tasks don't run through the Mustache templating
+  pipeline yet (manifests' `apply` does) — see [Playbooks](#playbooks)
+- No Scala DSL front-end for playbooks yet (designed, not built) —
+  see [Playbooks](#playbooks)
+- No task-to-task data flow, handlers/triggers, or playbook
+  includes/imports
+- Fact keys usable in `when:` conditions are a small fixed set
+  (`os_id`, `os_version`, `arch`, `hostname`) — not the full `Facts`
+  schema
 - Test coverage incomplete (see [Testing](#testing))
 - Native-image build not working (see [A note on native-image](#a-note-on-native-image))
+- No CI pipeline — several build breakages this project hit (an sbt
+  plugin object misnamed silently, an RPC method sharing its message
+  type's name, a `Command` case with no handler in `Main.scala`) would
+  have been caught immediately by a basic `sbt compile test` workflow
+  on every push. Relatedly: **`Command` matches in `Main.scala` should
+  be checked for exhaustiveness** — Scala 3 warns on a non-exhaustive
+  match against a sealed `enum`, but the project does not yet fail the
+  build on that warning (`-Werror`/`-Xfatal-warnings` not yet added to
+  `scalacOptions`), so a missing case can currently compile clean and
+  only fail at runtime.
