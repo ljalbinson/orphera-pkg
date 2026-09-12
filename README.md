@@ -13,6 +13,14 @@ platform coverage. Currently targets Debian/Ubuntu hosts (`apt`,
 what's described in [Testing](#testing). Not hardened for use against
 untrusted networks or adversarial input.
 
+> **Status:** early-stage, built as a learning/exploration project.
+> Not hardened for production use. In particular: the agent runs as
+> root and accepts file writes/reads to arbitrary paths from any
+> authenticated orchestrator, TLS uses a single shared private key
+> across the whole fleet, and there is no mutual TLS. See
+> [Known gaps](#known-gaps--not-yet-built) before pointing this at
+> anything you can't afford to lose.
+
 ## Architecture
 
 ```
