@@ -31,6 +31,7 @@ reload:
 clean:
 	sbt clean
 	rm -rf pkg $(DEB_FILE)
+	rm -f orphera-agent_*_amd64.deb
 
 test:
 	sbt test
@@ -54,8 +55,7 @@ pkg-stage: assembly
 	cp packaging/orphera-agent.service $(PKG_DIR)/etc/systemd/system/orphera-agent.service
 
 	@test -f $(CERTS_DIR)/server.crt || (echo "ERROR: $(CERTS_DIR)/server.crt not found - generate certs first" && exit 1)
-	cp $(CERTS_DIR)/server.crt $(CERTS_DIR)/server.key $(CERTS_DIR)/ca.crt \
-		$(PKG_DIR)/etc/orphera-agent/certs/
+	cp $(CERTS_DIR)/server.crt $(CERTS_DIR)/server.key $(CERTS_DIR)/ca.crt $(PKG_DIR)/etc/orphera-agent/certs/
 
 	sed "s/@VERSION@/$(VERSION)/" packaging/control.template > $(PKG_DIR)/DEBIAN/control
 	cp packaging/postinst $(PKG_DIR)/DEBIAN/postinst
