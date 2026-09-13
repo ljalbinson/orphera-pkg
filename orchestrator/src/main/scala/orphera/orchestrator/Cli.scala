@@ -44,6 +44,7 @@ enum Command:
   )
   case Fetch(remotePath: String, localDir: String, nodes: Option[List[String]])
   case Facts(nodes: Option[List[String]])
+  case RunPlaybook(path: String)
   case Help
 
 object Cli:
@@ -72,6 +73,7 @@ object Cli:
         parseTeardown(rest, Nil, "root", None, purge = false, confirmed = false)
       case "fetch" :: remote :: rest => parseFetch(rest, remote, ".", None)
       case "facts" :: rest           => parseFacts(rest, None)
+      case "playbook" :: path :: Nil  => Right(Command.RunPlaybook(path))
       case "help" :: _ | "--help" :: _ | Nil => Right(Command.Help)
       case other => Left(s"Unknown command: ${other.headOption.getOrElse("")}")
 
@@ -320,6 +322,7 @@ object Cli:
       |  teardown       --nodes host1,host2 --yes [--purge] [--ssh-user root] [--ssh-key ~/.ssh/id_ed25519]
       |  fetch          <remote-path> [--out ./local-dir] [--nodes host1,host2]
       |  facts          [--nodes host1,host2]
+      |  playbook       <file.yaml>
       |
       |Examples:
       |  install curl vim

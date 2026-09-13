@@ -1,0 +1,26 @@
+name: web-baseline
+
+nodes:
+  - tst0
+  - tst1
+  - tst2
+
+tasks:
+  - name: install curl
+    install:
+      packages: [curl]
+      update_cache: true
+
+  - name: push motd
+    copy:
+      src: files/motd
+      dest: /etc/motd
+      owner: root
+      group: root
+      mode: "0644"
+
+  - name: remove telnet if present
+    remove:
+      packages: [telnet]
+      purge: true
+    when: os_id == "ubuntu"

@@ -35,7 +35,10 @@ lazy val orchestrator = project
     Compile / run / baseDirectory := (ThisBuild / baseDirectory).value,
     libraryDependencies ++= Seq(
       "org.typelevel" %% "cats-effect" % "3.7.1",
-      "co.fs2" %% "fs2-io" % "3.11.0"
+      "co.fs2" %% "fs2-io" % "3.11.0",
+      "io.circe" %% "circe-yaml" % "0.15.1",
+      "io.circe" %% "circe-generic" % "0.14.10",
+      "com.github.spullara.mustache.java" % "compiler" % "0.9.14"
     )
   )
 

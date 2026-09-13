@@ -12,13 +12,13 @@ object AptInstaller:
   def install(cmd: InstallPackages, queue: Queue[IO, Event]): IO[Unit] =
     val update =
       if cmd.updateCache then
-        run(List("apt-get", "update"), "Updating package cache", queue)
+        run(List("apt-get", "-o", "DPkg::Lock::Timeout=60", "update"), "Updating package cache", queue)
       else IO.unit
 
     val installPkgs =
       run(
         List(
-          "apt-get",
+          "apt-get", "-o", "DPkg::Lock::Timeout=60",
           "-o",
           "Dpkg::Use-Pty=0",
           "-o",
@@ -41,7 +41,7 @@ object AptInstaller:
 
     run(
       List(
-        "apt-get",
+        "apt-get", "-o", "DPkg::Lock::Timeout=60",
         "-o",
         "Dpkg::Use-Pty=0",
         "-o",
@@ -62,7 +62,7 @@ object AptInstaller:
 
     run(
       List(
-        "apt-get",
+        "apt-get", "-o", "DPkg::Lock::Timeout=60",
         "-o",
         "Dpkg::Use-Pty=0",
         "-o",

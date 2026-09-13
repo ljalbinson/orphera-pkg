@@ -120,6 +120,11 @@ object Main extends IOApp:
           }
         }
 
+      case Right(Command.RunPlaybook(path)) =>
+        PlaybookYaml.load(path) match
+          case Left(err) => IO.println(s"Error: $err") >> IO.pure(ExitCode.Error)
+          case Right(pb)  => PlaybookRunner.run(pb) >> IO.pure(ExitCode.Success)
+
   private def withTargets(nodeNames: Option[List[String]])(
       action: List[Node] => IO[Unit]
   ): IO[ExitCode] =

@@ -8,7 +8,26 @@ import orphera.common.*
 object DebInstaller:
 
   def install(cmd: InstallDeb, queue: Queue[IO, Event]): IO[Unit] =
-    run(List("dpkg", "-i", cmd.path), s"Installing ${cmd.path}", queue)
+    for
+      _ <- queue.offer(Event(Event.Kind.PROGRESS, s"Starting detached install of ${cmd.path}"))
+
+      _ <- IO.blocking {
+        new ProcessBuilder(
+          "systemd-run", "--no-block", "--collect",
+          "--unit", s"orphera-deploy-${System.currentTimeMillis()}",
+          "dpkg", "-i", cmd.path
+        ).inheritIO().start()
+      }
+
+      _ <- queue.offer(
+        Event(
+          Event.Kind.RESULT,
+          "Install started as a detached unit — this connection will likely drop if the install restarts the agent",
+          exitCode = 0,
+          success = true
+        )
+      )
+    yield ()
 
   private def run(
       command: List[String],
