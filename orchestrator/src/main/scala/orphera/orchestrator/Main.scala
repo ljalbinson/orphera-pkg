@@ -3,6 +3,7 @@
 package orphera.orchestrator
 
 import cats.effect.*
+import cats.syntax.all.*
 import java.nio.file.Paths
 
 object Main extends IOApp:
@@ -101,6 +102,22 @@ object Main extends IOApp:
             remotePath,
             java.nio.file.Paths.get(localDir)
           )
+        }
+
+      case Right(Command.Facts(nodeNames)) =>
+        withTargets(nodeNames) { targets =>
+          Orchestrator.gatherFacts(targets).flatMap { factsByNode =>
+            targets.traverse_ { node =>
+              factsByNode.get(node.name) match
+                case Some(f) =>
+                  IO.println(
+                    s"[${node.name}] ${f.osId} ${f.osVersion}, kernel ${f.kernelVersion}, " +
+                      s"${f.architecture}, ${f.cpuCount} CPUs, ${f.memoryTotalBytes / (1024 * 1024)} MiB RAM"
+                  )
+                case None =>
+                  IO.println(s"[${node.name}] no facts returned")
+            }
+          }
         }
 
   private def withTargets(nodeNames: Option[List[String]])(

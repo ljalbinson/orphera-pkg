@@ -2,6 +2,7 @@
 
 package orphera.orchestrator
 
+import orphera.common.*
 import cats.effect.*
 import cats.syntax.all.*
 
@@ -138,3 +139,10 @@ object Orchestrator:
           IO.println(s"[${node.name}] FAILED: $err")
       }
     }
+
+  def gatherFacts(nodes: List[Node]): IO[Map[String, Facts]] =
+    nodes
+      .parTraverse { node =>
+        NodeClient.gatherFacts(node).map(facts => node.name -> facts)
+      }
+      .map(_.toMap)

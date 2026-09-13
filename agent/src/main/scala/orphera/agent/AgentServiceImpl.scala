@@ -71,3 +71,6 @@ class AgentServiceImpl(
 
   def remoteFetchFile(request: FetchFile, ctx: Metadata): Stream[IO, FileData] =
     FileTransfer.send(request)
+
+  def gatherFacts(request: FactsRequest, ctx: Metadata): IO[Facts] =
+    FactGatherer.gather()

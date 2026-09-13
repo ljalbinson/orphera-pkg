@@ -277,3 +277,11 @@ object NodeClient:
                     }.as(Right(metadata))
           }
       }
+
+  def gatherFacts(node: Node): IO[Facts] =
+    channelBuilder(node)
+      .resource[IO]
+      .flatMap(AgentFs2Grpc.stubResource[IO])
+      .use { stub =>
+        stub.gatherFacts(FactsRequest(), authMetadata())
+      }

@@ -71,6 +71,34 @@ message FileData {
   }
 }
 
+message FactsRequest {}
+
+message DiskInfo {
+  string mount_point = 1;
+  string filesystem = 2;
+  uint64 total_bytes = 3;
+  uint64 available_bytes = 4;
+}
+
+message NetworkInterface {
+  string name = 1;
+  repeated string ip_addresses = 2;
+  string mac_address = 3;
+}
+
+message Facts {
+  string hostname = 1;
+  string os_id = 2;
+  string os_version = 3;
+  string kernel_version = 4;
+  string architecture = 5;
+  uint32 cpu_count = 6;
+  uint64 memory_total_bytes = 7;
+  repeated DiskInfo disks = 8;
+  repeated NetworkInterface interfaces = 9;
+  int64 collected_at_epoch_millis = 10;
+}
+
 message Empty {}
 
 message Event {
@@ -95,5 +123,6 @@ service Agent {
   rpc ConfirmNetwork(NetworkConfirm) returns (Empty);
   rpc InstallDebPackage(InstallDeb) returns (stream Event);
   rpc RemoteFetchFile(FetchFile) returns (stream FileData);
+  rpc GatherFacts(FactsRequest) returns (Facts);
 }
 

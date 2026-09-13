@@ -25,6 +25,9 @@ bump-patch:
 fmt:
 	sbt scalafmt
 
+reload:
+	sbt reload
+
 clean:
 	sbt clean
 	rm -rf pkg $(DEB_FILE)
