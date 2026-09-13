@@ -73,7 +73,7 @@ object Cli:
         parseTeardown(rest, Nil, "root", None, purge = false, confirmed = false)
       case "fetch" :: remote :: rest => parseFetch(rest, remote, ".", None)
       case "facts" :: rest           => parseFacts(rest, None)
-      case "playbook" :: path :: Nil  => Right(Command.RunPlaybook(path))
+      case "playbook" :: path :: Nil => Right(Command.RunPlaybook(path))
       case "help" :: _ | "--help" :: _ | Nil => Right(Command.Help)
       case other => Left(s"Unknown command: ${other.headOption.getOrElse("")}")
 

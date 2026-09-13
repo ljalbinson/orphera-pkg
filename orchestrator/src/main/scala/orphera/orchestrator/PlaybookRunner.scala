@@ -13,8 +13,7 @@ object PlaybookRunner:
 
     if targets.isEmpty then
       IO.println(s"[${playbook.name}] No matching nodes found in inventory.")
-    else
-      targets.parTraverse_(runOnNode(playbook, _))
+    else targets.parTraverse_(runOnNode(playbook, _))
 
   private def runOnNode(playbook: Playbook, node: Node): IO[Unit] =
     for
@@ -23,30 +22,42 @@ object PlaybookRunner:
       _ <- runTasks(playbook.tasks, node, factsOpt)
     yield ()
 
-  private def runTasks(tasks: List[NamedTask], node: Node, facts: Option[Facts]): IO[Unit] =
+  private def runTasks(
+      tasks: List[NamedTask],
+      node: Node,
+      facts: Option[Facts]
+  ): IO[Unit] =
     tasks match
       case Nil => IO.unit
 
       case namedTask :: rest =>
         val shouldRun = namedTask.when match
-          case None => true
+          case None       => true
           case Some(cond) =>
             facts match
               case Some(f) => cond.matches(f)
               case None    => false
 
         if !shouldRun then
-          IO.println(s"[${node.name}] ${namedTask.name}: skipped (condition not met)") >>
+          IO.println(
+            s"[${node.name}] ${namedTask.name}: skipped (condition not met)"
+          ) >>
             runTasks(rest, node, facts)
         else
           runSingleTask(namedTask, node, facts).attempt.flatMap {
             case Right(()) =>
               runTasks(rest, node, facts)
             case Left(err) =>
-              IO.println(s"[${node.name}] ${namedTask.name}: FAILED — ${err.getMessage}. Stopping remaining tasks for this node.")
+              IO.println(
+                s"[${node.name}] ${namedTask.name}: FAILED — ${err.getMessage}. Stopping remaining tasks for this node."
+              )
           }
 
-  private def runSingleTask(namedTask: NamedTask, node: Node, facts: Option[Facts]): IO[Unit] =
+  private def runSingleTask(
+      namedTask: NamedTask,
+      node: Node,
+      facts: Option[Facts]
+  ): IO[Unit] =
     val render: orphera.common.Event => IO[Unit] = event =>
       IO.println(s"[${node.name}] ${namedTask.name}: ${eventLine(event)}")
 
@@ -63,7 +74,15 @@ object PlaybookRunner:
 
       case Task.Copy(src, dest, owner, group, mode, vars) =>
         resolveSourcePath(src, vars, facts).flatMap { resolvedSrc =>
-          NodeClient.copyFile(node, resolvedSrc, dest, owner, group, mode, render)
+          NodeClient.copyFile(
+            node,
+            resolvedSrc,
+            dest,
+            owner,
+            group,
+            mode,
+            render
+          )
         }
 
       case Task.NetworkApply(timeoutSeconds) =>
@@ -74,11 +93,11 @@ object PlaybookRunner:
       vars: Map[String, String],
       facts: Option[Facts]
   ): IO[java.nio.file.Path] =
-    if !src.endsWith(".mustache") then
-      IO.pure(java.nio.file.Paths.get(src))
+    if !src.endsWith(".mustache") then IO.pure(java.nio.file.Paths.get(src))
     else
       IO.blocking {
-        val templateContent = java.nio.file.Files.readString(java.nio.file.Paths.get(src))
+        val templateContent =
+          java.nio.file.Files.readString(java.nio.file.Paths.get(src))
 
         val factVars = facts match
           case Some(f) =>
@@ -100,6 +119,7 @@ object PlaybookRunner:
   private def eventLine(event: orphera.common.Event): String =
     event.kind match
       case orphera.common.Event.Kind.PROGRESS => event.message
-      case orphera.common.Event.Kind.OUTPUT    => event.message
-      case orphera.common.Event.Kind.RESULT    => s"exit=${event.exitCode} success=${event.success}"
-      case _                                    => event.message
+      case orphera.common.Event.Kind.OUTPUT   => event.message
+      case orphera.common.Event.Kind.RESULT   =>
+        s"exit=${event.exitCode} success=${event.success}"
+      case _ => event.message

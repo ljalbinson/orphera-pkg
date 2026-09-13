@@ -6,10 +6,21 @@ enum Task:
   case Install(packages: List[String], updateCache: Boolean = false)
   case Remove(packages: List[String], purge: Boolean = false)
   case AutoRemove(purge: Boolean = false)
-  case Copy(src: String, dest: String, owner: String, group: String, mode: Int, vars: Map[String, String] = Map.empty)
+  case Copy(
+      src: String,
+      dest: String,
+      owner: String,
+      group: String,
+      mode: Int,
+      vars: Map[String, String] = Map.empty
+  )
   case NetworkApply(timeoutSeconds: Int = 60)
 
-case class FactCondition(key: String, expected: String, negate: Boolean = false):
+case class FactCondition(
+    key: String,
+    expected: String,
+    negate: Boolean = false
+):
   def matches(facts: orphera.common.Facts): Boolean =
     val actual = factValue(facts)
     val eq = actual.contains(expected)
@@ -23,6 +34,14 @@ case class FactCondition(key: String, expected: String, negate: Boolean = false)
       case "hostname"   => Some(facts.hostname)
       case _            => None
 
-case class NamedTask(name: String, task: Task, when: Option[FactCondition] = None)
+case class NamedTask(
+    name: String,
+    task: Task,
+    when: Option[FactCondition] = None
+)
 
-case class Playbook(name: String, nodeNames: List[String], tasks: List[NamedTask])
+case class Playbook(
+    name: String,
+    nodeNames: List[String],
+    tasks: List[NamedTask]
+)

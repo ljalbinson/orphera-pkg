@@ -9,13 +9,20 @@ object DebInstaller:
 
   def install(cmd: InstallDeb, queue: Queue[IO, Event]): IO[Unit] =
     for
-      _ <- queue.offer(Event(Event.Kind.PROGRESS, s"Starting detached install of ${cmd.path}"))
+      _ <- queue.offer(
+        Event(Event.Kind.PROGRESS, s"Starting detached install of ${cmd.path}")
+      )
 
       _ <- IO.blocking {
         new ProcessBuilder(
-          "systemd-run", "--no-block", "--collect",
-          "--unit", s"orphera-deploy-${System.currentTimeMillis()}",
-          "dpkg", "-i", cmd.path
+          "systemd-run",
+          "--no-block",
+          "--collect",
+          "--unit",
+          s"orphera-deploy-${System.currentTimeMillis()}",
+          "dpkg",
+          "-i",
+          cmd.path
         ).inheritIO().start()
       }
 

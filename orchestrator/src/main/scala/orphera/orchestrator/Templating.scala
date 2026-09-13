@@ -11,7 +11,8 @@ object Templating:
   private val factory = new DefaultMustacheFactory()
 
   def render(templateContent: String, vars: Map[String, String]): String =
-    val mustache = factory.compile(new StringReader(templateContent), "template")
+    val mustache =
+      factory.compile(new StringReader(templateContent), "template")
     val writer = new StringWriter()
     mustache.execute(writer, vars.asJava)
     writer.flush()

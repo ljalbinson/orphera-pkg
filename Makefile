@@ -28,6 +28,9 @@ fmt:
 reload:
 	sbt reload
 
+countlines:
+	find . -name "*.scala" -not -path "*/target/*" -not -path "*/project/*" | xargs wc -l | tail -1
+
 clean:
 	sbt clean
 	rm -rf pkg $(DEB_FILE)
