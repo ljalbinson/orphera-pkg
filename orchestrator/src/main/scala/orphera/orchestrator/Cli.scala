@@ -274,14 +274,22 @@ object Cli:
         Left(s"Unknown argument to teardown: $other")
 
   private def parseFetch(
-      args: List[String], remote: String, localDir: String, nodes: Option[List[String]]
+      args: List[String],
+      remote: String,
+      localDir: String,
+      nodes: Option[List[String]]
   ): Either[String, Command] =
     args match
       case Nil => Right(Command.Fetch(remote, localDir, nodes))
       case "--out" :: value :: rest =>
         parseFetch(rest, remote, value, nodes)
       case "--nodes" :: value :: rest =>
-        parseFetch(rest, remote, localDir, Some(value.split(",").toList.map(_.trim)))
+        parseFetch(
+          rest,
+          remote,
+          localDir,
+          Some(value.split(",").toList.map(_.trim))
+        )
       case other :: _ =>
         Left(s"Unknown argument to fetch: $other")
 

@@ -22,6 +22,9 @@ bump-patch:
 	@mv $(VERSION_FILE).tmp $(VERSION_FILE)
 	@echo "Version bumped: $$(cat $(VERSION_FILE))"
 
+fmt:
+	sbt scalafmt
+
 clean:
 	sbt clean
 	rm -rf pkg $(DEB_FILE)

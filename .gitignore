@@ -17,6 +17,8 @@ metals.sbt
 *.log
 .DS_Store
 
+*.deb
+
 runtime
 
 orphera-agent
