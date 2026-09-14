@@ -43,6 +43,10 @@ check-uptimes:
 reboot-all:
 	sbt "orchestrator/runMain orphera.orchestrator.Main reboot"
 
+orpheracli:
+	sbt orchestrator/assembly
+	sudo cp -p orchestrator/target/scala-3.8.4/orchestrator-assembly-$(VERSION).jar /usr/local/lib
+
 sleep30:
 	sleep 30
 
