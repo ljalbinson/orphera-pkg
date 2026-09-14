@@ -22,3 +22,6 @@ metals.sbt
 runtime
 
 orphera-agent
+
+VERSION
+
