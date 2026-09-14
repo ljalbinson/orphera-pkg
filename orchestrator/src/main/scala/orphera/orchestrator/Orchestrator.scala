@@ -146,3 +146,14 @@ object Orchestrator:
         NodeClient.gatherFacts(node).map(facts => node.name -> facts)
       }
       .map(_.toMap)
+
+  def getVersions(nodes: List[Node]): IO[Map[String, String]] =
+    nodes
+      .parTraverse { node =>
+        NodeClient.getVersion(node).attempt.map(result => node.name -> result)
+      }
+      .map(_.collect {
+        case (name, Right(v)) => name -> v
+        case (name, Left(_))  => name -> "unreachable"
+      }.toMap)
+

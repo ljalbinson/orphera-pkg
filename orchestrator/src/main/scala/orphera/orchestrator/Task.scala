@@ -15,6 +15,11 @@ enum Task:
       vars: Map[String, String] = Map.empty
   )
   case NetworkApply(timeoutSeconds: Int = 60)
+  case Reboot(
+      delaySeconds: Int = 5,
+      waitForReturn: Boolean = false,
+      waitTimeoutSeconds: Int = 300
+  )
 
 case class FactCondition(
     key: String,

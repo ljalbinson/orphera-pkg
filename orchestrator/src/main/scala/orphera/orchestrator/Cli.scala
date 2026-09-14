@@ -45,6 +45,7 @@ enum Command:
   case Fetch(remotePath: String, localDir: String, nodes: Option[List[String]])
   case Facts(nodes: Option[List[String]])
   case RunPlaybook(path: String)
+  case Version(nodes: Option[List[String]])
   case Help
 
 object Cli:
@@ -74,6 +75,7 @@ object Cli:
       case "fetch" :: remote :: rest => parseFetch(rest, remote, ".", None)
       case "facts" :: rest           => parseFacts(rest, None)
       case "playbook" :: path :: Nil => Right(Command.RunPlaybook(path))
+      case "version" :: rest => parseVersion(rest, None)
       case "help" :: _ | "--help" :: _ | Nil => Right(Command.Help)
       case other => Left(s"Unknown command: ${other.headOption.getOrElse("")}")
 
@@ -308,6 +310,14 @@ object Cli:
       case other :: _ =>
         Left(s"Unknown argument to facts: $other")
 
+  private def parseVersion(args: List[String], nodes: Option[List[String]]): Either[String, Command] =
+    args match
+      case Nil => Right(Command.Version(nodes))
+      case "--nodes" :: value :: rest =>
+        parseVersion(rest, Some(value.split(",").toList.map(_.trim)))
+      case other :: _ =>
+        Left(s"Unknown argument to version: $other")
+
   val usage: String =
     """orphera-orchestrator - test CLI for the Orphera agent protocol
       |
@@ -322,6 +332,7 @@ object Cli:
       |  teardown       --nodes host1,host2 --yes [--purge] [--ssh-user root] [--ssh-key ~/.ssh/id_ed25519]
       |  fetch          <remote-path> [--out ./local-dir] [--nodes host1,host2]
       |  facts          [--nodes host1,host2]
+      |  version        [--nodes host1,host2]
       |  playbook       <file.yaml>
       |
       |Examples:

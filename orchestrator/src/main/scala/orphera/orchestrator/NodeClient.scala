@@ -285,3 +285,62 @@ object NodeClient:
       .use { stub =>
         stub.gatherFacts(FactsRequest(), authMetadata())
       }
+
+  def reboot(
+      node: Node,
+      delaySeconds: Int,
+      waitForReturn: Boolean,
+      waitTimeoutSeconds: Int,
+      onLine: String => IO[Unit]
+  ): IO[Unit] =
+    for
+      ack <- channelBuilder(node)
+        .resource[IO]
+        .flatMap(AgentFs2Grpc.stubResource[IO])
+        .use(_.triggerReboot(RebootRequest(delaySeconds), authMetadata()))
+
+      _ <- onLine(ack.message)
+
+      _ <-
+        if !waitForReturn then IO.unit
+        else
+          onLine("Waiting for host to come back...") >>
+            IO.sleep((delaySeconds + 5).seconds) >>
+            pollUntilBack(node, waitTimeoutSeconds, onLine)
+    yield ()
+
+  def getVersion(node: Node): IO[String] =
+    channelBuilder(node)
+      .resource[IO]
+      .flatMap(AgentFs2Grpc.stubResource[IO])
+      .use { stub =>
+        stub.getVersion(VersionRequest(), authMetadata()).map(_.version)
+      }
+
+  private def pollUntilBack(
+      node: Node,
+      timeoutSeconds: Int,
+      onLine: String => IO[Unit],
+      elapsed: Int = 0
+  ): IO[Unit] =
+    if elapsed >= timeoutSeconds then
+      onLine(s"Timed out after ${timeoutSeconds}s waiting for host to return")
+    else
+      channelBuilder(node)
+        .resource[IO]
+        .flatMap(AgentFs2Grpc.stubResource[IO])
+        .use(
+          _.checkFile(FileCheck("/etc/hostname", "", "", "", 0), authMetadata())
+        )
+        .attempt
+        .flatMap {
+          case Right(_) =>
+            onLine(s"Host is back after ~${elapsed}s")
+          case Left(_) =>
+            IO.sleep(5.seconds) >> pollUntilBack(
+              node,
+              timeoutSeconds,
+              onLine,
+              elapsed + 5
+            )
+        }
