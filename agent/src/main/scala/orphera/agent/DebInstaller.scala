@@ -24,9 +24,14 @@ object DebInstaller:
              |exit 1""".stripMargin
 
         new ProcessBuilder(
-          "systemd-run", "--no-block", "--collect",
-          "--unit", s"orphera-deploy-${System.currentTimeMillis()}",
-          "sh", "-c", script
+          "systemd-run",
+          "--no-block",
+          "--collect",
+          "--unit",
+          s"orphera-deploy-${System.currentTimeMillis()}",
+          "sh",
+          "-c",
+          script
         ).inheritIO().start()
       }
 

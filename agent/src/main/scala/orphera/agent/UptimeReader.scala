@@ -17,8 +17,17 @@ object UptimeReader:
 
   private def parseUptimeFile(): Long =
     val content = Files.readString(Paths.get("/proc/uptime"))
-    content.trim.split("\\s+").headOption.flatMap(_.toDoubleOption).map(_.toLong).getOrElse(0L)
+    content.trim
+      .split("\\s+")
+      .headOption
+      .flatMap(_.toDoubleOption)
+      .map(_.toLong)
+      .getOrElse(0L)
 
   private def parseLoadAvgFile(): Double =
     val content = Files.readString(Paths.get("/proc/loadavg"))
-    content.trim.split("\\s+").headOption.flatMap(_.toDoubleOption).getOrElse(0.0)
+    content.trim
+      .split("\\s+")
+      .headOption
+      .flatMap(_.toDoubleOption)
+      .getOrElse(0.0)

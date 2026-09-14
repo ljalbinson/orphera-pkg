@@ -160,7 +160,9 @@ object Main extends IOApp:
             targets.traverse_ { node =>
               uptimes.get(node.name) match
                 case Some(info) =>
-                  IO.println(s"[${node.name}] up ${formatUptime(info.uptimeSeconds)}, load avg (1m) ${info.loadAverage1M}")
+                  IO.println(
+                    s"[${node.name}] up ${formatUptime(info.uptimeSeconds)}, load avg (1m) ${info.loadAverage1M}"
+                  )
                 case None =>
                   IO.println(s"[${node.name}] unreachable")
             }

@@ -178,6 +178,6 @@ object Orchestrator:
       .parTraverse { node =>
         NodeClient.getUptime(node).attempt.map(result => node.name -> result)
       }
-      .map(_.collect {
-        case (name, Right(info)) => name -> info
+      .map(_.collect { case (name, Right(info)) =>
+        name -> info
       }.toMap)
