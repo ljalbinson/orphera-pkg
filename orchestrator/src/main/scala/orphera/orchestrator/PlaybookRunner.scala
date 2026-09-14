@@ -88,6 +88,15 @@ object PlaybookRunner:
       case Task.NetworkApply(timeoutSeconds) =>
         NodeClient.applyNetworkConfig(node, timeoutSeconds, render)
 
+      case Task.Reboot(delaySeconds, waitForReturn, waitTimeoutSeconds) =>
+        NodeClient.reboot(
+          node,
+          delaySeconds,
+          waitForReturn,
+          waitTimeoutSeconds,
+          line => IO.println(s"[${node.name}] ${namedTask.name}: $line")
+        )
+
   private def resolveSourcePath(
       src: String,
       vars: Map[String, String],

@@ -53,6 +53,13 @@ object PlaybookYaml:
       case "network_apply" =>
         body.getOrElse[Int]("timeout")(60).map(Task.NetworkApply.apply)
 
+      case "reboot" =>
+        for
+          delay <- body.getOrElse[Int]("delay")(5)
+          wait <- body.getOrElse[Boolean]("wait")(false)
+          waitTimeout <- body.getOrElse[Int]("wait_timeout")(300)
+        yield Task.Reboot(delay, wait, waitTimeout)
+
       case other =>
         Left(DecodingFailure(s"Unknown task type: $other", body.history))
 

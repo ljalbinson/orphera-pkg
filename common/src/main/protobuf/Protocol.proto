@@ -99,6 +99,20 @@ message Facts {
   int64 collected_at_epoch_millis = 10;
 }
 
+message RebootRequest {
+  uint32 delay_seconds = 1;
+}
+
+message RebootAck {
+  string message = 1;
+}
+
+message VersionRequest {}
+
+message VersionInfo {
+  string version = 1;
+}
+
 message Empty {}
 
 message Event {
@@ -124,5 +138,7 @@ service Agent {
   rpc InstallDebPackage(InstallDeb) returns (stream Event);
   rpc RemoteFetchFile(FetchFile) returns (stream FileData);
   rpc GatherFacts(FactsRequest) returns (Facts);
+  rpc TriggerReboot(RebootRequest) returns (RebootAck);
+  rpc GetVersion(VersionRequest) returns (VersionInfo);
 }
 
