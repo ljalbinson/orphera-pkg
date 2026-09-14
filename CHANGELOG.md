@@ -4,6 +4,93 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- **`reboot` command/RPC** (`TriggerReboot`/`RebootRequest`/`RebootAck`).
+  Runs fully detached from the agent's own process via `systemd-run
+  --no-block`, for the same reason as `deploy-agent`'s fix below —
+  systemd's `KillMode=control-group` would otherwise kill the reboot
+  command itself as a side effect of the agent's own service being
+  torn down. Supports `--delay`, `--wait` (poll the agent afterward
+  and report when it's reachable again, or time out), and
+  `--wait-timeout`.
+- **`version` command/RPC** (`GetVersion`/`VersionRequest`/`VersionInfo`).
+  Agent version is baked in at compile time from the top-level
+  `VERSION` file via an sbt source generator (`BuildInfo.scala`), so
+  a running agent's reported version reflects what `VERSION` held at
+  build time, not the current state of the source tree. Exists
+  specifically to make `deploy-agent`'s otherwise-unconfirmable
+  outcome checkable after the fact (full automatic wiring into
+  `deploy-agent` designed but not yet implemented).
+- **Playbooks**, a full ordered, multi-task execution model, superseding
+  the earlier (never fully implemented) declarative file-manifest idea:
+  - Shared `Task`/`NamedTask`/`Playbook`/`FactCondition` ADT
+    (`Task.scala`), covering `install`, `remove`, `autoremove`, `copy`,
+    `network_apply`, `reboot`.
+  - **YAML front-end** (`PlaybookYaml.scala`) — ordered task lists with
+    `when:` fact-based conditions, run via `playbook <file.yaml>`.
+  - **`copy` task templating** — `.mustache` sources rendered via
+    Mustache before push, merging the task's own `vars:` with facts
+    gathered for that node (`facts.hostname`, `facts.os_id`,
+    `facts.os_version`, `facts.architecture`). The idempotent
+    pre-check hashes rendered output, so re-applying an unchanged
+    playbook stays a no-op even across template-source churn.
+  - **`PlaybookRunner`** — executes one node's task sequence strictly
+    in order; different nodes run in parallel with each other. A
+    failed task stops that node's remaining tasks without affecting
+    other nodes. Facts are gathered once per node, up front, and
+    reused for every `when:` check in that node's sequence.
+  - **Scala DSL front-end** (`PlaybookDsl.scala`) — a fluent
+    `.task(name)(task).when(condition).build` builder, as an
+    alternative to YAML for cases wanting compile-time checking and
+    real Scala composability. `OrpheraPlaybook` (`OrpheraPlaybook.scala`)
+    lets a DSL playbook extend it to become its own independently
+    runnable `IOApp` (`sbt "orchestrator/runMain <fully.qualified.Name>"`),
+    in addition to being runnable by name via `playbook <name>` once
+    registered in `PlaybookRegistry.scala`.
+  - `-o DPkg::Lock::Timeout=60` added to every `apt-get`/`dpkg`
+    invocation on the agent, after hitting real lock contention
+    (background `unattended-upgrades` or a concurrent task) in
+    practice against real hosts.
+
+### Fixed
+
+- **`deploy-agent` self-disruption.** `dpkg -i` invoked by the agent
+  to upgrade itself was being killed mid-unpack by its own service
+  restart, since it ran as a child process inside the agent's systemd
+  cgroup and `KillMode=control-group` (the default) sends `SIGTERM` to
+  the whole cgroup on stop/restart — not just the agent JVM. Fixed by
+  launching the install via `systemd-run --no-block`, fully detached
+  from the agent's cgroup. As a direct consequence, `deploy-agent`'s
+  `RESULT` event now explicitly only ever means "the install was
+  launched," not "the install completed" — see the `version` RPC
+  above for the intended path to closing that gap properly.
+- **`postinst` simplified** back to a plain synchronous
+  `systemctl restart` once the above fix meant there was no longer a
+  race between `dpkg -i` and the service restart for `postinst` to
+  work around; an earlier `setsid`-based delayed-restart workaround
+  was solving the wrong problem and has been removed.
+
+### Known issues / gotchas hit this cycle
+
+- **`wait` cannot be used as a field name** on any Scala case
+  class/`enum case`/parameter in this codebase — it collides with
+  `java.lang.Object`'s `final wait()` method. Hit independently in
+  both `Task.Reboot` and `Cli.Command.Reboot`; both use
+  `waitForReturn` instead.
+- Several rounds of "a file or method given in an earlier message
+  never actually got saved/added" recurred throughout this feature's
+  development (missing `OrpheraPlaybook.scala`, missing
+  `NodeClient.reboot`, missing `Orchestrator.reboot`, a missing
+  `package orphera.orchestrator` declaration causing a whole-file
+  cascade of unrelated-looking "not found" errors). No code change
+  results from this beyond what's already listed above, but it's the
+  same pattern flagged earlier in this changelog's history and remains
+  the strongest existing argument for CI (see [0.1.0]'s Known
+  limitations).
+
 ## [0.1.0] - Initial build
 
 ### Added

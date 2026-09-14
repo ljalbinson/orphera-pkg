@@ -13,14 +13,6 @@ platform coverage. Currently targets Debian/Ubuntu hosts (`apt`,
 what's described in [Testing](#testing). Not hardened for use against
 untrusted networks or adversarial input.
 
-> **Status:** early-stage, built as a learning/exploration project.
-> Not hardened for production use. In particular: the agent runs as
-> root and accepts file writes/reads to arbitrary paths from any
-> authenticated orchestrator, TLS uses a single shared private key
-> across the whole fleet, and there is no mutual TLS. See
-> [Known gaps](#known-gaps--not-yet-built) before pointing this at
-> anything you can't afford to lose.
-
 ## Architecture
 
 ```
@@ -220,51 +212,32 @@ explicit targeting — see below).
 | `remove <pkg...> [--purge]` | `apt-get remove`/`purge` |
 | `autoremove [--purge]` | `apt-get autoremove` |
 | `copy <local> <remote> [--owner] [--group] [--mode]` | Push a file, with an idempotent pre-check (content hash + owner/group/mode) so unchanged files are skipped |
-| `apply <manifest.yaml>` | Push a declarative set of files (see [Manifests](#manifests)) |
 | `network-apply [--timeout 60]` | Apply pushed `.network`/`.netdev`/`.link` files with automatic rollback if not confirmed within the timeout — see [Network config safety](#network-config-safety) |
-| `reboot [--delay 5]` | Trigger a host reboot |
-| `deploy-agent <local.deb> [--remote-path]` | Push and install an updated agent `.deb` on a host **that already has an agent running** |
+| `reboot [--delay 5] [--wait] [--wait-timeout 300]` | Reboot a host. Runs fully detached from the agent's own process (`systemd-run`), for the same reason as `deploy-agent` below — the agent's own systemd unit would otherwise be killed by the reboot before it can schedule it. `--wait` polls the agent afterward and reports when it's reachable again (or times out) — see [Known gaps](#known-gaps--not-yet-built) for exactly what "reachable" does and doesn't confirm |
+| `version [--nodes ...]` | Report each agent's running version, baked in at build time from the `VERSION` file — see [Versioning](#versioning) |
+| `deploy-agent <local.deb> [--remote-path]` | Push and install an updated agent `.deb` on a host **that already has an agent running**. The install runs fully detached from the agent's own process (`systemd-run`), since the agent's own service restart would otherwise kill its own upgrade mid-unpack — see [Known gaps](#known-gaps--not-yet-built) for why success still can't be confirmed from the RPC alone |
 | `bootstrap <local.deb> --nodes ... [--ssh-user] [--ssh-key]` | First-time agent install via SSH, for a host with **no agent yet** |
 | `teardown --nodes ... --yes [--purge]` | Uninstall the agent via SSH. Requires explicit `--nodes` and `--yes` — no fleet-wide default, given the host becomes unmanageable via gRPC afterward |
 | `fetch <remote-path> [--out ./dir]` | Pull a file back from one or more agents into a local directory, one file per node (named `<node>-<filename>`) |
 | `facts [--nodes ...]` | Gather and print basic host facts (OS, kernel, CPU/memory, disks, interfaces) from one or more agents |
-| `playbook <file.yaml>` | Run an ordered, multi-task playbook — see [Playbooks](#playbooks) |
+| `playbook <file.yaml \| compiled-name>` | Run an ordered, multi-task playbook, from either a YAML file or a compiled Scala DSL playbook by registered name — see [Playbooks](#playbooks) |
 
-Every `install`/`remove`/`autoremove`/`copy`/`network-apply`/`reboot`
-invocation above is internally just a one-task playbook dispatched
-through the same execution path as `playbook` — see
-[Playbooks](#playbooks) for why that's structured this way.
+There is no `apply <manifest.yaml>` command — the standalone
+declarative-file-manifest idea (independent, parallel file pushes, no
+task ordering) was designed but superseded before being built;
+[Playbooks](#playbooks) is the actual, implemented mechanism for
+declarative, ordered multi-step execution, including file pushes as
+one task type among several.
 
-## Manifests
-
-`apply <manifest.yaml>` pushes a declarative list of files instead of
-one-off `copy` invocations:
-
-```yaml
-nodes:
-  - web1
-  - web2
-
-files:
-  - src: files/nginx.conf
-    dest: /etc/nginx/nginx.conf
-    owner: root
-    group: root
-    mode: "0644"
-```
-
-Files ending `.mustache` are rendered through
-[Mustache](https://mustache.github.io/) before push, using a `vars` map
-in the manifest entry — see `Templating.scala`. Everything else is
-copied verbatim. The pre-check (content hash) runs against the
-*rendered* output, so re-applying an unchanged manifest is a no-op.
-
-There is no task ordering, dependency graph, or conditional logic
-between manifest entries — each file is independent and may be pushed
-in parallel. If you need "install X, then push its config, then
-restart the service," see [Playbooks](#playbooks) below, which
-supersedes this for anything order-sensitive. `apply` remains as a
-convenience shorthand for the simple all-files, no-ordering case.
+Every CLI command above (`install`, `remove`, `autoremove`, `copy`,
+`network-apply`, `reboot`) currently has its **own direct dispatch
+path** in `Main.scala`/`Orchestrator.scala`, separate from
+`PlaybookRunner`. A design where single CLI commands are internally
+expressed as one-task playbooks — so there's exactly one execution
+engine instead of two — was discussed but is **not yet implemented**;
+this is worth doing as a follow-up, since right now a fix or feature
+added to `PlaybookRunner` (e.g. lock-contention retry behavior) does
+not automatically apply to the direct CLI path, and vice versa.
 
 ## Playbooks
 
@@ -311,8 +284,23 @@ sbt "orchestrator/run playbook manifests/web-server-baseline.yaml"
 
 **Available task types:** `install`, `remove`, `autoremove`, `copy`,
 `network_apply`, `reboot` — each maps directly onto the corresponding
-CLI command's underlying RPC, so anything the CLI can do, a playbook
-task can do as one step in a sequence.
+CLI command's underlying RPC, so anything the CLI can do (except
+`bootstrap`/`teardown`/`deploy-agent`/`facts`/`version`, which are
+intentionally excluded — see below), a playbook task can do as one
+step in a sequence. The `reboot` task's fields mirror the CLI command:
+`delay`, `wait`, `wait_timeout` in YAML.
+
+**`copy` templating:** if `src` ends in `.mustache`, it is rendered via
+[Mustache](https://mustache.github.io/) before being pushed, using the
+task's own `vars:` map merged with facts gathered for that node
+(`facts.hostname`, `facts.os_id`, `facts.os_version`,
+`facts.architecture` — note this is a different, wider naming
+convention than the `when:` condition keys below; not yet normalized
+to match). Non-`.mustache` sources are pushed verbatim. The idempotent
+pre-check (content hash) runs against the *rendered* output, so
+re-applying an unchanged playbook is a no-op even if the template
+source itself changed in a way that doesn't affect the rendered
+result.
 
 **`when:` conditions** are simple `key == "value"` / `key != "value"`
 checks against facts gathered from the node immediately before its
@@ -323,6 +311,9 @@ general expression language. Supported keys currently:
 **Failure behavior:** if a task fails, that node's remaining tasks are
 skipped, but other nodes' playbooks continue independently — one
 node's failure doesn't block or slow down the rest of the fleet.
+Confirmed in practice: `apt-get`/`dpkg` lock contention (see below)
+produces exactly this behavior — one node's `remove`/`autoremove` task
+failing with exit 100 does not affect other nodes' progress.
 
 **Facts-unavailable behavior:** if fact-gathering itself fails for a
 node (agent unreachable, etc.), any task on that node with a `when:`
@@ -332,16 +323,83 @@ being aware of if a task's `when:` is silently never satisfied —
 check whether facts are actually being retrieved from that node before
 assuming the condition itself is wrong.
 
+**`apt`/`dpkg` lock contention:** every `apt-get`/`dpkg` invocation on
+the agent passes `-o DPkg::Lock::Timeout=60`, so a task that hits the
+lock (background unattended-upgrades, another concurrent Orphera task,
+etc.) waits up to 60 seconds and retries automatically rather than
+failing immediately with exit 100. This was added after hitting the
+failure directly in practice — see [Known gaps](#known-gaps--not-yet-built)
+for the retry/backoff work this doesn't yet fully cover.
+
+### Scala DSL front-end
+
+As an alternative to YAML, a playbook can be written directly in
+Scala and compiled as part of the `orchestrator` build:
+
+```scala
+// SPDX-License-Identifier: Apache-2.0
+
+package orphera.orchestrator
+
+import orphera.orchestrator.PlaybookDsl.*
+
+object WebBaseline extends OrpheraPlaybook:
+
+  val playbook: Playbook =
+    PlaybookDsl.playbook("web-baseline", "tst0", "tst1", "tst2")
+      .task("install curl")(Task.Install(packages = List("curl"), updateCache = true))
+      .task("push motd")(
+        Task.Copy(src = "files/motd", dest = "/etc/motd", owner = "root", group = "root", mode = 420)
+      )
+      .task("remove telnet if present")(Task.Remove(packages = List("telnet"), purge = true))
+      .when("os_id" === "ubuntu")
+      .build
+```
+
+Every DSL playbook needs an entry in `PlaybookRegistry.scala`'s `all`
+map (`"web-baseline" -> WebBaseline.playbook`) to be reachable by name
+— this is currently a manual, easy-to-forget step with no build-time
+check that a defined playbook is actually registered.
+
+Run a registered DSL playbook the same way as a YAML one, by name
+instead of file path:
+
+```bash
+sbt "orchestrator/run playbook web-baseline"
+```
+
+Or, since `extends OrpheraPlaybook` makes it a real, independent
+`IOApp`, run it directly — bypassing the CLI and registry entirely:
+
+```bash
+sbt "orchestrator/runMain orphera.orchestrator.WebBaseline"
+```
+
+`.task(name)(task)` and `.when(condition)` (attaching a condition to
+the immediately preceding task) are the only two builder methods —
+this is a plain, chainable builder, not a monadic/for-comprehension
+structure. `===`/`=!=` (used in `.when(...)`) are extension methods
+defined in `PlaybookDsl` and need `import orphera.orchestrator.PlaybookDsl.*`
+in scope to resolve — a real, easy-to-hit compile error
+(`value === is not a member of String`) if that import is missing.
+
 **Not yet implemented:**
 - Task-to-task data flow (using one task's result in a later task)
 - Handlers/triggers (Ansible-style "restart only if config changed")
 - Includes/imports across playbook files
-- A Scala DSL front-end producing the same underlying task model as an
-  alternative to YAML, for cases wanting compile-time checking and
-  real composability (loops, shared helpers) — designed, not yet built
-- `copy` tasks do not yet run their `src` through the Mustache
-  templating pipeline that `apply`/manifests use — a playbook `copy`
-  task currently pushes `src` verbatim even if it ends in `.mustache`
+- A monadic/for-comprehension style for the Scala DSL (`for _ <- run(...)
+  yield ()`), as an alternative to the current fluent `.task(...)`
+  chain — designed, not implemented; the fluent builder above is what
+  actually exists and works
+- Any compile-time check that a DSL playbook extending `OrpheraPlaybook`
+  is also registered in `PlaybookRegistry` — currently a silent gap if
+  forgotten, not a build error
+- Per-task retry/backoff beyond the built-in `apt`/`dpkg` lock timeout
+  above — a task that fails for another transient reason still stops
+  that node's remaining tasks rather than retrying
+- Direct CLI commands (`install`, `remove`, etc.) do **not** currently
+  run through this same `PlaybookRunner` execution engine — see the
+  note in [CLI reference](#cli-reference)
 
 ## Network config safety
 
@@ -396,6 +454,27 @@ sbt "orchestrator/run fetch /etc/nginx/nginx.conf --out /tmp/fetched --nodes web
 There is currently no path restriction on either `fetch` or `copy` —
 an authenticated orchestrator can read or write any path the agent's
 root user can reach. See [Known gaps](#known-gaps--not-yet-built).
+
+## Versioning
+
+Each built agent binary carries its own version number, generated at
+compile time from the top-level `VERSION` file (the same file
+`make release` bumps — see [Makefile targets](#makefile-targets)) via
+an sbt source generator that writes `agent/.../BuildInfo.scala`. This
+means the version reported by a running agent reflects whatever
+`VERSION` held when that specific `.deb`/jar was built — not
+necessarily what's in `VERSION` on your current dev machine, if you
+haven't rebuilt and redeployed since the last bump.
+
+```bash
+sbt "orchestrator/run version --nodes tst0"
+```
+
+This exists specifically to make `deploy-agent`'s otherwise-ambiguous
+outcome checkable after the fact — see
+[Known gaps](#known-gaps--not-yet-built) for the current state of
+wiring version verification directly into `deploy-agent` itself
+(designed, not yet fully implemented as of this writing).
 
 ## Authentication and security notes
 
@@ -500,37 +579,71 @@ the author's.
 ## Known gaps / not yet built
 
 - No dynamic/cloud inventory source
-- No task ordering or dependencies **within manifests** specifically
-  (`apply`) — superseded by playbooks for anything order-sensitive,
-  see [Playbooks](#playbooks)
+- No standalone declarative file-manifest mechanism (`apply`) or task
+  ordering within one — playbooks are the actual implemented mechanism
+  for ordered, multi-step execution, see [Playbooks](#playbooks)
 - No per-node TLS certs (shared wildcard key across the fleet)
 - No mutual TLS
 - No path allowlisting on `copy` **or `fetch`** — an authenticated
   orchestrator can write or read any path the agent's root user can
   reach
 - No secrets management
-- No automated verification that `deploy-agent` actually succeeded
-  (the RPC stream is expected to drop mid-call on a successful
-  self-restart, so success can't be inferred from the call outcome
-  alone — a follow-up version-check RPC would close this gap)
-- Playbook `copy` tasks don't run through the Mustache templating
-  pipeline yet (manifests' `apply` does) — see [Playbooks](#playbooks)
-- No Scala DSL front-end for playbooks yet (designed, not built) —
-  see [Playbooks](#playbooks)
+- No automated verification that `deploy-agent` actually succeeded.
+  The install itself runs fully detached from the agent's own process
+  (via `systemd-run --no-block`), specifically because the agent's own
+  service restart otherwise kills the `dpkg -i` it just spawned
+  mid-unpack (systemd's default `KillMode=control-group` sends
+  `SIGTERM` to every process in the service's cgroup, including its
+  own children) — this was hit and fixed in practice, not theoretical.
+  `success = true` on `deploy-agent`'s `RESULT` event still only ever
+  means "the install was launched," never "the install completed
+  successfully." The `version` RPC (see [Versioning](#versioning)) now
+  exists specifically to close this gap by polling the agent
+  afterward and comparing against the expected version, but that
+  polling loop is designed and not yet wired into `deploy-agent`
+  itself as of this writing
+- Direct CLI commands (`install`, `remove`, `autoremove`, `copy`,
+  `network-apply`, `reboot`) each have their own dispatch path in
+  `Main.scala`/`Orchestrator.scala`, separate from `PlaybookRunner` —
+  a design where they're unified (CLI commands as one-task playbooks,
+  one execution engine) was discussed but not implemented. Practical
+  consequence: the `DPkg::Lock::Timeout` fix and any future
+  `PlaybookRunner`-level improvement (retries, etc.) apply to
+  `playbook` runs but not to direct CLI invocations, unless ported to
+  both places separately
 - No task-to-task data flow, handlers/triggers, or playbook
   includes/imports
+- No monadic/for-comprehension style for the Scala DSL, as an
+  alternative to the current fluent `.task(...).when(...)` builder —
+  designed, not implemented, see [Playbooks](#playbooks)
+- No compile-time check that a DSL playbook is actually registered in
+  `PlaybookRegistry` — a defined-but-unregistered playbook fails
+  silently at the CLI (though it's still directly runnable via
+  `runMain`, since `OrpheraPlaybook` doesn't depend on the registry)
+- No per-task retry/backoff in `PlaybookRunner` beyond the built-in
+  `apt`/`dpkg` lock-contention timeout — other transient failures
+  still stop a node's remaining tasks rather than retrying
+- `reboot --wait` confirms only that the agent's gRPC service answers
+  again — a real, useful signal, but distinct from confirming the
+  whole host finished a normal boot sequence
 - Fact keys usable in `when:` conditions are a small fixed set
   (`os_id`, `os_version`, `arch`, `hostname`) — not the full `Facts`
-  schema
+  schema, and use a different naming convention than the `facts.*`
+  keys exposed to `copy` task templating (not yet normalized)
 - Test coverage incomplete (see [Testing](#testing))
 - Native-image build not working (see [A note on native-image](#a-note-on-native-image))
-- No CI pipeline — several build breakages this project hit (an sbt
-  plugin object misnamed silently, an RPC method sharing its message
-  type's name, a `Command` case with no handler in `Main.scala`) would
-  have been caught immediately by a basic `sbt compile test` workflow
-  on every push. Relatedly: **`Command` matches in `Main.scala` should
-  be checked for exhaustiveness** — Scala 3 warns on a non-exhaustive
-  match against a sealed `enum`, but the project does not yet fail the
-  build on that warning (`-Werror`/`-Xfatal-warnings` not yet added to
-  `scalacOptions`), so a missing case can currently compile clean and
-  only fail at runtime.
+- `-Werror`/`-Wconf` are now enabled in `build.sbt`, which has already
+  caught at least one real bug (a `Command.Fetch` case parsed by `Cli`
+  but never handled in `Main.scala`) as a hard compile failure instead
+  of a silent runtime crash. No CI pipeline exists yet to run this
+  automatically on every push, which remains the main way build
+  breakages have been caught late in this project's history rather
+  than immediately.
+- **`wait` cannot be used as a case class/`enum case`/parameter name
+  anywhere in this codebase.** `java.lang.Object` declares a `final`
+  `wait()` method, inherited by every class; a Scala class or enum
+  case with a field literally named `wait` fails to compile
+  (`error overriding method wait in class Object`). Hit independently
+  in both `Task.Reboot` and `Cli.Command.Reboot` while building the
+  reboot feature — both use `waitForReturn` instead. Worth remembering
+  before naming any future field `wait` anywhere in this project.
