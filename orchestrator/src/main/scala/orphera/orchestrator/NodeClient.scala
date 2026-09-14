@@ -344,3 +344,11 @@ object NodeClient:
               elapsed + 5
             )
         }
+
+  def getUptime(node: Node): IO[UptimeInfo] =
+    channelBuilder(node)
+      .resource[IO]
+      .flatMap(AgentFs2Grpc.stubResource[IO])
+      .use { stub =>
+        stub.getUptime(UptimeRequest(), authMetadata())
+      }

@@ -80,3 +80,6 @@ class AgentServiceImpl(
 
   def getVersion(request: VersionRequest, ctx: Metadata): IO[VersionInfo] =
     IO.pure(VersionInfo(BuildInfo.version))
+
+  def getUptime(request: UptimeRequest, ctx: Metadata): IO[UptimeInfo] =
+    UptimeReader.read()

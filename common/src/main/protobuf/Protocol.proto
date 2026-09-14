@@ -113,6 +113,13 @@ message VersionInfo {
   string version = 1;
 }
 
+message UptimeRequest {}
+
+message UptimeInfo {
+  int64 uptime_seconds = 1;
+  double load_average_1m = 2;
+}
+
 message Empty {}
 
 message Event {
@@ -140,5 +147,6 @@ service Agent {
   rpc GatherFacts(FactsRequest) returns (Facts);
   rpc TriggerReboot(RebootRequest) returns (RebootAck);
   rpc GetVersion(VersionRequest) returns (VersionInfo);
+  rpc GetUptime(UptimeRequest) returns (UptimeInfo);
 }
 

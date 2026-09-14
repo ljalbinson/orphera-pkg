@@ -52,6 +52,7 @@ enum Command:
       waitTimeoutSeconds: Int
   )
   case Version(nodes: Option[List[String]])
+  case Uptime(nodes: Option[List[String]])
   case Help
 
 object Cli:
@@ -82,6 +83,7 @@ object Cli:
       case "facts" :: rest           => parseFacts(rest, None)
       case "playbook" :: path :: Nil => Right(Command.RunPlaybook(path))
       case "version" :: rest         => parseVersion(rest, None)
+      case "uptime" :: rest => parseUptime(rest, None)
       case "reboot" :: rest          =>
         parseReboot(rest, None, 5, waitForReturn = false, 300)
       case "help" :: _ | "--help" :: _ | Nil => Right(Command.Help)
@@ -370,6 +372,14 @@ object Cli:
       case other :: _ =>
         Left(s"Unknown argument to version: $other")
 
+  private def parseUptime(args: List[String], nodes: Option[List[String]]): Either[String, Command] =
+    args match
+      case Nil => Right(Command.Uptime(nodes))
+      case "--nodes" :: value :: rest =>
+        parseUptime(rest, Some(value.split(",").toList.map(_.trim)))
+      case other :: _ =>
+        Left(s"Unknown argument to uptime: $other")
+
   val usage: String =
     """orphera-orchestrator - test CLI for the Orphera agent protocol
       |
@@ -386,6 +396,7 @@ object Cli:
       |  facts          [--nodes host1,host2]
       |  reboot         [--nodes host1,host2] [--delay 5] [--wait] [--wait-timeout 300]
       |  version        [--nodes host1,host2]
+      |  uptime         [--nodes host1,host2]
       |  playbook       <file.yaml>
       |
       |Examples:

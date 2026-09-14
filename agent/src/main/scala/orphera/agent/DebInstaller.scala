@@ -23,7 +23,6 @@ object DebInstaller:
           "--unit",
           s"orphera-deploy-${System.currentTimeMillis()}",
           "dpkg",
-          "-o DPkg::Lock::Timeout=60",
           "-i",
           cmd.path
         ).inheritIO().start()

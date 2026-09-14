@@ -154,6 +154,27 @@ object Main extends IOApp:
           Orchestrator.reboot(targets, delaySeconds, wait, waitTimeoutSeconds)
         }
 
+      case Right(Command.Uptime(nodeNames)) =>
+        withTargets(nodeNames) { targets =>
+          Orchestrator.getUptimes(targets).flatMap { uptimes =>
+            targets.traverse_ { node =>
+              uptimes.get(node.name) match
+                case Some(info) =>
+                  IO.println(s"[${node.name}] up ${formatUptime(info.uptimeSeconds)}, load avg (1m) ${info.loadAverage1M}")
+                case None =>
+                  IO.println(s"[${node.name}] unreachable")
+            }
+          }
+        }
+
+  private def formatUptime(seconds: Long): String =
+    val days = seconds / 86400
+    val hours = (seconds % 86400) / 3600
+    val minutes = (seconds % 3600) / 60
+    if days > 0 then s"${days}d ${hours}h ${minutes}m"
+    else if hours > 0 then s"${hours}h ${minutes}m"
+    else s"${minutes}m"
+
   private def withTargets(nodeNames: Option[List[String]])(
       action: List[Node] => IO[Unit]
   ): IO[ExitCode] =
