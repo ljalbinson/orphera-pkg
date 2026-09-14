@@ -22,7 +22,8 @@ fi
 
 cd "$REPO_DIR"
 
-JAR=$(ls orchestrator/target/scala-*/orchestrator-assembly-*.jar 2>/dev/null | sort -V | tail -1)
+# JAR=$(ls orchestrator/target/scala-*/orchestrator-assembly-*.jar 2>/dev/null | sort -V | tail -1)
+JAR=$(ls /usr/local/lib/orchestrator-assembly-*.jar 2>/dev/null | sort -V | tail -1)
 
 if [ -z "$JAR" ]; then
   echo "No orchestrator assembly jar found in $REPO_DIR — building it now..." >&2
