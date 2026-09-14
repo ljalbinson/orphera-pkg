@@ -1,0 +1,32 @@
+#!/bin/sh
+# Runs the orchestrator directly from its assembled jar, without going
+# through sbt. Faster than `sbt "orchestrator/runMain ..."` for repeated
+# use, since it skips sbt's own startup cost each time.
+#
+# Usage: ./orphera <command> [args...]
+# e.g.:  ./orphera version --nodes tst0
+#        ./orphera reboot --wait
+
+set -e
+
+# Resolve the repo root regardless of where this script is invoked
+# from, since NodeClient.scala reads certs/ca.crt as a path relative
+# to the working directory — running from the wrong directory would
+# silently fail cert loading rather than erroring clearly.
+SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
+cd "$SCRIPT_DIR"
+
+JAR=$(ls orchestrator/target/scala-*/orchestrator-assembly-*.jar 2>/dev/null | sort -V | tail -1)
+
+if [ -z "$JAR" ]; then
+  echo "No orchestrator assembly jar found — building it now..." >&2
+  sbt orchestrator/assembly
+  JAR=$(ls orchestrator/target/scala-*/orchestrator-assembly-*.jar 2>/dev/null | sort -V | tail -1)
+fi
+
+if [ -z "$JAR" ]; then
+  echo "Error: orchestrator assembly jar still not found after build. Check for build errors above." >&2
+  exit 1
+fi
+
+exec java -cp "$JAR" orphera.orchestrator.Main "$@"

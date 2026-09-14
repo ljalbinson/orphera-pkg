@@ -1,4 +1,4 @@
-.PHONY: all release bump-patch _build_all clean test assembly pkg-stage deb verify certs certs-clean
+.PHONY: all release bump-patch _build_all clean test assembly pkg-stage deb verify certs certs-clean fmt
 
 VERSION_FILE := VERSION
 VERSION      := $(shell cat $(VERSION_FILE))
@@ -30,6 +30,21 @@ reload:
 
 countlines:
 	find . -name "*.scala" -not -path "*/target/*" -not -path "*/project/*" | xargs wc -l | tail -1
+
+deploy-agents:
+	sbt "orchestrator/runMain orphera.orchestrator.Main deploy-agent orphera-agent_$(VERSION)_amd64.deb"
+
+check-versions:
+	sbt "orchestrator/runMain orphera.orchestrator.Main version"
+
+check-uptimes:
+	sbt "orchestrator/runMain orphera.orchestrator.Main uptime"
+
+reboot-all:
+	sbt "orchestrator/runMain orphera.orchestrator.Main reboot"
+
+sleep30:
+	sleep 30
 
 clean:
 	sbt clean

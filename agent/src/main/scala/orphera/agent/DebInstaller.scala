@@ -16,15 +16,17 @@ object DebInstaller:
       )
 
       _ <- IO.blocking {
+        val script =
+          s"""for i in $$(seq 1 12); do
+             |  if dpkg -i ${cmd.path}; then exit 0; fi
+             |  sleep 5
+             |done
+             |exit 1""".stripMargin
+
         new ProcessBuilder(
-          "systemd-run",
-          "--no-block",
-          "--collect",
-          "--unit",
-          s"orphera-deploy-${System.currentTimeMillis()}",
-          "dpkg",
-          "-i",
-          cmd.path
+          "systemd-run", "--no-block", "--collect",
+          "--unit", s"orphera-deploy-${System.currentTimeMillis()}",
+          "sh", "-c", script
         ).inheritIO().start()
       }
 
