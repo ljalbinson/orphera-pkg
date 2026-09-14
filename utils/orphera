@@ -1,25 +1,31 @@
 #!/bin/sh
-# Runs the orchestrator directly from its assembled jar, without going
-# through sbt. Faster than `sbt "orchestrator/runMain ..."` for repeated
-# use, since it skips sbt's own startup cost each time.
+# Runs the orchestrator directly from its assembled jar.
 #
-# Usage: ./orphera <command> [args...]
-# e.g.:  ./orphera version --nodes tst0
-#        ./orphera reboot --wait
+# Looks for the Orphera repo at $ORPHERA_HOME, defaulting to
+# ~/orphera-pkg if unset. Override with:
+#   export ORPHERA_HOME=/path/to/orphera-pkg
+#
+# Usage: orphera <command> [args...]
+# e.g.:  orphera version --nodes tst0
+#        orphera reboot --wait
 
 set -e
 
-# Resolve the repo root regardless of where this script is invoked
-# from, since NodeClient.scala reads certs/ca.crt as a path relative
-# to the working directory — running from the wrong directory would
-# silently fail cert loading rather than erroring clearly.
-SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
-cd "$SCRIPT_DIR"
+REPO_DIR="${ORPHERA_HOME:-$HOME/orphera-pkg}"
+
+if [ ! -d "$REPO_DIR" ]; then
+  echo "Error: Orphera repo not found at $REPO_DIR" >&2
+  echo "Set ORPHERA_HOME to the correct path, e.g.:" >&2
+  echo "  export ORPHERA_HOME=/path/to/orphera-pkg" >&2
+  exit 1
+fi
+
+cd "$REPO_DIR"
 
 JAR=$(ls orchestrator/target/scala-*/orchestrator-assembly-*.jar 2>/dev/null | sort -V | tail -1)
 
 if [ -z "$JAR" ]; then
-  echo "No orchestrator assembly jar found — building it now..." >&2
+  echo "No orchestrator assembly jar found in $REPO_DIR — building it now..." >&2
   sbt orchestrator/assembly
   JAR=$(ls orchestrator/target/scala-*/orchestrator-assembly-*.jar 2>/dev/null | sort -V | tail -1)
 fi
