@@ -124,7 +124,9 @@ object Main extends IOApp:
         withTargets(nodeNames) { targets =>
           Orchestrator.getVersions(targets).flatMap { versions =>
             targets.traverse_ { node =>
-              IO.println(s"[${node.name}] ${versions.getOrElse(node.name, "unknown")}")
+              IO.println(
+                s"[${node.name}] ${versions.getOrElse(node.name, "unknown")}"
+              )
             }
           }
         }

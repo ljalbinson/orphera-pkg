@@ -75,7 +75,7 @@ object Cli:
       case "fetch" :: remote :: rest => parseFetch(rest, remote, ".", None)
       case "facts" :: rest           => parseFacts(rest, None)
       case "playbook" :: path :: Nil => Right(Command.RunPlaybook(path))
-      case "version" :: rest => parseVersion(rest, None)
+      case "version" :: rest         => parseVersion(rest, None)
       case "help" :: _ | "--help" :: _ | Nil => Right(Command.Help)
       case other => Left(s"Unknown command: ${other.headOption.getOrElse("")}")
 
@@ -310,9 +310,12 @@ object Cli:
       case other :: _ =>
         Left(s"Unknown argument to facts: $other")
 
-  private def parseVersion(args: List[String], nodes: Option[List[String]]): Either[String, Command] =
+  private def parseVersion(
+      args: List[String],
+      nodes: Option[List[String]]
+  ): Either[String, Command] =
     args match
-      case Nil => Right(Command.Version(nodes))
+      case Nil                        => Right(Command.Version(nodes))
       case "--nodes" :: value :: rest =>
         parseVersion(rest, Some(value.split(",").toList.map(_.trim)))
       case other :: _ =>
