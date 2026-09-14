@@ -14,5 +14,7 @@ object Inventory:
       Node("tst0", "tst0.ljalbinson.com"),
       Node("tst1", "tst1.ljalbinson.com"),
       Node("tst2", "tst2.ljalbinson.com"),
-      Node("tst3", "tst3.ljalbinson.com")
+      Node("tst3", "tst3.ljalbinson.com"),
+      Node("tst4", "tst4.ljalbinson.com"),
+      Node("tst5", "tst5.ljalbinson.com")
     )
