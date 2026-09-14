@@ -74,3 +74,9 @@ class AgentServiceImpl(
 
   def gatherFacts(request: FactsRequest, ctx: Metadata): IO[Facts] =
     FactGatherer.gather()
+
+  def triggerReboot(request: RebootRequest, ctx: Metadata): IO[RebootAck] =
+    Rebooter.trigger(request)
+
+  def getVersion(request: VersionRequest, ctx: Metadata): IO[VersionInfo] =
+    IO.pure(VersionInfo(BuildInfo.version))

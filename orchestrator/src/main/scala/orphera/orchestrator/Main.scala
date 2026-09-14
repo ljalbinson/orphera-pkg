@@ -120,8 +120,27 @@ object Main extends IOApp:
           }
         }
 
-      case Right(Command.RunPlaybook(path)) =>
-        PlaybookYaml.load(path) match
+      case Right(Command.Version(nodeNames)) =>
+        withTargets(nodeNames) { targets =>
+          Orchestrator.getVersions(targets).flatMap { versions =>
+            targets.traverse_ { node =>
+              IO.println(s"[${node.name}] ${versions.getOrElse(node.name, "unknown")}")
+            }
+          }
+        }
+
+      case Right(Command.RunPlaybook(source)) =>
+        val playbookResult: Either[String, Playbook] =
+          if source.endsWith(".yaml") || source.endsWith(".yml") then
+            PlaybookYaml.load(source)
+          else
+            PlaybookRegistry.all
+              .get(source)
+              .toRight(
+                s"No compiled playbook named '$source' (and it doesn't end in .yaml/.yml)"
+              )
+
+        playbookResult match
           case Left(err) =>
             IO.println(s"Error: $err") >> IO.pure(ExitCode.Error)
           case Right(pb) => PlaybookRunner.run(pb) >> IO.pure(ExitCode.Success)

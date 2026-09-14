@@ -25,7 +25,21 @@ lazy val agent = project
     Compile / run / fork := true,
     Compile / mainClass := Some("orphera.agent.Main"),
     assembly / mainClass := Some("orphera.agent.Main"),
-    libraryDependencies += "co.fs2" %% "fs2-io" % "3.11.0"
+    libraryDependencies += "co.fs2" %% "fs2-io" % "3.11.0",
+    Compile / sourceGenerators += Def.task {
+      val outFile = (Compile / sourceManaged).value / "orphera" / "agent" / "BuildInfo.scala"
+      val versionString = IO.read(file("VERSION")).trim
+      IO.write(
+        outFile,
+        s"""// SPDX-License-Identifier: Apache-2.0
+           |package orphera.agent
+           |
+           |object BuildInfo:
+           |  val version: String = "$versionString"
+           |""".stripMargin
+      )
+      Seq(outFile)
+    }
   )
 
 lazy val orchestrator = project
