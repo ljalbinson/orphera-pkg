@@ -156,3 +156,19 @@ object Orchestrator:
         case (name, Right(v)) => name -> v
         case (name, Left(_))  => name -> "unreachable"
       }.toMap)
+
+  def reboot(
+      nodes: List[Node],
+      delaySeconds: Int = 5,
+      waitForReturn: Boolean = false,
+      waitTimeoutSeconds: Int = 300
+  ): IO[Unit] =
+    nodes.parTraverse_ { node =>
+      NodeClient.reboot(
+        node,
+        delaySeconds,
+        waitForReturn,
+        waitTimeoutSeconds,
+        line => IO.println(s"[${node.name}] $line")
+      )
+    }

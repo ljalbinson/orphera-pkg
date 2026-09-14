@@ -147,6 +147,13 @@ object Main extends IOApp:
             IO.println(s"Error: $err") >> IO.pure(ExitCode.Error)
           case Right(pb) => PlaybookRunner.run(pb) >> IO.pure(ExitCode.Success)
 
+      case Right(
+            Command.Reboot(nodeNames, delaySeconds, wait, waitTimeoutSeconds)
+          ) =>
+        withTargets(nodeNames) { targets =>
+          Orchestrator.reboot(targets, delaySeconds, wait, waitTimeoutSeconds)
+        }
+
   private def withTargets(nodeNames: Option[List[String]])(
       action: List[Node] => IO[Unit]
   ): IO[ExitCode] =

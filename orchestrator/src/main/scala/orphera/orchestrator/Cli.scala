@@ -45,6 +45,12 @@ enum Command:
   case Fetch(remotePath: String, localDir: String, nodes: Option[List[String]])
   case Facts(nodes: Option[List[String]])
   case RunPlaybook(path: String)
+  case Reboot(
+      nodes: Option[List[String]],
+      delaySeconds: Int,
+      waitForReturn: Boolean,
+      waitTimeoutSeconds: Int
+  )
   case Version(nodes: Option[List[String]])
   case Help
 
@@ -76,6 +82,8 @@ object Cli:
       case "facts" :: rest           => parseFacts(rest, None)
       case "playbook" :: path :: Nil => Right(Command.RunPlaybook(path))
       case "version" :: rest         => parseVersion(rest, None)
+      case "reboot" :: rest          =>
+        parseReboot(rest, None, 5, waitForReturn = false, 300)
       case "help" :: _ | "--help" :: _ | Nil => Right(Command.Help)
       case other => Left(s"Unknown command: ${other.headOption.getOrElse("")}")
 
@@ -310,6 +318,47 @@ object Cli:
       case other :: _ =>
         Left(s"Unknown argument to facts: $other")
 
+  private def parseReboot(
+      args: List[String],
+      nodes: Option[List[String]],
+      delaySeconds: Int,
+      waitForReturn: Boolean,
+      waitTimeoutSeconds: Int
+  ): Either[String, Command] =
+    args match
+      case Nil =>
+        Right(
+          Command.Reboot(nodes, delaySeconds, waitForReturn, waitTimeoutSeconds)
+        )
+      case "--nodes" :: value :: rest =>
+        parseReboot(
+          rest,
+          Some(value.split(",").toList.map(_.trim)),
+          delaySeconds,
+          waitForReturn,
+          waitTimeoutSeconds
+        )
+      case "--delay" :: value :: rest =>
+        scala.util.Try(value.toInt).toOption match
+          case Some(parsed) =>
+            parseReboot(rest, nodes, parsed, waitForReturn, waitTimeoutSeconds)
+          case None => Left(s"Invalid delay: $value")
+      case "--wait" :: rest =>
+        parseReboot(
+          rest,
+          nodes,
+          delaySeconds,
+          waitForReturn = true,
+          waitTimeoutSeconds
+        )
+      case "--wait-timeout" :: value :: rest =>
+        scala.util.Try(value.toInt).toOption match
+          case Some(parsed) =>
+            parseReboot(rest, nodes, delaySeconds, waitForReturn, parsed)
+          case None => Left(s"Invalid wait-timeout: $value")
+      case other :: _ =>
+        Left(s"Unknown argument to reboot: $other")
+
   private def parseVersion(
       args: List[String],
       nodes: Option[List[String]]
@@ -335,6 +384,7 @@ object Cli:
       |  teardown       --nodes host1,host2 --yes [--purge] [--ssh-user root] [--ssh-key ~/.ssh/id_ed25519]
       |  fetch          <remote-path> [--out ./local-dir] [--nodes host1,host2]
       |  facts          [--nodes host1,host2]
+      |  reboot         [--nodes host1,host2] [--delay 5] [--wait] [--wait-timeout 300]
       |  version        [--nodes host1,host2]
       |  playbook       <file.yaml>
       |
