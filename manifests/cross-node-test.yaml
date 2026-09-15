@@ -1,0 +1,10 @@
+name: cross-node-test
+nodes: [tst0, tst1]
+tasks:
+  - name: push cluster motd
+    copy:
+      src: files/motd.mustache
+      dest: /etc/motd
+      owner: root
+      group: root
+      mode: "0644"

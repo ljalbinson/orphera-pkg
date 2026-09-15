@@ -5,6 +5,7 @@ package orphera.orchestrator
 import cats.effect.*
 import cats.syntax.all.*
 import orphera.common.Facts
+import scala.jdk.CollectionConverters.*
 
 object PlaybookRunner:
 
@@ -13,40 +14,54 @@ object PlaybookRunner:
 
     if targets.isEmpty then
       IO.println(s"[${playbook.name}] No matching nodes found in inventory.")
-    else targets.parTraverse_(runOnNode(playbook, _))
+    else
+      for
+        context <- gatherClusterFacts(targets)
+        _ <- targets.parTraverse_(runOnNode(playbook, _, context))
+      yield ()
 
-  private def runOnNode(playbook: Playbook, node: Node): IO[Unit] =
-    for
-      factsResult <- NodeClient.gatherFacts(node).attempt
-      factsOpt = factsResult.toOption
-      _ <- runTasks(playbook.tasks, node, factsOpt)
-    yield ()
+  /** Gathers facts for every target node up front, once, before any
+    * task runs on any node. A node whose facts couldn't be gathered
+    * (agent unreachable, etc.) is simply absent from the resulting
+    * map — see runOnNode/resolveSourcePath for how that's handled
+    * downstream, both for that node's own `when:` checks and for any
+    * *other* node's template referencing it via `nodes.<name>.*`.
+    */
+  private def gatherClusterFacts(nodes: List[Node]): IO[ClusterContext] =
+    nodes
+      .parTraverse { node =>
+        NodeClient.gatherFacts(node).attempt.map(result => node.name -> result.toOption)
+      }
+      .map(pairs => ClusterContext(pairs.collect { case (name, Some(f)) => name -> f }.toMap))
+
+  private def runOnNode(playbook: Playbook, node: Node, context: ClusterContext): IO[Unit] =
+    val factsOpt = context.factsByNode.get(node.name)
+    runTasks(playbook.tasks, node, factsOpt, context)
 
   private def runTasks(
       tasks: List[NamedTask],
       node: Node,
-      facts: Option[Facts]
+      facts: Option[Facts],
+      context: ClusterContext
   ): IO[Unit] =
     tasks match
       case Nil => IO.unit
 
       case namedTask :: rest =>
         val shouldRun = namedTask.when match
-          case None       => true
+          case None => true
           case Some(cond) =>
             facts match
               case Some(f) => cond.matches(f)
               case None    => false
 
         if !shouldRun then
-          IO.println(
-            s"[${node.name}] ${namedTask.name}: skipped (condition not met)"
-          ) >>
-            runTasks(rest, node, facts)
+          IO.println(s"[${node.name}] ${namedTask.name}: skipped (condition not met)") >>
+            runTasks(rest, node, facts, context)
         else
-          runSingleTask(namedTask, node, facts).attempt.flatMap {
+          runSingleTask(namedTask, node, facts, context).attempt.flatMap {
             case Right(()) =>
-              runTasks(rest, node, facts)
+              runTasks(rest, node, facts, context)
             case Left(err) =>
               IO.println(
                 s"[${node.name}] ${namedTask.name}: FAILED — ${err.getMessage}. Stopping remaining tasks for this node."
@@ -56,7 +71,8 @@ object PlaybookRunner:
   private def runSingleTask(
       namedTask: NamedTask,
       node: Node,
-      facts: Option[Facts]
+      facts: Option[Facts],
+      context: ClusterContext
   ): IO[Unit] =
     val render: orphera.common.Event => IO[Unit] = event =>
       IO.println(s"[${node.name}] ${namedTask.name}: ${eventLine(event)}")
@@ -73,16 +89,8 @@ object PlaybookRunner:
         NodeClient.autoRemove(node, purge, render)
 
       case Task.Copy(src, dest, owner, group, mode, vars) =>
-        resolveSourcePath(src, vars, facts).flatMap { resolvedSrc =>
-          NodeClient.copyFile(
-            node,
-            resolvedSrc,
-            dest,
-            owner,
-            group,
-            mode,
-            render
-          )
+        resolveSourcePath(src, vars, facts, context).flatMap { resolvedSrc =>
+          NodeClient.copyFile(node, resolvedSrc, dest, owner, group, mode, render)
         }
 
       case Task.NetworkApply(timeoutSeconds) =>
@@ -100,15 +108,15 @@ object PlaybookRunner:
   private def resolveSourcePath(
       src: String,
       vars: Map[String, String],
-      facts: Option[Facts]
+      facts: Option[Facts],
+      context: ClusterContext
   ): IO[java.nio.file.Path] =
     if !src.endsWith(".mustache") then IO.pure(java.nio.file.Paths.get(src))
     else
       IO.blocking {
-        val templateContent =
-          java.nio.file.Files.readString(java.nio.file.Paths.get(src))
+        val templateContent = java.nio.file.Files.readString(java.nio.file.Paths.get(src))
 
-        val factVars = facts match
+        val ownFactVars: Map[String, Any] = facts match
           case Some(f) =>
             Map(
               "facts.hostname" -> f.hostname,
@@ -118,12 +126,47 @@ object PlaybookRunner:
             )
           case None => Map.empty
 
-        val rendered = Templating.render(templateContent, factVars ++ vars)
+        val nestedNodeVars: Map[String, Any] = buildNestedNodeFacts(context)
+
+        val rendered = Templating.render(templateContent, ownFactVars ++ nestedNodeVars ++ vars)
 
         val tmp = java.nio.file.Files.createTempFile("orphera-render", ".tmp")
         java.nio.file.Files.writeString(tmp, rendered)
         tmp
       }
+
+  /** Exposes every other targeted node's facts to a template as
+    * genuinely nested maps — `nodes.<node-name>.<field>` — so
+    * Mustache's dotted-name traversal (e.g. {{nodes.mon1.hostname}}
+    * or {{#nodes.mon1.hostname}}...{{/nodes.mon1.hostname}}) actually
+    * walks nodes -> <name> -> <field> as real nested structure.
+    *
+    * A flat Map[String, String] with a literal key like
+    * "nodes.mon1.hostname" does NOT work here — Mustache always
+    * interprets a dotted name as a path to traverse, never as a
+    * single flat key, so a flat approach silently renders every
+    * such section as empty/missing rather than failing loudly.
+    *
+    * A node that's part of the playbook but whose facts couldn't be
+    * gathered is simply absent from the nested map; a template
+    * section referencing it is skipped entirely (falsy), rather than
+    * rendering with empty values — Mustache's normal behavior for a
+    * missing key.
+    */
+  private def buildNestedNodeFacts(context: ClusterContext): Map[String, Any] =
+    val nodesMap: java.util.Map[String, Any] =
+      context.factsByNode.map { case (nodeName, f) =>
+        val inner: java.util.Map[String, Any] =
+          Map[String, Any](
+            "hostname" -> f.hostname,
+            "os_id" -> f.osId,
+            "os_version" -> f.osVersion,
+            "architecture" -> f.architecture
+          ).asJava
+        nodeName -> (inner: Any)
+      }.asJava
+
+    Map("nodes" -> nodesMap)
 
   private def eventLine(event: orphera.common.Event): String =
     event.kind match
