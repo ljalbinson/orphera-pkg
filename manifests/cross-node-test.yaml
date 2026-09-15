@@ -1,5 +1,5 @@
 name: cross-node-test
-nodes: [tst0, tst1]
+nodes: [tst0, tst1, tst2, tst3, tst4, tst5]
 tasks:
   - name: push cluster motd
     copy:
