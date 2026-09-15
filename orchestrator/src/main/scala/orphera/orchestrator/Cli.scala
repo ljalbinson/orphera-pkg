@@ -53,6 +53,7 @@ enum Command:
   )
   case Version(nodes: Option[List[String]])
   case Uptime(nodes: Option[List[String]])
+  case RunClusterPlaybook(path: String)
   case Help
 
 object Cli:
@@ -86,6 +87,8 @@ object Cli:
       case "uptime" :: rest          => parseUptime(rest, None)
       case "reboot" :: rest          =>
         parseReboot(rest, None, 5, waitForReturn = false, 300)
+      case "cluster-playbook" :: path :: Nil =>
+        Right(Command.RunClusterPlaybook(path))
       case "help" :: _ | "--help" :: _ | Nil => Right(Command.Help)
       case other => Left(s"Unknown command: ${other.headOption.getOrElse("")}")
 
@@ -395,6 +398,7 @@ object Cli:
       |  deploy-agent   <local.deb> [--remote-path /tmp/orphera-agent.deb] [--nodes host1,host2]
       |  bootstrap      <local.deb> --nodes host1,host2 [--ssh-user root] [--ssh-key ~/.ssh/id_ed25519] [--remote-path /tmp/x.deb]
       |  teardown       --nodes host1,host2 --yes [--purge] [--ssh-user root] [--ssh-key ~/.ssh/id_ed25519]
+      |  cluster-playbook <file.yaml>
       |  fetch          <remote-path> [--out ./local-dir] [--nodes host1,host2]
       |  facts          [--nodes host1,host2]
       |  reboot         [--nodes host1,host2] [--delay 5] [--wait] [--wait-timeout 300]

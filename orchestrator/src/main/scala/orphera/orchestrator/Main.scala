@@ -169,6 +169,13 @@ object Main extends IOApp:
           }
         }
 
+      case Right(Command.RunClusterPlaybook(path)) =>
+        ClusterPlaybookYaml.load(path) match
+          case Left(err) =>
+            IO.println(s"Error: $err") >> IO.pure(ExitCode.Error)
+          case Right(pb) =>
+            ClusterPlaybookRunner.run(pb) >> IO.pure(ExitCode.Success)
+
   private def formatUptime(seconds: Long): String =
     val days = seconds / 86400
     val hours = (seconds % 86400) / 3600

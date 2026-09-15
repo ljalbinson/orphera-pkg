@@ -14,7 +14,7 @@ all: clean test assembly deb
 release: bump-patch
 	$(MAKE) _build_all
 
-_build_all: clean test assembly deb
+_build_all: clean test assembly deb orpheracli
 	@echo "Released $$(cat $(VERSION_FILE))"
 
 bump-patch:

@@ -352,3 +352,23 @@ object NodeClient:
       .use { stub =>
         stub.getUptime(UptimeRequest(), authMetadata())
       }
+
+  /** Simple boolean health-probe wrapper around CheckFile: true if the remote
+    * file's content hash matches expectedSha256 exactly.
+    */
+  def checkFile(
+      node: Node,
+      remotePath: String,
+      expectedSha256: String
+  ): IO[Boolean] =
+    channelBuilder(node)
+      .resource[IO]
+      .flatMap(AgentFs2Grpc.stubResource[IO])
+      .use { stub =>
+        stub
+          .checkFile(
+            FileCheck(remotePath, expectedSha256, "", "", 0),
+            authMetadata()
+          )
+          .map(result => !result.needsCopy)
+      }
