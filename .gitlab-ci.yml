@@ -1,0 +1,25 @@
+image: eclipse-temurin:21-jdk
+
+stages:
+  - build
+
+variables:
+  SBT_VERSION: "1.10.7"
+
+cache:
+  key: "$CI_COMMIT_REF_SLUG"
+  paths:
+    - .ivy2/
+    - .sbt/
+    - .cache/
+
+before_script:
+  - apt-get update -qq && apt-get install -y -qq curl gnupg
+  - curl -fL "https://github.com/sbt/sbt/releases/download/v${SBT_VERSION}/sbt-${SBT_VERSION}.tgz" | tar xz -C /usr/local
+  - export PATH="/usr/local/sbt/bin:$PATH"
+  - export SBT_OPTS="-Dsbt.ivy.home=$CI_PROJECT_DIR/.ivy2 -Dsbt.global.base=$CI_PROJECT_DIR/.sbt"
+
+compile_and_test:
+  stage: build
+  script:
+    - sbt clean compile test

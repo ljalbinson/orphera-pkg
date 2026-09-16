@@ -1,0 +1,14 @@
+name: web-baseline
+
+nodes:
+  - tst0
+
+tasks:
+  - name: install curl
+    install:
+      packages: [curl]
+      update_cache: true
+
+  - name: clean up unused packages
+    autoremove:
+      purge: true
