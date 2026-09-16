@@ -1,0 +1,30 @@
+name: cross-node-setfact-test
+
+stages:
+  - name: primary
+    nodes: [tst0]
+    tasks:
+      - name: compute a value
+        set_fact:
+          key: cluster_role
+          value: "primary-{{facts.hostname}}"
+
+      - name: write readiness sentinel
+        copy:
+          src: files/ready-sentinel.txt
+          dest: /tmp/orphera-ready
+          owner: root
+          group: root
+          mode: "0644"
+
+  - name: secondaries
+    nodes: [tst1]
+    wait_for:
+      on_node: tst0
+      sentinel_path: /tmp/orphera-ready
+      expected_sha256: "ed1a545bb85e55816bbf9566b028b2a0bc456b88f49f6f266c0401048824194b"
+      timeout: 60
+    tasks:
+      - name: show what tst0 computed
+        debug:
+          message: "tst0's role = {{nodes.tst0.cluster_role}}, tst0's real os_id = {{nodes.tst0.os_id}}"

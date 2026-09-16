@@ -138,47 +138,70 @@ object ClusterPlaybookRunner:
           IO.println(s"[${node.name}] ${namedTask.name}: $line")
         )
       case Task.SetFact(key, value) =>
-        setFacts.set(node.name, key, value) >>
-          IO.println(s"[${node.name}] ${namedTask.name}: set $key = $value")
+        buildDebugVars(facts, context, node, setFacts).flatMap { vars =>
+          val rendered = if value.contains("{{") then Templating.render(value, vars) else value
+          setFacts.set(node.name, key, rendered) >>
+            IO.println(s"[${node.name}] ${namedTask.name}: set $key = $rendered")
+        }
       case Task.Debug(message) =>
-        setFacts.get(node.name).flatMap { ownSetFacts =>
-          val vars = buildDebugVars(facts, context, ownSetFacts)
+        buildDebugVars(facts, context, node, setFacts).flatMap { vars =>
           val rendered = if message.contains("{{") then Templating.render(message, vars) else message
           IO.println(s"[${node.name}] ${namedTask.name}: $rendered")
         }
 
+  /** See PlaybookRunner.buildDebugVars — identical logic, duplicated
+    * here rather than shared, matching this file's existing
+    * pre-tonight duplication of the flat runner's task-execution
+    * logic (flagged, not yet consolidated).
+    */
   private def buildDebugVars(
       facts: Option[orphera.common.Facts],
       context: ClusterContext,
-      ownSetFacts: Map[String, String]
+      node: Node,
+      setFacts: SetFacts
+  ): IO[Map[String, Any]] =
+    setFacts.snapshot.map { allSetFacts =>
+      val ownFactVars: Map[String, Any] = facts match
+        case Some(f) =>
+          Map(
+            "facts.hostname" -> f.hostname,
+            "facts.os_id" -> f.osId,
+            "facts.os_version" -> f.osVersion,
+            "facts.architecture" -> f.architecture
+          )
+        case None => Map.empty
+
+      val nestedNodeVars = buildNestedNodeFacts(context, allSetFacts)
+      val ownSetFactVars: Map[String, Any] =
+        allSetFacts.getOrElse(node.name, Map.empty).map { case (k, v) => k -> v }
+
+      ownFactVars ++ nestedNodeVars ++ ownSetFactVars
+    }
+
+  private def buildNestedNodeFacts(
+      context: ClusterContext,
+      allSetFacts: Map[String, Map[String, String]]
   ): Map[String, Any] =
-    val ownFactVars: Map[String, Any] = facts match
-      case Some(f) =>
-        Map(
-          "facts.hostname" -> f.hostname,
-          "facts.os_id" -> f.osId,
-          "facts.os_version" -> f.osVersion,
-          "facts.architecture" -> f.architecture
-        )
-      case None => Map.empty
+    val allNodeNames = context.factsByNode.keySet ++ allSetFacts.keySet
 
-    val nestedNodeVars = buildNestedNodeFacts(context)
-    val setFactVars: Map[String, Any] = ownSetFacts.map { case (k, v) => k -> v }
-
-    ownFactVars ++ nestedNodeVars ++ setFactVars
-
-  private def buildNestedNodeFacts(context: ClusterContext): Map[String, Any] =
     val nodesMap: java.util.Map[String, Any] =
-      context.factsByNode.map { case (nodeName, f) =>
-        val inner: java.util.Map[String, Any] =
-          Map[String, Any](
-            "hostname" -> f.hostname,
-            "os_id" -> f.osId,
-            "os_version" -> f.osVersion,
-            "architecture" -> f.architecture
-          ).asJava
+      allNodeNames.map { nodeName =>
+        val factFields: Map[String, Any] = context.factsByNode.get(nodeName) match
+          case Some(f) =>
+            Map(
+              "hostname" -> f.hostname,
+              "os_id" -> f.osId,
+              "os_version" -> f.osVersion,
+              "architecture" -> f.architecture
+            )
+          case None => Map.empty
+
+        val setFactFields: Map[String, Any] =
+          allSetFacts.getOrElse(nodeName, Map.empty).map { case (k, v) => k -> v }
+
+        val inner: java.util.Map[String, Any] = (factFields ++ setFactFields).asJava
         nodeName -> (inner: Any)
-      }.asJava
+      }.toMap.asJava
 
     Map("nodes" -> nodesMap)
 

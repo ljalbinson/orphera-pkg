@@ -1,0 +1,13 @@
+name: facts0
+nodes:
+  - tst0
+tasks:
+  - name: set base
+    set_fact:
+      key: base
+      value: web
+
+  - name: set derived
+    set_fact:
+      key: full_name
+      value: "{{base}}-{{facts.hostname}}"

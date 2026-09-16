@@ -87,8 +87,8 @@ object PlaybookRunner:
         NodeClient.autoRemove(node, purge, render)
 
       case Task.Copy(src, dest, owner, group, mode, vars) =>
-        setFacts.get(node.name).flatMap { ownSetFacts =>
-          resolveSourcePath(src, vars, facts, context, ownSetFacts).flatMap { resolvedSrc =>
+        buildDebugVars(facts, context, node, setFacts).flatMap { templateVars =>
+          resolveSourcePath(src, vars, templateVars).flatMap { resolvedSrc =>
             NodeClient.copyFile(node, resolvedSrc, dest, owner, group, mode, render)
           }
         }
@@ -106,12 +106,14 @@ object PlaybookRunner:
         )
 
       case Task.SetFact(key, value) =>
-        setFacts.set(node.name, key, value) >>
-          IO.println(s"[${node.name}] ${namedTask.name}: set $key = $value")
+        buildDebugVars(facts, context, node, setFacts).flatMap { vars =>
+          val rendered = if value.contains("{{") then Templating.render(value, vars) else value
+          setFacts.set(node.name, key, rendered) >>
+            IO.println(s"[${node.name}] ${namedTask.name}: set $key = $rendered")
+        }
 
       case Task.Debug(message) =>
-        setFacts.get(node.name).flatMap { ownSetFacts =>
-          val vars = buildDebugVars(facts, context, ownSetFacts)
+        buildDebugVars(facts, context, node, setFacts).flatMap { vars =>
           val rendered = if message.contains("{{") then Templating.render(message, vars) else message
           IO.println(s"[${node.name}] ${namedTask.name}: $rendered")
         }
@@ -119,69 +121,80 @@ object PlaybookRunner:
   private def resolveSourcePath(
       src: String,
       vars: Map[String, String],
-      facts: Option[Facts],
-      context: ClusterContext,
-      ownSetFacts: Map[String, String]
+      templateVars: Map[String, Any]
   ): IO[java.nio.file.Path] =
     if !src.endsWith(".mustache") then IO.pure(java.nio.file.Paths.get(src))
     else
       IO.blocking {
         val templateContent = java.nio.file.Files.readString(java.nio.file.Paths.get(src))
-
-        val ownFactVars: Map[String, Any] = facts match
-          case Some(f) =>
-            Map(
-              "facts.hostname" -> f.hostname,
-              "facts.os_id" -> f.osId,
-              "facts.os_version" -> f.osVersion,
-              "facts.architecture" -> f.architecture
-            )
-          case None => Map.empty
-
-        val nestedNodeVars: Map[String, Any] = buildNestedNodeFacts(context)
-        val setFactVars: Map[String, Any] = ownSetFacts.map { case (k, v) => k -> v }
-
-        val rendered = Templating.render(templateContent, ownFactVars ++ nestedNodeVars ++ setFactVars ++ vars)
-
+        val rendered = Templating.render(templateContent, templateVars ++ vars)
         val tmp = java.nio.file.Files.createTempFile("orphera-render", ".tmp")
         java.nio.file.Files.writeString(tmp, rendered)
         tmp
       }
 
-  private def buildNestedNodeFacts(context: ClusterContext): Map[String, Any] =
-    val nodesMap: java.util.Map[String, Any] =
-      context.factsByNode.map { case (nodeName, f) =>
-        val inner: java.util.Map[String, Any] =
-          Map[String, Any](
-            "hostname" -> f.hostname,
-            "os_id" -> f.osId,
-            "os_version" -> f.osVersion,
-            "architecture" -> f.architecture
-          ).asJava
-        nodeName -> (inner: Any)
-      }.asJava
-
-    Map("nodes" -> nodesMap)
-
+  /** Builds the full var context available to templates, debug
+    * messages, and set_fact values: this node's own gathered facts
+    * (facts.*), every targeted node's gathered facts AND set-facts,
+    * nested under nodes.<name>.*, so `{{nodes.other-node.some_key}}`
+    * resolves whether some_key came from GatherFacts or from a
+    * set_fact task run on that other node.
+    */
   private def buildDebugVars(
       facts: Option[Facts],
       context: ClusterContext,
-      ownSetFacts: Map[String, String]
+      node: Node,
+      setFacts: SetFacts
+  ): IO[Map[String, Any]] =
+    setFacts.snapshot.map { allSetFacts =>
+      val ownFactVars: Map[String, Any] = facts match
+        case Some(f) =>
+          Map(
+            "facts.hostname" -> f.hostname,
+            "facts.os_id" -> f.osId,
+            "facts.os_version" -> f.osVersion,
+            "facts.architecture" -> f.architecture
+          )
+        case None => Map.empty
+
+      val nestedNodeVars = buildNestedNodeFacts(context, allSetFacts)
+      val ownSetFactVars: Map[String, Any] =
+        allSetFacts.getOrElse(node.name, Map.empty).map { case (k, v) => k -> v }
+
+      ownFactVars ++ nestedNodeVars ++ ownSetFactVars
+    }
+
+  /** nodes.<name>.* for every node that has either gathered facts or
+    * set-facts (or both) — the two are merged per node, with
+    * set-facts taking precedence over a same-named gathered field in
+    * the unlikely case of a collision.
+    */
+  private def buildNestedNodeFacts(
+      context: ClusterContext,
+      allSetFacts: Map[String, Map[String, String]]
   ): Map[String, Any] =
-    val ownFactVars: Map[String, Any] = facts match
-      case Some(f) =>
-        Map(
-          "facts.hostname" -> f.hostname,
-          "facts.os_id" -> f.osId,
-          "facts.os_version" -> f.osVersion,
-          "facts.architecture" -> f.architecture
-        )
-      case None => Map.empty
+    val allNodeNames = context.factsByNode.keySet ++ allSetFacts.keySet
 
-    val nestedNodeVars = buildNestedNodeFacts(context)
-    val setFactVars: Map[String, Any] = ownSetFacts.map { case (k, v) => k -> v }
+    val nodesMap: java.util.Map[String, Any] =
+      allNodeNames.map { nodeName =>
+        val factFields: Map[String, Any] = context.factsByNode.get(nodeName) match
+          case Some(f) =>
+            Map(
+              "hostname" -> f.hostname,
+              "os_id" -> f.osId,
+              "os_version" -> f.osVersion,
+              "architecture" -> f.architecture
+            )
+          case None => Map.empty
 
-    ownFactVars ++ nestedNodeVars ++ setFactVars
+        val setFactFields: Map[String, Any] =
+          allSetFacts.getOrElse(nodeName, Map.empty).map { case (k, v) => k -> v }
+
+        val inner: java.util.Map[String, Any] = (factFields ++ setFactFields).asJava
+        nodeName -> (inner: Any)
+      }.toMap.asJava
+
+    Map("nodes" -> nodesMap)
 
   private def eventLine(event: orphera.common.Event): String =
     event.kind match
