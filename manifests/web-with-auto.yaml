@@ -2,6 +2,9 @@ name: web-baseline
 
 nodes:
   - tst0
+  - tst1
+  - tst4
+  - tst5
 
 tasks:
   - name: install curl

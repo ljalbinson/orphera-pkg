@@ -17,68 +17,60 @@ object PlaybookRunner:
     else
       for
         context <- gatherClusterFacts(targets)
-        _ <- targets.parTraverse_(runOnNode(playbook, _, context))
+        setFacts <- SetFacts.empty
+        _ <- targets.parTraverse_(runOnNode(playbook, _, context, setFacts))
       yield ()
 
   private def gatherClusterFacts(nodes: List[Node]): IO[ClusterContext] =
     nodes
       .parTraverse { node =>
-        NodeClient
-          .gatherFacts(node)
-          .attempt
-          .map(result => node.name -> result.toOption)
+        NodeClient.gatherFacts(node).attempt.map(result => node.name -> result.toOption)
       }
-      .map(pairs =>
-        ClusterContext(pairs.collect { case (name, Some(f)) =>
-          name -> f
-        }.toMap)
-      )
+      .map(pairs => ClusterContext(pairs.collect { case (name, Some(f)) => name -> f }.toMap))
 
-  private def runOnNode(
-      playbook: Playbook,
-      node: Node,
-      context: ClusterContext
-  ): IO[Unit] =
+  private def runOnNode(playbook: Playbook, node: Node, context: ClusterContext, setFacts: SetFacts): IO[Unit] =
     val factsOpt = context.factsByNode.get(node.name)
-    runTasks(playbook.tasks, node, factsOpt, context)
+    runTasks(playbook.tasks, node, factsOpt, context, setFacts)
 
   private def runTasks(
       tasks: List[NamedTask],
       node: Node,
       facts: Option[Facts],
-      context: ClusterContext
+      context: ClusterContext,
+      setFacts: SetFacts
   ): IO[Unit] =
     tasks match
       case Nil => IO.unit
 
       case namedTask :: rest =>
-        val shouldRun = namedTask.when match
-          case None       => true
-          case Some(cond) =>
-            facts match
-              case Some(f) => cond.matches(f)
-              case None    => false
+        setFacts.get(node.name).flatMap { ownSetFacts =>
+          val shouldRun = namedTask.when match
+            case None => true
+            case Some(cond) =>
+              facts match
+                case Some(f) => cond.matches(f, ownSetFacts)
+                case None    => false
 
-        if !shouldRun then
-          IO.println(
-            s"[${node.name}] ${namedTask.name}: skipped (condition not met)"
-          ) >>
-            runTasks(rest, node, facts, context)
-        else
-          runSingleTask(namedTask, node, facts, context).attempt.flatMap {
-            case Right(()) =>
-              runTasks(rest, node, facts, context)
-            case Left(err) =>
-              IO.println(
-                s"[${node.name}] ${namedTask.name}: FAILED — ${err.getMessage}. Stopping remaining tasks for this node."
-              )
-          }
+          if !shouldRun then
+            IO.println(s"[${node.name}] ${namedTask.name}: skipped (condition not met)") >>
+              runTasks(rest, node, facts, context, setFacts)
+          else
+            runSingleTask(namedTask, node, facts, context, setFacts).attempt.flatMap {
+              case Right(()) =>
+                runTasks(rest, node, facts, context, setFacts)
+              case Left(err) =>
+                IO.println(
+                  s"[${node.name}] ${namedTask.name}: FAILED — ${err.getMessage}. Stopping remaining tasks for this node."
+                )
+            }
+        }
 
   private def runSingleTask(
       namedTask: NamedTask,
       node: Node,
       facts: Option[Facts],
-      context: ClusterContext
+      context: ClusterContext,
+      setFacts: SetFacts
   ): IO[Unit] =
     val render: orphera.common.Event => IO[Unit] = event =>
       IO.println(s"[${node.name}] ${namedTask.name}: ${eventLine(event)}")
@@ -95,16 +87,10 @@ object PlaybookRunner:
         NodeClient.autoRemove(node, purge, render)
 
       case Task.Copy(src, dest, owner, group, mode, vars) =>
-        resolveSourcePath(src, vars, facts, context).flatMap { resolvedSrc =>
-          NodeClient.copyFile(
-            node,
-            resolvedSrc,
-            dest,
-            owner,
-            group,
-            mode,
-            render
-          )
+        setFacts.get(node.name).flatMap { ownSetFacts =>
+          resolveSourcePath(src, vars, facts, context, ownSetFacts).flatMap { resolvedSrc =>
+            NodeClient.copyFile(node, resolvedSrc, dest, owner, group, mode, render)
+          }
         }
 
       case Task.NetworkApply(timeoutSeconds) =>
@@ -119,17 +105,28 @@ object PlaybookRunner:
           line => IO.println(s"[${node.name}] ${namedTask.name}: $line")
         )
 
+      case Task.SetFact(key, value) =>
+        setFacts.set(node.name, key, value) >>
+          IO.println(s"[${node.name}] ${namedTask.name}: set $key = $value")
+
+      case Task.Debug(message) =>
+        setFacts.get(node.name).flatMap { ownSetFacts =>
+          val vars = buildDebugVars(facts, context, ownSetFacts)
+          val rendered = if message.contains("{{") then Templating.render(message, vars) else message
+          IO.println(s"[${node.name}] ${namedTask.name}: $rendered")
+        }
+
   private def resolveSourcePath(
       src: String,
       vars: Map[String, String],
       facts: Option[Facts],
-      context: ClusterContext
+      context: ClusterContext,
+      ownSetFacts: Map[String, String]
   ): IO[java.nio.file.Path] =
     if !src.endsWith(".mustache") then IO.pure(java.nio.file.Paths.get(src))
     else
       IO.blocking {
-        val templateContent =
-          java.nio.file.Files.readString(java.nio.file.Paths.get(src))
+        val templateContent = java.nio.file.Files.readString(java.nio.file.Paths.get(src))
 
         val ownFactVars: Map[String, Any] = facts match
           case Some(f) =>
@@ -142,11 +139,9 @@ object PlaybookRunner:
           case None => Map.empty
 
         val nestedNodeVars: Map[String, Any] = buildNestedNodeFacts(context)
+        val setFactVars: Map[String, Any] = ownSetFacts.map { case (k, v) => k -> v }
 
-        val rendered = Templating.render(
-          templateContent,
-          ownFactVars ++ nestedNodeVars ++ vars
-        )
+        val rendered = Templating.render(templateContent, ownFactVars ++ nestedNodeVars ++ setFactVars ++ vars)
 
         val tmp = java.nio.file.Files.createTempFile("orphera-render", ".tmp")
         java.nio.file.Files.writeString(tmp, rendered)
@@ -167,6 +162,26 @@ object PlaybookRunner:
       }.asJava
 
     Map("nodes" -> nodesMap)
+
+  private def buildDebugVars(
+      facts: Option[Facts],
+      context: ClusterContext,
+      ownSetFacts: Map[String, String]
+  ): Map[String, Any] =
+    val ownFactVars: Map[String, Any] = facts match
+      case Some(f) =>
+        Map(
+          "facts.hostname" -> f.hostname,
+          "facts.os_id" -> f.osId,
+          "facts.os_version" -> f.osVersion,
+          "facts.architecture" -> f.architecture
+        )
+      case None => Map.empty
+
+    val nestedNodeVars = buildNestedNodeFacts(context)
+    val setFactVars: Map[String, Any] = ownSetFacts.map { case (k, v) => k -> v }
+
+    ownFactVars ++ nestedNodeVars ++ setFactVars
 
   private def eventLine(event: orphera.common.Event): String =
     event.kind match

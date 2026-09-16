@@ -46,6 +46,15 @@ object TaskYaml:
           waitTimeout <- body.getOrElse[Int]("wait_timeout")(300)
         yield Task.Reboot(delay, wait, waitTimeout)
 
+      case "set_fact" =>
+        for
+          key <- body.get[String]("key")
+          value <- body.get[String]("value")
+        yield Task.SetFact(key, value)
+
+      case "debug" =>
+        body.get[String]("message").map(Task.Debug.apply)
+
       case other =>
         Left(DecodingFailure(s"Unknown task type: $other", body.history))
 

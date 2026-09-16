@@ -20,6 +20,8 @@ enum Task:
       waitForReturn: Boolean = false,
       waitTimeoutSeconds: Int = 300
   )
+  case SetFact(key: String, value: String)
+  case Debug(message: String)
 
 case class FactCondition(
     key: String,
@@ -30,6 +32,14 @@ case class FactCondition(
     val actual = factValue(facts)
     val eq = actual.contains(expected)
     if negate then !eq else eq
+
+  def matches(facts: orphera.common.Facts, setFacts: Map[String, String]): Boolean =
+    setFacts.get(key) match
+      case Some(v) =>
+        val eq = v == expected
+        if negate then !eq else eq
+      case None =>
+        matches(facts)
 
   private def factValue(facts: orphera.common.Facts): Option[String] =
     key match

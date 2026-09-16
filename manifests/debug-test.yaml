@@ -1,0 +1,10 @@
+name: debug-test
+nodes: [tst0]
+tasks:
+  - name: set env
+    set_fact:
+      key: env_label
+      value: production
+  - name: show it
+    debug:
+      message: "env_label = {{env_label}}, hostname = {{facts.hostname}}"
