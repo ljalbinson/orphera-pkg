@@ -33,7 +33,10 @@ case class FactCondition(
     val eq = actual.contains(expected)
     if negate then !eq else eq
 
-  def matches(facts: orphera.common.Facts, setFacts: Map[String, String]): Boolean =
+  def matches(
+      facts: orphera.common.Facts,
+      setFacts: Map[String, String]
+  ): Boolean =
     setFacts.get(key) match
       case Some(v) =>
         val eq = v == expected

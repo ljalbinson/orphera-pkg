@@ -6,7 +6,10 @@ import io.circe.*
 
 object TaskYaml:
 
-  def decodeTask(taskKey: String, body: ACursor): Either[DecodingFailure, Task] =
+  def decodeTask(
+      taskKey: String,
+      body: ACursor
+  ): Either[DecodingFailure, Task] =
     taskKey match
 
       case "install" =>
@@ -32,8 +35,16 @@ object TaskYaml:
           group <- body.getOrElse[String]("group")("")
           modeStr <- body.getOrElse[String]("mode")("0")
           vars <- body.getOrElse[Map[String, String]]("vars")(Map.empty)
-          mode <- scala.util.Try(Integer.parseInt(modeStr, 8)).toEither.left.map(_ =>
-            DecodingFailure(s"Invalid mode: $modeStr (expected octal, e.g. 0644)", body.history))
+          mode <- scala.util
+            .Try(Integer.parseInt(modeStr, 8))
+            .toEither
+            .left
+            .map(_ =>
+              DecodingFailure(
+                s"Invalid mode: $modeStr (expected octal, e.g. 0644)",
+                body.history
+              )
+            )
         yield Task.Copy(src, dest, owner, group, mode, vars)
 
       case "network_apply" =>
@@ -63,16 +74,32 @@ object TaskYaml:
     val sep = if negate then "!=" else "=="
     str.split(sep, 2).map(_.trim) match
       case Array(key, rawValue) =>
-        Right(FactCondition(key, rawValue.stripPrefix("\"").stripSuffix("\""), negate))
+        Right(
+          FactCondition(
+            key,
+            rawValue.stripPrefix("\"").stripSuffix("\""),
+            negate
+          )
+        )
       case _ =>
-        Left(DecodingFailure(s"Invalid when condition: $str (expected e.g. os_id == \"ubuntu\")", Nil))
+        Left(
+          DecodingFailure(
+            s"Invalid when condition: $str (expected e.g. os_id == \"ubuntu\")",
+            Nil
+          )
+        )
 
   def decodeNamedTask(c: HCursor): Either[DecodingFailure, NamedTask] =
     for
       name <- c.get[String]("name")
 
-      keys = c.keys.map(_.toList).getOrElse(Nil).filterNot(k => k == "name" || k == "when")
-      taskKey <- keys.headOption.toRight(DecodingFailure(s"Task '$name' has no task type key", c.history))
+      keys = c.keys
+        .map(_.toList)
+        .getOrElse(Nil)
+        .filterNot(k => k == "name" || k == "when")
+      taskKey <- keys.headOption.toRight(
+        DecodingFailure(s"Task '$name' has no task type key", c.history)
+      )
 
       task <- decodeTask(taskKey, c.downField(taskKey))
 

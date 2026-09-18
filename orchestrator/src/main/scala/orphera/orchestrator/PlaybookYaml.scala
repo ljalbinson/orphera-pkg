@@ -19,7 +19,11 @@ object PlaybookYaml:
 
   def load(path: String): Either[String, Playbook] =
     for
-      content <- scala.util.Try(Files.readString(Paths.get(path))).toEither.left.map(_.getMessage)
+      content <- scala.util
+        .Try(Files.readString(Paths.get(path)))
+        .toEither
+        .left
+        .map(_.getMessage)
       json <- parser.parse(content).left.map(_.getMessage)
       playbook <- decodePlaybook(json.hcursor).left.map(_.getMessage)
     yield playbook

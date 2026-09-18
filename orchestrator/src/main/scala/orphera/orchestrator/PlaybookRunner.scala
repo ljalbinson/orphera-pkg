@@ -24,11 +24,23 @@ object PlaybookRunner:
   private def gatherClusterFacts(nodes: List[Node]): IO[ClusterContext] =
     nodes
       .parTraverse { node =>
-        NodeClient.gatherFacts(node).attempt.map(result => node.name -> result.toOption)
+        NodeClient
+          .gatherFacts(node)
+          .attempt
+          .map(result => node.name -> result.toOption)
       }
-      .map(pairs => ClusterContext(pairs.collect { case (name, Some(f)) => name -> f }.toMap))
+      .map(pairs =>
+        ClusterContext(pairs.collect { case (name, Some(f)) =>
+          name -> f
+        }.toMap)
+      )
 
-  private def runOnNode(playbook: Playbook, node: Node, context: ClusterContext, setFacts: SetFacts): IO[Unit] =
+  private def runOnNode(
+      playbook: Playbook,
+      node: Node,
+      context: ClusterContext,
+      setFacts: SetFacts
+  ): IO[Unit] =
     val factsOpt = context.factsByNode.get(node.name)
     runTasks(playbook.tasks, node, factsOpt, context, setFacts)
 
@@ -45,24 +57,27 @@ object PlaybookRunner:
       case namedTask :: rest =>
         setFacts.get(node.name).flatMap { ownSetFacts =>
           val shouldRun = namedTask.when match
-            case None => true
+            case None       => true
             case Some(cond) =>
               facts match
                 case Some(f) => cond.matches(f, ownSetFacts)
                 case None    => false
 
           if !shouldRun then
-            IO.println(s"[${node.name}] ${namedTask.name}: skipped (condition not met)") >>
+            IO.println(
+              s"[${node.name}] ${namedTask.name}: skipped (condition not met)"
+            ) >>
               runTasks(rest, node, facts, context, setFacts)
           else
-            runSingleTask(namedTask, node, facts, context, setFacts).attempt.flatMap {
-              case Right(()) =>
-                runTasks(rest, node, facts, context, setFacts)
-              case Left(err) =>
-                IO.println(
-                  s"[${node.name}] ${namedTask.name}: FAILED — ${err.getMessage}. Stopping remaining tasks for this node."
-                )
-            }
+            runSingleTask(namedTask, node, facts, context, setFacts).attempt
+              .flatMap {
+                case Right(()) =>
+                  runTasks(rest, node, facts, context, setFacts)
+                case Left(err) =>
+                  IO.println(
+                    s"[${node.name}] ${namedTask.name}: FAILED — ${err.getMessage}. Stopping remaining tasks for this node."
+                  )
+              }
         }
 
   private def runSingleTask(
@@ -89,7 +104,15 @@ object PlaybookRunner:
       case Task.Copy(src, dest, owner, group, mode, vars) =>
         buildDebugVars(facts, context, node, setFacts).flatMap { templateVars =>
           resolveSourcePath(src, vars, templateVars).flatMap { resolvedSrc =>
-            NodeClient.copyFile(node, resolvedSrc, dest, owner, group, mode, render)
+            NodeClient.copyFile(
+              node,
+              resolvedSrc,
+              dest,
+              owner,
+              group,
+              mode,
+              render
+            )
           }
         }
 
@@ -107,14 +130,20 @@ object PlaybookRunner:
 
       case Task.SetFact(key, value) =>
         buildDebugVars(facts, context, node, setFacts).flatMap { vars =>
-          val rendered = if value.contains("{{") then Templating.render(value, vars) else value
+          val rendered = if value.contains("{{") then
+            Templating.render(value, vars)
+          else value
           setFacts.set(node.name, key, rendered) >>
-            IO.println(s"[${node.name}] ${namedTask.name}: set $key = $rendered")
+            IO.println(
+              s"[${node.name}] ${namedTask.name}: set $key = $rendered"
+            )
         }
 
       case Task.Debug(message) =>
         buildDebugVars(facts, context, node, setFacts).flatMap { vars =>
-          val rendered = if message.contains("{{") then Templating.render(message, vars) else message
+          val rendered = if message.contains("{{") then
+            Templating.render(message, vars)
+          else message
           IO.println(s"[${node.name}] ${namedTask.name}: $rendered")
         }
 
@@ -126,19 +155,19 @@ object PlaybookRunner:
     if !src.endsWith(".mustache") then IO.pure(java.nio.file.Paths.get(src))
     else
       IO.blocking {
-        val templateContent = java.nio.file.Files.readString(java.nio.file.Paths.get(src))
+        val templateContent =
+          java.nio.file.Files.readString(java.nio.file.Paths.get(src))
         val rendered = Templating.render(templateContent, templateVars ++ vars)
         val tmp = java.nio.file.Files.createTempFile("orphera-render", ".tmp")
         java.nio.file.Files.writeString(tmp, rendered)
         tmp
       }
 
-  /** Builds the full var context available to templates, debug
-    * messages, and set_fact values: this node's own gathered facts
-    * (facts.*), every targeted node's gathered facts AND set-facts,
-    * nested under nodes.<name>.*, so `{{nodes.other-node.some_key}}`
-    * resolves whether some_key came from GatherFacts or from a
-    * set_fact task run on that other node.
+  /** Builds the full var context available to templates, debug messages, and
+    * set_fact values: this node's own gathered facts (facts.*), every targeted
+    * node's gathered facts AND set-facts, nested under nodes.<name>.*, so
+    * `{{nodes.other-node.some_key}}` resolves whether some_key came from
+    * GatherFacts or from a set_fact task run on that other node.
     */
   private def buildDebugVars(
       facts: Option[Facts],
@@ -159,15 +188,16 @@ object PlaybookRunner:
 
       val nestedNodeVars = buildNestedNodeFacts(context, allSetFacts)
       val ownSetFactVars: Map[String, Any] =
-        allSetFacts.getOrElse(node.name, Map.empty).map { case (k, v) => k -> v }
+        allSetFacts.getOrElse(node.name, Map.empty).map { case (k, v) =>
+          k -> v
+        }
 
       ownFactVars ++ nestedNodeVars ++ ownSetFactVars
     }
 
-  /** nodes.<name>.* for every node that has either gathered facts or
-    * set-facts (or both) — the two are merged per node, with
-    * set-facts taking precedence over a same-named gathered field in
-    * the unlikely case of a collision.
+  /** nodes.<name>.* for every node that has either gathered facts or set-facts
+    * (or both) — the two are merged per node, with set-facts taking precedence
+    * over a same-named gathered field in the unlikely case of a collision.
     */
   private def buildNestedNodeFacts(
       context: ClusterContext,
@@ -176,23 +206,30 @@ object PlaybookRunner:
     val allNodeNames = context.factsByNode.keySet ++ allSetFacts.keySet
 
     val nodesMap: java.util.Map[String, Any] =
-      allNodeNames.map { nodeName =>
-        val factFields: Map[String, Any] = context.factsByNode.get(nodeName) match
-          case Some(f) =>
-            Map(
-              "hostname" -> f.hostname,
-              "os_id" -> f.osId,
-              "os_version" -> f.osVersion,
-              "architecture" -> f.architecture
-            )
-          case None => Map.empty
+      allNodeNames
+        .map { nodeName =>
+          val factFields: Map[String, Any] =
+            context.factsByNode.get(nodeName) match
+              case Some(f) =>
+                Map(
+                  "hostname" -> f.hostname,
+                  "os_id" -> f.osId,
+                  "os_version" -> f.osVersion,
+                  "architecture" -> f.architecture
+                )
+              case None => Map.empty
 
-        val setFactFields: Map[String, Any] =
-          allSetFacts.getOrElse(nodeName, Map.empty).map { case (k, v) => k -> v }
+          val setFactFields: Map[String, Any] =
+            allSetFacts.getOrElse(nodeName, Map.empty).map { case (k, v) =>
+              k -> v
+            }
 
-        val inner: java.util.Map[String, Any] = (factFields ++ setFactFields).asJava
-        nodeName -> (inner: Any)
-      }.toMap.asJava
+          val inner: java.util.Map[String, Any] =
+            (factFields ++ setFactFields).asJava
+          nodeName -> (inner: Any)
+        }
+        .toMap
+        .asJava
 
     Map("nodes" -> nodesMap)
 

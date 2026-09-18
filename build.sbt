@@ -56,6 +56,13 @@ lazy val orchestrator = project
     )
   )
 
+lazy val scripting = project
+  .dependsOn(orchestrator)
+  .settings(
+    assembly / mainClass := Some("orphera.scripting.Main"),
+    libraryDependencies += "org.scala-lang" %% "scala3-compiler" % scalaVersion.value
+  )
+
 ThisBuild / assemblyMergeStrategy := {
   case "module-info.class" => MergeStrategy.discard
   case _                   => MergeStrategy.first

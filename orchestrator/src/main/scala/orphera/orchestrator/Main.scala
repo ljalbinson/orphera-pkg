@@ -132,20 +132,23 @@ object Main extends IOApp:
         }
 
       case Right(Command.RunPlaybook(source)) =>
-        val playbookResult: Either[String, Playbook] =
-          if source.endsWith(".yaml") || source.endsWith(".yml") then
-            PlaybookYaml.load(source)
-          else
-            PlaybookRegistry.all
-              .get(source)
-              .toRight(
-                s"No compiled playbook named '$source' (and it doesn't end in .yaml/.yml)"
-              )
+        if source.endsWith(".scala") then runScalaPlaybookScript(source)
+        else
+          val playbookResult: Either[String, Playbook] =
+            if source.endsWith(".yaml") || source.endsWith(".yml") then
+              PlaybookYaml.load(source)
+            else
+              PlaybookRegistry.all
+                .get(source)
+                .toRight(
+                  s"No compiled playbook named '$source' (and it doesn't end in .yaml/.yml/.scala)"
+                )
 
-        playbookResult match
-          case Left(err) =>
-            IO.println(s"Error: $err") >> IO.pure(ExitCode.Error)
-          case Right(pb) => PlaybookRunner.run(pb) >> IO.pure(ExitCode.Success)
+          playbookResult match
+            case Left(err) =>
+              IO.println(s"Error: $err") >> IO.pure(ExitCode.Error)
+            case Right(pb) =>
+              PlaybookRunner.run(pb) >> IO.pure(ExitCode.Success)
 
       case Right(
             Command.Reboot(nodeNames, delaySeconds, wait, waitTimeoutSeconds)
@@ -183,6 +186,50 @@ object Main extends IOApp:
     if days > 0 then s"${days}d ${hours}h ${minutes}m"
     else if hours > 0 then s"${hours}h ${minutes}m"
     else s"${minutes}m"
+
+  private def runScalaPlaybookScript(scriptPath: String): IO[ExitCode] =
+    IO.blocking {
+      findLatestJar("scripting/target", "scripting-assembly", ".jar") match
+        case None =>
+          Left(
+            "scripting-assembly jar not found under scripting/target/. Run 'sbt scripting/assembly' first."
+          )
+        case Some(jar) =>
+          val exit = new ProcessBuilder(
+            "java",
+            "-cp",
+            jar,
+            "orphera.scripting.Main",
+            scriptPath
+          )
+            .inheritIO()
+            .start()
+            .waitFor()
+          Right(exit)
+    }.flatMap {
+      case Left(err) => IO.println(s"Error: $err") >> IO.pure(ExitCode.Error)
+      case Right(0)  => IO.pure(ExitCode.Success)
+      case Right(_)  => IO.pure(ExitCode.Error)
+    }
+
+  private def findLatestJar(
+      dir: String,
+      prefix: String,
+      suffix: String
+  ): Option[String] =
+    val base = new java.io.File(dir)
+    if !base.isDirectory then None
+    else
+      val candidates =
+        Option(base.listFiles()).toList.flatten
+          .filter(_.isDirectory)
+          .flatMap(scalaDir => Option(scalaDir.listFiles()).toList.flatten)
+          .filter(f =>
+            f.isFile && f.getName.startsWith(prefix) && f.getName
+              .endsWith(suffix)
+          )
+          .sortBy(_.getName)
+      candidates.lastOption.map(_.getAbsolutePath)
 
   private def withTargets(nodeNames: Option[List[String]])(
       action: List[Node] => IO[Unit]

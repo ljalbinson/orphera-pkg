@@ -9,14 +9,22 @@ import java.nio.file.{Files, Paths}
 
 object ClusterPlaybookYaml:
 
-  private def decodeHealthCheck(c: HCursor): Either[DecodingFailure, HealthCheck] =
+  private def decodeHealthCheck(
+      c: HCursor
+  ): Either[DecodingFailure, HealthCheck] =
     for
       onNode <- c.get[String]("on_node")
       sentinelPath <- c.get[String]("sentinel_path")
       expectedSha256 <- c.get[String]("expected_sha256")
       pollInterval <- c.getOrElse[Int]("poll_interval")(5)
       timeout <- c.getOrElse[Int]("timeout")(120)
-    yield HealthCheck(onNode, sentinelPath, expectedSha256, pollInterval, timeout)
+    yield HealthCheck(
+      onNode,
+      sentinelPath,
+      expectedSha256,
+      pollInterval,
+      timeout
+    )
 
   private def decodeStage(c: HCursor): Either[DecodingFailure, Stage] =
     for
@@ -30,7 +38,9 @@ object ClusterPlaybookYaml:
         case Some(json) => decodeHealthCheck(json.hcursor).map(Some(_))
     yield Stage(name, nodes, tasks, waitFor)
 
-  private def decodeClusterPlaybook(c: HCursor): Either[DecodingFailure, ClusterPlaybook] =
+  private def decodeClusterPlaybook(
+      c: HCursor
+  ): Either[DecodingFailure, ClusterPlaybook] =
     for
       name <- c.get[String]("name")
       stageCursors <- c.downField("stages").as[List[Json]]
@@ -39,7 +49,11 @@ object ClusterPlaybookYaml:
 
   def load(path: String): Either[String, ClusterPlaybook] =
     for
-      content <- scala.util.Try(Files.readString(Paths.get(path))).toEither.left.map(_.getMessage)
+      content <- scala.util
+        .Try(Files.readString(Paths.get(path)))
+        .toEither
+        .left
+        .map(_.getMessage)
       json <- parser.parse(content).left.map(_.getMessage)
       playbook <- decodeClusterPlaybook(json.hcursor).left.map(_.getMessage)
     yield playbook

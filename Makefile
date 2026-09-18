@@ -1,4 +1,4 @@
-.PHONY: all release bump-patch _build_all clean test assembly pkg-stage deb verify certs certs-clean fmt
+.PHONY: all release bump-patch _build_all clean test assembly pkg-stage deb verify certs certs-clean fmt scripting
 
 VERSION_FILE := VERSION
 VERSION      := $(shell cat $(VERSION_FILE))
@@ -14,7 +14,7 @@ all: clean test assembly deb
 release: bump-patch
 	$(MAKE) _build_all
 
-_build_all: clean test assembly deb orpheracli
+_build_all: clean test assembly deb orpheracli scripting
 	@echo "Released $$(cat $(VERSION_FILE))"
 
 bump-patch:
@@ -46,6 +46,9 @@ reboot-all:
 orpheracli:
 	sbt orchestrator/assembly
 	sudo cp -p orchestrator/target/scala-3.8.4/orchestrator-assembly-$(VERSION).jar /usr/local/lib
+
+scripting:
+	sbt scripting/assembly
 
 sleep30:
 	sleep 30

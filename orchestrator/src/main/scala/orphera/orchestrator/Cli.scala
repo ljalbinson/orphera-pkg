@@ -398,13 +398,13 @@ object Cli:
       |  deploy-agent   <local.deb> [--remote-path /tmp/orphera-agent.deb] [--nodes host1,host2]
       |  bootstrap      <local.deb> --nodes host1,host2 [--ssh-user root] [--ssh-key ~/.ssh/id_ed25519] [--remote-path /tmp/x.deb]
       |  teardown       --nodes host1,host2 --yes [--purge] [--ssh-user root] [--ssh-key ~/.ssh/id_ed25519]
-      |  cluster-playbook <file.yaml>
+      |  playbook       <file.yaml | file.scala | compiled-name>  — .scala files are compiled at run time
       |  fetch          <remote-path> [--out ./local-dir] [--nodes host1,host2]
       |  facts          [--nodes host1,host2]
       |  reboot         [--nodes host1,host2] [--delay 5] [--wait] [--wait-timeout 300]
       |  version        [--nodes host1,host2]
       |  uptime         [--nodes host1,host2]
-      |  playbook       <file.yaml>
+      |  playbook       <file.yaml | file.scala | compiled-name>
       |
       |Examples:
       |  install curl vim
