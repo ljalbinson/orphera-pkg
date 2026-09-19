@@ -179,6 +179,11 @@ object Main extends IOApp:
           case Right(pb) =>
             ClusterPlaybookRunner.run(pb) >> IO.pure(ExitCode.Success)
 
+      case Right(Command.RunCommand(command, nodeNames, timeoutSeconds)) =>
+        withTargets(nodeNames) { targets =>
+          Orchestrator.executeCommand(targets, command, timeoutSeconds)
+        }
+
   private def formatUptime(seconds: Long): String =
     val days = seconds / 86400
     val hours = (seconds % 86400) / 3600

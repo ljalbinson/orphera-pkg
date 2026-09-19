@@ -120,6 +120,23 @@ message UptimeInfo {
   double load_average_1m = 2;
 }
 
+message RunCommandRequest {
+  repeated string command = 1;
+  int32 timeout_seconds = 2;
+}
+
+message CommandOutput {
+  oneof payload {
+    string stdout_line = 1;
+    string stderr_line = 2;
+  }
+}
+
+message CommandResult {
+  int32 exit_code = 1;
+  bool success = 2;
+}
+
 message Empty {}
 
 message Event {
@@ -148,5 +165,6 @@ service Agent {
   rpc TriggerReboot(RebootRequest) returns (RebootAck);
   rpc GetVersion(VersionRequest) returns (VersionInfo);
   rpc GetUptime(UptimeRequest) returns (UptimeInfo);
+  rpc ExecuteCommand(RunCommandRequest) returns (stream Event);
 }
 

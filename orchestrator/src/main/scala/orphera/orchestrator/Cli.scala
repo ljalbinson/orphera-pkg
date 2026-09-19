@@ -54,6 +54,7 @@ enum Command:
   case Version(nodes: Option[List[String]])
   case Uptime(nodes: Option[List[String]])
   case RunClusterPlaybook(path: String)
+  case RunCommand(command: List[String], nodes: Option[List[String]], timeoutSeconds: Int)
   case Help
 
 object Cli:
@@ -90,6 +91,7 @@ object Cli:
       case "cluster-playbook" :: path :: Nil =>
         Right(Command.RunClusterPlaybook(path))
       case "help" :: _ | "--help" :: _ | Nil => Right(Command.Help)
+      case "run" :: rest => parseRunCommand(rest, Nil, None, 60)
       case other => Left(s"Unknown command: ${other.headOption.getOrElse("")}")
 
   private def parseInstall(
@@ -386,6 +388,31 @@ object Cli:
       case other :: _ =>
         Left(s"Unknown argument to uptime: $other")
 
+  private def parseRunCommand(
+      args: List[String],
+      command: List[String],
+      nodes: Option[List[String]],
+      timeoutSeconds: Int
+  ): Either[String, Command] =
+    args match
+      case Nil =>
+        if command.isEmpty then Left("run requires a command")
+        else Right(Command.RunCommand(command, nodes, timeoutSeconds))
+
+      case "--nodes" :: value :: rest =>
+        parseRunCommand(rest, command, Some(value.split(",").toList.map(_.trim)), timeoutSeconds)
+
+      case "--timeout" :: value :: rest =>
+        scala.util.Try(value.toInt).toOption match
+          case Some(parsed) => parseRunCommand(rest, command, nodes, parsed)
+          case None => Left(s"Invalid timeout: $value")
+
+      case "--" :: rest =>
+        parseRunCommand(rest, command, nodes, timeoutSeconds)
+
+      case arg :: rest =>
+        parseRunCommand(rest, command :+ arg, nodes, timeoutSeconds)
+
   val usage: String =
     """orphera-orchestrator - test CLI for the Orphera agent protocol
       |
@@ -399,6 +426,7 @@ object Cli:
       |  bootstrap      <local.deb> --nodes host1,host2 [--ssh-user root] [--ssh-key ~/.ssh/id_ed25519] [--remote-path /tmp/x.deb]
       |  teardown       --nodes host1,host2 --yes [--purge] [--ssh-user root] [--ssh-key ~/.ssh/id_ed25519]
       |  playbook       <file.yaml | file.scala | compiled-name>  — .scala files are compiled at run time
+      |  run            <command...>  [--nodes host1,host2] [--timeout 60]  — run an arbitrary command, capturing stdout/stderr
       |  fetch          <remote-path> [--out ./local-dir] [--nodes host1,host2]
       |  facts          [--nodes host1,host2]
       |  reboot         [--nodes host1,host2] [--delay 5] [--wait] [--wait-timeout 300]

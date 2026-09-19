@@ -19,3 +19,6 @@ object Dispatcher:
 
   def dispatchInstallDeb(cmd: InstallDeb, queue: Queue[IO, Event]): IO[Unit] =
     DebInstaller.install(cmd, queue)
+
+  def dispatchRunCommand(cmd: RunCommandRequest, queue: Queue[IO, Event]): IO[Unit] =
+    CommandRunner.run(cmd, queue)

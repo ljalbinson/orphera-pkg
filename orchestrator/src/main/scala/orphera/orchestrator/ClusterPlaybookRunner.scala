@@ -189,6 +189,8 @@ object ClusterPlaybookRunner:
               s"[${node.name}] ${namedTask.name}: set $key = $rendered"
             )
         }
+      case Task.RunCommand(command, timeoutSeconds) =>
+        NodeClient.executeCommand(node, command, timeoutSeconds, render)
       case Task.Debug(message) =>
         buildDebugVars(facts, context, node, setFacts).flatMap { vars =>
           val rendered = if message.contains("{{") then

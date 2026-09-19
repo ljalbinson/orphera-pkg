@@ -181,3 +181,13 @@ object Orchestrator:
       .map(_.collect { case (name, Right(info)) =>
         name -> info
       }.toMap)
+
+  def executeCommand(
+      nodes: List[Node],
+      command: List[String],
+      timeoutSeconds: Int = 60
+  ): IO[Unit] =
+    nodes.parTraverse_ { node =>
+      NodeClient.executeCommand(node, command, timeoutSeconds, ConsoleRenderer.render(node, _))
+    }
+

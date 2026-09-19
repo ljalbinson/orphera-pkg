@@ -21,6 +21,7 @@ enum Task:
       waitTimeoutSeconds: Int = 300
   )
   case SetFact(key: String, value: String)
+  case RunCommand(command: List[String], timeoutSeconds: Int = 60)
   case Debug(message: String)
 
 case class FactCondition(

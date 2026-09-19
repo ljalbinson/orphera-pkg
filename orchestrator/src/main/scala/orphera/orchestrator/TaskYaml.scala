@@ -63,6 +63,12 @@ object TaskYaml:
           value <- body.get[String]("value")
         yield Task.SetFact(key, value)
 
+      case "run_command" =>
+        for
+          command <- body.get[List[String]]("command")
+          timeout <- body.getOrElse[Int]("timeout")(60)
+        yield Task.RunCommand(command, timeout)
+
       case "debug" =>
         body.get[String]("message").map(Task.Debug.apply)
 

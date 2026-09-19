@@ -372,3 +372,20 @@ object NodeClient:
           )
           .map(result => !result.needsCopy)
       }
+
+  def executeCommand(
+      node: Node,
+      command: List[String],
+      timeoutSeconds: Int,
+      onEvent: Event => IO[Unit]
+  ): IO[Unit] =
+    channelBuilder(node)
+      .resource[IO]
+      .flatMap(AgentFs2Grpc.stubResource[IO])
+      .use { stub =>
+        stub
+          .executeCommand(RunCommandRequest(command, timeoutSeconds), authMetadata())
+          .evalMap(onEvent)
+          .compile
+          .drain
+      }

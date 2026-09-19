@@ -83,3 +83,11 @@ class AgentServiceImpl(
 
   def getUptime(request: UptimeRequest, ctx: Metadata): IO[UptimeInfo] =
     UptimeReader.read()
+
+  def executeCommand(request: RunCommandRequest, ctx: Metadata): Stream[IO, Event] =
+    Stream.eval(Queue.unbounded[IO, Event]).flatMap { queue =>
+      Stream.eval(Dispatcher.dispatchRunCommand(request, queue).start) >>
+        Stream
+          .fromQueueUnterminated(queue)
+          .takeThrough(_.kind != Event.Kind.RESULT)
+    }
