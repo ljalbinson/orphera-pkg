@@ -263,7 +263,10 @@ object ClusterPlaybookRunner:
 
     Map("nodes" -> nodesMap)
 
-  private def waitForHealthy(stageName: String, check: HealthCheck): IO[Boolean] =
+  private def waitForHealthy(
+      stageName: String,
+      check: HealthCheck
+  ): IO[Boolean] =
     val onNode = check match
       case HealthCheck.Sentinel(n, _, _, _, _) => n
       case HealthCheck.Command(n, _, _, _)     => n
@@ -276,23 +279,36 @@ object ClusterPlaybookRunner:
 
     node match
       case None =>
-        IO.println(s"[$stageName] Health check node '$onNode' not found in inventory.") >>
+        IO.println(
+          s"[$stageName] Health check node '$onNode' not found in inventory."
+        ) >>
           IO.pure(false)
       case Some(n) =>
-        IO.println(s"[$stageName] Waiting for health check on $onNode (timeout ${timeoutSeconds}s)...") >>
+        IO.println(
+          s"[$stageName] Waiting for health check on $onNode (timeout ${timeoutSeconds}s)..."
+        ) >>
           pollHealthy(stageName, n, check, elapsed = 0)
 
-  private def pollHealthy(stageName: String, node: Node, check: HealthCheck, elapsed: Int): IO[Boolean] =
+  private def pollHealthy(
+      stageName: String,
+      node: Node,
+      check: HealthCheck,
+      elapsed: Int
+  ): IO[Boolean] =
     val (pollIntervalSeconds, timeoutSeconds) = check match
       case HealthCheck.Sentinel(_, _, _, p, t) => (p, t)
       case HealthCheck.Command(_, _, p, t)     => (p, t)
 
     if elapsed >= timeoutSeconds then
-      IO.println(s"[$stageName] Health check timed out after ${timeoutSeconds}s") >> IO.pure(false)
+      IO.println(
+        s"[$stageName] Health check timed out after ${timeoutSeconds}s"
+      ) >> IO.pure(false)
     else
       checkOnce(node, check).attempt.flatMap {
         case Right(true) =>
-          IO.println(s"[$stageName] Healthy after ~${elapsed}s") >> IO.pure(true)
+          IO.println(s"[$stageName] Healthy after ~${elapsed}s") >> IO.pure(
+            true
+          )
         case _ =>
           IO.sleep(pollIntervalSeconds.seconds) >>
             pollHealthy(stageName, node, check, elapsed + pollIntervalSeconds)

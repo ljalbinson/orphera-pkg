@@ -188,6 +188,10 @@ object Orchestrator:
       timeoutSeconds: Int = 60
   ): IO[Unit] =
     nodes.parTraverse_ { node =>
-      NodeClient.executeCommand(node, command, timeoutSeconds, ConsoleRenderer.render(node, _))
+      NodeClient.executeCommand(
+        node,
+        command,
+        timeoutSeconds,
+        ConsoleRenderer.render(node, _)
+      )
     }
-

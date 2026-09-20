@@ -54,7 +54,11 @@ enum Command:
   case Version(nodes: Option[List[String]])
   case Uptime(nodes: Option[List[String]])
   case RunClusterPlaybook(path: String)
-  case RunCommand(command: List[String], nodes: Option[List[String]], timeoutSeconds: Int)
+  case RunCommand(
+      command: List[String],
+      nodes: Option[List[String]],
+      timeoutSeconds: Int
+  )
   case Help
 
 object Cli:
@@ -400,12 +404,17 @@ object Cli:
         else Right(Command.RunCommand(command, nodes, timeoutSeconds))
 
       case "--nodes" :: value :: rest =>
-        parseRunCommand(rest, command, Some(value.split(",").toList.map(_.trim)), timeoutSeconds)
+        parseRunCommand(
+          rest,
+          command,
+          Some(value.split(",").toList.map(_.trim)),
+          timeoutSeconds
+        )
 
       case "--timeout" :: value :: rest =>
         scala.util.Try(value.toInt).toOption match
           case Some(parsed) => parseRunCommand(rest, command, nodes, parsed)
-          case None => Left(s"Invalid timeout: $value")
+          case None         => Left(s"Invalid timeout: $value")
 
       case "--" :: rest =>
         parseRunCommand(rest, command, nodes, timeoutSeconds)

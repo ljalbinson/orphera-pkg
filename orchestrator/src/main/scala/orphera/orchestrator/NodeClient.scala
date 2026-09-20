@@ -384,7 +384,10 @@ object NodeClient:
       .flatMap(AgentFs2Grpc.stubResource[IO])
       .use { stub =>
         stub
-          .executeCommand(RunCommandRequest(command, timeoutSeconds), authMetadata())
+          .executeCommand(
+            RunCommandRequest(command, timeoutSeconds),
+            authMetadata()
+          )
           .evalMap(onEvent)
           .compile
           .drain
