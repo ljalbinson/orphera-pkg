@@ -1,0 +1,6 @@
+name: ip-check
+nodes: [tst0, tst1, tst2, tst4]
+tasks:
+  - name: show cluster ips
+    debug:
+      message: "tst0={{nodes.tst0.cluster_ip}} tst1={{nodes.tst1.cluster_ip}} tst2={{nodes.tst2.cluster_ip}} tst4={{nodes.tst4.cluster_ip}}"

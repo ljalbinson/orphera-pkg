@@ -22,6 +22,7 @@ enum Task:
   )
   case SetFact(key: String, value: String)
   case RunCommand(command: List[String], timeoutSeconds: Int = 60)
+  case DumpFacts()
   case Debug(message: String)
 
 case class FactCondition(

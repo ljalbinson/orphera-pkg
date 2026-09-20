@@ -139,6 +139,13 @@ object PlaybookRunner:
             )
         }
 
+      case Task.DumpFacts() =>
+        buildDebugVars(facts, context, node, setFacts).flatMap { vars =>
+          IO.println(
+            s"[${node.name}] ${namedTask.name}:\n${FactPrinter.render(vars)}"
+          )
+        }
+
       case Task.RunCommand(command, timeoutSeconds) =>
         NodeClient.executeCommand(node, command, timeoutSeconds, render)
 
@@ -206,11 +213,20 @@ object PlaybookRunner:
       context: ClusterContext,
       allSetFacts: Map[String, Map[String, String]]
   ): Map[String, Any] =
-    val allNodeNames = context.factsByNode.keySet ++ allSetFacts.keySet
+    val allNodeNames =
+      context.factsByNode.keySet ++ allSetFacts.keySet ++ Inventory.all
+        .map(_.name)
+        .toSet
 
     val nodesMap: java.util.Map[String, Any] =
       allNodeNames
         .map { nodeName =>
+          val inventoryFields: Map[String, Any] =
+            Inventory.all
+              .find(_.name == nodeName)
+              .map(_.vars)
+              .getOrElse(Map.empty)
+
           val factFields: Map[String, Any] =
             context.factsByNode.get(nodeName) match
               case Some(f) =>
@@ -219,7 +235,7 @@ object PlaybookRunner:
                   "os_id" -> f.osId,
                   "os_version" -> f.osVersion,
                   "architecture" -> f.architecture
-                )
+                ) ++ interfaceFields(f)
               case None => Map.empty
 
           val setFactFields: Map[String, Any] =
@@ -228,13 +244,31 @@ object PlaybookRunner:
             }
 
           val inner: java.util.Map[String, Any] =
-            (factFields ++ setFactFields).asJava
+            (inventoryFields ++ factFields ++ setFactFields).asJava
           nodeName -> (inner: Any)
         }
         .toMap
         .asJava
 
     Map("nodes" -> nodesMap)
+
+  /** Exposes each network interface's first IP address as ip_<interface-name>,
+    * and the second non-loopback interface specifically as ip_secondary (falls
+    * back to empty string if there is no second interface) — the common case
+    * for a host with a management NIC and a separate cluster/storage NIC.
+    */
+  private def interfaceFields(f: Facts): Map[String, Any] =
+    val byName = f.interfaces.map { iface =>
+      s"ip_${iface.name}" -> iface.ipAddresses.headOption.getOrElse("")
+    }.toMap
+
+    val secondary = f.interfaces
+      .drop(1)
+      .headOption
+      .flatMap(_.ipAddresses.headOption)
+      .getOrElse("")
+
+    byName + ("ip_secondary" -> secondary)
 
   private def eventLine(event: orphera.common.Event): String =
     event.kind match

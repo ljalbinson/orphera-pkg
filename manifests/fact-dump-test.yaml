@@ -1,0 +1,5 @@
+name: fact-dump-test
+nodes: [tst0, tst1, tst4]
+tasks:
+  - name: show everything
+    dump_facts: {}

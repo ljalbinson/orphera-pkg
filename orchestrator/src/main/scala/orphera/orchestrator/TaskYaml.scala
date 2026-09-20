@@ -69,6 +69,9 @@ object TaskYaml:
           timeout <- body.getOrElse[Int]("timeout")(60)
         yield Task.RunCommand(command, timeout)
 
+      case "dump_facts" =>
+        Right(Task.DumpFacts())
+
       case "debug" =>
         body.get[String]("message").map(Task.Debug.apply)
 
