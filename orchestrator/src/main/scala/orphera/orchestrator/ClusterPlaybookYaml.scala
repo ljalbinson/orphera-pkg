@@ -9,22 +9,21 @@ import java.nio.file.{Files, Paths}
 
 object ClusterPlaybookYaml:
 
-  private def decodeHealthCheck(
-      c: HCursor
-  ): Either[DecodingFailure, HealthCheck] =
+  private def decodeHealthCheck(c: HCursor): Either[DecodingFailure, HealthCheck] =
     for
       onNode <- c.get[String]("on_node")
-      sentinelPath <- c.get[String]("sentinel_path")
-      expectedSha256 <- c.get[String]("expected_sha256")
       pollInterval <- c.getOrElse[Int]("poll_interval")(5)
       timeout <- c.getOrElse[Int]("timeout")(120)
-    yield HealthCheck(
-      onNode,
-      sentinelPath,
-      expectedSha256,
-      pollInterval,
-      timeout
-    )
+      commandOpt <- c.get[Option[List[String]]]("command")
+      result <- commandOpt match
+        case Some(command) =>
+          Right(HealthCheck.Command(onNode, command, pollInterval, timeout))
+        case None =>
+          for
+            sentinelPath <- c.get[String]("sentinel_path")
+            expectedSha256 <- c.get[String]("expected_sha256")
+          yield HealthCheck.Sentinel(onNode, sentinelPath, expectedSha256, pollInterval, timeout)
+    yield result
 
   private def decodeStage(c: HCursor): Either[DecodingFailure, Stage] =
     for

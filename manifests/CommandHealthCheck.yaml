@@ -1,0 +1,21 @@
+name: command-health-check
+
+stages:
+  - name: primary
+    nodes: [tst2]
+    tasks:
+      - name: start service
+        install:
+          packages: [nginx]
+
+  - name: secondaries
+    nodes: [tst1]
+    wait_for:
+      on_node: tst2
+      command: ["systemctl", "is-active", "--quiet", "nginx"]
+      poll_interval: 5
+      timeout: 60
+    tasks:
+      - name: install curl
+        install:
+          packages: [curl]

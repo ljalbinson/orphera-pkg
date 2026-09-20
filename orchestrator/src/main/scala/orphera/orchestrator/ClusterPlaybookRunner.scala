@@ -263,52 +263,63 @@ object ClusterPlaybookRunner:
 
     Map("nodes" -> nodesMap)
 
-  private def waitForHealthy(
-      stageName: String,
-      check: HealthCheck
-  ): IO[Boolean] =
-    val node = Inventory.all.find(_.name == check.onNode)
+  private def waitForHealthy(stageName: String, check: HealthCheck): IO[Boolean] =
+    val onNode = check match
+      case HealthCheck.Sentinel(n, _, _, _, _) => n
+      case HealthCheck.Command(n, _, _, _)     => n
+
+    val timeoutSeconds = check match
+      case HealthCheck.Sentinel(_, _, _, _, t) => t
+      case HealthCheck.Command(_, _, _, t)     => t
+
+    val node = Inventory.all.find(_.name == onNode)
 
     node match
       case None =>
-        IO.println(
-          s"[$stageName] Health check node '${check.onNode}' not found in inventory."
-        ) >>
+        IO.println(s"[$stageName] Health check node '$onNode' not found in inventory.") >>
           IO.pure(false)
       case Some(n) =>
-        IO.println(
-          s"[$stageName] Waiting for health check on ${check.onNode} (timeout ${check.timeoutSeconds}s)..."
-        ) >>
+        IO.println(s"[$stageName] Waiting for health check on $onNode (timeout ${timeoutSeconds}s)...") >>
           pollHealthy(stageName, n, check, elapsed = 0)
 
-  private def pollHealthy(
-      stageName: String,
-      node: Node,
-      check: HealthCheck,
-      elapsed: Int
-  ): IO[Boolean] =
-    if elapsed >= check.timeoutSeconds then
-      IO.println(
-        s"[$stageName] Health check timed out after ${check.timeoutSeconds}s"
-      ) >> IO.pure(false)
+  private def pollHealthy(stageName: String, node: Node, check: HealthCheck, elapsed: Int): IO[Boolean] =
+    val (pollIntervalSeconds, timeoutSeconds) = check match
+      case HealthCheck.Sentinel(_, _, _, p, t) => (p, t)
+      case HealthCheck.Command(_, _, p, t)     => (p, t)
+
+    if elapsed >= timeoutSeconds then
+      IO.println(s"[$stageName] Health check timed out after ${timeoutSeconds}s") >> IO.pure(false)
     else
+      checkOnce(node, check).attempt.flatMap {
+        case Right(true) =>
+          IO.println(s"[$stageName] Healthy after ~${elapsed}s") >> IO.pure(true)
+        case _ =>
+          IO.sleep(pollIntervalSeconds.seconds) >>
+            pollHealthy(stageName, node, check, elapsed + pollIntervalSeconds)
+      }
+
+  private def checkOnce(node: Node, check: HealthCheck): IO[Boolean] =
+    check match
+      case HealthCheck.Sentinel(_, sentinelPath, expectedSha256, _, _) =>
+        NodeClient.checkFile(node, sentinelPath, expectedSha256)
+
+      case HealthCheck.Command(_, command, _, _) =>
+        collectExitCode(node, command).map(_ == 0)
+
+  private def collectExitCode(node: Node, command: List[String]): IO[Int] =
+    Ref.of[IO, Int](-1).flatMap { exitRef =>
       NodeClient
-        .checkFile(node, check.sentinelPath, check.expectedSha256)
-        .attempt
-        .flatMap {
-          case Right(healthy) if healthy =>
-            IO.println(s"[$stageName] Healthy after ~${elapsed}s") >> IO.pure(
-              true
-            )
-          case _ =>
-            IO.sleep(check.pollIntervalSeconds.seconds) >>
-              pollHealthy(
-                stageName,
-                node,
-                check,
-                elapsed + check.pollIntervalSeconds
-              )
-        }
+        .executeCommand(
+          node,
+          command,
+          timeoutSeconds = 30,
+          onEvent = event =>
+            if event.kind == orphera.common.Event.Kind.RESULT then
+              exitRef.set(event.exitCode)
+            else IO.unit
+        )
+        .flatMap(_ => exitRef.get)
+    }
 
   private def eventLine(event: orphera.common.Event): String =
     event.kind match

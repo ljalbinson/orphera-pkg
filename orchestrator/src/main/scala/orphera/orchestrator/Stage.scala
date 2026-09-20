@@ -9,13 +9,20 @@ package orphera.orchestrator
   * inventing a new mechanism. A genuine arbitrary-command health-check task
   * type is a natural follow-up once one exists in the Task ADT at all.
   */
-case class HealthCheck(
-    onNode: String,
-    sentinelPath: String,
-    expectedSha256: String,
-    pollIntervalSeconds: Int = 5,
-    timeoutSeconds: Int = 120
-)
+enum HealthCheck:
+  case Sentinel(
+      onNode: String,
+      sentinelPath: String,
+      expectedSha256: String,
+      pollIntervalSeconds: Int = 5,
+      timeoutSeconds: Int = 120
+  )
+  case Command(
+      onNode: String,
+      command: List[String],
+      pollIntervalSeconds: Int = 5,
+      timeoutSeconds: Int = 120
+  )
 
 case class Stage(
     name: String,
