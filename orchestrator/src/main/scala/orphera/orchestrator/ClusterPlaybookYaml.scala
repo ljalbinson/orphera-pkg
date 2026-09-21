@@ -9,28 +9,33 @@ import java.nio.file.{Files, Paths}
 
 object ClusterPlaybookYaml:
 
-  private def decodeHealthCheck(
-      c: HCursor
-  ): Either[DecodingFailure, HealthCheck] =
+  private def decodeHealthCheck(c: HCursor): Either[DecodingFailure, HealthCheck] =
     for
-      onNode <- c.get[String]("on_node")
       pollInterval <- c.getOrElse[Int]("poll_interval")(5)
       timeout <- c.getOrElse[Int]("timeout")(120)
-      commandOpt <- c.get[Option[List[String]]]("command")
-      result <- commandOpt match
-        case Some(command) =>
-          Right(HealthCheck.Command(onNode, command, pollInterval, timeout))
+      nodesOpt <- c.get[Option[List[String]]]("nodes")
+      result <- nodesOpt match
+
+        case Some(nodes) =>
+          // Plural "nodes" + "required" -> a quorum check.
+          for
+            command <- c.get[List[String]]("command")
+            required <- c.get[Int]("required")
+          yield HealthCheck.Quorum(nodes, command, required, pollInterval, timeout)
+
         case None =>
           for
-            sentinelPath <- c.get[String]("sentinel_path")
-            expectedSha256 <- c.get[String]("expected_sha256")
-          yield HealthCheck.Sentinel(
-            onNode,
-            sentinelPath,
-            expectedSha256,
-            pollInterval,
-            timeout
-          )
+            onNode <- c.get[String]("on_node")
+            commandOpt <- c.get[Option[List[String]]]("command")
+            r <- commandOpt match
+              case Some(command) =>
+                Right(HealthCheck.Command(onNode, command, pollInterval, timeout))
+              case None =>
+                for
+                  sentinelPath <- c.get[String]("sentinel_path")
+                  expectedSha256 <- c.get[String]("expected_sha256")
+                yield HealthCheck.Sentinel(onNode, sentinelPath, expectedSha256, pollInterval, timeout)
+          yield r
     yield result
 
   private def decodeStage(c: HCursor): Either[DecodingFailure, Stage] =

@@ -1,0 +1,22 @@
+name: ceph-mons
+
+stages:
+  - name: bootstrap-mons
+    nodes: [tst0, tst1, tst4]
+    tasks:
+      - name: write per-mon quorum marker
+        run_command:
+          command: ["sh", "-c", "echo healthy > /tmp/mon-ready"]
+
+  - name: after-quorum
+    nodes: [tst2]
+    wait_for:
+      nodes: [tst0, tst1, tst4]
+      command: ["test", "-f", "/tmp/mon-ready"]
+      required: 2
+      poll_interval: 5
+      timeout: 60
+    tasks:
+      - name: install curl
+        install:
+          packages: [curl]
