@@ -146,6 +146,18 @@ object PlaybookRunner:
           )
         }
 
+      case Task.DistributeFile(sourceNodeName, sourcePath, destPath, owner, group, mode) =>
+        Inventory.all.find(_.name == sourceNodeName) match
+          case None =>
+            IO.raiseError(new RuntimeException(s"DistributeFile source node '$sourceNodeName' not found in inventory"))
+          case Some(sourceNode) =>
+            NodeClient.fetchFileBytes(sourceNode, sourcePath).flatMap {
+              case Left(err) =>
+                IO.raiseError(new RuntimeException(s"Failed to fetch $sourcePath from $sourceNodeName: $err"))
+              case Right(content) =>
+                NodeClient.copyBytes(node, content, destPath, owner, group, mode, render)
+            }
+
       case Task.RunCommand(command, timeoutSeconds) =>
         NodeClient.executeCommand(node, command, timeoutSeconds, render)
 

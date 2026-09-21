@@ -72,6 +72,18 @@ object TaskYaml:
       case "dump_facts" =>
         Right(Task.DumpFacts())
 
+      case "distribute_file" =>
+        for
+          sourceNode <- body.get[String]("source_node")
+          sourcePath <- body.get[String]("source_path")
+          destPath <- body.get[String]("dest_path")
+          owner <- body.getOrElse[String]("owner")("")
+          group <- body.getOrElse[String]("group")("")
+          modeStr <- body.getOrElse[String]("mode")("0")
+          mode <- scala.util.Try(Integer.parseInt(modeStr, 8)).toEither.left.map(_ =>
+            DecodingFailure(s"Invalid mode: $modeStr", body.history))
+        yield Task.DistributeFile(sourceNode, sourcePath, destPath, owner, group, mode)
+
       case "debug" =>
         body.get[String]("message").map(Task.Debug.apply)
 

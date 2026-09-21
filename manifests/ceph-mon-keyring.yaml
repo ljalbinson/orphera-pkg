@@ -1,0 +1,29 @@
+name: ceph-mon-keyring
+
+stages:
+  - name: install-tools
+    nodes: [tst0, tst1, tst4]
+    tasks:
+      - name: install ceph-common
+        install:
+          packages: [ceph-common]
+          update_cache: true
+
+  - name: generate
+    nodes: [tst0]
+    tasks:
+      - name: generate mon keyring
+        run_command:
+          command: ["sh", "-c", "ceph-authtool /etc/ceph/ceph.mon.keyring --create-keyring --gen-key -n mon. --cap mon 'allow *'"]
+
+  - name: distribute
+    nodes: [tst1, tst4]
+    tasks:
+      - name: distribute keyring from tst0
+        distribute_file:
+          source_node: tst0
+          source_path: /etc/ceph/ceph.mon.keyring
+          dest_path: /etc/ceph/ceph.mon.keyring
+          owner: root
+          group: root
+          mode: "0600"

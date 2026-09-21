@@ -23,6 +23,14 @@ enum Task:
   case SetFact(key: String, value: String)
   case RunCommand(command: List[String], timeoutSeconds: Int = 60)
   case DumpFacts()
+  case DistributeFile(
+      sourceNode: String,
+      sourcePath: String,
+      destPath: String,
+      owner: String = "",
+      group: String = "",
+      mode: Int = 0
+  )
   case Debug(message: String)
 
 case class FactCondition(

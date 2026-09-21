@@ -7,6 +7,7 @@ import cats.effect.std.Queue
 import fs2.Stream
 import java.nio.file.*
 import java.nio.file.attribute.*
+import scala.concurrent.duration.*
 import scala.jdk.CollectionConverters.*
 import orphera.common.*
 
@@ -56,9 +57,17 @@ object FileTransfer:
         )
         try contentChunks.foreach(chunk => out.write(chunk.toByteArray))
         finally out.close()
-      }
+      }.timeoutTo(
+        30.seconds,
+        IO.raiseError(new RuntimeException(s"Timed out writing content for ${metadata.destPath}"))
+      )
 
-      _ <- applyAttributes(tmpPath, metadata)
+      _ <- applyAttributes(tmpPath, metadata).timeoutTo(
+        10.seconds,
+        IO.raiseError(new RuntimeException(
+          s"Timed out setting owner/group/mode on ${metadata.destPath} — possible NSS/principal-lookup hang"
+        ))
+      )
 
       _ <- IO.blocking {
         Files.move(
@@ -67,7 +76,10 @@ object FileTransfer:
           StandardCopyOption.REPLACE_EXISTING,
           StandardCopyOption.ATOMIC_MOVE
         )
-      }
+      }.timeoutTo(
+        10.seconds,
+        IO.raiseError(new RuntimeException(s"Timed out moving temp file into place at ${metadata.destPath}"))
+      )
 
       _ <- queue.offer(
         Event(Event.Kind.RESULT, "OK", exitCode = 0, success = true)
