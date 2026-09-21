@@ -1,0 +1,5 @@
+name: group-vars-check
+nodes: [tst0, tst1, tst2, tst4]
+tasks:
+  - name: dump everything
+    dump_facts: {}

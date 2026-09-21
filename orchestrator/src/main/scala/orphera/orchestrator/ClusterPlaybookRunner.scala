@@ -247,11 +247,13 @@ object ClusterPlaybookRunner:
     val nodesMap: java.util.Map[String, Any] =
       allNodeNames
         .map { nodeName =>
-          val inventoryFields: Map[String, Any] =
+          val groupFields: Map[String, Any] = Inventory.groupVarsFor(nodeName)
+          val nodeFields: Map[String, Any] =
             Inventory.all
               .find(_.name == nodeName)
               .map(_.vars)
               .getOrElse(Map.empty)
+          val inventoryFields: Map[String, Any] = groupFields ++ nodeFields
 
           val factFields: Map[String, Any] =
             context.factsByNode.get(nodeName) match
