@@ -9,7 +9,9 @@ import java.nio.file.{Files, Paths}
 
 object ClusterPlaybookYaml:
 
-  private def decodeHealthCheck(c: HCursor): Either[DecodingFailure, HealthCheck] =
+  private def decodeHealthCheck(
+      c: HCursor
+  ): Either[DecodingFailure, HealthCheck] =
     for
       pollInterval <- c.getOrElse[Int]("poll_interval")(5)
       timeout <- c.getOrElse[Int]("timeout")(120)
@@ -21,7 +23,13 @@ object ClusterPlaybookYaml:
           for
             command <- c.get[List[String]]("command")
             required <- c.get[Int]("required")
-          yield HealthCheck.Quorum(nodes, command, required, pollInterval, timeout)
+          yield HealthCheck.Quorum(
+            nodes,
+            command,
+            required,
+            pollInterval,
+            timeout
+          )
 
         case None =>
           for
@@ -29,12 +37,20 @@ object ClusterPlaybookYaml:
             commandOpt <- c.get[Option[List[String]]]("command")
             r <- commandOpt match
               case Some(command) =>
-                Right(HealthCheck.Command(onNode, command, pollInterval, timeout))
+                Right(
+                  HealthCheck.Command(onNode, command, pollInterval, timeout)
+                )
               case None =>
                 for
                   sentinelPath <- c.get[String]("sentinel_path")
                   expectedSha256 <- c.get[String]("expected_sha256")
-                yield HealthCheck.Sentinel(onNode, sentinelPath, expectedSha256, pollInterval, timeout)
+                yield HealthCheck.Sentinel(
+                  onNode,
+                  sentinelPath,
+                  expectedSha256,
+                  pollInterval,
+                  timeout
+                )
           yield r
     yield result
 

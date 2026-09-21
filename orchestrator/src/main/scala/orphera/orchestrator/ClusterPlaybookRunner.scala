@@ -195,16 +195,39 @@ object ClusterPlaybookRunner:
             s"[${node.name}] ${namedTask.name}:\n${FactPrinter.render(vars)}"
           )
         }
-      case Task.DistributeFile(sourceNodeName, sourcePath, destPath, owner, group, mode) =>
+      case Task.DistributeFile(
+            sourceNodeName,
+            sourcePath,
+            destPath,
+            owner,
+            group,
+            mode
+          ) =>
         Inventory.all.find(_.name == sourceNodeName) match
           case None =>
-            IO.raiseError(new RuntimeException(s"DistributeFile source node '$sourceNodeName' not found in inventory"))
+            IO.raiseError(
+              new RuntimeException(
+                s"DistributeFile source node '$sourceNodeName' not found in inventory"
+              )
+            )
           case Some(sourceNode) =>
             NodeClient.fetchFileBytes(sourceNode, sourcePath).flatMap {
               case Left(err) =>
-                IO.raiseError(new RuntimeException(s"Failed to fetch $sourcePath from $sourceNodeName: $err"))
+                IO.raiseError(
+                  new RuntimeException(
+                    s"Failed to fetch $sourcePath from $sourceNodeName: $err"
+                  )
+                )
               case Right(content) =>
-                NodeClient.copyBytes(node, content, destPath, owner, group, mode, render)
+                NodeClient.copyBytes(
+                  node,
+                  content,
+                  destPath,
+                  owner,
+                  group,
+                  mode,
+                  render
+                )
             }
       case Task.RunCommand(command, timeoutSeconds) =>
         NodeClient.executeCommand(node, command, timeoutSeconds, render)
@@ -304,53 +327,85 @@ object ClusterPlaybookRunner:
 
     byName + ("ip_secondary" -> secondary)
 
-  private def waitForHealthy(stageName: String, check: HealthCheck): IO[Boolean] =
+  private def waitForHealthy(
+      stageName: String,
+      check: HealthCheck
+  ): IO[Boolean] =
     check match
 
-      case HealthCheck.Quorum(nodeNames, command, requiredCount, pollIntervalSeconds, timeoutSeconds) =>
+      case HealthCheck.Quorum(
+            nodeNames,
+            command,
+            requiredCount,
+            pollIntervalSeconds,
+            timeoutSeconds
+          ) =>
         val nodes = Inventory.all.filter(n => nodeNames.contains(n.name))
         val missing = nodeNames.filterNot(name => nodes.exists(_.name == name))
 
         if missing.nonEmpty then
-          IO.println(s"[$stageName] Quorum check node(s) not found in inventory: ${missing.mkString(", ")}") >>
+          IO.println(
+            s"[$stageName] Quorum check node(s) not found in inventory: ${missing.mkString(", ")}"
+          ) >>
             IO.pure(false)
         else
           IO.println(
             s"[$stageName] Waiting for quorum: $requiredCount of ${nodes.length} (${nodeNames.mkString(", ")}) (timeout ${timeoutSeconds}s)..."
           ) >>
-            pollQuorum(stageName, nodes, command, requiredCount, pollIntervalSeconds, timeoutSeconds, elapsed = 0)
+            pollQuorum(
+              stageName,
+              nodes,
+              command,
+              requiredCount,
+              pollIntervalSeconds,
+              timeoutSeconds,
+              elapsed = 0
+            )
 
       case single =>
         val onNode = single match
           case HealthCheck.Sentinel(n, _, _, _, _) => n
           case HealthCheck.Command(n, _, _, _)     => n
-          case _                                    => "" // unreachable, Quorum handled above
+          case _ => "" // unreachable, Quorum handled above
 
         val timeoutSeconds = single match
           case HealthCheck.Sentinel(_, _, _, _, t) => t
           case HealthCheck.Command(_, _, _, t)     => t
-          case _                                    => 0
+          case _                                   => 0
 
         Inventory.all.find(_.name == onNode) match
           case None =>
-            IO.println(s"[$stageName] Health check node '$onNode' not found in inventory.") >>
+            IO.println(
+              s"[$stageName] Health check node '$onNode' not found in inventory."
+            ) >>
               IO.pure(false)
           case Some(n) =>
-            IO.println(s"[$stageName] Waiting for health check on $onNode (timeout ${timeoutSeconds}s)...") >>
+            IO.println(
+              s"[$stageName] Waiting for health check on $onNode (timeout ${timeoutSeconds}s)..."
+            ) >>
               pollHealthy(stageName, n, single, elapsed = 0)
 
-  private def pollHealthy(stageName: String, node: Node, check: HealthCheck, elapsed: Int): IO[Boolean] =
+  private def pollHealthy(
+      stageName: String,
+      node: Node,
+      check: HealthCheck,
+      elapsed: Int
+  ): IO[Boolean] =
     val (pollIntervalSeconds, timeoutSeconds) = check match
       case HealthCheck.Sentinel(_, _, _, p, t) => (p, t)
       case HealthCheck.Command(_, _, p, t)     => (p, t)
       case HealthCheck.Quorum(_, _, _, p, t)   => (p, t)
 
     if elapsed >= timeoutSeconds then
-      IO.println(s"[$stageName] Health check timed out after ${timeoutSeconds}s") >> IO.pure(false)
+      IO.println(
+        s"[$stageName] Health check timed out after ${timeoutSeconds}s"
+      ) >> IO.pure(false)
     else
       checkOnce(node, check).attempt.flatMap {
         case Right(true) =>
-          IO.println(s"[$stageName] Healthy after ~${elapsed}s") >> IO.pure(true)
+          IO.println(s"[$stageName] Healthy after ~${elapsed}s") >> IO.pure(
+            true
+          )
         case _ =>
           IO.sleep(pollIntervalSeconds.seconds) >>
             pollHealthy(stageName, node, check, elapsed + pollIntervalSeconds)
@@ -365,12 +420,15 @@ object ClusterPlaybookRunner:
         collectExitCode(node, command).map(_ == 0)
 
       case HealthCheck.Quorum(_, _, _, _, _) =>
-        IO.raiseError(new IllegalStateException("Quorum checks are polled via pollQuorum, not checkOnce"))
+        IO.raiseError(
+          new IllegalStateException(
+            "Quorum checks are polled via pollQuorum, not checkOnce"
+          )
+        )
 
-  /** Checks every node in `nodes` once per round, counting how many
-    * report the command exiting 0. Proceeds as soon as the count
-    * reaches `requiredCount` — does not wait for slower/unreachable
-    * nodes once quorum is already met.
+  /** Checks every node in `nodes` once per round, counting how many report the
+    * command exiting 0. Proceeds as soon as the count reaches `requiredCount` —
+    * does not wait for slower/unreachable nodes once quorum is already met.
     */
   private def pollQuorum(
       stageName: String,
@@ -382,7 +440,9 @@ object ClusterPlaybookRunner:
       elapsed: Int
   ): IO[Boolean] =
     if elapsed >= timeoutSeconds then
-      IO.println(s"[$stageName] Quorum check timed out after ${timeoutSeconds}s") >> IO.pure(false)
+      IO.println(
+        s"[$stageName] Quorum check timed out after ${timeoutSeconds}s"
+      ) >> IO.pure(false)
     else
       nodes
         .parTraverse { node =>
@@ -402,7 +462,15 @@ object ClusterPlaybookRunner:
               s"[$stageName] Quorum check: ${healthy.length}/$requiredCount healthy so far (${healthy.mkString(", ")})"
             ) >>
               IO.sleep(pollIntervalSeconds.seconds) >>
-              pollQuorum(stageName, nodes, command, requiredCount, pollIntervalSeconds, timeoutSeconds, elapsed + pollIntervalSeconds)
+              pollQuorum(
+                stageName,
+                nodes,
+                command,
+                requiredCount,
+                pollIntervalSeconds,
+                timeoutSeconds,
+                elapsed + pollIntervalSeconds
+              )
         }
 
   private def collectExitCode(node: Node, command: List[String]): IO[Int] =

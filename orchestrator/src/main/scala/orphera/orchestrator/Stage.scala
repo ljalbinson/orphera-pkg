@@ -23,11 +23,12 @@ enum HealthCheck:
       pollIntervalSeconds: Int = 5,
       timeoutSeconds: Int = 120
   )
-  /** Waits until at least `requiredCount` of `nodes` each report the
-    * given command exiting 0 — a real quorum gate, as opposed to
-    * Command's single-node check. Each poll round checks every node
-    * in `nodes` once; the stage proceeds as soon as the healthy count
-    * reaches `requiredCount`, without waiting for the rest.
+
+  /** Waits until at least `requiredCount` of `nodes` each report the given
+    * command exiting 0 — a real quorum gate, as opposed to Command's
+    * single-node check. Each poll round checks every node in `nodes` once; the
+    * stage proceeds as soon as the healthy count reaches `requiredCount`,
+    * without waiting for the rest.
     */
   case Quorum(
       nodes: List[String],
