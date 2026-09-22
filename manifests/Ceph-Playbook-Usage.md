@@ -1,7 +1,11 @@
 # Ceph mon cluster — playbook usage
 
 Four playbooks bring up (or tear down) a 3-node Ceph mon quorum on
-`tst0`, `tst1`, `tst4`. Run in order.
+`tst0`, `tst1`, `tst4`. Run in order. Available as both YAML
+(`ceph-*.yaml`) and Scala DSL (`ceph_*.scala`) — both compile to the
+identical `ClusterPlaybook`/`Task` values and run through the same
+engine, so pick whichever front-end you're maintaining; they're not
+required to be kept in sync going forward.
 
 ## Cold start
 
@@ -9,6 +13,14 @@ Four playbooks bring up (or tear down) a 3-node Ceph mon quorum on
 orphera cluster-playbook manifests/ceph-mon-keyring.yaml
 orphera cluster-playbook manifests/ceph-mon-quorum.yaml
 orphera cluster-playbook manifests/ceph-admin-keyring.yaml
+```
+
+Or the DSL equivalent (needs `sbt orchestrator/assembly` and
+`sbt scripting/assembly` built first):
+```bash
+orphera cluster-playbook manifests/ceph_mon_keyring.scala
+orphera cluster-playbook manifests/ceph_mon_quorum.scala
+orphera cluster-playbook manifests/ceph_admin_keyring.scala
 ```
 
 Verify:
@@ -21,25 +33,29 @@ at this point (no OSDs, insecure global_id reclaim, msgr2 not enabled)
 
 ## What each playbook does
 
-- **`ceph-mon-keyring.yaml`** — installs `ceph-common` (pinned to
-  `{{ceph_version}}` from `inventory.yaml`), generates the mon cluster
-  secret once on `tst0`, distributes it verbatim to `tst1`/`tst4`.
-- **`ceph-mon-quorum.yaml`** — installs `ceph-mon`/`ceph-base`,
-  generates `ceph.conf`/monmap from each node's `cluster_ip` (real
-  addresses, not `download.ceph.com` — that repo doesn't publish a
-  `noble` build, don't reintroduce it), distributes both, runs
-  `--mkfs` on all three, starts the daemons, polls for 2-of-3 quorum.
-- **`ceph-admin-keyring.yaml`** — creates and registers `client.admin`
-  via an authenticated `mon.` connection on `tst0`, distributes the
-  resulting keyring to `tst1`/`tst4`. Must run *after* quorum is up —
-  it needs a live, authenticated connection to the running cluster,
-  not just local files.
-- **`ceph-teardown.yaml`** — stops the mon service, wipes mon data and
-  every `/etc/ceph/*` file, purges `ceph-mon`/`ceph-base`/`ceph-common`
-  plus their autoremoved dependencies, removes `/var/lib/ceph`,
-  `/var/log/ceph`, `/var/run/ceph`. Leaves the `/etc/ceph` directory
-  itself in place (only clears its contents) — package reinstalls
-  don't reliably recreate a deleted directory.
+- **`ceph-mon-keyring.yaml` / `ceph_mon_keyring.scala`** — installs
+  `ceph-common` (pinned to `{{ceph_version}}` from `inventory.yaml`),
+  generates the mon cluster secret once on `tst0`, distributes it
+  verbatim to `tst1`/`tst4`.
+- **`ceph-mon-quorum.yaml` / `ceph_mon_quorum.scala`** — installs
+  `ceph-mon`/`ceph-base`, generates `ceph.conf`/monmap from each
+  node's `cluster_ip` (real addresses, not `download.ceph.com` — that
+  repo doesn't publish a `noble` build, don't reintroduce it; fsid is
+  generated via `/proc/sys/kernel/random/uuid`, no Python dependency),
+  distributes both, runs `--mkfs` on all three, starts the daemons,
+  polls for 2-of-3 quorum.
+- **`ceph-admin-keyring.yaml` / `ceph_admin_keyring.scala`** — creates
+  and registers `client.admin` via an authenticated `mon.` connection
+  on `tst0`, distributes the resulting keyring to `tst1`/`tst4`. Must
+  run *after* quorum is up — it needs a live, authenticated connection
+  to the running cluster, not just local files.
+- **`ceph-teardown.yaml` / `ceph_teardown.scala`** — stops the mon
+  service, wipes mon data and every `/etc/ceph/*` file, purges
+  `ceph-mon`/`ceph-base`/`ceph-common` plus their autoremoved
+  dependencies, removes `/var/lib/ceph`, `/var/log/ceph`,
+  `/var/run/ceph`. Leaves the `/etc/ceph` directory itself in place
+  (only clears its contents) — package reinstalls don't reliably
+  recreate a deleted directory.
 
 ## Full reset
 
@@ -49,6 +65,7 @@ orphera cluster-playbook manifests/ceph-mon-keyring.yaml
 orphera cluster-playbook manifests/ceph-mon-quorum.yaml
 orphera cluster-playbook manifests/ceph-admin-keyring.yaml
 ```
+(or the four `ceph_*.scala` equivalents, same order)
 
 ## If a run fails partway through
 
@@ -81,3 +98,6 @@ node back into a state matching the other two.
   reachable between all three hosts — a stale or wrong IP here breaks
   everything downstream (`ceph.conf`, monmap, daemon startup) and
   won't surface as a clear error until `mkfs-and-start`.
+- No Python dependency anywhere in these playbooks — fsid generation
+  uses `/proc/sys/kernel/random/uuid`, available on any Linux host
+  with no extra packages.

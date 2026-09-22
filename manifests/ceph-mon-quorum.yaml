@@ -19,7 +19,7 @@ stages:
             - sh
             - -c
             - |
-              FSID=$(python3 -c 'import uuid; print(uuid.uuid4())')
+              FSID=$(cat /proc/sys/kernel/random/uuid)
               cat > /etc/ceph/ceph.conf <<EOF
               [global]
               fsid = $FSID
