@@ -1,0 +1,43 @@
+name: ceph-teardown
+
+stages:
+  - name: stop-and-wipe
+    nodes: [tst0, tst1, tst4]
+    tasks:
+      - name: stop mon service
+        run_command:
+          command: ["sh", "-c", "systemctl stop ceph-mon@$(hostname -s) 2>/dev/null; systemctl reset-failed ceph-mon@$(hostname -s) 2>/dev/null; true"]
+
+      - name: remove mon data and ceph config
+        run_command:
+          command:
+            - sh
+            - -c
+            - |
+              MONID=$(hostname -s)
+              rm -rf /var/lib/ceph/mon/ceph-$MONID
+              rm -f /etc/ceph/ceph.conf /etc/ceph/monmap /etc/ceph/fsid
+              rm -f /etc/ceph/ceph.mon.keyring /etc/ceph/ceph.client.admin.keyring
+              true
+
+  - name: remove-packages
+    nodes: [tst0, tst1, tst4]
+    tasks:
+      - name: purge ceph packages
+        remove:
+          packages: [ceph-mon, ceph-base, ceph-common]
+          purge: true
+
+      - name: autoremove leftover dependencies
+        autoremove:
+          purge: true
+
+      - name: remove remaining ceph directories
+        run_command:
+          command:
+            - sh
+            - -c
+            - |
+              rm -rf /var/lib/ceph /var/log/ceph /var/run/ceph
+              rm -rf /etc/ceph/*
+              true

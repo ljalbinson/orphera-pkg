@@ -2,23 +2,23 @@ nodes:
   - name: tst0
     host: tst0.ljalbinson.com
     vars:
-      cluster_ip: "10.0.5.11"
+      cluster_ip: "10.10.5.12"
       ceph_role: mon-leader
 
   - name: tst1
     host: tst1.ljalbinson.com
     vars:
-      cluster_ip: "10.0.5.13"
+      cluster_ip: "10.10.5.13"
 
   - name: tst2
     host: tst2.ljalbinson.com
     vars:
-      cluster_ip: "10.0.5.15"
+      cluster_ip: "10.10.5.14"
 
   - name: tst4
     host: tst4.ljalbinson.com
     vars:
-      cluster_ip: "10.0.5.17"
+      cluster_ip: "10.10.5.16"
 
 groups:
   - name: mons

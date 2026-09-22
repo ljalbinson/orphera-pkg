@@ -4,7 +4,7 @@ stages:
   - name: install-tools
     nodes: [tst0, tst1, tst4]
     tasks:
-      - name: install ceph-common (pinned version)
+      - name: install ceph-common
         install:
           packages: [ceph-common]
           version: "{{ceph_version}}"

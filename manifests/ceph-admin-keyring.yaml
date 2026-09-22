@@ -1,0 +1,28 @@
+name: ceph-admin-keyring
+
+stages:
+  - name: generate-and-register
+    nodes: [tst0]
+    tasks:
+      - name: create and register client.admin via mon. auth
+        run_command:
+          command:
+            - sh
+            - -c
+            - |
+              ceph --name mon. --keyring /var/lib/ceph/mon/ceph-tst0/keyring \
+                auth get-or-create client.admin \
+                mon 'allow *' osd 'allow *' mds 'allow *' mgr 'allow *' \
+                -o /etc/ceph/ceph.client.admin.keyring
+
+  - name: distribute
+    nodes: [tst1, tst4]
+    tasks:
+      - name: distribute admin keyring from tst0
+        distribute_file:
+          source_node: tst0
+          source_path: /etc/ceph/ceph.client.admin.keyring
+          dest_path: /etc/ceph/ceph.client.admin.keyring
+          owner: root
+          group: root
+          mode: "0600"
