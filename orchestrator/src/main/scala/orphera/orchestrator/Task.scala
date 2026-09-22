@@ -3,7 +3,11 @@
 package orphera.orchestrator
 
 enum Task:
-  case Install(packages: List[String], updateCache: Boolean = false, version: String = "")
+  case Install(
+      packages: List[String],
+      updateCache: Boolean = false,
+      version: String = ""
+  )
   case Remove(packages: List[String], purge: Boolean = false)
   case AutoRemove(purge: Boolean = false)
   case Copy(

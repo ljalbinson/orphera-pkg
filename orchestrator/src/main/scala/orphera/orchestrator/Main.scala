@@ -173,11 +173,14 @@ object Main extends IOApp:
         }
 
       case Right(Command.RunClusterPlaybook(path)) =>
-        ClusterPlaybookYaml.load(path) match
-          case Left(err) =>
-            IO.println(s"Error: $err") >> IO.pure(ExitCode.Error)
-          case Right(pb) =>
-            ClusterPlaybookRunner.run(pb) >> IO.pure(ExitCode.Success)
+        if path.endsWith(".scala") then
+          runScalaPlaybookScript(path)
+        else
+          ClusterPlaybookYaml.load(path) match
+            case Left(err) =>
+              IO.println(s"Error: $err") >> IO.pure(ExitCode.Error)
+            case Right(pb) =>
+              ClusterPlaybookRunner.run(pb) >> IO.pure(ExitCode.Success)
 
       case Right(Command.RunCommand(command, nodeNames, timeoutSeconds)) =>
         withTargets(nodeNames) { targets =>
