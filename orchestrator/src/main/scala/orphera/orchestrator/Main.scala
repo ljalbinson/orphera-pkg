@@ -178,8 +178,7 @@ object Main extends IOApp:
         }
 
       case Right(Command.RunClusterPlaybook(path)) =>
-        if path.endsWith(".scala") then
-          runScalaPlaybookScript(path)
+        if path.endsWith(".scala") then runScalaPlaybookScript(path)
         else
           ClusterPlaybookYaml.load(path) match
             case Left(err) =>

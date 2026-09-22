@@ -12,13 +12,23 @@ object ClusterPlaybookDsl:
   ):
 
     def task(taskName: String)(t: Task): StageBuilder =
-      new StageBuilder(name, nodes, tasks :+ NamedTask(taskName, t), waitForCheck)
+      new StageBuilder(
+        name,
+        nodes,
+        tasks :+ NamedTask(taskName, t),
+        waitForCheck
+      )
 
     /** Attaches a `when:` condition to the most recently added task. */
     def when(condition: FactCondition): StageBuilder =
       tasks.lastOption match
         case Some(last) =>
-          new StageBuilder(name, nodes, tasks.init :+ last.copy(when = Some(condition)), waitForCheck)
+          new StageBuilder(
+            name,
+            nodes,
+            tasks.init :+ last.copy(when = Some(condition)),
+            waitForCheck
+          )
         case None =>
           this
 
@@ -39,4 +49,5 @@ object ClusterPlaybookDsl:
 
   extension (key: String)
     def ===(value: String): FactCondition = FactCondition(key, value)
-    def =!=(value: String): FactCondition = FactCondition(key, value, negate = true)
+    def =!=(value: String): FactCondition =
+      FactCondition(key, value, negate = true)
