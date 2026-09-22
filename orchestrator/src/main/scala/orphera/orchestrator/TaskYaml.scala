@@ -16,7 +16,8 @@ object TaskYaml:
         for
           packages <- body.get[List[String]]("packages")
           updateCache <- body.getOrElse[Boolean]("update_cache")(false)
-        yield Task.Install(packages, updateCache)
+          version <- body.getOrElse[String]("version")("")
+        yield Task.Install(packages, updateCache, version)
 
       case "remove" =>
         for
