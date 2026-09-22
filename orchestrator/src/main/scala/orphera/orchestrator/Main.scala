@@ -9,6 +9,11 @@ import java.nio.file.Paths
 object Main extends IOApp:
 
   def run(args: List[String]): IO[ExitCode] =
+    dispatch(args).handleErrorWith { err =>
+      IO.println(s"Error: ${err.getMessage}") >> IO.pure(ExitCode.Error)
+    }
+
+  private def dispatch(args: List[String]): IO[ExitCode] =
     Cli.parse(args) match
 
       case Left(error) =>

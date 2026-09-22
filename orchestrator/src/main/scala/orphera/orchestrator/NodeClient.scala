@@ -84,6 +84,8 @@ object NodeClient:
       val digest = java.security.MessageDigest.getInstance("SHA-256")
       val bytes = java.nio.file.Files.readAllBytes(path)
       digest.digest(bytes).map(b => f"$b%02x").mkString
+    }.adaptError { case e: java.nio.file.NoSuchFileException =>
+      new RuntimeException(s"Local file not found: $path")
     }
 
   def copyFile(
