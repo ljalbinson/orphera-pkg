@@ -21,7 +21,7 @@ object ceph_teardown extends OrpheraClusterPlaybook:
   val playbook: ClusterPlaybook =
     clusterPlaybook("ceph-teardown")(
 
-      stage("stop-and-wipe", "tst0", "tst1", "tst4")
+      stage("stop-and-wipe", "tst0", "tst1", "tst2")
         .task("stop mon service")(
           Task.RunCommand(List("sh", "-c", stopMonServiceScript))
         )
@@ -30,7 +30,7 @@ object ceph_teardown extends OrpheraClusterPlaybook:
         )
         .build,
 
-      stage("remove-packages", "tst0", "tst1", "tst4")
+      stage("remove-packages", "tst0", "tst1", "tst2")
         .task("purge ceph packages")(
           Task.Remove(packages = List("ceph-mon", "ceph-base", "ceph-common"), purge = true)
         )

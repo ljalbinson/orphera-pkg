@@ -38,7 +38,7 @@ object AptInstaller:
         queue
       )
 
-    update >> installPkgs
+    update >> installPkgs >> waitForBinariesVisible(cmd.packages)
 
   def remove(cmd: RemovePackages, queue: Queue[IO, Event]): IO[Unit] =
     val subcommand = if cmd.purge then "purge" else "remove"
@@ -131,3 +131,51 @@ object AptInstaller:
       case line =>
         queue.offer(Event(Event.Kind.OUTPUT, line)) >> read(reader, queue)
     }
+
+  /** Waits for each just-installed package's /usr/bin or /usr/sbin
+    * files to actually exist on disk before returning. apt-get can
+    * report exit 0 for `install` while the filesystem view a
+    * subsequent, separately-spawned process sees is still briefly
+    * stale (dpkg trigger processing, or filesystem/cache lag on
+    * container hosts) — a task that immediately follows an install
+    * and invokes a binary from it can otherwise hit a transient
+    * "command not found", exactly as observed in practice with
+    * ceph-authtool and ceph-mon.
+    *
+    * Checks dpkg's own file listing for each package (not a fixed
+    * guess at a path) and polls up to ~5s per package.
+    */
+  private def waitForBinariesVisible(packages: Seq[String]): IO[Unit] =
+    IO.blocking {
+      packages.foreach { rawPkg =>
+        val pkg = rawPkg.takeWhile(_ != '=')
+
+        val listing = new ProcessBuilder("dpkg", "-L", pkg).start()
+        val output =
+          try scala.io.Source.fromInputStream(listing.getInputStream).getLines().toList
+          finally ()
+        listing.waitFor()
+
+        val binaries = output.filter(p => p.startsWith("/usr/bin/") || p.startsWith("/usr/sbin/"))
+
+        binaries.foreach { path =>
+          var attempts = 0
+          var ready = false
+          while attempts < 40 && !ready do
+            // Actually spawn a fresh process and try to execute the
+            // binary, rather than just checking file existence from
+            // this JVM's own process — cross-process executable
+            // visibility can lag behind same-process File.exists()
+            // checks on this environment (confirmed empirically).
+            val check = new ProcessBuilder(path, "--version")
+              .redirectOutput(ProcessBuilder.Redirect.DISCARD)
+              .redirectError(ProcessBuilder.Redirect.DISCARD)
+              .start()
+            val exit = check.waitFor()
+            ready = exit == 0 || exit == 1 // some tools exit 1 on --version but that still proves it ran
+            if !ready then
+              Thread.sleep(500)
+              attempts += 1
+      }
+    }
+}

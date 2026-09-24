@@ -16,7 +16,7 @@ stages:
                 -o /etc/ceph/ceph.client.admin.keyring
 
   - name: distribute
-    nodes: [tst1, tst4]
+    nodes: [tst1, tst2]
     tasks:
       - name: distribute admin keyring from tst0
         distribute_file:

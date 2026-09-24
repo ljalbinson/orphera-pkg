@@ -1,0 +1,17 @@
+name: ceph-health-fixes
+
+stages:
+  - name: apply-fixes
+    nodes: [tst0]
+    tasks:
+      - name: disable insecure global_id reclaim
+        run_command:
+          command: ["sh", "-c", "ceph config set mon auth_allow_insecure_global_id_reclaim false"]
+
+      - name: enable msgr2
+        run_command:
+          command: ["sh", "-c", "ceph mon enable-msgr2"]
+
+      - name: confirm clean health
+        run_command:
+          command: ["sh", "-c", "ceph -s"]

@@ -15,10 +15,20 @@ nodes:
     vars:
       cluster_ip: "10.10.5.14"
 
+  - name: tst3
+    host: tst3.ljalbinson.com
+    vars:
+      cluster_ip: "10.10.5.15"
+
   - name: tst4
     host: tst4.ljalbinson.com
     vars:
       cluster_ip: "10.10.5.16"
+
+  - name: tst5
+    host: tst5.ljalbinson.com
+    vars:
+      cluster_ip: "10.10.5.17"
 
 groups:
   - name: mons

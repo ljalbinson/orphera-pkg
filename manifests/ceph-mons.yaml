@@ -2,7 +2,7 @@ name: ceph-mons
 
 stages:
   - name: bootstrap-mons
-    nodes: [tst0, tst1, tst4]
+    nodes: [tst0, tst1, tst2]
     tasks:
       - name: write per-mon quorum marker
         run_command:
@@ -11,7 +11,7 @@ stages:
   - name: after-quorum
     nodes: [tst2]
     wait_for:
-      nodes: [tst0, tst1, tst4]
+      nodes: [tst0, tst1, tst2]
       command: ["test", "-f", "/tmp/mon-ready"]
       required: 2
       poll_interval: 5

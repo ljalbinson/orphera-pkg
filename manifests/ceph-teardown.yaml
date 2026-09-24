@@ -2,7 +2,7 @@ name: ceph-teardown
 
 stages:
   - name: stop-and-wipe
-    nodes: [tst0, tst1, tst4]
+    nodes: [tst0, tst1, tst2]
     tasks:
       - name: stop mon service
         run_command:
@@ -21,7 +21,7 @@ stages:
               true
 
   - name: remove-packages
-    nodes: [tst0, tst1, tst4]
+    nodes: [tst0, tst1, tst2]
     tasks:
       - name: purge ceph packages
         remove:

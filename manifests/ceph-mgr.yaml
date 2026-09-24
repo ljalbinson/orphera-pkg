@@ -1,0 +1,43 @@
+name: ceph-mgr
+
+stages:
+  - name: install-mgr-daemon
+    nodes: [tst0]
+    tasks:
+      - name: install ceph-mgr
+        install:
+          packages: [ceph-mgr]
+          version: "{{ceph_version}}"
+          update_cache: true
+
+  - name: bootstrap-mgr
+    nodes: [tst0]
+    tasks:
+      - name: create mgr keyring and data dir
+        run_command:
+          command:
+            - sh
+            - -c
+            - |
+              MGRID=$(hostname -s)
+              mkdir -p /var/lib/ceph/mgr/ceph-$MGRID
+              sleep 10 && ceph auth get-or-create mgr.$MGRID \
+                mon 'allow profile mgr' osd 'allow *' mds 'allow *' \
+                -o /var/lib/ceph/mgr/ceph-$MGRID/keyring
+              chown -R ceph:ceph /var/lib/ceph/mgr/ceph-$MGRID
+
+      - name: enable and start mgr service
+        run_command:
+          command: ["sh", "-c", "systemctl reset-failed ceph-mgr@$(hostname -s) 2>/dev/null; systemctl enable --now ceph-mgr@$(hostname -s)"]
+
+  - name: confirm-mgr
+    nodes: [tst0]
+    wait_for:
+      on_node: tst0
+      command: ["sh", "-c", "ceph -s 2>/dev/null | grep -q 'mgr:.*active'"]
+      poll_interval: 5
+      timeout: 60
+    tasks:
+      - name: mgr confirmed
+        debug:
+          message: "Mgr daemon active."

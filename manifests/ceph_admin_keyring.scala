@@ -18,7 +18,7 @@ object ceph_admin_keyring extends OrpheraClusterPlaybook:
         )
         .build,
 
-      stage("distribute", "tst1", "tst4")
+      stage("distribute", "tst1", "tst2")
         .task("distribute admin keyring from tst0")(
           Task.DistributeFile("tst0", "/etc/ceph/ceph.client.admin.keyring", "/etc/ceph/ceph.client.admin.keyring", "root", "root", 384)
         )

@@ -1,0 +1,71 @@
+name: ceph-osd
+
+stages:
+  - name: bootstrap-osd-keyring
+    nodes: [tst0]
+    tasks:
+      - name: extract existing bootstrap-osd keyring
+        run_command:
+          command:
+            - sh
+            - -c
+            - |
+              mkdir -p /var/lib/ceph/bootstrap-osd
+              sleep 10 && ceph auth get client.bootstrap-osd -o /var/lib/ceph/bootstrap-osd/ceph.keyring
+
+  - name: distribute-osd-keyring
+    nodes: [tst1, tst2]
+    tasks:
+      - name: distribute bootstrap-osd keyring from tst0
+        run_command:
+          command: ["sh", "-c", "mkdir -p /var/lib/ceph/bootstrap-osd"]
+      - name: copy bootstrap-osd keyring
+        distribute_file:
+          source_node: tst0
+          source_path: /var/lib/ceph/bootstrap-osd/ceph.keyring
+          dest_path: /var/lib/ceph/bootstrap-osd/ceph.keyring
+          owner: ceph
+          group: ceph
+          mode: "0600"
+
+  - name: install-osd-daemon
+    nodes: [tst0, tst1, tst2]
+    tasks:
+      - name: install ceph-osd
+        install:
+          packages: [ceph-osd, ceph-base]
+          version: "{{ceph_version}}"
+          update_cache: true
+
+  - name: prepare-and-activate
+    nodes: [tst0, tst1, tst2]
+    tasks:
+      - name: confirm /dev/sdb is a real, unpartitioned block device
+        run_command:
+          command:
+            - sh
+            - -c
+            - |
+              test -b /dev/sdb || { echo "/dev/sdb is not a block device"; exit 1; }
+              if lsblk -no MOUNTPOINT /dev/sdb | grep -q .; then
+                echo "/dev/sdb appears to be mounted — refusing to proceed"
+                exit 1
+              fi
+
+      - name: create OSD on /dev/sdb
+        run_command:
+          command: ["sh", "-c", "sleep 10 && ceph-volume lvm create --data /dev/sdb"]
+          timeout: 300
+
+  - name: confirm-osds
+    nodes: [tst0]
+    wait_for:
+      nodes: [tst0, tst1, tst2]
+      command: ["sh", "-c", "ceph osd stat 2>/dev/null | grep -Eq '3 osds: 3 up'"]
+      required: 1
+      poll_interval: 5
+      timeout: 120
+    tasks:
+      - name: osds confirmed
+        debug:
+          message: "All 3 OSDs are up and in."

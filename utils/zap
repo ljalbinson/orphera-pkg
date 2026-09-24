@@ -1,0 +1,14 @@
+#!/bin/bash
+echo 0
+sudo lvremove -f -y /dev/ceph-*
+# sudo vgremove ceph-3a77194c-80d4-4847-b4bf-dc45a6e35e23
+echo 1
+sudo vgremove -f -y $(sudo vgs --noheadings -o vg_name)
+echo 2
+sudo pvremove -f -y /dev/sdb
+echo 3
+sudo wipefs -a /dev/sdb
+echo 4
+sudo sgdisk --zap-all /dev/sdb
+echo 5
+sudo dd if=/dev/zero of=/dev/sdb bs=1M count=100 oflag=direct

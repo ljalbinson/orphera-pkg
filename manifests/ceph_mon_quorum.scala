@@ -9,8 +9,8 @@ object ceph_mon_quorum extends OrpheraClusterPlaybook:
       |cat > /etc/ceph/ceph.conf <<EOF
       |[global]
       |fsid = $FSID
-      |mon_initial_members = tst0, tst1, tst4
-      |mon_host = {{cluster_ip}}, {{nodes.tst1.cluster_ip}}, {{nodes.tst4.cluster_ip}}
+      |mon_initial_members = tst0, tst1, tst2
+      |mon_host = {{cluster_ip}}, {{nodes.tst1.cluster_ip}}, {{nodes.tst2.cluster_ip}}
       |auth_cluster_required = cephx
       |auth_service_required = cephx
       |auth_client_required = cephx
@@ -22,7 +22,7 @@ object ceph_mon_quorum extends OrpheraClusterPlaybook:
       |monmaptool --create --clobber --fsid "$FSID" \
       |  --add tst0 {{cluster_ip}} \
       |  --add tst1 {{nodes.tst1.cluster_ip}} \
-      |  --add tst4 {{nodes.tst4.cluster_ip}} \
+      |  --add tst2 {{nodes.tst2.cluster_ip}} \
       |  /etc/ceph/monmap""".stripMargin
 
   private val mkfsScript =
@@ -45,7 +45,7 @@ object ceph_mon_quorum extends OrpheraClusterPlaybook:
   val playbook: ClusterPlaybook =
     clusterPlaybook("ceph-mon-quorum")(
 
-      stage("install-mon-daemon", "tst0", "tst1", "tst4")
+      stage("install-mon-daemon", "tst0", "tst1", "tst2")
         .task("install ceph-mon")(
           Task.Install(packages = List("ceph-mon", "ceph-base"), updateCache = true, version = "{{ceph_version}}")
         )
@@ -60,7 +60,7 @@ object ceph_mon_quorum extends OrpheraClusterPlaybook:
         )
         .build,
 
-      stage("distribute-mon-config", "tst1", "tst4")
+      stage("distribute-mon-config", "tst1", "tst2")
         .task("distribute ceph.conf from tst0")(
           Task.DistributeFile("tst0", "/etc/ceph/ceph.conf", "/etc/ceph/ceph.conf", "root", "root", 420)
         )
@@ -69,7 +69,7 @@ object ceph_mon_quorum extends OrpheraClusterPlaybook:
         )
         .build,
 
-      stage("mkfs-and-start", "tst0", "tst1", "tst4")
+      stage("mkfs-and-start", "tst0", "tst1", "tst2")
         .task("prepare mon data dir and mkfs")(
           Task.RunCommand(List("sh", "-c", mkfsScript))
         )
@@ -81,7 +81,7 @@ object ceph_mon_quorum extends OrpheraClusterPlaybook:
       stage("confirm-quorum", "tst0")
         .waitFor(
           HealthCheck.Quorum(
-            nodes = List("tst0", "tst1", "tst4"),
+            nodes = List("tst0", "tst1", "tst2"),
             command = List("sh", "-c", quorumCheckScript),
             requiredCount = 2,
             pollIntervalSeconds = 5,
