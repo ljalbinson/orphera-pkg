@@ -33,9 +33,17 @@ object CommandRunner:
 
         pb <- IO {
           val p = new ProcessBuilder(request.command*)
-          p.environment().put("PATH", "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
-          System.err.println(s"[DEBUG-CMD] argc=${request.command.length} args=${request.command.map(a => s"[$a]").mkString(" ")}")
-          System.err.println(s"[DEBUG-CMD] spawning: ${request.command.mkString(" ")} cwd=${p.directory()} PATH=${p.environment().get("PATH")}")
+          p.environment()
+            .put(
+              "PATH",
+              "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+            )
+          System.err.println(
+            s"[DEBUG-CMD] argc=${request.command.length} args=${request.command.map(a => s"[$a]").mkString(" ")}"
+          )
+          System.err.println(
+            s"[DEBUG-CMD] spawning: ${request.command.mkString(" ")} cwd=${p.directory()} PATH=${p.environment().get("PATH")}"
+          )
           p.redirectInput(ProcessBuilder.Redirect.PIPE)
           p
         }

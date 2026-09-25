@@ -132,18 +132,17 @@ object AptInstaller:
         queue.offer(Event(Event.Kind.OUTPUT, line)) >> read(reader, queue)
     }
 
-  /** Waits for each just-installed package's /usr/bin or /usr/sbin
-    * files to actually exist on disk before returning. apt-get can
-    * report exit 0 for `install` while the filesystem view a
-    * subsequent, separately-spawned process sees is still briefly
-    * stale (dpkg trigger processing, or filesystem/cache lag on
-    * container hosts) — a task that immediately follows an install
-    * and invokes a binary from it can otherwise hit a transient
-    * "command not found", exactly as observed in practice with
-    * ceph-authtool and ceph-mon.
+  /** Waits for each just-installed package's /usr/bin or /usr/sbin files to
+    * actually exist on disk before returning. apt-get can report exit 0 for
+    * `install` while the filesystem view a subsequent, separately-spawned
+    * process sees is still briefly stale (dpkg trigger processing, or
+    * filesystem/cache lag on container hosts) — a task that immediately follows
+    * an install and invokes a binary from it can otherwise hit a transient
+    * "command not found", exactly as observed in practice with ceph-authtool
+    * and ceph-mon.
     *
-    * Checks dpkg's own file listing for each package (not a fixed
-    * guess at a path) and polls up to ~5s per package.
+    * Checks dpkg's own file listing for each package (not a fixed guess at a
+    * path) and polls up to ~5s per package.
     */
   private def waitForBinariesVisible(packages: Seq[String]): IO[Unit] =
     IO.blocking {
@@ -152,11 +151,17 @@ object AptInstaller:
 
         val listing = new ProcessBuilder("dpkg", "-L", pkg).start()
         val output =
-          try scala.io.Source.fromInputStream(listing.getInputStream).getLines().toList
+          try
+            scala.io.Source
+              .fromInputStream(listing.getInputStream)
+              .getLines()
+              .toList
           finally ()
         listing.waitFor()
 
-        val binaries = output.filter(p => p.startsWith("/usr/bin/") || p.startsWith("/usr/sbin/"))
+        val binaries = output.filter(p =>
+          p.startsWith("/usr/bin/") || p.startsWith("/usr/sbin/")
+        )
 
         binaries.foreach { path =>
           var attempts = 0
@@ -172,10 +177,11 @@ object AptInstaller:
               .redirectError(ProcessBuilder.Redirect.DISCARD)
               .start()
             val exit = check.waitFor()
-            ready = exit == 0 || exit == 1 // some tools exit 1 on --version but that still proves it ran
+            ready =
+              exit == 0 || exit == 1 // some tools exit 1 on --version but that still proves it ran
             if !ready then
               Thread.sleep(500)
               attempts += 1
+        }
       }
     }
-}
