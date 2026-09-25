@@ -1,0 +1,53 @@
+name: cephadm-add-mons
+
+stages:
+  - name: prep-additional-hosts
+    nodes: [tst1, tst2]
+    tasks:
+      - name: install cephadm prerequisites
+        install:
+          packages: [python3, lvm2, chrony, podman]
+          update_cache: true
+
+      - name: distribute cluster ssh public key
+        distribute_file:
+          source_node: tst0
+          source_path: /etc/ceph/ceph.pub
+          dest_path: /root/.ssh/authorized_keys_cephadm_tmp
+          owner: root
+          group: root
+          mode: "0600"
+
+      - name: append cephadm key to authorized_keys
+        run_command:
+          command: ["sh", "-c", "cat /root/.ssh/authorized_keys_cephadm_tmp >> /root/.ssh/authorized_keys && rm /root/.ssh/authorized_keys_cephadm_tmp"]
+
+  - name: register-hosts
+    nodes: [tst0]
+    tasks:
+      - name: add tst1 to cephadm-managed hosts
+        run_command:
+          command: ["sh", "-c", "cephadm shell -- ceph orch host add tst1 {{nodes.tst1.cluster_ip}}"]
+          timeout: 120
+
+      - name: add tst2 to cephadm-managed hosts
+        run_command:
+          command: ["sh", "-c", "cephadm shell -- ceph orch host add tst2 {{nodes.tst2.cluster_ip}}"]
+          timeout: 120
+
+      - name: apply mon placement across all three hosts
+        run_command:
+          command: ["sh", "-c", "cephadm shell -- ceph orch apply mon --placement='tst0,tst1,tst2'"]
+
+  - name: confirm-quorum
+    nodes: [tst0]
+    wait_for:
+      nodes: [tst0, tst1, tst2]
+      command: ["sh", "-c", "cephadm shell -- ceph mon stat 2>/dev/null | grep -Eq 'e[0-9]+: 3 mons'"]
+      required: 1
+      poll_interval: 10
+      timeout: 300
+    tasks:
+      - name: quorum confirmed
+        debug:
+          message: "Cephadm-managed 3-mon quorum reached."

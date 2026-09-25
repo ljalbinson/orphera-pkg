@@ -1,0 +1,27 @@
+name: cephadm-add-osds
+
+stages:
+  - name: apply-osds
+    nodes: [tst0]
+    tasks:
+      - name: confirm all hosts have a spare /dev/sdb (informational)
+        run_command:
+          command: ["sh", "-c", "cephadm shell -- ceph orch device ls"]
+
+      - name: apply OSD spec across all available devices
+        run_command:
+          command: ["sh", "-c", "cephadm shell -- ceph orch apply osd --all-available-devices"]
+          timeout: 120
+
+  - name: confirm-osds
+    nodes: [tst0]
+    wait_for:
+      nodes: [tst0]
+      command: ["sh", "-c", "cephadm shell -- ceph osd stat 2>/dev/null | grep -Eq '3 osds: 3 up'"]
+      required: 1
+      poll_interval: 10
+      timeout: 300
+    tasks:
+      - name: osds confirmed
+        debug:
+          message: "All 3 OSDs provisioned via cephadm."

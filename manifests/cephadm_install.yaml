@@ -1,0 +1,19 @@
+name: cephadm-install
+
+stages:
+  - name: install-cephadm
+    nodes: [tst0]
+    tasks:
+      - name: add cephadm prerequisites
+        install:
+          packages: [python3, lvm2, chrony, podman]
+          update_cache: true
+
+      - name: install cephadm package
+        install:
+          packages: [cephadm]
+          version: "{{ceph_version}}"
+
+      - name: confirm cephadm is runnable
+        run_command:
+          command: ["sh", "-c", "cephadm --help >/dev/null && echo cephadm binary is functional"]

@@ -1,0 +1,18 @@
+name: cephadm-bootstrap
+
+stages:
+  - name: bootstrap
+    nodes: [tst0]
+    tasks:
+      - name: run cephadm bootstrap
+        run_command:
+          command:
+            - sh
+            - -c
+            - "cephadm bootstrap --mon-ip {{cluster_ip}} --initial-dashboard-user admin --initial-dashboard-password 'ChangeMe123!' --dashboard-password-noupdate --allow-fqdn-hostname"
+          timeout: 600
+
+      - name: confirm cluster is up
+        run_command:
+          command: ["sh", "-c", "cephadm shell -- ceph -s"]
+          timeout: 60

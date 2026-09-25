@@ -1,0 +1,16 @@
+name: cephadm-teardown
+
+stages:
+  - name: rm-cluster
+    nodes: [tst0]
+    tasks:
+      - name: remove the cephadm-managed cluster
+        run_command:
+          command: ["sh", "-c", "cephadm rm-cluster --fsid $(cephadm ls | python3 -c 'import json,sys; print(json.load(sys.stdin)[0][\"fsid\"])') --force"]
+
+  - name: cleanup-all-hosts
+    nodes: [tst0, tst1, tst4]
+    tasks:
+      - name: remove cephadm binary and remaining state
+        run_command:
+          command: ["sh", "-c", "rm -f /usr/local/bin/cephadm; rm -rf /var/lib/ceph /etc/ceph; true"]
