@@ -20,12 +20,50 @@ stages:
               rm -f /etc/ceph/ceph.mon.keyring /etc/ceph/ceph.client.admin.keyring
               true
 
+  - name: zap-osd-disks
+    nodes: [tst0, tst1, tst2]
+    tasks:
+      - name: stop OSD service(s)
+        run_command:
+          command:
+            - sh
+            - -c
+            - |
+              for u in $(systemctl list-units --all --plain --no-legend 'ceph-osd@*' 'ceph-volume@*' | awk '{print $1}'); do
+                systemctl stop "$u" 2>/dev/null
+                systemctl reset-failed "$u" 2>/dev/null
+              done
+              true
+
+      - name: zap /dev/sdb (destroy LV/VG/PV and wipe signatures)
+        run_command:
+          command:
+            - sh
+            - -c
+            - |
+              # Deliberately NOT calling `ceph-volume lvm zap` — it shells
+              # out to `udevadm settle` internally, which hangs
+              # indefinitely on these VMs (udev never fires the events it
+              # waits for). Do the same job directly with `timeout`
+              # guards on every LVM call so a stuck lock/device can never
+              # hang the whole teardown again.
+              for vg in $(timeout 10 pvs --noheadings -o vg_name /dev/sdb 2>/dev/null | tr -d ' '); do
+                [ -n "$vg" ] || continue
+                timeout 15 lvremove -f "$vg" 2>/dev/null
+                timeout 15 vgremove -f "$vg" 2>/dev/null
+              done
+              timeout 15 pvremove -ff -y /dev/sdb 2>/dev/null || true
+              wipefs -a /dev/sdb 2>/dev/null || true
+              dd if=/dev/zero of=/dev/sdb bs=1M count=10 oflag=direct,dsync 2>/dev/null || true
+              partprobe /dev/sdb 2>/dev/null || true
+              true
+
   - name: remove-packages
     nodes: [tst0, tst1, tst2]
     tasks:
       - name: purge ceph packages
         remove:
-          packages: [ceph-mon, ceph-base, ceph-common]
+          packages: [ceph-osd, ceph-mon, ceph-base, ceph-common]
           purge: true
 
       - name: autoremove leftover dependencies
