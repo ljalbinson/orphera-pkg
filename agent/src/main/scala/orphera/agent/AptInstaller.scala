@@ -12,33 +12,29 @@ object AptInstaller:
   def install(cmd: InstallPackages, queue: Queue[IO, Event]): IO[Unit] =
     val update =
       if cmd.updateCache then
-        run(
+        runNoResult(
           List("apt-get", "-o", "DPkg::Lock::Timeout=60", "update"),
           "Updating package cache",
           queue
         )
       else IO.unit
 
-    val installPkgs =
-      run(
-        List(
-          "apt-get",
-          "-o",
-          "DPkg::Lock::Timeout=60",
-          "-o",
-          "Dpkg::Use-Pty=0",
-          "-o",
-          "APT::Color=0",
-          "-o",
-          "APT::Get::Assume-Yes=true",
-          "install",
-          "-y"
-        ) ++ cmd.packages,
-        "Installing packages",
-        queue
-      )
+    val installCommand =
+      List(
+        "apt-get",
+        "-o",
+        "DPkg::Lock::Timeout=60",
+        "-o",
+        "Dpkg::Use-Pty=0",
+        "-o",
+        "APT::Color=0",
+        "-o",
+        "APT::Get::Assume-Yes=true",
+        "install",
+        "-y"
+      ) ++ cmd.packages
 
-    update >> installPkgs >> waitForBinariesVisible(cmd.packages)
+    update >> runInstallWithPostCheck(installCommand, "Installing packages", cmd.packages, queue)
 
   def remove(cmd: RemovePackages, queue: Queue[IO, Event]): IO[Unit] =
     val subcommand = if cmd.purge then "purge" else "remove"
@@ -125,6 +121,106 @@ object AptInstaller:
       )
     yield ()
 
+  /** Same as `run`, but never emits a terminal RESULT event — for use
+    * as a non-final step chained before another run/runInstallWithPostCheck
+    * call within the same task. `run`'s RESULT is what closes the gRPC
+    * stream (AgentServiceImpl's takeThrough(_.kind != RESULT)) — if an
+    * intermediate step like `apt-get update` emits one, the stream
+    * closes immediately and the orchestrator moves on to the next
+    * task, while the *real* install (chained afterward via >>) keeps
+    * running invisibly in the background. This was the actual cause
+    * of "install reports success but the package isn't there yet" —
+    * not a timing race at all, a structural stream-termination bug.
+    */
+  private def runNoResult(
+      command: List[String],
+      stage: String,
+      queue: Queue[IO, Event]
+  ): IO[Unit] =
+    for
+      _ <- queue.offer(Event(Event.Kind.PROGRESS, stage))
+
+      pb <- IO {
+        val p = new ProcessBuilder(command*)
+        p.environment().put("DEBIAN_FRONTEND", "noninteractive")
+        p.environment().put("APT_LISTCHANGES_FRONTEND", "none")
+        p.redirectInput(ProcessBuilder.Redirect.PIPE)
+        p
+      }
+
+      process <- IO.blocking(pb.start())
+      _ <- IO.blocking(process.getOutputStream.close())
+
+      stdout = new BufferedReader(new InputStreamReader(process.getInputStream))
+      stderr = new BufferedReader(new InputStreamReader(process.getErrorStream))
+
+      out <- read(stdout, queue).start
+      err <- read(stderr, queue).start
+
+      exit <- IO.interruptible(process.waitFor())
+      _ <- out.joinWithNever
+      _ <- err.joinWithNever
+
+      _ <-
+        if exit != 0 then
+          IO.raiseError(new RuntimeException(s"Command failed with exit $exit: ${command.mkString(" ")}"))
+        else IO.unit
+    yield ()
+
+  private def runInstallWithPostCheck(
+      command: List[String],
+      stage: String,
+      packages: Seq[String],
+      queue: Queue[IO, Event]
+  ): IO[Unit] =
+    for
+      _ <- queue.offer(Event(Event.Kind.PROGRESS, stage))
+
+      pb <- IO {
+        val p = new ProcessBuilder(command*)
+        p.environment().put("DEBIAN_FRONTEND", "noninteractive")
+        p.environment().put("APT_LISTCHANGES_FRONTEND", "none")
+        p.redirectInput(ProcessBuilder.Redirect.PIPE)
+        p
+      }
+
+      process <- IO.blocking(pb.start())
+      _ <- IO.blocking(process.getOutputStream.close())
+
+      stdout = new BufferedReader(new InputStreamReader(process.getInputStream))
+      stderr = new BufferedReader(new InputStreamReader(process.getErrorStream))
+
+      out <- read(stdout, queue).start
+      err <- read(stderr, queue).start
+
+      exit <- IO.interruptible(process.waitFor())
+      _ <- out.joinWithNever
+      _ <- err.joinWithNever
+
+      postCheckOk <-
+        if exit == 0 then
+          waitForBinariesVisible(packages).attempt.flatMap {
+            case Right(_) => IO.pure(true)
+            case Left(err) =>
+              IO.blocking(System.err.println(s"[DEBUG-POSTCHECK-FAIL] ${err.getClass.getName}: ${err.getMessage}")) >>
+                IO.pure(false)
+          }
+        else IO.pure(true)
+
+      _ <- IO.blocking(System.err.println(s"[DEBUG-POSTCHECK] exit=$exit postCheckOk=$postCheckOk"))
+
+      finalSuccess = (exit == 0) && postCheckOk
+
+      _ <- queue.offer(
+        Event(
+          kind = Event.Kind.RESULT,
+          message = if finalSuccess then "OK" else "FAILED",
+          exitCode = if finalSuccess then 0 else if exit != 0 then exit else 1,
+          success = finalSuccess
+        )
+      )
+    yield ()
+
   private def read(reader: BufferedReader, queue: Queue[IO, Event]): IO[Unit] =
     IO.interruptible(reader.readLine()).flatMap {
       case null => IO.unit
@@ -132,56 +228,49 @@ object AptInstaller:
         queue.offer(Event(Event.Kind.OUTPUT, line)) >> read(reader, queue)
     }
 
-  /** Waits for each just-installed package's /usr/bin or /usr/sbin files to
-    * actually exist on disk before returning. apt-get can report exit 0 for
-    * `install` while the filesystem view a subsequent, separately-spawned
-    * process sees is still briefly stale (dpkg trigger processing, or
-    * filesystem/cache lag on container hosts) — a task that immediately follows
-    * an install and invokes a binary from it can otherwise hit a transient
-    * "command not found", exactly as observed in practice with ceph-authtool
-    * and ceph-mon.
-    *
-    * Checks dpkg's own file listing for each package (not a fixed guess at a
-    * path) and polls up to ~5s per package.
-    */
   private def waitForBinariesVisible(packages: Seq[String]): IO[Unit] =
     IO.blocking {
+      val allFailed = scala.collection.mutable.ListBuffer.empty[String]
+
       packages.foreach { rawPkg =>
         val pkg = rawPkg.takeWhile(_ != '=')
 
         val listing = new ProcessBuilder("dpkg", "-L", pkg).start()
         val output =
-          try
-            scala.io.Source
-              .fromInputStream(listing.getInputStream)
-              .getLines()
-              .toList
+          try scala.io.Source.fromInputStream(listing.getInputStream).getLines().toList
           finally ()
         listing.waitFor()
 
-        val binaries = output.filter(p =>
-          p.startsWith("/usr/bin/") || p.startsWith("/usr/sbin/")
-        )
+        val binaries = output.filter(p => p.startsWith("/usr/bin/") || p.startsWith("/usr/sbin/"))
 
         binaries.foreach { path =>
           var attempts = 0
           var ready = false
           while attempts < 40 && !ready do
-            // Actually spawn a fresh process and try to execute the
-            // binary, rather than just checking file existence from
-            // this JVM's own process — cross-process executable
-            // visibility can lag behind same-process File.exists()
-            // checks on this environment (confirmed empirically).
-            val check = new ProcessBuilder(path, "--version")
-              .redirectOutput(ProcessBuilder.Redirect.DISCARD)
-              .redirectError(ProcessBuilder.Redirect.DISCARD)
-              .start()
-            val exit = check.waitFor()
             ready =
-              exit == 0 || exit == 1 // some tools exit 1 on --version but that still proves it ran
+              try
+                val f = new java.io.File(path)
+                f.exists() && f.canExecute() && {
+                  val proc = new ProcessBuilder(path)
+                    .redirectOutput(ProcessBuilder.Redirect.DISCARD)
+                    .redirectError(ProcessBuilder.Redirect.DISCARD)
+                    .redirectInput(ProcessBuilder.Redirect.from(new java.io.File("/dev/null")))
+                    .start()
+                  val exited = proc.waitFor(2, java.util.concurrent.TimeUnit.SECONDS)
+                  if !exited then proc.destroyForcibly()
+                  true
+                }
+              catch
+                case _: Throwable => false
+
             if !ready then
               Thread.sleep(500)
               attempts += 1
+
+          if !ready then allFailed += path
         }
       }
+
+      if allFailed.nonEmpty then
+        throw new RuntimeException(s"Binaries never became ready after install: ${allFailed.mkString(", ")}")
     }
