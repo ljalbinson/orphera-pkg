@@ -21,5 +21,7 @@ metals.sbt
 
 runtime
 
+junk
+
 orphera-agent
 orphera-orchestrator
