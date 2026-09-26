@@ -84,36 +84,62 @@ theoretical:**
 
 ### Fixed — the real cause of the intermittent "binary not found immediately after install" failures
 
-A long, mostly-wrong investigation (dpkg-lock timing, `PATH`, stray
-manifest debugging leftovers, suspected concurrent invocations, fiber
-synchronization) before finding the actual, causally-confirmed cause:
-**on these KVM guests, a same-process `File.exists()` check reports a
-just-installed binary present well before a freshly spawned, separate
-process can reliably execute it** — most likely virtualized-disk
-I/O/page-cache settling, since executing a binary requires the kernel
-to fault in its pages from disk, a heavier operation than a metadata
-existence check. A flat `sleep 15` before the dependent command proved
-this causally. The real fix, in `AptInstaller.waitForBinariesVisible`:
-spawn each installed binary as a real subprocess (`<path> --version`)
-and confirm it actually executes, rather than checking file existence
-from the JVM's own process — this exercises the same
-separate-process-spawn path that was actually failing, instead of a
-proxy that reported success while the real dependent task still
-failed. `CommandRunner`'s `ProcessBuilder` also now sets an explicit
-`PATH` (ruled out as the actual cause here, but a reasonable
-robustness improvement to keep regardless, since `run_command`
-previously inherited whatever `PATH` the agent's own systemd unit
-environment happened to provide with no override).
+A long investigation (dpkg-lock timing, `PATH`, stray manifest
+debugging leftovers, suspected concurrent invocations, virtualized
+disk I/O/page-cache settling) before finding the two actual,
+causally-confirmed bugs — neither of which was a timing race at all:
+
+1. **The gRPC stream closed before the real install had finished.**
+   `AgentServiceImpl`'s `install` RPC streams events with
+   `takeThrough(_.kind != Event.Kind.RESULT)` — the stream ends the
+   instant a `RESULT` event is queued. `AptInstaller.install`'s
+   optional `apt-get update` sub-step (run when `updateCache: true`)
+   was implemented using the same shared `run()` helper as every other
+   command, which unconditionally emits a terminal `RESULT` event at
+   the end of *any* process it runs. So when `updateCache: true`, that
+   `RESULT` closed the stream right after `apt-get update` finished —
+   the orchestrator saw `success=true` and moved on to the next task,
+   while the real `apt-get install` (chained afterwards with `>>` on
+   the same fiber) was still running invisibly in the background.
+   Fixed by adding `runNoResult` — identical process-execution logic to
+   `run`, but it never emits a `RESULT` event (raising instead on a
+   non-zero exit) — and using it for the `update` sub-step, so only the
+   install itself, via the (also new) `runInstallWithPostCheck`, is
+   allowed to close the stream.
+2. **The post-install binary-readiness probe false-failed on binaries
+   that don't support `--version`.** Once the stream-closing bug above
+   was fixed, a second, independent bug surfaced: the readiness check
+   in `waitForBinariesVisible` validated each installed binary by
+   spawning `<path> --version` and requiring exit code `0` or `1`. Two
+   binaries shipped by `ceph-common`/`ceph-base` — `/usr/bin/crushdiff`
+   and `/usr/bin/ceph-crash` — don't accept `--version` at all (it's an
+   unrecognized argument for either), so they failed this probe every
+   time regardless of timing, correctly triggering the newly-added
+   failure path and reporting the whole install as failed. Fixed by
+   replacing the `--version` probe with a plain launchability check:
+   confirm the file exists, is executable, and a process can actually
+   be started from it (stdin from `/dev/null`, output discarded, a
+   2-second timeout, treating a successful *start* — not any
+   particular exit behavior — as "ready").
+
+Two of my own bytecode-based verification checks produced false
+negatives while confirming these fixes were actually deployed:
+`grep -c` against `javap` output for a closure-captured local variable
+name (`allFailed`) and for a string-interpolation literal
+(`"Command failed with exit"`) both returned 0 on correctly-deployed
+code, because Scala mangles local names in nested lambdas and splits
+interpolated strings across separate bytecode constant-pool fragments.
+Checking for an intact **method name** instead (`javap -p | grep
+runNoResult`) is the reliable way to confirm a given fix is present in
+a deployed jar.
 
 The debugging process itself is worth remembering: several rounds
 chased plausible-sounding theories (dpkg lock state, `PATH` contents,
 LXC/overlayfs caching — later corrected once it was confirmed these
-are KVM VMs, not containers) that direct evidence subsequently
-disproved one at a time. The causal test (add a deliberate, blunt
-delay; confirm it fixes the symptom; only then trust the theory) is
-what actually converged on the real cause — worth reaching for that
-kind of test earlier next time a fix based on inference alone doesn't
-hold up under retest.
+are KVM VMs, not containers — and virtualized-disk I/O settling) that
+turned out to be unrelated to either real bug. Both were found only by
+reading the actual RPC streaming and process-execution code path
+end-to-end, not by adding timing workarounds.
 
 ### Added — CLI and tooling
 
