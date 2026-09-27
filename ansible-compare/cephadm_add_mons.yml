@@ -1,0 +1,90 @@
+---
+# Ansible equivalent of Orphera's cephadm_add_mons.scala.
+# Adds tst1/tst2 as cephadm-managed hosts and grows mon placement to
+# tst0,tst1,tst2. Assumes cephadm_install.yml has already bootstrapped
+# tst0 (so /etc/ceph/ceph.pub exists there to distribute).
+#
+# Requires cluster_ip set per host in inventory, e.g.:
+#   tst1 ansible_host=tst1.ljalbinson.com cluster_ip=10.0.5.13
+#
+# Run: ansible-playbook -i inventory.ini cephadm_add_mons.yml
+
+- name: Install cephadm prerequisites on new mon hosts
+  hosts: tst1,tst2
+  become: true
+  tasks:
+    - name: Install cephadm prerequisites
+      ansible.builtin.apt:
+        name:
+          - python3
+          - lvm2
+          - chrony
+          - podman
+        update_cache: true
+        state: present
+
+- name: Fetch cluster ssh public key from tst0
+  hosts: tst0
+  become: true
+  tasks:
+    - name: Fetch ceph.pub to control node
+      ansible.builtin.fetch:
+        src: /etc/ceph/ceph.pub
+        dest: /tmp/ansible-ceph-pub/ceph.pub
+        flat: true
+
+- name: Distribute cluster ssh public key to new mon hosts
+  hosts: tst1,tst2
+  become: true
+  tasks:
+    - name: Copy ceph.pub from control node to a temp path
+      ansible.builtin.copy:
+        src: /tmp/ansible-ceph-pub/ceph.pub
+        dest: /root/.ssh/authorized_keys_cephadm_tmp
+        owner: root
+        group: root
+        mode: "0600"
+
+    - name: Append cephadm key to authorized_keys
+      ansible.builtin.shell: |
+        cat /root/.ssh/authorized_keys_cephadm_tmp >> /root/.ssh/authorized_keys
+        rm /root/.ssh/authorized_keys_cephadm_tmp
+      changed_when: true
+
+- name: Register new hosts with cephadm and grow mon placement
+  hosts: tst0
+  become: true
+  vars:
+    additional_mon_hosts: ["tst1", "tst2"]
+  tasks:
+    - name: Add hosts to cephadm-managed hosts
+      ansible.builtin.command:
+        cmd: >-
+          cephadm shell -- ceph orch host add
+          "{{ item }}" "{{ hostvars[item].cluster_ip }}"
+      loop: "{{ additional_mon_hosts }}"
+      changed_when: true
+
+    - name: Apply mon placement across all three hosts
+      ansible.builtin.command:
+        cmd: >-
+          cephadm shell -- ceph orch apply mon
+          --placement='tst0,{{ additional_mon_hosts | join(",") }}'
+      changed_when: true
+
+- name: Confirm mon quorum
+  hosts: tst0
+  become: true
+  tasks:
+    - name: Wait for 3-mon quorum
+      ansible.builtin.shell: >
+        cephadm shell -- ceph mon stat 2>/dev/null | grep -Eq 'e[0-9]+: 3 mons'
+      register: quorum_check
+      until: quorum_check.rc == 0
+      retries: 30
+      delay: 10
+      changed_when: false
+
+    - name: Quorum confirmed
+      ansible.builtin.debug:
+        msg: "Cephadm-managed 3-mon quorum reached."

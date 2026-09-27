@@ -1,0 +1,65 @@
+---
+# Ansible equivalent of Orphera's ceph-mon-keyring.yaml.
+# Generates the cluster mon keyring on tst0 and distributes it to tst1/tst2.
+#
+# Run: ansible-playbook -i inventory ceph-mon-keyring.yml
+
+- name: Install ceph tools on all keyring-related hosts
+  hosts: tst0,tst1,tst2
+  become: true
+  vars:
+    ceph_version: "{{ user_ceph_version | default('19.2.3-0ubuntu0.24.04.3') }}"
+  tasks:
+    - name: Install ceph-common and ceph-base
+      ansible.builtin.apt:
+        name:
+          - "ceph-common={{ ceph_version }}"
+          - "ceph-base={{ ceph_version }}"
+        update_cache: true
+        state: present
+
+- name: Generate mon keyring on tst0
+  hosts: tst0
+  become: true
+  tasks:
+    - name: Check whether the mon keyring already exists
+      ansible.builtin.stat:
+        path: /etc/ceph/ceph.mon.keyring
+      register: mon_keyring_stat
+
+    - name: Generate mon keyring
+      ansible.builtin.command:
+        cmd: >-
+          ceph-authtool /etc/ceph/ceph.mon.keyring
+          --create-keyring --gen-key -n mon. --cap mon 'allow *'
+      when: not mon_keyring_stat.stat.exists
+
+- name: Fetch mon keyring from tst0 to the control node
+  hosts: tst0
+  become: true
+  tasks:
+    - name: Fetch keyring
+      ansible.builtin.fetch:
+        src: /etc/ceph/ceph.mon.keyring
+        dest: /tmp/ansible-ceph-keyring/ceph.mon.keyring
+        flat: true
+
+- name: Distribute mon keyring to tst1 and tst2
+  hosts: tst1,tst2
+  become: true
+  tasks:
+    - name: Ensure /etc/ceph exists
+      ansible.builtin.file:
+        path: /etc/ceph
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Copy mon keyring from control node
+      ansible.builtin.copy:
+        src: /tmp/ansible-ceph-keyring/ceph.mon.keyring
+        dest: /etc/ceph/ceph.mon.keyring
+        owner: root
+        group: root
+        mode: "0600"

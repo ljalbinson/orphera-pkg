@@ -1,0 +1,47 @@
+---
+# Ansible equivalent of Orphera's cephadm_install.scala.
+# Installs cephadm prerequisites + the cephadm package on tst0, confirms the
+# binary runs, then bootstraps the cluster (idempotent — skipped if
+# /etc/ceph/ceph.pub already exists, since that's what bootstrap generates).
+#
+# Run: ansible-playbook -i inventory.ini cephadm_install.yml
+
+- name: Install cephadm and bootstrap the cluster on tst0
+  hosts: tst0
+  become: true
+  vars:
+    ceph_version: "{{ user_ceph_version | default('19.2.3-0ubuntu0.24.04.3') }}"
+    mon_ip: "{{ user_mon_ip | default(ansible_default_ipv4.address) }}"
+  tasks:
+    - name: Install cephadm prerequisites
+      ansible.builtin.apt:
+        name:
+          - python3
+          - lvm2
+          - chrony
+          - podman
+        update_cache: true
+        state: present
+
+    - name: Install cephadm package
+      ansible.builtin.apt:
+        name: "cephadm={{ ceph_version }}"
+        state: present
+
+    - name: Confirm cephadm is runnable
+      ansible.builtin.command:
+        cmd: cephadm --help
+      changed_when: false
+
+    - name: Check whether the cluster is already bootstrapped
+      ansible.builtin.stat:
+        path: /etc/ceph/ceph.pub
+      register: ceph_pub_stat
+
+    - name: Bootstrap ceph cluster
+      ansible.builtin.command:
+        cmd: >-
+          cephadm bootstrap
+          --mon-ip {{ mon_ip }}
+          --skip-dashboard --skip-monitoring-stack --allow-fqdn-hostname
+      when: not ceph_pub_stat.stat.exists

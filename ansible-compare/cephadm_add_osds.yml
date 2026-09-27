@@ -1,0 +1,57 @@
+---
+# Ansible equivalent of Orphera's cephadm_add_osds.scala.
+# Adds OSDs from explicitly specified host:device pairs (no
+# --all-available-devices), then waits for all of them to be up and in.
+#
+# Edit osd_devices below to control which disks become OSDs on which
+# host. Devices must already show as available:
+#   cephadm shell -- ceph orch device ls
+# A device with a stale LVM/filesystem signature from a prior teardown
+# will be rejected — re-wipe it first (see ceph-teardown.yml).
+#
+# Run: ansible-playbook -i inventory.ini cephadm_add_osds.yml
+
+- name: Add specified OSDs and confirm they're healthy
+  hosts: tst0
+  become: true
+  vars:
+    osd_devices:
+      - host: tst0
+        devices: [/dev/sdb, /dev/sdc]
+      - host: tst1
+        devices: [/dev/sdb]
+      - host: tst2
+        devices: [/dev/sdb]
+  tasks:
+    - name: Compute expected OSD count
+      ansible.builtin.set_fact:
+        expected_osd_count: "{{ osd_devices | subelements('devices') | length }}"
+
+    - name: Add OSD daemon for each specified host:device pair
+      ansible.builtin.command:
+        cmd: >-
+          cephadm shell -- ceph orch daemon add osd
+          "{{ item.0.host }}:{{ item.1 }}"
+      loop: "{{ osd_devices | subelements('devices') }}"
+      loop_control:
+        label: "{{ item.0.host }}:{{ item.1 }}"
+      changed_when: true
+
+    - name: Wait for all specified OSDs to be up and in
+      # Asserts the real condition we care about, via JSON rather than
+      # grepping a formatted string that varies with OSD count and elapsed
+      # time (and rather than checking mon quorum, which has nothing to do
+      # with OSD health — that was the bug in the original Orphera check).
+      ansible.builtin.shell: >
+        cephadm shell -- ceph osd stat -f json 2>/dev/null |
+        python3 -c 'import json,sys; d=json.load(sys.stdin);
+        sys.exit(0 if d["num_osds"]==d["num_up_osds"]==d["num_in_osds"]>={{ expected_osd_count }} else 1)'
+      register: osd_check
+      until: osd_check.rc == 0
+      retries: 30
+      delay: 10
+      changed_when: false
+
+    - name: OSDs confirmed
+      ansible.builtin.debug:
+        msg: "All {{ expected_osd_count }} specified OSD device(s) are up and in."
