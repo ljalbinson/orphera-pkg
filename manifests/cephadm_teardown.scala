@@ -25,10 +25,23 @@ object cephadm_teardown extends OrpheraClusterPlaybook:
   // even one no longer in that map — can still carry a stale LVM
   // signature that trips up a later apply-osd-spec run.
   val hosts: List[String] = List("tst0", "tst1", "tst2")
-  val devicesToZap: List[String] = List("/dev/sdb")
+  val devicesToZap: List[String] = List("/dev/sdb", "/dev/sdc")
 
   private val removeClusterScript: String =
     """
+      |# Stop and remove EVERY podman container on this host directly,
+      |# before anything else — not just ones `cephadm ls` can enumerate.
+      |# Found in testing: a container can still be running and holding a
+      |# device open (e.g. an OSD's LV) even though `cephadm ls` reports
+      |# zero daemons, if an earlier cleanup's directory sweep deleted a
+      |# daemon's metadata without stopping its container first. Relying
+      |# on cephadm's own bookkeeping alone is fragile once that metadata
+      |# is gone — these are single-purpose test hosts, so unconditionally
+      |# stopping every podman container here is safe and closes that gap.
+      |podman stop -a 2>/dev/null
+      |podman rm -fa 2>/dev/null
+      |true
+      |
       |# Handle EVERY fsid found, not just one — a host can carry leftover
       |# state from more than one prior cluster (e.g. two install/teardown
       |# cycles without a full clean between them), and cephadm's own fsid
@@ -61,8 +74,29 @@ object cephadm_teardown extends OrpheraClusterPlaybook:
       |true
       |""".stripMargin
 
+  // Confirmed by testing: podman-level cleanup does NOT fix this. A
+  // ceph-created LV's /dev/mapper/<vg>-<lv> entry is a kernel
+  // device-mapper table entry, independent of any process holding it
+  // open — it persists until explicitly torn down with `dmsetup remove`.
+  // Once a device's on-disk LVM signature has been wiped (e.g. by a
+  // prior, incomplete zap), `pvs`/`vgs` can no longer see the VG/LV at
+  // all, so a cleanup that only walks `pvs -o vg_name <dev>` silently
+  // skips that device forever while the orphaned mapper entry keeps
+  // refusing every later zap/OSD-create attempt against it ("Refusing
+  // to zap the mapper device"). This sweep is host-wide (dm names
+  // aren't tied to a specific /dev/sdX) and runs unconditionally, ahead
+  // of and independent of the pvs-based per-device loop below.
+  private val dmCleanupScript: String =
+    """
+      |for dm in $(dmsetup ls 2>/dev/null | awk '{print $1}' | grep -E '^ceph-'); do
+      |  echo "Removing orphaned device-mapper entry: $dm"
+      |  dmsetup remove -f "$dm" 2>/dev/null
+      |done
+      |true
+      |""".stripMargin
+
   private val zapDevicesScript: String =
-    devicesToZap.map { dev =>
+    dmCleanupScript + "\n" + devicesToZap.map { dev =>
       s"""
         |for vg in $$(timeout 10 pvs --noheadings -o vg_name $dev 2>/dev/null | tr -d ' '); do
         |  [ -n "$$vg" ] || continue
