@@ -1,0 +1,92 @@
+import orphera.orchestrator.*
+import orphera.orchestrator.ClusterPlaybookDsl.*
+
+object cephadm_teardown extends OrpheraClusterPlaybook:
+
+  // Replaces ceph-teardown.yaml for the cephadm-managed cluster. That
+  // script's "stop OSD/mon service(s)" steps matched raw systemd unit
+  // names (ceph-mon@*, ceph-osd@*) that don't exist under cephadm —
+  // daemons run as podman containers under per-fsid templated units — so
+  // those steps silently no-op'd, left daemons running, and every
+  // subsequent zap failed with "Can't open /dev/sdb exclusively. Mounted
+  // filesystem?" / "device has a signature". Confirmed twice in testing,
+  // both from a "dirty" pre-existing cluster and from what were assumed
+  // to be clean VMs (the disk itself had never actually been wiped).
+  //
+  // `cephadm rm-cluster` is the actual supported way to tear down a
+  // cephadm-managed host: it stops and removes that host's daemons and
+  // containers for a given fsid, and clears the local ceph directories.
+  // It's local-only — no cluster-wide coordination needed — so it's safe
+  // to run per-host in any order, including against a completely broken
+  // or partially-torn-down cluster.
+  //
+  // Devices are zapped broadly (not just whatever cephadm_add_osds.scala's
+  // osdDevices map currently lists) since a disk used by an earlier run —
+  // even one no longer in that map — can still carry a stale LVM
+  // signature that trips up a later apply-osd-spec run.
+  val hosts: List[String] = List("tst0", "tst1", "tst2")
+  val devicesToZap: List[String] = List("/dev/sdb")
+
+  private val removeClusterScript: String =
+    """
+      |# Handle EVERY fsid found, not just one — a host can carry leftover
+      |# state from more than one prior cluster (e.g. two install/teardown
+      |# cycles without a full clean between them), and cephadm's own fsid
+      |# auto-inference refuses to guess when it sees multiple candidate
+      |# /var/lib/ceph/<fsid> directories, failing every subsequent command
+      |# with "Cannot infer an fsid, one must be specified" — exactly what
+      |# happened here.
+      |FSIDS=$(cephadm ls --no-detail 2>/dev/null | python3 -c '
+      |import json, sys
+      |try:
+      |    ls = json.load(sys.stdin)
+      |except Exception:
+      |    ls = []
+      |fsids = sorted(set(d.get("fsid", "") for d in ls if d.get("fsid")))
+      |print(" ".join(fsids))
+      |')
+      |if [ -n "$FSIDS" ]; then
+      |  for fsid in $FSIDS; do
+      |    echo "Found cephadm cluster $fsid on this host — removing daemons/containers"
+      |    cephadm rm-cluster --fsid "$fsid" --force
+      |  done
+      |else
+      |  echo "No cephadm-managed daemons found on this host"
+      |fi
+      |# Unconditional final sweep: removes any fsid directory rm-cluster
+      |# didn't know about (e.g. orphaned from a crashed/partial earlier
+      |# run with no daemons left to report it), so a later `cephadm shell`
+      |# invocation never again finds more than one fsid to infer from.
+      |rm -rf /var/lib/ceph/* /etc/ceph/* /var/log/ceph/* /var/run/ceph/* 2>/dev/null
+      |true
+      |""".stripMargin
+
+  private val zapDevicesScript: String =
+    devicesToZap.map { dev =>
+      s"""
+        |for vg in $$(timeout 10 pvs --noheadings -o vg_name $dev 2>/dev/null | tr -d ' '); do
+        |  [ -n "$$vg" ] || continue
+        |  timeout 15 lvremove -f "$$vg" 2>/dev/null
+        |  timeout 15 vgremove -f "$$vg" 2>/dev/null
+        |done
+        |timeout 15 pvremove -ff -y $dev 2>/dev/null || true
+        |wipefs -a $dev 2>/dev/null || true
+        |dd if=/dev/zero of=$dev bs=1M count=10 oflag=direct,dsync 2>/dev/null || true
+        |partprobe $dev 2>/dev/null || true
+        |""".stripMargin
+    }.mkString("\n") + "true\n"
+
+  private def teardownStage(host: String) =
+    stage(s"teardown-$host", host)
+      .task(s"remove cephadm-managed cluster on $host (if any)")(
+        Task.RunCommand(List("sh", "-c", removeClusterScript), timeoutSeconds = 120)
+      )
+      .task(s"zap OSD disks on $host")(
+        Task.RunCommand(List("sh", "-c", zapDevicesScript), timeoutSeconds = 90)
+      )
+      .build
+
+  val playbook: ClusterPlaybook =
+    clusterPlaybook("cephadm-teardown")(
+      hosts.map(teardownStage)*
+    )
