@@ -6,6 +6,61 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed — `cephadm_teardown.scala` leaving orphaned LVM/device-mapper state across repeated runs
+
+Found via repeated end-to-end runs of `test_ceph_lifecycle.sh` against
+the same VMs, not in theory. Three separate, causally-confirmed bugs,
+each masking the next until the previous one was fixed:
+
+1. **Fsid auto-inference broke on a host carrying more than one prior
+   cluster's state.** The original teardown only picked
+   `cephadm ls`'s first-listed fsid (`ls[0]["fsid"]`) and called
+   `cephadm rm-cluster` for just that one, leaving any other
+   `/var/lib/ceph/<fsid>` directory in place. A later `cephadm
+   bootstrap`/`cephadm shell` on that host then failed outright with
+   `Cannot infer an fsid, one must be specified`, since cephadm refuses
+   to guess when more than one candidate directory exists. Fixed by
+   enumerating **every** fsid `cephadm ls` reports and calling
+   `rm-cluster --fsid <fsid> --force` for each, followed by an
+   unconditional `rm -rf /var/lib/ceph/* /etc/ceph/* /var/log/ceph/*
+   /var/run/ceph/*` sweep so no orphaned fsid directory (e.g. from a
+   crashed/partial earlier run with nothing left to report it) can
+   survive to confuse the next inference.
+2. **A daemon can still be running, and holding a device open, while
+   `cephadm ls` reports zero daemons for that host.** Confirmed
+   directly: `apply-osd-spec` failed on a host that `cephadm ls` (and
+   therefore the teardown's own rm-cluster loop) had just reported as
+   having no daemons at all, with the exact same "device has a
+   signature" / "Refusing to zap the mapper device" error a live OSD
+   produces. Most likely cause: an earlier cleanup's directory sweep
+   (bug 1's fix, or an even earlier ad hoc one) deleted a daemon's
+   `/var/lib/ceph/<fsid>/<daemon>` metadata without stopping its
+   container first, orphaning a still-running podman container that
+   `cephadm ls` can no longer enumerate (it reads that metadata to know
+   what exists) — permanently, since every future teardown's own
+   metadata-based view has the same blind spot. Fixed by no longer
+   relying on `cephadm ls`/`rm-cluster` as the only way containers get
+   stopped: teardown now runs `podman stop -a; podman rm -fa`
+   unconditionally, first, on every host — safe here since these are
+   single-purpose Ceph test nodes with no other podman workload to
+   protect.
+3. **A device-mapper LV can outlive the LVM metadata that created it.**
+   Even after fix 2, a *different* host still failed the same way on
+   one specific disk, with the zap log showing the other disk's VG/LV
+   being genuinely removed but silence for this one — meaning `pvs -o
+   vg_name <dev>` found no VG to report, so the existing zap loop's
+   `for vg in $(pvs ...)` simply skipped that device, while the kernel
+   still had an active `/dev/mapper/ceph--<uuid>-osd--block--<uuid>`
+   entry for it. Root cause: once a device's on-disk LVM signature has
+   been wiped (by a prior, incomplete zap), `pvs`/`vgs` can no longer
+   see the VG/LV, but device-mapper's own table entry is independent of
+   that on-disk metadata and persists until explicitly torn down with
+   `dmsetup remove` — no process needs to hold it open. Fixed with a
+   host-wide `dmsetup ls | grep '^ceph-' | xargs -n1 dmsetup remove -f`
+   sweep, run unconditionally ahead of and independent of the
+   `pvs`-based per-device loop, since dm names aren't tied to a
+   specific `/dev/sdX` path the way the existing loop is keyed.
+
 ### Ceph — manual mon/mgr/OSD bootstrap, hardening, and a second cephadm-based path
 
 Built and debugged against real KVM VMs (`tst0`/`tst1`/`tst4`), not just
