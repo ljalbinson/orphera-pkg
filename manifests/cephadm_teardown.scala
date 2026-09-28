@@ -20,12 +20,34 @@ object cephadm_teardown extends OrpheraClusterPlaybook:
   // to run per-host in any order, including against a completely broken
   // or partially-torn-down cluster.
   //
-  // Devices are zapped broadly (not just whatever cephadm_add_osds.scala's
-  // osdDevices map currently lists) since a disk used by an earlier run —
-  // even one no longer in that map — can still carry a stale LVM
-  // signature that trips up a later apply-osd-spec run.
+  // Devices are identified by their stable /dev/disk/by-id/ path, NOT by
+  // kernel-assigned /dev/sdX letters. Confirmed by testing (2026-09-28,
+  // live incident on tst0): SCSI/virtio device letters are NOT guaranteed
+  // stable across a reboot — the enumeration order at boot can shift
+  // which physical/virtual disk gets which letter. A reboot moved tst0's
+  // OS disk onto /dev/sdb — the exact device this playbook and
+  // cephadm_add_osds.scala each separately hardcoded as a spare OSD disk.
+  // /dev/disk/by-id/... paths are symlinks tied to the underlying QEMU
+  // drive (scsi0-0-0-<N>), fixed at VM-definition time, and do NOT change
+  // across reboots, unlike the /dev/sdX name the kernel happens to assign
+  // this particular boot.
+  //
+  // The by-id values themselves now live in the shared inventory
+  // (manifests/inventory.yaml), under each node's `zap_disks` var, NOT
+  // hardcoded here. The first pass at this fix put a hardcoded Map in
+  // this file AND a separately hardcoded Map in cephadm_add_osds.scala —
+  // which is exactly how the original /dev/sdX bug happened in the first
+  // place (two independently-maintained lists silently drifting apart),
+  // and one of the two by-id entries for tst0 did in fact turn out wrong
+  // in the first pass. Reading both from one inventory file removes the
+  // second copy that can drift. zap_disks is deliberately the FULL set of
+  // spare disks per host, not just whichever ones cephadm_add_osds.scala
+  // currently selects as OSDs (see that file's `osd_disks` var) — a disk
+  // not currently selected as an OSD can still carry a stale signature
+  // from an earlier run's different selection.
   val hosts: List[String] = List("tst0", "tst1", "tst2")
-  val devicesToZap: List[String] = List("/dev/sdb", "/dev/sdc")
+  val devicesToZap: Map[String, List[String]] =
+    hosts.map(h => h -> Inventory.csvVar(h, "zap_disks")).toMap
 
   private val removeClusterScript: String =
     """
@@ -95,18 +117,50 @@ object cephadm_teardown extends OrpheraClusterPlaybook:
       |true
       |""".stripMargin
 
-  private val zapDevicesScript: String =
-    dmCleanupScript + "\n" + devicesToZap.map { dev =>
+  private def zapDevicesScript(host: String): String =
+    dmCleanupScript + "\n" + devicesToZap.getOrElse(host, Nil).map { dev =>
       s"""
+        |# Defense in depth, independent of by-id correctness: if this
+        |# device (or any partition on it) is actually mounted right now,
+        |# it is by definition not a spare OSD disk — refuse to touch it
+        |# rather than trust the device list alone. This is exactly the
+        |# check that would have caught the tst0 incident even before the
+        |# by-id fix existed.
+        |MOUNTED=$$(lsblk -rno MOUNTPOINT $dev 2>/dev/null | grep -v '^$$' || true)
+        |if [ -n "$$MOUNTED" ]; then
+        |  echo "REFUSING to zap $dev on $host — mounted at: $$MOUNTED"
+        |else
         |for vg in $$(timeout 10 pvs --noheadings -o vg_name $dev 2>/dev/null | tr -d ' '); do
         |  [ -n "$$vg" ] || continue
         |  timeout 15 lvremove -f "$$vg" 2>/dev/null
         |  timeout 15 vgremove -f "$$vg" 2>/dev/null
         |done
         |timeout 15 pvremove -ff -y $dev 2>/dev/null || true
+        |
+        |# GPT keeps a backup partition table at the END of the disk
+        |# (that's the whole point of it — it's meant to survive damage
+        |# to the front). Confirmed by testing: zeroing only the first
+        |# few MB removes the primary header, so nothing sees partitions
+        |# right after teardown, but the backup header is untouched —
+        |# the very next time something rescans the disk from scratch
+        |# (a host reboot, in particular) the kernel finds the backup
+        |# GPT table and reconstructs a partition, and the next add-osd
+        |# run fails with "Device ... has partitions" even though
+        |# nothing touched the disk in between. sgdisk --zap-all
+        |# explicitly destroys both the primary and backup GPT
+        |# structures (and any MBR), so it goes first; wipefs/dd/
+        |# partprobe stay as belt-and-suspenders for anything sgdisk
+        |# doesn't recognize (isn't installed, non-GPT signatures, etc).
+        |sgdisk --zap-all $dev 2>/dev/null || true
         |wipefs -a $dev 2>/dev/null || true
         |dd if=/dev/zero of=$dev bs=1M count=10 oflag=direct,dsync 2>/dev/null || true
+        |SIZE_BYTES=$$(blockdev --getsize64 $dev 2>/dev/null || echo 0)
+        |if [ "$$SIZE_BYTES" -gt 10485760 ]; then
+        |  SEEK_MB=$$(( SIZE_BYTES / 1048576 - 10 ))
+        |  dd if=/dev/zero of=$dev bs=1M count=10 seek=$$SEEK_MB oflag=direct,dsync 2>/dev/null || true
+        |fi
         |partprobe $dev 2>/dev/null || true
+        |fi
         |""".stripMargin
     }.mkString("\n") + "true\n"
 
@@ -116,7 +170,7 @@ object cephadm_teardown extends OrpheraClusterPlaybook:
         Task.RunCommand(List("sh", "-c", removeClusterScript), timeoutSeconds = 120)
       )
       .task(s"zap OSD disks on $host")(
-        Task.RunCommand(List("sh", "-c", zapDevicesScript), timeoutSeconds = 90)
+        Task.RunCommand(List("sh", "-c", zapDevicesScript(host)), timeoutSeconds = 90)
       )
       .build
 

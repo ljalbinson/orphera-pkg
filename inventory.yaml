@@ -4,16 +4,45 @@ nodes:
     vars:
       cluster_ip: "10.10.5.12"
       ceph_role: mon-leader
+      # Confirmed 2026-09-28 via `lsblk` + `ls /dev/disk/by-id/` on the
+      # host itself, after a live incident where /dev/sdX letters (not
+      # by-id paths) were hardcoded separately in cephadm_add_osds.scala
+      # AND cephadm_teardown.scala, drifted out of sync with each other
+      # and with reality after a reboot moved this host's OS disk onto
+      # /dev/sdb — the device both files had assumed was a spare OSD
+      # disk. by-id paths are tied to the underlying QEMU drive's SCSI
+      # address and don't move across reboots; this host's OS disk sits
+      # at scsi0-0-0-0, so it's deliberately not listed in either var
+      # below. See CHANGELOG for the full incident writeup.
+      #
+      # osd_disks: disks cephadm_add_osds.scala actually turns into OSDs.
+      # zap_disks: every spare disk cephadm_teardown.scala should wipe —
+      #   deliberately the full set, even disks osd_disks doesn't
+      #   currently use, so a disk that drops out of osd_disks in a
+      #   future edit still gets its stale signature cleared on the next
+      #   teardown rather than silently keeping one from a much earlier run.
+      osd_disks: "/dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_drive-scsi0-0-0-2,/dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_drive-scsi0-0-0-3"
+      zap_disks: "/dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_drive-scsi0-0-0-2,/dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_drive-scsi0-0-0-3"
 
   - name: tst1
     host: tst1.ljalbinson.com
     vars:
       cluster_ip: "10.10.5.13"
+      # This host's OS disk sits at scsi0-0-0-0 — a different SCSI slot
+      # than tst0's OS disk. That's expected, not a typo: by-id mapping
+      # is per-host, never assumed to match across hosts. Only one of
+      # this host's two spare disks is turned into an OSD (matching the
+      # original single-OSD-per-node intent for tst1/tst2) — the other
+      # is still covered by zap_disks so it gets cleared regardless.
+      osd_disks: "/dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_drive-scsi0-0-0-2,/dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_drive-scsi0-0-0-3"
+      zap_disks: "/dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_drive-scsi0-0-0-2,/dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_drive-scsi0-0-0-3"
 
   - name: tst2
     host: tst2.ljalbinson.com
     vars:
       cluster_ip: "10.10.5.14"
+      osd_disks: "/dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_drive-scsi0-0-0-2,/dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_drive-scsi0-0-0-3"
+      zap_disks: "/dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_drive-scsi0-0-0-2,/dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_drive-scsi0-0-0-3"
 
 groups:
   - name: mons
@@ -21,4 +50,3 @@ groups:
     vars:
       ceph_role: mon
       ceph_version: "19.2.3-0ubuntu0.24.04.3"
-      ceph_version_branch: "squid"

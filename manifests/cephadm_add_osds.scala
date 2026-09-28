@@ -3,19 +3,45 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 
 object cephadm_add_osds extends OrpheraClusterPlaybook:
 
-  // Edit this map to control exactly which disks become OSDs, and on which
-  // hosts — no more "--all-available-devices". Leave a host out of the map
-  // (or give it an empty list) to skip OSD creation there entirely.
+  // Which disks become OSDs, and on which hosts, is controlled by the
+  // shared inventory (manifests/inventory.yaml), under each node's
+  // `osd_disks` var — not a Map literal in this file. Edit that file to
+  // change device selection; leave a node's osd_disks var unset (or
+  // empty) to skip OSD creation there entirely.
+  //
+  // Devices are identified by their stable /dev/disk/by-id/ path, NOT by
+  // kernel-assigned /dev/sdX letters — see cephadm_teardown.scala's
+  // devicesToZap comment for the full incident writeup. Short version:
+  // /dev/sdX letters can move across a reboot, and on 2026-09-28 tst0's
+  // OS disk landed on /dev/sdb — the device this playbook had hardcoded
+  // as a spare OSD disk at the time — so it attempted to add the running
+  // root filesystem's own disk as an OSD (ceph-volume correctly refused
+  // with "Device /dev/sdb has partitions"). by-id paths are tied to the
+  // underlying QEMU drive and don't move across reboots — this is also
+  // Ceph's own recommended practice for DriveGroup device specifications,
+  // for exactly this reason.
+  //
+  // The device list used to be a Map literal hardcoded directly in this
+  // file, duplicated from an independently hardcoded Map in
+  // cephadm_teardown.scala — two copies of the same information that
+  // silently drifted apart, which is exactly how the /dev/sdX bug above
+  // happened. Reading both from the one inventory file removes the
+  // second copy that can drift.
   //
   // Devices must already show as available before running this playbook:
   //   cephadm shell -- ceph orch device ls
   // A device with a stale LVM/filesystem signature from a prior run (e.g.
   // after ceph-teardown.yaml) will be rejected — re-wipe it first.
-  val osdDevices: Map[String, List[String]] = Map(
-    "tst0" -> List("/dev/sdb"),
-    "tst1" -> List("/dev/sdb"),
-    "tst2" -> List("/dev/sdb")
-  )
+  //
+  // Only one of tst1/tst2's two spare disks is selected in the inventory
+  // right now, matching the original intent (single-OSD-per-node on
+  // those two) — the other spare disk on each is still in that node's
+  // zap_disks var, so cephadm_teardown.scala's broader sweep still
+  // covers it, just not turned into an OSD by this playbook.
+  private val hosts: List[String] = List("tst0", "tst1", "tst2")
+
+  val osdDevices: Map[String, List[String]] =
+    hosts.map(h => h -> Inventory.csvVar(h, "osd_disks")).toMap
 
   private val expectedOsdCount: Int =
     osdDevices.values.map(_.size).sum

@@ -1,0 +1,25 @@
+---
+# Three tasks, deliberately built so task 2 fails until a marker file
+# is created on tst0 — lets test_restartability.sh force a real partial
+# failure and then prove --resume actually skips what already succeeded
+# rather than replaying it.
+name: restartability-test
+
+nodes:
+  - tst0
+
+tasks:
+  - name: task1 always succeeds
+    run_command:
+      command: ["sh", "-c", "true"]
+      timeout: 10
+
+  - name: task2 fails until marker exists
+    run_command:
+      command: ["sh", "-c", "test -f /tmp/orphera-resume-test-marker"]
+      timeout: 10
+
+  - name: task3 always succeeds
+    run_command:
+      command: ["sh", "-c", "true"]
+      timeout: 10

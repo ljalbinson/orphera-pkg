@@ -136,8 +136,8 @@ object Main extends IOApp:
           }
         }
 
-      case Right(Command.RunPlaybook(source)) =>
-        if source.endsWith(".scala") then runScalaPlaybookScript(source)
+      case Right(Command.RunPlaybook(source, resume)) =>
+        if source.endsWith(".scala") then runScalaPlaybookScript(source, resume)
         else
           val playbookResult: Either[String, Playbook] =
             if source.endsWith(".yaml") || source.endsWith(".yml") then
@@ -153,12 +153,11 @@ object Main extends IOApp:
             case Left(err) =>
               IO.println(s"Error: $err") >> IO.pure(ExitCode.Error)
             case Right(pb) =>
-              // PlaybookRunner.run now reports whether every node's task
-              // sequence actually succeeded (previously it always
-              // returned IO[Unit] and this call site always returned
-              // ExitCode.Success regardless — `orphera playbook ...`
-              // exited 0 even when a task genuinely failed).
-              PlaybookRunner.run(pb).map(ok => if ok then ExitCode.Success else ExitCode.Error)
+              // PlaybookRunner.run reports whether every node's task
+              // sequence actually succeeded, and --resume skips any
+              // (node, task) already recorded complete from a previous
+              // run's checkpoint file — see PlaybookRunner/Checkpoint.
+              PlaybookRunner.run(pb, resume).map(ok => if ok then ExitCode.Success else ExitCode.Error)
 
       case Right(
             Command.Reboot(nodeNames, delaySeconds, wait, waitTimeoutSeconds)
@@ -182,23 +181,16 @@ object Main extends IOApp:
           }
         }
 
-      case Right(Command.RunClusterPlaybook(path)) =>
-        if path.endsWith(".scala") then runScalaPlaybookScript(path)
+      case Right(Command.RunClusterPlaybook(path, resume)) =>
+        if path.endsWith(".scala") then runScalaPlaybookScript(path, resume)
         else
           ClusterPlaybookYaml.load(path) match
             case Left(err) =>
               IO.println(s"Error: $err") >> IO.pure(ExitCode.Error)
             case Right(pb) =>
-              // Same fix as RunPlaybook above: ClusterPlaybookRunner.run
-              // now reports whether every stage actually completed
-              // successfully, instead of this call site always hardcoding
-              // ExitCode.Success. This is the fix for `orphera
-              // cluster-playbook ...` reporting success (exit 0) even when
-              // a stage failed or a health check timed out — previously
-              // the only way to detect that was grepping stdout for
-              // "aborting remaining stages", which test_ceph_lifecycle.sh
-              // had to do as a workaround.
-              ClusterPlaybookRunner.run(pb).map(ok => if ok then ExitCode.Success else ExitCode.Error)
+              // Same --resume support as RunPlaybook above, via
+              // ClusterPlaybookRunner/Checkpoint.
+              ClusterPlaybookRunner.run(pb, resume).map(ok => if ok then ExitCode.Success else ExitCode.Error)
 
       case Right(Command.RunCommand(command, nodeNames, timeoutSeconds)) =>
         withTargets(nodeNames) { targets =>
@@ -213,7 +205,17 @@ object Main extends IOApp:
     else if hours > 0 then s"${hours}h ${minutes}m"
     else s"${minutes}m"
 
-  private def runScalaPlaybookScript(scriptPath: String): IO[ExitCode] =
+  /** Compiles and runs a standalone `.scala` playbook script in a
+    * separate `java` process (see scripting/Main.scala). `resume` is
+    * passed via the `ORPHERA_RESUME` environment variable rather than
+    * as a process argument: OrpheraPlaybook/OrpheraClusterPlaybook
+    * extend `IOApp.Simple`, whose `run: IO[Unit]` has no access to the
+    * process's command-line args at all, so an env var is the only way
+    * to reach them here without changing that trait's shape (and
+    * without needing to touch scripting/Main.scala's own arg-forwarding,
+    * which this file has no visibility into).
+    */
+  private def runScalaPlaybookScript(scriptPath: String, resume: Boolean): IO[ExitCode] =
     IO.blocking {
       findLatestJar("scripting/target", "scripting-assembly", ".jar") match
         case None =>
@@ -221,13 +223,15 @@ object Main extends IOApp:
             "scripting-assembly jar not found under scripting/target/. Run 'sbt scripting/assembly' first."
           )
         case Some(jar) =>
-          val exit = new ProcessBuilder(
+          val builder = new ProcessBuilder(
             "java",
             "-cp",
             jar,
             "orphera.scripting.Main",
             scriptPath
           )
+          if resume then builder.environment().put("ORPHERA_RESUME", "true")
+          val exit = builder
             .inheritIO()
             .start()
             .waitFor()

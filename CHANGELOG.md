@@ -6,6 +6,230 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed — OSD disk selection moved into the shared inventory, out of two independently-hardcoded manifests
+
+Direct follow-up to the by-id fix below: the first pass at that fix put
+a hardcoded `Map[String, List[String]]` of by-id paths in
+`cephadm_teardown.scala` AND a separately hardcoded copy in
+`cephadm_add_osds.scala` — two independently-maintained lists, which is
+exactly the shape of bug that caused the original `/dev/sdX` incident
+(two things that need to agree, silently drifting apart). One of the
+two by-id entries for tst0 was in fact wrong in the first pass, in only
+one of the two files.
+
+- Per-host disk paths now live in `manifests/inventory.yaml`, using
+  Orphera's existing `Node.vars` mechanism (already used for
+  `cluster_ip`, `ceph_role`, etc.) — two new comma-separated vars,
+  `osd_disks` (what `cephadm_add_osds.scala` turns into OSDs) and
+  `zap_disks` (the full set `cephadm_teardown.scala` wipes, deliberately
+  broader than `osd_disks` for the same "broad zap" reasoning as
+  before).
+- Added `Inventory.csvVar(nodeName, key)` — reads a comma-separated
+  list-valued var off a single node. Kept generic (not disk-specific)
+  since `Node.vars` is otherwise String-valued only and any future var
+  could reasonably want to be a list. Also added `Inventory.varsFor`,
+  a single node's own vars (existing `groupVarsFor` only covered group
+  vars).
+- Both `cephadm_teardown.scala` and `cephadm_add_osds.scala` now read
+  device lists via `Inventory.csvVar(host, ...)` instead of a literal
+  `Map`, so there is exactly one place per host's disks are declared.
+- `test_ceph_lifecycle.sh`'s `EXPECTED_OSD_COUNT` — already fixed once
+  today to stop being a hand-maintained constant, by grepping by-id
+  string literals out of `cephadm_add_osds.scala` — broke again the
+  moment device selection moved into `inventory.yaml`'s comma-joined
+  vars (a line-count grep can't see multiple devices on one YAML line).
+  Replaced that static analysis entirely: it now reads the real number
+  out of `cephadm_add_osds.scala`'s own run output (its confirm-osds
+  stage's "All N specified OSD device(s) are up and in." message, which
+  is `osdDevices.values.map(_.size).sum` computed live), rather than
+  restating the config from any file a second time.
+
+### Fixed — `test_ceph_lifecycle.sh`'s `EXPECTED_OSD_COUNT` was a stale hand-maintained constant
+
+Surfaced immediately after the by-id device-identification fix below:
+with disk identification actually correct, `cephadm_add_osds.scala`
+created all 4 of its intended OSDs (2 on tst0 + 1 each on tst1/tst2) for
+what may be the first time, and the test script failed 3 assertions —
+not a regression, but its own `EXPECTED_OSD_COUNT=3` constant having
+been wrong all along (masked by the disk-identification bug silently
+capping tst0 at 1 successful OSD in every prior run, which made "3"
+look correct by accident).
+
+- `EXPECTED_OSD_COUNT` is no longer a hand-maintained constant. It's
+  derived at test-run time by counting `/dev/disk/by-id/` entries
+  directly in `cephadm_add_osds.scala`, so there's one source of truth
+  and this can't silently drift out of sync with the manifest again.
+
+### Fixed — `cephadm_add_osds.scala`/`cephadm_teardown.scala` identified disks by unstable `/dev/sdX` letters
+
+Live incident on tst0 (2026-09-28), traced back from a `ceph orch daemon
+add osd tst0:/dev/sdb` failure ("Device /dev/sdb has partitions"):
+`/dev/sdX` letters are assigned by kernel enumeration order at boot and
+are **not** guaranteed stable across a reboot. A reboot moved tst0's OS
+disk onto `/dev/sdb` — the exact device `osdDevices`/`devicesToZap` had
+hardcoded as a spare OSD disk — so `cephadm_add_osds.scala` was
+attempting to add the running root filesystem's own disk as an OSD.
+`ceph-volume`'s "has partitions" refusal is what actually prevented
+damage here; it was luck that the disk was rejected before anything
+destructive ran against it, not a property either playbook was designed
+to guarantee. `cephadm_teardown.scala`'s zap script ran against the same
+disk on every teardown for the same reason — harmless only because a
+mounted filesystem generally refuses `wipefs`/`dd` without `-f`.
+
+- Both manifests now identify disks by their `/dev/disk/by-id/...` path
+  (tied to the underlying QEMU drive's SCSI address, fixed at
+  VM-definition time) instead of `/dev/sdX`. This is also Ceph's own
+  recommended practice for DriveGroup device specs, for the same reason.
+  Per-host by-id mappings were confirmed via `lsblk` + `ls
+  /dev/disk/by-id/` against all three hosts post-incident — note the
+  mapping is **not** the same across hosts (each host's OS disk happens
+  to sit at a different SCSI address).
+- `cephadm_teardown.scala`'s zap script also gained a mounted-device
+  guard (`lsblk -rno MOUNTPOINT`) that refuses to touch a device if it
+  or any of its partitions is currently mounted, independent of whether
+  the by-id device list is correct — defense in depth against this same
+  class of bug recurring, rather than relying solely on getting the
+  device identification right.
+- **Correction, same day**: the first version of this fix mistranscribed
+  tst0's own by-id mapping (swapped which SCSI slot was the OS disk vs.
+  a data disk), so `tst0`'s entries pointed at the OS disk again under
+  its by-id path instead of `/dev/sdb`. `ceph-volume` rejected it the
+  same way for the same reason, and the mounted-device guard above is
+  what should have kept the intervening teardown run from touching it.
+  Corrected `tst0`'s two data-disk entries to the right SCSI slots.
+  tst1/tst2's mappings were verified correct throughout.
+
+### Fixed — `cephadm_teardown.scala` leaving a stale GPT backup header, resurfacing after a host reboot
+
+Found via a real `cephadm-add-osds` run failing with `Device /dev/sdb
+has partitions` on a host that had been torn down and — as far as any
+command run at the time could tell — cleanly zapped.
+
+- `zapDevicesScript`'s device wipe zeroed only the first 10MB of each
+  disk. GPT keeps a second, backup partition table at the *end* of the
+  disk by design, specifically so it survives damage to the front —
+  zeroing just the front removes the primary header (so nothing sees
+  partitions right after teardown) but leaves the backup header
+  intact. The next full rescan of the disk from scratch — a host
+  reboot, in particular — finds that backup GPT table and reconstructs
+  `/dev/sdb1` etc., so a later `add osd` run fails even though nothing
+  touched the disk in between the teardown and the failure.
+- Fixed by running `sgdisk --zap-all` first (destroys both the primary
+  and backup GPT structures, plus any MBR), and by additionally
+  zeroing the last 10MB of the disk, not just the first. `wipefs`/`dd`
+  (front)/`partprobe` stay as belt-and-suspenders for anything
+  `sgdisk` doesn't recognize.
+
+### Added — structured, machine-parseable event logging (`RunLog.scala`)
+
+The other half of the gap flagged alongside restartability: output has
+only ever been human-readable console lines
+(`[tst2] install cephadm prerequisites: ...`), with nothing a script or
+dashboard could parse without screen-scraping.
+
+- Both `PlaybookRunner` and `ClusterPlaybookRunner` now write one JSON
+  Lines file per run — `.orphera-logs/<kind>-<playbook-name>-<yyyyMMdd-HHmmss>.jsonl`
+  — alongside (not instead of) the existing console output. Nothing
+  about current behavior changes; this is purely additive.
+- **Task/stage lifecycle only, deliberately** — `run_start`/`run_end`,
+  `stage_start`/`stage_end` (cluster-playbook only), `task_start`,
+  `task_end` (with `success`, `duration_ms`, and `error` on failure),
+  and `task_skipped` (with `reason`: `condition_not_met` or
+  `resume_checkpoint`). Not every streamed `PROGRESS`/`OUTPUT` line —
+  that would make log files large for little benefit, since the
+  console output (and, for Ceph specifically, `ceph -s` itself) already
+  covers "what did this command print."
+- **No new dependency**, same reasoning as `Checkpoint.scala`: this
+  project's `orchestrator` module doesn't have `circe-parser`
+  available, and a flat, dozen-or-so-key event object doesn't need a
+  general JSON library. `RunLog.toJson` is a deliberately minimal,
+  non-general encoder (flat objects, String/Boolean/Int/Long/Double/
+  Option values only) — sufficient for every event this file emits.
+- Always-on, no flag — it only ever appends a separate file and never
+  touches stdout, so there was nothing to gate behind an opt-in.
+
+### Added — `--resume`: checkpoint-based restart for `playbook`/`cluster-playbook`
+
+Addresses a real, previously-open gap: a staged run (e.g.
+`cephadm_add_osds.scala`'s `apply-osd-spec`, adding OSDs across 5
+separate `host:device` pairs) that succeeds on some and fails on
+another had no safe way to continue — re-running the whole playbook
+replays the already-succeeded `ceph orch daemon add osd` commands,
+which are not idempotent (the device already carries an OSD's LVM
+signature by then, producing the same "device has a signature" class
+of error this project already hit and fixed once in
+`cephadm_teardown.scala`, for an unrelated reason).
+
+- **`Checkpoint.scala`** — per-(node, task-name) completion tracking,
+  shared by both `PlaybookRunner` and `ClusterPlaybookRunner`. State is
+  a local JSON file on the control host (`.orphera-state/<kind>-<name>.json`,
+  gitignored — add it to `.gitignore` if not already there), written
+  atomically (temp file + `ATOMIC_MOVE`, matching `CopyFile`'s existing
+  convention) and flushed after every single task completion, not
+  batched, since a crash mid-run leaving an accurate checkpoint is the
+  entire point.
+- **Opt-in, not automatic.** An ordinary run (no `--resume`) always
+  starts this playbook's checkpoint state fresh and immediately
+  overwrites any existing file for that name — behavior for every
+  existing invocation is unchanged. Passing `--resume` loads the
+  previous run's recorded completions first and skips any (node, task)
+  already marked done, printing `skipped (already completed in a
+  previous run — resuming)` in place of running it. Every run — resumed
+  or not — still records completions as it goes, so a *subsequent*
+  `--resume` always has accurate state to work from.
+- **`orphera playbook <file.yaml> --resume`** /
+  **`orphera cluster-playbook <file.yaml> --resume`** — wired through
+  `Cli.scala`/`Main.scala` for the YAML and registered-DSL-name paths.
+- **The `.scala`-script path needed a different mechanism.** The actual
+  motivating case (`cephadm_add_osds.scala`) runs via
+  `runScalaPlaybookScript`, a separate `java` subprocess running an
+  `OrpheraPlaybook`/`OrpheraClusterPlaybook` object — both
+  `IOApp.Simple`, whose `run: IO[Unit]` has no access to process args at
+  all. Rather than changing that trait's shape (which would ripple into
+  `scripting/Main.scala`'s arg-forwarding, not touched here), `--resume`
+  is passed to that subprocess as an `ORPHERA_RESUME=true` environment
+  variable instead, which both traits read directly. Same checkpoint
+  mechanism underneath either way.
+- **Known limitation, accepted for a first version:** a task is
+  identified only by `(node name, task name)` — renaming, reordering,
+  or duplicating a task name between runs will confuse resumption. Same
+  fragility as Ansible's `--start-at-task`; a content-hash-based task
+  identity was considered and deferred as more machinery than this
+  first version needs.
+- **Also deliberately deferred:** state lives on the control host, not
+  the target agent — resume only works from the same host/working
+  directory that produced the checkpoint file. Revisit with an
+  agent-side RPC if that portability becomes a real requirement.
+- **`Checkpoint.scala` rewritten to drop a circe dependency that
+  doesn't exist here.** The first version used `io.circe.parser.decode`
+  to read the checkpoint file back, which failed to compile
+  (`value parser is not a member of io.circe`) — `circe-parser` isn't
+  actually a dependency of the `orchestrator` module (only whatever
+  `circe-yaml` pulls in for `PlaybookYaml.scala`). Rather than guess at
+  another circe API or add a new dependency blind, the format was
+  dropped to plain tab-separated text (`<node>\t<task name>` per line)
+  — zero library dependency beyond `java.nio.file`, appropriate for
+  what is genuinely a small set of `(node, task)` pairs.
+- **Verified end-to-end against real hosts, not just compiled.** Two
+  new regression tests, both built the same way as this cycle's other
+  test scripts: force a genuine partial failure deterministically (a
+  task that fails until a marker file exists on the target), then prove
+  three things — the checkpoint file records exactly the tasks that
+  actually succeeded; a second run *without* `--resume` re-executes
+  everything (default behavior provably unchanged); a run *with*
+  `--resume` skips the already-completed task and actually executes the
+  rest through to success.
+  - `manifests/test_restartability.sh` (+ `restartability_test.yaml`)
+    — the flat-`playbook`/YAML path, `--resume` as a direct CLI flag.
+    Run against real hosts: **8/8 assertions passed.**
+  - `manifests/test_restartability_cluster.sh` (+
+    `restartability_cluster_test.scala`) — the staged
+    `cluster-playbook`/`.scala`-script path, exercising `ORPHERA_RESUME`
+    via the actual subprocess mechanism rather than trusting that the
+    flat-playbook test's pass implies the cluster path also works. This
+    is the path `cephadm_add_osds.scala` (the original motivating case)
+    actually uses.
+
 ### Fixed — `orphera playbook`/`orphera cluster-playbook` always exiting 0, even on a genuine failure
 
 Root cause, in both `PlaybookRunner.run` and `ClusterPlaybookRunner.run`:

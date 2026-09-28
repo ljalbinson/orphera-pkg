@@ -25,3 +25,6 @@ junk
 
 orphera-agent
 orphera-orchestrator
+
+.orphera-state/
+.orphera-logs/

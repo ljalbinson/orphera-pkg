@@ -13,9 +13,12 @@ trait OrpheraClusterPlaybook extends IOApp.Simple:
   def playbook: ClusterPlaybook
 
   def run: IO[Unit] =
+    // See OrpheraPlaybook for why resume comes from ORPHERA_RESUME
+    // rather than a CLI arg — same reasoning, same mechanism.
+    val resume = sys.env.get("ORPHERA_RESUME").contains("true")
     IO.println(
-      s"Running cluster playbook '${playbook.name}'"
-    ) >> ClusterPlaybookRunner.run(playbook).flatMap { ok =>
+      s"Running cluster playbook '${playbook.name}'${if resume then " (resuming from checkpoint)" else ""}"
+    ) >> ClusterPlaybookRunner.run(playbook, resume).flatMap { ok =>
       // Same fix as OrpheraPlaybook: ClusterPlaybookRunner.run now
       // reports success/failure as a Boolean instead of always
       // completing as IO[Unit]. IOApp.Simple only exits the process

@@ -19,7 +19,7 @@ object ClusterPlaybookRunner:
     * behavior `test_ceph_lifecycle.sh` had to work around by grepping
     * output for that message instead of trusting the exit code.
     */
-  def run(playbook: ClusterPlaybook): IO[Boolean] =
+  def run(playbook: ClusterPlaybook, resume: Boolean = false): IO[Boolean] =
     val allNodeNames = playbook.stages.flatMap(_.nodeNames).distinct
     val allNodes = Inventory.all.filter(n => allNodeNames.contains(n.name))
 
@@ -29,8 +29,9 @@ object ClusterPlaybookRunner:
       for
         context <- gatherClusterFacts(allNodes)
         setFacts <- SetFacts.empty
+        checkpoint <- Checkpoint.load("cluster", playbook.name, resume)
         _ <- IO.println(s"[${playbook.name}] Starting — ${playbook.stages.length} stage(s)")
-        ok <- runStages(playbook.stages, context, setFacts)
+        ok <- runStages(playbook.stages, context, setFacts, checkpoint)
       yield ok
 
   private def gatherClusterFacts(nodes: List[Node]): IO[ClusterContext] =
@@ -40,21 +41,31 @@ object ClusterPlaybookRunner:
       }
       .map(pairs => ClusterContext(pairs.collect { case (name, Some(f)) => name -> f }.toMap))
 
-  private def runStages(stages: List[Stage], context: ClusterContext, setFacts: SetFacts): IO[Boolean] =
+  private def runStages(
+      stages: List[Stage],
+      context: ClusterContext,
+      setFacts: SetFacts,
+      checkpoint: Checkpoint.Handle
+  ): IO[Boolean] =
     stages match
       case Nil => IO.println("All stages completed.") >> IO.pure(true)
 
       case stage :: rest =>
         IO.println(s"--- Stage '${stage.name}' ---") >>
-          runStage(stage, context, setFacts).flatMap {
-            case true  => runStages(rest, context, setFacts)
+          runStage(stage, context, setFacts, checkpoint).flatMap {
+            case true  => runStages(rest, context, setFacts, checkpoint)
             case false =>
               IO.println(
                 s"Stage '${stage.name}' failed or did not become healthy — aborting remaining stages."
               ) >> IO.pure(false)
           }
 
-  private def runStage(stage: Stage, context: ClusterContext, setFacts: SetFacts): IO[Boolean] =
+  private def runStage(
+      stage: Stage,
+      context: ClusterContext,
+      setFacts: SetFacts,
+      checkpoint: Checkpoint.Handle
+  ): IO[Boolean] =
     val targets = Inventory.all.filter(n => stage.nodeNames.contains(n.name))
 
     if targets.isEmpty then
@@ -64,20 +75,21 @@ object ClusterPlaybookRunner:
         case Some(check) =>
           waitForHealthy(stage.name, check).flatMap {
             case false => IO.pure(false)
-            case true  => runStageTasks(stage, targets, context, setFacts)
+            case true  => runStageTasks(stage, targets, context, setFacts, checkpoint)
           }
         case None =>
-          runStageTasks(stage, targets, context, setFacts)
+          runStageTasks(stage, targets, context, setFacts, checkpoint)
 
   private def runStageTasks(
       stage: Stage,
       targets: List[Node],
       context: ClusterContext,
-      setFacts: SetFacts
+      setFacts: SetFacts,
+      checkpoint: Checkpoint.Handle
   ): IO[Boolean] =
     for
       results <- targets.parTraverse { node =>
-        runTasksForNode(stage, node, context, setFacts).attempt.map(r => node.name -> r.isRight)
+        runTasksForNode(stage, node, context, setFacts, checkpoint).attempt.map(r => node.name -> r.isRight)
       }
       failed = results.collect { case (name, false) => name }
       allOk = failed.isEmpty
@@ -87,38 +99,53 @@ object ClusterPlaybookRunner:
         else IO.unit
     yield allOk
 
-  private def runTasksForNode(stage: Stage, node: Node, context: ClusterContext, setFacts: SetFacts): IO[Unit] =
+  private def runTasksForNode(
+      stage: Stage,
+      node: Node,
+      context: ClusterContext,
+      setFacts: SetFacts,
+      checkpoint: Checkpoint.Handle
+  ): IO[Unit] =
     val factsOpt = context.factsByNode.get(node.name)
-    runTasks(stage.tasks, node, factsOpt, context, setFacts)
+    runTasks(stage.tasks, node, factsOpt, context, setFacts, checkpoint)
 
   private def runTasks(
       tasks: List[NamedTask],
       node: Node,
       facts: Option[orphera.common.Facts],
       context: ClusterContext,
-      setFacts: SetFacts
+      setFacts: SetFacts,
+      checkpoint: Checkpoint.Handle
   ): IO[Unit] =
     tasks match
       case Nil => IO.unit
       case namedTask :: rest =>
-        setFacts.get(node.name).flatMap { ownSetFacts =>
-          val shouldRun = namedTask.when match
-            case None => true
-            case Some(cond) =>
-              facts match
-                case Some(f) => cond.matches(f, ownSetFacts)
-                case None    => false
-
-          if !shouldRun then
-            IO.println(s"[${node.name}] ${namedTask.name}: skipped (condition not met)") >>
-              runTasks(rest, node, facts, context, setFacts)
+        checkpoint.isDone(node.name, namedTask.name).flatMap { alreadyDone =>
+          if alreadyDone then
+            IO.println(s"[${node.name}] ${namedTask.name}: skipped (already completed in a previous run — resuming)") >>
+              runTasks(rest, node, facts, context, setFacts, checkpoint)
           else
-            runSingleTask(namedTask, node, facts, context, setFacts).attempt.flatMap {
-              case Right(()) => runTasks(rest, node, facts, context, setFacts)
-              case Left(err) =>
-                IO.println(
-                  s"[${node.name}] ${namedTask.name}: FAILED — ${err.getMessage}"
-                ) >> IO.raiseError(err)
+            setFacts.get(node.name).flatMap { ownSetFacts =>
+              val shouldRun = namedTask.when match
+                case None => true
+                case Some(cond) =>
+                  facts match
+                    case Some(f) => cond.matches(f, ownSetFacts)
+                    case None    => false
+
+              if !shouldRun then
+                IO.println(s"[${node.name}] ${namedTask.name}: skipped (condition not met)") >>
+                  runTasks(rest, node, facts, context, setFacts, checkpoint)
+              else
+                runSingleTask(namedTask, node, facts, context, setFacts).attempt.flatMap {
+                  case Right(()) =>
+                    checkpoint.markDone(node.name, namedTask.name) >>
+                      runTasks(rest, node, facts, context, setFacts, checkpoint)
+                  case Left(err) =>
+                    IO.println(
+                      s"[${node.name}] ${namedTask.name}: FAILED — ${err.getMessage}"
+                    ) >> IO.raiseError(err)
+                }
             }
         }
 

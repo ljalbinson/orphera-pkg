@@ -17,7 +17,7 @@ object PlaybookRunner:
     * below, never surfaced), so `orphera playbook ...` always exited
     * 0 even when a task genuinely failed.
     */
-  def run(playbook: Playbook): IO[Boolean] =
+  def run(playbook: Playbook, resume: Boolean = false): IO[Boolean] =
     val targets = Inventory.all.filter(n => playbook.nodeNames.contains(n.name))
 
     if targets.isEmpty then
@@ -26,7 +26,8 @@ object PlaybookRunner:
       for
         context <- gatherClusterFacts(targets)
         setFacts <- SetFacts.empty
-        results <- targets.parTraverse(runOnNode(playbook, _, context, setFacts))
+        checkpoint <- Checkpoint.load("playbook", playbook.name, resume)
+        results <- targets.parTraverse(runOnNode(playbook, _, context, setFacts, checkpoint))
       yield results.forall(identity)
 
   private def gatherClusterFacts(nodes: List[Node]): IO[ClusterContext] =
@@ -36,40 +37,54 @@ object PlaybookRunner:
       }
       .map(pairs => ClusterContext(pairs.collect { case (name, Some(f)) => name -> f }.toMap))
 
-  private def runOnNode(playbook: Playbook, node: Node, context: ClusterContext, setFacts: SetFacts): IO[Boolean] =
+  private def runOnNode(
+      playbook: Playbook,
+      node: Node,
+      context: ClusterContext,
+      setFacts: SetFacts,
+      checkpoint: Checkpoint.Handle
+  ): IO[Boolean] =
     val factsOpt = context.factsByNode.get(node.name)
-    runTasks(playbook.tasks, node, factsOpt, context, setFacts)
+    runTasks(playbook.tasks, node, factsOpt, context, setFacts, checkpoint)
 
   private def runTasks(
       tasks: List[NamedTask],
       node: Node,
       facts: Option[Facts],
       context: ClusterContext,
-      setFacts: SetFacts
+      setFacts: SetFacts,
+      checkpoint: Checkpoint.Handle
   ): IO[Boolean] =
     tasks match
       case Nil => IO.pure(true)
 
       case namedTask :: rest =>
-        setFacts.get(node.name).flatMap { ownSetFacts =>
-          val shouldRun = namedTask.when match
-            case None => true
-            case Some(cond) =>
-              facts match
-                case Some(f) => cond.matches(f, ownSetFacts)
-                case None    => false
-
-          if !shouldRun then
-            IO.println(s"[${node.name}] ${namedTask.name}: skipped (condition not met)") >>
-              runTasks(rest, node, facts, context, setFacts)
+        checkpoint.isDone(node.name, namedTask.name).flatMap { alreadyDone =>
+          if alreadyDone then
+            IO.println(s"[${node.name}] ${namedTask.name}: skipped (already completed in a previous run — resuming)") >>
+              runTasks(rest, node, facts, context, setFacts, checkpoint)
           else
-            runSingleTask(namedTask, node, facts, context, setFacts).attempt.flatMap {
-              case Right(()) =>
-                runTasks(rest, node, facts, context, setFacts)
-              case Left(err) =>
-                IO.println(
-                  s"[${node.name}] ${namedTask.name}: FAILED — ${err.getMessage}. Stopping remaining tasks for this node."
-                ) >> IO.pure(false)
+            setFacts.get(node.name).flatMap { ownSetFacts =>
+              val shouldRun = namedTask.when match
+                case None => true
+                case Some(cond) =>
+                  facts match
+                    case Some(f) => cond.matches(f, ownSetFacts)
+                    case None    => false
+
+              if !shouldRun then
+                IO.println(s"[${node.name}] ${namedTask.name}: skipped (condition not met)") >>
+                  runTasks(rest, node, facts, context, setFacts, checkpoint)
+              else
+                runSingleTask(namedTask, node, facts, context, setFacts).attempt.flatMap {
+                  case Right(()) =>
+                    checkpoint.markDone(node.name, namedTask.name) >>
+                      runTasks(rest, node, facts, context, setFacts, checkpoint)
+                  case Left(err) =>
+                    IO.println(
+                      s"[${node.name}] ${namedTask.name}: FAILED — ${err.getMessage}. Stopping remaining tasks for this node."
+                    ) >> IO.pure(false)
+                }
             }
         }
 

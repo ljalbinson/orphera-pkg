@@ -39,6 +39,8 @@ untrusted networks or adversarial input.
 - [Network config safety](#network-config-safety)
 - [Fact gathering](#fact-gathering)
 - [File retrieval](#file-retrieval)
+- [Restartability](#restartability)
+- [Observability](#observability)
 - [Versioning](#versioning)
 - [Authentication and security notes](#authentication-and-security-notes)
 - [Provisioning a new host](#provisioning-a-new-host)
@@ -281,8 +283,8 @@ explicit targeting — see below).
 | `facts [--nodes ...]` | Gather and print basic host facts (OS, kernel, CPU/memory, disks, interfaces) from one or more agents |
 | `uptime [--nodes ...]` | Report each agent's host uptime and 1-minute load average — the concrete way to confirm a `reboot` genuinely rebooted the host, not just that the agent came back |
 | `run <command...> [--nodes] [--timeout 60]` | Run an arbitrary command on one or more agents, streaming stdout/stderr and reporting the real exit code. Use `--` before the command to separate it from `run`'s own flags, e.g. `orphera run --nodes tst0 -- systemctl status nginx` |
-| `playbook <file.yaml \| file.scala \| compiled-name>` | Run an ordered, multi-task playbook — from a YAML file, a run-time-compiled Scala script, or a compiled DSL playbook by registered name — see [Playbooks](#playbooks) |
-| `cluster-playbook <file.yaml>` | Run a staged, cross-node-coordinated playbook — see [Cross-node coordination](#cross-node-coordination-and-staged-playbooks) |
+| `playbook <file.yaml \| file.scala \| compiled-name> [--resume]` | Run an ordered, multi-task playbook — from a YAML file, a run-time-compiled Scala script, or a compiled DSL playbook by registered name — see [Playbooks](#playbooks). `--resume` skips tasks already completed in a previous run — see [Restartability](#restartability) |
+| `cluster-playbook <file.yaml \| file.scala> [--resume]` | Run a staged, cross-node-coordinated playbook — see [Cross-node coordination](#cross-node-coordination-and-staged-playbooks). Same `--resume` support as `playbook` |
 
 There is no `apply <manifest.yaml>` command — the standalone
 declarative-file-manifest idea (independent, parallel file pushes, no
@@ -701,6 +703,74 @@ sbt "orchestrator/run fetch /etc/nginx/nginx.conf --out /tmp/fetched --nodes web
 There is currently no path restriction on either `fetch` or `copy` —
 an authenticated orchestrator can read or write any path the agent's
 root user can reach. See [Known gaps](#known-gaps--not-yet-built).
+
+## Restartability
+
+`playbook`/`cluster-playbook` both accept `--resume`, which skips any
+task already recorded as completed by a previous run of that same
+playbook, instead of replaying it. This exists because many tasks are
+**not** safely re-runnable once partially applied — `ceph orch daemon
+add osd host:/dev/sdb`, for instance, fails on a second attempt because
+the device already carries an OSD's LVM signature by then. Without
+`--resume`, a staged rollout that fails 4 hosts into a 5-host stage has
+no safe way to continue except a full teardown and restart.
+
+State is a local JSON file on the control host
+(`.orphera-state/<kind>-<playbook-name>.json`, gitignored), tracking
+completion per `(node, task name)` pair, written atomically after every
+task. An ordinary run (no `--resume`) always starts fresh and
+overwrites this file — existing behavior is unchanged unless you pass
+the flag. `--resume` loads the previous run's completions and skips
+anything already marked done, printing `skipped (already completed in
+a previous run — resuming)` in its place.
+
+```bash
+orphera cluster-playbook manifests/cephadm_add_osds.scala   # fails partway through
+orphera cluster-playbook manifests/cephadm_add_osds.scala --resume   # picks up where it left off
+```
+
+**Known limitations:**
+- A task is identified only by `(node name, task name)` — renaming,
+  reordering, or duplicating a task name between runs will confuse
+  resumption (the same fragility Ansible's `--start-at-task` has).
+- State lives on the control host, not the target agent — resume only
+  works from the same host and working directory that produced the
+  checkpoint file.
+
+**Verified, not just compiled:** `manifests/test_restartability.sh`
+(flat `playbook`, `--resume` as a CLI flag) and
+`manifests/test_restartability_cluster.sh` (staged `cluster-playbook`,
+run as a `.scala` script — the actual path `cephadm_add_osds.scala`
+uses — exercising `ORPHERA_RESUME` via the real subprocess mechanism
+rather than assuming it from the flat-playbook test alone) both force a
+genuine partial failure against real hosts, then assert the checkpoint
+file, a second non-`--resume` run's unchanged behavior, and a
+`--resume` run's actual skip-and-continue — see either script's header
+comment for the exact mechanism.
+
+## Observability
+
+`playbook`/`cluster-playbook` both write one JSON Lines file per run —
+`.orphera-logs/<kind>-<playbook-name>-<yyyyMMdd-HHmmss>.jsonl` —
+alongside the existing human-readable console output, not instead of
+it. Task/stage lifecycle only: `run_start`/`run_end`,
+`stage_start`/`stage_end` (cluster-playbook), `task_start`, `task_end`
+(`success`, `duration_ms`, `error` on failure), `task_skipped`
+(`reason`: `condition_not_met` or `resume_checkpoint`). Not every
+streamed command-output line — the console already has that.
+
+```bash
+$ orphera cluster-playbook manifests/cephadm_add_osds.scala
+...
+$ tail -3 .orphera-logs/cluster-cephadm-add-osds-20260928-145112.jsonl
+{"event":"task_end","stage":"apply-osd-spec","node":"tst1","task":"add osd on tst1:/dev/sdb","success":false,"duration_ms":3182,"error":"Remote command reported failure (see output above)","ts":"2026-09-28T14:51:15.482Z"}
+{"event":"stage_end","stage":"apply-osd-spec","success":false,"duration_ms":9107,"ts":"2026-09-28T14:51:15.483Z"}
+{"event":"run_end","playbook":"cephadm-add-osds","success":false,"duration_ms":9110,"ts":"2026-09-28T14:51:15.483Z"}
+```
+
+Always on, no flag — it only ever appends a separate file and never
+touches stdout, so anything that already greps console output (or the
+existing test scripts) is unaffected.
 
 ## Versioning
 

@@ -44,7 +44,7 @@ enum Command:
   )
   case Fetch(remotePath: String, localDir: String, nodes: Option[List[String]])
   case Facts(nodes: Option[List[String]])
-  case RunPlaybook(path: String)
+  case RunPlaybook(path: String, resume: Boolean)
   case Reboot(
       nodes: Option[List[String]],
       delaySeconds: Int,
@@ -53,7 +53,7 @@ enum Command:
   )
   case Version(nodes: Option[List[String]])
   case Uptime(nodes: Option[List[String]])
-  case RunClusterPlaybook(path: String)
+  case RunClusterPlaybook(path: String, resume: Boolean)
   case RunCommand(
       command: List[String],
       nodes: Option[List[String]],
@@ -87,16 +87,29 @@ object Cli:
         parseTeardown(rest, Nil, "root", None, purge = false, confirmed = false)
       case "fetch" :: remote :: rest => parseFetch(rest, remote, ".", None)
       case "facts" :: rest           => parseFacts(rest, None)
-      case "playbook" :: path :: Nil => Right(Command.RunPlaybook(path))
+      case "playbook" :: path :: rest => parsePlaybookFlags(rest, resume = false).map(Command.RunPlaybook(path, _))
       case "version" :: rest         => parseVersion(rest, None)
       case "uptime" :: rest          => parseUptime(rest, None)
       case "reboot" :: rest          =>
         parseReboot(rest, None, 5, waitForReturn = false, 300)
-      case "cluster-playbook" :: path :: Nil =>
-        Right(Command.RunClusterPlaybook(path))
+      case "cluster-playbook" :: path :: rest =>
+        parsePlaybookFlags(rest, resume = false).map(Command.RunClusterPlaybook(path, _))
       case "help" :: _ | "--help" :: _ | Nil => Right(Command.Help)
       case "run" :: rest => parseRunCommand(rest, Nil, None, 60)
       case other => Left(s"Unknown command: ${other.headOption.getOrElse("")}")
+
+  /** Shared flag parser for `playbook`/`cluster-playbook`'s only current
+    * flag. Kept separate rather than inlined since both commands need
+    * identical handling and neither previously took any arguments past
+    * the file path at all — see `Command.RunPlaybook`/`RunClusterPlaybook`
+    * for what `resume` does (checkpoint-based restart skipping,
+    * `Checkpoint.scala`).
+    */
+  private def parsePlaybookFlags(args: List[String], resume: Boolean): Either[String, Boolean] =
+    args match
+      case Nil               => Right(resume)
+      case "--resume" :: rest => parsePlaybookFlags(rest, resume = true)
+      case other :: _         => Left(s"Unknown argument: $other (expected at most --resume)")
 
   private def parseInstall(
       args: List[String],
@@ -434,14 +447,14 @@ object Cli:
       |  deploy-agent   <local.deb> [--remote-path /tmp/orphera-agent.deb] [--nodes host1,host2]
       |  bootstrap      <local.deb> --nodes host1,host2 [--ssh-user root] [--ssh-key ~/.ssh/id_ed25519] [--remote-path /tmp/x.deb]
       |  teardown       --nodes host1,host2 --yes [--purge] [--ssh-user root] [--ssh-key ~/.ssh/id_ed25519]
-      |  playbook       <file.yaml | file.scala | compiled-name>  — .scala files are compiled at run time
+      |  playbook       <file.yaml | file.scala | compiled-name> [--resume]  — .scala files are compiled at run time; --resume skips tasks already completed in a previous run (per .orphera-state/ checkpoint)
+      |  cluster-playbook <file.yaml | file.scala> [--resume]  — same --resume semantics, per stage/task/node
       |  run            <command...>  [--nodes host1,host2] [--timeout 60]  — run an arbitrary command, capturing stdout/stderr
       |  fetch          <remote-path> [--out ./local-dir] [--nodes host1,host2]
       |  facts          [--nodes host1,host2]
       |  reboot         [--nodes host1,host2] [--delay 5] [--wait] [--wait-timeout 300]
       |  version        [--nodes host1,host2]
       |  uptime         [--nodes host1,host2]
-      |  playbook       <file.yaml | file.scala | compiled-name>
       |
       |Examples:
       |  install curl vim
@@ -449,4 +462,5 @@ object Cli:
       |  autoremove --purge
       |  copy /tmp/test.txt /etc/orphera-test.txt --owner root --group root --mode 0644
       |  network-apply --nodes web1 --timeout 90
+      |  cluster-playbook manifests/cephadm_add_osds.scala --resume
       |""".stripMargin

@@ -28,11 +28,26 @@ ADMIN_SSH_USER="ubuntu"                 # root SSH login is blocked by cloud-ini
                                         # cephadm still needs root, so commands below go
                                         # through `sudo` instead of `ssh root@...`.
 EXPECTED_MON_COUNT=3                   # tst0, tst1, tst2
-EXPECTED_OSD_COUNT=3                   # keep this in sync with whatever osdDevices map
-                                        # cephadm_add_osds.scala actually ran with — there's
-                                        # no shared source of truth between the two yet.
 MANIFESTS_DIR="manifests"
 
+# EXPECTED_OSD_COUNT is NOT a hand-maintained constant, and not derived
+# by scanning any source/config file either — both were tried and both
+# went stale (see CHANGELOG for the full history: a hand-set "3" that
+# silently stopped matching reality, then a source-grep that miscounted
+# a comment line as a device, then broke again the moment device
+# selection moved out of the .scala file and into manifests/inventory.yaml
+# as comma-joined per-node vars, which a line-counting grep can't see
+# into correctly either). Any static analysis of "whichever file device
+# selection happens to live in today" is fragile in the same way: it's
+# a second, independent restatement of what cephadm_add_osds.scala
+# itself already computes and asserts on every run.
+#
+# So this reads it out of the playbook's own run output instead — its
+# confirm-osds stage prints exactly "All N specified OSD device(s) are
+# up and in.", where N is osdDevices.values.map(_.size).sum, computed
+# live from whatever cephadm_add_osds.scala actually resolved for this
+# run. That's the one true source: not a copy of the config, the
+# playbook's own real computed answer.
 PASS=0
 FAIL=0
 
@@ -52,6 +67,10 @@ assert_eq() {
 }
 
 # Runs a playbook and hard-fails the whole script on any sign of failure.
+# Also stashes the run's output in LAST_PLAYBOOK_OUTPUT so a caller can
+# pull information out of it afterward (used below to read the real
+# OSD count out of cephadm_add_osds.scala's own confirm-osds message,
+# rather than maintaining a second copy of that number here).
 #
 # NOTE: `orphera cluster-playbook` has been observed to exit 0 even when
 # a stage failed and it printed "Stage '...' failed or did not become
@@ -60,14 +79,15 @@ assert_eq() {
 # actual output for the failure marker instead. (Worth fixing in
 # Orphera itself — any script relying on $?, which is the normal thing
 # to do, gets silently lied to otherwise.)
+LAST_PLAYBOOK_OUTPUT=""
 run_playbook() {
   local manifest="$1"
-  local output rc
+  local rc
   log "Running $manifest ..."
-  output=$(orphera cluster-playbook "$MANIFESTS_DIR/$manifest" 2>&1)
+  LAST_PLAYBOOK_OUTPUT=$(orphera cluster-playbook "$MANIFESTS_DIR/$manifest" 2>&1)
   rc=$?
-  echo "$output"
-  if [ "$rc" -ne 0 ] || printf '%s' "$output" | grep -q "aborting remaining stages"; then
+  echo "$LAST_PLAYBOOK_OUTPUT"
+  if [ "$rc" -ne 0 ] || printf '%s' "$LAST_PLAYBOOK_OUTPUT" | grep -q "aborting remaining stages"; then
     log "FATAL: $manifest failed (non-zero exit, or a stage reported failure) — aborting test run"
     exit 1
   fi
@@ -119,6 +139,17 @@ run_playbook "cephadm_teardown.scala"
 run_playbook "cephadm_install.scala"
 run_playbook "cephadm_add_mons.scala"
 run_playbook "cephadm_add_osds.scala"
+
+# Pull the real OSD count out of cephadm_add_osds.scala's own
+# confirm-osds message ("All N specified OSD device(s) are up and in.")
+# rather than maintaining any second copy of it in this script — see the
+# EXPECTED_OSD_COUNT comment near the top for why.
+EXPECTED_OSD_COUNT=$(printf '%s' "$LAST_PLAYBOOK_OUTPUT" | grep -oE 'All [0-9]+ specified OSD device' | grep -oE '[0-9]+')
+if [ -z "$EXPECTED_OSD_COUNT" ]; then
+  log "FATAL: could not find cephadm_add_osds.scala's 'All N specified OSD device(s)' line in its output — can't derive EXPECTED_OSD_COUNT"
+  exit 1
+fi
+log "cephadm_add_osds.scala reported $EXPECTED_OSD_COUNT specified OSD device(s)"
 
 log "Playbooks completed — independently verifying final cluster state via SSH ..."
 
