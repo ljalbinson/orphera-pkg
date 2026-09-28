@@ -1,0 +1,13 @@
+---
+# Control case: exercises the same cluster-playbook (staged) path as
+# cluster_exit_code_fail.yaml, but should genuinely succeed.
+name: cluster-exit-code-regression-pass
+
+stages:
+  - name: only
+    nodes: [tst0]
+    tasks:
+      - name: deliberately succeed
+        run_command:
+          command: ["sh", "-c", "exit 0"]
+          timeout: 10

@@ -1,0 +1,17 @@
+---
+# Deliberately fails: exercises the cluster-playbook (staged) path of
+# the exit-code fix. Before the fix, `orphera cluster-playbook
+# manifests/cluster_exit_code_fail.yaml` printed "Stage 'only' failed
+# or did not become healthy — aborting remaining stages." and then
+# exited 0 anyway — the exact behavior test_ceph_lifecycle.sh had to
+# grep around instead of trusting $?.
+name: cluster-exit-code-regression-fail
+
+stages:
+  - name: only
+    nodes: [tst0]
+    tasks:
+      - name: deliberately fail
+        run_command:
+          command: ["sh", "-c", "exit 1"]
+          timeout: 10

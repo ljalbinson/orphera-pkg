@@ -6,6 +6,55 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed — `orphera playbook`/`orphera cluster-playbook` always exiting 0, even on a genuine failure
+
+Root cause, in both `PlaybookRunner.run` and `ClusterPlaybookRunner.run`:
+a failed task, or a stage that failed/never became healthy, was only
+ever **printed** (`"... FAILED — ..."` / `"... aborting remaining
+stages."`) and then the enclosing `IO` completed normally as
+`IO[Unit]` — nothing raised, nothing signaled failure upward. `Main.scala`'s
+dispatch for both commands compounded this by hardcoding
+`>> IO.pure(ExitCode.Success)` after calling `run(...)`, so the process
+exit code was unconditionally 0 regardless of what actually happened.
+This is exactly the behavior `test_ceph_lifecycle.sh`'s `run_playbook`
+helper had to work around by grepping output for `"aborting remaining
+stages"` instead of trusting `$?` — that workaround is no longer
+strictly necessary, though it's harmless to leave in place.
+
+Fixed by changing both runners' signatures from `IO[Unit]` to
+`IO[Boolean]` (did everything succeed), threading that signal up
+through every branch that previously only printed on failure
+(`PlaybookRunner.runTasks`'s `Left(err)` case; `PlaybookRunner.run`'s
+`parTraverse_` → `parTraverse` + `.forall(identity)`, since
+`parTraverse_` discards per-node results entirely;
+`ClusterPlaybookRunner.runStages`'s both branches), and updating
+`Main.scala`'s two call sites to map that boolean to a real
+`ExitCode.Success`/`ExitCode.Error` instead of hardcoding success.
+
+Missed on the first pass and caught by the compiler on the next build:
+**`OrpheraPlaybook`/`OrpheraClusterPlaybook`** — the traits that let a
+DSL playbook run as its own standalone `IOApp.Simple` (the
+`orphera playbook`/`cluster-playbook somefile.scala` path, via
+`runScalaPlaybookScript`'s separate `java` process + `waitFor()`) also
+call `PlaybookRunner.run`/`ClusterPlaybookRunner.run` directly and
+require `IO[Unit]`, not `IO[Boolean]` — `sbt compile` failed with two
+`Found: IO[Boolean] / Required: IO[Unit]` errors at
+`OrpheraClusterPlaybook.scala:18` and `OrpheraPlaybook.scala:12` once
+the runner signatures above changed. Since `IOApp.Simple` only exits
+the process nonzero when its `IO` actually raises, both traits now
+`flatMap` the runner's boolean and `IO.raiseError` on `false` rather
+than trying to return it directly — this is also what makes the
+standalone-script path's exit code correct, not just the ordinary
+`Main.scala` dispatch path.
+
+**Regression test added:** `manifests/test_exit_code_regression.sh`,
+asserting `$?` directly (not grepping output, unlike
+`test_ceph_lifecycle.sh`'s existing workaround for this exact bug) —
+a deliberately-failing task/stage and a deliberately-succeeding control
+for both the flat-playbook and staged-cluster-playbook paths
+(`exit_code_{fail,pass}.yaml`, `cluster_exit_code_{fail,pass}.yaml`),
+so the test can't pass by coincidence.
+
 ### Fixed — `cephadm_teardown.scala` leaving orphaned LVM/device-mapper state across repeated runs
 
 Found via repeated end-to-end runs of `test_ceph_lifecycle.sh` against

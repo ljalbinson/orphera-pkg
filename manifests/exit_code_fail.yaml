@@ -1,0 +1,14 @@
+---
+# Deliberately fails: exercises the flat-playbook path of the exit-code
+# fix. Before the fix, `orphera playbook manifests/exit_code_fail.yaml`
+# printed "FAILED" for this task and then exited 0 anyway.
+name: exit-code-regression-fail
+
+nodes:
+  - tst0
+
+tasks:
+  - name: deliberately fail
+    run_command:
+      command: ["sh", "-c", "exit 1"]
+      timeout: 10

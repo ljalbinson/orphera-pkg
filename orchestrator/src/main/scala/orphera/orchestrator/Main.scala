@@ -153,7 +153,12 @@ object Main extends IOApp:
             case Left(err) =>
               IO.println(s"Error: $err") >> IO.pure(ExitCode.Error)
             case Right(pb) =>
-              PlaybookRunner.run(pb) >> IO.pure(ExitCode.Success)
+              // PlaybookRunner.run now reports whether every node's task
+              // sequence actually succeeded (previously it always
+              // returned IO[Unit] and this call site always returned
+              // ExitCode.Success regardless — `orphera playbook ...`
+              // exited 0 even when a task genuinely failed).
+              PlaybookRunner.run(pb).map(ok => if ok then ExitCode.Success else ExitCode.Error)
 
       case Right(
             Command.Reboot(nodeNames, delaySeconds, wait, waitTimeoutSeconds)
@@ -184,7 +189,16 @@ object Main extends IOApp:
             case Left(err) =>
               IO.println(s"Error: $err") >> IO.pure(ExitCode.Error)
             case Right(pb) =>
-              ClusterPlaybookRunner.run(pb) >> IO.pure(ExitCode.Success)
+              // Same fix as RunPlaybook above: ClusterPlaybookRunner.run
+              // now reports whether every stage actually completed
+              // successfully, instead of this call site always hardcoding
+              // ExitCode.Success. This is the fix for `orphera
+              // cluster-playbook ...` reporting success (exit 0) even when
+              // a stage failed or a health check timed out — previously
+              // the only way to detect that was grepping stdout for
+              // "aborting remaining stages", which test_ceph_lifecycle.sh
+              // had to do as a workaround.
+              ClusterPlaybookRunner.run(pb).map(ok => if ok then ExitCode.Success else ExitCode.Error)
 
       case Right(Command.RunCommand(command, nodeNames, timeoutSeconds)) =>
         withTargets(nodeNames) { targets =>

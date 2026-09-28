@@ -15,4 +15,13 @@ trait OrpheraClusterPlaybook extends IOApp.Simple:
   def run: IO[Unit] =
     IO.println(
       s"Running cluster playbook '${playbook.name}'"
-    ) >> ClusterPlaybookRunner.run(playbook)
+    ) >> ClusterPlaybookRunner.run(playbook).flatMap { ok =>
+      // Same fix as OrpheraPlaybook: ClusterPlaybookRunner.run now
+      // reports success/failure as a Boolean instead of always
+      // completing as IO[Unit]. IOApp.Simple only exits the process
+      // nonzero when the IO raises, so `false` is turned into a raised
+      // error here — this is what makes `orphera cluster-playbook
+      // somefile.scala` actually exit nonzero when a stage fails.
+      if ok then IO.unit
+      else IO.raiseError(new RuntimeException(s"Cluster playbook '${playbook.name}' failed (see output above)"))
+    }
