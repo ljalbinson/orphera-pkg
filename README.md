@@ -1,13 +1,24 @@
 # Orphera
 
-Orphera is a lightweight configuration-management and orchestration tool: an
-`orchestrator` CLI drives one or more `agent` processes over gRPC to install
-packages, push files, manage network config, and provision hosts.
+Orphera is a distributed orchestration system for coordinating real,
+multi-node infrastructure changes — not a package installer with a
+prettier syntax. A central `orchestrator` directs persistent `agent`
+daemons over authenticated gRPC/TLS, and can stage work across a fleet
+with genuine cross-node awareness: one node's config can embed
+another's address, a rollout can wait on a quorum of N healthy nodes
+before proceeding, and a whole tier can gate on another tier's
+readiness — the kind of coordination a flat list of per-host SSH tasks
+can't express. It's been used to bring up a real 3-node Ceph cluster
+end-to-end (mon quorum, mgr, OSDs), not just installed a few packages.
 
-It is an early-stage, self-built alternative to Ansible-style tools —
-built for a small, deliberately understood feature set rather than broad
-platform coverage. Currently targets Debian/Ubuntu hosts (`apt`,
-`systemd-networkd`).
+Where Ansible executes ad hoc, per-run scripts pushed over SSH, Orphera
+runs long-lived agents that a coordinator drives directly, and gives you
+three ways to describe what should happen: declarative YAML, a typed
+Scala DSL with compile-time checking, or run-time-compiled Scala
+scripts — all sharing the same staged, health-gated execution engine
+underneath. It currently targets Debian/Ubuntu hosts (`apt`,
+`systemd-networkd`), built for a small, deliberately understood feature
+set rather than broad platform coverage first.
 
 **Status: early / pre-production.** No automated test coverage yet beyond
 what's described in [Testing](#testing). Not hardened for use against
