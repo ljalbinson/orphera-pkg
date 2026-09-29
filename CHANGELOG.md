@@ -6,6 +6,90 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — `manifests/test_observability.sh`: regression test for `RunLog.scala`'s structured event log
+
+Verifies the `.orphera-logs/*.jsonl` output itself, not just the console
+lines — the gap left after the logging feature below shipped without a
+test of its own.
+
+- Reuses `restartability_test.yaml`'s existing 3-run cycle (no
+  `--resume` / no `--resume` / `--resume`) and, on top of the
+  console-output assertions `test_restartability.sh` already makes,
+  parses each run's own log segment and checks the structured events
+  line up with what actually happened: exactly one `run_start`
+  (`playbook`, `target_count`) and `run_end` (`success`, numeric
+  `duration_ms`) per run; `task_start`/`task_end` with correct
+  `success`/`duration_ms`/`error`; `task_skipped`
+  (`reason=resume_checkpoint`) on the resumed run, with no
+  `task_start` for that task; and that a task never reached after a
+  failure (task3, in run 1/2) doesn't appear in the log at all.
+- **`manifests/observability_condition_test.scala`** — a small new
+  flat-`Playbook` fixture (built against the real `PlaybookDsl`, not a
+  guessed YAML `when:` schema), added because `restartability_test.yaml`
+  never exercises a `when:`-gated task and so never produces a
+  `task_skipped`/`reason=condition_not_met` event. Its second task is
+  gated on a fact condition that can never be true
+  (`"facts.os_id" === "this-os-id-does-not-exist"`), which proves that
+  reason code is emitted correctly, the gated task is never
+  `task_start`'d, and — unlike a genuine task failure — execution
+  carries on to the next task and the run still succeeds overall.
+- Each run's log segment is located by finding the most-recently-modified
+  file matching that manifest's log glob and reading from its *last*
+  `run_start` to end of file, rather than assuming one file equals one
+  run — `RunLog` filenames only have one-second resolution, so two runs
+  launched inside the same second land in, and get appended to, the
+  same file.
+- **Bug caught and fixed while building this**: the first version piped
+  each run's assertion output through a bash function
+  (`... | apply_verdicts`) to tally pass/fail counts — every stage of a
+  bash pipeline runs in its own subshell, so that function's counter
+  increments were silently discarded the moment the pipe closed, and
+  the script reported far fewer passes than it actually ran (5 instead
+  of 25, in the first real run against tst0). Fixed by capturing each
+  block's output via command substitution and feeding it to the
+  tallying function through a herestring instead, which runs in the
+  current shell.
+
+### Added — `manifests/iperf3_test.yaml` / `manifests/iperf3_test.scala`: parallel network throughput test
+
+New example manifests, in both front-ends, for a real non-Ceph use case:
+tst1 and tst2 run `iperf3` clients simultaneously against a self-hosted
+`iperf3` server on tst0 (star topology — tst0 isn't its own client,
+and this isn't full mesh between every pair). Demonstrates staged
+node-subset targeting (install on all three, start the server on tst0
+only, run clients on tst1+tst2 only) and genuinely parallel task
+execution within the client stage.
+
+- A default `iperf3 -s` instance only serves one client connection at a
+  time, so tst0 runs one server unit per client, each on its own port,
+  rather than one shared server the two clients would otherwise queue
+  behind.
+- Per-node port selection is done with a shell `case` on the node's own
+  hostname inside the task command — neither DSL front-end supports
+  per-node task parameterization within a single stage/node-list, so
+  the differentiation has to live in the command itself.
+
+### Fixed — starting a long-lived daemon from a `RunCommand` task with `nohup ... &` hangs until timeout, then gets SIGTERM-killed
+
+Found while building the iperf3 test above: starting the `iperf3`
+server with `nohup iperf3 -s ... &` inside a `RunCommand` task
+consistently failed with `exit=143` (SIGTERM) and no output from the
+script at all — not a task-specific bug, a general hazard of
+backgrounding a never-exiting process from inside an orchestration
+task. `RunCommand` waits for the command's process tree/output to
+fully close before considering the task done; a `nohup ... &` daemon
+that's meant to run forever never lets that happen, so eventually the
+task's own timeout fires and kills the whole thing, server included.
+
+- Fixed by using `systemd-run --unit=<name> --collect -- <command>`
+  instead: it hands the process off to systemd immediately and
+  returns, so the task genuinely finishes right away and the daemon's
+  lifecycle is no longer tied to the task's own process tracking.
+  General pattern, not specific to iperf3 — worth reaching for
+  `systemd-run` (or an installed systemd unit) any time a playbook
+  needs to start something that's meant to keep running after the task
+  that started it has finished.
+
 ### Changed — OSD disk selection moved into the shared inventory, out of two independently-hardcoded manifests
 
 Direct follow-up to the by-id fix below: the first pass at that fix put

@@ -49,6 +49,7 @@ untrusted networks or adversarial input.
 - [Testing](#testing)
 - [Development notes](#development-notes)
 - [Example: a real Ceph cluster deployment](#example-a-real-ceph-cluster-deployment)
+- [Example: parallel network throughput test (iperf3)](#example-parallel-network-throughput-test-iperf3)
 - [Known gaps / not yet built](#known-gaps--not-yet-built)
 
 ## Architecture
@@ -772,6 +773,20 @@ Always on, no flag — it only ever appends a separate file and never
 touches stdout, so anything that already greps console output (or the
 existing test scripts) is unaffected.
 
+**Verified, not just compiled:** `manifests/test_observability.sh`
+parses the actual `.orphera-logs/*.jsonl` output of a real run against
+tst0 (reusing `restartability_test.yaml`'s existing 3-run
+no-`--resume`/no-`--resume`/`--resume` cycle) and asserts the structured
+events themselves — correct `run_start`/`run_end`, `task_start`/
+`task_end` with the right `success`/`duration_ms`/`error`, and
+`task_skipped` with `reason=resume_checkpoint` on the resumed run — not
+just that a file gets written. `manifests/observability_condition_test.scala`
+is a second, small fixture with a `when:`-gated task whose condition can
+never be true, added because the restartability fixture never produces
+a `reason=condition_not_met` skip; it confirms that reason is logged
+correctly and that a condition skip (unlike a task failure) lets the
+rest of the run continue and still succeed.
+
 ## Versioning
 
 Each built agent binary carries its own version number, generated at
@@ -918,6 +933,31 @@ per-node devices (`osd_devices` inventory/group var) or left to
 
 The two paths are not meant to be run against the same hosts — pick
 one per cluster.
+
+## Example: parallel network throughput test (iperf3)
+
+`manifests/iperf3_test.yaml` / `manifests/iperf3_test.scala` — a
+smaller, non-Ceph example: tst1 and tst2 run `iperf3` clients
+simultaneously against a self-hosted `iperf3` server on tst0 (star
+topology, not full mesh between every pair). Demonstrates staged
+node-subset targeting (install on all three, start the server on tst0
+only, run clients on tst1+tst2 only) and genuinely parallel execution
+within a stage.
+
+Two things worth knowing if adapting this to a different target:
+
+- A default `iperf3 -s` instance only serves one client at a time, so
+  the server stage starts one instance per client, each on its own
+  port — otherwise the second client just queues behind the first.
+- The server is started with `systemd-run --unit=<name> --collect --
+  <command>`, not `nohup ... &`. Backgrounding a never-exiting daemon
+  with `nohup` inside a `RunCommand` task hangs the task until its own
+  timeout kills it (`RunCommand` waits for the process tree/output to
+  fully close, which a daemon that's meant to run forever never does)
+  — `systemd-run` hands the process to systemd and returns immediately
+  instead. This is a general pattern, not iperf3-specific: reach for
+  `systemd-run` any time a playbook needs to start something meant to
+  outlive the task that started it.
 
 ## Known gaps / not yet built
 
