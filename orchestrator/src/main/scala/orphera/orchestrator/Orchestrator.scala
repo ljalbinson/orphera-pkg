@@ -78,14 +78,15 @@ object Orchestrator:
       localDebPath: java.nio.file.Path,
       remoteDebPath: String = "/tmp/orphera-agent.deb"
   ): IO[Unit] =
-    nodes.parTraverse_ { node =>
-      NodeClient.deployDeb(
-        node,
-        localDebPath,
-        remoteDebPath,
-        ConsoleRenderer.render(node, _)
-      )
-    }
+    requireOrpheraAgentPackage(localDebPath.toString) >>
+      nodes.parTraverse_ { node =>
+        NodeClient.deployDeb(
+          node,
+          localDebPath,
+          remoteDebPath,
+          ConsoleRenderer.render(node, _)
+        )
+      }
 
   def bootstrapAgent(
       nodes: List[Node],
@@ -94,15 +95,56 @@ object Orchestrator:
       sshKeyPath: Option[String],
       remotePath: String = "/tmp/orphera-agent.deb"
   ): IO[Unit] =
-    nodes.parTraverse_ { node =>
-      SshDeployer.bootstrap(
-        node,
-        localDebPath,
-        sshUser,
-        sshKeyPath,
-        remotePath,
-        line => IO.println(s"[${node.name}] $line")
-      )
+    requireOrpheraAgentPackage(localDebPath) >>
+      nodes.parTraverse_ { node =>
+        SshDeployer.bootstrap(
+          node,
+          localDebPath,
+          sshUser,
+          sshKeyPath,
+          remotePath,
+          line => IO.println(s"[${node.name}] $line")
+        )
+      }
+
+  // The only package this project's own deploy paths are allowed to
+  // push and install. `deployDeb` also gets this checked again on the
+  // agent side (DebInstaller.verifyPackageName) — that's the real
+  // trust boundary, since deployDeb goes over an authenticated gRPC
+  // call that could in principle be made directly. `bootstrapAgent`
+  // has no agent to defer to yet (that's the whole point of
+  // bootstrap), so this client-side check is its ONLY enforcement —
+  // there is no second layer for that path.
+  //
+  // Checked via the .deb's own control metadata (`dpkg-deb -f <path>
+  // Package`), not its filename, for the same reason as the agent-side
+  // check: a wrong or tampered file given an innocent-looking name
+  // would otherwise sail through.
+  private def requireOrpheraAgentPackage(localDebPath: String): IO[Unit] =
+    val expectedPackageName = "orphera-agent"
+    IO.blocking {
+      val process = new ProcessBuilder("dpkg-deb", "-f", localDebPath, "Package")
+        .redirectErrorStream(true)
+        .start()
+      val output = new String(process.getInputStream.readAllBytes()).trim
+      val exit = process.waitFor()
+      (exit, output)
+    }.attempt.flatMap {
+      case Right((0, name)) if name == expectedPackageName =>
+        IO.unit
+      case Right((0, name)) =>
+        IO.raiseError(new RuntimeException(
+          s"Refusing to deploy $localDebPath: its Package field is '$name', not '$expectedPackageName'. " +
+            "bootstrap/deploy-agent only install the orphera-agent package — build one with 'make deb' first."
+        ))
+      case Right((exit, _)) =>
+        IO.raiseError(new RuntimeException(
+          s"Refusing to deploy $localDebPath: could not read its package metadata (dpkg-deb exited $exit) — is this a valid .deb?"
+        ))
+      case Left(err) =>
+        IO.raiseError(new RuntimeException(
+          s"Refusing to deploy $localDebPath: failed to run dpkg-deb (${err.getMessage})"
+        ))
     }
 
   def teardownAgent(

@@ -6,6 +6,59 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — command audit trail (`.orphera-audit/audit.jsonl`) and `orphera audit-log` to view it
+
+New `AuditLog.scala`: every mutating CLI invocation (`install`,
+`remove`, `autoremove`, `copy`, `network-apply`, `deploy-agent`,
+`bootstrap`, `teardown`, `playbook`, `reboot`, `cluster-playbook`,
+`run`) now gets a `command_start`/`command_end` pair appended to
+`.orphera-audit/audit.jsonl`, correlated by a random `invocation_id`,
+recording what ran, against which nodes, when, and whether it
+succeeded. Read-only/informational commands (`facts`, `version`,
+`uptime`, `log-summary`, `audit-log`, `help`, `fetch`) are
+deliberately excluded — this is a trail of changes, not a general
+access log.
+
+- `Main.scala`'s `dispatch` wraps only the commands
+  `AuditLog.isAuditable` marks true — everything else goes straight to
+  `dispatchCommand` unaudited. `args` gets parsed twice on the audited
+  path (once to classify, once inside `dispatchCommand` to actually
+  run), a deliberate trade to avoid restructuring the existing,
+  already-verified command match.
+- Own small JSON-Lines writer (`AuditLog.toJson`) rather than reusing
+  `RunLog`'s — that one's tuned for one file per playbook run; this is
+  one flat, always-growing file across every mutating command,
+  including ones with nothing to do with playbooks at all. Deliberately
+  a duplicate of `RunLog.toJson`'s encoding rather than a shared
+  extraction, to avoid touching that already-tested file for this.
+- Best-effort: a failure to write to the audit log never fails the
+  command it's auditing (logged as a warning instead).
+- Real limitation, worth being upfront about: no per-operator identity,
+  only the shared `ORPHERA_TOKEN` — this records WHAT ran, WHEN,
+  against WHICH nodes, and its OUTCOME, not reliably WHO ran it beyond
+  "someone with the token from this control host." Also unrotated in
+  this first version — `audit.jsonl` grows forever.
+- **`orphera audit-log [--limit N]`** (new `Command.ShowAuditLog`,
+  default `--limit 20`) — renders the trail as a table (time, command,
+  nodes, status, duration, and any command-specific detail fields) by
+  correlating `command_start`/`command_end` pairs from the file.
+  Implemented in `LogSummary.scala` alongside `log-summary` rather
+  than a third parallel JSON parser, since `AuditLog.toJson` emits the
+  same flat-object grammar `RunLog.toJson` does — `log-summary` covers
+  one playbook run's task-level detail, `audit-log` covers the flat
+  trail across every mutating command ever run here. An invocation
+  with no matching `command_end` (still running, or the process was
+  killed before it could record one) is shown as `IN PROGRESS / NO END
+  RECORD` rather than silently dropped.
+- Bash completion (`orphera-completion.bash`) updated for both new
+  verbs — `log-summary` (previously missing from the verb list
+  entirely) and `audit-log`. Also fixed, found in the process:
+  `deploy-agent` and `bootstrap` completion both still treated the
+  `.deb` path as a bare positional argument, completing it right
+  after the verb — stale since both commands moved that path behind
+  `--file` (auto-discovered when omitted); `--file` was missing from
+  both entirely. Both now complete `--file <path.deb>` correctly.
+
 ### Added — `manifests/test_observability.sh`: regression test for `RunLog.scala`'s structured event log
 
 Verifies the `.orphera-logs/*.jsonl` output itself, not just the console

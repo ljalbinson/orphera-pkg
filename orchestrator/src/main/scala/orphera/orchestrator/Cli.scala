@@ -24,12 +24,12 @@ enum Command:
   )
   case NetworkApply(nodes: Option[List[String]], timeoutSeconds: Int)
   case DeployAgent(
-      localPath: String,
+      localPath: Option[String],
       remotePath: String,
       nodes: Option[List[String]]
   )
   case Bootstrap(
-      localPath: String,
+      localPath: Option[String],
       nodes: Option[List[String]],
       sshUser: String,
       sshKeyPath: Option[String],
@@ -64,6 +64,13 @@ enum Command:
   // .jsonl path or a playbook name (resolves to that playbook's most
   // recently modified log file).
   case LogSummary(target: String)
+  // Reads .orphera-audit/audit.jsonl (see AuditLog.scala) and prints a
+  // human-readable table of recent mutating-command invocations —
+  // command, nodes, outcome, duration — correlated from its
+  // command_start/command_end pairs. Distinct from LogSummary: that's
+  // one playbook run's task-by-task detail, this is a flat trail
+  // across every mutating command ever run here.
+  case ShowAuditLog(limit: Int)
   case Help
 
 object Cli:
@@ -77,12 +84,12 @@ object Cli:
       case "copy" :: local :: dest :: rest =>
         parseCopy(rest, local, dest, None, "", "", 0)
       case "network-apply" :: rest         => parseNetworkApply(rest, None, 60)
-      case "deploy-agent" :: local :: rest =>
-        parseDeployAgent(rest, local, "/tmp/orphera-agent.deb", None)
-      case "bootstrap" :: local :: rest =>
+      case "deploy-agent" :: rest =>
+        parseDeployAgent(rest, None, "/tmp/orphera-agent.deb", None)
+      case "bootstrap" :: rest =>
         parseBootstrap(
           rest,
-          local,
+          None,
           None,
           "root",
           None,
@@ -110,6 +117,7 @@ object Cli:
         )
       case "log-summary" :: target :: rest =>
         parseLogSummary(rest, target)
+      case "audit-log" :: rest => parseAuditLog(rest, 20)
       case "help" :: _ | "--help" :: _ | Nil => Right(Command.Help)
       case "run" :: rest => parseRunCommand(rest, Nil, None, 60)
       case other => Left(s"Unknown command: ${other.headOption.getOrElse("")}")
@@ -136,7 +144,20 @@ object Cli:
   ): Either[String, Command] =
     args match
       case Nil        => Right(Command.LogSummary(target))
-      case other :: _ => Left(s"Unknown argument to log-summary: $other")
+      case other :: _  => Left(s"Unknown argument to log-summary: $other")
+
+  private def parseAuditLog(
+      args: List[String],
+      limit: Int
+  ): Either[String, Command] =
+    args match
+      case Nil => Right(Command.ShowAuditLog(limit))
+      case "--limit" :: value :: rest =>
+        scala.util.Try(value.toInt).toOption match
+          case Some(parsed) if parsed > 0 => parseAuditLog(rest, parsed)
+          case _                          => Left(s"Invalid limit: $value (expected a positive integer)")
+      case other :: _ =>
+        Left(s"Unknown argument to audit-log: $other")
 
   private def parseInstall(
       args: List[String],
@@ -251,12 +272,14 @@ object Cli:
 
   private def parseDeployAgent(
       args: List[String],
-      local: String,
+      local: Option[String],
       remotePath: String,
       nodes: Option[List[String]]
   ): Either[String, Command] =
     args match
       case Nil => Right(Command.DeployAgent(local, remotePath, nodes))
+      case "--file" :: value :: rest =>
+        parseDeployAgent(rest, Some(value), remotePath, nodes)
       case "--remote-path" :: value :: rest =>
         parseDeployAgent(rest, local, value, nodes)
       case "--nodes" :: value :: rest =>
@@ -271,7 +294,7 @@ object Cli:
 
   private def parseBootstrap(
       args: List[String],
-      local: String,
+      local: Option[String],
       nodes: Option[List[String]],
       sshUser: String,
       sshKeyPath: Option[String],
@@ -280,6 +303,8 @@ object Cli:
     args match
       case Nil =>
         Right(Command.Bootstrap(local, nodes, sshUser, sshKeyPath, remotePath))
+      case "--file" :: value :: rest =>
+        parseBootstrap(rest, Some(value), nodes, sshUser, sshKeyPath, remotePath)
       case "--nodes" :: value :: rest =>
         parseBootstrap(
           rest,
@@ -471,8 +496,8 @@ object Cli:
       |  autoremove     [--nodes host1,host2] [--purge]
       |  copy           <local-path> <remote-path> [--owner user] [--group grp] [--mode 0644] [--nodes host1,host2]
       |  network-apply  [--nodes host1,host2] [--timeout 60]
-      |  deploy-agent   <local.deb> [--remote-path /tmp/orphera-agent.deb] [--nodes host1,host2]
-      |  bootstrap      <local.deb> --nodes host1,host2 [--ssh-user root] [--ssh-key ~/.ssh/id_ed25519] [--remote-path /tmp/x.deb]
+      |  deploy-agent   [--file <local.deb>] [--remote-path /tmp/orphera-agent.deb] [--nodes host1,host2]  — installs only the orphera-agent package (verified against its control metadata, refused otherwise); auto-discovers the freshly built orphera-agent_*.deb in the current directory if --file is omitted
+      |  bootstrap      [--file <local.deb>] --nodes host1,host2 [--ssh-user root] [--ssh-key ~/.ssh/id_ed25519] [--remote-path /tmp/x.deb]  — same package check and auto-discovery as deploy-agent
       |  teardown       --nodes host1,host2 --yes [--purge] [--ssh-user root] [--ssh-key ~/.ssh/id_ed25519]
       |  playbook       <file.yaml | file.scala | compiled-name> [--resume]  — .scala files are compiled at run time; --resume skips tasks already completed in a previous run (per .orphera-state/ checkpoint)
       |  cluster-playbook <file.yaml | file.scala> [--resume]  — same --resume semantics, per stage/task/node
@@ -483,6 +508,7 @@ object Cli:
       |  version        [--nodes host1,host2]
       |  uptime         [--nodes host1,host2]
       |  log-summary    <playbook-name | file.jsonl>  — summarizes a run's .orphera-logs/*.jsonl output as a table (latest run for that playbook, if a name is given)
+      |  audit-log      [--limit 20]  — lists recent mutating-command invocations from .orphera-audit/audit.jsonl (command, nodes, outcome, duration); see log-summary for one playbook run's task-level detail
       |
       |Examples:
       |  install curl vim

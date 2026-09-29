@@ -15,7 +15,7 @@ _orphera_completions() {
 
   local verbs="install remove autoremove copy network-apply reboot uptime run
     playbook cluster-playbook deploy-agent bootstrap teardown fetch facts
-    version help"
+    version log-summary audit-log help"
 
   # Flags common to most verbs that take --nodes
   local nodes_flag="--nodes"
@@ -99,21 +99,26 @@ _orphera_completions() {
       ;;
 
     deploy-agent)
+      # No positional args — the .deb is --file (auto-discovered if
+      # omitted), not a bare path like playbook/bootstrap take.
       case "$prev" in
-        deploy-agent) COMPREPLY=($(compgen -f -X '!*.deb' -- "$cur")) ;;
+        --file) COMPREPLY=($(compgen -f -X '!*.deb' -- "$cur")) ;;
         --remote-path) COMPREPLY=() ;;
-        *) COMPREPLY=($(compgen -W "--remote-path" -- "$cur")) ;;
+        --nodes) COMPREPLY=() ;;
+        *) COMPREPLY=($(compgen -W "--file --remote-path --nodes" -- "$cur")) ;;
       esac
       ;;
 
     bootstrap)
+      # No positional args here either — same as deploy-agent, the
+      # .deb is --file (auto-discovered if omitted).
       case "$prev" in
-        bootstrap) COMPREPLY=($(compgen -f -X '!*.deb' -- "$cur")) ;;
+        --file) COMPREPLY=($(compgen -f -X '!*.deb' -- "$cur")) ;;
         --nodes) COMPREPLY=() ;;
         --ssh-user) COMPREPLY=() ;;
         --ssh-key) COMPREPLY=($(compgen -f -- "$cur")) ;;
         --remote-path) COMPREPLY=() ;;
-        *) COMPREPLY=($(compgen -W "--nodes --ssh-user --ssh-key --remote-path" -- "$cur")) ;;
+        *) COMPREPLY=($(compgen -W "--file --nodes --ssh-user --ssh-key --remote-path" -- "$cur")) ;;
       esac
       ;;
 
@@ -138,6 +143,22 @@ _orphera_completions() {
       case "$prev" in
         --nodes) COMPREPLY=() ;;
         *) COMPREPLY=($(compgen -W "--nodes" -- "$cur")) ;;
+      esac
+      ;;
+
+    log-summary)
+      # <playbook-name | file.jsonl> — no flags, so only offer .jsonl
+      # paths; a bare playbook name has nothing to complete against.
+      case "$prev" in
+        log-summary) COMPREPLY=($(compgen -f -X '!*.jsonl' -- "$cur")) ;;
+        *) COMPREPLY=() ;;
+      esac
+      ;;
+
+    audit-log)
+      case "$prev" in
+        --limit) COMPREPLY=() ;;
+        *) COMPREPLY=($(compgen -W "--limit" -- "$cur")) ;;
       esac
       ;;
 
