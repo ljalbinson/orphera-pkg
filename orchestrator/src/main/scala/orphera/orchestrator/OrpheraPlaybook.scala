@@ -16,7 +16,9 @@ trait OrpheraPlaybook extends IOApp.Simple:
     // cluster-playbook) was invoked with --resume — see there and
     // Checkpoint.scala for the full mechanism.
     val resume = sys.env.get("ORPHERA_RESUME").contains("true")
-    IO.println(s"Running playbook '${playbook.name}'${if resume then " (resuming from checkpoint)" else ""}") >>
+    IO.println(s"Running playbook '${playbook.name}'${
+        if resume then " (resuming from checkpoint)" else ""
+      }") >>
       PlaybookRunner.run(playbook, resume).flatMap { ok =>
         // PlaybookRunner.run reports success/failure as a Boolean rather
         // than always completing as IO[Unit] (see PlaybookRunner).
@@ -27,5 +29,10 @@ trait OrpheraPlaybook extends IOApp.Simple:
         // runScalaPlaybookScript's separate `java` process + waitFor())
         // actually exit nonzero on a real failure instead of always 0.
         if ok then IO.unit
-        else IO.raiseError(new RuntimeException(s"Playbook '${playbook.name}' failed (see output above)"))
+        else
+          IO.raiseError(
+            new RuntimeException(
+              s"Playbook '${playbook.name}' failed (see output above)"
+            )
+          )
       }

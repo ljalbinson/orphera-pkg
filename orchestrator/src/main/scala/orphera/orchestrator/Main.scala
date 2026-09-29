@@ -157,7 +157,9 @@ object Main extends IOApp:
               // sequence actually succeeded, and --resume skips any
               // (node, task) already recorded complete from a previous
               // run's checkpoint file — see PlaybookRunner/Checkpoint.
-              PlaybookRunner.run(pb, resume).map(ok => if ok then ExitCode.Success else ExitCode.Error)
+              PlaybookRunner
+                .run(pb, resume)
+                .map(ok => if ok then ExitCode.Success else ExitCode.Error)
 
       case Right(
             Command.Reboot(nodeNames, delaySeconds, wait, waitTimeoutSeconds)
@@ -190,7 +192,9 @@ object Main extends IOApp:
             case Right(pb) =>
               // Same --resume support as RunPlaybook above, via
               // ClusterPlaybookRunner/Checkpoint.
-              ClusterPlaybookRunner.run(pb, resume).map(ok => if ok then ExitCode.Success else ExitCode.Error)
+              ClusterPlaybookRunner
+                .run(pb, resume)
+                .map(ok => if ok then ExitCode.Success else ExitCode.Error)
 
       case Right(Command.RunCommand(command, nodeNames, timeoutSeconds)) =>
         withTargets(nodeNames) { targets =>
@@ -205,17 +209,19 @@ object Main extends IOApp:
     else if hours > 0 then s"${hours}h ${minutes}m"
     else s"${minutes}m"
 
-  /** Compiles and runs a standalone `.scala` playbook script in a
-    * separate `java` process (see scripting/Main.scala). `resume` is
-    * passed via the `ORPHERA_RESUME` environment variable rather than
-    * as a process argument: OrpheraPlaybook/OrpheraClusterPlaybook
-    * extend `IOApp.Simple`, whose `run: IO[Unit]` has no access to the
-    * process's command-line args at all, so an env var is the only way
-    * to reach them here without changing that trait's shape (and
-    * without needing to touch scripting/Main.scala's own arg-forwarding,
-    * which this file has no visibility into).
+  /** Compiles and runs a standalone `.scala` playbook script in a separate
+    * `java` process (see scripting/Main.scala). `resume` is passed via the
+    * `ORPHERA_RESUME` environment variable rather than as a process argument:
+    * OrpheraPlaybook/OrpheraClusterPlaybook extend `IOApp.Simple`, whose
+    * `run: IO[Unit]` has no access to the process's command-line args at all,
+    * so an env var is the only way to reach them here without changing that
+    * trait's shape (and without needing to touch scripting/Main.scala's own
+    * arg-forwarding, which this file has no visibility into).
     */
-  private def runScalaPlaybookScript(scriptPath: String, resume: Boolean): IO[ExitCode] =
+  private def runScalaPlaybookScript(
+      scriptPath: String,
+      resume: Boolean
+  ): IO[ExitCode] =
     IO.blocking {
       findLatestJar("scripting/target", "scripting-assembly", ".jar") match
         case None =>

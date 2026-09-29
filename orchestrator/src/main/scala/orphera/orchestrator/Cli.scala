@@ -85,31 +85,39 @@ object Cli:
         )
       case "teardown" :: rest =>
         parseTeardown(rest, Nil, "root", None, purge = false, confirmed = false)
-      case "fetch" :: remote :: rest => parseFetch(rest, remote, ".", None)
-      case "facts" :: rest           => parseFacts(rest, None)
-      case "playbook" :: path :: rest => parsePlaybookFlags(rest, resume = false).map(Command.RunPlaybook(path, _))
-      case "version" :: rest         => parseVersion(rest, None)
-      case "uptime" :: rest          => parseUptime(rest, None)
-      case "reboot" :: rest          =>
+      case "fetch" :: remote :: rest  => parseFetch(rest, remote, ".", None)
+      case "facts" :: rest            => parseFacts(rest, None)
+      case "playbook" :: path :: rest =>
+        parsePlaybookFlags(rest, resume = false).map(
+          Command.RunPlaybook(path, _)
+        )
+      case "version" :: rest => parseVersion(rest, None)
+      case "uptime" :: rest  => parseUptime(rest, None)
+      case "reboot" :: rest  =>
         parseReboot(rest, None, 5, waitForReturn = false, 300)
       case "cluster-playbook" :: path :: rest =>
-        parsePlaybookFlags(rest, resume = false).map(Command.RunClusterPlaybook(path, _))
+        parsePlaybookFlags(rest, resume = false).map(
+          Command.RunClusterPlaybook(path, _)
+        )
       case "help" :: _ | "--help" :: _ | Nil => Right(Command.Help)
       case "run" :: rest => parseRunCommand(rest, Nil, None, 60)
       case other => Left(s"Unknown command: ${other.headOption.getOrElse("")}")
 
-  /** Shared flag parser for `playbook`/`cluster-playbook`'s only current
-    * flag. Kept separate rather than inlined since both commands need
-    * identical handling and neither previously took any arguments past
-    * the file path at all — see `Command.RunPlaybook`/`RunClusterPlaybook`
-    * for what `resume` does (checkpoint-based restart skipping,
-    * `Checkpoint.scala`).
+  /** Shared flag parser for `playbook`/`cluster-playbook`'s only current flag.
+    * Kept separate rather than inlined since both commands need identical
+    * handling and neither previously took any arguments past the file path at
+    * all — see `Command.RunPlaybook`/`RunClusterPlaybook` for what `resume`
+    * does (checkpoint-based restart skipping, `Checkpoint.scala`).
     */
-  private def parsePlaybookFlags(args: List[String], resume: Boolean): Either[String, Boolean] =
+  private def parsePlaybookFlags(
+      args: List[String],
+      resume: Boolean
+  ): Either[String, Boolean] =
     args match
-      case Nil               => Right(resume)
+      case Nil                => Right(resume)
       case "--resume" :: rest => parsePlaybookFlags(rest, resume = true)
-      case other :: _         => Left(s"Unknown argument: $other (expected at most --resume)")
+      case other :: _         =>
+        Left(s"Unknown argument: $other (expected at most --resume)")
 
   private def parseInstall(
       args: List[String],

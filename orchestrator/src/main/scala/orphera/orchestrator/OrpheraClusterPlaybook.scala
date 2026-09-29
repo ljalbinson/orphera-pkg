@@ -17,7 +17,9 @@ trait OrpheraClusterPlaybook extends IOApp.Simple:
     // rather than a CLI arg — same reasoning, same mechanism.
     val resume = sys.env.get("ORPHERA_RESUME").contains("true")
     IO.println(
-      s"Running cluster playbook '${playbook.name}'${if resume then " (resuming from checkpoint)" else ""}"
+      s"Running cluster playbook '${playbook.name}'${
+          if resume then " (resuming from checkpoint)" else ""
+        }"
     ) >> ClusterPlaybookRunner.run(playbook, resume).flatMap { ok =>
       // Same fix as OrpheraPlaybook: ClusterPlaybookRunner.run now
       // reports success/failure as a Boolean instead of always
@@ -26,5 +28,10 @@ trait OrpheraClusterPlaybook extends IOApp.Simple:
       // error here — this is what makes `orphera cluster-playbook
       // somefile.scala` actually exit nonzero when a stage fails.
       if ok then IO.unit
-      else IO.raiseError(new RuntimeException(s"Cluster playbook '${playbook.name}' failed (see output above)"))
+      else
+        IO.raiseError(
+          new RuntimeException(
+            s"Cluster playbook '${playbook.name}' failed (see output above)"
+          )
+        )
     }

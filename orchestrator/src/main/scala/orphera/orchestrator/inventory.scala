@@ -43,21 +43,20 @@ object Inventory:
       }
 
   /** A single node's own vars (not merged with its groups' vars — use
-    * groupVarsFor for that side separately if a caller ever needs both).
-    * Empty map for an unknown node name rather than throwing, matching
-    * this object's existing fail-soft convention (see `loaded` above).
+    * groupVarsFor for that side separately if a caller ever needs both). Empty
+    * map for an unknown node name rather than throwing, matching this object's
+    * existing fail-soft convention (see `loaded` above).
     */
   def varsFor(nodeName: String): Map[String, String] =
     all.find(_.name == nodeName).map(_.vars).getOrElse(Map.empty)
 
-  /** Reads a comma-separated list-valued var off a single node — added
-    * for per-host disk paths (`osd_disks`, `zap_disks`), which don't fit
-    * the plain String-valued `vars: Map[String, String]` shape on their
-    * own. Kept generic (not disk-specific) since any inventory var could
-    * reasonably want to be a list some day. Whitespace around each
-    * element is trimmed, and empty elements (a trailing comma, or the
-    * var simply not being set on that node) are dropped rather than
-    * producing a list with a blank entry.
+  /** Reads a comma-separated list-valued var off a single node — added for
+    * per-host disk paths (`osd_disks`, `zap_disks`), which don't fit the plain
+    * String-valued `vars: Map[String, String]` shape on their own. Kept generic
+    * (not disk-specific) since any inventory var could reasonably want to be a
+    * list some day. Whitespace around each element is trimmed, and empty
+    * elements (a trailing comma, or the var simply not being set on that node)
+    * are dropped rather than producing a list with a blank entry.
     */
   def csvVar(nodeName: String, key: String): List[String] =
     varsFor(nodeName)

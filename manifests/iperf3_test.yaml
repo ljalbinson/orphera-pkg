@@ -1,0 +1,81 @@
+name: iperf3-network-test
+
+# Runs iperf3 clients on tst1 and tst2 simultaneously against a
+# self-hosted iperf3 server on tst0 — a star topology (not full mesh —
+# every pair against every other pair). tst0 isn't included as a
+# client against itself — that's a loopback test, not a network test.
+#
+# The server runs as a transient systemd unit (`systemd-run`), not a
+# backgrounded `nohup ... &` process. The nohup version hit exit=143
+# (SIGTERM) in testing: the orchestrator's RunCommand task waits for
+# the command's process tree/output to fully close before considering
+# it done, and a `nohup ... &` daemon that's meant to live forever
+# never lets that happen — eventually something times the whole task
+# out and kills it. `systemd-run` hands the process off to systemd
+# immediately and returns, so the RunCommand task genuinely finishes
+# right away, and the server's lifecycle isn't tied to the task's own
+# process-tree tracking at all.
+#
+# A default `iperf3 -s` instance only serves ONE client connection at a
+# time — a second concurrent client gets "error - the server is busy
+# running a test" — so tst0 runs TWO server units, one per client, on
+# separate ports (5201 for tst1, 5202 for tst2), so both client runs
+# can genuinely happen at once.
+
+stages:
+  - name: install-iperf3
+    nodes: [tst0, tst1, tst2]
+    tasks:
+      - name: install iperf3 if missing
+        run_command:
+          command:
+            - sh
+            - -c
+            - |
+              which iperf3 >/dev/null 2>&1 && exit 0
+              apt-get update -qq
+              apt-get install -y iperf3
+
+  - name: start-iperf3-servers
+    nodes: [tst0]
+    tasks:
+      - name: start one iperf3 server per expected client, on separate ports
+        run_command:
+          command:
+            - sh
+            - -c
+            - |
+              for PORT in 5201 5202; do
+                systemctl stop "iperf3-server-$PORT" 2>/dev/null || true
+                systemctl reset-failed "iperf3-server-$PORT" 2>/dev/null || true
+                systemd-run --unit="iperf3-server-$PORT" --collect -- iperf3 -s -p "$PORT"
+              done
+              sleep 1
+              for PORT in 5201 5202; do
+                iperf3 -c 127.0.0.1 -p "$PORT" -t 1 >/dev/null 2>&1 \
+                  && echo "iperf3 server on port $PORT is up" \
+                  || { echo "iperf3 server on port $PORT failed to start — check: systemctl status iperf3-server-$PORT" >&2; exit 1; }
+              done
+
+  - name: run-clients-in-parallel
+    nodes: [tst1, tst2]
+    tasks:
+      - name: run iperf3 client against tst0 (own dedicated port)
+        run_command:
+          command:
+            - sh
+            - -c
+            - |
+              case "$(hostname -s)" in
+                tst1) PORT=5201 ;;
+                tst2) PORT=5202 ;;
+                *) echo "unexpected node running the client task: $(hostname -s)" >&2; exit 1 ;;
+              esac
+              RESULT="/tmp/iperf3-result-$(hostname -s).json"
+              iperf3 -c tst0.ljalbinson.com -p "$PORT" -t 10 -P 1 -J > "$RESULT"
+              python3 -c "
+              import json
+              d = json.load(open('$RESULT'))
+              mbps = d['end']['sum_received']['bits_per_second'] / 1e6
+              print(f'$(hostname -s) -> tst0 (port $PORT): {mbps:.1f} Mbps')
+              "
