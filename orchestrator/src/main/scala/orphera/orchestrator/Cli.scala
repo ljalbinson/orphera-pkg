@@ -491,24 +491,40 @@ object Cli:
     """orphera-orchestrator - test CLI for the Orphera agent protocol
       |
       |Usage:
-      |  install        <package> [<package> ...] [--nodes host1,host2] [--update-cache]
-      |  remove         <package> [<package> ...] [--nodes host1,host2] [--purge]
-      |  autoremove     [--nodes host1,host2] [--purge]
-      |  copy           <local-path> <remote-path> [--owner user] [--group grp] [--mode 0644] [--nodes host1,host2]
-      |  network-apply  [--nodes host1,host2] [--timeout 60]
-      |  deploy-agent   [--file <local.deb>] [--remote-path /tmp/orphera-agent.deb] [--nodes host1,host2]  — installs only the orphera-agent package (verified against its control metadata, refused otherwise); auto-discovers the freshly built orphera-agent_*.deb in the current directory if --file is omitted
-      |  bootstrap      [--file <local.deb>] --nodes host1,host2 [--ssh-user root] [--ssh-key ~/.ssh/id_ed25519] [--remote-path /tmp/x.deb]  — same package check and auto-discovery as deploy-agent
-      |  teardown       --nodes host1,host2 --yes [--purge] [--ssh-user root] [--ssh-key ~/.ssh/id_ed25519]
-      |  playbook       <file.yaml | file.scala | compiled-name> [--resume]  — .scala files are compiled at run time; --resume skips tasks already completed in a previous run (per .orphera-state/ checkpoint)
-      |  cluster-playbook <file.yaml | file.scala> [--resume]  — same --resume semantics, per stage/task/node
-      |  run            <command...>  [--nodes host1,host2] [--timeout 60]  — run an arbitrary command, capturing stdout/stderr
-      |  fetch          <remote-path> [--out ./local-dir] [--nodes host1,host2]
-      |  facts          [--nodes host1,host2]
-      |  reboot         [--nodes host1,host2] [--delay 5] [--wait] [--wait-timeout 300]
-      |  version        [--nodes host1,host2]
-      |  uptime         [--nodes host1,host2]
-      |  log-summary    <playbook-name | file.jsonl>  — summarizes a run's .orphera-logs/*.jsonl output as a table (latest run for that playbook, if a name is given)
-      |  audit-log      [--limit 20]  — lists recent mutating-command invocations from .orphera-audit/audit.jsonl (command, nodes, outcome, duration); see log-summary for one playbook run's task-level detail
+      |  install           <package> [<package> ...] [--nodes host1,host2] [--update-cache]
+      |  remove            <package> [<package> ...] [--nodes host1,host2] [--purge]
+      |  autoremove        [--nodes host1,host2] [--purge]
+      |  copy              <local-path> <remote-path> [--owner user] [--group grp] [--mode 0644] [--nodes host1,host2]
+      |  network-apply     [--nodes host1,host2] [--timeout 60]
+      |  deploy-agent      [--file <local.deb>] [--remote-path /tmp/orphera-agent.deb] [--nodes host1,host2]
+      |                    — installs only the orphera-agent package (verified against
+      |                      its control metadata, refused otherwise); auto-discovers
+      |                      the freshly built orphera-agent_*.deb in the current
+      |                      directory if --file is omitted
+      |  bootstrap         [--file <local.deb>] --nodes host1,host2 [--ssh-user root] [--ssh-key ~/.ssh/id_ed25519] [--remote-path /tmp/x.deb]
+      |                    — same package check and auto-discovery as deploy-agent
+      |  teardown          --nodes host1,host2 --yes [--purge] [--ssh-user root] [--ssh-key ~/.ssh/id_ed25519]
+      |  playbook          <file.yaml | file.scala | compiled-name> [--resume]
+      |                    — .scala files are compiled at run time; --resume skips
+      |                      tasks already completed in a previous run (per
+      |                      .orphera-state/ checkpoint)
+      |  cluster-playbook  <file.yaml | file.scala> [--resume]
+      |                    — same --resume semantics, per stage/task/node
+      |  run               <command...> [--nodes host1,host2] [--timeout 60]
+      |                    — run an arbitrary command, capturing stdout/stderr
+      |  fetch             <remote-path> [--out ./local-dir] [--nodes host1,host2]
+      |  facts             [--nodes host1,host2]
+      |  reboot            [--nodes host1,host2] [--delay 5] [--wait] [--wait-timeout 300]
+      |  version           [--nodes host1,host2]
+      |  uptime            [--nodes host1,host2]
+      |  log-summary       <playbook-name | file.jsonl>
+      |                    — summarizes a run's .orphera-logs/*.jsonl output as a
+      |                      table (latest run for that playbook, if a name is given)
+      |  audit-log         [--limit 20]
+      |                    — lists recent mutating-command invocations from
+      |                      .orphera-audit/audit.jsonl (command, nodes, outcome,
+      |                      duration); see log-summary for one playbook run's
+      |                      task-level detail
       |
       |Examples:
       |  install curl vim
