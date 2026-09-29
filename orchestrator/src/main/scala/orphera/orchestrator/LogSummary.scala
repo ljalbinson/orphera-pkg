@@ -6,25 +6,25 @@ import cats.effect.IO
 import java.nio.file.{Files, Path, Paths}
 import scala.jdk.CollectionConverters.*
 
-/** `orphera log-summary <target>` — renders one run's
-  * `.orphera-logs` directory's `.jsonl` run-log file as a human-readable table: one row per
-  * task (node, stage if present, task name, status, duration), with
-  * failures called out, plus a run-level header/footer.
+/** `orphera log-summary <target>` — renders one run's `.orphera-logs`
+  * directory's `.jsonl` run-log file as a human-readable table: one row per
+  * task (node, stage if present, task name, status, duration), with failures
+  * called out, plus a run-level header/footer.
   *
-  * `<target>` is either a direct path to a `.jsonl` file, or a playbook
-  * name — resolved to that playbook's most-recently-modified log file
-  * under `.orphera-logs/`, the same "latest by mtime" approach
-  * `test_observability.sh` uses, for the same reason: `RunLog`
-  * filenames only have one-second resolution, so this is more reliable
-  * than assuming a fixed name.
+  * `<target>` is either a direct path to a `.jsonl` file, or a playbook name —
+  * resolved to that playbook's most-recently-modified log file under
+  * `.orphera-logs/`, the same "latest by mtime" approach
+  * `test_observability.sh` uses, for the same reason: `RunLog` filenames only
+  * have one-second resolution, so this is more reliable than assuming a fixed
+  * name.
   *
-  * No JSON library dependency, same reasoning as `RunLog.toJson`
-  * itself and `Checkpoint.scala`: this module doesn't have
-  * `circe-parser` available, and `RunLog.toJson` only ever emits a
-  * flat object of String/Boolean/Int/Long/Double/null values, never
-  * nested objects or arrays — so a minimal parser tailored to exactly
-  * that grammar (mirroring `RunLog.toJson`'s own escaping) is enough,
-  * rather than a general-purpose JSON reader.
+  * No JSON library dependency, same reasoning as `RunLog.toJson` itself and
+  * `Checkpoint.scala`: this module doesn't have `circe-parser` available, and
+  * `RunLog.toJson` only ever emits a flat object of
+  * String/Boolean/Int/Long/Double/null values, never nested objects or arrays —
+  * so a minimal parser tailored to exactly that grammar (mirroring
+  * `RunLog.toJson`'s own escaping) is enough, rather than a general-purpose
+  * JSON reader.
   */
 object LogSummary:
 
@@ -48,11 +48,10 @@ object LogSummary:
     private def intField(key: String): Option[Int] =
       e.get(key).collect { case JNum(n) => n.toIntOption }.flatten
 
-  /** Returns whether the summary itself could be produced (file found,
-    * parsed, and printed) — deliberately NOT whether the underlying
-    * run succeeded, since this is a read-only reporting command and a
-    * failed run is a completely valid, successfully-summarized thing
-    * to look at.
+  /** Returns whether the summary itself could be produced (file found, parsed,
+    * and printed) — deliberately NOT whether the underlying run succeeded,
+    * since this is a read-only reporting command and a failed run is a
+    * completely valid, successfully-summarized thing to look at.
     */
   def run(target: String): IO[Boolean] =
     resolveLogFile(target) match
@@ -61,11 +60,15 @@ object LogSummary:
       case Right(file) =>
         IO.blocking(Files.readAllLines(file).asScala.toList).attempt.flatMap {
           case Left(err) =>
-            IO.println(s"Error: could not read $file — ${err.getMessage}") >> IO.pure(false)
+            IO.println(s"Error: could not read $file — ${err.getMessage}") >> IO
+              .pure(false)
           case Right(rawLines) =>
-            val allEvents = rawLines.map(_.trim).filter(_.nonEmpty).flatMap(parseLine)
+            val allEvents =
+              rawLines.map(_.trim).filter(_.nonEmpty).flatMap(parseLine)
             if allEvents.isEmpty then
-              IO.println(s"No parseable events found in $file") >> IO.pure(false)
+              IO.println(s"No parseable events found in $file") >> IO.pure(
+                false
+              )
             else
               val (segment, priorRunCount) = lastRunSegment(allEvents)
               IO.println(render(file, segment, priorRunCount)) >> IO.pure(true)
@@ -86,7 +89,9 @@ object LogSummary:
       else
         val sanitized = sanitize(target)
         val pattern =
-          ("^(playbook|cluster)-" + java.util.regex.Pattern.quote(sanitized) + "-\\d{8}-\\d{6}\\.jsonl$").r
+          ("^(playbook|cluster)-" + java.util.regex.Pattern.quote(
+            sanitized
+          ) + "-\\d{8}-\\d{6}\\.jsonl$").r
         val matches = Option(dir.toFile.listFiles()).toList.flatten
           .filter(f => f.isFile && pattern.matches(f.getName))
         if matches.isEmpty then
@@ -94,8 +99,7 @@ object LogSummary:
             s"No log files found for '$target' under .orphera-logs/ " +
               s"(looked for playbook-$sanitized-*.jsonl / cluster-$sanitized-*.jsonl)"
           )
-        else
-          Right(matches.maxBy(_.lastModified()).toPath())
+        else Right(matches.maxBy(_.lastModified()).toPath())
 
   // Mirrors RunLog.sanitize exactly, so a playbook name resolves to the
   // same filename RunLog itself would have written.
@@ -115,16 +119,25 @@ object LogSummary:
       case None      => (events, 0)
       case Some(idx) => (events.drop(idx), startIndices.size - 1)
 
-  private def render(file: Path, events: List[Event], priorRunCount: Int): String =
+  private def render(
+      file: Path,
+      events: List[Event],
+      priorRunCount: Int
+  ): String =
     val sb = new StringBuilder
 
     val runStart = events.find(_.str("event").contains("run_start"))
     val runEnd = events.find(_.str("event").contains("run_end"))
-    val playbookName = runStart.flatMap(_.str("playbook")).orElse(runEnd.flatMap(_.str("playbook"))).getOrElse("(unknown)")
+    val playbookName = runStart
+      .flatMap(_.str("playbook"))
+      .orElse(runEnd.flatMap(_.str("playbook")))
+      .getOrElse("(unknown)")
     val targetCount = runStart.flatMap(_.intField("target_count"))
 
     sb.append(s"Run: $playbookName")
-    targetCount.foreach(n => sb.append(s"  ($n target${if n == 1 then "" else "s"})"))
+    targetCount.foreach(n =>
+      sb.append(s"  ($n target${if n == 1 then "" else "s"})")
+    )
     sb.append('\n')
     sb.append(s"Log file: $file\n")
     if priorRunCount > 0 then
@@ -137,9 +150,13 @@ object LogSummary:
       case Some(e) =>
         val ok = e.boolField("success").getOrElse(false)
         val dur = e.longField("duration_ms").map(d => s"${d}ms").getOrElse("?")
-        sb.append(s"Status: ${if ok then "SUCCESS" else "FAILED"}   Duration: $dur\n")
+        sb.append(
+          s"Status: ${if ok then "SUCCESS" else "FAILED"}   Duration: $dur\n"
+        )
       case None =>
-        sb.append("Status: (no run_end event found — run may still be in progress, or was interrupted)\n")
+        sb.append(
+          "Status: (no run_end event found — run may still be in progress, or was interrupted)\n"
+        )
 
     sb.append('\n')
 
@@ -148,11 +165,23 @@ object LogSummary:
     // follows for that (node, task) — normally every task_start is
     // paired, so in practice this only surfaces a task that was still
     // running when the log ends (an interrupted run).
-    case class Row(stage: String, node: String, task: String, status: String, duration: String, error: Option[String])
+    case class Row(
+        stage: String,
+        node: String,
+        task: String,
+        status: String,
+        duration: String,
+        error: Option[String]
+    )
 
     val hasStages = events.exists(_.get("stage").isDefined)
 
-    val taskEvents = events.filter(e => e.str("event").exists(ev => ev == "task_start" || ev == "task_end" || ev == "task_skipped"))
+    val taskEvents = events.filter(e =>
+      e.str("event")
+        .exists(ev =>
+          ev == "task_start" || ev == "task_end" || ev == "task_skipped"
+        )
+    )
 
     val rows = scala.collection.mutable.ListBuffer.empty[Row]
     val started = scala.collection.mutable.Set.empty[(String, String)]
@@ -167,7 +196,8 @@ object LogSummary:
         case Some("task_end") =>
           started -= (node -> task)
           val ok = e.boolField("success").getOrElse(false)
-          val dur = e.longField("duration_ms").map(d => s"${d}ms").getOrElse("?")
+          val dur =
+            e.longField("duration_ms").map(d => s"${d}ms").getOrElse("?")
           val status = if ok then "OK" else "FAILED"
           rows += Row(stage, node, task, status, dur, e.str("error"))
         case Some("task_skipped") =>
@@ -181,8 +211,7 @@ object LogSummary:
     for (node, task) <- started do
       rows += Row("", node, task, "IN PROGRESS / INTERRUPTED", "-", None)
 
-    if rows.isEmpty then
-      sb.append("(no task events in this run)\n")
+    if rows.isEmpty then sb.append("(no task events in this run)\n")
     else
       val headers =
         if hasStages then List("Stage", "Node", "Task", "Status", "Duration")
@@ -225,7 +254,10 @@ object LogSummary:
 
   private def parseObject(s: String): Event =
     val trimmed = s.trim
-    require(trimmed.startsWith("{") && trimmed.endsWith("}"), s"not a JSON object: $s")
+    require(
+      trimmed.startsWith("{") && trimmed.endsWith("}"),
+      s"not a JSON object: $s"
+    )
     val inner = trimmed.substring(1, trimmed.length - 1)
     if inner.isBlank then Map.empty[String, JsonValue]
     else splitTopLevel(inner).map(parsePair).toMap
@@ -245,8 +277,7 @@ object LogSummary:
         inString = !inString; current.append(c)
       else if c == ',' && !inString then
         parts += current.toString; current.clear()
-      else
-        current.append(c)
+      else current.append(c)
     if current.nonEmpty then parts += current.toString
     parts.toList
 
@@ -268,7 +299,8 @@ object LogSummary:
       else if c == '"' then inString = !inString
       else if c == ':' && !inString then found = i
       i += 1
-    if found == -1 then throw new IllegalArgumentException(s"no top-level ':' found in: $s")
+    if found == -1 then
+      throw new IllegalArgumentException(s"no top-level ':' found in: $s")
     found
 
   private def parseValue(raw: String): JsonValue =
@@ -287,11 +319,11 @@ object LogSummary:
       val c = body(i)
       if c == '\\' && i + 1 < body.length then
         body(i + 1) match
-          case '"'  => sb.append('"'); i += 2
-          case '\\' => sb.append('\\'); i += 2
-          case 'n'  => sb.append('\n'); i += 2
-          case 'r'  => sb.append('\r'); i += 2
-          case 't'  => sb.append('\t'); i += 2
+          case '"'                         => sb.append('"'); i += 2
+          case '\\'                        => sb.append('\\'); i += 2
+          case 'n'                         => sb.append('\n'); i += 2
+          case 'r'                         => sb.append('\r'); i += 2
+          case 't'                         => sb.append('\t'); i += 2
           case 'u' if i + 6 <= body.length =>
             val hex = body.substring(i + 2, i + 6)
             sb.append(Integer.parseInt(hex, 16).toChar)

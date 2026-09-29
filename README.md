@@ -286,6 +286,7 @@ explicit targeting — see below).
 | `run <command...> [--nodes] [--timeout 60]` | Run an arbitrary command on one or more agents, streaming stdout/stderr and reporting the real exit code. Use `--` before the command to separate it from `run`'s own flags, e.g. `orphera run --nodes tst0 -- systemctl status nginx` |
 | `playbook <file.yaml \| file.scala \| compiled-name> [--resume]` | Run an ordered, multi-task playbook — from a YAML file, a run-time-compiled Scala script, or a compiled DSL playbook by registered name — see [Playbooks](#playbooks). `--resume` skips tasks already completed in a previous run — see [Restartability](#restartability) |
 | `cluster-playbook <file.yaml \| file.scala> [--resume]` | Run a staged, cross-node-coordinated playbook — see [Cross-node coordination](#cross-node-coordination-and-staged-playbooks). Same `--resume` support as `playbook` |
+| `log-summary <playbook-name \| file.jsonl>` | Print a human-readable table (per-task status/duration, failures called out) from a run's `.orphera-logs` output. A playbook name resolves to that playbook's most recently modified log file — see [Observability](#observability) |
 
 There is no `apply <manifest.yaml>` command — the standalone
 declarative-file-manifest idea (independent, parallel file pushes, no
@@ -772,6 +773,37 @@ $ tail -3 .orphera-logs/cluster-cephadm-add-osds-20260928-145112.jsonl
 Always on, no flag — it only ever appends a separate file and never
 touches stdout, so anything that already greps console output (or the
 existing test scripts) is unaffected.
+
+**`orphera log-summary <playbook-name | file.jsonl>`** renders a run's
+log as a table instead of leaving you to read the raw JSON Lines —
+one row per task (stage, if the log has one, node, task, status,
+duration), failures with their error message inline, and a run-level
+header/totals line. A playbook name resolves to that playbook's most
+recently modified log file under `.orphera-logs/` (a direct `.jsonl`
+path also works); if a file happens to hold more than one run's events
+(two runs launched inside the same second, since `RunLog` filenames
+only have one-second resolution), only the most recent run's events
+are shown.
+
+```bash
+$ orphera log-summary cephadm-add-osds
+Run: cephadm-add-osds  (3 targets)
+Log file: .orphera-logs/cluster-cephadm-add-osds-20260928-145112.jsonl
+Status: FAILED   Duration: 9110ms
+
+Stage            Node   Task                                 Status  Duration
+---------------  -----  -----------------------------------  ------  --------
+apply-osd-spec   tst0   add osd on tst0:/dev/disk/by-id/...   OK      3421ms
+apply-osd-spec   tst1   add osd on tst1:/dev/sdb              FAILED  3182ms
+    error: Remote command reported failure (see output above)
+
+1 succeeded, 1 failed, 0 skipped
+```
+
+No new dependency: it parses `.jsonl` with a small hand-rolled reader
+tailored to exactly what `RunLog.toJson` emits (same reasoning as
+`RunLog`/`Checkpoint` — no `circe-parser` available in this module),
+not a general-purpose JSON library.
 
 **Verified, not just compiled:** `manifests/test_observability.sh`
 parses the actual `.orphera-logs/*.jsonl` output of a real run against

@@ -136,7 +136,7 @@ object Cli:
   ): Either[String, Command] =
     args match
       case Nil        => Right(Command.LogSummary(target))
-      case other :: _  => Left(s"Unknown argument to log-summary: $other")
+      case other :: _ => Left(s"Unknown argument to log-summary: $other")
 
   private def parseInstall(
       args: List[String],

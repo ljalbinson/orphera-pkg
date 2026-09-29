@@ -9,22 +9,23 @@ import scala.jdk.CollectionConverters.*
 
 object ClusterPlaybookRunner:
 
-  /** Returns whether every stage completed successfully. `Main.scala`
-    * maps this to the process exit code — previously it never did:
-    * `run` always completed as `IO[Unit]` regardless of whether a
-    * stage failed or a health check timed out (`runStages`'s failure
-    * branch only ever printed "... aborting remaining stages", never
-    * raised or signaled failure), so `orphera cluster-playbook ...`
-    * always exited 0 even when a stage genuinely failed — the exact
-    * behavior `test_ceph_lifecycle.sh` had to work around by grepping
-    * output for that message instead of trusting the exit code.
+  /** Returns whether every stage completed successfully. `Main.scala` maps this
+    * to the process exit code — previously it never did: `run` always completed
+    * as `IO[Unit]` regardless of whether a stage failed or a health check timed
+    * out (`runStages`'s failure branch only ever printed "... aborting
+    * remaining stages", never raised or signaled failure), so
+    * `orphera cluster-playbook ...` always exited 0 even when a stage genuinely
+    * failed — the exact behavior `test_ceph_lifecycle.sh` had to work around by
+    * grepping output for that message instead of trusting the exit code.
     */
   def run(playbook: ClusterPlaybook, resume: Boolean = false): IO[Boolean] =
     val allNodeNames = playbook.stages.flatMap(_.nodeNames).distinct
     val allNodes = Inventory.all.filter(n => allNodeNames.contains(n.name))
 
     if allNodes.isEmpty then
-      IO.println(s"[${playbook.name}] No matching nodes found in inventory across any stage.") >> IO.pure(false)
+      IO.println(
+        s"[${playbook.name}] No matching nodes found in inventory across any stage."
+      ) >> IO.pure(false)
     else
       for
         context <- gatherClusterFacts(allNodes)
@@ -32,19 +33,37 @@ object ClusterPlaybookRunner:
         checkpoint <- Checkpoint.load("cluster", playbook.name, resume)
         runLog <- RunLog.start("cluster", playbook.name)
         startMs <- IO.delay(System.currentTimeMillis())
-        _ <- runLog.event("event" -> "run_start", "playbook" -> playbook.name, "stage_count" -> playbook.stages.length)
-        _ <- IO.println(s"[${playbook.name}] Starting — ${playbook.stages.length} stage(s)")
+        _ <- runLog.event(
+          "event" -> "run_start",
+          "playbook" -> playbook.name,
+          "stage_count" -> playbook.stages.length
+        )
+        _ <- IO.println(
+          s"[${playbook.name}] Starting — ${playbook.stages.length} stage(s)"
+        )
         ok <- runStages(playbook.stages, context, setFacts, checkpoint, runLog)
         endMs <- IO.delay(System.currentTimeMillis())
-        _ <- runLog.event("event" -> "run_end", "playbook" -> playbook.name, "success" -> ok, "duration_ms" -> (endMs - startMs))
+        _ <- runLog.event(
+          "event" -> "run_end",
+          "playbook" -> playbook.name,
+          "success" -> ok,
+          "duration_ms" -> (endMs - startMs)
+        )
       yield ok
 
   private def gatherClusterFacts(nodes: List[Node]): IO[ClusterContext] =
     nodes
       .parTraverse { node =>
-        NodeClient.gatherFacts(node).attempt.map(result => node.name -> result.toOption)
+        NodeClient
+          .gatherFacts(node)
+          .attempt
+          .map(result => node.name -> result.toOption)
       }
-      .map(pairs => ClusterContext(pairs.collect { case (name, Some(f)) => name -> f }.toMap))
+      .map(pairs =>
+        ClusterContext(pairs.collect { case (name, Some(f)) =>
+          name -> f
+        }.toMap)
+      )
 
   private def runStages(
       stages: List[Stage],
@@ -78,7 +97,12 @@ object ClusterPlaybookRunner:
       _ <- runLog.event("event" -> "stage_start", "stage" -> stage.name)
       ok <- runStage(stage, context, setFacts, checkpoint, runLog)
       endMs <- IO.delay(System.currentTimeMillis())
-      _ <- runLog.event("event" -> "stage_end", "stage" -> stage.name, "success" -> ok, "duration_ms" -> (endMs - startMs))
+      _ <- runLog.event(
+        "event" -> "stage_end",
+        "stage" -> stage.name,
+        "success" -> ok,
+        "duration_ms" -> (endMs - startMs)
+      )
     yield ok
 
   private def runStage(
@@ -91,13 +115,22 @@ object ClusterPlaybookRunner:
     val targets = Inventory.all.filter(n => stage.nodeNames.contains(n.name))
 
     if targets.isEmpty then
-      IO.println(s"[${stage.name}] No matching nodes found in inventory.") >> IO.pure(false)
+      IO.println(s"[${stage.name}] No matching nodes found in inventory.") >> IO
+        .pure(false)
     else
       stage.waitFor match
         case Some(check) =>
           waitForHealthy(stage.name, check).flatMap {
             case false => IO.pure(false)
-            case true  => runStageTasks(stage, targets, context, setFacts, checkpoint, runLog)
+            case true  =>
+              runStageTasks(
+                stage,
+                targets,
+                context,
+                setFacts,
+                checkpoint,
+                runLog
+              )
           }
         case None =>
           runStageTasks(stage, targets, context, setFacts, checkpoint, runLog)
@@ -112,7 +145,14 @@ object ClusterPlaybookRunner:
   ): IO[Boolean] =
     for
       results <- targets.parTraverse { node =>
-        runTasksForNode(stage, node, context, setFacts, checkpoint, runLog).attempt.map(r => node.name -> r.isRight)
+        runTasksForNode(
+          stage,
+          node,
+          context,
+          setFacts,
+          checkpoint,
+          runLog
+        ).attempt.map(r => node.name -> r.isRight)
       }
       failed = results.collect { case (name, false) => name }
       allOk = failed.isEmpty
@@ -131,7 +171,16 @@ object ClusterPlaybookRunner:
       runLog: RunLog.Handle
   ): IO[Unit] =
     val factsOpt = context.factsByNode.get(node.name)
-    runTasks(stage, stage.tasks, node, factsOpt, context, setFacts, checkpoint, runLog)
+    runTasks(
+      stage,
+      stage.tasks,
+      node,
+      factsOpt,
+      context,
+      setFacts,
+      checkpoint,
+      runLog
+    )
 
   private def runTasks(
       stage: Stage,
@@ -144,50 +193,107 @@ object ClusterPlaybookRunner:
       runLog: RunLog.Handle
   ): IO[Unit] =
     tasks match
-      case Nil => IO.unit
+      case Nil               => IO.unit
       case namedTask :: rest =>
         checkpoint.isDone(node.name, namedTask.name).flatMap { alreadyDone =>
           if alreadyDone then
-            IO.println(s"[${node.name}] ${namedTask.name}: skipped (already completed in a previous run — resuming)") >>
+            IO.println(
+              s"[${node.name}] ${namedTask.name}: skipped (already completed in a previous run — resuming)"
+            ) >>
               runLog.event(
-                "event" -> "task_skipped", "stage" -> stage.name, "node" -> node.name,
-                "task" -> namedTask.name, "reason" -> "resume_checkpoint"
+                "event" -> "task_skipped",
+                "stage" -> stage.name,
+                "node" -> node.name,
+                "task" -> namedTask.name,
+                "reason" -> "resume_checkpoint"
               ) >>
-              runTasks(stage, rest, node, facts, context, setFacts, checkpoint, runLog)
+              runTasks(
+                stage,
+                rest,
+                node,
+                facts,
+                context,
+                setFacts,
+                checkpoint,
+                runLog
+              )
           else
             setFacts.get(node.name).flatMap { ownSetFacts =>
               val shouldRun = namedTask.when match
-                case None => true
+                case None       => true
                 case Some(cond) =>
                   facts match
                     case Some(f) => cond.matches(f, ownSetFacts)
                     case None    => false
 
               if !shouldRun then
-                IO.println(s"[${node.name}] ${namedTask.name}: skipped (condition not met)") >>
+                IO.println(
+                  s"[${node.name}] ${namedTask.name}: skipped (condition not met)"
+                ) >>
                   runLog.event(
-                    "event" -> "task_skipped", "stage" -> stage.name, "node" -> node.name,
-                    "task" -> namedTask.name, "reason" -> "condition_not_met"
+                    "event" -> "task_skipped",
+                    "stage" -> stage.name,
+                    "node" -> node.name,
+                    "task" -> namedTask.name,
+                    "reason" -> "condition_not_met"
                   ) >>
-                  runTasks(stage, rest, node, facts, context, setFacts, checkpoint, runLog)
+                  runTasks(
+                    stage,
+                    rest,
+                    node,
+                    facts,
+                    context,
+                    setFacts,
+                    checkpoint,
+                    runLog
+                  )
               else
                 for
                   startMs <- IO.delay(System.currentTimeMillis())
-                  _ <- runLog.event("event" -> "task_start", "stage" -> stage.name, "node" -> node.name, "task" -> namedTask.name)
-                  result <- runSingleTask(namedTask, node, facts, context, setFacts).attempt
+                  _ <- runLog.event(
+                    "event" -> "task_start",
+                    "stage" -> stage.name,
+                    "node" -> node.name,
+                    "task" -> namedTask.name
+                  )
+                  result <- runSingleTask(
+                    namedTask,
+                    node,
+                    facts,
+                    context,
+                    setFacts
+                  ).attempt
                   endMs <- IO.delay(System.currentTimeMillis())
                   _ <- result match
                     case Right(()) =>
                       runLog.event(
-                        "event" -> "task_end", "stage" -> stage.name, "node" -> node.name, "task" -> namedTask.name,
-                        "success" -> true, "duration_ms" -> (endMs - startMs)
+                        "event" -> "task_end",
+                        "stage" -> stage.name,
+                        "node" -> node.name,
+                        "task" -> namedTask.name,
+                        "success" -> true,
+                        "duration_ms" -> (endMs - startMs)
                       ) >>
                         checkpoint.markDone(node.name, namedTask.name) >>
-                        runTasks(stage, rest, node, facts, context, setFacts, checkpoint, runLog)
+                        runTasks(
+                          stage,
+                          rest,
+                          node,
+                          facts,
+                          context,
+                          setFacts,
+                          checkpoint,
+                          runLog
+                        )
                     case Left(err) =>
                       runLog.event(
-                        "event" -> "task_end", "stage" -> stage.name, "node" -> node.name, "task" -> namedTask.name,
-                        "success" -> false, "duration_ms" -> (endMs - startMs), "error" -> err.getMessage
+                        "event" -> "task_end",
+                        "stage" -> stage.name,
+                        "node" -> node.name,
+                        "task" -> namedTask.name,
+                        "success" -> false,
+                        "duration_ms" -> (endMs - startMs),
+                        "error" -> err.getMessage
                       ) >>
                         IO.println(
                           s"[${node.name}] ${namedTask.name}: FAILED — ${err.getMessage}"
@@ -196,10 +302,9 @@ object ClusterPlaybookRunner:
             }
         }
 
-  /** See PlaybookRunner.requireStreamedSuccess — identical logic,
-    * duplicated here rather than shared (matching this file's
-    * existing pre-established duplication of the flat runner's
-    * task-execution logic).
+  /** See PlaybookRunner.requireStreamedSuccess — identical logic, duplicated
+    * here rather than shared (matching this file's existing pre-established
+    * duplication of the flat runner's task-execution logic).
     */
   private def requireStreamedSuccess(
       render: orphera.common.Event => IO[Unit]
@@ -216,7 +321,11 @@ object ClusterPlaybookRunner:
       didFail <- failed.get
       _ <-
         if didFail then
-          IO.raiseError(new RuntimeException("Remote command reported failure (see output above)"))
+          IO.raiseError(
+            new RuntimeException(
+              "Remote command reported failure (see output above)"
+            )
+          )
         else IO.unit
     yield ()
 
@@ -234,72 +343,128 @@ object ClusterPlaybookRunner:
 
       case Task.Install(packages, updateCache, version) =>
         buildTemplateVars(facts, context, node, setFacts).flatMap { vars =>
-          val renderedVersion = if version.contains("{{") then Templating.render(version, vars) else version
+          val renderedVersion = if version.contains("{{") then
+            Templating.render(version, vars)
+          else version
           val versionedPackages =
             if renderedVersion.isEmpty then packages
             else packages.map(pkg => s"$pkg=$renderedVersion")
-          requireStreamedSuccess(render)(r => NodeClient.installPackages(node, versionedPackages, updateCache, r))
+          requireStreamedSuccess(render)(r =>
+            NodeClient.installPackages(node, versionedPackages, updateCache, r)
+          )
         }
 
       case Task.Remove(packages, purge) =>
-        requireStreamedSuccess(render)(r => NodeClient.removePackages(node, packages, purge, r))
+        requireStreamedSuccess(render)(r =>
+          NodeClient.removePackages(node, packages, purge, r)
+        )
 
       case Task.AutoRemove(purge) =>
-        requireStreamedSuccess(render)(r => NodeClient.autoRemove(node, purge, r))
+        requireStreamedSuccess(render)(r =>
+          NodeClient.autoRemove(node, purge, r)
+        )
 
       case Task.Copy(src, dest, owner, group, mode, _) =>
         requireStreamedSuccess(render)(r =>
-          NodeClient.copyFile(node, java.nio.file.Paths.get(src), dest, owner, group, mode, r)
+          NodeClient.copyFile(
+            node,
+            java.nio.file.Paths.get(src),
+            dest,
+            owner,
+            group,
+            mode,
+            r
+          )
         )
 
       case Task.NetworkApply(timeoutSeconds) =>
-        requireStreamedSuccess(render)(r => NodeClient.applyNetworkConfig(node, timeoutSeconds, r))
+        requireStreamedSuccess(render)(r =>
+          NodeClient.applyNetworkConfig(node, timeoutSeconds, r)
+        )
 
       case Task.Reboot(delaySeconds, waitForReturn, waitTimeoutSeconds) =>
-        NodeClient.reboot(node, delaySeconds, waitForReturn, waitTimeoutSeconds, line =>
-          IO.println(s"[${node.name}] ${namedTask.name}: $line")
+        NodeClient.reboot(
+          node,
+          delaySeconds,
+          waitForReturn,
+          waitTimeoutSeconds,
+          line => IO.println(s"[${node.name}] ${namedTask.name}: $line")
         )
 
       case Task.RunCommand(command, timeoutSeconds) =>
         buildTemplateVars(facts, context, node, setFacts).flatMap { vars =>
           val renderedCommand = command.map { token =>
-            if token.contains("{{") then Templating.render(token, vars) else token
+            if token.contains("{{") then Templating.render(token, vars)
+            else token
           }
-          requireStreamedSuccess(render)(r => NodeClient.executeCommand(node, renderedCommand, timeoutSeconds, r))
+          requireStreamedSuccess(render)(r =>
+            NodeClient.executeCommand(node, renderedCommand, timeoutSeconds, r)
+          )
         }
 
       case Task.SetFact(key, value) =>
         buildTemplateVars(facts, context, node, setFacts).flatMap { vars =>
-          val rendered = if value.contains("{{") then Templating.render(value, vars) else value
+          val rendered = if value.contains("{{") then
+            Templating.render(value, vars)
+          else value
           setFacts.set(node.name, key, rendered) >>
-            IO.println(s"[${node.name}] ${namedTask.name}: set $key = $rendered")
+            IO.println(
+              s"[${node.name}] ${namedTask.name}: set $key = $rendered"
+            )
         }
 
       case Task.Debug(message) =>
         buildTemplateVars(facts, context, node, setFacts).flatMap { vars =>
-          val rendered = if message.contains("{{") then Templating.render(message, vars) else message
+          val rendered = if message.contains("{{") then
+            Templating.render(message, vars)
+          else message
           IO.println(s"[${node.name}] ${namedTask.name}: $rendered")
         }
 
       case Task.DumpFacts() =>
         buildTemplateVars(facts, context, node, setFacts).flatMap { vars =>
-          IO.println(s"[${node.name}] ${namedTask.name}:\n${FactPrinter.render(vars)}")
+          IO.println(
+            s"[${node.name}] ${namedTask.name}:\n${FactPrinter.render(vars)}"
+          )
         }
 
-      case Task.DistributeFile(sourceNodeName, sourcePath, destPath, owner, group, mode) =>
+      case Task.DistributeFile(
+            sourceNodeName,
+            sourcePath,
+            destPath,
+            owner,
+            group,
+            mode
+          ) =>
         Inventory.all.find(_.name == sourceNodeName) match
           case None =>
-            IO.raiseError(new RuntimeException(s"DistributeFile source node '$sourceNodeName' not found in inventory"))
+            IO.raiseError(
+              new RuntimeException(
+                s"DistributeFile source node '$sourceNodeName' not found in inventory"
+              )
+            )
           case Some(sourceNode) =>
             NodeClient.fetchFileBytes(sourceNode, sourcePath).flatMap {
               case Left(err) =>
-                IO.raiseError(new RuntimeException(s"Failed to fetch $sourcePath from $sourceNodeName: $err"))
+                IO.raiseError(
+                  new RuntimeException(
+                    s"Failed to fetch $sourcePath from $sourceNodeName: $err"
+                  )
+                )
               case Right(content) =>
-                NodeClient.copyBytes(node, content, destPath, owner, group, mode, render)
+                NodeClient.copyBytes(
+                  node,
+                  content,
+                  destPath,
+                  owner,
+                  group,
+                  mode,
+                  render
+                )
             }
 
-  /** See PlaybookRunner.buildTemplateVars — identical logic,
-    * duplicated here rather than shared.
+  /** See PlaybookRunner.buildTemplateVars — identical logic, duplicated here
+    * rather than shared.
     */
   private def buildTemplateVars(
       facts: Option[orphera.common.Facts],
@@ -310,7 +475,10 @@ object ClusterPlaybookRunner:
     setFacts.snapshot.map { allSetFacts =>
       val ownInventoryVars: Map[String, Any] =
         Inventory.groupVarsFor(node.name) ++
-          Inventory.all.find(_.name == node.name).map(_.vars).getOrElse(Map.empty)
+          Inventory.all
+            .find(_.name == node.name)
+            .map(_.vars)
+            .getOrElse(Map.empty)
 
       val ownFactVars: Map[String, Any] = facts match
         case Some(f) =>
@@ -324,7 +492,9 @@ object ClusterPlaybookRunner:
 
       val nestedNodeVars = buildNestedNodeFacts(context, allSetFacts)
       val ownSetFactVars: Map[String, Any] =
-        allSetFacts.getOrElse(node.name, Map.empty).map { case (k, v) => k -> v }
+        allSetFacts.getOrElse(node.name, Map.empty).map { case (k, v) =>
+          k -> v
+        }
 
       ownInventoryVars ++ ownFactVars ++ nestedNodeVars ++ ownSetFactVars
     }
@@ -333,31 +503,44 @@ object ClusterPlaybookRunner:
       context: ClusterContext,
       allSetFacts: Map[String, Map[String, String]]
   ): Map[String, Any] =
-    val allNodeNames = context.factsByNode.keySet ++ allSetFacts.keySet ++ Inventory.all.map(_.name).toSet
+    val allNodeNames =
+      context.factsByNode.keySet ++ allSetFacts.keySet ++ Inventory.all
+        .map(_.name)
+        .toSet
 
     val nodesMap: java.util.Map[String, Any] =
-      allNodeNames.map { nodeName =>
-        val groupFields: Map[String, Any] = Inventory.groupVarsFor(nodeName)
-        val nodeFields: Map[String, Any] =
-          Inventory.all.find(_.name == nodeName).map(_.vars).getOrElse(Map.empty)
-        val inventoryFields: Map[String, Any] = groupFields ++ nodeFields
+      allNodeNames
+        .map { nodeName =>
+          val groupFields: Map[String, Any] = Inventory.groupVarsFor(nodeName)
+          val nodeFields: Map[String, Any] =
+            Inventory.all
+              .find(_.name == nodeName)
+              .map(_.vars)
+              .getOrElse(Map.empty)
+          val inventoryFields: Map[String, Any] = groupFields ++ nodeFields
 
-        val factFields: Map[String, Any] = context.factsByNode.get(nodeName) match
-          case Some(f) =>
-            Map(
-              "hostname" -> f.hostname,
-              "os_id" -> f.osId,
-              "os_version" -> f.osVersion,
-              "architecture" -> f.architecture
-            ) ++ interfaceFields(f)
-          case None => Map.empty
+          val factFields: Map[String, Any] =
+            context.factsByNode.get(nodeName) match
+              case Some(f) =>
+                Map(
+                  "hostname" -> f.hostname,
+                  "os_id" -> f.osId,
+                  "os_version" -> f.osVersion,
+                  "architecture" -> f.architecture
+                ) ++ interfaceFields(f)
+              case None => Map.empty
 
-        val setFactFields: Map[String, Any] =
-          allSetFacts.getOrElse(nodeName, Map.empty).map { case (k, v) => k -> v }
+          val setFactFields: Map[String, Any] =
+            allSetFacts.getOrElse(nodeName, Map.empty).map { case (k, v) =>
+              k -> v
+            }
 
-        val inner: java.util.Map[String, Any] = (inventoryFields ++ factFields ++ setFactFields).asJava
-        nodeName -> (inner: Any)
-      }.toMap.asJava
+          val inner: java.util.Map[String, Any] =
+            (inventoryFields ++ factFields ++ setFactFields).asJava
+          nodeName -> (inner: Any)
+        }
+        .toMap
+        .asJava
 
     Map("nodes" -> nodesMap)
 
@@ -366,59 +549,93 @@ object ClusterPlaybookRunner:
       s"ip_${iface.name}" -> iface.ipAddresses.headOption.getOrElse("")
     }.toMap
 
-    val secondary = f.interfaces.drop(1).headOption
+    val secondary = f.interfaces
+      .drop(1)
+      .headOption
       .flatMap(_.ipAddresses.headOption)
       .getOrElse("")
 
     byName + ("ip_secondary" -> secondary)
 
-  private def waitForHealthy(stageName: String, check: HealthCheck): IO[Boolean] =
+  private def waitForHealthy(
+      stageName: String,
+      check: HealthCheck
+  ): IO[Boolean] =
     check match
 
-      case HealthCheck.Quorum(nodeNames, command, requiredCount, pollIntervalSeconds, timeoutSeconds) =>
+      case HealthCheck.Quorum(
+            nodeNames,
+            command,
+            requiredCount,
+            pollIntervalSeconds,
+            timeoutSeconds
+          ) =>
         val nodes = Inventory.all.filter(n => nodeNames.contains(n.name))
         val missing = nodeNames.filterNot(name => nodes.exists(_.name == name))
 
         if missing.nonEmpty then
-          IO.println(s"[$stageName] Quorum check node(s) not found in inventory: ${missing.mkString(", ")}") >>
+          IO.println(
+            s"[$stageName] Quorum check node(s) not found in inventory: ${missing.mkString(", ")}"
+          ) >>
             IO.pure(false)
         else
           IO.println(
             s"[$stageName] Waiting for quorum: $requiredCount of ${nodes.length} (${nodeNames.mkString(", ")}) (timeout ${timeoutSeconds}s)..."
           ) >>
-            pollQuorum(stageName, nodes, command, requiredCount, pollIntervalSeconds, timeoutSeconds, elapsed = 0)
+            pollQuorum(
+              stageName,
+              nodes,
+              command,
+              requiredCount,
+              pollIntervalSeconds,
+              timeoutSeconds,
+              elapsed = 0
+            )
 
       case single =>
         val onNode = single match
           case HealthCheck.Sentinel(n, _, _, _, _) => n
           case HealthCheck.Command(n, _, _, _)     => n
-          case _                                    => ""
+          case _                                   => ""
 
         val timeoutSeconds = single match
           case HealthCheck.Sentinel(_, _, _, _, t) => t
           case HealthCheck.Command(_, _, _, t)     => t
-          case _                                    => 0
+          case _                                   => 0
 
         Inventory.all.find(_.name == onNode) match
           case None =>
-            IO.println(s"[$stageName] Health check node '$onNode' not found in inventory.") >>
+            IO.println(
+              s"[$stageName] Health check node '$onNode' not found in inventory."
+            ) >>
               IO.pure(false)
           case Some(n) =>
-            IO.println(s"[$stageName] Waiting for health check on $onNode (timeout ${timeoutSeconds}s)...") >>
+            IO.println(
+              s"[$stageName] Waiting for health check on $onNode (timeout ${timeoutSeconds}s)..."
+            ) >>
               pollHealthy(stageName, n, single, elapsed = 0)
 
-  private def pollHealthy(stageName: String, node: Node, check: HealthCheck, elapsed: Int): IO[Boolean] =
+  private def pollHealthy(
+      stageName: String,
+      node: Node,
+      check: HealthCheck,
+      elapsed: Int
+  ): IO[Boolean] =
     val (pollIntervalSeconds, timeoutSeconds) = check match
       case HealthCheck.Sentinel(_, _, _, p, t) => (p, t)
       case HealthCheck.Command(_, _, p, t)     => (p, t)
       case HealthCheck.Quorum(_, _, _, p, t)   => (p, t)
 
     if elapsed >= timeoutSeconds then
-      IO.println(s"[$stageName] Health check timed out after ${timeoutSeconds}s") >> IO.pure(false)
+      IO.println(
+        s"[$stageName] Health check timed out after ${timeoutSeconds}s"
+      ) >> IO.pure(false)
     else
       checkOnce(node, check).attempt.flatMap {
         case Right(true) =>
-          IO.println(s"[$stageName] Healthy after ~${elapsed}s") >> IO.pure(true)
+          IO.println(s"[$stageName] Healthy after ~${elapsed}s") >> IO.pure(
+            true
+          )
         case _ =>
           IO.sleep(pollIntervalSeconds.seconds) >>
             pollHealthy(stageName, node, check, elapsed + pollIntervalSeconds)
@@ -433,7 +650,11 @@ object ClusterPlaybookRunner:
         collectExitCode(node, command).map(_ == 0)
 
       case HealthCheck.Quorum(_, _, _, _, _) =>
-        IO.raiseError(new IllegalStateException("Quorum checks are polled via pollQuorum, not checkOnce"))
+        IO.raiseError(
+          new IllegalStateException(
+            "Quorum checks are polled via pollQuorum, not checkOnce"
+          )
+        )
 
   private def pollQuorum(
       stageName: String,
@@ -445,7 +666,9 @@ object ClusterPlaybookRunner:
       elapsed: Int
   ): IO[Boolean] =
     if elapsed >= timeoutSeconds then
-      IO.println(s"[$stageName] Quorum check timed out after ${timeoutSeconds}s") >> IO.pure(false)
+      IO.println(
+        s"[$stageName] Quorum check timed out after ${timeoutSeconds}s"
+      ) >> IO.pure(false)
     else
       nodes
         .parTraverse { node =>
@@ -465,7 +688,15 @@ object ClusterPlaybookRunner:
               s"[$stageName] Quorum check: ${healthy.length}/$requiredCount healthy so far (${healthy.mkString(", ")})"
             ) >>
               IO.sleep(pollIntervalSeconds.seconds) >>
-              pollQuorum(stageName, nodes, command, requiredCount, pollIntervalSeconds, timeoutSeconds, elapsed + pollIntervalSeconds)
+              pollQuorum(
+                stageName,
+                nodes,
+                command,
+                requiredCount,
+                pollIntervalSeconds,
+                timeoutSeconds,
+                elapsed + pollIntervalSeconds
+              )
         }
 
   private def collectExitCode(node: Node, command: List[String]): IO[Int] =
