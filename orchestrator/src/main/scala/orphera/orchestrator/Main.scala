@@ -201,6 +201,15 @@ object Main extends IOApp:
           Orchestrator.executeCommand(targets, command, timeoutSeconds)
         }
 
+      case Right(Command.LogSummary(target)) =>
+        // Read-only reporting command: its own exit code reflects
+        // whether the summary could be produced (file found/parsed),
+        // not whether the run it's summarizing succeeded — see
+        // LogSummary.run's doc comment.
+        LogSummary
+          .run(target)
+          .map(ok => if ok then ExitCode.Success else ExitCode.Error)
+
   private def formatUptime(seconds: Long): String =
     val days = seconds / 86400
     val hours = (seconds % 86400) / 3600

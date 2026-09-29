@@ -59,6 +59,11 @@ enum Command:
       nodes: Option[List[String]],
       timeoutSeconds: Int
   )
+  // Reads a .orphera-logs/*.jsonl run log and prints a human-readable
+  // summary table — see LogSummary.scala. `target` is either a direct
+  // .jsonl path or a playbook name (resolves to that playbook's most
+  // recently modified log file).
+  case LogSummary(target: String)
   case Help
 
 object Cli:
@@ -99,6 +104,12 @@ object Cli:
         parsePlaybookFlags(rest, resume = false).map(
           Command.RunClusterPlaybook(path, _)
         )
+      case "log-summary" :: Nil =>
+        Left(
+          "log-summary requires a target: a .jsonl file path, or a playbook name (finds its most recent run)"
+        )
+      case "log-summary" :: target :: rest =>
+        parseLogSummary(rest, target)
       case "help" :: _ | "--help" :: _ | Nil => Right(Command.Help)
       case "run" :: rest => parseRunCommand(rest, Nil, None, 60)
       case other => Left(s"Unknown command: ${other.headOption.getOrElse("")}")
@@ -118,6 +129,14 @@ object Cli:
       case "--resume" :: rest => parsePlaybookFlags(rest, resume = true)
       case other :: _         =>
         Left(s"Unknown argument: $other (expected at most --resume)")
+
+  private def parseLogSummary(
+      args: List[String],
+      target: String
+  ): Either[String, Command] =
+    args match
+      case Nil        => Right(Command.LogSummary(target))
+      case other :: _  => Left(s"Unknown argument to log-summary: $other")
 
   private def parseInstall(
       args: List[String],
@@ -463,6 +482,7 @@ object Cli:
       |  reboot         [--nodes host1,host2] [--delay 5] [--wait] [--wait-timeout 300]
       |  version        [--nodes host1,host2]
       |  uptime         [--nodes host1,host2]
+      |  log-summary    <playbook-name | file.jsonl>  — summarizes a run's .orphera-logs/*.jsonl output as a table (latest run for that playbook, if a name is given)
       |
       |Examples:
       |  install curl vim
@@ -471,4 +491,5 @@ object Cli:
       |  copy /tmp/test.txt /etc/orphera-test.txt --owner root --group root --mode 0644
       |  network-apply --nodes web1 --timeout 90
       |  cluster-playbook manifests/cephadm_add_osds.scala --resume
+      |  log-summary cephadm-add-osds
       |""".stripMargin
