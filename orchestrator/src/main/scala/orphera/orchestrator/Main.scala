@@ -14,19 +14,18 @@ object Main extends IOApp:
     }
 
   /** Entry point for every invocation. Auditable commands (see
-    * AuditLog.isAuditable) get a start/end record in the audit trail
-    * wrapped around dispatchCommand; everything else (read-only
-    * commands, a parse failure) goes straight through. `args` gets
-    * parsed twice on the audited path — once here just to classify the
-    * command, once more inside dispatchCommand to actually run it —
-    * a deliberate trade: parsing is cheap and pure, and this way
-    * dispatchCommand's existing, already-verified match over every
-    * Command case needed no restructuring at all for this feature.
+    * AuditLog.isAuditable) get a start/end record in the audit trail wrapped
+    * around dispatchCommand; everything else (read-only commands, a parse
+    * failure) goes straight through. `args` gets parsed twice on the audited
+    * path — once here just to classify the command, once more inside
+    * dispatchCommand to actually run it — a deliberate trade: parsing is cheap
+    * and pure, and this way dispatchCommand's existing, already-verified match
+    * over every Command case needed no restructuring at all for this feature.
     */
   private def dispatch(args: List[String]): IO[ExitCode] =
     Cli.parse(args).toOption.filter(AuditLog.isAuditable) match
       case Some(command) => auditedRun(command, args)
-      case None           => dispatchCommand(args)
+      case None          => dispatchCommand(args)
 
   private def auditedRun(command: Command, args: List[String]): IO[ExitCode] =
     for
@@ -35,7 +34,12 @@ object Main extends IOApp:
       _ <- AuditLog.recordStart(command, invocationId)
       exitCode <- dispatchCommand(args)
       endMs <- IO.delay(System.currentTimeMillis())
-      _ <- AuditLog.recordEnd(command, invocationId, exitCode.code, endMs - startMs)
+      _ <- AuditLog.recordEnd(
+        command,
+        invocationId,
+        exitCode.code,
+        endMs - startMs
+      )
     yield exitCode
 
   private def dispatchCommand(args: List[String]): IO[ExitCode] =
@@ -83,13 +87,17 @@ object Main extends IOApp:
 
       case Right(Command.DeployAgent(localOpt, remotePath, nodeNames)) =>
         resolveDebPath(localOpt) match
-          case Left(err) => IO.println(s"Error: $err") >> IO.pure(ExitCode.Error)
+          case Left(err) =>
+            IO.println(s"Error: $err") >> IO.pure(ExitCode.Error)
           case Right(local) =>
             val targets = nodeNames match
-              case Some(names) => Inventory.all.filter(n => names.contains(n.name))
-              case None        => Inventory.all
+              case Some(names) =>
+                Inventory.all.filter(n => names.contains(n.name))
+              case None => Inventory.all
             if targets.isEmpty then
-              IO.println("No matching nodes found in inventory.") >> IO.pure(ExitCode.Error)
+              IO.println("No matching nodes found in inventory.") >> IO.pure(
+                ExitCode.Error
+              )
             else
               // Unlike withTargets (which always reports Success once
               // its action runs, whatever that action actually did),
@@ -101,19 +109,29 @@ object Main extends IOApp:
               Orchestrator
                 .deployDeb(targets, java.nio.file.Paths.get(local), remotePath)
                 .flatMap { confirmed =>
-                  val (ok, failed) = targets.partition(n => confirmed.getOrElse(n.name, false))
+                  val (ok, failed) =
+                    targets.partition(n => confirmed.getOrElse(n.name, false))
                   IO.println(
                     s"${ok.size}/${targets.size} node(s) confirmed running the new version" +
                       (if failed.isEmpty then ""
-                       else s" — not confirmed: ${failed.map(_.name).mkString(", ")}")
-                  ) >> IO.pure(if failed.isEmpty then ExitCode.Success else ExitCode.Error)
+                       else
+                         s" — not confirmed: ${failed.map(_.name).mkString(", ")}")
+                  ) >> IO.pure(if failed.isEmpty then ExitCode.Success
+                  else ExitCode.Error)
                 }
 
       case Right(
-            Command.Bootstrap(localOpt, nodeNames, sshUser, sshKeyPath, remotePath)
+            Command.Bootstrap(
+              localOpt,
+              nodeNames,
+              sshUser,
+              sshKeyPath,
+              remotePath
+            )
           ) =>
         resolveDebPath(localOpt) match
-          case Left(err) => IO.println(s"Error: $err") >> IO.pure(ExitCode.Error)
+          case Left(err) =>
+            IO.println(s"Error: $err") >> IO.pure(ExitCode.Error)
           case Right(local) =>
             withTargets(nodeNames) { targets =>
               Orchestrator.bootstrapAgent(
@@ -313,21 +331,20 @@ object Main extends IOApp:
       case Right(_)  => IO.pure(ExitCode.Error)
     }
 
-  /** Resolves `bootstrap`/`deploy-agent`'s local `.deb` path: an
-    * explicit `--file` wins, otherwise auto-discovers the freshly
-    * built `orphera-agent_*.deb` in the current directory — the same
-    * "find it by naming convention" approach as findLatestJar below,
-    * for the same underlying reason: neither command should be taking
-    * an arbitrary free-form path as its normal mode of use. Whatever
-    * path this resolves to still gets checked against its own package
-    * metadata in Orchestrator.requireOrpheraAgentPackage before
-    * anything is pushed anywhere — this only decides which file, not
-    * whether it's trusted.
+  /** Resolves `bootstrap`/`deploy-agent`'s local `.deb` path: an explicit
+    * `--file` wins, otherwise auto-discovers the freshly built
+    * `orphera-agent_*.deb` in the current directory — the same "find it by
+    * naming convention" approach as findLatestJar below, for the same
+    * underlying reason: neither command should be taking an arbitrary free-form
+    * path as its normal mode of use. Whatever path this resolves to still gets
+    * checked against its own package metadata in
+    * Orchestrator.requireOrpheraAgentPackage before anything is pushed anywhere
+    * — this only decides which file, not whether it's trusted.
     */
   private def resolveDebPath(explicit: Option[String]): Either[String, String] =
     explicit match
       case Some(path) => Right(path)
-      case None =>
+      case None       =>
         findLatestDeb(".").toRight(
           "No orphera-agent_*.deb found in the current directory, and no --file given. " +
             "Run 'make deb' (or 'make release') first, or pass --file <path>."

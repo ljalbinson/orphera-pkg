@@ -24,7 +24,10 @@ object DebInstaller:
       case Right(()) =>
         for
           _ <- queue.offer(
-            Event(Event.Kind.PROGRESS, s"Starting detached install of ${cmd.path}")
+            Event(
+              Event.Kind.PROGRESS,
+              s"Starting detached install of ${cmd.path}"
+            )
           )
 
           _ <- IO.blocking {
@@ -58,21 +61,20 @@ object DebInstaller:
         yield ()
     }
 
-  /** Refuses to let `InstallDebPackage` be used to install anything
-    * other than this project's own agent package. Previously this ran
-    * `dpkg -i` against whatever path it was handed with no check at
-    * all — meaning any authenticated caller (a legitimate orchestrator
-    * invocation with a typo'd path, a compromised orchestrator host,
-    * or a leaked `ORPHERA_TOKEN` used directly against the gRPC port)
-    * could install an arbitrary `.deb` as root on every agent host
-    * this RPC could reach. This is the actual trust boundary — TLS and
-    * the shared token authenticate *who* can call this RPC, not *what*
-    * it's allowed to do once called.
+  /** Refuses to let `InstallDebPackage` be used to install anything other than
+    * this project's own agent package. Previously this ran `dpkg -i` against
+    * whatever path it was handed with no check at all — meaning any
+    * authenticated caller (a legitimate orchestrator invocation with a typo'd
+    * path, a compromised orchestrator host, or a leaked `ORPHERA_TOKEN` used
+    * directly against the gRPC port) could install an arbitrary `.deb` as root
+    * on every agent host this RPC could reach. This is the actual trust
+    * boundary — TLS and the shared token authenticate *who* can call this RPC,
+    * not *what* it's allowed to do once called.
     *
-    * Checked by reading the package's own control metadata
-    * (`dpkg-deb -f <path> Package`), not by trusting the filename or
-    * path — a malicious or mistaken file given an innocent-looking
-    * name would sail straight through a filename-only check.
+    * Checked by reading the package's own control metadata (`dpkg-deb -f <path>
+    * Package`), not by trusting the filename or path — a malicious or mistaken
+    * file given an innocent-looking name would sail straight through a
+    * filename-only check.
     */
   private def verifyPackageName(path: String): IO[Either[String, Unit]] =
     IO.blocking {
@@ -82,19 +84,20 @@ object DebInstaller:
       val output = new String(process.getInputStream.readAllBytes()).trim
       val exit = process.waitFor()
       (exit, output)
-    }.attempt.map {
-      case Right((0, name)) if name == expectedPackageName =>
-        Right(())
-      case Right((0, name)) =>
-        Left(
-          s"Refusing to install $path: its Package field is '$name', not '$expectedPackageName'."
-        )
-      case Right((exit, _)) =>
-        Left(
-          s"Refusing to install $path: could not read its package metadata (dpkg-deb exited $exit) — is this a valid .deb?"
-        )
-      case Left(err) =>
-        Left(
-          s"Refusing to install $path: failed to run dpkg-deb (${err.getMessage})"
-        )
-    }
+    }.attempt
+      .map {
+        case Right((0, name)) if name == expectedPackageName =>
+          Right(())
+        case Right((0, name)) =>
+          Left(
+            s"Refusing to install $path: its Package field is '$name', not '$expectedPackageName'."
+          )
+        case Right((exit, _)) =>
+          Left(
+            s"Refusing to install $path: could not read its package metadata (dpkg-deb exited $exit) — is this a valid .deb?"
+          )
+        case Left(err) =>
+          Left(
+            s"Refusing to install $path: failed to run dpkg-deb (${err.getMessage})"
+          )
+      }

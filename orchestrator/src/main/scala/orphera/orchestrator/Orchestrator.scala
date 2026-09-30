@@ -74,16 +74,15 @@ object Orchestrator:
       )
     }
 
-  /** Pushes and installs the agent `.deb`, then polls each node's
-    * `getVersion` RPC until it reports the `.deb`'s own `Version`
-    * field or `confirmTimeoutSeconds` elapses — see
-    * `NodeClient.pollForVersion`'s doc comment for why this exists:
-    * the install itself runs detached (the agent's own service
-    * restart would otherwise kill it mid-unpack), so the RPC call
-    * that launches it can never itself confirm completion. Returns
-    * each node's confirmation result rather than `IO[Unit]`, so the
-    * CLI can report which nodes actually finished upgrading and set
-    * its exit code accordingly, instead of exit-0-means-nothing.
+  /** Pushes and installs the agent `.deb`, then polls each node's `getVersion`
+    * RPC until it reports the `.deb`'s own `Version` field or
+    * `confirmTimeoutSeconds` elapses — see `NodeClient.pollForVersion`'s doc
+    * comment for why this exists: the install itself runs detached (the agent's
+    * own service restart would otherwise kill it mid-unpack), so the RPC call
+    * that launches it can never itself confirm completion. Returns each node's
+    * confirmation result rather than `IO[Unit]`, so the CLI can report which
+    * nodes actually finished upgrading and set its exit code accordingly,
+    * instead of exit-0-means-nothing.
     */
   def deployDeb(
       nodes: List[Node],
@@ -174,7 +173,13 @@ object Orchestrator:
       IO.raiseError(new RuntimeException(s"No such file: $localDebPath"))
     else
       IO.blocking {
-        val process = new ProcessBuilder("dpkg-deb", "-f", localDebPath, "Package", "Version")
+        val process = new ProcessBuilder(
+          "dpkg-deb",
+          "-f",
+          localDebPath,
+          "Package",
+          "Version"
+        )
           .redirectErrorStream(true)
           .start()
         val output = new String(process.getInputStream.readAllBytes()).trim
@@ -185,33 +190,47 @@ object Orchestrator:
             case _                 => None
         }.toMap
         (exit, fields, output)
-      }.attempt.flatMap {
-        case Right((0, fields, _)) if fields.get("Package").contains(expectedPackageName) =>
-          fields.get("Version") match
-            case Some(version) => IO.pure(version)
-            case None =>
-              IO.raiseError(new RuntimeException(
-                s"Refusing to deploy $localDebPath: read its Package field but no Version field (dpkg-deb fields: ${fields.mkString(", ")})"
-              ))
-        case Right((0, fields, _)) if fields.contains("Package") =>
-          IO.raiseError(new RuntimeException(
-            s"Refusing to deploy $localDebPath: its Package field is '${fields("Package")}', not '$expectedPackageName'. " +
-              "bootstrap/deploy-agent only install the orphera-agent package — build one with 'make deb' first."
-          ))
-        case Right((0, fields, _)) =>
-          IO.raiseError(new RuntimeException(
-            s"Refusing to deploy $localDebPath: could not find a Package field in dpkg-deb's output: ${fields.mkString(", ")}"
-          ))
-        case Right((exit, _, output)) =>
-          IO.raiseError(new RuntimeException(
-            s"Refusing to deploy $localDebPath: dpkg-deb exited $exit reading its metadata — " +
-              s"is this a valid .deb? (dpkg-deb said: ${if output.isEmpty then "<no output>" else output})"
-          ))
-        case Left(err) =>
-          IO.raiseError(new RuntimeException(
-            s"Refusing to deploy $localDebPath: failed to run dpkg-deb (${err.getMessage})"
-          ))
-      }
+      }.attempt
+        .flatMap {
+          case Right((0, fields, _))
+              if fields.get("Package").contains(expectedPackageName) =>
+            fields.get("Version") match
+              case Some(version) => IO.pure(version)
+              case None          =>
+                IO.raiseError(
+                  new RuntimeException(
+                    s"Refusing to deploy $localDebPath: read its Package field but no Version field (dpkg-deb fields: ${fields.mkString(", ")})"
+                  )
+                )
+          case Right((0, fields, _)) if fields.contains("Package") =>
+            IO.raiseError(
+              new RuntimeException(
+                s"Refusing to deploy $localDebPath: its Package field is '${fields("Package")}', not '$expectedPackageName'. " +
+                  "bootstrap/deploy-agent only install the orphera-agent package — build one with 'make deb' first."
+              )
+            )
+          case Right((0, fields, _)) =>
+            IO.raiseError(
+              new RuntimeException(
+                s"Refusing to deploy $localDebPath: could not find a Package field in dpkg-deb's output: ${fields.mkString(", ")}"
+              )
+            )
+          case Right((exit, _, output)) =>
+            IO.raiseError(
+              new RuntimeException(
+                s"Refusing to deploy $localDebPath: dpkg-deb exited $exit reading its metadata — " +
+                  s"is this a valid .deb? (dpkg-deb said: ${
+                      if output.isEmpty then "<no output>" else output
+                    })"
+              )
+            )
+          case Left(err) =>
+            IO.raiseError(
+              new RuntimeException(
+                s"Refusing to deploy $localDebPath: failed to run dpkg-deb (${err.getMessage})"
+              )
+            )
+        }
 
   def teardownAgent(
       nodes: List[Node],

@@ -83,8 +83,8 @@ object Cli:
       case "autoremove" :: rest => parseAutoRemove(rest, None, purge = false)
       case "copy" :: local :: dest :: rest =>
         parseCopy(rest, local, dest, None, "", "", 0)
-      case "network-apply" :: rest         => parseNetworkApply(rest, None, 60)
-      case "deploy-agent" :: rest =>
+      case "network-apply" :: rest => parseNetworkApply(rest, None, 60)
+      case "deploy-agent" :: rest  =>
         parseDeployAgent(rest, None, "/tmp/orphera-agent.deb", None)
       case "bootstrap" :: rest =>
         parseBootstrap(
@@ -117,7 +117,7 @@ object Cli:
         )
       case "log-summary" :: target :: rest =>
         parseLogSummary(rest, target)
-      case "audit-log" :: rest => parseAuditLog(rest, 20)
+      case "audit-log" :: rest               => parseAuditLog(rest, 20)
       case "help" :: _ | "--help" :: _ | Nil => Right(Command.Help)
       case "run" :: rest => parseRunCommand(rest, Nil, None, 60)
       case other => Left(s"Unknown command: ${other.headOption.getOrElse("")}")
@@ -144,18 +144,18 @@ object Cli:
   ): Either[String, Command] =
     args match
       case Nil        => Right(Command.LogSummary(target))
-      case other :: _  => Left(s"Unknown argument to log-summary: $other")
+      case other :: _ => Left(s"Unknown argument to log-summary: $other")
 
   private def parseAuditLog(
       args: List[String],
       limit: Int
   ): Either[String, Command] =
     args match
-      case Nil => Right(Command.ShowAuditLog(limit))
+      case Nil                        => Right(Command.ShowAuditLog(limit))
       case "--limit" :: value :: rest =>
         scala.util.Try(value.toInt).toOption match
           case Some(parsed) if parsed > 0 => parseAuditLog(rest, parsed)
-          case _                          => Left(s"Invalid limit: $value (expected a positive integer)")
+          case _ => Left(s"Invalid limit: $value (expected a positive integer)")
       case other :: _ =>
         Left(s"Unknown argument to audit-log: $other")
 
@@ -304,7 +304,14 @@ object Cli:
       case Nil =>
         Right(Command.Bootstrap(local, nodes, sshUser, sshKeyPath, remotePath))
       case "--file" :: value :: rest =>
-        parseBootstrap(rest, Some(value), nodes, sshUser, sshKeyPath, remotePath)
+        parseBootstrap(
+          rest,
+          Some(value),
+          nodes,
+          sshUser,
+          sshKeyPath,
+          remotePath
+        )
       case "--nodes" :: value :: rest =>
         parseBootstrap(
           rest,

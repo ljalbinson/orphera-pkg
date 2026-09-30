@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-### Added — `manifests/etcd_cluster.scala`: 3-node etcd cluster, first cut at a non-Ceph framework stress test
+### Added — `manifests/etcd_cluster.scala`: 3-node etcd cluster, confirmed working against tst0/tst1/tst2
 
 Follow-up to a side discussion on what a Keystone+Galera deployment would
 teach about Orphera's orchestration model versus what it's actually worth
@@ -26,12 +26,12 @@ captured in this file's own header comment.
   vars alone, so it's rendered identically on all three nodes via
   `{{nodes.<name>.cluster_ip}}` templating with **zero**
   `Task.DistributeFile` calls — no generate-once-on-one-node-then-push
-  step at all. Worth revisiting once this has actually run: if it works
-  cleanly, that's real evidence the existing cross-node templating
-  already covers this shape of problem; it says nothing about the
-  asymmetric case (Galera-style bootstrap, or etcd's own runtime
-  membership changes), which is a different, harder shape not exercised
-  here.
+  step at all. **Confirmed**: ran clean on the first attempt against
+  tst0/tst1/tst2, all three nodes reaching `started` with no retries —
+  real evidence the existing cross-node templating already covers this
+  shape of problem on its own. Says nothing about the asymmetric case
+  (Galera-style bootstrap, or etcd's own runtime membership changes),
+  which is a different, harder shape not exercised here.
 - `confirm-quorum`'s `HealthCheck.Quorum` here checks three independent
   per-node endpoints (`etcdctl endpoint health` against each node's own
   loopback client port, `requiredCount = 3`) rather than one node
@@ -42,13 +42,17 @@ captured in this file's own header comment.
   (`<<EOF`) silently drops every `\<newline>` it contains (same rule as
   inside a double-quoted string), so the `ExecStart=` line's
   readability-motivated `\` continuations never reach the written
-  `etcd.service` — it lands there as one long single line. Functionally
-  identical (systemd doesn't care), but worth knowing before mistaking
-  it for a bug later.
-- Not yet run against real infrastructure — this is the DSL written and
-  reasoned through, not a confirmed-working deployment. Next step is an
-  actual `orphera cluster-playbook manifests/etcd_cluster.scala` run
-  against tst0/tst1/tst2 to find out what the design got wrong.
+  `etcd.service` — it lands there as one long single line. Confirmed
+  harmless in the real run: `enable --now etcd` reported success and
+  the quorum check passed, so the collapsed single-line `ExecStart`
+  parsed and ran correctly.
+- First real run (2026-09-30): all three stages completed with no
+  retries needed, `Type=notify` didn't trip a systemd startup timeout,
+  and `confirm-quorum` reached 3/3 in ~0s — all three nodes were
+  already healthy by the check's first poll. Nothing in this design
+  needed correcting; the open questions above (asymmetric bootstrap,
+  runtime membership changes) remain the interesting unexercised
+  ground for a follow-up.
 
 ### Fixed — `deploy-agent` now confirms the install actually completed, instead of just that it was launched
 
