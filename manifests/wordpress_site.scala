@@ -21,7 +21,7 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 // writes and needs write capability throughout, not just for the initial
 // install.
 //
-// Two stages, asymmetric in a new way from anything earlier in this
+// Three stages, asymmetric in a new way from anything earlier in this
 // project: not "one node bootstraps, others join" (mariadb_galera_cluster.scala)
 // or "one node's output feeds the others" (ceph_mon_quorum.scala), but
 // "one stage prepares shared state on a DIFFERENT cluster than the one
@@ -35,6 +35,14 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 //     repeat it on all three.
 //   - install-wordpress (tst5 only): installs nginx + php-fpm, downloads
 //     WordPress, and writes wp-config.php pointing at the VIP.
+//   - confirm-wordpress-healthy (tst5 only): a SEPARATE stage for the
+//     `wait_for` health check and its confirm task, not more tasks on
+//     install-wordpress above — `ClusterPlaybookRunner.runStage` checks a
+//     stage's `waitFor` BEFORE that stage's own tasks run, not after, so a
+//     health check sharing a stage with the tasks that bring the thing up
+//     gets evaluated before those tasks ever ran. Found on a real first
+//     run: the health check timed out every time because nginx/php-fpm
+//     weren't installed yet when it started polling.
 //
 // A real gap found by reading ClusterPlaybookRunner.scala's actual
 // Task.Copy handling before using it here (not assumed): the cluster
@@ -253,6 +261,20 @@ object wordpress_site extends OrpheraClusterPlaybook:
         .task("start nginx and php8.3-fpm")(
           Task.RunCommand(List("sh", "-c", startServicesScript))
         )
+        .build,
+
+      // A separate stage, not more tasks tacked onto install-wordpress
+      // above: `ClusterPlaybookRunner.runStage` checks a stage's `waitFor`
+      // BEFORE running that same stage's own tasks (it's a precondition
+      // gate on entry, not a postcondition on exit) — confirmed the hard
+      // way on a real first run, where `siteHealthScript` was being polled
+      // against tst5 before nginx/php-fpm were even installed, so it just
+      // timed out every time. `mariadb_galera_cluster.scala`'s own
+      // confirm-cluster-healthy stage happens to already follow this
+      // correctly (nothing else in that stage depends on running before
+      // its own waitFor), which is exactly why this same mistake was easy
+      // to make here without noticing until a real run caught it.
+      stage("confirm-wordpress-healthy", "tst5")
         .waitFor(
           HealthCheck.Command(
             onNode = "tst5",

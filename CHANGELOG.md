@@ -6,6 +6,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed — `manifests/wordpress_site.scala`: health check must be its own stage, not tacked onto install-wordpress
+
+Real first run against tst5: `install-wordpress`'s health check timed out
+after 60s every time, with no task output for that stage printed at all —
+because `ClusterPlaybookRunner.runStage` checks a stage's `waitFor` BEFORE
+running that stage's own tasks, not after (confirmed by reading the actual
+runner, not assumed). The `siteHealthScript` curl check was sharing a stage
+with the install/download/config/start tasks that actually bring the site
+up, so it was being polled against tst5 before nginx or php8.3-fpm were
+even installed.
+
+- Split into a separate `confirm-wordpress-healthy` stage (`waitFor` + the
+  "wordpress site confirmed" debug task), run strictly after
+  `install-wordpress` completes — same shape
+  `mariadb_galera_cluster.scala`'s own `confirm-cluster-healthy` stage
+  already uses, which is exactly why this was easy to get wrong here
+  without noticing until a real run caught it.
+- Not yet re-run against tst5 with the fix applied.
+
 ### Added — `manifests/wordpress_teardown.scala`: tears down wordpress_site.scala's database and tst5 install
 
 Two stages, mirroring `wordpress_site.scala`'s own asymmetric shape:
