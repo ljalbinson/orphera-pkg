@@ -6,6 +6,165 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — `manifests/mariadb_haproxy_keepalived.scala`: front the Galera cluster with a floating IP, confirmed working against tst0/tst1/tst2 (three real bugs found and fixed along the way)
+
+Fifth infrastructure exercise: fronts `mariadb_galera_cluster.scala`'s
+3-node cluster with haproxy + keepalived, colocated on tst0/tst1/tst2 (the
+user's own choice when asked, over dedicated LB nodes), giving clients one
+stable address (`10.10.5.100`, user-provided) with automatic failover
+instead of needing to know which of tst0/tst1/tst2 to talk to. Researched
+against a real guide before writing any of this, not assumed:
+[computingforgeeks.com's MariaDB Galera + HAProxy + Keepalived guide](https://computingforgeeks.com/mariadb-high-availability-galera-haproxy-keepalived/).
+
+- **Health check**: a small custom HTTP-over-raw-socket script
+  (`galera-clustercheck`), exposed on `:9200` via a systemd socket unit
+  (`Accept=yes` — one instance per connection, standing in for the
+  xinetd-based approach some guides use; xinetd isn't a default Ubuntu
+  24.04 dependency, systemd socket units always are). Checks
+  `wsrep_local_state = 4` (Synced) specifically, not just `wsrep_ready` —
+  a real, necessary distinction from `mariadb_galera_cluster.scala`'s own
+  health check: a node can be `wsrep_ready` while still catching up via
+  SST/IST, and haproxy routing a write there would be a correctness bug,
+  not just a slow query.
+- **Two haproxy listeners**, symmetric across all three nodes (same
+  `{{nodes.<name>.cluster_ip}}` templating as Galera's own config, no
+  `DistributeFile` needed): `:3306` (write) pins all traffic to tst0 with
+  tst1/tst2 as `backup` — avoiding Galera's multi-writer
+  certification-conflict problem under normal operation while still
+  failing over if tst0 goes down; `:3307` (read) round-robins across all
+  three, each gated on its own `:9200` Synced check.
+- **A real port-binding conflict, fixed in `mariadb_galera_cluster.scala`
+  itself rather than worked around here**: haproxy needs to bind `*:3306`
+  on each node to serve both that node's own address and the floating VIP
+  once it holds it — but that file's `bind-address=0.0.0.0` meant mysqld
+  was already claiming every address on `:3306`, including the VIP the
+  instant keepalived added it. Narrowed to `{{cluster_ip}}` — see that
+  file's own entry above and updated header comment.
+- **keepalived**, unlike haproxy's config, is genuinely asymmetric
+  (priority/state differ per node — tst0 priority 101/`MASTER`, tst1 100,
+  tst2 99, all `BACKUP` except tst0), so it's three separate per-host
+  stages rather than one shared stage, same pattern as
+  `mariadb_galera_cluster.scala`'s `bootstrap-tst0`/`join-others` split.
+  `interface` is detected at runtime (`ip -4 route show default`) rather
+  than hardcoded as e.g. `eth0` — guessing an OS device name instead of
+  confirming it is exactly the class of bug behind this project's real
+  `/dev/sdX` incident (see CHANGELOG history below), no reason to repeat
+  it for a NIC name.
+- **Honest limitation, stated in the file itself**: the confirm stage's
+  `HealthCheck.Quorum(requiredCount = 1)` against "does any node hold the
+  VIP" is a reasonable fit for `HealthCheck.Quorum`'s shape but does NOT
+  detect a split-brain double-VIP (two nodes both reporting true would
+  still pass) — a real anti-split-brain check would need to count VIP
+  holders in one pass, which the per-node polling design here doesn't
+  support as written.
+- Final confirm stage also proves the whole path end-to-end — connects
+  through the VIP itself (`mariadb -h 10.10.5.100 ...`, reusing the
+  clustercheck user rather than adding a second test credential) from
+  tst1, not trusting each piece's own status output in isolation.
+- **First real run, and a real bug it caught**: `install-haproxy-keepalived`
+  through `write-keepalived-tst2` all completed and reported success — but
+  `write-haproxy-config`'s own output, read closely, showed `Job for
+  haproxy.service failed because the control process exited with error
+  code` on all three nodes, and the script's final `echo` still exited 0
+  regardless, so the task reported `success=true` anyway. The
+  `confirm-ha-frontend` stage's VIP-holder check still passed (keepalived
+  had no problem electing tst0), but the actual connectivity task then
+  failed for the real reason: `ERROR 2002 ... Can't connect to server on
+  '10.10.5.100'` — nothing was listening, because haproxy wasn't actually
+  running anywhere.
+  - **Root cause**: the live cluster had been built *before* the
+    bind-address fix above went into `mariadb_galera_cluster.scala` —
+    mysqld was still bound to `0.0.0.0:3306` from its last real start, so
+    haproxy's own `*:3306` bind collided with it. Simply re-running
+    `mariadb_galera_cluster.scala` would rewrite `60-galera.cnf`'s
+    content but NOT apply it: `bootstrapScript`/`joinScript`'s own
+    idempotency check sees an already-healthy `wsrep_cluster_size` and
+    skips restarting mariadb — a real, previously unrecognized gap
+    between "config file matches what's intended" and "the running
+    process has actually picked it up."
+  - **Fixed two ways.** `haproxyConfigScript` now checks
+    `systemctl is-active` after restarting and `exit 1` if it isn't, so a
+    real failure is never silently reported as success again — this was
+    the more important fix, since it's what let the first bug hide long
+    enough to surface as a confusing downstream connection error instead
+    of a clear "haproxy didn't start" at the point it actually happened.
+    **`manifests/mariadb_galera_rolling_restart.scala`** (new) applies a
+    config change like this one to an already-running cluster safely —
+    restarting mariadb one node at a time, waiting for each to rejoin
+    (`wsrep_ready=ON`, `wsrep_cluster_size=3`) before moving to the next,
+    so the cluster never drops below 2-of-3 quorum mid-restart. Needs to
+    be run once against the live tst0/tst1/tst2 cluster before re-running
+    `mariadb_haproxy_keepalived.scala`, to actually apply the
+    already-shipped bind-address fix.
+  - **Second real run, and the real fix — the first diagnosis above was
+    wrong.** With the masking bug fixed, the real `journalctl` output came
+    back: `cannot bind socket (Address already in use) for [0.0.0.0:3306]`
+    — but `ss` confirmed mysqld was already correctly bound to only
+    `10.10.5.12:3306` (the bind-address fix HAD applied), not the
+    wildcard. So narrowing mysqld's bind, while independently reasonable,
+    was never what actually fixes this: on Linux, a wildcard bind
+    (`0.0.0.0:PORT`) conflicts with ANY already-bound specific address on
+    the same port — the wildcard side has to stop being wildcard, no
+    matter how narrowly the other process binds. This is a genuine gap in
+    the reference guide this file follows: it runs haproxy/keepalived on
+    dedicated LB nodes, never colocated with a Galera backend on the same
+    host, so this exact collision never comes up for it — colocating (the
+    user's own choice when asked, over dedicated LB nodes) is what
+    surfaces it here.
+  - **Properly fixed**: `haproxyConfigScript` now binds the VIP address
+    specifically (`10.10.5.100:3306`/`:3307`), never a wildcard, with
+    `net.ipv4.ip_nonlocal_bind=1` set first (researched, not assumed —
+    [cyberciti.biz's explainer](https://www.cyberciti.biz/faq/linux-bind-ip-that-doesnt-exist-with-net-ipv4-ip_nonlocal_bind/))
+    so HAProxy can hold that bind on the two backup nodes too, before
+    keepalived has ever attached the VIP to their interface — without it,
+    they'd instead fail with "Cannot assign requested address." This also
+    means clients only ever reach HAProxy via the VIP, which was the
+    intended design anyway, rather than incidentally also being reachable
+    on each node's own address.
+  - **Third real run — the VIP-specific bind fix worked.** `install-haproxy-keepalived`
+    through `write-keepalived-tst2` all completed cleanly this time, no
+    bind errors anywhere, and `confirm-ha-frontend`'s VIP-holder check
+    found tst0 correctly. The connectivity task then hit a *different*
+    real failure, one layer further in: `ERROR 1698 (28000): Access
+    denied for user 'clustercheck'@'10.10.5.12'` — proof the TCP
+    connection genuinely reached a real mysqld through HAProxy (an auth
+    rejection, not a timeout or connection-refused), so the bind fix
+    itself is confirmed working.
+  - **Root cause**: `createClustercheckUserScript` only ever granted
+    `'clustercheck'@'localhost'`. MariaDB's `'localhost'` host-match is
+    special-cased to genuine unix-socket connections — it never matches a
+    TCP connection, even one originating from the same machine. The local
+    `:9200` health-check script connects via socket, so `@'localhost'`
+    correctly covers that path (which is why haproxy's own httpchk had
+    been passing and routing traffic to tst0 in the first place) — but a
+    client going through HAProxy arrives at mysqld as a real TCP
+    connection, and HAProxy's plain `mode tcp` doesn't preserve the
+    original client address for the backend leg, so mysqld saw it as
+    coming from tst0's own address, which `'localhost'` doesn't match at
+    all.
+  - **Fixed** by also granting `'clustercheck'@'%'` under the same
+    username — both grants are needed for the two genuinely different
+    connection paths (local socket for health checks, proxied TCP for
+    everything else), not a redundant belt-and-suspenders pair. Applies
+    cleanly on a re-run against the already-partially-created user, since
+    `CREATE USER IF NOT EXISTS` just adds the missing `@'%'` grant.
+  - **Fourth real run — confirmed working end-to-end.** With the `@'%'`
+    grant added, `confirm-ha-frontend` completed clean: tst0 holds the
+    VIP, and `mariadb -h 10.10.5.100 -P 3306 ... "SELECT CONCAT('served
+    by ', @@hostname)"` run from tst1 came back `served by tst0` —
+    proving the full path (client -> VIP -> HAProxy -> Galera backend)
+    works, not just each piece's own status output in isolation. Three
+    real, independent bugs were found and fixed in sequence to get here
+    (a masked restart failure, a wildcard-vs-specific-address bind
+    conflict, and a `'localhost'`-only auth grant that TCP connections
+    can't match), each only visible once the previous one was actually
+    fixed — worth keeping in the record as a genuine example of what
+    "not yet run" turning into "confirmed working" actually took, rather
+    than compressing it into a single clean success. Not yet exercised:
+    an actual failover (killing tst0's haproxy/keepalived and confirming
+    the VIP migrates and traffic keeps flowing) — see the regression-test
+    idea below, still not built.
+
 ### Added — `manifests/test_mariadb_galera.sh`: end-to-end regression test for the MariaDB Galera playbooks
 
 Same shape as `test_ceph_lifecycle.sh`: runs the full lifecycle
@@ -61,36 +220,51 @@ hand first.
   and still does, now finding `manifests/` for every path in the list, not
   just the first.
 
-### Added — `manifests/mariadb_galera_teardown.scala`: tear down the MariaDB Galera exercise (not yet run)
+### Updated — `manifests/mariadb_galera_teardown.scala`: now also tears down the haproxy/keepalived VIP frontend (not yet run against the combined state)
 
-Tears down what `mariadb_galera_cluster.scala` (below) builds on
-tst0/tst1/tst2. Deliberately different from `cephadm_teardown.scala`, the
-closest existing precedent for a package-installed (not raw-binary) thing:
-cephadm/podman are heavy and slow to reinstall, so that file leaves the
-packages in place and only cleans up cluster state. `mariadb-server` is a
-normal, fast apt package, so this file fully purges it
-(`Task.Remove(purge = true)`) rather than just stopping the service —
-giving every future `mariadb_galera_cluster.scala` run a genuinely clean
-slate, including a fresh pass through that file's own documented
-package-auto-starts-a-standalone-instance gotcha, instead of tearing down
-into a half-cleaned state that would behave differently from a true first
-run.
+Originally only covered `mariadb_galera_cluster.scala`; extended once
+`mariadb_haproxy_keepalived.scala` (above) existed and had real state on
+tst0/tst1/tst2 to clean up — one combined teardown rather than two, since
+the HA frontend can't meaningfully outlive the Galera cluster it fronts.
+Deliberately different from `cephadm_teardown.scala`, the closest existing
+precedent for a package-installed (not raw-binary) thing: cephadm/podman
+are heavy and slow to reinstall, so that file leaves the packages in place
+and only cleans up cluster state. `mariadb-server`, `haproxy` and
+`keepalived` are all normal, fast apt packages, so this file fully purges
+all of them (`Task.Remove(purge = true)`) rather than just stopping
+services — giving every future build run a genuinely clean slate, instead
+of tearing down into a half-cleaned state that would behave differently
+from a true first run.
 
 - One stage **per host**, same reasoning as `etcd_teardown.scala`: a
   cluster-playbook run aborts entirely on the first stage that fails, so
   per-host stages mean one broken node only blocks the teardown stages
   that run *after* it.
-- Purge removes the packages and their own conffiles, but not
-  `/etc/mysql/mariadb.conf.d/60-galera.cnf` (never package-owned — this
-  playbook's own file) or, reliably, `/var/lib/mysql` (Ubuntu's postrm
-  script only removes the data directory on purge if debconf is answered
-  interactively, which it isn't here — same `DEBIAN_FRONTEND=noninteractive`
-  convention as every other `Task.Install` in this project). Both are
-  removed explicitly in a follow-up task rather than trusted to purge's own
-  behavior, since a leftover data directory carrying an old cluster's
-  Galera state is exactly what would make the next build run
-  unpredictably.
-- **Not yet run.**
+- Purge removes the packages and their own conffiles — including
+  `/etc/haproxy/haproxy.cfg` and `/etc/keepalived/keepalived.conf`, since
+  `mariadb_haproxy_keepalived.scala` only ever overwrote the *content* of
+  those package-owned conffiles, never created new ones — but not:
+  `/etc/mysql/mariadb.conf.d/60-galera.cnf` (never package-owned), `/var/lib/mysql`
+  (Ubuntu's postrm only removes it on purge under interactive debconf,
+  which this project never uses), or the four files
+  `mariadb_haproxy_keepalived.scala` wrote directly and that no package
+  owns at all: `/usr/local/bin/galera-clustercheck`, the
+  `clustercheck.socket`/`clustercheck@.service` systemd units, and
+  `/etc/sysctl.d/99-orphera-haproxy-vip.conf`. All of these are removed
+  explicitly rather than trusted to purge's own behavior, plus a
+  belt-and-suspenders `ip addr del` for the VIP itself in case
+  keepalived's own shutdown didn't get to it in time, and resetting
+  `net.ipv4.ip_nonlocal_bind` back to its default (`0`) at runtime, not
+  just removing the sysctl file that sets it at boot.
+- New `Task.AutoRemove(purge = true)` step cleans up the now-unneeded
+  dependencies haproxy/keepalived pulled in (`ipvsadm`, `liblua5.4-0`,
+  `libsnmp-base`, `libsnmp40t64`), rather than leaving them behind as
+  orphaned packages.
+- **Not yet run against the combined haproxy/keepalived + Galera state** —
+  the original mariadb-only version of this file was never run either
+  (the cluster was torn down manually / not at all before this session's
+  HA-frontend work built directly on top of it), so this is genuinely
+  untested, not just extended.
 
 ### Added — `manifests/mariadb_galera_cluster.scala`: 3-node MariaDB Galera cluster on tst0/tst1/tst2 (not yet run)
 
@@ -153,6 +327,18 @@ for or removes etcd itself.
   same convention `ceph_mon_quorum.scala`/`etcd_cluster.scala` already use
   — with the same assumption (hostname matches inventory name) those files
   make.
+- **Correction, made while building `mariadb_haproxy_keepalived.scala`
+  below:** `bind-address=0.0.0.0` (reasoned at the time as needed for
+  "cross-node replication and this playbook's own client connections")
+  overstated the requirement — Galera's own replication traffic never
+  goes through mysqld's bind-address at all (it uses `wsrep_node_address`
+  on separate ports 4567/4568/4444), and this playbook's own health
+  queries run locally via unix socket, unaffected by bind-address either
+  way. Narrowed to `{{cluster_ip}}` (this node's own static address only)
+  once haproxy needed to bind `*:3306` on the same host to serve both
+  that address and a floating VIP — two processes can't both bind the
+  same address:port, and the wildcard bind was claiming the VIP the
+  instant keepalived added it to the interface, ahead of haproxy.
 - Root auth: Ubuntu's `mariadb-server` ships root with `unix_socket` auth
   by default, so every `mariadb -N -e "..."` call here (run as the OS root
   user, same as every other privileged command in this project) needs no

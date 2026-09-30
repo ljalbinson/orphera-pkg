@@ -81,9 +81,22 @@ object mariadb_galera_cluster extends OrpheraClusterPlaybook:
   // /etc/mysql/mariadb.conf.d/50-server.cnf (included via my.cnf's
   // `!includedir`) as a new, later-loaded file rather than editing that
   // packaged one directly — 60-galera.cnf's settings win over
-  // 50-server.cnf's for anything both set (bind-address, in particular:
-  // the package default of 127.0.0.1 would otherwise block both
-  // cross-node replication and this playbook's own client connections).
+  // 50-server.cnf's for anything both set.
+  //
+  // Correction, made while building mariadb_haproxy_keepalived.scala:
+  // bind-address was originally 0.0.0.0 (open to every address, reasoned
+  // at the time as needed for "cross-node replication and this playbook's
+  // own client connections" — overstated; Galera's own replication
+  // traffic never goes through mysqld's bind-address at all, it uses
+  // wsrep_node_address on separate ports 4567/4568/4444, and this
+  // playbook's own health/status queries run locally via unix socket,
+  // which bind-address doesn't affect either). Narrowed to {{cluster_ip}}
+  // (this node's own static address only) once HAProxy needed to bind
+  // *:3306 on the same host to serve both that address AND the floating
+  // VIP keepalived adds later — two processes can't both bind the same
+  // address:port, and mysqld's wildcard bind was claiming the VIP the
+  // instant keepalived added it to the interface, before HAProxy ever
+  // got a chance to.
   // NAME is resolved via `hostname -s`, not a Scala parameter — there is
   // no built-in {{node_name}}/{{name}} template var in Orphera (checked
   // against the real DSL/runner source rather than assumed, after
@@ -109,7 +122,7 @@ object mariadb_galera_cluster extends OrpheraClusterPlaybook:
        |binlog_format=ROW
        |default_storage_engine=InnoDB
        |innodb_autoinc_lock_mode=2
-       |bind-address=0.0.0.0
+       |bind-address={{cluster_ip}}
        |EOF""".stripMargin
 
   // Empty/zero specifically means "wsrep is off" (a fresh standalone
