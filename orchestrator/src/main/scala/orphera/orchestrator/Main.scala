@@ -85,13 +85,29 @@ object Main extends IOApp:
         resolveDebPath(localOpt) match
           case Left(err) => IO.println(s"Error: $err") >> IO.pure(ExitCode.Error)
           case Right(local) =>
-            withTargets(nodeNames) { targets =>
-              Orchestrator.deployDeb(
-                targets,
-                java.nio.file.Paths.get(local),
-                remotePath
-              )
-            }
+            val targets = nodeNames match
+              case Some(names) => Inventory.all.filter(n => names.contains(n.name))
+              case None        => Inventory.all
+            if targets.isEmpty then
+              IO.println("No matching nodes found in inventory.") >> IO.pure(ExitCode.Error)
+            else
+              // Unlike withTargets (which always reports Success once
+              // its action runs, whatever that action actually did),
+              // this reflects Orchestrator.deployDeb's per-node version
+              // confirmation in both the summary and the exit code —
+              // closing the gap where `deploy-agent` exiting 0 only
+              // ever meant "every install was launched," not "every
+              // node actually finished upgrading."
+              Orchestrator
+                .deployDeb(targets, java.nio.file.Paths.get(local), remotePath)
+                .flatMap { confirmed =>
+                  val (ok, failed) = targets.partition(n => confirmed.getOrElse(n.name, false))
+                  IO.println(
+                    s"${ok.size}/${targets.size} node(s) confirmed running the new version" +
+                      (if failed.isEmpty then ""
+                       else s" — not confirmed: ${failed.map(_.name).mkString(", ")}")
+                  ) >> IO.pure(if failed.isEmpty then ExitCode.Success else ExitCode.Error)
+                }
 
       case Right(
             Command.Bootstrap(localOpt, nodeNames, sshUser, sshKeyPath, remotePath)

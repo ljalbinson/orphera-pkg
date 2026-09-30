@@ -277,7 +277,7 @@ explicit targeting — see below).
 | `network-apply [--timeout 60]` | Apply pushed `.network`/`.netdev`/`.link` files with automatic rollback if not confirmed within the timeout — see [Network config safety](#network-config-safety) |
 | `reboot [--delay 5] [--wait] [--wait-timeout 300]` | Reboot a host. Runs fully detached from the agent's own process (`systemd-run`), for the same reason as `deploy-agent` below — the agent's own systemd unit would otherwise be killed by the reboot before it can schedule it. `--wait` polls the agent afterward and reports when it's reachable again (or times out) — see [Known gaps](#known-gaps--not-yet-built) for exactly what "reachable" does and doesn't confirm |
 | `version [--nodes ...]` | Report each agent's running version, baked in at build time from the `VERSION` file — see [Versioning](#versioning) |
-| `deploy-agent <local.deb> [--remote-path]` | Push and install an updated agent `.deb` on a host **that already has an agent running**. The install runs fully detached from the agent's own process (`systemd-run`), since the agent's own service restart would otherwise kill its own upgrade mid-unpack — see [Known gaps](#known-gaps--not-yet-built) for why success still can't be confirmed from the RPC alone |
+| `deploy-agent <local.deb> [--remote-path]` | Push and install an updated agent `.deb` on a host **that already has an agent running**. The install runs fully detached from the agent's own process (`systemd-run`), since the agent's own service restart would otherwise kill its own upgrade mid-unpack, so the RPC call that launches it can't itself confirm completion — instead, each node is polled afterward via the `version` RPC (60s default timeout) until it reports the `.deb`'s own version or the timeout elapses; the command's exit code and printed summary reflect that confirmation, not just that the install was launched — see [Versioning](#versioning) |
 | `bootstrap <local.deb> --nodes ... [--ssh-user] [--ssh-key]` | First-time agent install via SSH, for a host with **no agent yet** |
 | `teardown --nodes ... --yes [--purge]` | Uninstall the agent via SSH. Requires explicit `--nodes` and `--yes` — no fleet-wide default, given the host becomes unmanageable via gRPC afterward |
 | `fetch <remote-path> [--out ./dir]` | Pull a file back from one or more agents into a local directory, one file per node (named `<node>-<filename>`) |
@@ -835,10 +835,15 @@ sbt "orchestrator/run version --nodes tst0"
 ```
 
 This exists specifically to make `deploy-agent`'s otherwise-ambiguous
-outcome checkable after the fact — see
-[Known gaps](#known-gaps--not-yet-built) for the current state of
-wiring version verification directly into `deploy-agent` itself
-(designed, not yet fully implemented as of this writing).
+outcome checkable, and `deploy-agent` now polls it automatically:
+after pushing and installing the `.deb` on every target node, it polls
+each node's `version` RPC (every 5s, 60s default timeout) until it
+reports the version baked into that same `.deb` — read once via
+`dpkg-deb -f <path> Package Version`, so the expected version can
+never drift from what's actually being pushed. A node's install is
+only reported confirmed once its agent is reachable again and running
+that exact version; the command's own exit code is non-zero if any
+node isn't confirmed within the timeout, and it prints which ones.
 
 ## Authentication and security notes
 
@@ -1009,20 +1014,21 @@ Two things worth knowing if adapting this to a different target:
   orchestrator can write or read any path the agent's root user can
   reach
 - No secrets management
-- No automated verification that `deploy-agent` actually succeeded.
-  The install itself runs fully detached from the agent's own process
-  (via `systemd-run --no-block`), specifically because the agent's own
-  service restart otherwise kills the `dpkg -i` it just spawned
-  mid-unpack (systemd's default `KillMode=control-group` sends
-  `SIGTERM` to every process in the service's cgroup, including its
-  own children) — this was hit and fixed in practice, not theoretical.
-  `success = true` on `deploy-agent`'s `RESULT` event still only ever
-  means "the install was launched," never "the install completed
-  successfully." The `version` RPC (see [Versioning](#versioning)) now
-  exists specifically to close this gap by polling the agent
-  afterward and comparing against the expected version, but that
-  polling loop is designed and not yet wired into `deploy-agent`
-  itself as of this writing
+- ~~No automated verification that `deploy-agent` actually
+  succeeded~~ — **closed**: `deploy-agent` now polls each node's
+  `version` RPC after installing (see [Versioning](#versioning)) and
+  its exit code/summary reflect actual confirmed-running-the-new-version,
+  not just "the detached install was launched." The install itself
+  still has to run fully detached from the agent's own process (via
+  `systemd-run --no-block`), because the agent's own service restart
+  otherwise kills the `dpkg -i` it just spawned mid-unpack (systemd's
+  default `KillMode=control-group` sends `SIGTERM` to every process in
+  the service's cgroup, including its own children) — this was hit and
+  fixed in practice, not theoretical — so the RPC call that launches
+  the install still can't itself wait for it to finish; polling
+  afterward is how that gets closed instead. `bootstrap` (SSH-based,
+  no existing agent to poll against) isn't covered by this — its own
+  success is still only as good as the SSH session's exit code
 - Direct CLI commands (`install`, `remove`, `autoremove`, `copy`,
   `network-apply`, `reboot`, `run`) each have their own dispatch path
   in `Main.scala`/`Orchestrator.scala`, separate from `PlaybookRunner`

@@ -6,6 +6,113 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — `manifests/etcd_cluster.scala`: 3-node etcd cluster, first cut at a non-Ceph framework stress test
+
+Follow-up to a side discussion on what a Keystone+Galera deployment would
+teach about Orphera's orchestration model versus what it's actually worth
+in effort: etcd was picked instead as a synthetic test that isolates the
+same architectural questions (cross-node config templating, quorum
+waiting, an operation scoped to one node rather than all of them) without
+OpenStack's packaging/service-catalog overhead — see the reasoning
+captured in this file's own header comment.
+
+- Installs etcd from the official static Go binary release
+  (`etcd-io/etcd`, pinned to `v3.5.21`) rather than a distro package —
+  deliberately, so the exercise's effort goes into orchestration, not
+  install-complexity.
+- Bootstrap is symmetric, unlike `ceph_mon_quorum.scala`'s hand-rolled
+  mon cluster: etcd's `--initial-cluster` just needs every peer's name
+  and address, which is knowable upfront from inventory `cluster_ip`
+  vars alone, so it's rendered identically on all three nodes via
+  `{{nodes.<name>.cluster_ip}}` templating with **zero**
+  `Task.DistributeFile` calls — no generate-once-on-one-node-then-push
+  step at all. Worth revisiting once this has actually run: if it works
+  cleanly, that's real evidence the existing cross-node templating
+  already covers this shape of problem; it says nothing about the
+  asymmetric case (Galera-style bootstrap, or etcd's own runtime
+  membership changes), which is a different, harder shape not exercised
+  here.
+- `confirm-quorum`'s `HealthCheck.Quorum` here checks three independent
+  per-node endpoints (`etcdctl endpoint health` against each node's own
+  loopback client port, `requiredCount = 3`) rather than one node
+  reporting a cluster-wide view like the Ceph examples' mon-quorum
+  checks (`requiredCount = 1` against `ceph mon stat`/`mon_status`) —
+  first real use of `HealthCheck.Quorum` in that shape.
+- Documented in the file itself, not just here: an unquoted heredoc
+  (`<<EOF`) silently drops every `\<newline>` it contains (same rule as
+  inside a double-quoted string), so the `ExecStart=` line's
+  readability-motivated `\` continuations never reach the written
+  `etcd.service` — it lands there as one long single line. Functionally
+  identical (systemd doesn't care), but worth knowing before mistaking
+  it for a bug later.
+- Not yet run against real infrastructure — this is the DSL written and
+  reasoned through, not a confirmed-working deployment. Next step is an
+  actual `orphera cluster-playbook manifests/etcd_cluster.scala` run
+  against tst0/tst1/tst2 to find out what the design got wrong.
+
+### Fixed — `deploy-agent` now confirms the install actually completed, instead of just that it was launched
+
+Closes a gap the README has flagged since the `version` RPC was added:
+`deploy-agent`'s install runs fully detached from the agent's own
+process (`systemd-run --no-block`), because the agent's own service
+restart otherwise kills the `dpkg -i` it just spawned mid-unpack — so
+the RPC call that launches the install can never itself wait for it to
+finish. `success = true` on the install's `RESULT` event only ever
+meant "the detached install was launched," never "the agent is now
+running the new version," and nothing closed that gap until now.
+
+- **`NodeClient.pollForVersion`** (new) — same shape as the existing
+  `pollUntilBack` (used by `reboot --wait`): polls `getVersion` every
+  5s until it reports the expected version or a timeout elapses,
+  tolerating the few seconds of unreachability around the agent's own
+  restart rather than treating them as failure.
+- **`Orchestrator.deployDeb`** — now pushes and installs, then polls
+  every target node via `pollForVersion` (60s default timeout) before
+  returning, and returns `Map[String, Boolean]` (per-node confirmed)
+  instead of `IO[Unit]`.
+- **`Orchestrator.requireOrpheraAgentPackage`** — already ran
+  `dpkg-deb -f <path> Package` to verify the `.deb` being pushed is
+  actually `orphera-agent`; now also reads `Version` in the same call
+  and returns it, so `deployDeb` has an expected version to poll for
+  that can never drift from what's actually being installed — it's
+  read from the exact file being pushed, not typed in separately
+  anywhere.
+  **Caught in real use, fixed same day**: the first version of this
+  assumed `dpkg-deb -f <path> Package Version` prints two bare,
+  unlabeled values like a single-field query does — it doesn't.
+  Asking for more than one field switches `dpkg-deb` to labeled
+  `Field: value` lines instead, so every real `.deb` was being rejected
+  with "its Package field is 'Package: orphera-agent', not
+  'orphera-agent'" — a correct package always reported as wrong.
+  Fixed by parsing `Field: value` pairs into a map instead of assuming
+  bare positional values. Second bug caught right after, from the same
+  real run: a missing/typo'd `.deb` path also came back through
+  `dpkg-deb exited 2`, which the code treated identically to "file
+  exists but isn't a valid .deb" — "could not read its package
+  metadata — is this a valid .deb?" for a file that was never there at
+  all. Now checked explicitly with `Files.exists` before ever invoking
+  `dpkg-deb`, so a bad path says "No such file" instead of implying a
+  corrupt one; the remaining `dpkg-deb`-failed case now also echoes
+  its actual output rather than just its exit code, for whatever's
+  left that isn't a missing file or a wrong package.
+- **`Main.scala`**'s `deploy-agent` dispatch no longer goes through
+  `withTargets` (which always reports `ExitCode.Success` once its
+  action runs, regardless of what that action actually did — fine for
+  commands with no real per-node pass/fail signal, wrong for this
+  one). It now prints a `N/M node(s) confirmed running the new
+  version` summary naming any unconfirmed nodes, and the process exits
+  non-zero if any node wasn't confirmed within the timeout.
+- Deliberately unchanged: `bootstrap` (SSH-based first-time install, no
+  existing agent to poll against — its own success is still only as
+  good as the SSH session's exit code) and the agent-side
+  `DebInstaller.verifyPackageName` check (a separate, independent
+  package-name check — the real trust boundary on that path, per its
+  own doc comment — not affected by this).
+- README's CLI reference, Versioning section, and Known gaps entry for
+  this updated to match (the gap entry struck through rather than
+  deleted, to keep the "hit and fixed in practice" context around the
+  detached-install design intact).
+
 ### Added — command audit trail (`.orphera-audit/audit.jsonl`) and `orphera audit-log` to view it
 
 New `AuditLog.scala`: every mutating CLI invocation (`install`,

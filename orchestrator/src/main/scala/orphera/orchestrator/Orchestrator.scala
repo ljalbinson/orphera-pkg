@@ -5,6 +5,7 @@ package orphera.orchestrator
 import orphera.common.*
 import cats.effect.*
 import cats.syntax.all.*
+import java.nio.file.{Files, Paths}
 
 object Orchestrator:
 
@@ -73,20 +74,42 @@ object Orchestrator:
       )
     }
 
+  /** Pushes and installs the agent `.deb`, then polls each node's
+    * `getVersion` RPC until it reports the `.deb`'s own `Version`
+    * field or `confirmTimeoutSeconds` elapses — see
+    * `NodeClient.pollForVersion`'s doc comment for why this exists:
+    * the install itself runs detached (the agent's own service
+    * restart would otherwise kill it mid-unpack), so the RPC call
+    * that launches it can never itself confirm completion. Returns
+    * each node's confirmation result rather than `IO[Unit]`, so the
+    * CLI can report which nodes actually finished upgrading and set
+    * its exit code accordingly, instead of exit-0-means-nothing.
+    */
   def deployDeb(
       nodes: List[Node],
       localDebPath: java.nio.file.Path,
-      remoteDebPath: String = "/tmp/orphera-agent.deb"
-  ): IO[Unit] =
-    requireOrpheraAgentPackage(localDebPath.toString) >>
-      nodes.parTraverse_ { node =>
-        NodeClient.deployDeb(
-          node,
-          localDebPath,
-          remoteDebPath,
-          ConsoleRenderer.render(node, _)
-        )
+      remoteDebPath: String = "/tmp/orphera-agent.deb",
+      confirmTimeoutSeconds: Int = 60
+  ): IO[Map[String, Boolean]] =
+    for
+      expectedVersion <- requireOrpheraAgentPackage(localDebPath.toString)
+      results <- nodes.parTraverse { node =>
+        for
+          _ <- NodeClient.deployDeb(
+            node,
+            localDebPath,
+            remoteDebPath,
+            ConsoleRenderer.render(node, _)
+          )
+          confirmed <- NodeClient.pollForVersion(
+            node,
+            expectedVersion,
+            confirmTimeoutSeconds,
+            line => IO.println(s"[${node.name}] $line")
+          )
+        yield node.name -> confirmed
       }
+    yield results.toMap
 
   def bootstrapAgent(
       nodes: List[Node],
@@ -117,35 +140,78 @@ object Orchestrator:
   // there is no second layer for that path.
   //
   // Checked via the .deb's own control metadata (`dpkg-deb -f <path>
-  // Package`), not its filename, for the same reason as the agent-side
-  // check: a wrong or tampered file given an innocent-looking name
-  // would otherwise sail through.
-  private def requireOrpheraAgentPackage(localDebPath: String): IO[Unit] =
+  // Package Version`), not its filename, for the same reason as the
+  // agent-side check: a wrong or tampered file given an
+  // innocent-looking name would otherwise sail through.
+  //
+  // Also the source of the version `deployDeb` polls for afterward
+  // (see `NodeClient.pollForVersion`) — reading both fields off one
+  // `dpkg-deb` call rather than two.
+  //
+  // NOTE, found the hard way: `dpkg-deb -f <path> <one-field>` prints
+  // just the bare value, no label — but as soon as you ask for MORE
+  // than one field, it switches to labeled `Field: value` lines
+  // instead (undocumented in the obvious places, but real: confirmed
+  // against an actual `dpkg-deb` on 2026-09-30 after this exact check
+  // rejected a genuine orphera-agent .deb with "its Package field is
+  // 'Package: orphera-agent', not 'orphera-agent'" — the unlabeled
+  // parsing below is what the earlier version of this method assumed
+  // for the single-field case, and it broke the moment Version was
+  // added alongside it). Parsed as `Field: value` pairs now, not
+  // positionally, so it doesn't matter which order dpkg-deb prints them in.
+  private def requireOrpheraAgentPackage(localDebPath: String): IO[String] =
     val expectedPackageName = "orphera-agent"
-    IO.blocking {
-      val process = new ProcessBuilder("dpkg-deb", "-f", localDebPath, "Package")
-        .redirectErrorStream(true)
-        .start()
-      val output = new String(process.getInputStream.readAllBytes()).trim
-      val exit = process.waitFor()
-      (exit, output)
-    }.attempt.flatMap {
-      case Right((0, name)) if name == expectedPackageName =>
-        IO.unit
-      case Right((0, name)) =>
-        IO.raiseError(new RuntimeException(
-          s"Refusing to deploy $localDebPath: its Package field is '$name', not '$expectedPackageName'. " +
-            "bootstrap/deploy-agent only install the orphera-agent package — build one with 'make deb' first."
-        ))
-      case Right((exit, _)) =>
-        IO.raiseError(new RuntimeException(
-          s"Refusing to deploy $localDebPath: could not read its package metadata (dpkg-deb exited $exit) — is this a valid .deb?"
-        ))
-      case Left(err) =>
-        IO.raiseError(new RuntimeException(
-          s"Refusing to deploy $localDebPath: failed to run dpkg-deb (${err.getMessage})"
-        ))
-    }
+
+    // Checked up front, separately from dpkg-deb's own exit code:
+    // dpkg-deb exits 2 for "no such file" exactly the same as it does
+    // for "file exists but isn't a valid .deb", so without this check
+    // a plain typo'd/missing path came back as "could not read its
+    // package metadata — is this a valid .deb?", which sent someone
+    // looking for a corrupt file that was never there in the first
+    // place. Found in real use, same day as the fields-parsing fix
+    // above.
+    if !Files.exists(Paths.get(localDebPath)) then
+      IO.raiseError(new RuntimeException(s"No such file: $localDebPath"))
+    else
+      IO.blocking {
+        val process = new ProcessBuilder("dpkg-deb", "-f", localDebPath, "Package", "Version")
+          .redirectErrorStream(true)
+          .start()
+        val output = new String(process.getInputStream.readAllBytes()).trim
+        val exit = process.waitFor()
+        val fields = output.linesIterator.flatMap { line =>
+          line.split(":", 2) match
+            case Array(key, value) => Some(key.trim -> value.trim)
+            case _                 => None
+        }.toMap
+        (exit, fields, output)
+      }.attempt.flatMap {
+        case Right((0, fields, _)) if fields.get("Package").contains(expectedPackageName) =>
+          fields.get("Version") match
+            case Some(version) => IO.pure(version)
+            case None =>
+              IO.raiseError(new RuntimeException(
+                s"Refusing to deploy $localDebPath: read its Package field but no Version field (dpkg-deb fields: ${fields.mkString(", ")})"
+              ))
+        case Right((0, fields, _)) if fields.contains("Package") =>
+          IO.raiseError(new RuntimeException(
+            s"Refusing to deploy $localDebPath: its Package field is '${fields("Package")}', not '$expectedPackageName'. " +
+              "bootstrap/deploy-agent only install the orphera-agent package — build one with 'make deb' first."
+          ))
+        case Right((0, fields, _)) =>
+          IO.raiseError(new RuntimeException(
+            s"Refusing to deploy $localDebPath: could not find a Package field in dpkg-deb's output: ${fields.mkString(", ")}"
+          ))
+        case Right((exit, _, output)) =>
+          IO.raiseError(new RuntimeException(
+            s"Refusing to deploy $localDebPath: dpkg-deb exited $exit reading its metadata — " +
+              s"is this a valid .deb? (dpkg-deb said: ${if output.isEmpty then "<no output>" else output})"
+          ))
+        case Left(err) =>
+          IO.raiseError(new RuntimeException(
+            s"Refusing to deploy $localDebPath: failed to run dpkg-deb (${err.getMessage})"
+          ))
+      }
 
   def teardownAgent(
       nodes: List[Node],
