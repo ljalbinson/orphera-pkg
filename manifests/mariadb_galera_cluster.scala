@@ -140,13 +140,58 @@ object mariadb_galera_cluster extends OrpheraClusterPlaybook:
   // nothing's obviously wrong: it's what actually stops the
   // package-install-time standalone auto-start described in the header
   // comment, whether or not this is a first run.
+  //
+  // Two real bugs found from an actual run against tst0/tst1/tst2, both
+  // fixed below:
+  //
+  // 1. Masked failure, same shape as the haproxy `systemctl restart`
+  //    masking bug in mariadb_haproxy_keepalived.scala: `galera_new_cluster`'s
+  //    own exit code wasn't checked, so the unconditional
+  //    `echo "Bootstrapped..."` printed even when it had genuinely
+  //    failed — `Task.RunCommand` then only caught the problem two lines
+  //    later, when the final `CREATE USER` failed to connect at all
+  //    (`ERROR 2002 (HY000): Can't connect to local server through
+  //    socket`). Fixed by checking `galera_new_cluster`'s own exit status
+  //    and failing loudly, immediately, if it fails.
+  //
+  // 2. The real reason `galera_new_cluster` failed on that run:
+  //    `journalctl -xeu mariadb.service` showed
+  //    `[ERROR] WSREP: It may not be safe to bootstrap the cluster from
+  //    this node. It was not the last one to leave the cluster and may
+  //    not contain all the updates`, with `/var/lib/mysql/grastate.dat`
+  //    showing `safe_to_bootstrap: 0` and `seqno: -1`. This is Galera's
+  //    own safety check: an unclean shutdown (or, as here, leftover data
+  //    from an earlier test run that was never cleanly torn down) leaves
+  //    grastate.dat unable to prove this copy of the data is the most
+  //    up-to-date one, so it refuses to let it declare itself the
+  //    authoritative bootstrap node. For a real production cluster the
+  //    correct recovery is to run `mysqld --wsrep-recover` on every node
+  //    and bootstrap from whichever one reports the highest seqno — NOT
+  //    to force this blindly, since forcing the wrong node can silently
+  //    discard committed data. Forcing it here instead (rewriting
+  //    `safe_to_bootstrap: 0` to `1` in grastate.dat before calling
+  //    `galera_new_cluster`) is deliberately a test-cluster-only shortcut:
+  //    this playbook always treats tst0 as the sole bootstrap node by
+  //    design, and mariadb_galera_teardown.scala's own job is to wipe
+  //    /var/lib/mysql clean between runs anyway — so a stale
+  //    safe_to_bootstrap: 0 here only ever means "this node's leftover
+  //    data from last time", not "some other node has newer data I'd be
+  //    discarding". Not a pattern to reuse anywhere real data is at
+  //    stake.
   private val bootstrapScript =
     s"""SIZE=$$($wsrepClusterSizeScript)
        |if [ -n "$$SIZE" ] && [ "$$SIZE" != "0" ]; then
        |  echo "wsrep already active (cluster size reported: $$SIZE) — assuming already bootstrapped, skipping"
        |else
        |  systemctl stop mariadb 2>/dev/null || true
-       |  galera_new_cluster
+       |  if [ -f /var/lib/mysql/grastate.dat ] && grep -q 'safe_to_bootstrap: 0' /var/lib/mysql/grastate.dat; then
+       |    echo "grastate.dat says safe_to_bootstrap: 0 (leftover state from a previous run) — forcing it to 1 to bootstrap this disposable test cluster from tst0"
+       |    sed -i 's/safe_to_bootstrap: 0/safe_to_bootstrap: 1/' /var/lib/mysql/grastate.dat
+       |  fi
+       |  if ! galera_new_cluster; then
+       |    echo "galera_new_cluster failed — see 'systemctl status mariadb' / 'journalctl -xeu mariadb.service' for the real reason" >&2
+       |    exit 1
+       |  fi
        |  echo "Bootstrapped a new Galera cluster on this node"
        |fi
        |# Idempotent regardless of the branch above: IF NOT EXISTS/re-GRANTing

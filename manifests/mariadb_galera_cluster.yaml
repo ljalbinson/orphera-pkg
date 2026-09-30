@@ -1,0 +1,154 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# YAML equivalent of manifests/mariadb_galera_cluster.scala — same five
+# stages, same scripts, same HealthCheck.Quorum. See that file's own
+# header comment for the full design reasoning (bootstrap-shape
+# comparison against etcd_cluster.scala/ceph_mon_quorum.scala, the
+# package-auto-starts-a-standalone-instance gotcha, the root-auth
+# assumption) — not repeated here to avoid the two files drifting out of
+# sync with each other's prose.
+#
+# One real, honest difference worth calling out: the Scala DSL version
+# defines sstPassword/clusterName/galeraPeers/wsrepClusterSizeScript once
+# as `val`s and reuses them across multiple scripts. YAML has no
+# equivalent for reusing a text FRAGMENT embedded inside a larger
+# multi-line block scalar (a YAML anchor/alias can only substitute a
+# whole node, not splice into the middle of a string) — so the
+# wsrep_cluster_size lookup one-liner and the SST password are just
+# typed out again, literally, everywhere they're needed below. Nothing
+# stops them drifting apart by hand-editing one copy and not the others,
+# which the Scala version doesn't have to worry about.
+name: mariadb-galera-cluster
+
+stages:
+  - name: install-mariadb
+    nodes: [tst0, tst1, tst2]
+    tasks:
+      - name: install mariadb-server, mariadb-client, mariadb-backup, galera-4
+        install:
+          packages: [mariadb-server, mariadb-client, mariadb-backup, galera-4]
+          update_cache: true
+
+  # Config on all three now — cheap and symmetric, so no reason to delay
+  # writing it until just before each node's own start step.
+  - name: write-galera-config
+    nodes: [tst0, tst1, tst2]
+    tasks:
+      - name: write /etc/mysql/mariadb.conf.d/60-galera.cnf
+        run_command:
+          command:
+            - sh
+            - -c
+            - |
+              NAME=$(hostname -s)
+              cat > /etc/mysql/mariadb.conf.d/60-galera.cnf <<EOF
+              [mariadbd]
+              wsrep_on=ON
+              wsrep_provider=/usr/lib/galera/libgalera_smm.so
+              wsrep_cluster_name="orphera-galera-test"
+              wsrep_cluster_address="gcomm://{{nodes.tst0.cluster_ip}},{{nodes.tst1.cluster_ip}},{{nodes.tst2.cluster_ip}}"
+              wsrep_node_address="{{cluster_ip}}"
+              wsrep_node_name="$NAME"
+              wsrep_sst_method=mariabackup
+              wsrep_sst_auth="sst_user:orphera-test-sst-password"
+              binlog_format=ROW
+              default_storage_engine=InnoDB
+              innodb_autoinc_lock_mode=2
+              bind-address={{cluster_ip}}
+              EOF
+
+  # tst0 only, and strictly before join-others below — see
+  # mariadb_galera_cluster.scala's header comment for the
+  # asymmetric-start-order explanation.
+  # Real run finding: on a data directory left over from a previous,
+  # not-cleanly-torn-down test run, `galera_new_cluster` refused to start
+  # ("It may not be safe to bootstrap the cluster from this node... It
+  # was not the last one to leave the cluster") because grastate.dat's
+  # safe_to_bootstrap flag was 0 — and the failure was silently masked
+  # (the unconditional echo below still printed) until the final CREATE
+  # USER failed to connect at all. See mariadb_galera_cluster.scala's
+  # bootstrapScript comment for the full explanation of both the fix
+  # below and why forcing safe_to_bootstrap is a test-cluster-only
+  # shortcut, not something to do against real production data.
+  - name: bootstrap-tst0
+    nodes: [tst0]
+    tasks:
+      - name: bootstrap a new Galera cluster and create the SST user
+        run_command:
+          timeout: 90
+          command:
+            - sh
+            - -c
+            - |
+              SIZE=$(mariadb -N -e "SHOW STATUS LIKE 'wsrep_cluster_size'" 2>/dev/null | awk '{print $2}')
+              if [ -n "$SIZE" ] && [ "$SIZE" != "0" ]; then
+                echo "wsrep already active (cluster size reported: $SIZE) - assuming already bootstrapped, skipping"
+              else
+                systemctl stop mariadb 2>/dev/null || true
+                if [ -f /var/lib/mysql/grastate.dat ] && grep -q 'safe_to_bootstrap: 0' /var/lib/mysql/grastate.dat; then
+                  echo "grastate.dat says safe_to_bootstrap: 0 (leftover state from a previous run) - forcing it to 1 to bootstrap this disposable test cluster from tst0"
+                  sed -i 's/safe_to_bootstrap: 0/safe_to_bootstrap: 1/' /var/lib/mysql/grastate.dat
+                fi
+                if ! galera_new_cluster; then
+                  echo "galera_new_cluster failed - see 'systemctl status mariadb' / 'journalctl -xeu mariadb.service' for the real reason" >&2
+                  exit 1
+                fi
+                echo "Bootstrapped a new Galera cluster on this node"
+              fi
+              # Idempotent regardless of the branch above: IF NOT EXISTS/re-GRANTing
+              # an existing user and privileges is a no-op, not an error.
+              mariadb -N -e "CREATE USER IF NOT EXISTS 'sst_user'@'%' IDENTIFIED BY 'orphera-test-sst-password'; GRANT RELOAD, LOCK TABLES, PROCESS, REPLICATION CLIENT ON *.* TO 'sst_user'@'%'; FLUSH PRIVILEGES;"
+
+  # tst1/tst2 only. Only works once tst0 has actually finished
+  # bootstrapping — enforced as a separate STAGE (not just a separate
+  # task) because tasks within one stage run in parallel across that
+  # stage's nodes; a shared stage would race this against bootstrap-tst0.
+  - name: join-others
+    nodes: [tst1, tst2]
+    tasks:
+      - name: join the cluster via SST from tst0
+        run_command:
+          timeout: 120
+          command:
+            - sh
+            - -c
+            - |
+              SIZE=$(mariadb -N -e "SHOW STATUS LIKE 'wsrep_cluster_size'" 2>/dev/null | awk '{print $2}')
+              if [ -n "$SIZE" ] && [ "$SIZE" != "0" ]; then
+                echo "wsrep already active (cluster size reported: $SIZE) - assuming already joined, skipping"
+              else
+                systemctl stop mariadb 2>/dev/null || true
+                systemctl start mariadb
+                echo "Started mariadb - joining the existing cluster via SST"
+              fi
+
+  # Checked independently on EACH node (not just tst0's view) via
+  # wait_for's `nodes` list — same per-node convention
+  # etcd_cluster.scala's HealthCheck.Quorum uses.
+  - name: confirm-cluster-healthy
+    nodes: [tst0]
+    wait_for:
+      nodes: [tst0, tst1, tst2]
+      command:
+        - sh
+        - -c
+        - |
+          SIZE=$(mariadb -N -e "SHOW STATUS LIKE 'wsrep_cluster_size'" 2>/dev/null | awk '{print $2}')
+          STATUS=$(mariadb -N -e "SHOW STATUS LIKE 'wsrep_cluster_status'" 2>/dev/null | awk '{print $2}')
+          READY=$(mariadb -N -e "SHOW STATUS LIKE 'wsrep_ready'" 2>/dev/null | awk '{print $2}')
+          [ "$SIZE" = "3" ] && [ "$STATUS" = "Primary" ] && [ "$READY" = "ON" ]
+      required: 3
+      poll_interval: 5
+      timeout: 180
+    tasks:
+      - name: print cluster status
+        run_command:
+          command:
+            - sh
+            - -c
+            - |
+              mariadb -N -e "SHOW STATUS LIKE 'wsrep_cluster_size'; SHOW STATUS LIKE 'wsrep_cluster_status'; SHOW STATUS LIKE 'wsrep_ready'; SHOW STATUS LIKE 'wsrep_incoming_addresses'"
+
+      - name: cluster confirmed
+        debug:
+          message: "3-node MariaDB Galera cluster healthy: wsrep_cluster_size=3, status=Primary, ready=ON on every node."
