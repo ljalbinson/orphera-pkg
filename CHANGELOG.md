@@ -6,6 +6,121 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — `manifests/wordpress_site.scala`: single-node WordPress on tst5, database on the existing Galera cluster via the HAProxy VIP
+
+Sixth infrastructure exercise, and the first one that's an ordinary app
+built on top of already-working infrastructure rather than infrastructure
+itself: a single nginx + php8.3-fpm + WordPress node (tst5, new —
+`10.10.5.17`, added to `inventory.yaml`, deliberately not one of
+tst0/tst1/tst2) using `mariadb_galera_cluster.scala` +
+`mariadb_haproxy_keepalived.scala`'s already-built 3-node Galera cluster as
+its database, addressed only through the floating IP (`10.10.5.100:3306`,
+the write listener, never the round-robin read listener — WordPress uses
+one connection for both reads and writes throughout, not just at install
+time).
+
+- Two stages: `create-wordpress-database` (tst0 only — creates the
+  `wordpress` database and `wordpress_user`@`%` locally via the same
+  trusted unix-socket-root assumption `mariadb_galera_cluster.scala`
+  itself depends on; Galera's synchronous replication makes this visible
+  on tst1/tst2 immediately, no need to repeat it there) and
+  `install-wordpress` (tst5 only).
+- **Real gap found by reading `ClusterPlaybookRunner.scala`'s actual
+  `Task.Copy` handling before using it, not assumed**: the cluster-playbook
+  runner discards `Task.Copy`'s `vars` field entirely
+  (`case Task.Copy(src, dest, owner, group, mode, _) =>`) — `.mustache`
+  template rendering only works in the flat `PlaybookRunner.scala`, not
+  `ClusterPlaybookRunner.scala`. Using `Task.Copy` with a `.mustache`
+  template for wp-config.php or the nginx site config here would have
+  silently shipped the literal `{{placeholders}}` unrendered. Written
+  instead as `RunCommand` heredoc scripts with values already
+  Scala-interpolated at build time, the same convention every other
+  config file in this project already uses.
+- `'wordpress_user'@'%'`, not a specific host: WordPress's traffic reaches
+  whichever real node HAProxy is routing to as a plain TCP connection from
+  that node's own address, not from tst5 directly — the identical reason
+  `mariadb_haproxy_keepalived.scala`'s own clustercheck user needed `@'%'`
+  rather than `@'localhost'`.
+- Applies this session's own masked-failure lesson from
+  `mariadb_haproxy_keepalived.scala`'s haproxy bug proactively rather than
+  waiting to hit it a fourth time: `nginx -t` is checked before reloading,
+  and both nginx's and php8.3-fpm's actual active state are checked after
+  starting, failing loudly rather than silently if either isn't running.
+  Not yet exercised against a real failure the way that file's checks
+  were — reasoned through, not battle-tested.
+- Confirm stage doesn't just check HTTP 200: also greps the response body
+  for "Error establishing a database connection", since a DB-connectivity
+  failure through the VIP often still renders as a 200 OK page — same
+  "prove the real thing, don't trust a status flag alone" reasoning as
+  `test_mariadb_galera.sh`'s replicated-row check.
+- **Not yet run** — this project has no local Scala compiler available to
+  check it against before a real run (unlike every other manifest so far
+  this session, which were checked this way before delivery), so treat
+  this one as reasoned through rather than compile-checked.
+- No YAML front-end yet — offered once this is confirmed working for real,
+  same order every other manifest this session followed (fix and confirm
+  the `.scala` version first, translate to YAML after).
+
+### Added — `manifests/mariadb_galera_cluster.yaml`: YAML front-end for `mariadb_galera_cluster.scala`, and a real bug its first run found (fixed in both files)
+
+Same five stages (`install-mariadb`, `write-galera-config`, `bootstrap-tst0`,
+`join-others`, `confirm-cluster-healthy`), same scripts, same
+`HealthCheck.Quorum`, translated against the real confirmed YAML schema
+(`install`, `run_command` with block-scalar `|` command bodies, `wait_for`
+with `required`/`poll_interval`/`timeout`, `debug`) rather than assumed —
+checked against the actual `ClusterPlaybookYaml.scala`/`TaskYaml.scala`
+parser source and cross-referenced against a real manifest already in the
+repo (`manifests/ceph-mon-quorum.yaml`). Validated with
+`python3 -c "import yaml; yaml.safe_load(...)"` before delivery.
+
+- **One real, honest difference from the Scala DSL, stated in the file's
+  own header comment**: the Scala version defines
+  `sstPassword`/`clusterName`/`galeraPeers`/`wsrepClusterSizeScript` once as
+  `val`s and reuses them across multiple scripts. YAML has no equivalent for
+  reusing a text *fragment* embedded inside a larger multi-line block scalar
+  (an anchor/alias can only substitute a whole node, not splice into the
+  middle of a string) — so the `wsrep_cluster_size` lookup one-liner and the
+  SST password are just typed out again everywhere they're needed, with
+  nothing stopping the copies drifting apart by hand-editing one and not the
+  others.
+- **First real run, against tst0/tst1/tst2** — `install-mariadb` and
+  `write-galera-config` both completed cleanly (confirmed the per-node
+  `{{cluster_ip}}` templating rendered correctly: tst0=10.10.5.12,
+  tst1=10.10.5.13, tst2=10.10.5.14, `bind-address` set to each node's own
+  IP), then failed at `bootstrap-tst0` with a generic systemd failure and a
+  downstream `ERROR 2002 (HY000): Can't connect to local server through
+  socket '/run/mysqld/mysqld.sock' (111)` — and, same masking shape as the
+  haproxy `systemctl restart` bug above, the script's own
+  `echo "Bootstrapped a new Galera cluster on this node"` still printed even
+  though `galera_new_cluster` had genuinely failed two lines earlier.
+  - **Root cause, from the real `journalctl -xeu mariadb.service` output**:
+    `[ERROR] WSREP: It may not be safe to bootstrap the cluster from this
+    node. It was not the last one to leave the cluster and may not contain
+    all the updates`, with `/var/lib/mysql/grastate.dat` showing
+    `safe_to_bootstrap: 0` and `seqno: -1` — Galera's own safety check
+    against bootstrapping from a copy of the data it can't prove is
+    current, tripped here by leftover state on tst0 from an earlier test
+    run that was never cleanly torn down first (not a fresh install: the
+    `install-mariadb` stage reported packages "already the newest version"
+    rather than newly installing them).
+  - **Fixed in both `mariadb_galera_cluster.scala`'s `bootstrapScript` and
+    this file's `bootstrap-tst0` task** (identical logic, since the two
+    front-ends share the same underlying script): if `grastate.dat` shows
+    `safe_to_bootstrap: 0`, rewrite it to `1` before calling
+    `galera_new_cluster`, and check `galera_new_cluster`'s own exit code
+    directly rather than letting a failure fall through to the unconditional
+    `echo`. Documented in both files as a **test-cluster-only shortcut**: a
+    real production cluster should instead run `mysqld --wsrep-recover` on
+    every node and bootstrap from whichever one reports the highest seqno,
+    since forcing the wrong node can silently discard committed data. Safe
+    here specifically because this playbook always designates tst0 as the
+    sole bootstrap node by design, and `mariadb_galera_teardown.scala`'s job
+    is to wipe `/var/lib/mysql` clean between runs anyway — so a stale
+    `safe_to_bootstrap: 0` on tst0 only ever means "this node's own leftover
+    data from last time," never "some other node has newer data being
+    discarded."
+  - Not yet re-run against tst0/tst1/tst2 with the fix applied.
+
 ### Added — `manifests/mariadb_haproxy_keepalived.scala`: front the Galera cluster with a floating IP, confirmed working against tst0/tst1/tst2 (three real bugs found and fixed along the way)
 
 Fifth infrastructure exercise: fronts `mariadb_galera_cluster.scala`'s

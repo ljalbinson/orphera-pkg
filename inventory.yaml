@@ -60,6 +60,16 @@ nodes:
     vars:
       cluster_ip: "10.10.5.16"
 
+  # Not part of the ceph mons group or the Galera/haproxy trio — a separate
+  # single node for manifests/wordpress_site.scala, deliberately outside
+  # tst0-tst2 so trying a new stack doesn't risk state on the
+  # already-working cluster nodes. No osd_disks/zap_disks: this node runs
+  # no ceph role at all.
+  - name: tst5
+    host: tst5.ljalbinson.com
+    vars:
+      cluster_ip: "10.10.5.17"
+
 groups:
   - name: mons
     members: [tst0, tst1, tst2]
