@@ -44,6 +44,22 @@ nodes:
       osd_disks: "/dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_drive-scsi0-0-0-2,/dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_drive-scsi0-0-0-3"
       zap_disks: "/dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_drive-scsi0-0-0-2,/dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_drive-scsi0-0-0-3"
 
+  # tst3/tst4: added 2026-09-30 for etcd cluster-growth testing
+  # (manifests/etcd_grow_cluster.scala). No osd_disks/zap_disks yet — they
+  # haven't been used for any Ceph exercise, so nothing is guessed here;
+  # add real by-id paths, confirmed via lsblk on the host itself, if/when
+  # that changes (see the incident note on tst0 above for why guessing at
+  # disk paths instead of confirming them is what caused real drift before).
+  - name: tst3
+    host: tst3.ljalbinson.com
+    vars:
+      cluster_ip: "10.10.5.15"
+
+  - name: tst4
+    host: tst4.ljalbinson.com
+    vars:
+      cluster_ip: "10.10.5.16"
+
 groups:
   - name: mons
     members: [tst0, tst1, tst2]

@@ -28,7 +28,7 @@ fmt:
 reload:
 	sbt reload
 
-countlines:
+lines:
 	find . -name "*.scala" -not -path "*/target/*" -not -path "*/project/*" | xargs wc -l | tail -1
 
 deploy-agents:

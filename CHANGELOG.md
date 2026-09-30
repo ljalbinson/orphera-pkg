@@ -6,6 +6,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — `manifests/etcd_teardown.scala`: clean up everything the etcd exercises left behind (not yet run)
+
+Tears down what `etcd_cluster.scala`, `etcd_member_rejoin.scala`, and
+`etcd_grow_cluster.scala` installed: stops and disables the `etcd`
+service, removes its unit file, wipes `/var/lib/etcd` and `/etc/etcd`,
+removes the `etcd`/`etcdctl` binaries, and removes the `etcd` system
+user. Much simpler than `cephadm_teardown.scala` — no LVM/device-mapper
+state or raw disks involved, just a service, two directories, two
+binaries and one user.
+
+- One stage **per host** (`teardown-tst0`, `teardown-tst1`, ...), not one
+  shared stage across all five nodes — deliberate, because a
+  cluster-playbook run aborts entirely on the first stage that fails
+  (confirmed by the real `etcd_grow_cluster.scala` run against tst4's
+  unreachable agent). Per-host stages mean one unreachable node only
+  blocks whatever teardown stage runs *after* it, not the ones before it.
+- `tst4` is deliberately last in the host list for exactly that reason:
+  its agent is currently unreachable and it never got past
+  `etcd_grow_cluster.scala`'s first install task, so there's nothing on
+  it to tear down anyway — every other host's cleanup completes before a
+  still-unreachable tst4 is even attempted.
+- Every command is written to tolerate partial/missing state (`|| true`,
+  `2>/dev/null` throughout) — safe against a fully-built cluster, a
+  partially-grown one (tst3's current state: binaries installed, never
+  configured or started), or a host that never had etcd at all.
+- **Not yet run.**
+
 ### Added — `manifests/etcd_cluster.scala`: 3-node etcd cluster, confirmed working against tst0/tst1/tst2
 
 Follow-up to a side discussion on what a Keystone+Galera deployment would
@@ -53,6 +80,140 @@ captured in this file's own header comment.
   needed correcting; the open questions above (asymmetric bootstrap,
   runtime membership changes) remain the interesting unexercised
   ground for a follow-up.
+
+### Added — `manifests/etcd_member_rejoin.scala`: remove/wipe/rejoin tst2 against a live cluster (not yet run)
+
+Direct follow-up to `etcd_cluster.scala`, targeting the asymmetric
+membership-change case that file's own commentary flagged as unexercised.
+Assumes the healthy 3-node cluster `etcd_cluster.scala` builds already
+exists; removes tst2 from it, wipes its data dir, then rejoins it under a
+fresh member identity and confirms quorum is restored to 3/3.
+
+- Exercises etcd's strict two-step membership-change ordering: `etcdctl
+  member add` must be run against an *already-healthy existing* member
+  (tst0) to register the rejoining node's identity in the cluster's
+  membership list **before** the rejoining node (tst2) is allowed to
+  start with `--initial-cluster-state existing` — starting it first just
+  fails, since as far as the live cluster is concerned that peer doesn't
+  exist yet.
+- That ordering is expressed as two separate stages
+  (`register-new-identity` on tst0, then `rejoin-tst2` on tst2), not two
+  tasks in one stage — tasks within a single stage run in **parallel**
+  across that stage's nodes (`ClusterPlaybookRunner.runStageTasks`), so
+  combining them would race the two steps against each other, which is
+  exactly the failure this split exists to avoid. Stages, unlike tasks
+  within one stage, run strictly sequentially.
+- `remove-member` and `register-new-identity` are both written
+  idempotently (grep the current membership list first, act only if
+  needed) — same "check first, act only if needed" convention used
+  throughout the codebase — so a partially-completed run can be safely
+  re-run from the top.
+- The rejoin unit file is identical to `etcd_cluster.scala`'s, with
+  exactly one change: `--initial-cluster-state existing` instead of
+  `new` — `new` is only valid for a member starting cluster formation
+  from scratch, and etcd refuses to start with it once other members
+  (tst0, tst1) already exist.
+- Confirms success the same way `etcd_cluster.scala` does
+  (`HealthCheck.Quorum`, `requiredCount = 3`), then prints the roster
+  again and prompts comparing tst2's member ID against the "before"
+  roster — a removed-and-re-added member gets a fresh ID even though its
+  name and address are unchanged, so an unchanged ID would mean this
+  wasn't a real rejoin.
+- Honest scope limit, stated in the file itself: tst2's peer address is
+  still known statically from inventory the whole time, same as
+  `etcd_cluster.scala` — so this does **not** exercise a harder gap
+  identified alongside it (capturing a task's *output* on one node —
+  e.g. a freshly assigned member ID, or a brand-new node's address
+  nobody typed into inventory — and feeding it into a task on a
+  different node). What this does prove, once run, is the narrower but
+  still real "stage B must not start until stage A has truly finished
+  on a different node" ordering requirement, plus whether a
+  wipe-and-rejoin under a fresh identity actually works end-to-end
+  against real infrastructure.
+  **Correction, added while building `etcd_grow_cluster.scala` below:**
+  the "Orphera has no mechanism for that" line originally here overstated
+  the gap — checked against the real source this time rather than
+  assumed. `Task.SetFact` writes into a shared, run-scoped store
+  (`SetFacts`), and a later stage on any node *can* read another node's
+  fact via `{{nodes.<name>.<key>}}`. The real, still-open gap is
+  narrower: there's no mechanism to capture a `RunCommand`'s stdout
+  (e.g. `member add`'s own printed member ID) into a fact automatically
+  — `SetFact`'s value must be a literal or template expression, not
+  "whatever the last command printed." Neither this file nor
+  `etcd_grow_cluster.scala` exercises that narrower gap, since every
+  address either uses comes from inventory, not from anything computed
+  at runtime.
+- **Not yet run** — written and reasoned through, but not yet exercised
+  against tst0/tst1/tst2. Unlike `etcd_cluster.scala`'s entry above,
+  nothing here is confirmed by a real pass yet.
+
+### Added — `manifests/etcd_grow_cluster.scala` + `inventory.yaml`: grow the etcd cluster from 3 to 5 nodes with tst3/tst4, confirmed working against tst0-tst4
+
+Third etcd exercise. Adds `tst3` (`10.10.5.15`) and `tst4` (`10.10.5.16`)
+to `inventory.yaml` and grows the live cluster built by
+`etcd_cluster.scala` to 5 members by registering and starting each one in
+turn — a genuinely new member joining, not a rejoin of one that was
+already part of the cluster's history like `etcd_member_rejoin.scala`.
+
+- Adds tst3 and tst4 with `cluster_ip` inventory vars only — no
+  `osd_disks`/`zap_disks`, since neither has been used for a Ceph
+  exercise yet and nothing is guessed at (see the tst0 incident note in
+  `inventory.yaml` for why guessing disk paths instead of confirming them
+  bit before).
+- Grows one member at a time — register tst3, start it, confirm 4/4
+  healthy, *then* register tst4, start it, confirm 5/5 — rather than
+  adding both together, following etcd's own operational guidance:
+  changing membership by more than one node at once risks the cluster
+  needing more simultaneous votes than are actually available, even when
+  the arithmetic looks fine on paper.
+- Same register-then-join two-stage split as `etcd_member_rejoin.scala`,
+  applied twice (once per new node): `register-tst3`/`join-tst3`, then
+  `register-tst4`/`join-tst4`, each pair on different nodes for the same
+  parallel-tasks-within-a-stage reason.
+- tst0/tst1/tst2's own unit files are never touched or restarted —
+  `--initial-cluster` only governs a node's *own* first bootstrap against
+  an empty data dir, so the existing three nodes don't care that the
+  cluster's membership grew around them.
+- Corrects an overstated claim in `etcd_member_rejoin.scala`'s header
+  comment about cross-node output-passing being entirely unsupported —
+  see the correction added to that file and to its entry above.
+- **Caught in real use, fixed same day**: the first real attempt to run
+  this failed at compile time — `manifests/etcd_grow_cluster.scala:94:38
+  invalid escape '\<newline>' not one of [\b, \t, \n, \f, \r, \\, \", \',
+  \uxxxx]`. Root cause: `joinScript` needs `$`-interpolation
+  (`$name`/`$clusterIp`/`$initialCluster`) so it was written as
+  `s"""..."""`, but unlike a bare, non-interpolated `"""..."""` (fully
+  raw — what `etcd_cluster.scala`'s `configureAndStartScript` relies on
+  for its own `\`-continued `ExecStart` line), an *interpolated*
+  triple-quoted string still validates escape sequences the same as a
+  normal string — a lone `\` before a newline isn't one of the
+  recognized escapes, so it fails to compile. Fixed by switching
+  `joinScript` to `raw"""..."""`, which keeps `$`-interpolation but skips
+  escape validation entirely, same as the plain string. `registerScript`
+  and `installEtcdScript` were unaffected — neither contains a literal
+  `\`, only `$$`/`${...}`/`$name`-style interpolation, which every
+  interpolator (`s`, `raw`) handles identically.
+- **Caught in real use, fixed same day (second real attempt)**: with the
+  compile error above fixed, the first end-to-end attempt got tst3 joined
+  and `confirm-4-healthy` reported 4/4 in ~0s, but `register-tst4` failed
+  immediately after with `rpc error: ... etcdserver: unhealthy cluster`.
+  Root cause: `HealthCheck.Quorum` here only asks each node to answer its
+  *own* local `etcdctl endpoint health` — a much weaker signal than "the
+  leader now considers the newly-joined member durably active," which is
+  what etcd's own internal safety check for the *next* membership change
+  actually requires. tst3 could answer a localhost health check within
+  milliseconds of starting, well before the leader's internal accounting
+  had marked it settled enough to permit another `member add`. An
+  unmodified second run succeeded outright — the extra real time between
+  attempts (re-running the install stage's package checks etc.) was
+  enough for that window to close on its own, which is itself evidence
+  for the race rather than a deeper problem. Mitigated by adding a
+  `sleep 10` task between `confirm-4-healthy` and `register-tst4` — a
+  pragmatic narrowing of the window, explicitly documented in the file as
+  *not* a guarantee that it's always closed.
+- **Confirmed** (2026-09-30, after the two fixes above): grew tst0/tst1/tst2
+  to a full 5-node cluster (tst3, then tst4) end-to-end, `confirm-5-healthy`
+  reaching 5/5 in ~0s.
 
 ### Fixed — `deploy-agent` now confirms the install actually completed, instead of just that it was launched
 
