@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — `manifests/wordpress_teardown.scala`: tears down wordpress_site.scala's database and tst5 install
+
+Two stages, mirroring `wordpress_site.scala`'s own asymmetric shape:
+`drop-wordpress-database` (tst0 — `DROP DATABASE`/`DROP USER IF EXISTS`,
+replicated to tst1/tst2 by Galera the same way the original `CREATE` was)
+and `teardown-tst5` (stops nginx/php8.3-fpm, purges them and the PHP
+extensions, autoremoves now-unneeded dependencies, then explicitly removes
+`/var/www/wordpress` and the nginx site config/symlink — neither is
+package-owned, so purging nginx alone wouldn't reliably clean them up).
+Same full-purge convention as `mariadb_galera_teardown.scala` (fast apt
+packages, tst5 exists solely for this one exercise), not
+`cephadm_teardown.scala`'s leave-the-packages-in-place approach. Not yet
+run.
+
 ### Added — `manifests/wordpress_site.scala`: single-node WordPress on tst5, database on the existing Galera cluster via the HAProxy VIP
 
 Sixth infrastructure exercise, and the first one that's an ordinary app
