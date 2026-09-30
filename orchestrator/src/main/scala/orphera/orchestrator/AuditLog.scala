@@ -32,16 +32,43 @@ import scala.jdk.CollectionConverters.*
   * Real limitation, worth being upfront about: this project has no per-operator
   * identity, only the shared `ORPHERA_TOKEN`. This records WHAT ran, WHEN,
   * against WHICH nodes, and its OUTCOME — not reliably WHO ran it, beyond
-  * "someone with the token from this control host." Also unrotated in this
-  * first version — `audit.jsonl` grows forever; revisit if that becomes a real
-  * problem.
+  * "someone with the token from this control host."
+  *
+  * Rotated by size (see `maxSizeBytes`/`maxRotatedFiles` below) rather than
+  * growing `audit.jsonl` forever — classic logrotate-style numbering:
+  * `audit.jsonl` is always the current file being appended to; `audit.jsonl.1`
+  * is the most recently rotated-out file, `.2` the one before that, up to
+  * `maxRotatedFiles`, beyond which the oldest is deleted. Checked (and rotated,
+  * if needed) once per `append` call, before writing that call's line — see
+  * `rotateIfNeeded`. A `command_start`/`command_end` pair CAN legitimately end
+  * up split across `audit.jsonl` and `audit.jsonl.1` if rotation happens to
+  * fall between the two writes (the command's own duration, not something this
+  * file controls) — `LogSummary.runAuditLog` reads every audit file,
+  * oldest-to-newest, specifically so a split pair still correlates correctly;
+  * rotation only bounds the size of any one file on disk, never the correlation
+  * window.
   *
   * Best-effort: a failure to write here never fails the command it's auditing —
-  * see `append`'s error handling.
+  * see `append`'s error handling. Rotation failures are the same: best-effort,
+  * logged as a warning, never fail the command being audited.
   */
 object AuditLog:
 
-  private val auditFile: Path = Paths.get(".orphera-audit", "audit.jsonl")
+  private val auditDir: Path = Paths.get(".orphera-audit")
+  private val auditFile: Path = auditDir.resolve("audit.jsonl")
+
+  // Rotate once the current file would exceed ~5MB (audit lines are
+  // small — a few hundred bytes each — so this is on the order of tens
+  // of thousands of invocations per file, a reasonable size to page
+  // through by hand if ever needed) and keep at most 5 rotated files
+  // beyond the current one, deleting the oldest past that. Both are
+  // deliberately simple constants rather than configurable — this is a
+  // small ops tool's audit trail, not a production log-shipping
+  // pipeline; revisit if real usage ever actually needs something more.
+  private val maxSizeBytes: Long = 5L * 1024 * 1024
+  private val maxRotatedFiles: Int = 5
+
+  private def rotatedFile(n: Int): Path = auditDir.resolve(s"audit.jsonl.$n")
 
   def isAuditable(command: Command): Boolean =
     command match
@@ -159,10 +186,10 @@ object AuditLog:
           "nodes" -> nodesField(nodes),
           "delay_seconds" -> delaySeconds
         )
-      case Command.RunClusterPlaybook(path, resume) =>
+      case Command.RunClusterPlaybook(paths, resume) =>
         List(
           "command" -> "cluster-playbook",
-          "path" -> path,
+          "path" -> paths.mkString(","),
           "resume" -> resume
         )
       case Command.RunCommand(cmd, nodes, timeoutSeconds) =>
@@ -185,7 +212,8 @@ object AuditLog:
 
   private def append(fields: List[(String, Any)]): IO[Unit] =
     IO.blocking {
-      Files.createDirectories(auditFile.getParent)
+      Files.createDirectories(auditDir)
+      rotateIfNeeded()
       val line = toJson(fields :+ ("ts" -> Instant.now().toString))
       Files.write(
         auditFile,
@@ -199,6 +227,33 @@ object AuditLog:
         s"Warning: could not write to the audit log (${err.getMessage})"
       )
     }
+
+  // Shifts audit.jsonl.<n> -> audit.jsonl.<n+1> for n = maxRotatedFiles-1
+  // down to 1 (deleting whatever's currently at maxRotatedFiles, if
+  // anything, since it's aging out), then moves the current audit.jsonl
+  // to audit.jsonl.1 — classic logrotate order, done from the HIGHEST
+  // number down so an in-progress shift never overwrites a file it
+  // hasn't moved yet. No-ops (and returns immediately) if audit.jsonl
+  // doesn't exist yet or hasn't reached maxSizeBytes — the common case
+  // on every call, so this is deliberately a cheap `Files.size` check
+  // first rather than doing any of the above unconditionally.
+  private def rotateIfNeeded(): Unit =
+    if Files.exists(auditFile) && Files.size(auditFile) >= maxSizeBytes then
+      val oldest = rotatedFile(maxRotatedFiles)
+      if Files.exists(oldest) then Files.delete(oldest)
+      for n <- (maxRotatedFiles - 1) to 1 by -1 do
+        val src = rotatedFile(n)
+        if Files.exists(src) then
+          Files.move(
+            src,
+            rotatedFile(n + 1),
+            java.nio.file.StandardCopyOption.REPLACE_EXISTING
+          )
+      Files.move(
+        auditFile,
+        rotatedFile(1),
+        java.nio.file.StandardCopyOption.REPLACE_EXISTING
+      )
 
   private def toJson(fields: Seq[(String, Any)]): String =
     fields

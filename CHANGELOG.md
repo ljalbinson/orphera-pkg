@@ -6,6 +6,64 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — audit log rotation
+
+`.orphera-audit/audit.jsonl` no longer grows forever — closes the gap
+flagged in its own doc comment since it was first added. Rotated by
+size, classic logrotate-style numbering: `audit.jsonl` is always the
+current file; `audit.jsonl.1` is the most recently rotated-out file, up
+to `audit.jsonl.5` (both the 5MB-ish threshold and the 5-file retention
+are simple fixed constants in `AuditLog.scala`, not configurable —
+deliberately, for a small ops tool's audit trail rather than a
+production log-shipping pipeline).
+
+- Checked once per `append` call (`AuditLog.rotateIfNeeded`), before
+  writing that call's line — a cheap `Files.size` check on the common
+  path where no rotation is needed.
+- **The real design question this raised**: a `command_start`/
+  `command_end` pair is written as two separate `append` calls, one
+  command's duration apart — so rotation genuinely can fall between the
+  two, splitting one invocation's pair across `audit.jsonl` and
+  `audit.jsonl.1`. Rather than trying to prevent that (not really
+  possible without knowing a command's duration in advance), `orphera
+  audit-log` was changed to read every audit file it finds — current
+  plus all rotated ones, oldest to newest (`LogSummary.allAuditFiles`)
+  — so correlation by `invocation_id` still works across a rotation
+  boundary. Rotation bounds the size of any one file on disk; it was
+  never meant to bound the correlation window, and now doesn't
+  accidentally do so.
+- `audit-log`'s header line now says `(+ N rotated file(s))` when more
+  than the current file was read, so it's visible when a report spans a
+  rotation.
+- Not yet run against a file that's actually grown past the threshold
+  (5MB of real audit lines is a lot to generate by hand) — the rotation
+  and multi-file-read logic haven't been exercised against a real
+  rotation event yet, only reasoned through.
+
+### Added — `cluster-playbook` accepts multiple playbook files in one invocation
+
+`orphera cluster-playbook a.scala b.scala c.scala` now runs each in
+order, stopping at the first one that fails — same "don't press on past
+a failure" convention as a single playbook's own stages, applied one
+level up. Saves typing a separate invocation per file for a fixed
+sequence (e.g. `etcd_teardown.scala` then `etcd_cluster.scala`) without
+needing a wrapper shell script.
+
+- `Command.RunClusterPlaybook`'s `path: String` is now `paths: List[String]`
+  — CLI parsing takes every leading non-flag argument as a path, so
+  `--resume` (the only flag) can still only appear once, at the end,
+  applied independently to each playbook via its own checkpoint file,
+  not to the sequence as a whole.
+- Prints a `[N/M] <path>` header before each playbook, but only when more
+  than one path is given — a normal single-playbook invocation's output
+  is byte-for-byte unchanged.
+- Audit log's `path` field for this command now records all the given
+  paths, comma-separated, rather than just one.
+- Not yet run against real infrastructure — untested, but a low-risk
+  change: single-path invocations take the same code path as before
+  (`total == 1` skips the new header), so this shouldn't affect anything
+  already working.
+
 ### Added — `manifests/etcd_teardown.scala`: clean up everything the etcd exercises left behind (not yet run)
 
 Tears down what `etcd_cluster.scala`, `etcd_member_rejoin.scala`, and
@@ -197,20 +255,51 @@ already part of the cluster's history like `etcd_member_rejoin.scala`.
   compile error above fixed, the first end-to-end attempt got tst3 joined
   and `confirm-4-healthy` reported 4/4 in ~0s, but `register-tst4` failed
   immediately after with `rpc error: ... etcdserver: unhealthy cluster`.
-  Root cause: `HealthCheck.Quorum` here only asks each node to answer its
-  *own* local `etcdctl endpoint health` — a much weaker signal than "the
-  leader now considers the newly-joined member durably active," which is
-  what etcd's own internal safety check for the *next* membership change
-  actually requires. tst3 could answer a localhost health check within
-  milliseconds of starting, well before the leader's internal accounting
-  had marked it settled enough to permit another `member add`. An
-  unmodified second run succeeded outright — the extra real time between
-  attempts (re-running the install stage's package checks etc.) was
-  enough for that window to close on its own, which is itself evidence
-  for the race rather than a deeper problem. Mitigated by adding a
-  `sleep 10` task between `confirm-4-healthy` and `register-tst4` — a
-  pragmatic narrowing of the window, explicitly documented in the file as
-  *not* a guarantee that it's always closed.
+  Traced properly rather than left as a guess:
+  - etcd's `--strict-reconfig-check` (on by default) refuses a membership
+    change unless it can confirm enough of the cluster is healthy to
+    survive it — per etcd's own runtime-configuration docs, "etcd rejects
+    reconfiguration requests if the number of started members will be
+    less than a quorum of the reconfigured cluster." The specific
+    server-side check producing the "unhealthy cluster" error string is
+    `mayAddMember`'s `isConnectedToQuorumAfterAddingNewMemberSince` — it
+    checks whether the node handling the request (tst0) currently has a
+    *live peer-transport (rafthttp) connection* to a quorum of the
+    cluster the change would create, counting the brand-new member as
+    unavailable by definition.
+  - That's a materially different signal from this file's own
+    `HealthCheck.Quorum`, which only asks each node to answer its *own*
+    local `etcdctl endpoint health` over loopback — tst3 could answer
+    that within milliseconds of starting. Whether tst0 (the leader,
+    handling `member add`) had already re-settled its own outbound
+    rafthttp connection to tst3 well enough for etcd's internal check to
+    count it as "connected" is a separate, slightly slower thing, with no
+    CLI-visible signal — neither `member list` nor `endpoint health`
+    exposes it.
+  - An unmodified second run succeeded outright — the extra real time
+    between attempts (re-running the install stage's package checks etc.)
+    was, on its own, enough for that gap to close, which is exactly what
+    a transport-reconnection race predicts, and rules out a deeper or
+    permanent problem.
+  - No etcd-published constant for how long this actually takes turned
+    up (checked the docs and several real-world GitHub issues hitting
+    the same error string).
+  - **Revised same day**: the first fix was a blind `sleep 10` task
+    between `confirm-4-healthy` and `register-tst4` — a fixed cost paid
+    on every run whether or not it was actually needed, and still just a
+    guess at the settle time. Replaced with a bounded retry (6 attempts,
+    5s apart, 30s max) around the `member add` call itself, inside
+    `registerScript`, so it retries the actual operation that's failing
+    instead of guessing how long to wait before trying once. This also
+    means registering tst3 (nothing to settle, since it's the first
+    addition to an already-stable cluster) now costs zero added delay,
+    where the blind sleep would have paid the same fixed cost for both
+    registrations regardless of need. Still not a *guarantee* — 30s is
+    itself an arbitrary ceiling, not a derived value — but it only waits
+    as long as the real failure persists, rather than a fixed amount
+    either way. A more rigorous fix would poll something that actually
+    reflects rafthttp connection state, which `etcdctl` doesn't currently
+    expose in scriptable form.
 - **Confirmed** (2026-09-30, after the two fixes above): grew tst0/tst1/tst2
   to a full 5-node cluster (tst3, then tst4) end-to-end, `confirm-5-healthy`
   reaching 5/5 in ~0s.

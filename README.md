@@ -285,7 +285,7 @@ explicit targeting — see below).
 | `uptime [--nodes ...]` | Report each agent's host uptime and 1-minute load average — the concrete way to confirm a `reboot` genuinely rebooted the host, not just that the agent came back |
 | `run <command...> [--nodes] [--timeout 60]` | Run an arbitrary command on one or more agents, streaming stdout/stderr and reporting the real exit code. Use `--` before the command to separate it from `run`'s own flags, e.g. `orphera run --nodes tst0 -- systemctl status nginx` |
 | `playbook <file.yaml \| file.scala \| compiled-name> [--resume]` | Run an ordered, multi-task playbook — from a YAML file, a run-time-compiled Scala script, or a compiled DSL playbook by registered name — see [Playbooks](#playbooks). `--resume` skips tasks already completed in a previous run — see [Restartability](#restartability) |
-| `cluster-playbook <file.yaml \| file.scala> [--resume]` | Run a staged, cross-node-coordinated playbook — see [Cross-node coordination](#cross-node-coordination-and-staged-playbooks). Same `--resume` support as `playbook` |
+| `cluster-playbook <file.yaml \| file.scala> [<file2> ...] [--resume]` | Run a staged, cross-node-coordinated playbook — see [Cross-node coordination](#cross-node-coordination-and-staged-playbooks). Same `--resume` support as `playbook`, applied independently to each file. One or more files run in the order given, stopping at the first one that fails — a shorthand for a fixed sequence (e.g. tear down, then rebuild) without a wrapper script |
 | `log-summary <playbook-name \| file.jsonl>` | Print a human-readable table (per-task status/duration, failures called out) from a run's `.orphera-logs` output. A playbook name resolves to that playbook's most recently modified log file — see [Observability](#observability) |
 
 There is no `apply <manifest.yaml>` command — the standalone
@@ -582,6 +582,21 @@ stages:
 ```bash
 orphera cluster-playbook manifests/mini-cluster.yaml
 ```
+
+`cluster-playbook` also accepts more than one file, run in the order
+given:
+
+```bash
+orphera cluster-playbook manifests/etcd_teardown.scala manifests/etcd_cluster.scala
+```
+
+This runs the whole sequence in one invocation rather than one command
+per file — useful for a fixed sequence you find yourself typing
+repeatedly (tear down, then rebuild; or rebuild, then a follow-up
+exercise). It stops at the first playbook that fails, the same way a
+single playbook stops at its first failed stage; playbooks before the
+failure are unaffected, and `--resume` (if given) applies independently
+to each one via its own checkpoint file, not to the sequence as a whole.
 
 **Stages run strictly in order.** Nodes *within* one stage run fully
 in parallel with each other, same as a flat playbook — but the next

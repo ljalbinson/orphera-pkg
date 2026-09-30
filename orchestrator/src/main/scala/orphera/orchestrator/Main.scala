@@ -248,18 +248,8 @@ object Main extends IOApp:
           }
         }
 
-      case Right(Command.RunClusterPlaybook(path, resume)) =>
-        if path.endsWith(".scala") then runScalaPlaybookScript(path, resume)
-        else
-          ClusterPlaybookYaml.load(path) match
-            case Left(err) =>
-              IO.println(s"Error: $err") >> IO.pure(ExitCode.Error)
-            case Right(pb) =>
-              // Same --resume support as RunPlaybook above, via
-              // ClusterPlaybookRunner/Checkpoint.
-              ClusterPlaybookRunner
-                .run(pb, resume)
-                .map(ok => if ok then ExitCode.Success else ExitCode.Error)
+      case Right(Command.RunClusterPlaybook(paths, resume)) =>
+        runClusterPlaybookSequence(paths, resume)
 
       case Right(Command.RunCommand(command, nodeNames, timeoutSeconds)) =>
         withTargets(nodeNames) { targets =>
@@ -291,6 +281,47 @@ object Main extends IOApp:
     if days > 0 then s"${days}d ${hours}h ${minutes}m"
     else if hours > 0 then s"${hours}h ${minutes}m"
     else s"${minutes}m"
+
+  /** Runs one or more cluster playbooks in order, stopping at the first one
+    * that fails — same "don't press on past a failure" convention as a single
+    * playbook's own stages, applied one level up. `--resume` (if given) applies
+    * to every playbook in the sequence, not just the first, since each has its
+    * own independent checkpoint file. Prints a "[N/M]" header before each one
+    * only when there's more than one, so a normal single-playbook invocation's
+    * output is unchanged.
+    */
+  private def runClusterPlaybookSequence(
+      paths: List[String],
+      resume: Boolean
+  ): IO[ExitCode] =
+    val total = paths.size
+    def go(remaining: List[(String, Int)]): IO[ExitCode] =
+      remaining match
+        case Nil                   => IO.pure(ExitCode.Success)
+        case (path, index) :: rest =>
+          val header =
+            if total > 1 then IO.println(s"[$index/$total] $path") else IO.unit
+          header >> runOneClusterPlaybook(path, resume).flatMap {
+            case ExitCode.Success => go(rest)
+            case failed           => IO.pure(failed)
+          }
+    go(paths.zipWithIndex.map { case (p, i) => (p, i + 1) })
+
+  private def runOneClusterPlaybook(
+      path: String,
+      resume: Boolean
+  ): IO[ExitCode] =
+    if path.endsWith(".scala") then runScalaPlaybookScript(path, resume)
+    else
+      ClusterPlaybookYaml.load(path) match
+        case Left(err) =>
+          IO.println(s"Error: $err") >> IO.pure(ExitCode.Error)
+        case Right(pb) =>
+          // Same --resume support as RunPlaybook above, via
+          // ClusterPlaybookRunner/Checkpoint.
+          ClusterPlaybookRunner
+            .run(pb, resume)
+            .map(ok => if ok then ExitCode.Success else ExitCode.Error)
 
   /** Compiles and runs a standalone `.scala` playbook script in a separate
     * `java` process (see scripting/Main.scala). `resume` is passed via the

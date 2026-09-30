@@ -65,11 +65,38 @@ object etcd_grow_cluster extends OrpheraClusterPlaybook:
   // Idempotent, same "check the current membership list first" convention
   // as etcd_member_rejoin.scala: safe to re-run this whole playbook if a
   // previous attempt got partway through registering either node.
+  //
+  // Retries `member add` itself on failure, up to 6 times / 5s apart
+  // (30s max), rather than a blind sleep before every call regardless of
+  // whether one's needed. Exists because of a real failure hit running
+  // this file: register-tst4 failed once with "etcdserver: unhealthy
+  // cluster" immediately after tst3 joined — etcd's `mayAddMember` check
+  // (`isConnectedToQuorumAfterAddingNewMemberSince`) requires the node
+  // handling the request to have a settled rafthttp peer connection to
+  // the newly-joined member, which can lag slightly behind that member
+  // answering its own local health check (see the longer writeup on
+  // confirm-4-healthy below, and the CHANGELOG entry for this file, for
+  // the full trace — etcd doesn't publish a constant for how long this
+  // actually takes). Retrying the real operation instead of guessing a
+  // fixed wait means: registering tst3 (no prior addition, so nothing to
+  // settle) succeeds on the first attempt with zero added delay, and
+  // registering tst4 pays only as many 5s waits as the actual settle
+  // takes, not a fixed cost either way.
   private def registerScript(name: String, peerUrl: String) =
     s"""EXISTING=$$(${etcdCtl("member list")} | grep ', $name,' || true)
        |if [ -z "$$EXISTING" ]; then
        |  echo "Registering $name as a new member"
-       |  ${etcdCtl(s"member add $name --peer-urls=$peerUrl")}
+       |  ATTEMPT=0
+       |  MAX_ATTEMPTS=6
+       |  until ${etcdCtl(s"member add $name --peer-urls=$peerUrl")}; do
+       |    ATTEMPT=$$((ATTEMPT + 1))
+       |    if [ "$$ATTEMPT" -ge "$$MAX_ATTEMPTS" ]; then
+       |      echo "member add $name failed after $$MAX_ATTEMPTS attempts — giving up"
+       |      exit 1
+       |    fi
+       |    echo "member add $name failed (attempt $$ATTEMPT/$$MAX_ATTEMPTS) — retrying in 5s"
+       |    sleep 5
+       |  done
        |else
        |  echo "$name is already registered as a member — skipping member add"
        |fi""".stripMargin
@@ -178,6 +205,27 @@ object etcd_grow_cluster extends OrpheraClusterPlaybook:
       // Confirm 4/4 healthy BEFORE touching tst4 at all — verifying each
       // addition independently, rather than adding both new nodes back
       // to back, is what actually follows etcd's own guidance here.
+      //
+      // Why this Quorum check alone doesn't guarantee register-tst4 (the
+      // next stage) will succeed on its first try: caught in real use
+      // (2026-09-30) — register-tst4 once failed immediately after this
+      // stage reported 4/4 in ~0s, with "etcdserver: unhealthy cluster".
+      // etcd's `--strict-reconfig-check` (on by default) refuses a
+      // membership change unless the node handling it (tst0) has a LIVE
+      // PEER-TRANSPORT (rafthttp) CONNECTION to a quorum of the cluster
+      // the change would create — the actual check is `mayAddMember`'s
+      // `isConnectedToQuorumAfterAddingNewMemberSince`. That's a
+      // materially different, slightly slower signal than THIS stage's
+      // `HealthCheck.Quorum`, which only asks each node to answer its own
+      // local `etcdctl endpoint health` over loopback — tst3 can answer
+      // that within milliseconds of starting, well before tst0's own
+      // outbound rafthttp connection to it has necessarily settled, and
+      // neither `member list` nor `endpoint health` exposes that state to
+      // check for directly. No etcd-published constant for how long that
+      // settling takes turned up (checked the docs and several real
+      // GitHub issues hitting the same error). `registerScript` above
+      // handles this with a bounded retry around the actual `member add`
+      // call instead of a blind pre-sleep here — see its own comment.
       stage("confirm-4-healthy", "tst0")
         .waitFor(
           HealthCheck.Quorum(
@@ -190,24 +238,6 @@ object etcd_grow_cluster extends OrpheraClusterPlaybook:
         )
         .task("print member roster (4 nodes)")(
           Task.RunCommand(List("sh", "-c", printRosterScript))
-        )
-        // Caught in real use (2026-09-30): with no delay here, register-tst4
-        // failed immediately with "etcdserver: unhealthy cluster" even
-        // though confirm-4-healthy had just reported 4/4 in ~0s. That
-        // Quorum check only asks each node to answer its OWN local
-        // `etcdctl endpoint health` — a much weaker signal than "the
-        // leader now considers the newly-joined member durably active",
-        // which is what etcd's own internal safety check for the NEXT
-        // membership change actually requires. A brand-new member can
-        // answer localhost health checks within milliseconds of starting,
-        // well before the leader's internal accounting has marked it
-        // settled enough to permit another `member add`. A second,
-        // unmodified run succeeded — the extra real time between attempts
-        // was enough for that window to close on its own — so this sleep
-        // is a pragmatic mitigation confirmed necessary by that failure,
-        // not a guarantee: it narrows the race, it doesn't prove it closed.
-        .task("let tst3 settle before the next membership change")(
-          Task.RunCommand(List("sh", "-c", "sleep 10"))
         )
         .build,
 

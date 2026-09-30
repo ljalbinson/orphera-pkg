@@ -53,7 +53,13 @@ enum Command:
   )
   case Version(nodes: Option[List[String]])
   case Uptime(nodes: Option[List[String]])
-  case RunClusterPlaybook(path: String, resume: Boolean)
+  // `paths` is one or more — `cluster-playbook a.scala b.scala c.scala`
+  // runs each in turn, in the order given, stopping at the first one that
+  // fails (same "don't press on past a failure" convention as a single
+  // playbook's own stages). Saves typing multiple full invocations for
+  // the common case of a fixed sequence (teardown, then rebuild, then a
+  // follow-up exercise) without needing a wrapper shell script.
+  case RunClusterPlaybook(paths: List[String], resume: Boolean)
   case RunCommand(
       command: List[String],
       nodes: Option[List[String]],
@@ -107,10 +113,20 @@ object Cli:
       case "uptime" :: rest  => parseUptime(rest, None)
       case "reboot" :: rest  =>
         parseReboot(rest, None, 5, waitForReturn = false, 300)
-      case "cluster-playbook" :: path :: rest =>
-        parsePlaybookFlags(rest, resume = false).map(
-          Command.RunClusterPlaybook(path, _)
-        )
+      case "cluster-playbook" :: rest =>
+        // One or more paths, all before any flag — `--resume` (the only
+        // flag) only makes sense once, applied to the whole sequence, not
+        // interleaved per-path, so paths.takeWhile/dropWhile on "starts
+        // with --" is enough: no path is ever expected to itself start
+        // with "--".
+        val paths = rest.takeWhile(!_.startsWith("--"))
+        val flagArgs = rest.drop(paths.length)
+        if paths.isEmpty then
+          Left("cluster-playbook requires at least one playbook path")
+        else
+          parsePlaybookFlags(flagArgs, resume = false).map(
+            Command.RunClusterPlaybook(paths, _)
+          )
       case "log-summary" :: Nil =>
         Left(
           "log-summary requires a target: a .jsonl file path, or a playbook name (finds its most recent run)"
@@ -515,8 +531,9 @@ object Cli:
       |                    — .scala files are compiled at run time; --resume skips
       |                      tasks already completed in a previous run (per
       |                      .orphera-state/ checkpoint)
-      |  cluster-playbook  <file.yaml | file.scala> [--resume]
-      |                    — same --resume semantics, per stage/task/node
+      |  cluster-playbook  <file.yaml | file.scala> [<file2> ...] [--resume]
+      |                    — same --resume semantics, per stage/task/node; one or
+      |                      more files run in order, stopping at the first failure
       |  run               <command...> [--nodes host1,host2] [--timeout 60]
       |                    — run an arbitrary command, capturing stdout/stderr
       |  fetch             <remote-path> [--out ./local-dir] [--nodes host1,host2]
@@ -540,5 +557,6 @@ object Cli:
       |  copy /tmp/test.txt /etc/orphera-test.txt --owner root --group root --mode 0644
       |  network-apply --nodes web1 --timeout 90
       |  cluster-playbook manifests/cephadm_add_osds.scala --resume
+      |  cluster-playbook manifests/etcd_teardown.scala manifests/etcd_cluster.scala
       |  log-summary cephadm-add-osds
       |""".stripMargin

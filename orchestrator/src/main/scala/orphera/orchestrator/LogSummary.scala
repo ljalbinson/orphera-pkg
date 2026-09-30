@@ -260,7 +260,8 @@ object LogSummary:
   //     a third copy of it, since AuditLog.toJson emits the exact same
   //     flat-object grammar RunLog.toJson does. ---
 
-  private val auditFile: Path = Paths.get(".orphera-audit", "audit.jsonl")
+  private val auditDir: Path = Paths.get(".orphera-audit")
+  private val auditFile: Path = auditDir.resolve("audit.jsonl")
 
   // Fields every audit event already surfaces as their own named
   // columns below — excluded from `detail` so it isn't just the row
@@ -276,6 +277,31 @@ object LogSummary:
       "success",
       "duration_ms"
     )
+
+  // AuditLog.scala rotates audit.jsonl by size — audit.jsonl.1 is the
+  // most recently rotated-out file, up to audit.jsonl.<AuditLog's own
+  // maxRotatedFiles>. Read here in OLDEST-to-NEWEST order (highest
+  // rotation number first, current audit.jsonl last) rather than just
+  // the current file, so a command_start/command_end pair that happened
+  // to fall on either side of a rotation still correlates correctly —
+  // see AuditLog.scala's own doc comment for why that split can happen.
+  // No hardcoded upper bound on the rotation number here: this just
+  // globs whatever audit.jsonl.<N> files actually exist, so it stays
+  // correct even if AuditLog's own retention constant changes later.
+  private def allAuditFiles(): List[Path] =
+    // java.io.File.listFiles rather than Files.list (a Stream that needs
+    // explicit closing to avoid leaking the directory handle) — this is
+    // a short-lived CLI command listing a handful of files, so the
+    // simpler, no-cleanup-required API is the right tool here.
+    val rotated =
+      Option(auditDir.toFile.listFiles())
+        .map(_.toList)
+        .getOrElse(Nil)
+        .filter(f => f.getName.matches("audit\\.jsonl\\.\\d+"))
+        .sortBy(f => -f.getName.stripPrefix("audit.jsonl.").toInt)
+        .map(_.toPath)
+    val current = if Files.exists(auditFile) then List(auditFile) else Nil
+    rotated ++ current
 
   private case class Invocation(
       invocationId: String,
@@ -294,29 +320,30 @@ object LogSummary:
     * full of FAILED rows is still a successfully rendered report.
     */
   def runAuditLog(limit: Int): IO[Boolean] =
-    if !Files.exists(auditFile) then
+    val files = allAuditFiles()
+    if files.isEmpty then
       IO.println(
         s"No audit log found at $auditFile — no auditable commands have run here yet " +
           "(install, remove, copy, playbook, run, ... — see AuditLog.isAuditable)."
       ) >> IO.pure(true)
     else
-      IO.blocking(Files.readAllLines(auditFile).asScala.toList)
+      IO.blocking(files.flatMap(f => Files.readAllLines(f).asScala.toList))
         .attempt
         .flatMap {
           case Left(err) =>
             IO.println(
-              s"Error: could not read $auditFile — ${err.getMessage}"
+              s"Error: could not read $auditDir — ${err.getMessage}"
             ) >> IO.pure(false)
           case Right(rawLines) =>
             val events =
               rawLines.map(_.trim).filter(_.nonEmpty).flatMap(parseLine)
             if events.isEmpty then
-              IO.println(s"No parseable events found in $auditFile") >> IO.pure(
-                false
-              )
+              IO.println(s"No parseable events found under $auditDir") >> IO
+                .pure(false)
             else
               val invocations = correlateAudit(events).sortBy(_.startTs)
-              IO.println(renderAudit(invocations, limit)) >> IO.pure(true)
+              IO.println(renderAudit(invocations, limit, files.size)) >> IO
+                .pure(true)
         }
 
   // Pairs each command_start with the command_end sharing its
@@ -367,9 +394,16 @@ object LogSummary:
   private def formatTs(ts: String): String =
     if ts.length >= 19 then ts.substring(0, 19).replace('T', ' ') else ts
 
-  private def renderAudit(invocations: List[Invocation], limit: Int): String =
+  private def renderAudit(
+      invocations: List[Invocation],
+      limit: Int,
+      fileCount: Int
+  ): String =
     val sb = new StringBuilder
-    sb.append(s"Audit log: $auditFile\n")
+    val sourceNote =
+      if fileCount > 1 then s"$auditFile (+ ${fileCount - 1} rotated file(s))"
+      else auditFile.toString
+    sb.append(s"Audit log: $sourceNote\n")
 
     val shown = invocations.takeRight(limit)
     if shown.size < invocations.size then
