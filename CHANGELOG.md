@@ -6,6 +6,167 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — `manifests/test_mariadb_galera.sh`: end-to-end regression test for the MariaDB Galera playbooks
+
+Same shape as `test_ceph_lifecycle.sh`: runs the full lifecycle
+(`mariadb_galera_teardown.scala` → `mariadb_galera_cluster.scala`) through
+`orphera cluster-playbook`, then verifies the result independently over
+SSH rather than trusting the playbook's own `confirm-cluster-healthy`
+`HealthCheck` — same "don't let the thing being tested also grade itself"
+reasoning.
+
+- Checks `wsrep_cluster_size`/`wsrep_cluster_status`/`wsrep_ready`
+  independently on **each** of tst0/tst1/tst2 (not just one node's
+  report), the same per-node convention the playbook's own
+  `HealthCheck.Quorum` uses, queried directly rather than trusted secondhand.
+- Goes one step further than status flags: writes a uniquely-marked row on
+  tst0, then polls tst1 and tst2 (bounded retry, not a blind sleep — same
+  principle as `etcd_grow_cluster.scala`'s `registerScript`) until that
+  exact row shows up, proving actual synchronous replication happened
+  rather than three nodes that each merely believe they're in a healthy
+  Primary component. Cleans up the test database afterward (best-effort,
+  not asserted — `CREATE ... IF NOT EXISTS` makes a leftover from a failed
+  run harmless to a later one).
+- Same SSH convention as `test_ceph_lifecycle.sh`: connects as the
+  `ubuntu` user (root SSH is blocked by cloud-init on these images) and
+  runs `mariadb`/`sudo` on the far side — which also makes this the first
+  real confirmation of `mariadb_galera_cluster.scala`'s own documented
+  `unix_socket`-root-auth assumption, on all three nodes rather than just
+  the one node the playbook itself queries.
+- **Not yet run** — written and reasoned through, same as the two
+  playbooks it exercises, but not yet executed against tst0/tst1/tst2.
+
+### Fixed — `orphera-completion.bash`: `playbook`/`cluster-playbook` path completion now finds `manifests/` without typing it first
+
+Real friction, not theoretical: every playbook in this project lives under
+`manifests/`, but completion only ever matched names relative to the
+current directory — and couldn't even tab-complete into `manifests/`
+itself, since it's a directory rather than a `.yaml`/`.yml`/`.scala` file
+and the existing extension filter (`-X`) excluded it too. So
+`orphera playbook <TAB>` found nothing until `manifests/` was typed out by
+hand first.
+
+- New `_orphera_playbook_path_completions` helper additionally searches
+  `manifests/` directly for anything matching the current prefix (skipped
+  once the word being completed already names a directory, i.e. contains a
+  `/`, since ordinary completion already handles that correctly) — so
+  `orphera playbook etcd<TAB>` now finds `manifests/etcd_cluster.scala`
+  etc. directly.
+- Also now offers `--resume` itself once the current word starts with
+  `--`, which this completion never did before (`cluster-playbook a.scala
+  b.scala --<TAB>` now suggests it).
+- `cluster-playbook`'s multiple-playbook-files support (above) already
+  worked with this completion by coincidence — every non-flag position
+  fell through to the same path-completion branch regardless of `prev` —
+  and still does, now finding `manifests/` for every path in the list, not
+  just the first.
+
+### Added — `manifests/mariadb_galera_teardown.scala`: tear down the MariaDB Galera exercise (not yet run)
+
+Tears down what `mariadb_galera_cluster.scala` (below) builds on
+tst0/tst1/tst2. Deliberately different from `cephadm_teardown.scala`, the
+closest existing precedent for a package-installed (not raw-binary) thing:
+cephadm/podman are heavy and slow to reinstall, so that file leaves the
+packages in place and only cleans up cluster state. `mariadb-server` is a
+normal, fast apt package, so this file fully purges it
+(`Task.Remove(purge = true)`) rather than just stopping the service —
+giving every future `mariadb_galera_cluster.scala` run a genuinely clean
+slate, including a fresh pass through that file's own documented
+package-auto-starts-a-standalone-instance gotcha, instead of tearing down
+into a half-cleaned state that would behave differently from a true first
+run.
+
+- One stage **per host**, same reasoning as `etcd_teardown.scala`: a
+  cluster-playbook run aborts entirely on the first stage that fails, so
+  per-host stages mean one broken node only blocks the teardown stages
+  that run *after* it.
+- Purge removes the packages and their own conffiles, but not
+  `/etc/mysql/mariadb.conf.d/60-galera.cnf` (never package-owned — this
+  playbook's own file) or, reliably, `/var/lib/mysql` (Ubuntu's postrm
+  script only removes the data directory on purge if debconf is answered
+  interactively, which it isn't here — same `DEBIAN_FRONTEND=noninteractive`
+  convention as every other `Task.Install` in this project). Both are
+  removed explicitly in a follow-up task rather than trusted to purge's own
+  behavior, since a leftover data directory carrying an old cluster's
+  Galera state is exactly what would make the next build run
+  unpredictably.
+- **Not yet run.**
+
+### Added — `manifests/mariadb_galera_cluster.scala`: 3-node MariaDB Galera cluster on tst0/tst1/tst2 (not yet run)
+
+Fourth infrastructure exercise, and the one the original Keystone/Galera
+side-discussion pointed at — built directly, same reasoning as picking
+etcd first: isolate the orchestration questions from OpenStack's own
+install-complexity, which has nothing to do with Orphera. Targets
+tst0/tst1/tst2, the same three nodes `etcd_cluster.scala` used — reusing
+them for a clean before/after was a deliberate choice, per the user's own
+answer when asked, not a technical requirement. `manifests/etcd_teardown.scala`
+should be run against those three nodes first; nothing in this file checks
+for or removes etcd itself.
+
+- A genuinely different bootstrap **shape** from both earlier cluster
+  exercises, worth naming explicitly: `etcd_cluster.scala` is symmetric
+  config *and* symmetric start (every node's `--initial-cluster` lists the
+  same peers, all three start at once). `ceph_mon_quorum.scala` is
+  asymmetric config *and* asymmetric start (fsid/monmap generated once on
+  tst0, then distributed). This file is symmetric **config** (every node's
+  `wsrep_cluster_address` lists the identical three-peer `gcomm://` list,
+  rendered via the same `{{nodes.<name>.cluster_ip}}` templating as
+  `etcd_cluster.scala` — no `Task.DistributeFile` needed) but asymmetric
+  **start order**: exactly one node (tst0) must run `galera_new_cluster`
+  (bootstraps a brand-new cluster, ignoring the peer list) strictly before
+  the other two do a normal `systemctl start mariadb`, which makes them
+  State-Snapshot-Transfer-join from whichever peer is reachable. Enforced
+  as separate stages (`bootstrap-tst0` then `join-others`), not tasks
+  within one stage, for the same parallel-tasks-within-a-stage reason
+  documented in `etcd_member_rejoin.scala`.
+- Config written to a new `/etc/mysql/mariadb.conf.d/60-galera.cnf` file
+  rather than editing the packaged `50-server.cnf` — loads later via
+  `!includedir`, so its `bind-address=0.0.0.0` correctly overrides the
+  package default of `127.0.0.1`, which would otherwise block both
+  cross-node replication and this playbook's own health-check queries.
+- **A real gotcha, reasoned through before ever running this, not found by
+  trial and error**: installing `mariadb-server` auto-starts a standalone
+  (non-Galera, `wsrep_on=OFF`) instance as a side effect of the package's
+  own postinst, before this playbook writes any Galera config at all. A
+  naive "is mariadb already active?" idempotency check would mistake that
+  for "already bootstrapped." Guarded against by checking
+  `wsrep_cluster_size` specifically (empty/zero when wsrep is off) instead
+  of service-active state, and by unconditionally `systemctl stop mariadb`
+  before writing config and (re)starting either way, on every node.
+- Health check, like `etcd_cluster.scala`'s, is per-node rather than
+  trusting one node's cluster-wide view: each of the three nodes must
+  independently report `wsrep_cluster_size=3`, `wsrep_cluster_status=Primary`
+  (this node's own view of quorum, as opposed to a partitioned
+  non-Primary component), and `wsrep_ready=ON` (this node's own readiness
+  to serve queries — a node mid-SST can already see `cluster_size=3` while
+  still catching up, so size alone isn't sufficient).
+- **Caught before ever running this, not by trial and error**: an early
+  draft of the config-writing script took the node's own name as a Scala
+  function parameter, rendered via a nonexistent `{{node_name}}` template
+  placeholder. Spawned an Explore subagent against the real DSL/runner
+  source to check, prompted directly by having gotten bitten by a similar
+  wrong assumption earlier in this project's etcd work — confirmed Orphera
+  has no built-in `{{node_name}}`/`{{name}}` template var; `{{cluster_ip}}`
+  only works because it's a literal per-node var in `inventory.yaml`. Fixed
+  by resolving the node's own name shell-side via `$(hostname -s)`, the
+  same convention `ceph_mon_quorum.scala`/`etcd_cluster.scala` already use
+  — with the same assumption (hostname matches inventory name) those files
+  make.
+- Root auth: Ubuntu's `mariadb-server` ships root with `unix_socket` auth
+  by default, so every `mariadb -N -e "..."` call here (run as the OS root
+  user, same as every other privileged command in this project) needs no
+  `-u`/`-p`. Flagged as an assumption to confirm on first real run — if
+  wrong, it's an easy, loud connection failure, not a silent wrong result.
+- SST (State Snapshot Transfer) auth uses a hardcoded `sst_user`/test
+  password, created idempotently (`CREATE USER IF NOT EXISTS`) as part of
+  the bootstrap step — documented explicitly as a test-only credential,
+  not a pattern to reuse anywhere real secrets matter (this project has no
+  secrets management at all).
+- **Not yet run** — written and reasoned through, including the
+  package-auto-start gotcha and the root-auth assumption above, but not
+  yet exercised against tst0/tst1/tst2.
+
 ### Added — audit log rotation
 
 `.orphera-audit/audit.jsonl` no longer grows forever — closes the gap
