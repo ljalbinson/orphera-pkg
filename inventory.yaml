@@ -60,6 +60,11 @@ nodes:
     vars:
       cluster_ip: "10.10.5.16"
 
+  - name: tst5
+    host: tst5.ljalbinson.com
+    vars:
+      cluster_ip: "10.10.5.17"
+
 groups:
   - name: mons
     members: [tst0, tst1, tst2]
