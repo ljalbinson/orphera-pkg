@@ -33,9 +33,15 @@ set -uo pipefail
 
 # ---- Configuration -----------------------------------------------------
 NODES=(tst0 tst1 tst2)
-SSH_USER="ubuntu"          # root SSH login is blocked by cloud-init on these
-                            # images, same as the Ceph test hits — commands
-                            # below go through `sudo` on the target instead.
+SSH_USER="localadmin"      # the real login on these nodes — was "ubuntu"
+                            # (a guess, never confirmed against real
+                            # infra); corrected after a real session
+                            # against tst0/tst1/tst2/tst5 this session
+                            # showed `localadmin@tst0:~$` prompts
+                            # throughout. Root SSH login is still blocked
+                            # by cloud-init on these images, same as the
+                            # Ceph test hits — commands below go through
+                            # `sudo` on the target instead.
 MANIFESTS_DIR="manifests"
 TEST_DB="orphera_galera_test"
 TEST_MARKER="orphera-test-$(date +%s)-$$"   # unique per run, so a stale row

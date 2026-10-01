@@ -23,9 +23,17 @@ set -uo pipefail
 
 # ---- Configuration -----------------------------------------------------
 ADMIN_HOST="tst0"                      # host to SSH into for `ceph -s`
-ADMIN_SSH_USER="ubuntu"                 # root SSH login is blocked by cloud-init on these
-                                        # images ("Please login as the user \"ubuntu\"...").
-                                        # cephadm still needs root, so commands below go
+ADMIN_SSH_USER="localadmin"             # the real login on these nodes — was
+                                         # "ubuntu" (a guess, never confirmed
+                                         # against real infra, including the
+                                         # specific cloud-init denial message
+                                         # this comment used to quote).
+                                         # Corrected after a real session
+                                         # against these nodes this session
+                                         # showed `localadmin@tst0:~$` prompts
+                                         # throughout. Root SSH login is
+                                         # still blocked by cloud-init on
+                                        # these images. cephadm still needs root, so commands below go
                                         # through `sudo` instead of `ssh root@...`.
 EXPECTED_MON_COUNT=3                   # tst0, tst1, tst2
 MANIFESTS_DIR="manifests"
