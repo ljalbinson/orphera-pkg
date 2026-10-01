@@ -57,8 +57,10 @@ AND the ability to see anything was wrong, at the same time.
   Not included: haproxy's own native Prometheus-format stats endpoint, or
   a mysqld_exporter for Galera-specific wsrep metrics — both natural
   follow-ups once this base layer is confirmed working.
-- First real run: `install-node-exporter` and `install-prometheus` both
-  succeeded; `install-grafana` failed — see the `### Fixed` entry below.
+- **Confirmed working end-to-end** after the fix below: all four stages
+  passed on a real run — node_exporter on all six nodes, Prometheus
+  scraping all six targets plus itself, Grafana up with the Prometheus
+  datasource provisioned, `confirm-observability-healthy` passing in ~10s.
 
 ### Fixed — `manifests/observability_stack.scala`: Grafana health check failed on every fresh install
 
