@@ -6,6 +6,60 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — `manifests/observability_stack.scala`: Prometheus + Grafana scraping the whole fleet (tst0-tst6)
+
+Seventh infrastructure exercise, and a genuinely different category from
+everything before it: not another clustered service or an app on top of
+one, but a cross-cutting exercise reaching across the entire fleet
+(tst0-tst5 — six nodes spanning three unrelated earlier exercises) at
+once, rather than building one more self-contained thing. New node tst6
+(`10.10.5.18`, added to `inventory.yaml`) hosts Prometheus + Grafana,
+deliberately not reusing tst5 — losing tst5 would mean losing WordPress
+AND the ability to see anything was wrong, at the same time.
+
+- `prometheus-node-exporter` installed on all six existing nodes
+  (tst0-tst5) via plain apt — the one exercise so far needing zero
+  per-node customization (no IPs, priorities, or peer lists to template
+  in; it just exports whatever it finds on that host).
+- Prometheus's `scrape_configs` built from the real inventory data (the
+  same `{{nodes.<name>.cluster_ip}}` templating every other manifest in
+  this project uses), looped across all six targets plus itself.
+- **A genuinely new technique for this project**: Grafana has no official
+  Ubuntu/Debian package at all, so installing it means adding Grafana's
+  own apt repository (GPG key + a `signed-by` sources.list.d entry, the
+  current non-deprecated approach, not `apt-key add`) before
+  `apt-get install` can find it — written as a `RunCommand` script since
+  `Task.Install` has no concept of "add this repo first". Every other
+  package in this project so far came from Ubuntu's own repos.
+- Grafana is pre-wired with a Prometheus datasource via its own
+  provisioning directory (`/etc/grafana/provisioning/datasources/`,
+  read only at startup) rather than left for someone to click through in
+  the UI.
+- Applies this session's now-established lessons proactively rather than
+  waiting to hit them again: `systemctl restart`, not just
+  `enable --now`, for both `prometheus-node-exporter` and
+  `grafana-server` (the auto-start-on-install race from
+  `wordpress_site.scala`'s php8.3-fpm bug); and the health check lives in
+  its own `confirm-observability-healthy` stage, not tacked onto
+  `install-grafana` (the stage-ordering bug from that same file).
+- Confirm stage doesn't just check "is Prometheus/Grafana up": it checks
+  Prometheus's own `/api/v1/targets` reports every node_exporter target
+  healthy (0 down, all up) and Grafana's own `/api/datasources` reports
+  the Prometheus datasource actually provisioned — same "prove the real
+  thing" reasoning as `test_mariadb_galera.sh`'s replicated-row check.
+- Grafana's default `admin`/`admin` login is assumed to still work
+  against its API (not just the UI, which forces a password change) on a
+  truly fresh install — unconfirmed, flagged the same way
+  `mariadb_galera_cluster.scala` flags its own unix-socket-root
+  assumption: an easy, loud 401 to spot if wrong, not a silent wrong
+  result.
+- Scope, deliberately: node-level fleet metrics only for this first pass.
+  Not included: haproxy's own native Prometheus-format stats endpoint, or
+  a mysqld_exporter for Galera-specific wsrep metrics — both natural
+  follow-ups once this base layer is confirmed working.
+- **Not yet run** — no local Scala compiler available to check it against
+  (same limitation noted on `wordpress_site.scala`'s own first delivery).
+
 ### Added — `manifests/test_vip_failover.sh`: chaos/failover drill for mariadb_haproxy_keepalived.scala
 
 Closes a gap flagged (but never built) since that file's own CHANGELOG

@@ -70,6 +70,17 @@ nodes:
     vars:
       cluster_ip: "10.10.5.17"
 
+  # Dedicated monitoring node for manifests/observability_stack.scala
+  # (Prometheus + Grafana) — deliberately a NEW node rather than reusing
+  # tst5, so the monitoring stack doesn't share fate with the one
+  # workload node it would otherwise live on (losing tst5 would mean
+  # losing WordPress AND the ability to see anything was wrong, at the
+  # same time). No osd_disks/zap_disks: this node runs no ceph role.
+  - name: tst6
+    host: tst6.ljalbinson.com
+    vars:
+      cluster_ip: "10.10.5.18"
+
 groups:
   - name: mons
     members: [tst0, tst1, tst2]
