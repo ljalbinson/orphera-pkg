@@ -6,6 +6,48 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — `manifests/test_vip_failover.sh`: chaos/failover drill for mariadb_haproxy_keepalived.scala
+
+Closes a gap flagged (but never built) since that file's own CHANGELOG
+entry: every earlier confirmation only ever proved the VIP works while
+nothing is broken. This deliberately breaks something and watches the
+cluster recover, against whatever's already running on tst0/tst1/tst2
+(no teardown/rebuild).
+
+- Stops haproxy (not keepalived) on whichever node currently holds the
+  VIP — the realistic failure this setup is actually designed to survive
+  via keepalived.conf's own `vrrp_script chk_haproxy` (`pgrep -x haproxy`,
+  weight 4), not a simulated full node outage.
+- Polls (bounded, not a blind sleep) for the VIP to move to a different
+  node, confirms the original holder genuinely released it (catching a
+  split-brain double-hold as its own distinct failure), and confirms the
+  VIP is still reachable through the new holder — proving clients kept
+  working through the handover, not just that an address moved.
+- Restarts haproxy on the original node and asserts failback is
+  deterministic, not just likely: keepalived.conf sets no `nopreempt`,
+  and priorities are fixed (tst0=101 > tst1=100 > tst2=99), so the VIP
+  must return to tst0 specifically once every node's haproxy is healthy
+  again, whichever node was actually stopped.
+- A `trap cleanup EXIT` always restarts haproxy on whatever node this
+  script stopped it on, whether the run passes, fails, or is interrupted
+  — a chaos test that can leave the cluster broken on exit is worse than
+  not running it.
+- Connectivity checks run from tst5 when reachable (a genuinely external
+  client, matching the configuration this whole exercise serves) rather
+  than from one of the three backend nodes, falling back to a backend
+  node if tst5 isn't available so this doesn't hard-depend on
+  `wordpress_site.scala`.
+- **Real bug found and fixed along the way, in two existing test
+  scripts, not this new one**: `test_mariadb_galera.sh` and
+  `test_ceph_lifecycle.sh` both hardcoded `SSH_USER="ubuntu"`, an
+  assumption that was apparently never actually confirmed against real
+  infra — this session's own terminal transcripts against
+  tst0/tst1/tst2/tst5 consistently showed `localadmin@tst0:~$` prompts.
+  Both corrected to `localadmin`; neither script had been run for real
+  before now, so this would have been the first thing to fail on an
+  actual run of either.
+- Not yet run.
+
 ### Fixed — `manifests/wordpress_site.scala`: health check rejected a perfectly healthy fresh install
 
 Real run against tst5, after the php8.3-fpm restart fix above: the
