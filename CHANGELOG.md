@@ -6,6 +6,40 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — `manifests/observability_extended.scala`: haproxy + Galera metrics, closing the gap observability_stack.scala left open
+
+Picks up the two scrape targets `observability_stack.scala`'s own header
+comment explicitly scoped out of the first pass. Assumes that file is
+already applied and healthy; does not repeat its stages.
+
+- haproxy's own native Prometheus-format stats endpoint
+  (`http-request use-service prometheus-exporter`), added via a small,
+  idempotently-appended frontend block (BEGIN/END marker comments, `sed`
+  to remove any previous block before every append) on tst0/tst1/tst2 —
+  appended rather than a full rewrite, since this file doesn't own
+  `mariadb_haproxy_keepalived.scala`'s haproxy.cfg and can't risk
+  clobbering it. Bound to `{{cluster_ip}}:8404` specifically, not the
+  wildcard — the same colocated-services bind lesson
+  `mariadb_haproxy_keepalived.scala` already paid for once.
+- `prometheus-mysqld-exporter` on tst0/tst1/tst2, one per node, each
+  reading its own local mysqld over a unix socket for Galera/wsrep
+  metrics — a dedicated, minimally-privileged `exporter`@`localhost`
+  MariaDB user (PROCESS + REPLICATION CLIENT + SELECT, mysqld_exporter's
+  own recommended grant set), created once on tst0 and replicated to
+  tst1/tst2 by Galera, same pattern as `clustercheckUser`.
+- `prometheus.yml` on tst6 rewritten with two new scrape jobs (`haproxy`,
+  `mysqld`) alongside the existing `node_exporter`/`prometheus` jobs —
+  13 targets total once this file is applied.
+- Two flagged, unconfirmed assumptions (consistent with this project's
+  practice of calling out guesses rather than hiding them): that Ubuntu's
+  packaged haproxy 2.8 has the `prometheus-exporter` service compiled in
+  (should fail loudly via `haproxy -c` if not), and that the Debian
+  `prometheus-mysqld-exporter` package reads its connection string from
+  `/etc/default/prometheus-mysqld-exporter`'s `DATA_SOURCE_NAME` (should
+  fail loudly via the exporter not starting, or `/metrics` missing
+  `mysql_up`, if not).
+- **Not yet run.**
+
 ### Added — `manifests/observability_stack.scala`: Prometheus + Grafana scraping the whole fleet (tst0-tst6)
 
 Seventh infrastructure exercise, and a genuinely different category from
