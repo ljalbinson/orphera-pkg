@@ -57,8 +57,30 @@ AND the ability to see anything was wrong, at the same time.
   Not included: haproxy's own native Prometheus-format stats endpoint, or
   a mysqld_exporter for Galera-specific wsrep metrics — both natural
   follow-ups once this base layer is confirmed working.
-- **Not yet run** — no local Scala compiler available to check it against
-  (same limitation noted on `wordpress_site.scala`'s own first delivery).
+- First real run: `install-node-exporter` and `install-prometheus` both
+  succeeded; `install-grafana` failed — see the `### Fixed` entry below.
+
+### Fixed — `manifests/observability_stack.scala`: Grafana health check failed on every fresh install
+
+`provisionDatasourceScript`'s health check slept a fixed 3 seconds before a
+single `curl -sf http://localhost:3000/api/health` attempt, then gave up.
+On the real first run this failed every time, even though Grafana was
+never actually broken.
+
+Root cause, confirmed from real diagnostics (`systemctl status`,
+`journalctl -xeu grafana-server`, `curl -v`, all pasted by the user): a
+fresh `grafana-server` start kicks off a background download-and-install
+of its ~13 bundled datasource plugins (elasticsearch, prometheus, mysql,
+postgres, zipkin, and more), which took upward of 50 seconds — while
+`systemctl is-active` reported the service active almost immediately
+(it's listening on :3000 well before it's actually finished starting up).
+3 seconds was never going to be enough.
+
+Fixed by replacing the fixed sleep with a genuine poll: up to 30 attempts
+at 3s apart (90s total) against `/api/health`, same "retry the real
+thing, don't guess a sleep duration" principle `etcd_grow_cluster.scala`'s
+`registerScript` and `test_mariadb_galera.sh`'s `poll_for_marker` already
+use elsewhere in this project.
 
 ### Added — `manifests/test_vip_failover.sh`: chaos/failover drill for mariadb_haproxy_keepalived.scala
 

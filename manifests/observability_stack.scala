@@ -127,6 +127,19 @@ object observability_stack extends OrpheraClusterPlaybook:
   // deliberately a separate task/script from installGrafanaScript so the
   // restart-and-check pattern below applies to both the initial install
   // AND this config change, not just the first one.
+  //
+  // Real run finding: a fresh `grafana-server` start kicks off a
+  // background download-and-install of ~13 bundled datasource plugins
+  // (elasticsearch, prometheus, mysql, postgres, zipkin, and more — all
+  // visible in `journalctl`) that took upward of 50 seconds, while
+  // `systemctl is-active` reports the service active almost immediately
+  // (it's listening, just not finished with its own startup work yet). A
+  // fixed `sleep 3` before the one-shot `/api/health` check was nowhere
+  // near enough and failed every time on a fresh install, even though
+  // Grafana was perfectly healthy barely a minute later. Fixed by polling
+  // instead of guessing a sleep duration — same principle
+  // etcd_grow_cluster.scala's registerScript and
+  // test_mariadb_galera.sh's poll_for_marker already use.
   private val provisionDatasourceScript =
     """mkdir -p /etc/grafana/provisioning/datasources
       |cat > /etc/grafana/provisioning/datasources/prometheus.yaml <<EOF
@@ -144,9 +157,16 @@ object observability_stack extends OrpheraClusterPlaybook:
       |  echo "grafana-server failed to start — see 'journalctl -xeu grafana-server' for the real reason" >&2
       |  exit 1
       |fi
-      |sleep 3
-      |if ! curl -sf http://localhost:3000/api/health > /dev/null; then
-      |  echo "grafana-server is running but /api/health didn't return success" >&2
+      |READY=false
+      |for i in $(seq 1 30); do
+      |  if curl -sf http://localhost:3000/api/health > /dev/null 2>&1; then
+      |    READY=true
+      |    break
+      |  fi
+      |  sleep 3
+      |done
+      |if [ "$READY" != "true" ]; then
+      |  echo "grafana-server is running but /api/health never returned success after 90s (it may still be installing bundled plugins — see 'journalctl -xeu grafana-server')" >&2
       |  exit 1
       |fi
       |echo "grafana running on :3000, provisioned with a Prometheus datasource"""".stripMargin
