@@ -6,6 +6,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed — `manifests/wordpress_site.scala`: php8.3-fpm now gets an explicit restart, not just `enable --now`
+
+Real run against tst5: once the health-check stage split (above) was
+fixed, the first real re-run instead hit a transient startup race —
+nginx logged a burst of "Address already in use" errors and php8.3-fpm
+logged "Another FPM instance seems to already listen on
+/run/php/php8.3-fpm.sock", both self-resolving within a few seconds, but
+not reliably inside confirm-wordpress-healthy's 60s window. Root cause:
+a fresh `nginx`/`php8.3-fpm` package install auto-starts both services as
+a side effect of their own postinst scripts (the same class of gotcha
+`mariadb_galera_cluster.scala`'s header comment already documents for
+mariadb-server) — and `systemctl enable --now php8.3-fpm` only starts a
+unit if it isn't already active, so it doesn't force a clean restart the
+way `systemctl restart` does, leaving php8.3-fpm's final state dependent
+on whatever timing the package's own auto-start left it in.
+
+- `startServicesScript` now runs `systemctl restart php8.3-fpm` right
+  after `enable --now`, the same explicit-restart pattern already used
+  for nginx — both services now go through one guaranteed clean
+  stop-then-start regardless of the auto-start race. Confirmed the
+  database connection itself was never the problem on this run (`mariadb
+  -h 10.10.5.100 ... SELECT 1` from tst5 succeeded throughout) — this was
+  purely a tst5-local service-startup timing issue.
+- Not yet re-run with the fix applied.
+
 ### Fixed — `manifests/wordpress_site.scala`: health check must be its own stage, not tacked onto install-wordpress
 
 Real first run against tst5: `install-wordpress`'s health check timed out
