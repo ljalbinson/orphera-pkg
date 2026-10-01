@@ -201,11 +201,26 @@ object wordpress_site extends OrpheraClusterPlaybook:
   // failure a fourth time: `nginx -t` is checked BEFORE reloading (a bad
   // config must never take down an already-running nginx), and both
   // services' actual active state is checked AFTER restarting, with a
-  // loud `exit 1` if either isn't — not yet exercised against a real
-  // failure the way that file's checks were, so treat this as reasoned
-  // through rather than battle-tested.
+  // loud `exit 1` if either isn't.
+  //
+  // Real run finding: a fresh `nginx`/`php8.3-fpm` package install
+  // auto-starts both services as a side effect of their own postinst
+  // scripts (the same class of gotcha as mariadb-server auto-starting
+  // standalone in mariadb_galera_cluster.scala's header comment) — and on
+  // one real run, that auto-started instance was still mid-startup when
+  // `enable --now php8.3-fpm` ran right after it, logging "Another FPM
+  // instance seems to already listen on /run/php/php8.3-fpm.sock" and a
+  // burst of nginx "Address already in use" errors, both self-resolving
+  // within a few seconds — but not reliably within the confirm stage's
+  // original 60s health-check window. `enable --now` only starts a unit
+  // if it isn't already active, so it doesn't force a clean restart the
+  // way `systemctl restart` does; switched `php8.3-fpm` to the same
+  // explicit `restart` pattern nginx already used, so both services go
+  // through one guaranteed clean stop-then-start here regardless of
+  // whatever state the package's own auto-start left them in.
   private val startServicesScript =
     """systemctl enable --now php8.3-fpm
+      |systemctl restart php8.3-fpm
       |if ! systemctl is-active --quiet php8.3-fpm; then
       |  echo "php8.3-fpm failed to start — see 'journalctl -xeu php8.3-fpm' for the real reason" >&2
       |  exit 1
@@ -228,8 +243,19 @@ object wordpress_site extends OrpheraClusterPlaybook:
   // connection" in the body, so that phrase is checked for too — same
   // "prove the real thing, don't just trust a status flag" reasoning as
   // test_mariadb_galera.sh's replicated-row check.
+  //
+  // Real run finding: a fresh install (database reachable, but no
+  // WordPress tables yet) doesn't serve `/` as 200 at all — WordPress's
+  // own `wp-settings.php` redirects it 302 to `/wp-admin/install.php` to
+  // run the setup wizard, which is the CORRECT, expected first-run
+  // behavior, not a failure. The original check only ever accepted a bare
+  // 200 on `/`, so it rejected a perfectly healthy fresh install. Fixed
+  // by following the redirect (`curl -sL`) before judging the final page
+  // — a DB-connection failure still won't produce a clean 200 after
+  // following redirects, so the "don't trust a status flag alone" check
+  // below still holds.
   private val siteHealthScript =
-    """CODE=$(curl -s -o /tmp/wp-check.html -w '%{http_code}' http://localhost/)
+    """CODE=$(curl -s -L -o /tmp/wp-check.html -w '%{http_code}' http://localhost/)
       |if [ "$CODE" = "200" ] && ! grep -qi "Error establishing a database connection" /tmp/wp-check.html; then
       |  exit 0
       |else
