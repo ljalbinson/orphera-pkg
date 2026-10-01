@@ -21,7 +21,13 @@ healthy fresh install.
   page's status and body — a genuine DB-connection failure still won't
   produce a clean 200 after following redirects, so the existing
   "Error establishing a database connection" body check still holds.
-- Not yet re-run with the fix applied.
+- **Confirmed working** — with this fix applied, `wordpress_site.scala`
+  ran end-to-end against tst0 (database) and tst5 (WordPress) with no
+  further failures. Three real bugs found and fixed in sequence to get
+  here (the health-check stage-ordering bug, the php8.3-fpm restart race,
+  and this 302 check), each only visible once the previous one was
+  actually fixed — same pattern `mariadb_haproxy_keepalived.scala`'s own
+  three-bug chain followed earlier this session.
 
 ### Fixed — `manifests/wordpress_site.scala`: php8.3-fpm now gets an explicit restart, not just `enable --now`
 
@@ -46,7 +52,6 @@ on whatever timing the package's own auto-start left it in.
   database connection itself was never the problem on this run (`mariadb
   -h 10.10.5.100 ... SELECT 1` from tst5 succeeded throughout) — this was
   purely a tst5-local service-startup timing issue.
-- Not yet re-run with the fix applied.
 
 ### Fixed — `manifests/wordpress_site.scala`: health check must be its own stage, not tacked onto install-wordpress
 
@@ -65,7 +70,6 @@ even installed.
   `mariadb_galera_cluster.scala`'s own `confirm-cluster-healthy` stage
   already uses, which is exactly why this was easy to get wrong here
   without noticing until a real run caught it.
-- Not yet re-run against tst5 with the fix applied.
 
 ### Added — `manifests/wordpress_teardown.scala`: tears down wordpress_site.scala's database and tst5 install
 
@@ -81,7 +85,7 @@ packages, tst5 exists solely for this one exercise), not
 `cephadm_teardown.scala`'s leave-the-packages-in-place approach. Not yet
 run.
 
-### Added — `manifests/wordpress_site.scala`: single-node WordPress on tst5, database on the existing Galera cluster via the HAProxy VIP
+### Added — `manifests/wordpress_site.scala`: single-node WordPress on tst5, database on the existing Galera cluster via the HAProxy VIP — confirmed working (three real bugs found and fixed along the way, see entries above)
 
 Sixth infrastructure exercise, and the first one that's an ordinary app
 built on top of already-working infrastructure rather than infrastructure
@@ -117,24 +121,23 @@ time).
   `mariadb_haproxy_keepalived.scala`'s own clustercheck user needed `@'%'`
   rather than `@'localhost'`.
 - Applies this session's own masked-failure lesson from
-  `mariadb_haproxy_keepalived.scala`'s haproxy bug proactively rather than
-  waiting to hit it a fourth time: `nginx -t` is checked before reloading,
-  and both nginx's and php8.3-fpm's actual active state are checked after
-  starting, failing loudly rather than silently if either isn't running.
-  Not yet exercised against a real failure the way that file's checks
-  were — reasoned through, not battle-tested.
+  `mariadb_haproxy_keepalived.scala`'s haproxy bug proactively: `nginx -t`
+  is checked before reloading, and both nginx's and php8.3-fpm's actual
+  active state are checked after starting, failing loudly rather than
+  silently if either isn't running.
 - Confirm stage doesn't just check HTTP 200: also greps the response body
   for "Error establishing a database connection", since a DB-connectivity
   failure through the VIP often still renders as a 200 OK page — same
   "prove the real thing, don't trust a status flag alone" reasoning as
   `test_mariadb_galera.sh`'s replicated-row check.
-- **Not yet run** — this project has no local Scala compiler available to
-  check it against before a real run (unlike every other manifest so far
-  this session, which were checked this way before delivery), so treat
-  this one as reasoned through rather than compile-checked.
-- No YAML front-end yet — offered once this is confirmed working for real,
-  same order every other manifest this session followed (fix and confirm
-  the `.scala` version first, translate to YAML after).
+- Written and first delivered with no local Scala compiler available to
+  check it against (unlike every other manifest so far this session) — see
+  the three "Fixed" entries above for what a real run against tst0/tst5
+  actually found: a stage-ordering bug in the health check, a php8.3-fpm
+  startup race, and a 302-vs-200 check that rejected a healthy fresh
+  install. **Confirmed working end-to-end** once all three were fixed.
+- No YAML front-end yet — a natural follow-up now this is confirmed
+  working, same order every other manifest this session followed.
 
 ### Added — `manifests/mariadb_galera_cluster.yaml`: YAML front-end for `mariadb_galera_cluster.scala`, and a real bug its first run found (fixed in both files)
 
