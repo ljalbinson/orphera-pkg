@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed — `manifests/wordpress_site.scala`: health check rejected a perfectly healthy fresh install
+
+Real run against tst5, after the php8.3-fpm restart fix above: the
+database connection was fine and both services were stable, but
+`curl http://localhost/` came back `302`, not `200` — `siteHealthScript`
+treated that as a failure. The 302 is WordPress's own normal, correct
+behavior on a fresh install with no tables yet: `wp-settings.php`
+redirects `/` to `/wp-admin/install.php` to run the setup wizard. The
+check only ever accepted a bare 200 on `/`, so it rejected a perfectly
+healthy fresh install.
+
+- Fixed by following the redirect (`curl -sL`) before judging the final
+  page's status and body — a genuine DB-connection failure still won't
+  produce a clean 200 after following redirects, so the existing
+  "Error establishing a database connection" body check still holds.
+- Not yet re-run with the fix applied.
+
 ### Fixed — `manifests/wordpress_site.scala`: php8.3-fpm now gets an explicit restart, not just `enable --now`
 
 Real run against tst5: once the health-check stage split (above) was

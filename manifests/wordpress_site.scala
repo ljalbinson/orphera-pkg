@@ -243,8 +243,19 @@ object wordpress_site extends OrpheraClusterPlaybook:
   // connection" in the body, so that phrase is checked for too — same
   // "prove the real thing, don't just trust a status flag" reasoning as
   // test_mariadb_galera.sh's replicated-row check.
+  //
+  // Real run finding: a fresh install (database reachable, but no
+  // WordPress tables yet) doesn't serve `/` as 200 at all — WordPress's
+  // own `wp-settings.php` redirects it 302 to `/wp-admin/install.php` to
+  // run the setup wizard, which is the CORRECT, expected first-run
+  // behavior, not a failure. The original check only ever accepted a bare
+  // 200 on `/`, so it rejected a perfectly healthy fresh install. Fixed
+  // by following the redirect (`curl -sL`) before judging the final page
+  // — a DB-connection failure still won't produce a clean 200 after
+  // following redirects, so the "don't trust a status flag alone" check
+  // below still holds.
   private val siteHealthScript =
-    """CODE=$(curl -s -o /tmp/wp-check.html -w '%{http_code}' http://localhost/)
+    """CODE=$(curl -s -L -o /tmp/wp-check.html -w '%{http_code}' http://localhost/)
       |if [ "$CODE" = "200" ] && ! grep -qi "Error establishing a database connection" /tmp/wp-check.html; then
       |  exit 0
       |else
