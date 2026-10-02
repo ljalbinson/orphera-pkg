@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed — `manifests/observability_stack.scala`: compile error from a backslash line-continuation
+
+The previous fix's `if` condition used a trailing `\` to continue onto a
+second line inside a `s"""..."""` stripMargin string. Real compile
+error: Scala 3 rejects a `\` immediately before a newline inside a
+triple-quoted string as an invalid escape sequence — true even though
+triple-quoted literals otherwise ignore backslash escapes entirely (the
+established convention elsewhere in this project). Fixed by putting the
+whole condition on one line instead of relying on shell line
+continuation.
+
 ### Fixed — `manifests/observability_stack.scala`: a second Grafana race, uncovered by fixing the first one
 
 Real run on a genuinely fresh `grafana.db`: no lockout this time, but

@@ -224,8 +224,7 @@ object observability_stack extends OrpheraClusterPlaybook:
       |fi
       |READY=false
       |for i in $$(seq 1 30); do
-      |  if curl -sf http://localhost:3000/api/health > /dev/null 2>&1 \
-      |     && journalctl -u grafana-server --no-pager 2>/dev/null | grep -q "Created default admin"; then
+      |  if curl -sf http://localhost:3000/api/health > /dev/null 2>&1 && journalctl -u grafana-server --no-pager 2>/dev/null | grep -q "Created default admin"; then
       |    READY=true
       |    break
       |  fi
