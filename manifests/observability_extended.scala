@@ -8,15 +8,13 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 // header comment deliberately scoped OUT of the first pass.
 //   - haproxy's own native Prometheus-format stats endpoint (the
 //     `prometheus-exporter` service, built into haproxy's core since
-//     2.0 on the upstream build). Ubuntu 24.04 packages haproxy 2.8, so
-//     no extra package install is needed, just a config change — ASSUMED
-//     the Ubuntu/Debian build has this module compiled in, same as every
-//     distro build since it moved out of being a separate contrib/USE_PROMEX
-//     flag; not independently confirmed against this project's actual
-//     haproxy binary. If wrong, the failure is loud and immediate:
-//     `haproxy -c` (run before restarting, see haproxyMetricsScript)
-//     rejects the config with "unknown service name 'prometheus-exporter'"
-//     rather than silently serving nothing.
+//     2.0 on the upstream build). Ubuntu 24.04 packages haproxy 2.8 —
+//     CONFIRMED against a real run that this build has the module
+//     compiled in (`haproxy -c` accepted the config, `:8404/metrics`
+//     returned real `haproxy_*` series on all three nodes); the only
+//     real bug hit here was the health check itself probing `localhost`
+//     instead of the `{{cluster_ip}}` address the frontend is actually
+//     bound to — fixed, see haproxyMetricsScript's own comment.
 //   - prometheus-mysqld-exporter for Galera/wsrep metrics, also on
 //     tst0/tst1/tst2 — one exporter per node, each reading its own local
 //     mysqld over a unix socket, same "every node exports its own view"
@@ -57,16 +55,19 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 // mysqld over a local unix socket, so there's no second connection path
 // needing '@%'.
 //
-// Honest flag, same convention as this project's other not-yet-verified
-// assumptions (Grafana's admin/admin, mariadb_galera_cluster.scala's
-// unix-socket-root): the exact config filename/variable the Debian
-// `prometheus-mysqld-exporter` package reads for its connection string
-// (assumed here to be /etc/default/prometheus-mysqld-exporter,
-// DATA_SOURCE_NAME, mirroring how every other Debian prometheus-*
-// package in this project takes its own /etc/default/<pkg> file) is NOT
-// confirmed against a real run yet — an easy, loud failure to spot
-// (service won't start, or /metrics returns no mysql_* series) if wrong,
-// not a silent wrong result.
+// Real run finding on the other flagged assumption: the Debian
+// `prometheus-mysqld-exporter` package (0.15.0 on Ubuntu 24.04) does NOT
+// read DATA_SOURCE_NAME at all, unlike what was assumed here originally
+// — confirmed via a real `journalctl -u prometheus-mysqld-exporter`
+// ("no user specified in section or parent" / "Error parsing host
+// config file=.my.cnf err=\"no configuration found\""). Its only
+// connection-config mechanism is `--config.my-cnf=<path>`, an ini-style
+// `[client]` file — fixed in configureMysqldExporterScript below, which
+// writes that file explicitly rather than relying on an env var this
+// binary never reads. The `EnvironmentFile=/etc/default/<pkg>` +
+// `ExecStart=... $ARGS` mechanism itself WAS exactly as assumed
+// (confirmed via a real `systemctl cat`) — only the variable name/value
+// inside that file was wrong.
 object observability_extended extends OrpheraClusterPlaybook:
 
   private val haProxyNodes = List("tst0", "tst1", "tst2")
@@ -115,13 +116,49 @@ object observability_extended extends OrpheraClusterPlaybook:
   private val createExporterUserScript =
     s"""mariadb -N -e "CREATE USER IF NOT EXISTS '$exporterUser'@'localhost' IDENTIFIED BY '$exporterPassword'; GRANT PROCESS, REPLICATION CLIENT, SELECT ON *.* TO '$exporterUser'@'localhost'; FLUSH PRIVILEGES;""""
 
-  // tst0/tst1/tst2 only. See header comment's honest flag on the
-  // /etc/default file path and DATA_SOURCE_NAME variable name — assumed,
-  // not yet confirmed against a real run.
+  // tst0/tst1/tst2 only.
+  //
+  // Real run finding: the flagged, unconfirmed assumption in this file's
+  // header comment was wrong — confirmed via a real `journalctl -u
+  // prometheus-mysqld-exporter` and `systemctl cat`. Ubuntu 24.04's
+  // packaged mysqld_exporter (0.15.0) does NOT read DATA_SOURCE_NAME at
+  // all; its only connection-config mechanism is `--config.my-cnf=<path>`
+  // pointing at an ini-style file with a `[client]` section (real error
+  // seen: `no user specified in section or parent` /
+  // `Error parsing host config file=.my.cnf err="no configuration
+  // found"` — it was defaulting to a bare `.my.cnf` relative path, which
+  // doesn't exist anywhere relevant to the `prometheus` system user this
+  // service runs as). The unit file's `EnvironmentFile=/etc/default/
+  // prometheus-mysqld-exporter` + `ExecStart=... $ARGS` assumption WAS
+  // right — confirmed via a real `systemctl cat` — just the variable
+  // inside that file needed to be `ARGS=--config.my-cnf=...`, not
+  // DATA_SOURCE_NAME.
+  //
+  // Fixed by writing a dedicated my.cnf-style file instead
+  // (`/etc/prometheus-mysqld-exporter.cnf`, `0640 root:prometheus` — the
+  // `prometheus` system user this service runs as needs to read it, but
+  // it holds a password so it's not world-readable) and pointing ARGS at
+  // it. Deliberately NOT under `/etc/prometheus/` — that directory only
+  // exists on tst6, where the `prometheus` package itself is installed;
+  // tst0/tst1/tst2 only ever install `prometheus-mysqld-exporter`, a
+  // separate package that creates no such directory. The local unix
+  // socket itself needs no extra grant beyond what
+  // createExporterUserScript already created — MariaDB's default Debian
+  // packaging leaves the socket file itself world-connectable, with
+  // MariaDB's own user/grant system (not filesystem permissions) doing
+  // the real access control, same as every other local-socket connection
+  // in this project (clustercheck's own script, mariadb -N).
   private val configureMysqldExporterScript =
-    s"""cat > /etc/default/prometheus-mysqld-exporter <<EOF
-       |DATA_SOURCE_NAME="$exporterUser:$exporterPassword@unix(/run/mysqld/mysqld.sock)/"
-       |ARGS=
+    s"""cat > /etc/prometheus-mysqld-exporter.cnf <<EOF
+       |[client]
+       |user = $exporterUser
+       |password = $exporterPassword
+       |socket = /run/mysqld/mysqld.sock
+       |EOF
+       |chown root:prometheus /etc/prometheus-mysqld-exporter.cnf
+       |chmod 640 /etc/prometheus-mysqld-exporter.cnf
+       |cat > /etc/default/prometheus-mysqld-exporter <<EOF
+       |ARGS=--config.my-cnf=/etc/prometheus-mysqld-exporter.cnf
        |EOF
        |systemctl enable --now prometheus-mysqld-exporter
        |systemctl restart prometheus-mysqld-exporter
@@ -130,7 +167,7 @@ object observability_extended extends OrpheraClusterPlaybook:
        |  exit 1
        |fi
        |if ! curl -sf http://localhost:9104/metrics | grep -q '^mysql_up'; then
-       |  echo "prometheus-mysqld-exporter is running but :9104/metrics didn't return mysql_up — check DATA_SOURCE_NAME in /etc/default/prometheus-mysqld-exporter" >&2
+       |  echo "prometheus-mysqld-exporter is running but :9104/metrics didn't return mysql_up — check /etc/prometheus-mysqld-exporter.cnf and 'journalctl -u prometheus-mysqld-exporter'" >&2
        |  exit 1
        |fi
        |echo "mysqld_exporter running on :9104, reading this node's own mysqld over the local socket"""".stripMargin

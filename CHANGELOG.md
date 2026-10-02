@@ -6,6 +6,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed — `manifests/observability_extended.scala`: mysqld_exporter never reads DATA_SOURCE_NAME on Ubuntu 24.04
+
+Real run, after the haproxy fix above: `prometheus-mysqld-exporter`
+reported active, but `/metrics` never showed `mysql_up`. Confirmed via
+`journalctl -u prometheus-mysqld-exporter`: Ubuntu 24.04's packaged
+exporter (0.15.0) doesn't read `DATA_SOURCE_NAME` at all — the flagged,
+unconfirmed assumption in this file's header comment, now confirmed
+wrong (`no user specified in section or parent` / `Error parsing host
+config file=.my.cnf err="no configuration found"`). Its only
+connection-config mechanism is `--config.my-cnf=<path>`, an ini-style
+`[client]` file. The `EnvironmentFile`/`ARGS` mechanism itself, also
+flagged as an assumption, was confirmed correct via a real
+`systemctl cat` — only the variable inside that file was wrong.
+
+Fixed by writing `/etc/prometheus-mysqld-exporter.cnf` (`0640
+root:prometheus`, deliberately not under `/etc/prometheus/`, which only
+exists on tst6) with a `[client]` section, and setting
+`ARGS=--config.my-cnf=/etc/prometheus-mysqld-exporter.cnf` instead.
+
+Also confirmed correct on this same run: haproxy's native Prometheus
+exporter module IS compiled into Ubuntu 24.04's packaged haproxy
+2.8 — the other flagged assumption in this file, no longer unconfirmed.
+
 ### Fixed — `manifests/observability_extended.scala`: haproxy metrics check probed the wrong address
 
 Real run, first stage, all three nodes: `haproxy -c` passed and the
