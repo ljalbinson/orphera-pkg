@@ -6,6 +6,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Confirmed — both observability manifests now run clean end-to-end on genuinely fresh VMs
+
+After today's six real-run fixes across `observability_stack.scala` and
+`observability_extended.scala` (Grafana's brute-force lockout, two
+separate Grafana first-boot races, a wrong health-check address, the
+mysqld_exporter config mechanism, and its package's own start-limit
+lockout), a full run from genuinely fresh VMs — not `--resume`, not a
+VM with leftover state from a prior run — passed every stage in both
+files on the first try. Final state: 13 Prometheus targets (6
+node_exporter, 3 haproxy, 3 mysqld_exporter, Prometheus itself), all
+up, Grafana wired to the Prometheus datasource with no lockout.
+
+Also worth remembering from today, not a code fix: most of the "still
+failing after a rebuild" confusion mid-session turned out to be tst6's
+`/var/lib/grafana/grafana.db` surviving from a much earlier run despite
+repeated "virgin VM" claims — worth checking whatever rebuild process
+is in use actually reaches every node's stateful service data, not just
+reprovisions the OS.
+
 ### Fixed — `manifests/observability_extended.scala`: mysqld_exporter blocked by its own package's auto-start failures
 
 Real run, genuinely fresh package install this time (earlier passing
