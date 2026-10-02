@@ -162,6 +162,26 @@ object observability_extended extends OrpheraClusterPlaybook:
   // sleep — mysqld_exporter's own scrape is synchronous per-request, so
   // once the listener is actually up, mysql_up appears on the very first
   // successful request.
+  //
+  // A third real-run finding, on a genuinely FRESH package install this
+  // time (the earlier tst0/tst1/tst2 runs had the package already
+  // installed from prior testing, which skips this): the package's own
+  // postinst auto-starts the service with no config present yet (same
+  // auto-start-on-install gotcha documented elsewhere in this project —
+  // nginx, php8.3-fpm, prometheus-node-exporter, grafana-server), and
+  // this binary's immediate exit-on-bad-config plus systemd's own
+  // Restart=on-failure burns through the default 5-failures-per-10s
+  // start-limit-burst in under a second — all BEFORE this script even
+  // runs. The result: this script's own `systemctl restart` call
+  // afterward was silently blocked by that still-active rate limit
+  // (confirmed via `systemctl status` showing "Start request repeated
+  // too quickly") and never actually launched the process with the
+  // correct config at all — journalctl kept showing the OLD "no user
+  // specified"/".my.cnf" error from the package's own failed attempts,
+  // even though the files this script wrote were correct the whole
+  // time. Fixed with `systemctl reset-failed` immediately before
+  // enabling/restarting, so this script's own restart is never starting
+  // from a rate-limited state it didn't create.
   private val configureMysqldExporterScript =
     s"""cat > /etc/prometheus-mysqld-exporter.cnf <<EOF
        |[client]
@@ -174,6 +194,7 @@ object observability_extended extends OrpheraClusterPlaybook:
        |cat > /etc/default/prometheus-mysqld-exporter <<EOF
        |ARGS=--config.my-cnf=/etc/prometheus-mysqld-exporter.cnf
        |EOF
+       |systemctl reset-failed prometheus-mysqld-exporter 2>/dev/null || true
        |systemctl enable --now prometheus-mysqld-exporter
        |systemctl restart prometheus-mysqld-exporter
        |if ! systemctl is-active --quiet prometheus-mysqld-exporter; then

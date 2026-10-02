@@ -6,6 +6,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed — `manifests/observability_extended.scala`: mysqld_exporter blocked by its own package's auto-start failures
+
+Real run, genuinely fresh package install this time (earlier passing
+runs had the package already installed from prior testing, which
+skipped this entirely): `systemctl restart` reported success, but
+journalctl kept showing the OLD "no user specified in section or
+parent" / ".my.cnf" error the config-mechanism fix was supposed to have
+already resolved — even though the files this script writes were
+confirmed correct (`systemctl show`'s `ExecStart` had the right
+`--config.my-cnf` flag).
+
+Root cause: the package's own postinst auto-starts the service with no
+config present yet (the same auto-start-on-install gotcha already
+documented for nginx/php8.3-fpm/node_exporter/grafana-server elsewhere
+in this project), and the binary's immediate exit plus systemd's
+`Restart=on-failure` burns through the default 5-failures-per-10s
+start-limit-burst in under a second, all before this script even runs.
+This script's own `systemctl restart` afterward was then silently
+blocked by that still-active rate limit ("Start request repeated too
+quickly") and never actually launched the process with the correct
+config — confirmed by `systemctl reset-failed` + a fresh restart
+working immediately.
+
+Fixed by running `systemctl reset-failed prometheus-mysqld-exporter`
+immediately before enabling/restarting, so this script's own restart
+is never starting from a rate-limited state it didn't create.
+
 ### Fixed — `manifests/observability_stack.scala`: compile error from a backslash line-continuation
 
 The previous fix's `if` condition used a trailing `\` to continue onto a
