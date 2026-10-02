@@ -6,6 +6,42 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed — `manifests/observability_stack.scala`: Grafana locked itself out of its own admin account on a real fresh-install run
+
+After the earlier Grafana-startup poll fix (see entry further below), a
+second real failure surfaced one stage later: `confirm-observability-healthy`
+timed out at 60s even though Prometheus and Grafana were both genuinely
+healthy.
+
+Root cause, confirmed via real `journalctl -u grafana-server` output: the
+health check polled `/api/datasources` with basic auth (`admin`/`admin`)
+every 5 seconds as part of the retried script. A single early failure —
+whether from the assumed-but-unconfirmed default credential being wrong,
+or a startup race on a brand-new `grafana.db` — was enough to trigger
+Grafana's own brute-force login protection ("too many consecutive
+incorrect login attempts... login for user temporarily blocked"), which
+then rejected every subsequent attempt regardless of correctness, for
+several minutes — well past the stage's own 60s timeout. The repeated
+polling was the amplifier, not a one-off flake.
+
+Fixed two ways:
+- `admin_user`/`admin_password` are now set explicitly in `grafana.ini`
+  (idempotently, via the same BEGIN/END-marker `sed` pattern
+  `observability_extended.scala` uses for haproxy.cfg) before
+  grafana-server's first-ever start, replacing the undocumented-default
+  assumption with a deterministic value — only effective on a true
+  first start, same real Grafana behavior noted inline.
+- The authenticated `/api/datasources` check was moved out of the
+  retried health-check script entirely, into its own one-shot task that
+  runs once after `confirm-observability-healthy`'s `waitFor` already
+  passed. It can no longer hammer Grafana's login endpoint into locking
+  itself out, and a genuinely wrong credential now surfaces as one clean
+  401 instead of a masked, several-minutes-long self-inflicted lockout.
+- Unblocking an already-locked real VM needs `grafana-cli
+  admin reset-admin-password <password>` (operates on the DB directly,
+  bypassing the login-API lockout) — config changes alone don't
+  retroactively fix an admin account that already exists.
+
 ### Added — `manifests/observability_extended.scala`: haproxy + Galera metrics, closing the gap observability_stack.scala left open
 
 Picks up the two scrape targets `observability_stack.scala`'s own header

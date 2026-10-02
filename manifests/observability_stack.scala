@@ -140,8 +140,43 @@ object observability_stack extends OrpheraClusterPlaybook:
   // instead of guessing a sleep duration — same principle
   // etcd_grow_cluster.scala's registerScript and
   // test_mariadb_galera.sh's poll_for_marker already use.
+  // Real run finding, second one on this file: assuming Grafana's
+  // undocumented default admin/admin credential (flagged unconfirmed in
+  // this file's header comment from the start) turned out to be the
+  // wrong thing to rely on either way — not necessarily because it was
+  // actually wrong, but because this script never got a clean read on
+  // it. The confirm-observability-healthy health check polls every 5s,
+  // and its Grafana check used basic auth against /api/datasources on
+  // EVERY poll — so a single transient early failure (the admin account
+  // not fully committed to grafana.db yet, a startup race of exactly the
+  // kind this file already fixed once for /api/health) triggered
+  // Grafana's own brute-force login protection ("too many consecutive
+  // incorrect login attempts... login for user temporarily blocked"),
+  // confirmed verbatim in a real journalctl excerpt, repeating every 5s
+  // in lockstep with the poll interval. Once locked, every subsequent
+  // attempt failed from the lockout alone, regardless of whether the
+  // credential was ever actually right — a self-inflicted amplifier
+  // that then outlasted the stage's own 60s timeout (Grafana's lockout
+  // window is several minutes).
+  //
+  // Fixed two ways:
+  //   1. Set admin_user/admin_password explicitly in grafana.ini,
+  //      idempotently, before grafana-server's FIRST-EVER start —
+  //      removing the undocumented-default guess entirely, not just
+  //      hoping it matches. Only takes effect on true first-start
+  //      (a brand-new grafana.db with no admin account yet); restarting
+  //      grafana-server later does NOT retroactively change an
+  //      already-created admin account's password, same as real
+  //      Grafana behavior — relevant here because this project's normal
+  //      flow is full VM rebuilds, not in-place reconfiguration.
+  //   2. Moved the authenticated /api/datasources check OUT of the
+  //      retried health-check script entirely (see
+  //      grafanaDatasourceCheckScript below) — it now runs exactly once,
+  //      as its own task after confirm-observability-healthy's waitFor
+  //      already passed, so it can never again hammer Grafana's login
+  //      endpoint into locking itself out.
   private val provisionDatasourceScript =
-    """mkdir -p /etc/grafana/provisioning/datasources
+    s"""mkdir -p /etc/grafana/provisioning/datasources
       |cat > /etc/grafana/provisioning/datasources/prometheus.yaml <<EOF
       |apiVersion: 1
       |datasources:
@@ -151,6 +186,14 @@ object observability_stack extends OrpheraClusterPlaybook:
       |    url: http://localhost:9090
       |    isDefault: true
       |EOF
+      |sed -i '/# BEGIN orphera-admin-credentials/,/# END orphera-admin-credentials/d' /etc/grafana/grafana.ini
+      |cat >> /etc/grafana/grafana.ini <<EOF
+      |# BEGIN orphera-admin-credentials
+      |[security]
+      |admin_user = $grafanaAdminUser
+      |admin_password = $grafanaAdminPassword
+      |# END orphera-admin-credentials
+      |EOF
       |systemctl enable --now grafana-server
       |systemctl restart grafana-server
       |if ! systemctl is-active --quiet grafana-server; then
@@ -158,14 +201,14 @@ object observability_stack extends OrpheraClusterPlaybook:
       |  exit 1
       |fi
       |READY=false
-      |for i in $(seq 1 30); do
+      |for i in $$(seq 1 30); do
       |  if curl -sf http://localhost:3000/api/health > /dev/null 2>&1; then
       |    READY=true
       |    break
       |  fi
       |  sleep 3
       |done
-      |if [ "$READY" != "true" ]; then
+      |if [ "$$READY" != "true" ]; then
       |  echo "grafana-server is running but /api/health never returned success after 90s (it may still be installing bundled plugins — see 'journalctl -xeu grafana-server')" >&2
       |  exit 1
       |fi
@@ -176,8 +219,13 @@ object observability_stack extends OrpheraClusterPlaybook:
   // six, health=down for none) — same "prove the real thing, don't trust
   // a status flag alone" reasoning as test_mariadb_galera.sh's
   // replicated-row check and wordpress_site.scala's DB-error body check.
-  // Also confirms Grafana's own API reports the Prometheus datasource was
-  // actually provisioned, not just that the file was written.
+  //
+  // Deliberately does NOT also check Grafana's /api/datasources here
+  // anymore — see provisionDatasourceScript's own header comment for why
+  // a basic-auth call inside a script that gets polled every 5s is
+  // exactly what caused a real Grafana brute-force login lockout. This
+  // script only ever touches unauthenticated endpoints, so it's safe to
+  // retry freely.
   private val observabilityHealthScript =
     s"""TARGETS=$$(curl -s http://localhost:9090/api/v1/targets)
        |UP=$$(echo "$$TARGETS" | grep -o '"health":"up"' | wc -l)
@@ -186,12 +234,21 @@ object observability_stack extends OrpheraClusterPlaybook:
        |  echo "prometheus targets not all healthy yet: up=$$UP down=$$DOWN (want ${allNodes.length + 1} up, 0 down)" >&2
        |  exit 1
        |fi
-       |DATASOURCES=$$(curl -s -u $grafanaAdminUser:$grafanaAdminPassword http://localhost:3000/api/datasources)
+       |exit 0""".stripMargin
+
+  // Runs exactly ONCE, as an ordinary task after confirm-observability-healthy's
+  // waitFor already passed — not inside any retried health check — so a
+  // wrong credential now surfaces as one clean, unambiguous 401 rather
+  // than a self-inflicted lockout that masks whatever the real answer
+  // was. Confirms Grafana's own API reports the Prometheus datasource
+  // actually provisioned, not just that the file was written.
+  private val grafanaDatasourceCheckScript =
+    s"""DATASOURCES=$$(curl -s -u $grafanaAdminUser:$grafanaAdminPassword http://localhost:3000/api/datasources)
        |if ! echo "$$DATASOURCES" | grep -q '"name":"Prometheus"'; then
-       |  echo "grafana's Prometheus datasource doesn't show up in /api/datasources yet" >&2
+       |  echo "grafana's Prometheus datasource doesn't show up in /api/datasources (or the login failed — check 'journalctl -u grafana-server | grep authn')" >&2
        |  exit 1
        |fi
-       |exit 0""".stripMargin
+       |echo "grafana's Prometheus datasource confirmed via /api/datasources"""".stripMargin
 
   val playbook: ClusterPlaybook =
     clusterPlaybook("observability-stack")(
@@ -238,6 +295,9 @@ object observability_stack extends OrpheraClusterPlaybook:
             pollIntervalSeconds = 5,
             timeoutSeconds = 60
           )
+        )
+        .task("confirm grafana's Prometheus datasource (one-shot, not polled)")(
+          Task.RunCommand(List("sh", "-c", grafanaDatasourceCheckScript))
         )
         .task("observability stack confirmed")(
           Task.Debug(
