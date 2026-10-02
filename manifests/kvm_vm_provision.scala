@@ -103,7 +103,7 @@ object kvm_vm_provision extends OrpheraClusterPlaybook:
   // config/{{TGT}}-config.yml in the original; hardcoded here the same
   // way every other node list in this project is a Scala val, not a
   // per-run parameter).
-  private val hypervisorNode = "kvm0"
+  private val hypervisorNode = "tst7"
 
   // Standing in for the original's config/{{TGT}}-config.yml for ONE
   // concrete VM — Orphera playbooks are code per exercise, not a
@@ -111,7 +111,7 @@ object kvm_vm_provision extends OrpheraClusterPlaybook:
   // project (ceph_observability.scala's node lists, wordpress_site.scala's
   // db credentials). A second VM means a second object like this one
   // with its own vals, not a parameter to this one.
-  private val vmName = "tst7"
+  private val vmName = "testvm0"
   private val baseImage = "noble-server-cloudimg-amd64.img" // under /var/lib/libvirt/boot/ on the hypervisor
   private val diskSizeGB = 20
   private val swapSizeGB = 2
@@ -217,7 +217,7 @@ object kvm_vm_provision extends OrpheraClusterPlaybook:
       stage("write-cloud-init-config", hypervisorNode)
         .task("template user-data")(
           Task.Copy(
-            src = "templates/cloud-init/user-data.j2",
+            src = "~/templates/cloud-init/user-data.j2",
             dest = s"$workingDir/user-data",
             owner = "localadmin",
             group = "localadmin",

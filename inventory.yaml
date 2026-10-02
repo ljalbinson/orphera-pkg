@@ -81,6 +81,11 @@ nodes:
     vars:
       cluster_ip: "10.10.5.18"
 
+  - name: tst7
+    host: tst7.ljalbinson.com
+    vars:
+      cluster_ip: "10.10.5.19"
+
 groups:
   - name: mons
     members: [tst0, tst1, tst2]
