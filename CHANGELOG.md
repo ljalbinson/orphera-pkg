@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed — `manifests/observability_extended.scala`: haproxy metrics check probed the wrong address
+
+Real run, first stage, all three nodes: `haproxy -c` passed and the
+service restarted active, but the health check still failed —
+`:8404/metrics didn't return haproxy_* series`. Not a race, a genuine
+bug: the frontend is deliberately bound to `{{cluster_ip}}` specifically
+(not the wildcard, per this file's own header comment on the colocated-
+services bind lesson), but the check itself curled `localhost:8404` —
+loopback, a different address than the one haproxy is actually
+listening on. Fixed by curling `{{cluster_ip}}:8404` instead, matching
+the bind.
+
 ### Noted — `--resume` checkpoints don't know their own script changed
 
 Real-run discovery while rolling out the Grafana credential fix below: a

@@ -104,8 +104,8 @@ object observability_extended extends OrpheraClusterPlaybook:
        |  echo "haproxy failed to restart after adding the metrics frontend — see 'journalctl -xeu haproxy' for the real reason" >&2
        |  exit 1
        |fi
-       |if ! curl -sf http://localhost:$haproxyMetricsPort/metrics | grep -q '^haproxy_'; then
-       |  echo "haproxy is running but :$haproxyMetricsPort/metrics didn't return haproxy_* series" >&2
+       |if ! curl -sf http://{{cluster_ip}}:$haproxyMetricsPort/metrics | grep -q '^haproxy_'; then
+       |  echo "haproxy is running but {{cluster_ip}}:$haproxyMetricsPort/metrics didn't return haproxy_* series" >&2
        |  exit 1
        |fi
        |echo "haproxy prometheus-exporter frontend listening on :$haproxyMetricsPort"""".stripMargin
