@@ -6,6 +6,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — `manifests/ceph_observability.scala` and `manifests/ceph_performance_test.scala`
+
+Drafted, not yet run against real infrastructure.
+
+`ceph_observability.scala` wires Ceph's own metrics into the existing
+tst6 Prometheus/Grafana stack (`observability_stack.scala` /
+`observability_extended.scala`) rather than standing up a second
+monitoring stack: enables ceph mgr's built-in `prometheus` module
+(`:9283/metrics`, no separate exporter package needed) on tst0, adds it
+as a fifth Prometheus scrape job (14 targets total), and points at
+Grafana dashboard ID 2842 ("Ceph - Cluster") to import. Flags the mgr
+host's metrics-port reachability and single-mgr-no-failover assumptions
+as unconfirmed, same as every other new mechanism in this project on
+first draft.
+
+`ceph_performance_test.scala` is an Orphera-playbook equivalent of the
+existing `cephperf.sh`/`cephadmperf.sh` scripts — same `rados bench`
+write/seq/rand workload against a disposable pool, but with real
+timeouts, a check that each pass's "Bandwidth (MB/sec):" summary line
+actually appeared (not just that the command exited 0), and automatic
+pool cleanup so repeated runs start clean. Deliberately RADOS-only for
+this first pass — no `rbd bench`/kernel client pass, which would need
+host-level `ceph-common` and keyring assumptions this file doesn't make.
+Meant to be run alongside `ceph_observability.scala` so the load shows
+up as a real spike in Grafana.
+
 ### Confirmed — both observability manifests now run clean end-to-end on genuinely fresh VMs
 
 After today's six real-run fixes across `observability_stack.scala` and
