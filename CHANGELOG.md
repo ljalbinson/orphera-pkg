@@ -6,6 +6,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed — `manifests/observability_stack.scala`: a second Grafana race, uncovered by fixing the first one
+
+Real run on a genuinely fresh `grafana.db`: no lockout this time, but
+the one-shot datasource check still failed on its single attempt.
+Confirmed via journalctl: `/api/health` can return success before
+Grafana's own admin-account bootstrap migration ("Created default
+admin") actually finishes — the retried auth check removed in the
+lockout fix had been accidentally covering for this underlying race all
+along. Fixed by having `provisionDatasourceScript`'s own poll (which
+never authenticates, so it's safe to retry) wait for both `/api/health`
+AND a "Created default admin" journal line before declaring ready, so
+the one real login attempt downstream is no longer a coin flip.
+
+Noted limitation: on a VM whose `grafana.db` survived from an earlier
+run instead of a true fresh install, "Created default admin" is already
+in journal history from that earlier run, so this check can't
+distinguish "stale admin, wrong password" from "fresh admin, right
+password". Hit for real mid-session: a "virgin" VM rebuild left tst6's
+`/var/lib/grafana/grafana.db` intact from the previous day, so today's
+credential fix never got the chance to apply until the file was wiped
+by hand. Worth checking that a VM rebuild actually clears stateful
+service data directories, not just reprovisions the OS.
+
 ### Fixed — `manifests/observability_extended.scala`: mysqld_exporter startup race on tst0
 
 Real run, after the `--config.my-cnf` fix above: tst1/tst2 both passed

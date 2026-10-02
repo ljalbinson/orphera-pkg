@@ -175,6 +175,28 @@ object observability_stack extends OrpheraClusterPlaybook:
   //      as its own task after confirm-observability-healthy's waitFor
   //      already passed, so it can never again hammer Grafana's login
   //      endpoint into locking itself out.
+  //
+  // Real run finding, round two, on fix #2 specifically: removing the
+  // retried auth check exposed a DIFFERENT, underlying race the retries
+  // had been accidentally covering for — /api/health can return success
+  // before Grafana's own admin-account bootstrap migration has actually
+  // finished (confirmed via journalctl: the "Created default admin"
+  // line lands a few seconds after health starts passing). A single
+  // one-shot auth attempt right after /api/health succeeds can still
+  // lose that race. Fixed by making THIS poll loop (which never
+  // authenticates, so it's safe to retry freely) wait for both signals —
+  // /api/health AND a "Created default admin" line in the journal —
+  // before declaring ready, so by the time grafanaDatasourceCheckScript
+  // runs its one real login attempt, the account is actually guaranteed
+  // to exist. Known limitation, not fixed by this: on a VM whose
+  // grafana.db survived from an earlier run (not a true fresh install —
+  // this project's whole workflow assumes full VM rebuilds, but a rebuild
+  // that doesn't actually wipe /var/lib/grafana breaks that assumption),
+  // the "Created default admin" line is already in journal HISTORY from
+  // that earlier run, so this check passes immediately without proving
+  // today's grafana.ini credential actually took effect on today's
+  // account — there's no way to tell "stale admin, wrong password" apart
+  // from "fresh admin, right password" from inside this script alone.
   private val provisionDatasourceScript =
     s"""mkdir -p /etc/grafana/provisioning/datasources
       |cat > /etc/grafana/provisioning/datasources/prometheus.yaml <<EOF
@@ -202,14 +224,15 @@ object observability_stack extends OrpheraClusterPlaybook:
       |fi
       |READY=false
       |for i in $$(seq 1 30); do
-      |  if curl -sf http://localhost:3000/api/health > /dev/null 2>&1; then
+      |  if curl -sf http://localhost:3000/api/health > /dev/null 2>&1 \
+      |     && journalctl -u grafana-server --no-pager 2>/dev/null | grep -q "Created default admin"; then
       |    READY=true
       |    break
       |  fi
       |  sleep 3
       |done
       |if [ "$$READY" != "true" ]; then
-      |  echo "grafana-server is running but /api/health never returned success after 90s (it may still be installing bundled plugins — see 'journalctl -xeu grafana-server')" >&2
+      |  echo "grafana-server is running but either /api/health never returned success, or the admin account never finished being created, after 90s — see 'journalctl -xeu grafana-server'" >&2
       |  exit 1
       |fi
       |echo "grafana running on :3000, provisioned with a Prometheus datasource"""".stripMargin
