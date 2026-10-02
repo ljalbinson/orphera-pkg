@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Noted — `--resume` checkpoints don't know their own script changed
+
+Real-run discovery while rolling out the Grafana credential fix below: a
+`--resume`'d run skips any task already checkpointed successful, with no
+way to tell that the task's own script content changed since that
+checkpoint was written. Concretely: `install-grafana`'s
+`provisionDatasourceScript` task had already succeeded (and been
+checkpointed) using the OLD script, before the `grafana.ini`
+`admin_user`/`admin_password` fix below existed — so resuming after
+pulling the fix skipped straight past it, and the new credential lines
+never actually landed on the real VM. Not a bug in the fix itself, but a
+sharp edge in `--resume` worth knowing: after changing a task that's
+already checkpointed, either don't use `--resume` (rerun clean on a
+genuinely fresh VM) or apply that one task's change by hand before
+resuming, same as this project's own manual workaround for it. No code
+change proposed for this yet — flagging it here since it's the kind of
+gotcha worth not re-discovering blind next time.
+
 ### Fixed — `manifests/observability_stack.scala`: Grafana locked itself out of its own admin account on a real fresh-install run
 
 After the earlier Grafana-startup poll fix (see entry further below), a
