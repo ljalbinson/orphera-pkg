@@ -148,6 +148,20 @@ object observability_extended extends OrpheraClusterPlaybook:
   // MariaDB's own user/grant system (not filesystem permissions) doing
   // the real access control, same as every other local-socket connection
   // in this project (clustercheck's own script, mariadb -N).
+  //
+  // Also found on a real run (tst0 specifically, same config as tst1/tst2
+  // which both passed): `systemctl restart` returns once the process
+  // starts, but the exporter's own HTTP listener binds a moment after
+  // that log line — the exact same class of race this project already
+  // fixed for php-fpm/nginx (wordpress_site.scala) and
+  // prometheus-node-exporter/grafana-server (observability_stack.scala),
+  // just not yet guarded here. journalctl confirmed the service was
+  // genuinely healthy well before this was investigated; the immediate
+  // single curl right after restart could just beat it. Fixed with the
+  // same short bounded poll used elsewhere, rather than a longer fixed
+  // sleep — mysqld_exporter's own scrape is synchronous per-request, so
+  // once the listener is actually up, mysql_up appears on the very first
+  // successful request.
   private val configureMysqldExporterScript =
     s"""cat > /etc/prometheus-mysqld-exporter.cnf <<EOF
        |[client]
@@ -166,8 +180,16 @@ object observability_extended extends OrpheraClusterPlaybook:
        |  echo "prometheus-mysqld-exporter failed to start — see 'journalctl -xeu prometheus-mysqld-exporter' for the real reason" >&2
        |  exit 1
        |fi
-       |if ! curl -sf http://localhost:9104/metrics | grep -q '^mysql_up'; then
-       |  echo "prometheus-mysqld-exporter is running but :9104/metrics didn't return mysql_up — check /etc/prometheus-mysqld-exporter.cnf and 'journalctl -u prometheus-mysqld-exporter'" >&2
+       |READY=false
+       |for i in $$(seq 1 10); do
+       |  if curl -sf http://localhost:9104/metrics 2>/dev/null | grep -q '^mysql_up'; then
+       |    READY=true
+       |    break
+       |  fi
+       |  sleep 1
+       |done
+       |if [ "$$READY" != "true" ]; then
+       |  echo "prometheus-mysqld-exporter is running but :9104/metrics never showed mysql_up after 10s — check /etc/prometheus-mysqld-exporter.cnf and 'journalctl -u prometheus-mysqld-exporter'" >&2
        |  exit 1
        |fi
        |echo "mysqld_exporter running on :9104, reading this node's own mysqld over the local socket"""".stripMargin

@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed — `manifests/observability_extended.scala`: mysqld_exporter startup race on tst0
+
+Real run, after the `--config.my-cnf` fix above: tst1/tst2 both passed
+cleanly, tst0 alone failed with the same config. `journalctl` showed the
+service was genuinely healthy (`Listening on [::]:9104`, scrapers
+enabled, no errors) — a timing race, not a real fault: `systemctl
+restart` returns once the process starts, but the exporter's own HTTP
+listener binds a moment after that, the same class of race already
+fixed for php-fpm/nginx and prometheus-node-exporter/grafana-server
+elsewhere in this project, just not yet guarded here. Fixed with the
+same short bounded poll (10 attempts, 1s apart) rather than a fixed
+sleep — mysqld_exporter's scrape is synchronous per-request, so
+`mysql_up` appears on the very first request once the listener is
+actually up.
+
 ### Fixed — `manifests/observability_extended.scala`: mysqld_exporter never reads DATA_SOURCE_NAME on Ubuntu 24.04
 
 Real run, after the haproxy fix above: `prometheus-mysqld-exporter`
