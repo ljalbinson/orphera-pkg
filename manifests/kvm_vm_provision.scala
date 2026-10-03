@@ -103,7 +103,7 @@ object kvm_vm_provision extends OrpheraClusterPlaybook:
   // config/{{TGT}}-config.yml in the original; hardcoded here the same
   // way every other node list in this project is a Scala val, not a
   // per-run parameter).
-  private val hypervisorNode = "tst7"
+  private val hypervisorNode = "gs1"
 
   // Standing in for the original's config/{{TGT}}-config.yml for ONE
   // concrete VM — Orphera playbooks are code per exercise, not a
@@ -118,7 +118,7 @@ object kvm_vm_provision extends OrpheraClusterPlaybook:
   private val swapSizeGB = 2
   private val memoryMB = 4096
   private val vcpus = 2
-  private val nicBridge = "br0"
+  private val nicBridge = "br-net1"
 
   // Mirrors EFSNAME/EDIR from the original (DFSNAME/DDIR — the second,
   // bulk-data filesystem — is out of scope here, see header comment).
@@ -191,7 +191,7 @@ object kvm_vm_provision extends OrpheraClusterPlaybook:
   // never use one here, not to trust it works in a "safer-looking"
   // spot.
   private val defineAndStartVmScript =
-    s"""virt-install --connect qemu:///system --name $vmName --memory $memoryMB --vcpus $vcpus --disk $workingDir/$vmName.qcow2,format=qcow2,bus=scsi --disk $workingDir/$vmName-swap.qcow2,format=qcow2,bus=scsi --disk $workingDir/$vmName-cidata.iso,device=cdrom --network bridge=$nicBridge,model=virtio --os-variant ubuntu24.04 --import --noautoconsole
+    s"""virt-install --connect qemu:///system --name $vmName --memory $memoryMB --vcpus $vcpus --disk $workingDir/$vmName.qcow2,format=qcow2,bus=scsi --disk $workingDir/$vmName-swap.qcow2,format=qcow2,bus=scsi --disk $workingDir/$vmName-cidata.iso,device=cdrom --network bridge=$nicBridge,model=virtio,virtualport_type=openvswitch --os-variant ubuntu24.04 --import --noautoconsole
        |echo "$vmName defined and started"""".stripMargin
 
   val playbook: ClusterPlaybook =
@@ -229,9 +229,9 @@ object kvm_vm_provision extends OrpheraClusterPlaybook:
         .task("template user-data")(
           Task.WriteFile(
             content = CloudConfigTemplate.render(
-              "tst7",
+              "testvm0",
               "ljalbinson.com",
-              "10.10.5.19",
+              "192.168.1.222",
               "192.168.1.70",
               "192.168.1.71",
               "localadmin",
@@ -258,10 +258,10 @@ object kvm_vm_provision extends OrpheraClusterPlaybook:
           Task.WriteFile(
             content = NetworkConfigTemplate.render(
               "enp1s0",
-              "10.10.5.19",
+              "192.168.1.222",
               24,
               "255.255.255.0",
-              "10.10.5.1",
+              "192.168.1.1",
               "192.168.1.70",
               "192.168.1.71",
               "ljalbinson.com"
