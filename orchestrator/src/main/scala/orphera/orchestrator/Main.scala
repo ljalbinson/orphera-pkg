@@ -81,14 +81,28 @@ object Main extends IOApp:
         }
 
       case Right(
-            Command.WriteFile(destPath, contentSource, nodeNames, owner, group, mode)
+            Command.WriteFile(
+              destPath,
+              contentSource,
+              nodeNames,
+              owner,
+              group,
+              mode
+            )
           ) =>
         resolveContentSource(contentSource).flatMap {
           case Left(err) =>
             IO.println(s"Error: $err") >> IO.pure(ExitCode.Error)
           case Right(bytes) =>
             withTargets(nodeNames) { targets =>
-              Orchestrator.writeFile(targets, bytes, destPath, owner, group, mode)
+              Orchestrator.writeFile(
+                targets,
+                bytes,
+                destPath,
+                owner,
+                group,
+                mode
+              )
             }
         }
 
@@ -376,21 +390,24 @@ object Main extends IOApp:
 
   /** Resolves write-file's --content/--content-file into real bytes. The
     * literal-string case is pure (just UTF-8 encoding) but is still routed
-    * through IO here so both branches return the same type — the actual
-    * file read (--content-file) is the one that genuinely needs IO.blocking,
-    * same as every other local-disk read in this file.
+    * through IO here so both branches return the same type — the actual file
+    * read (--content-file) is the one that genuinely needs IO.blocking, same as
+    * every other local-disk read in this file.
     */
   private def resolveContentSource(
       source: Either[String, String]
   ): IO[Either[String, Array[Byte]]] =
     source match
       case Left(literal) =>
-        IO.pure(Right(literal.getBytes(java.nio.charset.StandardCharsets.UTF_8)))
+        IO.pure(
+          Right(literal.getBytes(java.nio.charset.StandardCharsets.UTF_8))
+        )
       case Right(path) =>
-        IO.blocking(java.nio.file.Files.readAllBytes(java.nio.file.Paths.get(path)))
-          .attempt
+        IO.blocking(
+          java.nio.file.Files.readAllBytes(java.nio.file.Paths.get(path))
+        ).attempt
           .map {
-            case Left(err)    =>
+            case Left(err) =>
               Left(s"Could not read --content-file '$path': ${err.getMessage}")
             case Right(bytes) => Right(bytes)
           }

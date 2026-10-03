@@ -297,23 +297,74 @@ object Cli:
           case (Some(_), Some(_)) =>
             Left("write-file: pass only one of --content or --content-file")
           case (Some(literal), None) =>
-            Right(Command.WriteFile(dest, Left(literal), nodes, owner, group, mode))
+            Right(
+              Command.WriteFile(dest, Left(literal), nodes, owner, group, mode)
+            )
           case (None, Some(path)) =>
-            Right(Command.WriteFile(dest, Right(path), nodes, owner, group, mode))
+            Right(
+              Command.WriteFile(dest, Right(path), nodes, owner, group, mode)
+            )
           case (None, None) =>
-            Left("write-file requires --content <string> or --content-file <path>")
+            Left(
+              "write-file requires --content <string> or --content-file <path>"
+            )
       case "--content" :: value :: rest =>
-        parseWriteFile(rest, dest, Some(value), contentFile, nodes, owner, group, mode)
+        parseWriteFile(
+          rest,
+          dest,
+          Some(value),
+          contentFile,
+          nodes,
+          owner,
+          group,
+          mode
+        )
       case "--content-file" :: value :: rest =>
-        parseWriteFile(rest, dest, contentLiteral, Some(value), nodes, owner, group, mode)
+        parseWriteFile(
+          rest,
+          dest,
+          contentLiteral,
+          Some(value),
+          nodes,
+          owner,
+          group,
+          mode
+        )
       case "--owner" :: value :: rest =>
-        parseWriteFile(rest, dest, contentLiteral, contentFile, nodes, value, group, mode)
+        parseWriteFile(
+          rest,
+          dest,
+          contentLiteral,
+          contentFile,
+          nodes,
+          value,
+          group,
+          mode
+        )
       case "--group" :: value :: rest =>
-        parseWriteFile(rest, dest, contentLiteral, contentFile, nodes, owner, value, mode)
+        parseWriteFile(
+          rest,
+          dest,
+          contentLiteral,
+          contentFile,
+          nodes,
+          owner,
+          value,
+          mode
+        )
       case "--mode" :: value :: rest =>
         scala.util.Try(Integer.parseInt(value, 8)).toOption match
           case Some(parsed) =>
-            parseWriteFile(rest, dest, contentLiteral, contentFile, nodes, owner, group, parsed)
+            parseWriteFile(
+              rest,
+              dest,
+              contentLiteral,
+              contentFile,
+              nodes,
+              owner,
+              group,
+              parsed
+            )
           case None => Left(s"Invalid mode: $value (expected octal, e.g. 0644)")
       case "--nodes" :: value :: rest =>
         parseWriteFile(

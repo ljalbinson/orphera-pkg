@@ -62,11 +62,11 @@ object Orchestrator:
       )
     }
 
-  /** `content` is already-resolved bytes — Main.scala reads --content-file
-    * (or UTF-8-encodes a literal --content string) before calling this, so
-    * this stays a pure "push these bytes" operation, same shape as
-    * copyFile just without a local path. Goes through the same CopyFile
-    * RPC/FileChunk streaming copyFile does (NodeClient.copyBytes).
+  /** `content` is already-resolved bytes — Main.scala reads --content-file (or
+    * UTF-8-encodes a literal --content string) before calling this, so this
+    * stays a pure "push these bytes" operation, same shape as copyFile just
+    * without a local path. Goes through the same CopyFile RPC/FileChunk
+    * streaming copyFile does (NodeClient.copyBytes).
     */
   def writeFile(
       nodes: List[Node],
