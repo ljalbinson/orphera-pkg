@@ -1,4 +1,4 @@
-.PHONY: all release bump-patch _build_all clean test assembly pkg-stage deb verify certs certs-clean fmt scripting
+.PHONY: all release bump-patch _build_all clean test assembly pkg-stage deb verify certs certs-clean fmt fmt-manifests scripting
 
 VERSION_FILE := VERSION
 VERSION      := $(shell cat $(VERSION_FILE))
@@ -24,6 +24,21 @@ bump-patch:
 
 fmt:
 	sbt scalafmt
+	$(MAKE) fmt-manifests
+
+# manifests/*.scala are standalone playbook scripts, compiled at run time
+# by `orphera playbook`/`cluster-playbook` — none of them are declared as
+# a sourceDirectory of any project in build.sbt, so plain `sbt scalafmt`
+# (which only ever touches each project's own configured Compile/Test
+# sources) never reaches them, formatted or not. sbt-scalafmt's own
+# `scalafmtOnly <files>` command formats arbitrary files regardless of
+# whether they're part of a project's source set, which is exactly what's
+# needed here — no build.sbt changes (e.g. adding manifests as an
+# unmanagedSourceDirectory) that would risk pulling 30+ standalone,
+# single-file-compiled playbook scripts onto one shared compile
+# classpath together, which they were never meant to be.
+fmt-manifests:
+	sbt "scalafmtOnly manifests/*.scala"
 
 reload:
 	sbt reload
