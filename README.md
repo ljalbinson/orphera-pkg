@@ -349,13 +349,24 @@ sbt "orchestrator/run playbook manifests/web-server-baseline.yaml"
 ```
 
 **Available task types:** `install`, `remove`, `autoremove`, `copy`,
-`network_apply`, `reboot`, `run_command`, `set_fact`, `debug`,
-`dump_facts` — each of the first six maps directly onto the
+`write_file`, `network_apply`, `reboot`, `run_command`, `set_fact`,
+`debug`, `dump_facts` — each of the first six maps directly onto the
 corresponding CLI command's underlying RPC, so anything the CLI can
 do (except `bootstrap`/`teardown`/`deploy-agent`/`facts`/`version`,
 which are intentionally excluded — see below), a playbook task can do
 as one step in a sequence. The `reboot` task's fields mirror the CLI
 command: `delay`, `wait`, `wait_timeout` in YAML.
+
+- `write_file` (`content:`, `dest:`, `owner:`, `group:`, `mode:`)
+  writes a literal string straight to a file on the agent — no source
+  file has to exist on the orchestrator's own disk first, unlike
+  `copy`. `content` is rendered through Mustache first if it contains
+  `{{...}}`, same as `set_fact`/`debug`. Reuses the same underlying
+  file-transfer RPC `copy` does; it's the task-level equivalent of the
+  `cat > file <<EOF ... EOF` heredoc pattern most `run_command` scripts
+  in `manifests/` reach for today — useful when the content is a
+  short, already-in-hand string (a rendered config block, say) rather
+  than something that belongs in its own template file on disk.
 
 - `run_command` runs an arbitrary command on the agent (`command:` as
   a YAML list, `timeout:` in seconds), streaming stdout/stderr and

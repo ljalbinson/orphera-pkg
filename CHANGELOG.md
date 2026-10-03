@@ -6,6 +6,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — `write_file` task (`Task.WriteFile` / YAML `write_file`)
+
+A new base operation: writes a literal string straight to a file on
+the agent, with no local source file required on the orchestrator's
+own disk first — unlike `copy`, whose `src` has to name a file that
+already exists there. Needed because most manifests in `manifests/`
+currently reach for a `run_command` shell heredoc
+(`cat > file <<EOF ... EOF`) every time they want to push an
+already-in-hand string (a rendered config block, a small generated
+script) rather than something that belongs in its own template file —
+`haproxy.cfg`'s BEGIN/END-marker blocks, `prometheus.yml`, `grafana.ini`'s
+appended credentials section, and `/etc/prometheus-mysqld-exporter.cnf`
+are all examples of exactly that pattern across
+`observability_stack.scala`/`observability_extended.scala`.
+
+No new agent-side capability or proto change was needed — it reuses
+the same `CopyFile` RPC / `FileChunk` streaming `copy` already uses
+(`NodeClient.copyBytes`, which `Task.DistributeFile` already calls
+too), just with the bytes coming from a rendered Scala/YAML string
+instead of a node-to-node file fetch or a local path. `content` is
+Mustache-rendered first if it contains `{{...}}`, the same treatment
+`set_fact`/`debug`/`run_command` tokens already get, so
+`{{nodes.tst0.cluster_ip}}`-style cross-node references work here too.
+
+Not yet used by any manifest in this repo — existing heredoc-based
+scripts weren't converted over as part of this change, to keep it a
+pure addition rather than a mixed add-and-refactor commit.
+
 ### Added — `manifests/ceph_observability.scala` and `manifests/ceph_performance_test.scala`
 
 Drafted, not yet run against real infrastructure.

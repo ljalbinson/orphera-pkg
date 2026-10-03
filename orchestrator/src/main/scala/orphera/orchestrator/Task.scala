@@ -25,6 +25,23 @@ enum Task:
       waitTimeoutSeconds: Int = 300
   )
   case SetFact(key: String, value: String)
+  /** Writes `content` to `dest` on the agent, verbatim — no local source
+    * file on the orchestrator's own disk required, unlike Copy (whose `src`
+    * must name a file that already exists there). `content` is rendered
+    * through Mustache first if it contains `{{...}}`, the same treatment
+    * SetFact/Debug/run_command's own tokens already get, so
+    * `{{nodes.tst0.cluster_ip}}`-style cross-node references work here too.
+    * Reuses the same underlying CopyFile RPC/FileChunk streaming Copy does
+    * (via NodeClient.copyBytes) — no new agent-side capability was needed
+    * to add this.
+    */
+  case WriteFile(
+      content: String,
+      dest: String,
+      owner: String = "",
+      group: String = "",
+      mode: Int = 0
+  )
   case RunCommand(command: List[String], timeoutSeconds: Int = 60)
   case DumpFacts()
   case DistributeFile(

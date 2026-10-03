@@ -48,6 +48,25 @@ object TaskYaml:
             )
         yield Task.Copy(src, dest, owner, group, mode, vars)
 
+      case "write_file" =>
+        for
+          content <- body.get[String]("content")
+          dest <- body.get[String]("dest")
+          owner <- body.getOrElse[String]("owner")("")
+          group <- body.getOrElse[String]("group")("")
+          modeStr <- body.getOrElse[String]("mode")("0")
+          mode <- scala.util
+            .Try(Integer.parseInt(modeStr, 8))
+            .toEither
+            .left
+            .map(_ =>
+              DecodingFailure(
+                s"Invalid mode: $modeStr (expected octal, e.g. 0644)",
+                body.history
+              )
+            )
+        yield Task.WriteFile(content, dest, owner, group, mode)
+
       case "network_apply" =>
         body.getOrElse[Int]("timeout")(60).map(Task.NetworkApply.apply)
 
