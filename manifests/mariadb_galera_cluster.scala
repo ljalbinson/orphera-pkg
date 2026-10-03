@@ -238,11 +238,15 @@ object mariadb_galera_cluster extends OrpheraClusterPlaybook:
 
   val playbook: ClusterPlaybook =
     clusterPlaybook("mariadb-galera-cluster")(
-
       stage("install-mariadb", "tst0", "tst1", "tst2")
         .task("install mariadb-server, mariadb-backup, galera-4")(
           Task.Install(
-            packages = List("mariadb-server", "mariadb-client", "mariadb-backup", "galera-4"),
+            packages = List(
+              "mariadb-server",
+              "mariadb-client",
+              "mariadb-backup",
+              "galera-4"
+            ),
             updateCache = true
           )
         )
@@ -260,7 +264,8 @@ object mariadb_galera_cluster extends OrpheraClusterPlaybook:
       // header comment's asymmetric-start-order explanation.
       stage("bootstrap-tst0", "tst0")
         .task("bootstrap a new Galera cluster and create the SST user")(
-          Task.RunCommand(List("sh", "-c", bootstrapScript), timeoutSeconds = 90)
+          Task
+            .RunCommand(List("sh", "-c", bootstrapScript), timeoutSeconds = 90)
         )
         .build,
 
@@ -284,7 +289,9 @@ object mariadb_galera_cluster extends OrpheraClusterPlaybook:
           Task.RunCommand(List("sh", "-c", printClusterStatusScript))
         )
         .task("cluster confirmed")(
-          Task.Debug("3-node MariaDB Galera cluster healthy: wsrep_cluster_size=3, status=Primary, ready=ON on every node.")
+          Task.Debug(
+            "3-node MariaDB Galera cluster healthy: wsrep_cluster_size=3, status=Primary, ready=ON on every node."
+          )
         )
         .build
     )

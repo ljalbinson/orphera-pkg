@@ -112,7 +112,8 @@ object kvm_vm_provision extends OrpheraClusterPlaybook:
   // db credentials). A second VM means a second object like this one
   // with its own vals, not a parameter to this one.
   private val vmName = "testvm0"
-  private val baseImage = "noble-server-cloudimg-amd64.img" // under /var/lib/libvirt/boot/ on the hypervisor
+  private val baseImage =
+    "noble-server-cloudimg-amd64.img" // under /var/lib/libvirt/boot/ on the hypervisor
   private val diskSizeGB = 20
   private val swapSizeGB = 2
   private val memoryMB = 4096
@@ -195,31 +196,49 @@ object kvm_vm_provision extends OrpheraClusterPlaybook:
 
   val playbook: ClusterPlaybook =
     clusterPlaybook("kvm-vm-provision")(
-
       stage("destroy-existing-vm", hypervisorNode)
-        .task(s"destroy/undefine $vmName and its zfs filesystem if they already exist")(
-          Task.RunCommand(List("sh", "-c", destroyExistingVmScript), timeoutSeconds = 60)
+        .task(
+          s"destroy/undefine $vmName and its zfs filesystem if they already exist"
+        )(
+          Task.RunCommand(
+            List("sh", "-c", destroyExistingVmScript),
+            timeoutSeconds = 60
+          )
         )
         .build,
 
       stage("create-vm-filesystem", hypervisorNode)
         .task(s"create $workingFs and set ownership")(
-          Task.RunCommand(List("sh", "-c", createFilesystemScript), timeoutSeconds = 30)
+          Task.RunCommand(
+            List("sh", "-c", createFilesystemScript),
+            timeoutSeconds = 30
+          )
         )
         .build,
 
       stage("stage-vm-image", hypervisorNode)
         .task("copy pristine base image, resize, create swap image")(
-          Task.RunCommand(List("sh", "-c", stageImageScript), timeoutSeconds = 120)
+          Task.RunCommand(
+            List("sh", "-c", stageImageScript),
+            timeoutSeconds = 120
+          )
         )
         .build,
 
       stage("write-cloud-init-config", hypervisorNode)
         .task("template user-data")(
           Task.WriteFile(
-            content = CloudConfigTemplate.render("tst7", "ljalbinson.com", "10.10.5.19",
-              "192.168.1.70", "192.168.1.71", "localadmin", "passw0rd",
-              "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCh3x5I0xfDt1XWoJyRovdmhelVvU9HW8W5kUrK85q593JFAx0EazsTJ1wKBpQGw7YGhf5EzhiAMsPJjZpOMN0XuzT7+UzYcKRpTaZ5eWMXRSbjnYcd+BoOGaLMjJPN7x7yu6pbXbW2VP7vCZem+5yIJUW4gB/2GqhEQAxg+0+zM66/93PgJ5GPd9mvwN8MkU7z0AV53Hlz6QJo7310Vxehe80NGKwgmxOZz6rjcnf3155vau48Ol0stghE0hgBCFDQcL14Aqdvi3TX9VT0uHJQK9BcMzchd9RyteNVrO/lYf10gL2OH68BUFZPfv9QJrO9kempCMvZplGJl29rvT55 localadmin@xh4", "Europe/London"),
+            content = CloudConfigTemplate.render(
+              "tst7",
+              "ljalbinson.com",
+              "10.10.5.19",
+              "192.168.1.70",
+              "192.168.1.71",
+              "localadmin",
+              "passw0rd",
+              "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCh3x5I0xfDt1XWoJyRovdmhelVvU9HW8W5kUrK85q593JFAx0EazsTJ1wKBpQGw7YGhf5EzhiAMsPJjZpOMN0XuzT7+UzYcKRpTaZ5eWMXRSbjnYcd+BoOGaLMjJPN7x7yu6pbXbW2VP7vCZem+5yIJUW4gB/2GqhEQAxg+0+zM66/93PgJ5GPd9mvwN8MkU7z0AV53Hlz6QJo7310Vxehe80NGKwgmxOZz6rjcnf3155vau48Ol0stghE0hgBCFDQcL14Aqdvi3TX9VT0uHJQK9BcMzchd9RyteNVrO/lYf10gL2OH68BUFZPfv9QJrO9kempCMvZplGJl29rvT55 localadmin@xh4",
+              "Europe/London"
+            ),
             dest = s"$workingDir/user-data",
             owner = "localadmin",
             group = "localadmin",
@@ -237,7 +256,16 @@ object kvm_vm_provision extends OrpheraClusterPlaybook:
         )
         .task("template network-config")(
           Task.WriteFile(
-            content = NetworkConfigTemplate.render("enp1s0", "10.10.5.19", 24, "255.255.255.0", "10.10.5.1", "192.168.1.70", "192.168.1.71", "ljalbinson.com"),
+            content = NetworkConfigTemplate.render(
+              "enp1s0",
+              "10.10.5.19",
+              24,
+              "255.255.255.0",
+              "10.10.5.1",
+              "192.168.1.70",
+              "192.168.1.71",
+              "ljalbinson.com"
+            ),
             dest = s"$workingDir/network-config",
             owner = "localadmin",
             group = "localadmin",
@@ -245,13 +273,19 @@ object kvm_vm_provision extends OrpheraClusterPlaybook:
           )
         )
         .task("build the cidata ISO from the three rendered files")(
-          Task.RunCommand(List("sh", "-c", s"cd $workingDir && $buildCidataIsoScript"), timeoutSeconds = 30)
+          Task.RunCommand(
+            List("sh", "-c", s"cd $workingDir && $buildCidataIsoScript"),
+            timeoutSeconds = 30
+          )
         )
         .build,
 
       stage("define-and-start-vm", hypervisorNode)
         .task(s"virt-install $vmName and boot it")(
-          Task.RunCommand(List("sh", "-c", defineAndStartVmScript), timeoutSeconds = 60)
+          Task.RunCommand(
+            List("sh", "-c", defineAndStartVmScript),
+            timeoutSeconds = 60
+          )
         )
         .build,
 
@@ -277,7 +311,6 @@ object kvm_vm_provision extends OrpheraClusterPlaybook:
         )
         .build
     )
-
 
 object CloudConfigTemplate {
 
@@ -364,8 +397,8 @@ object NetworkConfigTemplate {
   def render(
       nic: String,
       ipAddress: String,
-      ipMask: Int,          // prefix length, used by the VLAN (v2) form
-      netmask: String,      // dotted netmask, used by the plain (v1) form
+      ipMask: Int, // prefix length, used by the VLAN (v2) form
+      netmask: String, // dotted netmask, used by the plain (v1) form
       gateway: String,
       dns1: String,
       dns2: String,
@@ -423,7 +456,7 @@ object NetworkConfigTemplate {
 object MetaConfigTemplate {
 
   def render(): String =
-   s"""# instance-id: iid-local24
+    s"""# instance-id: iid-local24
        |local-hostname: cloudimg
        |""".stripMargin
 

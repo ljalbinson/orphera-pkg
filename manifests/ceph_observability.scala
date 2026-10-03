@@ -137,7 +137,8 @@ object ceph_observability extends OrpheraClusterPlaybook:
        |echo "prometheus reconfigured: now also scraping the ceph mgr target"""".stripMargin
 
   // node_exporter(6) + haproxy(3) + mysqld(3) + ceph(1) + prometheus-self(1) = 14.
-  private val expectedTargets = allNodes.length + haProxyNodes.length + haProxyNodes.length + 1 + 1
+  private val expectedTargets =
+    allNodes.length + haProxyNodes.length + haProxyNodes.length + 1 + 1
 
   private val extendedHealthScript =
     s"""TARGETS=$$(curl -s http://localhost:9090/api/v1/targets)
@@ -151,16 +152,23 @@ object ceph_observability extends OrpheraClusterPlaybook:
 
   val playbook: ClusterPlaybook =
     clusterPlaybook("ceph-observability")(
-
       stage("enable-ceph-prometheus-module", mgrNode)
-        .task("enable ceph mgr's built-in prometheus module and confirm :9283/metrics")(
-          Task.RunCommand(List("sh", "-c", enablePrometheusModuleScript), timeoutSeconds = 90)
+        .task(
+          "enable ceph mgr's built-in prometheus module and confirm :9283/metrics"
+        )(
+          Task.RunCommand(
+            List("sh", "-c", enablePrometheusModuleScript),
+            timeoutSeconds = 90
+          )
         )
         .build,
 
       stage("update-prometheus-scrape-config-for-ceph", monitoringNode)
         .task("rewrite prometheus.yml with the ceph job and restart")(
-          Task.RunCommand(List("sh", "-c", prometheusConfigScript), timeoutSeconds = 60)
+          Task.RunCommand(
+            List("sh", "-c", prometheusConfigScript),
+            timeoutSeconds = 60
+          )
         )
         .build,
 

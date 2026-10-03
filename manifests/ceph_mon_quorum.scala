@@ -43,10 +43,13 @@ object ceph_mon_quorum extends OrpheraClusterPlaybook:
 
   val playbook: ClusterPlaybook =
     clusterPlaybook("ceph-mon-quorum")(
-
       stage("install-mon-daemon", "tst0", "tst1", "tst2")
         .task("install ceph-mon")(
-          Task.Install(packages = List("ceph-mon", "ceph-base"), updateCache = true, version = "{{ceph_version}}")
+          Task.Install(
+            packages = List("ceph-mon", "ceph-base"),
+            updateCache = true,
+            version = "{{ceph_version}}"
+          )
         )
         .build,
 
@@ -61,10 +64,24 @@ object ceph_mon_quorum extends OrpheraClusterPlaybook:
 
       stage("distribute-mon-config", "tst1", "tst2")
         .task("distribute ceph.conf from tst0")(
-          Task.DistributeFile("tst0", "/etc/ceph/ceph.conf", "/etc/ceph/ceph.conf", "root", "root", 420)
+          Task.DistributeFile(
+            "tst0",
+            "/etc/ceph/ceph.conf",
+            "/etc/ceph/ceph.conf",
+            "root",
+            "root",
+            420
+          )
         )
         .task("distribute monmap from tst0")(
-          Task.DistributeFile("tst0", "/etc/ceph/monmap", "/etc/ceph/monmap", "root", "root", 420)
+          Task.DistributeFile(
+            "tst0",
+            "/etc/ceph/monmap",
+            "/etc/ceph/monmap",
+            "root",
+            "root",
+            420
+          )
         )
         .build,
 

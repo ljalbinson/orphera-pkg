@@ -78,7 +78,8 @@ object ceph_performance_test extends OrpheraClusterPlaybook:
        |fi
        |echo "rados bench $mode: $${BANDWIDTH} MB/sec"""".stripMargin
 
-  private val writeBenchScript = benchScript("write", "--no-cleanup --run-name orphera-perf-run")
+  private val writeBenchScript =
+    benchScript("write", "--no-cleanup --run-name orphera-perf-run")
   private val seqReadBenchScript = benchScript("seq")
   private val randReadBenchScript = benchScript("rand")
 
@@ -92,37 +93,52 @@ object ceph_performance_test extends OrpheraClusterPlaybook:
 
   val playbook: ClusterPlaybook =
     clusterPlaybook("ceph-performance-test")(
-
       stage("create-benchmark-pool", adminNode)
         .task("create (or recreate) the disposable benchmark pool")(
-          Task.RunCommand(List("sh", "-c", createPoolScript), timeoutSeconds = 60)
+          Task
+            .RunCommand(List("sh", "-c", createPoolScript), timeoutSeconds = 60)
         )
         .build,
 
       stage("run-write-benchmark", adminNode)
         .task(s"rados bench write, ${benchSeconds}s")(
-          Task.RunCommand(List("sh", "-c", writeBenchScript), timeoutSeconds = benchSeconds + 60)
+          Task.RunCommand(
+            List("sh", "-c", writeBenchScript),
+            timeoutSeconds = benchSeconds + 60
+          )
         )
         .build,
 
       stage("run-sequential-read-benchmark", adminNode)
         .task(s"rados bench seq read, ${benchSeconds}s")(
-          Task.RunCommand(List("sh", "-c", seqReadBenchScript), timeoutSeconds = benchSeconds + 60)
+          Task.RunCommand(
+            List("sh", "-c", seqReadBenchScript),
+            timeoutSeconds = benchSeconds + 60
+          )
         )
         .build,
 
       stage("run-random-read-benchmark", adminNode)
         .task(s"rados bench rand read, ${benchSeconds}s")(
-          Task.RunCommand(List("sh", "-c", randReadBenchScript), timeoutSeconds = benchSeconds + 60)
+          Task.RunCommand(
+            List("sh", "-c", randReadBenchScript),
+            timeoutSeconds = benchSeconds + 60
+          )
         )
         .build,
 
       stage("cleanup-benchmark", adminNode)
         .task("clean up benchmark objects")(
-          Task.RunCommand(List("sh", "-c", cleanupDataScript), timeoutSeconds = 60)
+          Task.RunCommand(
+            List("sh", "-c", cleanupDataScript),
+            timeoutSeconds = 60
+          )
         )
         .task("remove benchmark pool")(
-          Task.RunCommand(List("sh", "-c", teardownPoolScript), timeoutSeconds = 60)
+          Task.RunCommand(
+            List("sh", "-c", teardownPoolScript),
+            timeoutSeconds = 60
+          )
         )
         .task("performance test complete")(
           Task.Debug(

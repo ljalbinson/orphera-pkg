@@ -271,7 +271,9 @@ object mariadb_haproxy_keepalived extends OrpheraClusterPlaybook:
 
   private def keepalivedConfigScript(host: String): String =
     val (priority, state) = keepalivedPriorityAndState(host)
-    val peerLines = keepalivedPeers(host).map(p => s"        {{nodes.$p.cluster_ip}}").mkString("\n")
+    val peerLines = keepalivedPeers(host)
+      .map(p => s"        {{nodes.$p.cluster_ip}}")
+      .mkString("\n")
     s"""IFACE=$$(ip -4 route show default | awk '{print $$5; exit}')
        |cat > /etc/keepalived/keepalived.conf <<EOF
        |vrrp_script chk_haproxy {
@@ -305,7 +307,9 @@ object mariadb_haproxy_keepalived extends OrpheraClusterPlaybook:
        |systemctl daemon-reload
        |systemctl enable --now keepalived
        |systemctl restart keepalived
-       |echo "keepalived configured on $host: priority=$priority state=$state, peers=${keepalivedPeers(host).mkString(",")}"""".stripMargin
+       |echo "keepalived configured on $host: priority=$priority state=$state, peers=${keepalivedPeers(
+        host
+      ).mkString(",")}"""".stripMargin
 
   // Checked independently on EACH node (`requiredCount = 1` against three
   // candidates) — this isn't really a quorum in the usual sense (it's
@@ -335,10 +339,12 @@ object mariadb_haproxy_keepalived extends OrpheraClusterPlaybook:
 
   val playbook: ClusterPlaybook =
     clusterPlaybook("mariadb-haproxy-keepalived")(
-
       stage("install-haproxy-keepalived", "tst0", "tst1", "tst2")
         .task("install haproxy, keepalived")(
-          Task.Install(packages = List("haproxy", "keepalived"), updateCache = true)
+          Task.Install(
+            packages = List("haproxy", "keepalived"),
+            updateCache = true
+          )
         )
         .build,
 

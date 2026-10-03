@@ -10,5 +10,7 @@ object arithmetic_demo extends OrpheraPlaybook:
   val playbook: Playbook =
     PlaybookDsl
       .playbook("arithmetic-demo", "tst0")
-      .task("show computed port")(Task.Debug(s"computed target_port = $targetPort"))
+      .task("show computed port")(
+        Task.Debug(s"computed target_port = $targetPort")
+      )
       .build

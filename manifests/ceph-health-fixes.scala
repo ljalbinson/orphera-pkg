@@ -7,7 +7,13 @@ object ceph_health_fixes extends OrpheraClusterPlaybook:
     clusterPlaybook("ceph-health-fixes")(
       stage("apply-fixes", "tst0")
         .task("disable insecure global_id reclaim")(
-          Task.RunCommand(List("sh", "-c", "ceph config set mon auth_allow_insecure_global_id_reclaim false"))
+          Task.RunCommand(
+            List(
+              "sh",
+              "-c",
+              "ceph config set mon auth_allow_insecure_global_id_reclaim false"
+            )
+          )
         )
         .task("enable msgr2")(
           Task.RunCommand(List("sh", "-c", "ceph mon enable-msgr2"))

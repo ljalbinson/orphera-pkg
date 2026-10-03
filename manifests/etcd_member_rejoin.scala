@@ -60,7 +60,9 @@ object etcd_member_rejoin extends OrpheraClusterPlaybook:
   // error — same "check first, act only if needed" convention as
   // etcd_cluster.scala's installEtcdScript.
   private val removeMemberScript =
-    s"""MEMBER_ID=$$(${etcdCtl("member list")} | grep ', tst2,' | cut -d',' -f1 | tr -d ' ')
+    s"""MEMBER_ID=$$(${etcdCtl(
+        "member list"
+      )} | grep ', tst2,' | cut -d',' -f1 | tr -d ' ')
        |if [ -n "$$MEMBER_ID" ]; then
        |  echo "Removing tst2 (member $$MEMBER_ID) from the cluster"
        |  ${etcdCtl("member remove \"$MEMBER_ID\"")}
@@ -85,7 +87,9 @@ object etcd_member_rejoin extends OrpheraClusterPlaybook:
     s"""EXISTING=$$(${etcdCtl("member list")} | grep ', tst2,' || true)
        |if [ -z "$$EXISTING" ]; then
        |  echo "Registering tst2 as a new member"
-       |  ${etcdCtl("member add tst2 --peer-urls=http://{{nodes.tst2.cluster_ip}}:2380")}
+       |  ${etcdCtl(
+        "member add tst2 --peer-urls=http://{{nodes.tst2.cluster_ip}}:2380"
+      )}
        |else
        |  echo "tst2 is already registered as a member — skipping member add"
        |fi""".stripMargin
@@ -131,7 +135,6 @@ object etcd_member_rejoin extends OrpheraClusterPlaybook:
 
   val playbook: ClusterPlaybook =
     clusterPlaybook("etcd-member-rejoin")(
-
       stage("show-roster-before", "tst0")
         .task("print member roster (before)")(
           Task.RunCommand(List("sh", "-c", printRosterScript))
@@ -183,7 +186,9 @@ object etcd_member_rejoin extends OrpheraClusterPlaybook:
           // re-added member gets a fresh ID even though the name and
           // address are unchanged. Same ID would mean this wasn't a
           // real rejoin.
-          Task.Debug("tst2 rejoined — compare its member ID above against the 'before' roster; it should be different.")
+          Task.Debug(
+            "tst2 rejoined — compare its member ID above against the 'before' roster; it should be different."
+          )
         )
         .build
     )

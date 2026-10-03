@@ -264,7 +264,6 @@ object wordpress_site extends OrpheraClusterPlaybook:
 
   val playbook: ClusterPlaybook =
     clusterPlaybook("wordpress-site")(
-
       stage("create-wordpress-database", "tst0")
         .task(s"create $dbName database and $dbUser on the Galera cluster")(
           Task.RunCommand(List("sh", "-c", createDatabaseScript))
@@ -276,7 +275,10 @@ object wordpress_site extends OrpheraClusterPlaybook:
           Task.Install(packages = wordpressPackages, updateCache = true)
         )
         .task("download and extract WordPress")(
-          Task.RunCommand(List("sh", "-c", downloadWordpressScript), timeoutSeconds = 120)
+          Task.RunCommand(
+            List("sh", "-c", downloadWordpressScript),
+            timeoutSeconds = 120
+          )
         )
         .task("write wp-config.php")(
           Task.RunCommand(List("sh", "-c", writeWpConfigScript))
@@ -310,7 +312,9 @@ object wordpress_site extends OrpheraClusterPlaybook:
           )
         )
         .task("wordpress site confirmed")(
-          Task.Debug(s"WordPress reachable at http://tst5.ljalbinson.com/ (10.10.5.17), database on the Galera cluster via $vip:3306 — open it in a browser to run the WordPress install wizard.")
+          Task.Debug(
+            s"WordPress reachable at http://tst5.ljalbinson.com/ (10.10.5.17), database on the Galera cluster via $vip:3306 — open it in a browser to run the WordPress install wizard."
+          )
         )
         .build
     )

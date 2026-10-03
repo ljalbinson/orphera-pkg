@@ -274,10 +274,12 @@ object observability_stack extends OrpheraClusterPlaybook:
 
   val playbook: ClusterPlaybook =
     clusterPlaybook("observability-stack")(
-
       stage("install-node-exporter", allNodes*)
         .task("install prometheus-node-exporter")(
-          Task.Install(packages = List("prometheus-node-exporter"), updateCache = true)
+          Task.Install(
+            packages = List("prometheus-node-exporter"),
+            updateCache = true
+          )
         )
         .task("start node_exporter")(
           Task.RunCommand(List("sh", "-c", startNodeExporterScript))
@@ -289,16 +291,25 @@ object observability_stack extends OrpheraClusterPlaybook:
           Task.Install(packages = List("prometheus"), updateCache = true)
         )
         .task("write prometheus.yml and (re)start prometheus")(
-          Task.RunCommand(List("sh", "-c", prometheusConfigScript), timeoutSeconds = 60)
+          Task.RunCommand(
+            List("sh", "-c", prometheusConfigScript),
+            timeoutSeconds = 60
+          )
         )
         .build,
 
       stage("install-grafana", monitoringNode)
         .task("add Grafana's apt repo and install grafana")(
-          Task.RunCommand(List("sh", "-c", installGrafanaScript), timeoutSeconds = 120)
+          Task.RunCommand(
+            List("sh", "-c", installGrafanaScript),
+            timeoutSeconds = 120
+          )
         )
         .task("provision Prometheus datasource and (re)start grafana-server")(
-          Task.RunCommand(List("sh", "-c", provisionDatasourceScript), timeoutSeconds = 60)
+          Task.RunCommand(
+            List("sh", "-c", provisionDatasourceScript),
+            timeoutSeconds = 60
+          )
         )
         .build,
 

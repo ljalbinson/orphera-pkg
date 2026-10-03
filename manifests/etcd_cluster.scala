@@ -115,13 +115,15 @@ object etcd_cluster extends OrpheraClusterPlaybook:
 
   val playbook: ClusterPlaybook =
     clusterPlaybook("etcd-cluster")(
-
       stage("install-etcd", "tst0", "tst1", "tst2")
         .task("install curl/tar prerequisites")(
           Task.Install(packages = List("curl", "tar"), updateCache = true)
         )
         .task("download and install etcd binaries")(
-          Task.RunCommand(List("sh", "-c", installEtcdScript), timeoutSeconds = 120)
+          Task.RunCommand(
+            List("sh", "-c", installEtcdScript),
+            timeoutSeconds = 120
+          )
         )
         .build,
 
@@ -157,10 +159,13 @@ object etcd_cluster extends OrpheraClusterPlaybook:
           )
         )
         .task("print member roster")(
-          Task.RunCommand(List(
-            "sh", "-c",
-            "ETCDCTL_API=3 /usr/local/bin/etcdctl --endpoints=http://127.0.0.1:2379 member list --write-out=table"
-          ))
+          Task.RunCommand(
+            List(
+              "sh",
+              "-c",
+              "ETCDCTL_API=3 /usr/local/bin/etcdctl --endpoints=http://127.0.0.1:2379 member list --write-out=table"
+            )
+          )
         )
         .task("quorum confirmed")(
           Task.Debug("3-node etcd cluster healthy.")

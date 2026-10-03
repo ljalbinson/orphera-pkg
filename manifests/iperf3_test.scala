@@ -95,7 +95,9 @@ object iperf3_test extends OrpheraClusterPlaybook:
         .build,
 
       stage("start-iperf3-servers", serverHost)
-        .task("start one iperf3 server per expected client, on separate ports")(startServers)
+        .task("start one iperf3 server per expected client, on separate ports")(
+          startServers
+        )
         .build,
 
       stage("run-clients-in-parallel", clientHosts*)

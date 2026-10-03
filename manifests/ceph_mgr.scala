@@ -19,10 +19,13 @@ object ceph_mgr extends OrpheraClusterPlaybook:
 
   val playbook: ClusterPlaybook =
     clusterPlaybook("ceph-mgr")(
-
       stage("install-mgr-daemon", "tst0")
         .task("install ceph-mgr")(
-          Task.Install(packages = List("ceph-mgr"), updateCache = true, version = "{{ceph_version}}")
+          Task.Install(
+            packages = List("ceph-mgr"),
+            updateCache = true,
+            version = "{{ceph_version}}"
+          )
         )
         .build,
 
@@ -37,7 +40,12 @@ object ceph_mgr extends OrpheraClusterPlaybook:
 
       stage("confirm-mgr", "tst0")
         .waitFor(
-          HealthCheck.Command("tst0", List("sh", "-c", confirmMgrScript), pollIntervalSeconds = 5, timeoutSeconds = 60)
+          HealthCheck.Command(
+            "tst0",
+            List("sh", "-c", confirmMgrScript),
+            pollIntervalSeconds = 5,
+            timeoutSeconds = 60
+          )
         )
         .task("mgr confirmed")(
           Task.Debug("Mgr daemon active.")

@@ -12,10 +12,13 @@ object ceph_mon_keyring extends OrpheraClusterPlaybook:
 
   val playbook: ClusterPlaybook =
     clusterPlaybook("ceph-mon-keyring")(
-
       stage("install-tools", "tst0", "tst1", "tst2")
         .task("install ceph-common (pinned version)")(
-          Task.Install(packages = List("ceph-common", "ceph-base"), updateCache = true, version = "{{ceph_version}}")
+          Task.Install(
+            packages = List("ceph-common", "ceph-base"),
+            updateCache = true,
+            version = "{{ceph_version}}"
+          )
         )
         .build,
 

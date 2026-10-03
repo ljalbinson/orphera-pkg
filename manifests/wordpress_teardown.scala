@@ -49,7 +49,6 @@ object wordpress_teardown extends OrpheraClusterPlaybook:
 
   val playbook: ClusterPlaybook =
     clusterPlaybook("wordpress-teardown")(
-
       stage("drop-wordpress-database", "tst0")
         .task(s"drop $dbName database and $dbUser on the Galera cluster")(
           Task.RunCommand(List("sh", "-c", dropDatabaseScript))
@@ -58,10 +57,13 @@ object wordpress_teardown extends OrpheraClusterPlaybook:
 
       stage("teardown-tst5", "tst5")
         .task("stop nginx and php8.3-fpm")(
-          Task.RunCommand(List(
-            "sh", "-c",
-            "systemctl stop nginx php8.3-fpm 2>/dev/null || true"
-          ))
+          Task.RunCommand(
+            List(
+              "sh",
+              "-c",
+              "systemctl stop nginx php8.3-fpm 2>/dev/null || true"
+            )
+          )
         )
         .task("purge nginx, php8.3-fpm and PHP extensions")(
           Task.Remove(

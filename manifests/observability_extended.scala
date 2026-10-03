@@ -225,7 +225,9 @@ object observability_extended extends OrpheraClusterPlaybook:
   private val nodeExporterTargets =
     allNodes.map(n => s"'{{nodes.$n.cluster_ip}}:9100'").mkString(", ")
   private val haproxyExporterTargets =
-    haProxyNodes.map(n => s"'{{nodes.$n.cluster_ip}}:$haproxyMetricsPort'").mkString(", ")
+    haProxyNodes
+      .map(n => s"'{{nodes.$n.cluster_ip}}:$haproxyMetricsPort'")
+      .mkString(", ")
   private val mysqldExporterTargets =
     haProxyNodes.map(n => s"'{{nodes.$n.cluster_ip}}:9104'").mkString(", ")
 
@@ -266,7 +268,8 @@ object observability_extended extends OrpheraClusterPlaybook:
   // Same "prove the real thing" shape as observability_stack.scala's own
   // health check: total expected targets is node_exporter(6) +
   // haproxy(3) + mysqld(3) + prometheus-self(1) = 13.
-  private val expectedTargets = allNodes.length + haProxyNodes.length + haProxyNodes.length + 1
+  private val expectedTargets =
+    allNodes.length + haProxyNodes.length + haProxyNodes.length + 1
 
   private val extendedHealthScript =
     s"""TARGETS=$$(curl -s http://localhost:9090/api/v1/targets)
@@ -280,10 +283,12 @@ object observability_extended extends OrpheraClusterPlaybook:
 
   val playbook: ClusterPlaybook =
     clusterPlaybook("observability-extended")(
-
       stage("add-haproxy-metrics-endpoint", haProxyNodes*)
         .task("append prometheus-exporter frontend to haproxy.cfg and restart")(
-          Task.RunCommand(List("sh", "-c", haproxyMetricsScript), timeoutSeconds = 60)
+          Task.RunCommand(
+            List("sh", "-c", haproxyMetricsScript),
+            timeoutSeconds = 60
+          )
         )
         .build,
 
@@ -297,16 +302,25 @@ object observability_extended extends OrpheraClusterPlaybook:
 
       stage("install-mysqld-exporter", haProxyNodes*)
         .task("install prometheus-mysqld-exporter")(
-          Task.Install(packages = List("prometheus-mysqld-exporter"), updateCache = true)
+          Task.Install(
+            packages = List("prometheus-mysqld-exporter"),
+            updateCache = true
+          )
         )
         .task("configure and (re)start mysqld_exporter")(
-          Task.RunCommand(List("sh", "-c", configureMysqldExporterScript), timeoutSeconds = 60)
+          Task.RunCommand(
+            List("sh", "-c", configureMysqldExporterScript),
+            timeoutSeconds = 60
+          )
         )
         .build,
 
       stage("update-prometheus-scrape-config", monitoringNode)
         .task("rewrite prometheus.yml with haproxy + mysqld jobs and restart")(
-          Task.RunCommand(List("sh", "-c", prometheusConfigScript), timeoutSeconds = 60)
+          Task.RunCommand(
+            List("sh", "-c", prometheusConfigScript),
+            timeoutSeconds = 60
+          )
         )
         .build,
 

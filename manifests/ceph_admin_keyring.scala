@@ -11,7 +11,6 @@ object ceph_admin_keyring extends OrpheraClusterPlaybook:
 
   val playbook: ClusterPlaybook =
     clusterPlaybook("ceph-admin-keyring")(
-
       stage("generate-and-register", "tst0")
         .task("create and register client.admin via mon. auth")(
           Task.RunCommand(List("sh", "-c", createAndRegisterScript))
@@ -20,7 +19,14 @@ object ceph_admin_keyring extends OrpheraClusterPlaybook:
 
       stage("distribute", "tst1", "tst2")
         .task("distribute admin keyring from tst0")(
-          Task.DistributeFile("tst0", "/etc/ceph/ceph.client.admin.keyring", "/etc/ceph/ceph.client.admin.keyring", "root", "root", 384)
+          Task.DistributeFile(
+            "tst0",
+            "/etc/ceph/ceph.client.admin.keyring",
+            "/etc/ceph/ceph.client.admin.keyring",
+            "root",
+            "root",
+            384
+          )
         )
         .build
     )

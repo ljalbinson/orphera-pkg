@@ -54,19 +54,22 @@ object cephadm_add_osds extends OrpheraClusterPlaybook:
   private val addOsdTasks: List[(String, Task.RunCommand)] =
     for
       (host, devices) <- osdDevices.toList.sortBy(_._1)
-      device          <- devices
-    yield
-      s"add osd on $host:$device" -> Task.RunCommand(
-        List("sh", "-c", s"cephadm shell -- ceph orch daemon add osd $host:$device"),
-        timeoutSeconds = 120
-      )
+      device <- devices
+    yield s"add osd on $host:$device" -> Task.RunCommand(
+      List(
+        "sh",
+        "-c",
+        s"cephadm shell -- ceph orch daemon add osd $host:$device"
+      ),
+      timeoutSeconds = 120
+    )
 
   val playbook: ClusterPlaybook =
     clusterPlaybook("cephadm-add-osds")(
-
       addOsdTasks
-        .foldLeft(stage("apply-osd-spec", "tst0")) { case (builder, (name, task)) =>
-          builder.task(name)(task)
+        .foldLeft(stage("apply-osd-spec", "tst0")) {
+          case (builder, (name, task)) =>
+            builder.task(name)(task)
         }
         .build,
 
@@ -91,7 +94,9 @@ object cephadm_add_osds extends OrpheraClusterPlaybook:
           )
         )
         .task("osds confirmed")(
-          Task.Debug(s"All $expectedOsdCount specified OSD device(s) are up and in.")
+          Task.Debug(
+            s"All $expectedOsdCount specified OSD device(s) are up and in."
+          )
         )
         .build
     )

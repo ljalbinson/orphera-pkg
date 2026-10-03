@@ -63,14 +63,24 @@ object mariadb_galera_teardown extends OrpheraClusterPlaybook:
   private def teardownStage(host: String) =
     stage(s"teardown-$host", host)
       .task(s"stop mariadb, haproxy, keepalived on $host")(
-        Task.RunCommand(List(
-          "sh", "-c",
-          "systemctl stop mariadb haproxy keepalived clustercheck.socket 2>/dev/null || true"
-        ))
+        Task.RunCommand(
+          List(
+            "sh",
+            "-c",
+            "systemctl stop mariadb haproxy keepalived clustercheck.socket 2>/dev/null || true"
+          )
+        )
       )
-      .task(s"purge mariadb-server, mariadb-client, mariadb-backup, galera-4 on $host")(
+      .task(
+        s"purge mariadb-server, mariadb-client, mariadb-backup, galera-4 on $host"
+      )(
         Task.Remove(
-          packages = List("mariadb-server", "mariadb-client", "mariadb-backup", "galera-4"),
+          packages = List(
+            "mariadb-server",
+            "mariadb-client",
+            "mariadb-backup",
+            "galera-4"
+          ),
           purge = true
         )
       )

@@ -15,10 +15,13 @@ object ceph_osd extends OrpheraClusterPlaybook:
 
   val playbook: ClusterPlaybook =
     clusterPlaybook("ceph-osd")(
-
       stage("install-osd-daemon", "tst0", "tst1", "tst2")
         .task("install ceph-osd")(
-          Task.Install(packages = List("ceph-osd"), updateCache = true, version = "{{ceph_version}}")
+          Task.Install(
+            packages = List("ceph-osd"),
+            updateCache = true,
+            version = "{{ceph_version}}"
+          )
         )
         .build,
 
@@ -27,7 +30,10 @@ object ceph_osd extends OrpheraClusterPlaybook:
           Task.RunCommand(List("sh", "-c", checkDeviceScript))
         )
         .task("create OSD on /dev/sdb")(
-          Task.RunCommand(List("sh", "-c", "ceph-volume lvm create --data /dev/sdb"), timeoutSeconds = 300)
+          Task.RunCommand(
+            List("sh", "-c", "ceph-volume lvm create --data /dev/sdb"),
+            timeoutSeconds = 300
+          )
         )
         .build,
 

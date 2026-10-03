@@ -120,7 +120,11 @@ object etcd_grow_cluster extends OrpheraClusterPlaybook:
   // `raw` keeps $-interpolation but skips escape validation entirely, so
   // the backslashes pass through untouched — caught by a real compile
   // error the first time this file was actually run.
-  private def joinScript(name: String, clusterIp: String, initialCluster: String) =
+  private def joinScript(
+      name: String,
+      clusterIp: String,
+      initialCluster: String
+  ) =
     raw"""cat > /etc/systemd/system/etcd.service <<EOF
        |[Unit]
        |Description=etcd distributed key-value store (orphera etcd_cluster test)
@@ -163,13 +167,15 @@ object etcd_grow_cluster extends OrpheraClusterPlaybook:
 
   val playbook: ClusterPlaybook =
     clusterPlaybook("etcd-grow-cluster")(
-
       stage("install-etcd-new-nodes", "tst3", "tst4")
         .task("install curl/tar prerequisites")(
           Task.Install(packages = List("curl", "tar"), updateCache = true)
         )
         .task("download and install etcd binaries")(
-          Task.RunCommand(List("sh", "-c", installEtcdScript), timeoutSeconds = 120)
+          Task.RunCommand(
+            List("sh", "-c", installEtcdScript),
+            timeoutSeconds = 120
+          )
         )
         .build,
 
@@ -186,19 +192,25 @@ object etcd_grow_cluster extends OrpheraClusterPlaybook:
       // on tst0" and "start on tst3" into one stage would race them.
       stage("register-tst3", "tst0")
         .task("register tst3 as a new member")(
-          Task.RunCommand(List(
-            "sh", "-c",
-            registerScript("tst3", "http://{{nodes.tst3.cluster_ip}}:2380")
-          ))
+          Task.RunCommand(
+            List(
+              "sh",
+              "-c",
+              registerScript("tst3", "http://{{nodes.tst3.cluster_ip}}:2380")
+            )
+          )
         )
         .build,
 
       stage("join-tst3", "tst3")
         .task("write systemd unit and start etcd")(
-          Task.RunCommand(List(
-            "sh", "-c",
-            joinScript("tst3", "{{cluster_ip}}", clusterAtThreePlusTst3)
-          ))
+          Task.RunCommand(
+            List(
+              "sh",
+              "-c",
+              joinScript("tst3", "{{cluster_ip}}", clusterAtThreePlusTst3)
+            )
+          )
         )
         .build,
 
@@ -243,19 +255,25 @@ object etcd_grow_cluster extends OrpheraClusterPlaybook:
 
       stage("register-tst4", "tst0")
         .task("register tst4 as a new member")(
-          Task.RunCommand(List(
-            "sh", "-c",
-            registerScript("tst4", "http://{{nodes.tst4.cluster_ip}}:2380")
-          ))
+          Task.RunCommand(
+            List(
+              "sh",
+              "-c",
+              registerScript("tst4", "http://{{nodes.tst4.cluster_ip}}:2380")
+            )
+          )
         )
         .build,
 
       stage("join-tst4", "tst4")
         .task("write systemd unit and start etcd")(
-          Task.RunCommand(List(
-            "sh", "-c",
-            joinScript("tst4", "{{cluster_ip}}", clusterAtFourPlusTst4)
-          ))
+          Task.RunCommand(
+            List(
+              "sh",
+              "-c",
+              joinScript("tst4", "{{cluster_ip}}", clusterAtFourPlusTst4)
+            )
+          )
         )
         .build,
 
@@ -273,7 +291,9 @@ object etcd_grow_cluster extends OrpheraClusterPlaybook:
           Task.RunCommand(List("sh", "-c", printRosterScript))
         )
         .task("growth confirmed")(
-          Task.Debug("etcd cluster grown from 3 to 5 nodes: tst0, tst1, tst2, tst3, tst4.")
+          Task.Debug(
+            "etcd cluster grown from 3 to 5 nodes: tst0, tst1, tst2, tst3, tst4."
+          )
         )
         .build
     )

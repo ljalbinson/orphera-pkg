@@ -118,8 +118,10 @@ object cephadm_teardown extends OrpheraClusterPlaybook:
       |""".stripMargin
 
   private def zapDevicesScript(host: String): String =
-    dmCleanupScript + "\n" + devicesToZap.getOrElse(host, Nil).map { dev =>
-      s"""
+    dmCleanupScript + "\n" + devicesToZap
+      .getOrElse(host, Nil)
+      .map { dev =>
+        s"""
         |# Defense in depth, independent of by-id correctness: if this
         |# device (or any partition on it) is actually mounted right now,
         |# it is by definition not a spare OSD disk — refuse to touch it
@@ -162,15 +164,22 @@ object cephadm_teardown extends OrpheraClusterPlaybook:
         |partprobe $dev 2>/dev/null || true
         |fi
         |""".stripMargin
-    }.mkString("\n") + "true\n"
+      }
+      .mkString("\n") + "true\n"
 
   private def teardownStage(host: String) =
     stage(s"teardown-$host", host)
       .task(s"remove cephadm-managed cluster on $host (if any)")(
-        Task.RunCommand(List("sh", "-c", removeClusterScript), timeoutSeconds = 120)
+        Task.RunCommand(
+          List("sh", "-c", removeClusterScript),
+          timeoutSeconds = 120
+        )
       )
       .task(s"zap OSD disks on $host")(
-        Task.RunCommand(List("sh", "-c", zapDevicesScript(host)), timeoutSeconds = 90)
+        Task.RunCommand(
+          List("sh", "-c", zapDevicesScript(host)),
+          timeoutSeconds = 90
+        )
       )
       .build
 
