@@ -216,33 +216,32 @@ object kvm_vm_provision extends OrpheraClusterPlaybook:
 
       stage("write-cloud-init-config", hypervisorNode)
         .task("template user-data")(
-          Task.Copy(
-            src = "~/templates/cloud-init/user-data.j2",
+          Task.WriteFile(
+            content = CloudConfigTemplate.render("tst7", "ljalbinson.com", "10.10.5.19",
+              "192.168.1.70", "192.168.1.71", "localadmin", "passw0rd",
+              "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCh3x5I0xfDt1XWoJyRovdmhelVvU9HW8W5kUrK85q593JFAx0EazsTJ1wKBpQGw7YGhf5EzhiAMsPJjZpOMN0XuzT7+UzYcKRpTaZ5eWMXRSbjnYcd+BoOGaLMjJPN7x7yu6pbXbW2VP7vCZem+5yIJUW4gB/2GqhEQAxg+0+zM66/93PgJ5GPd9mvwN8MkU7z0AV53Hlz6QJo7310Vxehe80NGKwgmxOZz6rjcnf3155vau48Ol0stghE0hgBCFDQcL14Aqdvi3TX9VT0uHJQK9BcMzchd9RyteNVrO/lYf10gL2OH68BUFZPfv9QJrO9kempCMvZplGJl29rvT55 localadmin@xh4", "Europe/London"),
             dest = s"$workingDir/user-data",
             owner = "localadmin",
             group = "localadmin",
-            mode = 420, // 0644
-            vars = cloudInitVars
+            mode = 420
           )
         )
         .task("template meta-data")(
-          Task.Copy(
-            src = "templates/cloud-init/meta-data.j2",
+          Task.WriteFile(
+            content = MetaConfigTemplate.render(),
             dest = s"$workingDir/meta-data",
             owner = "localadmin",
             group = "localadmin",
-            mode = 420,
-            vars = cloudInitVars
+            mode = 420
           )
         )
         .task("template network-config")(
-          Task.Copy(
-            src = "templates/cloud-init/network-config.j2",
+          Task.WriteFile(
+            content = NetworkConfigTemplate.render("enp1s0", "10.10.5.19", 24, "255.255.255.0", "10.10.5.1", "192.168.1.70", "192.168.1.71", "ljalbinson.com"),
             dest = s"$workingDir/network-config",
             owner = "localadmin",
             group = "localadmin",
-            mode = 420,
-            vars = cloudInitVars
+            mode = 420
           )
         )
         .task("build the cidata ISO from the three rendered files")(
@@ -278,3 +277,154 @@ object kvm_vm_provision extends OrpheraClusterPlaybook:
         )
         .build
     )
+
+
+object CloudConfigTemplate {
+
+  def render(
+      hostname: String,
+      domainname: String,
+      ipAddress: String,
+      dns1: String,
+      dns2: String,
+      username: String,
+      password: String,
+      sshKey: String,
+      timezone: String = "Europe/London"
+  ): String =
+    s"""#cloud-config
+       |# password: passw0rd
+       |# chpasswd: { expire: False }
+       |# ssh_pwauth: True
+       |# Install my public ssh key to the first user-defined user configured
+       |# in cloud.cfg in the template (which is centos for CentOS cloud images)
+       |preserve_hostname: False
+       |hostname: $hostname
+       |fqdn: $hostname.$domainname
+       |
+       |# Users
+       |users:
+       |    - default
+       |    - name: $username
+       |      groups:
+       |        - wheel
+       |      shell: /bin/bash
+       |      oock_passwd: false
+       |      sudo:
+       |        - ALL=(ALL) NOPASSWD:ALL
+       |      ssh-authorized-keys:
+       |        - $sshKey
+       |
+       |chpasswd:
+       |  list:
+       |    - "$username:$password"
+       |  expire: false
+       |
+       |# Configure where output will go
+       |output:
+       |  all: ">> /var/log/cloud-init.log"
+       |
+       |# configure interaction with ssh server
+       |ssh_genkeytypes: ['ed25519', 'rsa']
+       |
+       |# Install my public ssh key to the first user-defined user configured
+       |# in cloud.cfg in the template (which is centos for CentOS cloud images)
+       |ssh_authorized_keys:
+       |  - $sshKey
+       |
+       |# set timezone for VM
+       |timezone: $timezone
+       |
+       |# Enter host in /etc/hosts
+       |write_files:
+       |  - path: /etc/hosts
+       |    content: |
+       |      127.0.0.1 localhost localhost.localdomain localhost4 localhost4.localdomain4
+       |      ::1 localhost localhost.localdomain localhost6 localhost6.localdomain6
+       |      $ipAddress $hostname.$domainname $hostname
+       |  - path: /etc/resolv.conf
+       |    content: |
+       |      nameserver $dns1
+       |      nameserver $dns2
+       |      search $domainname
+       |
+       |# Remove cloud-init
+       |runcmd:
+       |  - echo "Hi there"
+       |
+       |# EOF
+       |""".stripMargin
+}
+
+object NetworkConfigTemplate {
+
+  /** VLAN settings for nic0. When given, the netplan v2 form is used. */
+  final case class Vlan(name: String, id: Int, mtu: Int)
+
+  def render(
+      nic: String,
+      ipAddress: String,
+      ipMask: Int,          // prefix length, used by the VLAN (v2) form
+      netmask: String,      // dotted netmask, used by the plain (v1) form
+      gateway: String,
+      dns1: String,
+      dns2: String,
+      domainname: String,
+      vlan: Option[Vlan] = None
+  ): String =
+    vlan match {
+      case Some(v) =>
+        s"""network:
+           |  version: 2
+           |  ethernets:
+           |    $nic:
+           |      dhcp4: false
+           |  vlans:
+           |    ${v.name}:
+           |      link: "$nic"
+           |      id: ${v.id}
+           |      mtu: ${v.mtu}
+           |      optional: true
+           |      addresses:
+           |      - $ipAddress/$ipMask
+           |      nameservers:
+           |        addresses:
+           |        - $dns1
+           |        - $dns2
+           |        search:
+           |        - $domainname
+           |      routes:
+           |      - to: default
+           |        via: $gateway
+           |        metric: 100
+           |""".stripMargin
+
+      case None =>
+        s"""version: 1
+           |config:
+           |   - type: physical
+           |     name: ens3
+           |     name: $nic
+           |     subnets:
+           |        - type: static
+           |          address: $ipAddress
+           |          netmask: $netmask
+           |          gateway: $gateway
+           |   - type: nameserver
+           |     address:
+           |        - $dns1
+           |        - $dns2
+           |     search:
+           |        - $domainname
+           |""".stripMargin
+    }
+}
+
+object MetaConfigTemplate {
+
+  def render(): String =
+   s"""# instance-id: iid-local24
+       |local-hostname: cloudimg
+       |""".stripMargin
+
+}
