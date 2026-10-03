@@ -300,7 +300,7 @@ object kvm_vm_provision extends OrpheraClusterPlaybook:
             onNode = vmName,
             command = List("sh", "-c", "echo alive"),
             pollIntervalSeconds = 10,
-            timeoutSeconds = 300
+            timeoutSeconds = 30
           )
         )
         .task(s"$vmName provisioned and reachable")(
