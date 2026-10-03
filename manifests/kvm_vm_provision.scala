@@ -316,7 +316,6 @@ object kvm_vm_provision extends OrpheraClusterPlaybook:
         .waitFor(
           HealthCheck.Ssh(
             onNode = vmName,
-            host = "192.168.1.222",
             sshUser = "localadmin", // matches the `users:` entry CloudConfigTemplate renders
             sshKeyPath = None, // fill in a path if the operator's default identity isn't the right key
             remoteCommand = "true",
