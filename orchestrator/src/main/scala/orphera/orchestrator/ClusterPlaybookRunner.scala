@@ -614,11 +614,13 @@ object ClusterPlaybookRunner:
         val onNode = single match
           case HealthCheck.Sentinel(n, _, _, _, _) => n
           case HealthCheck.Command(n, _, _, _)     => n
+          case HealthCheck.Ssh(n, _, _, _, _, _)   => n
           case _                                   => ""
 
         val timeoutSeconds = single match
           case HealthCheck.Sentinel(_, _, _, _, t) => t
           case HealthCheck.Command(_, _, _, t)     => t
+          case HealthCheck.Ssh(_, _, _, _, _, t)   => t
           case _                                   => 0
 
         Inventory.all.find(_.name == onNode) match
@@ -643,6 +645,7 @@ object ClusterPlaybookRunner:
       case HealthCheck.Sentinel(_, _, _, p, t) => (p, t)
       case HealthCheck.Command(_, _, p, t)     => (p, t)
       case HealthCheck.Quorum(_, _, _, p, t)   => (p, t)
+      case HealthCheck.Ssh(_, _, _, _, p, t)   => (p, t)
 
     if elapsed >= timeoutSeconds then
       IO.println(
@@ -666,6 +669,9 @@ object ClusterPlaybookRunner:
 
       case HealthCheck.Command(_, command, _, _) =>
         collectExitCode(node, command).map(_ == 0)
+
+      case HealthCheck.Ssh(_, sshUser, sshKeyPath, remoteCommand, _, _) =>
+        SshDeployer.checkAlive(node, sshUser, sshKeyPath, remoteCommand)
 
       case HealthCheck.Quorum(_, _, _, _, _) =>
         IO.raiseError(

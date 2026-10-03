@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — `HealthCheck.Ssh` (SSH-based health check)
+
+A new `wait_for` health check variant that polls a node over plain SSH
+(`SshDeployer.checkAlive`) instead of Orphera's own agent RPC. Added
+after a real run of `manifests/kvm_vm_provision.scala` showed its
+`confirm-vm-reachable` stage timing out every time: that stage used
+`HealthCheck.Command`, which goes through `NodeClient` to an Orphera
+agent — but a brand-new VM provisioned by that same playbook can't
+possibly be running the agent yet, since cloud-init never installs
+one. SSH (via the VM's own `ssh_authorized_keys`, set by cloud-init) is
+the one thing a stock cloud image guarantees is reachable once boot
+finishes, so it's the only honest liveness probe at that point in a
+VM's life. Deliberately does not install or start the agent itself —
+that stays a separate, explicit `orphera bootstrap` step run by hand
+afterward. YAML: `ssh_user:` (required to select this variant),
+optional `ssh_key_path:`/`remote_command:` (default `"true"`).
+
 ### Added — `write-file` CLI command
 
 A direct CLI command for the `write_file` task added just before this:

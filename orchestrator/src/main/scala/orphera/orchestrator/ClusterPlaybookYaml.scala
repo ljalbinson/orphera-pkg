@@ -34,23 +34,47 @@ object ClusterPlaybookYaml:
         case None =>
           for
             onNode <- c.get[String]("on_node")
-            commandOpt <- c.get[Option[List[String]]]("command")
-            r <- commandOpt match
-              case Some(command) =>
-                Right(
-                  HealthCheck.Command(onNode, command, pollInterval, timeout)
-                )
-              case None =>
+            // "ssh_user" present -> a plain-SSH liveness check
+            // (HealthCheck.Ssh), checked before "command" since it also
+            // accepts an optional remote_command and would otherwise be
+            // ambiguous with the agent-RPC Command case below. See
+            // HealthCheck.Ssh's doc comment: this is for a brand-new VM
+            // that can't possibly be running the Orphera agent yet.
+            sshUserOpt <- c.get[Option[String]]("ssh_user")
+            r <- sshUserOpt match
+              case Some(sshUser) =>
                 for
-                  sentinelPath <- c.get[String]("sentinel_path")
-                  expectedSha256 <- c.get[String]("expected_sha256")
-                yield HealthCheck.Sentinel(
+                  sshKeyPath <- c.get[Option[String]]("ssh_key_path")
+                  remoteCommand <- c.getOrElse[String]("remote_command")("true")
+                yield HealthCheck.Ssh(
                   onNode,
-                  sentinelPath,
-                  expectedSha256,
+                  sshUser,
+                  sshKeyPath,
+                  remoteCommand,
                   pollInterval,
                   timeout
                 )
+              case None =>
+                for
+                  commandOpt <- c.get[Option[List[String]]]("command")
+                  r2 <- commandOpt match
+                    case Some(command) =>
+                      Right(
+                        HealthCheck
+                          .Command(onNode, command, pollInterval, timeout)
+                      )
+                    case None =>
+                      for
+                        sentinelPath <- c.get[String]("sentinel_path")
+                        expectedSha256 <- c.get[String]("expected_sha256")
+                      yield HealthCheck.Sentinel(
+                        onNode,
+                        sentinelPath,
+                        expectedSha256,
+                        pollInterval,
+                        timeout
+                      )
+                yield r2
           yield r
     yield result
 

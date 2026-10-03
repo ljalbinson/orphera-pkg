@@ -34,16 +34,19 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 //   2. The brand-new VM this playbook creates. The Ansible original
 //      doesn't need anything pre-installed on it — cloud-init runs,
 //      the OS comes up, `wait_for_connection` just waits for sshd.
-//      Orphera's confirm-vm-reachable stage below needs the NEW VM's
-//      own Orphera agent to be running before it can check anything
-//      the way every other health check in this project does — so
-//      user-data (see writeCloudInitConfigScript) has to install and
-//      start that agent itself during first boot. UNCONFIRMED here:
-//      exactly how (a package? a binary fetched from somewhere
-//      reachable during cloud-init? copied in via the cidata ISO
-//      alongside user-data/meta-data?) — flagged rather than guessed,
-//      the same way every other new mechanism in this project starts
-//      out flagged until a real run proves it one way or the other.
+//      RESOLVED by a real run: the first version of confirm-vm-reachable
+//      below used HealthCheck.Command (Orphera's own agent RPC) and
+//      timed out every time, because cloud-init never installs an agent
+//      that doesn't exist on the VM yet — a genuinely unresolvable
+//      chicken-and-egg if this playbook tried to make the agent a
+//      precondition of its own last stage. Fixed by adding a new
+//      primitive, HealthCheck.Ssh (see Stage.scala), and using THAT
+//      here instead: sshd is the one thing cloud-init actually
+//      guarantees is up, via the same users/ssh_authorized_keys block
+//      CloudConfigTemplate already renders. This stage deliberately
+//      does not install the agent either — that stays a separate,
+//      explicit `orphera bootstrap` step run by hand afterward, same
+//      as every other node in this project's history.
 //
 // OTHER ANSIBLE CONSTRUCTS THAT DON'T HAVE A DIRECT EQUIVALENT:
 //   - `register` + `when: result.stdout_lines` (the exists/snapshot/
@@ -289,24 +292,36 @@ object kvm_vm_provision extends OrpheraClusterPlaybook:
         )
         .build,
 
-      // UNCONFIRMED end-to-end, per the header comment: this only
-      // works once user-data's agent-install step is real. Modeled on
-      // the same "separate stage, waitFor runs before the stage's own
-      // tasks" lesson every observability manifest in this project
-      // already learned.
+      // Real run finding: the first version of this stage used
+      // HealthCheck.Command, which polls over Orphera's own agent RPC —
+      // but testvm0 can't possibly be running that agent yet (cloud-init's
+      // user-data here never installs/starts one, see CloudConfigTemplate
+      // below), so every poll failed the same way until the stage timed
+      // out. Switched to HealthCheck.Ssh: the one thing a stock cloud
+      // image's cloud-init guarantees is up once boot finishes is sshd,
+      // via the same users/ssh_authorized_keys block already in
+      // CloudConfigTemplate — so SSH, not the agent, is the honest
+      // liveness signal at this point in the VM's life. Deliberately
+      // does NOT install the agent itself; that stays a separate,
+      // explicit `orphera bootstrap` step run by hand afterward, same as
+      // every other node in this project's history (see the header
+      // comment's point #2 on the agent-install gap, which this stage no
+      // longer tries to paper over).
       stage("confirm-vm-reachable", vmName)
         .waitFor(
-          HealthCheck.Command(
+          HealthCheck.Ssh(
             onNode = vmName,
-            command = List("sh", "-c", "echo alive"),
+            sshUser = "localadmin", // matches the `users:` entry CloudConfigTemplate renders
+            sshKeyPath = None, // fill in a path if the operator's default identity isn't the right key
+            remoteCommand = "true",
             pollIntervalSeconds = 10,
             timeoutSeconds = 30
           )
         )
         .task(s"$vmName provisioned and reachable")(
           Task.Debug(
-            s"$vmName is up and answering Orphera's agent. Add it to inventory.yaml by hand " +
-              "before targeting it from any other manifest — this playbook does not do that for you."
+            s"$vmName is up and answering SSH. The Orphera agent is NOT installed yet — " +
+              "run `orphera bootstrap` against it by hand before targeting it from any other manifest."
           )
         )
         .build

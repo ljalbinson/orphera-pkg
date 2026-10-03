@@ -26,6 +26,25 @@ object SshDeployer:
       )
     yield ()
 
+  /** Runs `remoteCommand` over plain SSH and reports true/false on
+    * exit-0/non-zero, swallowing the failure rather than raising it —
+    * unlike bootstrap/teardown above, which legitimately want to blow up
+    * loudly on failure, this is a liveness POLL: connection refused
+    * (sshd not up yet), auth failure, and a non-zero remote command are
+    * all just "not ready yet, try again on the next interval" to a
+    * caller like ClusterPlaybookRunner.checkOnce. Built for HealthCheck.Ssh
+    * — confirming a brand-new VM is reachable before any Orphera agent
+    * could possibly be running on it yet, see that case's doc comment.
+    */
+  def checkAlive(
+      node: Node,
+      sshUser: String,
+      sshKeyPath: Option[String],
+      remoteCommand: String = "true"
+  ): IO[Boolean] =
+    sshRun(node, sshUser, sshKeyPath, remoteCommand, _ => IO.unit).attempt
+      .map(_.isRight)
+
   def teardown(
       node: Node,
       sshUser: String,
