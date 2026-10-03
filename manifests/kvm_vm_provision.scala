@@ -307,12 +307,21 @@ object kvm_vm_provision extends OrpheraClusterPlaybook:
       // every other node in this project's history (see the header
       // comment's point #2 on the agent-install gap, which this stage no
       // longer tries to paper over).
-      // host is given directly, not looked up from inventory.yaml —
-      // HealthCheck.Ssh deliberately doesn't require the new VM to be
-      // registered anywhere yet (see that case's doc comment); 192.168.1.222
-      // is the same static address CloudConfigTemplate/NetworkConfigTemplate
-      // already rendered into this VM's own cloud-init files above.
-      stage("confirm-vm-reachable", vmName)
+      // Real run finding #2: even with host given directly to
+      // HealthCheck.Ssh, this stage still failed — with a DIFFERENT
+      // error, "No matching nodes found in inventory", thrown before
+      // waitFor is ever even looked at. ClusterPlaybookRunner.runStage
+      // resolves a stage's OWN nodeNames (here, vmName — used to decide
+      // where this stage's own tasks, i.e. the Task.Debug below, are
+      // allowed to run) through Inventory.all unconditionally, as a
+      // completely separate concern from waitFor's node resolution. That
+      // lookup has nothing to do with the health check itself, but it
+      // gates the whole stage, agent or no agent. Fixed by targeting this
+      // stage's tasks at hypervisorNode instead (already in inventory,
+      // already has the agent) — HealthCheck.Ssh's `host` field, not this
+      // stage's nodeNames, is what actually controls where the liveness
+      // check runs.
+      stage("confirm-vm-reachable", hypervisorNode)
         .waitFor(
           HealthCheck.Ssh(
             onNode = vmName,
