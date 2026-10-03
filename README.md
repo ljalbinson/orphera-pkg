@@ -285,8 +285,8 @@ explicit targeting — see below).
 | `facts [--nodes ...]` | Gather and print basic host facts (OS, kernel, CPU/memory, disks, interfaces) from one or more agents |
 | `uptime [--nodes ...]` | Report each agent's host uptime and 1-minute load average — the concrete way to confirm a `reboot` genuinely rebooted the host, not just that the agent came back |
 | `run <command...> [--nodes] [--timeout 60]` | Run an arbitrary command on one or more agents, streaming stdout/stderr and reporting the real exit code. Use `--` before the command to separate it from `run`'s own flags, e.g. `orphera run --nodes tst0 -- systemctl status nginx` |
-| `playbook <file.yaml \| file.scala \| compiled-name> [--resume]` | Run an ordered, multi-task playbook — from a YAML file, a run-time-compiled Scala script, or a compiled DSL playbook by registered name — see [Playbooks](#playbooks). `--resume` skips tasks already completed in a previous run — see [Restartability](#restartability) |
-| `cluster-playbook <file.yaml \| file.scala> [<file2> ...] [--resume]` | Run a staged, cross-node-coordinated playbook — see [Cross-node coordination](#cross-node-coordination-and-staged-playbooks). Same `--resume` support as `playbook`, applied independently to each file. One or more files run in the order given, stopping at the first one that fails — a shorthand for a fixed sequence (e.g. tear down, then rebuild) without a wrapper script |
+| `playbook <file.yaml \| file.scala \| compiled-name> [--resume] [--vm-config <path>]` | Run an ordered, multi-task playbook — from a YAML file, a run-time-compiled Scala script, or a compiled DSL playbook by registered name — see [Playbooks](#playbooks). `--resume` skips tasks already completed in a previous run — see [Restartability](#restartability). `--vm-config` points a `.scala` script at a per-VM YAML config file (`VmConfigYaml.fromEnv()`, see [Per-VM config files](#per-vm-config-files---vm-config)); has no effect on a `.yaml`/compiled playbook, which has no code of its own to read it |
+| `cluster-playbook <file.yaml \| file.scala> [<file2> ...] [--resume] [--vm-config <path>]` | Run a staged, cross-node-coordinated playbook — see [Cross-node coordination](#cross-node-coordination-and-staged-playbooks). Same `--resume`/`--vm-config` support as `playbook`, applied independently to each file. One or more files run in the order given, stopping at the first one that fails — a shorthand for a fixed sequence (e.g. tear down, then rebuild) without a wrapper script |
 | `log-summary <playbook-name \| file.jsonl>` | Print a human-readable table (per-task status/duration, failures called out) from a run's `.orphera-logs` output. A playbook name resolves to that playbook's most recently modified log file — see [Observability](#observability) |
 
 There is no `apply <manifest.yaml>` command — the standalone
@@ -786,6 +786,49 @@ genuine partial failure against real hosts, then assert the checkpoint
 file, a second non-`--resume` run's unchanged behavior, and a
 `--resume` run's actual skip-and-continue — see either script's header
 comment for the exact mechanism.
+
+## Per-VM config files (`--vm-config`)
+
+`playbook`/`cluster-playbook` also accept `--vm-config <path>`, for a
+`.scala` script that needs real per-VM sizing/network values instead of
+hardcoded Scala vals — the motivating case is
+`manifests/kvm_vm_provision.scala`, which provisions a brand-new KVM VM
+and previously had to hardcode memory/cpu/disk/nic values one Scala val
+at a time per VM.
+
+`--vm-config` doesn't change what gets compiled or run — same as
+`--resume`, it's handed to the running script as an environment
+variable (`ORPHERA_VM_CONFIG`), since `OrpheraPlaybook`/
+`OrpheraClusterPlaybook` extend `IOApp.Simple`, whose `run: IO[Unit]`
+has no access to process args at all. A script reads it with:
+
+```scala
+VmConfigYaml.fromEnv() match
+  case Some(Right(params)) => // --vm-config was given and parsed; params: VmParams
+  case Some(Left(err))     => // --vm-config was given but failed to load/parse
+  case None                 => // --vm-config wasn't given at all
+```
+
+The file itself is **not** an Orphera-invented format — it's the same
+shape as the kayobe/kttb-virt-ansible project's own per-VM config files
+(`playbooks/config/<hostname>-config.yml` there), a top-level `params:`
+block with `hypervisor`, `hostname`, `domainname`, `os`, `disk`,
+`memory`, `cpu`, `dns1`/`dns2`, `host_type`, a nested `nic0:` block
+(`nic`, `ipaddress`, `gateway`, `bridge`, `netmask`, `cidr`, `table`,
+`priority`, `mtu`), and `disks`/`pdisks`/`nics`/`pre_basic_packages`/
+`basic_packages` lists — parsed into `VmParams`/`Nic0` case classes by
+`VmConfigYaml.scala`. Has no effect on a `.yaml` or compiled playbook,
+which has no code of its own to read an env var; `orphera` prints a
+note rather than silently ignoring the flag in that case.
+
+```bash
+orphera cluster-playbook manifests/kvm_vm_provision.scala --vm-config config/testvm0-config.yml
+```
+
+**Not yet done:** `kvm_vm_provision.scala` can call `VmConfigYaml.fromEnv()`
+but its vals aren't wired to read from the result yet — that's a
+deliberate follow-up, replacing one hardcoded val at a time rather than
+all at once.
 
 ## Observability
 

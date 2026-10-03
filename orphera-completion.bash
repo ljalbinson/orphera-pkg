@@ -148,9 +148,10 @@ _orphera_completions() {
       # completion via the flag literal below).
       case "$prev" in
         --resume) COMPREPLY=() ;;
+        --vm-config) COMPREPLY=($(compgen -f -- "$cur")) ;;
         *)
           if [[ "$cur" == --* ]]; then
-            COMPREPLY=($(compgen -W "--resume" -- "$cur"))
+            COMPREPLY=($(compgen -W "--resume --vm-config" -- "$cur"))
           else
             _orphera_playbook_path_completions "$cur"
           fi

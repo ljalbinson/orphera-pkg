@@ -227,8 +227,9 @@ object Main extends IOApp:
           }
         }
 
-      case Right(Command.RunPlaybook(source, resume)) =>
-        if source.endsWith(".scala") then runScalaPlaybookScript(source, resume)
+      case Right(Command.RunPlaybook(source, resume, vmConfig)) =>
+        if source.endsWith(".scala") then
+          runScalaPlaybookScript(source, resume, vmConfig)
         else
           val playbookResult: Either[String, Playbook] =
             if source.endsWith(".yaml") || source.endsWith(".yml") then
@@ -240,7 +241,21 @@ object Main extends IOApp:
                   s"No compiled playbook named '$source' (and it doesn't end in .yaml/.yml/.scala)"
                 )
 
-          playbookResult match
+          // --vm-config only reaches a running .scala script via
+          // ORPHERA_VM_CONFIG (see runScalaPlaybookScript) — a .yaml
+          // file or a compiled, registered playbook has no code of its
+          // own to read that env var, so there's nothing to wire it
+          // into. Warn rather than silently ignore, so a typo'd
+          // --vm-config on the wrong kind of playbook doesn't look like
+          // it did something.
+          val vmConfigWarning =
+            if vmConfig.isDefined then
+              IO.println(
+                "Note: --vm-config has no effect on a .yaml file or a compiled playbook — only a .scala script can read it (via VmConfigYaml.fromEnv())."
+              )
+            else IO.unit
+
+          vmConfigWarning >> (playbookResult match
             case Left(err) =>
               IO.println(s"Error: $err") >> IO.pure(ExitCode.Error)
             case Right(pb) =>
@@ -251,6 +266,7 @@ object Main extends IOApp:
               PlaybookRunner
                 .run(pb, resume)
                 .map(ok => if ok then ExitCode.Success else ExitCode.Error)
+          )
 
       case Right(
             Command.Reboot(nodeNames, delaySeconds, wait, waitTimeoutSeconds)
@@ -274,8 +290,8 @@ object Main extends IOApp:
           }
         }
 
-      case Right(Command.RunClusterPlaybook(paths, resume)) =>
-        runClusterPlaybookSequence(paths, resume)
+      case Right(Command.RunClusterPlaybook(paths, resume, vmConfig)) =>
+        runClusterPlaybookSequence(paths, resume, vmConfig)
 
       case Right(Command.RunCommand(command, nodeNames, timeoutSeconds)) =>
         withTargets(nodeNames) { targets =>
@@ -318,7 +334,8 @@ object Main extends IOApp:
     */
   private def runClusterPlaybookSequence(
       paths: List[String],
-      resume: Boolean
+      resume: Boolean,
+      vmConfig: Option[String]
   ): IO[ExitCode] =
     val total = paths.size
     def go(remaining: List[(String, Int)]): IO[ExitCode] =
@@ -327,7 +344,7 @@ object Main extends IOApp:
         case (path, index) :: rest =>
           val header =
             if total > 1 then IO.println(s"[$index/$total] $path") else IO.unit
-          header >> runOneClusterPlaybook(path, resume).flatMap {
+          header >> runOneClusterPlaybook(path, resume, vmConfig).flatMap {
             case ExitCode.Success => go(rest)
             case failed           => IO.pure(failed)
           }
@@ -335,11 +352,23 @@ object Main extends IOApp:
 
   private def runOneClusterPlaybook(
       path: String,
-      resume: Boolean
+      resume: Boolean,
+      vmConfig: Option[String]
   ): IO[ExitCode] =
-    if path.endsWith(".scala") then runScalaPlaybookScript(path, resume)
+    if path.endsWith(".scala") then
+      runScalaPlaybookScript(path, resume, vmConfig)
     else
-      ClusterPlaybookYaml.load(path) match
+      // Same reasoning as RunPlaybook above: --vm-config only reaches a
+      // running .scala script, never a YAML cluster-playbook, which has
+      // no code of its own to read ORPHERA_VM_CONFIG.
+      val vmConfigWarning =
+        if vmConfig.isDefined then
+          IO.println(
+            "Note: --vm-config has no effect on a .yaml cluster-playbook — only a .scala script can read it (via VmConfigYaml.fromEnv())."
+          )
+        else IO.unit
+
+      vmConfigWarning >> (ClusterPlaybookYaml.load(path) match
         case Left(err) =>
           IO.println(s"Error: $err") >> IO.pure(ExitCode.Error)
         case Right(pb) =>
@@ -348,19 +377,23 @@ object Main extends IOApp:
           ClusterPlaybookRunner
             .run(pb, resume)
             .map(ok => if ok then ExitCode.Success else ExitCode.Error)
+      )
 
   /** Compiles and runs a standalone `.scala` playbook script in a separate
-    * `java` process (see scripting/Main.scala). `resume` is passed via the
-    * `ORPHERA_RESUME` environment variable rather than as a process argument:
-    * OrpheraPlaybook/OrpheraClusterPlaybook extend `IOApp.Simple`, whose
-    * `run: IO[Unit]` has no access to the process's command-line args at all,
-    * so an env var is the only way to reach them here without changing that
+    * `java` process (see scripting/Main.scala). `resume`/`vmConfig` are
+    * passed via the `ORPHERA_RESUME`/`ORPHERA_VM_CONFIG` environment
+    * variables rather than as process arguments: OrpheraPlaybook/
+    * OrpheraClusterPlaybook extend `IOApp.Simple`, whose `run: IO[Unit]`
+    * has no access to the process's command-line args at all, so an env
+    * var is the only way to reach them here without changing that
     * trait's shape (and without needing to touch scripting/Main.scala's own
-    * arg-forwarding, which this file has no visibility into).
+    * arg-forwarding, which this file has no visibility into). A script
+    * reads ORPHERA_VM_CONFIG via VmConfigYaml.fromEnv(), same file.
     */
   private def runScalaPlaybookScript(
       scriptPath: String,
-      resume: Boolean
+      resume: Boolean,
+      vmConfig: Option[String] = None
   ): IO[ExitCode] =
     IO.blocking {
       findLatestJar("scripting/target", "scripting-assembly", ".jar") match
@@ -377,6 +410,9 @@ object Main extends IOApp:
             scriptPath
           )
           if resume then builder.environment().put("ORPHERA_RESUME", "true")
+          vmConfig.foreach(path =>
+            builder.environment().put("ORPHERA_VM_CONFIG", path)
+          )
           val exit = builder
             .inheritIO()
             .start()

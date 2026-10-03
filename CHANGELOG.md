@@ -6,6 +6,37 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — `--vm-config` (per-VM YAML config files for `.scala` scripts)
+
+A new `playbook`/`cluster-playbook` flag, `--vm-config <path>`, for
+reading real per-VM sizing/network values into a `.scala` script
+instead of hardcoding one Scala val per field per VM. Motivated by
+`manifests/kvm_vm_provision.scala`, which previously hardcoded
+memory/cpu/disk/nic values and, once a real `testvm0-config.yml` was
+seen, turned out to not match it in several places (wrong NIC name,
+placeholder sizing).
+
+New file `VmConfigYaml.scala` parses the kayobe/kttb-virt-ansible
+project's own per-VM config file shape (`params:` block with
+`hypervisor`/`hostname`/`disk`/`memory`/`cpu`/`dns1`/`dns2`/
+`host_type`/a nested `nic0:`/etc. — not a format invented here) into
+`VmParams`/`Nic0` case classes. `VmConfigYaml.fromEnv()` is what a
+script calls — reads the path from `ORPHERA_VM_CONFIG`, the same
+environment-variable hand-off `--resume`/`ORPHERA_RESUME` already uses,
+since `IOApp.Simple`'s `run: IO[Unit]` has no access to process args at
+all.
+
+`Command.RunPlaybook`/`RunClusterPlaybook` (`Cli.scala`) both gained a
+`vmConfig: Option[String]` field; `Main.scala`'s `runScalaPlaybookScript`
+sets `ORPHERA_VM_CONFIG` on the subprocess when given. Has no effect on
+a `.yaml` file or a compiled, registered playbook — neither has any
+code of its own that could read the env var — `orphera` prints a note
+rather than silently ignoring the flag in that case.
+
+`kvm_vm_provision.scala` is NOT yet wired to read from `VmConfigYaml` —
+deliberately left as a follow-up, replacing its hardcoded vals one at a
+time rather than all at once.
+
 ### Added — `HealthCheck.Ssh` (SSH-based health check)
 
 A new `wait_for` health check variant that polls a node over plain SSH

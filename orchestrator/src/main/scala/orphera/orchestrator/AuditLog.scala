@@ -81,9 +81,9 @@ object AuditLog:
       case Command.DeployAgent(_, _, _)        => true
       case Command.Bootstrap(_, _, _, _, _)    => true
       case Command.Teardown(_, _, _, _, _)     => true
-      case Command.RunPlaybook(_, _)           => true
+      case Command.RunPlaybook(_, _, _)        => true
       case Command.Reboot(_, _, _, _)          => true
-      case Command.RunClusterPlaybook(_, _)    => true
+      case Command.RunClusterPlaybook(_, _, _) => true
       case Command.RunCommand(_, _, _)         => true
       case Command.Fetch(_, _, _)              => false
       case Command.Facts(_)                    => false
@@ -196,8 +196,13 @@ object AuditLog:
           "ssh_user" -> sshUser,
           "purge" -> purge
         )
-      case Command.RunPlaybook(path, resume) =>
-        List("command" -> "playbook", "path" -> path, "resume" -> resume)
+      case Command.RunPlaybook(path, resume, vmConfig) =>
+        List(
+          "command" -> "playbook",
+          "path" -> path,
+          "resume" -> resume,
+          "vm_config" -> vmConfig.getOrElse("")
+        )
       case Command.Reboot(
             nodes,
             delaySeconds,
@@ -209,11 +214,12 @@ object AuditLog:
           "nodes" -> nodesField(nodes),
           "delay_seconds" -> delaySeconds
         )
-      case Command.RunClusterPlaybook(paths, resume) =>
+      case Command.RunClusterPlaybook(paths, resume, vmConfig) =>
         List(
           "command" -> "cluster-playbook",
           "path" -> paths.mkString(","),
-          "resume" -> resume
+          "resume" -> resume,
+          "vm_config" -> vmConfig.getOrElse("")
         )
       case Command.RunCommand(cmd, nodes, timeoutSeconds) =>
         List(

@@ -99,6 +99,19 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 //     exists" (the original's own scope).
 object kvm_vm_provision extends OrpheraClusterPlaybook:
 
+  // `orphera cluster-playbook manifests/kvm_vm_provision.scala --vm-config
+  // config/testvm0-config.yml` now makes that file's parsed params
+  // available here as:
+  //   val vmConfig: Option[VmParams] = VmConfigYaml.fromEnv() match
+  //     case Some(Right(p))  => Some(p)
+  //     case Some(Left(err)) => throw new RuntimeException(err) // or handle however
+  //     case None             => None // --vm-config wasn't given
+  // The vals below are still hardcoded literals, not yet wired to read
+  // from `vmConfig` — intentionally left for a follow-up pass to replace
+  // them one at a time (hypervisorNode <- vmConfig.hypervisor, memoryMB
+  // <- vmConfig.memory.toInt, etc.) rather than done wholesale here.
+  // See VmConfigYaml.scala for the full VmParams/Nic0 shape.
+
   // NEW node, not yet in inventory.yaml — add it for real (host,
   // cluster_ip, and confirm the Orphera agent is actually reachable
   // there) before this playbook can run at all. Standing in for
@@ -106,7 +119,14 @@ object kvm_vm_provision extends OrpheraClusterPlaybook:
   // config/{{TGT}}-config.yml in the original; hardcoded here the same
   // way every other node list in this project is a Scala val, not a
   // per-run parameter).
-  private val hypervisorNode = "gs1"
+  //
+  // Synced to the real testvm0-config.yml (kayobe0:~/kttb-virt-ansible/
+  // playbooks/config/) below, which gives `hypervisor: gs10` — NOTE this
+  // differs from "gs1", the hypervisor every real run of this playbook
+  // so far actually used successfully. Flagging rather than silently
+  // picking: if gs10 isn't the real intended target (or isn't in
+  // inventory.yaml yet), change this back before running again.
+  private val hypervisorNode = "gs10"
 
   // Standing in for the original's config/{{TGT}}-config.yml for ONE
   // concrete VM — Orphera playbooks are code per exercise, not a
@@ -114,14 +134,27 @@ object kvm_vm_provision extends OrpheraClusterPlaybook:
   // project (ceph_observability.scala's node lists, wordpress_site.scala's
   // db credentials). A second VM means a second object like this one
   // with its own vals, not a parameter to this one.
+  //
+  // Values below synced to the real testvm0-config.yml's `params:` block
+  // (disk/memory/cpu/nic0.*) — previously placeholders. That file also
+  // carries `pre_basic_packages`/`basic_packages` (qemu-guest-agent,
+  // openvswitch-switch, htop, etc.) and `host_type: host-passthrough`;
+  // the package lists are NOT wired in here yet — installing packages
+  // on testvm0 itself needs a way to run commands there, and the only
+  // primitive that currently reaches an uninventoried VM at all is the
+  // SSH liveness probe (HealthCheck.Ssh), not a command-execution task —
+  // a real follow-up, not folded in here. `host_type` IS wired in below
+  // (`--cpu host-passthrough` on virt-install).
   private val vmName = "testvm0"
   private val baseImage =
     "noble-server-cloudimg-amd64.img" // under /var/lib/libvirt/boot/ on the hypervisor
-  private val diskSizeGB = 20
-  private val swapSizeGB = 2
-  private val memoryMB = 4096
-  private val vcpus = 2
+  private val diskSizeGB = 32
+  private val swapSizeGB = 2 // not present in testvm0-config.yml at all; left at its prior placeholder value
+  private val memoryMB = 16384
+  private val vcpus = 4
+  private val nicName = "ens3" // testvm0-config.yml nic0.nic — the original's `enp1s0` placeholder was never real
   private val nicBridge = "br-net1"
+  private val cpuMode = "host-passthrough" // testvm0-config.yml host_type
 
   // Mirrors EFSNAME/EDIR from the original (DFSNAME/DDIR — the second,
   // bulk-data filesystem — is out of scope here, see header comment).
@@ -194,7 +227,7 @@ object kvm_vm_provision extends OrpheraClusterPlaybook:
   // never use one here, not to trust it works in a "safer-looking"
   // spot.
   private val defineAndStartVmScript =
-    s"""virt-install --connect qemu:///system --name $vmName --memory $memoryMB --vcpus $vcpus --disk $workingDir/$vmName.qcow2,format=qcow2,bus=scsi --disk $workingDir/$vmName-swap.qcow2,format=qcow2,bus=scsi --disk $workingDir/$vmName-cidata.iso,device=cdrom --network bridge=$nicBridge,model=virtio,virtualport_type=openvswitch --os-variant ubuntu24.04 --import --noautoconsole
+    s"""virt-install --connect qemu:///system --name $vmName --memory $memoryMB --vcpus $vcpus --cpu $cpuMode --disk $workingDir/$vmName.qcow2,format=qcow2,bus=scsi --disk $workingDir/$vmName-swap.qcow2,format=qcow2,bus=scsi --disk $workingDir/$vmName-cidata.iso,device=cdrom --network bridge=$nicBridge,model=virtio,virtualport_type=openvswitch --os-variant ubuntu24.04 --import --noautoconsole
        |echo "$vmName defined and started"""".stripMargin
 
   val playbook: ClusterPlaybook =
@@ -260,7 +293,7 @@ object kvm_vm_provision extends OrpheraClusterPlaybook:
         .task("template network-config")(
           Task.WriteFile(
             content = NetworkConfigTemplate.render(
-              "enp1s0",
+              nicName,
               "192.168.1.222",
               24,
               "255.255.255.0",

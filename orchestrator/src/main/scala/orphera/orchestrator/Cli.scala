@@ -57,7 +57,12 @@ enum Command:
   )
   case Fetch(remotePath: String, localDir: String, nodes: Option[List[String]])
   case Facts(nodes: Option[List[String]])
-  case RunPlaybook(path: String, resume: Boolean)
+  // vmConfig (--vm-config <path>) is handed to the running script as
+  // ORPHERA_VM_CONFIG, the same way `resume` becomes ORPHERA_RESUME —
+  // see Main.scala's runScalaPlaybookScript and VmConfigYaml.fromEnv.
+  // Only meaningful for a .scala script; ignored for .yaml/a registered
+  // compiled playbook, which have no way to read it at all.
+  case RunPlaybook(path: String, resume: Boolean, vmConfig: Option[String])
   case Reboot(
       nodes: Option[List[String]],
       delaySeconds: Int,
@@ -72,7 +77,13 @@ enum Command:
   // playbook's own stages). Saves typing multiple full invocations for
   // the common case of a fixed sequence (teardown, then rebuild, then a
   // follow-up exercise) without needing a wrapper shell script.
-  case RunClusterPlaybook(paths: List[String], resume: Boolean)
+  // Same vmConfig hand-off as RunPlaybook above, applied to every path
+  // in the sequence.
+  case RunClusterPlaybook(
+      paths: List[String],
+      resume: Boolean,
+      vmConfig: Option[String]
+  )
   case RunCommand(
       command: List[String],
       nodes: Option[List[String]],
@@ -121,16 +132,16 @@ object Cli:
       case "fetch" :: remote :: rest  => parseFetch(rest, remote, ".", None)
       case "facts" :: rest            => parseFacts(rest, None)
       case "playbook" :: path :: rest =>
-        parsePlaybookFlags(rest, resume = false).map(
-          Command.RunPlaybook(path, _)
-        )
+        parsePlaybookFlags(rest, resume = false, vmConfig = None).map {
+          case (resume, vmConfig) => Command.RunPlaybook(path, resume, vmConfig)
+        }
       case "version" :: rest => parseVersion(rest, None)
       case "uptime" :: rest  => parseUptime(rest, None)
       case "reboot" :: rest  =>
         parseReboot(rest, None, 5, waitForReturn = false, 300)
       case "cluster-playbook" :: rest =>
-        // One or more paths, all before any flag — `--resume` (the only
-        // flag) only makes sense once, applied to the whole sequence, not
+        // One or more paths, all before any flag — `--resume`/`--vm-config`
+        // only make sense once, applied to the whole sequence, not
         // interleaved per-path, so paths.takeWhile/dropWhile on "starts
         // with --" is enough: no path is ever expected to itself start
         // with "--".
@@ -139,9 +150,10 @@ object Cli:
         if paths.isEmpty then
           Left("cluster-playbook requires at least one playbook path")
         else
-          parsePlaybookFlags(flagArgs, resume = false).map(
-            Command.RunClusterPlaybook(paths, _)
-          )
+          parsePlaybookFlags(flagArgs, resume = false, vmConfig = None).map {
+            case (resume, vmConfig) =>
+              Command.RunClusterPlaybook(paths, resume, vmConfig)
+          }
       case "log-summary" :: Nil =>
         Left(
           "log-summary requires a target: a .jsonl file path, or a playbook name (finds its most recent run)"
@@ -153,21 +165,29 @@ object Cli:
       case "run" :: rest => parseRunCommand(rest, Nil, None, 60)
       case other => Left(s"Unknown command: ${other.headOption.getOrElse("")}")
 
-  /** Shared flag parser for `playbook`/`cluster-playbook`'s only current flag.
-    * Kept separate rather than inlined since both commands need identical
-    * handling and neither previously took any arguments past the file path at
-    * all — see `Command.RunPlaybook`/`RunClusterPlaybook` for what `resume`
-    * does (checkpoint-based restart skipping, `Checkpoint.scala`).
+  /** Shared flag parser for `playbook`/`cluster-playbook`. Kept separate
+    * rather than inlined since both commands need identical handling — see
+    * `Command.RunPlaybook`/`RunClusterPlaybook` for what `resume`
+    * (checkpoint-based restart skipping, `Checkpoint.scala`) and `vmConfig`
+    * (ORPHERA_VM_CONFIG hand-off, `VmConfigYaml.scala`) do.
     */
   private def parsePlaybookFlags(
       args: List[String],
-      resume: Boolean
-  ): Either[String, Boolean] =
+      resume: Boolean,
+      vmConfig: Option[String]
+  ): Either[String, (Boolean, Option[String])] =
     args match
-      case Nil                => Right(resume)
-      case "--resume" :: rest => parsePlaybookFlags(rest, resume = true)
-      case other :: _         =>
-        Left(s"Unknown argument: $other (expected at most --resume)")
+      case Nil => Right((resume, vmConfig))
+      case "--resume" :: rest =>
+        parsePlaybookFlags(rest, resume = true, vmConfig)
+      case "--vm-config" :: path :: rest =>
+        parsePlaybookFlags(rest, resume, vmConfig = Some(path))
+      case "--vm-config" :: Nil =>
+        Left("--vm-config requires a path")
+      case other :: _ =>
+        Left(
+          s"Unknown argument: $other (expected at most --resume and/or --vm-config <path>)"
+        )
 
   private def parseLogSummary(
       args: List[String],
@@ -648,13 +668,17 @@ object Cli:
       |  bootstrap         [--file <local.deb>] --nodes host1,host2 [--ssh-user root] [--ssh-key ~/.ssh/id_ed25519] [--remote-path /tmp/x.deb]
       |                    — same package check and auto-discovery as deploy-agent
       |  teardown          --nodes host1,host2 --yes [--purge] [--ssh-user root] [--ssh-key ~/.ssh/id_ed25519]
-      |  playbook          <file.yaml | file.scala | compiled-name> [--resume]
+      |  playbook          <file.yaml | file.scala | compiled-name> [--resume] [--vm-config <path>]
       |                    — .scala files are compiled at run time; --resume skips
       |                      tasks already completed in a previous run (per
-      |                      .orphera-state/ checkpoint)
-      |  cluster-playbook  <file.yaml | file.scala> [<file2> ...] [--resume]
-      |                    — same --resume semantics, per stage/task/node; one or
-      |                      more files run in order, stopping at the first failure
+      |                      .orphera-state/ checkpoint); --vm-config points at a
+      |                      kttb-virt-ansible-style per-VM YAML config file (e.g.
+      |                      hypervisor/memory/cpu/nic0.*) that a .scala script can
+      |                      read via VmConfigYaml.fromEnv() — ignored by .yaml/
+      |                      compiled playbooks, which have no way to read it
+      |  cluster-playbook  <file.yaml | file.scala> [<file2> ...] [--resume] [--vm-config <path>]
+      |                    — same --resume/--vm-config semantics, per stage/task/node;
+      |                      one or more files run in order, stopping at the first failure
       |  run               <command...> [--nodes host1,host2] [--timeout 60]
       |                    — run an arbitrary command, capturing stdout/stderr
       |  fetch             <remote-path> [--out ./local-dir] [--nodes host1,host2]
@@ -680,5 +704,6 @@ object Cli:
       |  network-apply --nodes web1 --timeout 90
       |  cluster-playbook manifests/cephadm_add_osds.scala --resume
       |  cluster-playbook manifests/etcd_teardown.scala manifests/etcd_cluster.scala
+      |  cluster-playbook manifests/kvm_vm_provision.scala --vm-config config/testvm0-config.yml
       |  log-summary cephadm-add-osds
       |""".stripMargin
