@@ -36,9 +36,22 @@ fmt:
 # needed here — no build.sbt changes (e.g. adding manifests as an
 # unmanagedSourceDirectory) that would risk pulling 30+ standalone,
 # single-file-compiled playbook scripts onto one shared compile
-# classpath together, which they were never meant to be.
+# classpath.
+#
+# Real run finding: `sbt "scalafmtOnly manifests/*.scala"` (the glob
+# quoted as part of the sbt command string) fails — bash does not expand
+# a glob inside double quotes, so sbt/scalafmt received the nine literal
+# characters `*.scala` and tried to open a file actually named
+# `manifests/*.scala`, which doesn't exist ("Failed to read"). It also
+# ran once per subproject (common/agent/orchestrator/scripting), each
+# resolving that same literal, non-existent path relative to ITS OWN base
+# directory, since an unscoped command run at the aggregate root fans out
+# to every subproject. Fixed by expanding the glob with `ls` inside a
+# `$$(...)` command substitution — that substitution still runs even
+# inside the outer double quotes (only a bare `*` is blocked by quotes,
+# not `$$(...)`), so sbt receives real, already-expanded filenames.
 fmt-manifests:
-	sbt "scalafmtOnly manifests/*.scala"
+	sbt "scalafmtOnly $$(ls -1 manifests/*.scala | tr '\n' ' ')"
 
 reload:
 	sbt reload
