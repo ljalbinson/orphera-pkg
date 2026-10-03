@@ -38,20 +38,28 @@ fmt:
 # single-file-compiled playbook scripts onto one shared compile
 # classpath.
 #
-# Real run finding: `sbt "scalafmtOnly manifests/*.scala"` (the glob
+# Real run finding #1: `sbt "scalafmtOnly manifests/*.scala"` (the glob
 # quoted as part of the sbt command string) fails — bash does not expand
 # a glob inside double quotes, so sbt/scalafmt received the nine literal
 # characters `*.scala` and tried to open a file actually named
-# `manifests/*.scala`, which doesn't exist ("Failed to read"). It also
-# ran once per subproject (common/agent/orchestrator/scripting), each
-# resolving that same literal, non-existent path relative to ITS OWN base
-# directory, since an unscoped command run at the aggregate root fans out
-# to every subproject. Fixed by expanding the glob with `ls` inside a
-# `$$(...)` command substitution — that substitution still runs even
-# inside the outer double quotes (only a bare `*` is blocked by quotes,
-# not `$$(...)`), so sbt receives real, already-expanded filenames.
+# `manifests/*.scala`, which doesn't exist ("Failed to read"). Fixed by
+# expanding the glob with `ls` inside a `$$(...)` command substitution —
+# that substitution still runs even inside the outer double quotes (only
+# a bare `*` is blocked by quotes, not `$$(...)`), so sbt receives real,
+# already-expanded filenames.
+#
+# Real run finding #2: even with the glob expanded, relative paths
+# (`manifests/Foo.scala`) still failed to read in every subproject scope
+# (common/agent/orchestrator/scripting) — only the root scope succeeded.
+# `scalafmtOnly` is unscoped, so it runs once per subproject in the
+# aggregate build, and each run resolves a relative path against THAT
+# subproject's own base directory (e.g. `common/manifests/Foo.scala`),
+# not the repo root where `manifests/` actually lives. Fixed by using
+# `cd manifests && pwd` to build an absolute directory prefix, so every
+# scope resolves the exact same unambiguous path regardless of its own
+# base directory.
 fmt-manifests:
-	sbt "scalafmtOnly $$(ls -1 manifests/*.scala | tr '\n' ' ')"
+	sbt "scalafmtOnly $$(dir=$$(cd manifests && pwd); ls -1 $$dir/*.scala | tr '\n' ' ')"
 
 reload:
 	sbt reload

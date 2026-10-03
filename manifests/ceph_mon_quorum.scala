@@ -4,7 +4,6 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 object ceph_mon_quorum extends OrpheraClusterPlaybook:
 
   private val bootstrapConfigScript =
-  private val bootstrapConfigScript =
     """FSID=$(cat /proc/sys/kernel/random/uuid)
       |cat > /etc/ceph/ceph.conf <<EOF
       |[global]
