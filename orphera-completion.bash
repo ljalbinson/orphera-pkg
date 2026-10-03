@@ -47,7 +47,7 @@ _orphera_completions() {
   local cur prev words cword
   _init_completion || return
 
-  local verbs="install remove autoremove copy network-apply reboot uptime run
+  local verbs="install remove autoremove copy write-file network-apply reboot uptime run
     playbook cluster-playbook deploy-agent bootstrap teardown fetch facts
     version log-summary audit-log help"
 
@@ -90,6 +90,19 @@ _orphera_completions() {
         --owner|--group|--mode) COMPREPLY=() ;;
         copy) COMPREPLY=($(compgen -f -- "$cur")) ;; # local path
         *) COMPREPLY=($(compgen -W "--nodes --owner --group --mode" -- "$cur")) ;;
+      esac
+      ;;
+
+    write-file)
+      # Unlike copy's first positional (a local path), write-file's
+      # first positional is the REMOTE dest path — nothing locally to
+      # complete against, so only --content-file's value gets -f.
+      case "$prev" in
+        --nodes) COMPREPLY=() ;;
+        --owner|--group|--mode) COMPREPLY=() ;;
+        --content) COMPREPLY=() ;;
+        --content-file) COMPREPLY=($(compgen -f -- "$cur")) ;;
+        *) COMPREPLY=($(compgen -W "--content --content-file --nodes --owner --group --mode" -- "$cur")) ;;
       esac
       ;;
 
