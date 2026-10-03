@@ -402,6 +402,24 @@ object ClusterPlaybookRunner:
           )
         }
 
+      case Task.WriteFile(content, dest, owner, group, mode) =>
+        buildTemplateVars(facts, context, node, setFacts).flatMap { vars =>
+          val rendered =
+            if content.contains("{{") then Templating.render(content, vars)
+            else content
+          requireStreamedSuccess(render)(r =>
+            NodeClient.copyBytes(
+              node,
+              rendered.getBytes(java.nio.charset.StandardCharsets.UTF_8),
+              dest,
+              owner,
+              group,
+              mode,
+              r
+            )
+          )
+        }
+
       case Task.SetFact(key, value) =>
         buildTemplateVars(facts, context, node, setFacts).flatMap { vars =>
           val rendered = if value.contains("{{") then
