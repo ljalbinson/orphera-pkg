@@ -62,6 +62,32 @@ object Orchestrator:
       )
     }
 
+  /** `content` is already-resolved bytes — Main.scala reads --content-file
+    * (or UTF-8-encodes a literal --content string) before calling this, so
+    * this stays a pure "push these bytes" operation, same shape as
+    * copyFile just without a local path. Goes through the same CopyFile
+    * RPC/FileChunk streaming copyFile does (NodeClient.copyBytes).
+    */
+  def writeFile(
+      nodes: List[Node],
+      content: Array[Byte],
+      destPath: String,
+      owner: String,
+      group: String,
+      mode: Int
+  ): IO[Unit] =
+    nodes.parTraverse_ { node =>
+      NodeClient.copyBytes(
+        node,
+        content,
+        destPath,
+        owner,
+        group,
+        mode,
+        ConsoleRenderer.render(node, _)
+      )
+    }
+
   def applyNetworkConfig(
       nodes: List[Node],
       confirmTimeoutSeconds: Int = 60

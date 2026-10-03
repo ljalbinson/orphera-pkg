@@ -76,6 +76,7 @@ object AuditLog:
       case Command.Remove(_, _, _)          => true
       case Command.AutoRemove(_, _)         => true
       case Command.Copy(_, _, _, _, _, _)   => true
+      case Command.WriteFile(_, _, _, _, _, _) => true
       case Command.NetworkApply(_, _)       => true
       case Command.DeployAgent(_, _, _)     => true
       case Command.Bootstrap(_, _, _, _, _) => true
@@ -138,6 +139,22 @@ object AuditLog:
           "command" -> "copy",
           "local_path" -> localPath,
           "dest_path" -> destPath,
+          "nodes" -> nodesField(nodes)
+        )
+      case Command.WriteFile(destPath, contentSource, nodes, owner, group, mode) =>
+        // Deliberately never logs the literal --content string itself —
+        // same reasoning Copy only logs local_path/dest_path and never
+        // peeks at a file's contents. A written string could easily be
+        // a credential (see every hardcoded test password elsewhere in
+        // this project); the audit trail records WHAT ran and WHERE,
+        // not a copy of whatever was written.
+        List(
+          "command" -> "write-file",
+          "dest_path" -> destPath,
+          "content_source" -> (contentSource match
+            case Left(_)     => "inline"
+            case Right(path) => s"file:$path"
+          ),
           "nodes" -> nodesField(nodes)
         )
       case Command.NetworkApply(nodes, timeoutSeconds) =>

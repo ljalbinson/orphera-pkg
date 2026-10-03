@@ -274,6 +274,7 @@ explicit targeting — see below).
 | `remove <pkg...> [--purge]` | `apt-get remove`/`purge` |
 | `autoremove [--purge]` | `apt-get autoremove` |
 | `copy <local> <remote> [--owner] [--group] [--mode]` | Push a file, with an idempotent pre-check (content hash + owner/group/mode) so unchanged files are skipped |
+| `write-file <remote> (--content <string> \| --content-file <local>) [--owner] [--group] [--mode]` | Write a literal string straight to a file on the agent — no local source file required first, unlike `copy`. `--content-file` is for when the string is awkward to pass inline (multi-line, shell-quoting-sensitive); it still just reads that local file and sends its bytes, same mechanism as `copy` |
 | `network-apply [--timeout 60]` | Apply pushed `.network`/`.netdev`/`.link` files with automatic rollback if not confirmed within the timeout — see [Network config safety](#network-config-safety) |
 | `reboot [--delay 5] [--wait] [--wait-timeout 300]` | Reboot a host. Runs fully detached from the agent's own process (`systemd-run`), for the same reason as `deploy-agent` below — the agent's own systemd unit would otherwise be killed by the reboot before it can schedule it. `--wait` polls the agent afterward and reports when it's reachable again (or times out) — see [Known gaps](#known-gaps--not-yet-built) for exactly what "reachable" does and doesn't confirm |
 | `version [--nodes ...]` | Report each agent's running version, baked in at build time from the `VERSION` file — see [Versioning](#versioning) |
@@ -296,7 +297,7 @@ declarative, ordered multi-step execution, including file pushes as
 one task type among several.
 
 Every CLI command above (`install`, `remove`, `autoremove`, `copy`,
-`network-apply`, `reboot`) currently has its **own direct dispatch
+`write-file`, `network-apply`, `reboot`) currently has its **own direct dispatch
 path** in `Main.scala`/`Orchestrator.scala`, separate from
 `PlaybookRunner`. A design where single CLI commands are internally
 expressed as one-task playbooks — so there's exactly one execution
@@ -1056,7 +1057,7 @@ Two things worth knowing if adapting this to a different target:
   no existing agent to poll against) isn't covered by this — its own
   success is still only as good as the SSH session's exit code
 - Direct CLI commands (`install`, `remove`, `autoremove`, `copy`,
-  `network-apply`, `reboot`, `run`) each have their own dispatch path
+  `write-file`, `network-apply`, `reboot`, `run`) each have their own dispatch path
   in `Main.scala`/`Orchestrator.scala`, separate from `PlaybookRunner`
   — a design where they're unified (CLI commands as one-task
   playbooks, one execution engine) was discussed but not implemented.

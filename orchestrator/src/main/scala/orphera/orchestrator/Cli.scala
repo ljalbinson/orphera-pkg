@@ -22,6 +22,19 @@ enum Command:
       group: String,
       mode: Int
   )
+  // `contentSource` is Left(literal) for `--content <string>` or
+  // Right(localPath) for `--content-file <path>` — mutually exclusive,
+  // see parseWriteFile. A file path is only read (in Main.scala, at
+  // dispatch time) once a --content-file is actually given; parsing
+  // itself stays pure, same as every other Command here.
+  case WriteFile(
+      destPath: String,
+      contentSource: Either[String, String],
+      nodes: Option[List[String]],
+      owner: String,
+      group: String,
+      mode: Int
+  )
   case NetworkApply(nodes: Option[List[String]], timeoutSeconds: Int)
   case DeployAgent(
       localPath: Option[String],
@@ -89,6 +102,8 @@ object Cli:
       case "autoremove" :: rest => parseAutoRemove(rest, None, purge = false)
       case "copy" :: local :: dest :: rest =>
         parseCopy(rest, local, dest, None, "", "", 0)
+      case "write-file" :: dest :: rest =>
+        parseWriteFile(rest, dest, None, None, None, "", "", 0)
       case "network-apply" :: rest => parseNetworkApply(rest, None, 60)
       case "deploy-agent" :: rest  =>
         parseDeployAgent(rest, None, "/tmp/orphera-agent.deb", None)
@@ -265,6 +280,54 @@ object Cli:
           case None => Left(s"Invalid mode: $value (expected octal, e.g. 0644)")
       case other :: _ =>
         Left(s"Unknown argument to copy: $other")
+
+  private def parseWriteFile(
+      args: List[String],
+      dest: String,
+      contentLiteral: Option[String],
+      contentFile: Option[String],
+      nodes: Option[List[String]],
+      owner: String,
+      group: String,
+      mode: Int
+  ): Either[String, Command] =
+    args match
+      case Nil =>
+        (contentLiteral, contentFile) match
+          case (Some(_), Some(_)) =>
+            Left("write-file: pass only one of --content or --content-file")
+          case (Some(literal), None) =>
+            Right(Command.WriteFile(dest, Left(literal), nodes, owner, group, mode))
+          case (None, Some(path)) =>
+            Right(Command.WriteFile(dest, Right(path), nodes, owner, group, mode))
+          case (None, None) =>
+            Left("write-file requires --content <string> or --content-file <path>")
+      case "--content" :: value :: rest =>
+        parseWriteFile(rest, dest, Some(value), contentFile, nodes, owner, group, mode)
+      case "--content-file" :: value :: rest =>
+        parseWriteFile(rest, dest, contentLiteral, Some(value), nodes, owner, group, mode)
+      case "--owner" :: value :: rest =>
+        parseWriteFile(rest, dest, contentLiteral, contentFile, nodes, value, group, mode)
+      case "--group" :: value :: rest =>
+        parseWriteFile(rest, dest, contentLiteral, contentFile, nodes, owner, value, mode)
+      case "--mode" :: value :: rest =>
+        scala.util.Try(Integer.parseInt(value, 8)).toOption match
+          case Some(parsed) =>
+            parseWriteFile(rest, dest, contentLiteral, contentFile, nodes, owner, group, parsed)
+          case None => Left(s"Invalid mode: $value (expected octal, e.g. 0644)")
+      case "--nodes" :: value :: rest =>
+        parseWriteFile(
+          rest,
+          dest,
+          contentLiteral,
+          contentFile,
+          Some(value.split(",").toList.map(_.trim)),
+          owner,
+          group,
+          mode
+        )
+      case other :: _ =>
+        Left(s"Unknown argument to write-file: $other")
 
   private def parseNetworkApply(
       args: List[String],
@@ -518,6 +581,13 @@ object Cli:
       |  remove            <package> [<package> ...] [--nodes host1,host2] [--purge]
       |  autoremove        [--nodes host1,host2] [--purge]
       |  copy              <local-path> <remote-path> [--owner user] [--group grp] [--mode 0644] [--nodes host1,host2]
+      |  write-file        <remote-path> (--content <string> | --content-file <local-path>)
+      |                    [--owner user] [--group grp] [--mode 0644] [--nodes host1,host2]
+      |                    — writes a literal string straight to a file on the agent, no
+      |                      local source file required first unlike copy (--content-file
+      |                      is for when the string is awkward to pass inline, e.g.
+      |                      multi-line; it still reads that file and sends its bytes,
+      |                      same as copy, just under this command's own flags)
       |  network-apply     [--nodes host1,host2] [--timeout 60]
       |  deploy-agent      [--file <local.deb>] [--remote-path /tmp/orphera-agent.deb] [--nodes host1,host2]
       |                    — installs only the orphera-agent package (verified against
@@ -555,6 +625,7 @@ object Cli:
       |  remove nginx --purge --nodes web1
       |  autoremove --purge
       |  copy /tmp/test.txt /etc/orphera-test.txt --owner root --group root --mode 0644
+      |  write-file /etc/motd --content "Welcome to tst0" --nodes tst0
       |  network-apply --nodes web1 --timeout 90
       |  cluster-playbook manifests/cephadm_add_osds.scala --resume
       |  cluster-playbook manifests/etcd_teardown.scala manifests/etcd_cluster.scala

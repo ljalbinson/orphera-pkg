@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — `write-file` CLI command
+
+A direct CLI command for the `write_file` task added just before this:
+`orphera write-file <remote-path> (--content <string> | --content-file <local-path>) [--owner] [--group] [--mode] [--nodes ...]`.
+Same dispatch-path shape as every other direct command (`Command.WriteFile`
+in `Cli.scala` -> `Orchestrator.writeFile` -> `NodeClient.copyBytes`, the
+same underlying call `copy` and `distribute_file` already use). Audited
+like `copy` (mutating) — but the audit trail deliberately records only
+whether the content came from `--content` or `--content-file` and the
+file path in the latter case, never the literal string itself, since a
+written string could easily be a credential.
+
 ### Added — `write_file` task (`Task.WriteFile` / YAML `write_file`)
 
 A new base operation: writes a literal string straight to a file on
