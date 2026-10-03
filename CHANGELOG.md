@@ -20,7 +20,18 @@ the one thing a stock cloud image guarantees is reachable once boot
 finishes, so it's the only honest liveness probe at that point in a
 VM's life. Deliberately does not install or start the agent itself —
 that stays a separate, explicit `orphera bootstrap` step run by hand
-afterward. YAML: `ssh_user:` (required to select this variant),
+afterward.
+
+Takes its own `host` directly rather than an `on_node:` resolved
+through inventory.yaml like every other HealthCheck variant — on
+further request, since the whole point is checking a VM nothing has
+registered anywhere yet; requiring it to already be in inventory.yaml
+first would have defeated that. `onNode` is kept as a display-only
+label. A synthetic, never-looked-up `Node(onNode, host)` is built on
+the fly in `ClusterPlaybookRunner.waitForHealthy` so the existing
+`pollHealthy`/`checkOnce`/`SshDeployer.checkAlive` plumbing — all
+written in terms of `Node` — didn't need its own parallel path. YAML:
+`ssh_user:` (required to select this variant) + `host:` (required),
 optional `ssh_key_path:`/`remote_command:` (default `"true"`).
 
 ### Added — `write-file` CLI command

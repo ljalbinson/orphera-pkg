@@ -610,17 +610,28 @@ object ClusterPlaybookRunner:
               elapsed = 0
             )
 
+      // Ssh checks deliberately do NOT go through Inventory.all.find —
+      // the whole point of this variant (see HealthCheck.Ssh's doc
+      // comment) is checking a brand-new VM that nothing has registered
+      // in inventory.yaml yet. The Node built here is synthetic, purely
+      // so pollHealthy/checkOnce/SshDeployer.checkAlive can keep reusing
+      // the same Node-shaped plumbing every other health check already
+      // uses — it's never looked up anywhere, just carries `host` along.
+      case ssh @ HealthCheck.Ssh(onNode, host, _, _, _, _, timeoutSeconds) =>
+        IO.println(
+          s"[$stageName] Waiting for SSH health check on $onNode ($host) (timeout ${timeoutSeconds}s)..."
+        ) >>
+          pollHealthy(stageName, Node(onNode, host), ssh, elapsed = 0)
+
       case single =>
         val onNode = single match
           case HealthCheck.Sentinel(n, _, _, _, _) => n
           case HealthCheck.Command(n, _, _, _)     => n
-          case HealthCheck.Ssh(n, _, _, _, _, _)   => n
           case _                                   => ""
 
         val timeoutSeconds = single match
           case HealthCheck.Sentinel(_, _, _, _, t) => t
           case HealthCheck.Command(_, _, _, t)     => t
-          case HealthCheck.Ssh(_, _, _, _, _, t)   => t
           case _                                   => 0
 
         Inventory.all.find(_.name == onNode) match
@@ -642,10 +653,10 @@ object ClusterPlaybookRunner:
       elapsed: Int
   ): IO[Boolean] =
     val (pollIntervalSeconds, timeoutSeconds) = check match
-      case HealthCheck.Sentinel(_, _, _, p, t) => (p, t)
-      case HealthCheck.Command(_, _, p, t)     => (p, t)
-      case HealthCheck.Quorum(_, _, _, p, t)   => (p, t)
-      case HealthCheck.Ssh(_, _, _, _, p, t)   => (p, t)
+      case HealthCheck.Sentinel(_, _, _, p, t)  => (p, t)
+      case HealthCheck.Command(_, _, p, t)      => (p, t)
+      case HealthCheck.Quorum(_, _, _, p, t)    => (p, t)
+      case HealthCheck.Ssh(_, _, _, _, _, p, t) => (p, t)
 
     if elapsed >= timeoutSeconds then
       IO.println(
@@ -670,7 +681,7 @@ object ClusterPlaybookRunner:
       case HealthCheck.Command(_, command, _, _) =>
         collectExitCode(node, command).map(_ == 0)
 
-      case HealthCheck.Ssh(_, sshUser, sshKeyPath, remoteCommand, _, _) =>
+      case HealthCheck.Ssh(_, _, sshUser, sshKeyPath, remoteCommand, _, _) =>
         SshDeployer.checkAlive(node, sshUser, sshKeyPath, remoteCommand)
 
       case HealthCheck.Quorum(_, _, _, _, _) =>

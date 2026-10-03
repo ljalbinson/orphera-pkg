@@ -631,14 +631,16 @@ designated node (`on_node:`) at `poll_interval` seconds until
   "--quiet", "nginx"]`. This is a real service-state check, not a
   proxy — use it whenever the target has a meaningful way to report
   its own readiness.
-- **Ssh** (`ssh_user:`, optional `ssh_key_path:`/`remote_command:`,
+- **Ssh** (`host:`, `ssh_user:`, optional `ssh_key_path:`/`remote_command:`,
   default `true`) — like Command, but polls over plain SSH instead of
-  Orphera's own agent RPC. The one case for this: confirming a
-  brand-new VM (e.g. one `virt-install`ed by a playbook — see
-  `manifests/kvm_vm_provision.scala`) is alive, when by definition it
-  can't be running the Orphera agent yet. Deliberately does not
-  install or start the agent itself; that stays a separate, explicit
-  `orphera bootstrap` step afterward.
+  Orphera's own agent RPC, and against `host` directly rather than an
+  `on_node:` looked up in inventory.yaml. The one case for this:
+  confirming a brand-new VM (e.g. one `virt-install`ed by a playbook —
+  see `manifests/kvm_vm_provision.scala`) is alive, when by definition
+  it can't be running the Orphera agent yet and usually isn't in
+  inventory.yaml yet either. Deliberately does not install or start
+  the agent itself; that stays a separate, explicit `orphera bootstrap`
+  step afterward.
 
 Only single-node `Sentinel`/`Command`/`Ssh` checks probe one designated node.
 `HealthCheck.Quorum` (`nodes`, `command`, `requiredCount`) is a genuine

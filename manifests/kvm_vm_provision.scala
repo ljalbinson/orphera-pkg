@@ -307,10 +307,16 @@ object kvm_vm_provision extends OrpheraClusterPlaybook:
       // every other node in this project's history (see the header
       // comment's point #2 on the agent-install gap, which this stage no
       // longer tries to paper over).
+      // host is given directly, not looked up from inventory.yaml —
+      // HealthCheck.Ssh deliberately doesn't require the new VM to be
+      // registered anywhere yet (see that case's doc comment); 192.168.1.222
+      // is the same static address CloudConfigTemplate/NetworkConfigTemplate
+      // already rendered into this VM's own cloud-init files above.
       stage("confirm-vm-reachable", vmName)
         .waitFor(
           HealthCheck.Ssh(
             onNode = vmName,
+            host = "192.168.1.222",
             sshUser = "localadmin", // matches the `users:` entry CloudConfigTemplate renders
             sshKeyPath = None, // fill in a path if the operator's default identity isn't the right key
             remoteCommand = "true",

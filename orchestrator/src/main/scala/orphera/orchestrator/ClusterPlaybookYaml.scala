@@ -43,11 +43,17 @@ object ClusterPlaybookYaml:
             sshUserOpt <- c.get[Option[String]]("ssh_user")
             r <- sshUserOpt match
               case Some(sshUser) =>
+                // `host` is required here, separately from `on_node` —
+                // Ssh checks don't look `on_node` up in inventory.yaml at
+                // all (see HealthCheck.Ssh's doc comment), so the actual
+                // address to connect to has to come from the YAML itself.
                 for
+                  host <- c.get[String]("host")
                   sshKeyPath <- c.get[Option[String]]("ssh_key_path")
                   remoteCommand <- c.getOrElse[String]("remote_command")("true")
                 yield HealthCheck.Ssh(
                   onNode,
+                  host,
                   sshUser,
                   sshKeyPath,
                   remoteCommand,
