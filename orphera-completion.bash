@@ -56,7 +56,13 @@ _orphera_completions() {
 
   # First word after "orphera" itself — complete the verb.
   if [[ $cword -eq 1 ]]; then
-    COMPREPLY=($(compgen -W "$verbs" -- "$cur"))
+    # `--help` is accepted as the first argument too, but only offered once
+    # a dash has been typed, so it doesn't clutter the plain verb list.
+    if [[ "$cur" == -* ]]; then
+      COMPREPLY=($(compgen -W "--help" -- "$cur"))
+    else
+      COMPREPLY=($(compgen -W "$verbs" -- "$cur"))
+    fi
     return
   fi
 
