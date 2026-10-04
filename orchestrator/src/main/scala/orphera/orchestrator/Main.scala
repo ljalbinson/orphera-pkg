@@ -68,6 +68,11 @@ object Main extends IOApp:
           Orchestrator.autoRemove(targets, purge)
         }
 
+      case Right(Command.DistUpgrade(nodeNames, updateCache)) =>
+        withTargets(nodeNames) { targets =>
+          Orchestrator.distUpgrade(targets, updateCache)
+        }
+
       case Right(Command.Copy(local, dest, nodeNames, owner, group, mode)) =>
         withTargets(nodeNames) { targets =>
           Orchestrator.copyFile(

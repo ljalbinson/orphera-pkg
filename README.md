@@ -273,6 +273,7 @@ explicit targeting — see below).
 | `install <pkg...> [--update-cache]` | `apt-get install` |
 | `remove <pkg...> [--purge]` | `apt-get remove`/`purge` |
 | `autoremove [--purge]` | `apt-get autoremove` |
+| `dist-upgrade [--no-update-cache]` | `apt-get update` then `apt-get dist-upgrade`, keeping existing config files and never prompting; `--no-update-cache` skips the update. Also available as the `dist_upgrade` playbook task |
 | `copy <local> <remote> [--owner] [--group] [--mode]` | Push a file, with an idempotent pre-check (content hash + owner/group/mode) so unchanged files are skipped |
 | `write-file <remote> (--content <string> \| --content-file <local>) [--owner] [--group] [--mode]` | Write a literal string straight to a file on the agent — no local source file required first, unlike `copy`. `--content-file` is for when the string is awkward to pass inline (multi-line, shell-quoting-sensitive); it still just reads that local file and sends its bytes, same mechanism as `copy` |
 | `network-apply [--timeout 60]` | Apply pushed `.network`/`.netdev`/`.link` files with automatic rollback if not confirmed within the timeout — see [Network config safety](#network-config-safety) |
@@ -296,7 +297,7 @@ task ordering) was designed but superseded before being built;
 declarative, ordered multi-step execution, including file pushes as
 one task type among several.
 
-Every CLI command above (`install`, `remove`, `autoremove`, `copy`,
+Every CLI command above (`install`, `remove`, `autoremove`, `dist-upgrade`, `copy`,
 `write-file`, `network-apply`, `reboot`) currently has its **own direct dispatch
 path** in `Main.scala`/`Orchestrator.scala`, separate from
 `PlaybookRunner`. A design where single CLI commands are internally
@@ -353,7 +354,7 @@ sbt "orchestrator/run playbook manifests/web-server-baseline.yaml"
 `dist_upgrade`, `copy`, `write_file`, `network_apply`, `reboot`,
 `run_command`, `set_fact`, `debug`, `dump_facts` — most of the first
 seven map directly onto the corresponding CLI command's underlying RPC
-(`dist_upgrade` is task-only, no CLI command), so anything the CLI can
+(`dist_upgrade` ↔ `dist-upgrade`), so anything the CLI can
 do (except `bootstrap`/`teardown`/`deploy-agent`/`facts`/`version`,
 which are intentionally excluded — see below), a playbook task can do
 as one step in a sequence. The `reboot` task's fields mirror the CLI

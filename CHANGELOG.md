@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — `dist-upgrade` CLI command
+
+`orphera dist-upgrade [--nodes host1,host2] [--no-update-cache]` runs the new
+`RunDistUpgrade` RPC (`apt-get update` unless `--no-update-cache`, then
+`dist-upgrade`, keeping existing config files) on the targeted nodes in
+parallel, same shape as `autoremove`. Unlike `install`'s opt-in
+`--update-cache`, the update defaults on, matching `Task.DistUpgrade`. Audited
+like the other mutating package commands (`dist-upgrade` with `nodes` and
+`update_cache` fields), and added to bash completion. Not compiled or run yet.
+
 ### Added — `round_robin` option for `manifests/set_dns.scala`
 
 `round_robin: true` in the `--config` file (default `false`) spreads DNS
@@ -33,7 +43,7 @@ proto message and `RunDistUpgrade` RPC; agent side is `AptInstaller.distUpgrade`
 `--force-confdef`/`--force-confold`). A failed update emits a FAILED result
 event rather than raising inside the detached fiber — raising there would
 leave the orchestrator's stream (which only ends on a RESULT) hanging.
-Task-only: there is no `dist-upgrade` CLI command. Requires rebuilding and
+Also exposed as the `dist-upgrade` CLI command (see below). Requires rebuilding and
 redeploying the agent, since the new RPC is agent-side.
 
 ### Added — `--config` (per-VM YAML config files for `.scala` scripts)

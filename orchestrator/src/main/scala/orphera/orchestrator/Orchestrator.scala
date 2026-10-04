@@ -42,6 +42,15 @@ object Orchestrator:
       NodeClient.autoRemove(node, purge, ConsoleRenderer.render(node, _))
     }
 
+  def distUpgrade(nodes: List[Node], updateCache: Boolean = true): IO[Unit] =
+    nodes.parTraverse_ { node =>
+      NodeClient.distUpgrade(
+        node,
+        updateCache,
+        ConsoleRenderer.render(node, _)
+      )
+    }
+
   def copyFile(
       nodes: List[Node],
       localPath: java.nio.file.Path,

@@ -14,6 +14,7 @@ enum Command:
       purge: Boolean
   )
   case AutoRemove(nodes: Option[List[String]], purge: Boolean)
+  case DistUpgrade(nodes: Option[List[String]], updateCache: Boolean)
   case Copy(
       localPath: String,
       destPath: String,
@@ -111,6 +112,8 @@ object Cli:
         parseInstall(rest, Nil, None, updateCache = false)
       case "remove" :: rest     => parseRemove(rest, Nil, None, purge = false)
       case "autoremove" :: rest => parseAutoRemove(rest, None, purge = false)
+      case "dist-upgrade" :: rest =>
+        parseDistUpgrade(rest, None, updateCache = true)
       case "copy" :: local :: dest :: rest =>
         parseCopy(rest, local, dest, None, "", "", 0)
       case "write-file" :: dest :: rest =>
@@ -267,6 +270,27 @@ object Cli:
         parseAutoRemove(rest, nodes, purge = true)
       case other :: _ =>
         Left(s"Unknown argument to autoremove: $other")
+
+  // updateCache defaults to true here (unlike install's opt-in
+  // --update-cache): a dist-upgrade against a stale index is rarely what
+  // anyone wants, and Task.DistUpgrade defaults the same way.
+  private def parseDistUpgrade(
+      args: List[String],
+      nodes: Option[List[String]],
+      updateCache: Boolean
+  ): Either[String, Command] =
+    args match
+      case Nil => Right(Command.DistUpgrade(nodes, updateCache))
+      case "--nodes" :: value :: rest =>
+        parseDistUpgrade(
+          rest,
+          Some(value.split(",").toList.map(_.trim)),
+          updateCache
+        )
+      case "--no-update-cache" :: rest =>
+        parseDistUpgrade(rest, nodes, updateCache = false)
+      case other :: _ =>
+        Left(s"Unknown argument to dist-upgrade: $other")
 
   private def parseCopy(
       args: List[String],
@@ -651,6 +675,9 @@ object Cli:
       |  install           <package> [<package> ...] [--nodes host1,host2] [--update-cache]
       |  remove            <package> [<package> ...] [--nodes host1,host2] [--purge]
       |  autoremove        [--nodes host1,host2] [--purge]
+      |  dist-upgrade      [--nodes host1,host2] [--no-update-cache]
+      |                    — apt-get update (skip with --no-update-cache), then dist-upgrade,
+      |                      keeping existing config files; follow with autoremove
       |  copy              <local-path> <remote-path> [--owner user] [--group grp] [--mode 0644] [--nodes host1,host2]
       |  write-file        <remote-path> (--content <string> | --content-file <local-path>)
       |                    [--owner user] [--group grp] [--mode 0644] [--nodes host1,host2]
@@ -699,6 +726,7 @@ object Cli:
       |  install curl vim
       |  remove nginx --purge --nodes web1
       |  autoremove --purge
+      |  dist-upgrade --nodes tst0,tst1
       |  copy /tmp/test.txt /etc/orphera-test.txt --owner root --group root --mode 0644
       |  write-file /etc/motd --content "Welcome to tst0" --nodes tst0
       |  network-apply --nodes web1 --timeout 90

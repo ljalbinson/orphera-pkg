@@ -75,6 +75,7 @@ object AuditLog:
       case Command.Install(_, _, _)            => true
       case Command.Remove(_, _, _)             => true
       case Command.AutoRemove(_, _)            => true
+      case Command.DistUpgrade(_, _)           => true
       case Command.Copy(_, _, _, _, _, _)      => true
       case Command.WriteFile(_, _, _, _, _, _) => true
       case Command.NetworkApply(_, _)          => true
@@ -133,6 +134,12 @@ object AuditLog:
           "command" -> "autoremove",
           "nodes" -> nodesField(nodes),
           "purge" -> purge
+        )
+      case Command.DistUpgrade(nodes, updateCache) =>
+        List(
+          "command" -> "dist-upgrade",
+          "nodes" -> nodesField(nodes),
+          "update_cache" -> updateCache
         )
       case Command.Copy(localPath, destPath, nodes, owner, group, mode) =>
         List(
