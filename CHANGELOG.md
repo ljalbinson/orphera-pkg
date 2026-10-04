@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — `round_robin` option for `manifests/set_dns.scala`
+
+`round_robin: true` in the `--config` file (default `false`) spreads DNS
+queries across the configured servers. systemd-resolved, which the playbook
+normally drives via a drop-in, has no rotate option — it sticks to one server
+and only fails over — so this mode writes a static `/etc/resolv.conf`
+(replacing the resolved stub symlink) with glibc's `options rotate` instead,
+and removes the resolved drop-in. Requires 2-3 `dns_servers` (glibc ignores
+anything beyond 3; the playbook rejects other counts rather than silently
+dropping some). Running again without `round_robin` restores the stub symlink,
+but only when the file still carries Orphera's marker line — a hand-written
+resolv.conf is left alone. Trade-off: on those nodes resolved's stub, caching
+and per-link DNS are bypassed for anything reading resolv.conf.
+Not compiled or run yet.
+
 ### Added — `dist_upgrade` task (`Task.DistUpgrade`)
 
 A native `apt-get dist-upgrade` task, for playbooks that previously had to

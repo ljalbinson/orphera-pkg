@@ -16,6 +16,7 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 //     nodes: [tst0, tst1]
 //     dns_servers: [192.168.1.70, 192.168.1.71]
 //     search_domains: [ljalbinson.com]
+//     round_robin: true      # optional, default false — see below
 //
 // dns_servers falls back to dns1/dns2, and search_domains to domainname,
 // so a per-VM file (config/testvm0-config.yaml) also works as --config.
@@ -30,6 +31,19 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 // `nameservers:` — this playbook adds global servers, it doesn't strip
 // per-link ones.
 //
+// round_robin: true switches mechanism. systemd-resolved has no rotate
+// option — it sticks to one upstream server and only fails over — so
+// instead the node gets a static /etc/resolv.conf (replacing the
+// resolved stub symlink) with `options rotate`, which makes glibc
+// spread queries across the listed servers. Costs, on those nodes:
+// resolved's stub, caching and per-link DNS are bypassed for anything
+// that reads resolv.conf, and a dead server costs a resolver timeout
+// each time it's picked. glibc only honours 3 nameservers, so
+// round_robin needs 2-3 dns_servers and rejects anything else rather
+// than silently ignoring the rest. Running again WITHOUT round_robin
+// puts the stub symlink back, but only if the file still carries
+// Orphera's marker line — a hand-written resolv.conf is left alone.
+//
 // Unlike kvm_vm_provision.scala, there's no hardcoded fallback when
 // --config is missing: the config file is the whole input here, so a
 // missing or bad one fails before any node is touched.
@@ -38,7 +52,8 @@ object set_dns extends OrpheraClusterPlaybook:
   private case class DnsConfig(
       nodes: List[String],
       servers: List[String],
-      searchDomains: List[String]
+      searchDomains: List[String],
+      roundRobin: Boolean
   )
 
   private val defaultNodes =
@@ -60,11 +75,17 @@ object set_dns extends OrpheraClusterPlaybook:
       search <- c.get[Option[List[String]]]("search_domains").left.map(err)
       domain <- c.get[Option[String]]("domainname").left.map(err)
       domains = search.getOrElse(domain.toList).filter(_.nonEmpty)
+      roundRobin <- c.getOrElse[Boolean]("round_robin")(false).left.map(err)
       _ <- Either.cond(nodes.nonEmpty, (), "no nodes given")
       _ <- Either.cond(
         servers.nonEmpty,
         (),
         "no DNS servers: set dns_servers (or dns1/dns2)"
+      )
+      _ <- Either.cond(
+        !roundRobin || (servers.size >= 2 && servers.size <= 3),
+        (),
+        s"round_robin needs 2-3 DNS servers (glibc ignores any beyond 3), got ${servers.size}"
       )
       _ <- servers
         .find(s =>
@@ -78,7 +99,7 @@ object set_dns extends OrpheraClusterPlaybook:
         .toLeft(())
         .left
         .map(d => s"not a valid search domain: '$d'")
-    yield DnsConfig(nodes, servers, domains)
+    yield DnsConfig(nodes, servers, domains, roundRobin)
 
   private val config: DnsConfig =
     val result =
@@ -114,6 +135,20 @@ object set_dns extends OrpheraClusterPlaybook:
        |DNS=${config.servers.mkString(" ")}
        |""".stripMargin + domainsLine
 
+  private val managedMarker = "# Managed by Orphera (manifests/set_dns.scala)"
+
+  private val resolvConf = "/etc/resolv.conf"
+  private val stubResolvConf = "/run/systemd/resolve/stub-resolv.conf"
+
+  // round_robin: a static resolv.conf. `search` only when domains exist.
+  private val resolvConfContent =
+    val nameservers = config.servers.map(s => s"nameserver $s\n").mkString
+    val searchLine =
+      if config.searchDomains.isEmpty then ""
+      else s"search ${config.searchDomains.mkString(" ")}\n"
+    s"$managedMarker — edits are overwritten.\n" +
+      nameservers + searchLine + "options rotate\n"
+
   // `resolvectl dns` prints the global servers on a "Global:" line;
   // fail the task unless every configured server is on it.
   private val verifyScript =
@@ -126,29 +161,83 @@ object set_dns extends OrpheraClusterPlaybook:
        |echo "$$G"
        |$checks""".stripMargin
 
+  // round_robin: the file must be a regular file (not the resolved stub
+  // symlink), carry `options rotate`, and list every server.
+  private val verifyRotateScript =
+    val checks = config.servers
+      .map(s =>
+        s"""grep -qxF 'nameserver $s' $resolvConf || { echo 'missing: $s'; exit 1; }"""
+      )
+      .mkString("\n")
+    s"""cat $resolvConf
+       |if [ -L $resolvConf ]; then echo '$resolvConf is still a symlink'; exit 1; fi
+       |grep -qxF 'options rotate' $resolvConf || { echo 'options rotate missing'; exit 1; }
+       |$checks""".stripMargin
+
+  // Undo a previous round_robin run: put the stub symlink back, but only
+  // if the file is ours (marker line present) and not a symlink already.
+  private val restoreStubScript =
+    s"""if [ ! -L $resolvConf ] && grep -qF '$managedMarker' $resolvConf 2>/dev/null; then
+       |  ln -sf $stubResolvConf $resolvConf
+       |  echo "restored $resolvConf -> $stubResolvConf"
+       |else
+       |  echo "$resolvConf not managed by Orphera or already the stub; left alone"
+       |fi""".stripMargin
+
+  private val resolvedStage: Stage =
+    stage("set-dns", config.nodes*)
+      .task("restore resolved stub resolv.conf if a round_robin run replaced it")(
+        Task.RunCommand(List("sh", "-c", restoreStubScript), timeoutSeconds = 30)
+      )
+      .task("create resolved drop-in directory")(
+        Task.RunCommand(List("mkdir", "-p", dropInDir), timeoutSeconds = 30)
+      )
+      .task("write resolved DNS drop-in")(
+        Task.WriteFile(
+          content = dropInContent,
+          dest = dropIn,
+          owner = "root",
+          group = "root",
+          mode = Integer.parseInt("0644", 8)
+        )
+      )
+      .task("restart systemd-resolved")(
+        Task.RunCommand(
+          List("systemctl", "restart", "systemd-resolved"),
+          timeoutSeconds = 60
+        )
+      )
+      .task("verify global DNS servers")(
+        Task.RunCommand(List("sh", "-c", verifyScript), timeoutSeconds = 30)
+      )
+      .build
+
+  // WriteFile stages a temp file and atomically renames it over the
+  // destination, which replaces the stub symlink itself rather than
+  // writing through it into /run.
+  private val roundRobinStage: Stage =
+    stage("set-dns", config.nodes*)
+      .task("remove resolved DNS drop-in from a non-round_robin run")(
+        Task.RunCommand(List("rm", "-f", dropIn), timeoutSeconds = 30)
+      )
+      .task("write static resolv.conf with options rotate")(
+        Task.WriteFile(
+          content = resolvConfContent,
+          dest = resolvConf,
+          owner = "root",
+          group = "root",
+          mode = Integer.parseInt("0644", 8)
+        )
+      )
+      .task("verify resolv.conf rotates across every server")(
+        Task.RunCommand(
+          List("sh", "-c", verifyRotateScript),
+          timeoutSeconds = 30
+        )
+      )
+      .build
+
   val playbook: ClusterPlaybook =
     clusterPlaybook("set-dns")(
-      stage("set-dns", config.nodes*)
-        .task("create resolved drop-in directory")(
-          Task.RunCommand(List("mkdir", "-p", dropInDir), timeoutSeconds = 30)
-        )
-        .task("write resolved DNS drop-in")(
-          Task.WriteFile(
-            content = dropInContent,
-            dest = dropIn,
-            owner = "root",
-            group = "root",
-            mode = Integer.parseInt("0644", 8)
-          )
-        )
-        .task("restart systemd-resolved")(
-          Task.RunCommand(
-            List("systemctl", "restart", "systemd-resolved"),
-            timeoutSeconds = 60
-          )
-        )
-        .task("verify global DNS servers")(
-          Task.RunCommand(List("sh", "-c", verifyScript), timeoutSeconds = 30)
-        )
-        .build
+      if config.roundRobin then roundRobinStage else resolvedStage
     )

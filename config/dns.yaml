@@ -16,3 +16,8 @@ params:
   # Optional search domains.
   search_domains:
     - ljalbinson.com
+
+  # Optional, default false. true = spread queries across the servers
+  # (glibc `options rotate` in a static /etc/resolv.conf) instead of the
+  # systemd-resolved drop-in, which only fails over. Needs 2-3 servers.
+  # round_robin: true
