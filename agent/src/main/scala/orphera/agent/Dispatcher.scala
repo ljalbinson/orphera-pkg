@@ -17,6 +17,9 @@ object Dispatcher:
   def dispatchAutoRemove(cmd: AutoRemove, queue: Queue[IO, Event]): IO[Unit] =
     AptInstaller.autoRemove(cmd, queue)
 
+  def dispatchDistUpgrade(cmd: DistUpgrade, queue: Queue[IO, Event]): IO[Unit] =
+    AptInstaller.distUpgrade(cmd, queue)
+
   def dispatchInstallDeb(cmd: InstallDeb, queue: Queue[IO, Event]): IO[Unit] =
     DebInstaller.install(cmd, queue)
 

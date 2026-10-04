@@ -28,6 +28,9 @@ object TaskYaml:
       case "autoremove" =>
         body.getOrElse[Boolean]("purge")(false).map(Task.AutoRemove.apply)
 
+      case "dist_upgrade" =>
+        body.getOrElse[Boolean]("update_cache")(true).map(Task.DistUpgrade.apply)
+
       case "copy" =>
         for
           src <- body.get[String]("src")

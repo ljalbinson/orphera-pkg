@@ -16,6 +16,10 @@ message AutoRemove {
   bool purge = 1;
 }
 
+message DistUpgrade {
+  bool update_cache = 1;
+}
+
 message FileMetadata {
   string dest_path = 1;
   string owner = 2;
@@ -155,6 +159,7 @@ service Agent {
   rpc Install(InstallPackages) returns (stream Event);
   rpc Remove(RemovePackages) returns (stream Event);
   rpc RunAutoRemove(AutoRemove) returns (stream Event);
+  rpc RunDistUpgrade(DistUpgrade) returns (stream Event);
   rpc CopyFile(stream FileChunk) returns (stream Event);
   rpc CheckFile(FileCheck) returns (FileCheckResult);
   rpc ReloadNetwork(NetworkReload) returns (NetworkReloadResult);

@@ -10,6 +10,14 @@ enum Task:
   )
   case Remove(packages: List[String], purge: Boolean = false)
   case AutoRemove(purge: Boolean = false)
+
+  /** `apt-get dist-upgrade` on the agent. `updateCache` (default true — a
+    * dist-upgrade against a stale index is rarely what anyone wants) runs
+    * `apt-get update` first, in the same task. Existing config files are kept
+    * rather than prompting (`--force-confdef`/`--force-confold`). Pair with
+    * `AutoRemove` afterward to clear packages the upgrade orphaned.
+    */
+  case DistUpgrade(updateCache: Boolean = true)
   case Copy(
       src: String,
       dest: String,

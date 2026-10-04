@@ -349,14 +349,22 @@ Run with:
 sbt "orchestrator/run playbook manifests/web-server-baseline.yaml"
 ```
 
-**Available task types:** `install`, `remove`, `autoremove`, `copy`,
-`write_file`, `network_apply`, `reboot`, `run_command`, `set_fact`,
-`debug`, `dump_facts` — each of the first six maps directly onto the
-corresponding CLI command's underlying RPC, so anything the CLI can
+**Available task types:** `install`, `remove`, `autoremove`,
+`dist_upgrade`, `copy`, `write_file`, `network_apply`, `reboot`,
+`run_command`, `set_fact`, `debug`, `dump_facts` — most of the first
+seven map directly onto the corresponding CLI command's underlying RPC
+(`dist_upgrade` is task-only, no CLI command), so anything the CLI can
 do (except `bootstrap`/`teardown`/`deploy-agent`/`facts`/`version`,
 which are intentionally excluded — see below), a playbook task can do
 as one step in a sequence. The `reboot` task's fields mirror the CLI
 command: `delay`, `wait`, `wait_timeout` in YAML.
+
+- `dist_upgrade` (`update_cache:`, default `true`) runs
+  `apt-get dist-upgrade` on the agent, preceded by `apt-get update`
+  unless `update_cache: false`. Existing config files are kept
+  (`--force-confdef`/`--force-confold`) rather than stalling on a
+  conffile prompt. In Scala: `Task.DistUpgrade(updateCache = true)`.
+  Follow it with `autoremove` to clear packages the upgrade orphaned.
 
 - `write_file` (`content:`, `dest:`, `owner:`, `group:`, `mode:`)
   writes a literal string straight to a file on the agent — no source

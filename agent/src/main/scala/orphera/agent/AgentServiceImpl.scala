@@ -36,6 +36,14 @@ class AgentServiceImpl(
           .takeThrough(_.kind != Event.Kind.RESULT)
     }
 
+  def runDistUpgrade(request: DistUpgrade, ctx: Metadata): Stream[IO, Event] =
+    Stream.eval(Queue.unbounded[IO, Event]).flatMap { queue =>
+      Stream.eval(Dispatcher.dispatchDistUpgrade(request, queue).start) >>
+        Stream
+          .fromQueueUnterminated(queue)
+          .takeThrough(_.kind != Event.Kind.RESULT)
+    }
+
   def copyFile(
       request: Stream[IO, FileChunk],
       ctx: Metadata

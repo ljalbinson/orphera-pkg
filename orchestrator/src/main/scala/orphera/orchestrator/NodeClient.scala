@@ -77,6 +77,22 @@ object NodeClient:
           .drain
       }
 
+  def distUpgrade(
+      node: Node,
+      updateCache: Boolean,
+      onEvent: Event => IO[Unit]
+  ): IO[Unit] =
+    channelBuilder(node)
+      .resource[IO]
+      .flatMap(AgentFs2Grpc.stubResource[IO])
+      .use { stub =>
+        stub
+          .runDistUpgrade(DistUpgrade(updateCache), authMetadata())
+          .evalMap(onEvent)
+          .compile
+          .drain
+      }
+
   private def localSha256(path: java.nio.file.Path): IO[String] =
     IO.blocking {
       val digest = java.security.MessageDigest.getInstance("SHA-256")

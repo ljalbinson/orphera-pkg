@@ -364,6 +364,11 @@ object ClusterPlaybookRunner:
           NodeClient.autoRemove(node, purge, r)
         )
 
+      case Task.DistUpgrade(updateCache) =>
+        requireStreamedSuccess(render)(r =>
+          NodeClient.distUpgrade(node, updateCache, r)
+        )
+
       case Task.Copy(src, dest, owner, group, mode, _) =>
         requireStreamedSuccess(render)(r =>
           NodeClient.copyFile(

@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — `dist_upgrade` task (`Task.DistUpgrade`)
+
+A native `apt-get dist-upgrade` task, for playbooks that previously had to
+hand-roll it through `run_command` (with `DEBIAN_FRONTEND`, apt lock timeout
+and conffile options all spelled out per use — see the old
+`manifests/apt-dist-upgrade.yaml`). `Task.DistUpgrade(updateCache = true)` /
+YAML `dist_upgrade:` with `update_cache:` (default `true`). New `DistUpgrade`
+proto message and `RunDistUpgrade` RPC; agent side is `AptInstaller.distUpgrade`
+(runs `apt-get update` first when `updateCache`, then `dist-upgrade -y` with
+`--force-confdef`/`--force-confold`). A failed update emits a FAILED result
+event rather than raising inside the detached fiber — raising there would
+leave the orchestrator's stream (which only ends on a RESULT) hanging.
+Task-only: there is no `dist-upgrade` CLI command. Requires rebuilding and
+redeploying the agent, since the new RPC is agent-side.
+
 ### Added — `--config` (per-VM YAML config files for `.scala` scripts)
 
 A new `playbook`/`cluster-playbook` flag, `--config <path>`, for

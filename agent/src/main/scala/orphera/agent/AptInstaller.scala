@@ -87,6 +87,61 @@ object AptInstaller:
       queue
     )
 
+  /** `apt-get dist-upgrade`, optionally preceded by `apt-get update`. Unlike
+    * install's update step, a failed update here emits a FAILED RESULT itself
+    * rather than just raising: runNoResult's raised error would die inside the
+    * detached fiber that runs this, never reaching the queue, and the
+    * orchestrator's stream (which only ends on a RESULT event) would hang.
+    * `--force-confdef`/`--force-confold` keep existing config files instead of
+    * stalling on a conffile prompt, since there is no tty to answer it.
+    */
+  def distUpgrade(cmd: DistUpgrade, queue: Queue[IO, Event]): IO[Unit] =
+    val aptOptions = List(
+      "-o",
+      "DPkg::Lock::Timeout=60",
+      "-o",
+      "Dpkg::Use-Pty=0",
+      "-o",
+      "APT::Color=0",
+      "-o",
+      "APT::Get::Assume-Yes=true"
+    )
+
+    val update =
+      if cmd.updateCache then
+        runNoResult(
+          List("apt-get") ++ aptOptions ++ List("update"),
+          "Updating package cache",
+          queue
+        )
+      else IO.unit
+
+    val upgrade = run(
+      List("apt-get") ++ aptOptions ++ List(
+        "-o",
+        "Dpkg::Options::=--force-confdef",
+        "-o",
+        "Dpkg::Options::=--force-confold",
+        "dist-upgrade",
+        "-y"
+      ),
+      "Upgrading packages (dist-upgrade)",
+      queue
+    )
+
+    update.attempt.flatMap {
+      case Right(_)  => upgrade
+      case Left(err) =>
+        queue.offer(
+          Event(
+            kind = Event.Kind.RESULT,
+            message = s"FAILED: ${err.getMessage}",
+            exitCode = 1,
+            success = false
+          )
+        )
+    }
+
   private def run(
       command: List[String],
       stage: String,

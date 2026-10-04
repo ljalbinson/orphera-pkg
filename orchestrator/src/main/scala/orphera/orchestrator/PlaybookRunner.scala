@@ -249,6 +249,11 @@ object PlaybookRunner:
           NodeClient.autoRemove(node, purge, r)
         )
 
+      case Task.DistUpgrade(updateCache) =>
+        requireStreamedSuccess(render)(r =>
+          NodeClient.distUpgrade(node, updateCache, r)
+        )
+
       case Task.Copy(src, dest, owner, group, mode, vars) =>
         resolveSourcePath(src, vars, facts, context, setFacts, node).flatMap {
           resolvedSrc =>
