@@ -1,0 +1,61 @@
+# apt update -> apt dist-upgrade -> apt autoremove across the test nodes.
+#
+# Orphera has no native update/dist-upgrade task (install's update_cache
+# only fires alongside an install), so the first two steps go through
+# run_command. CommandRunner doesn't set DEBIAN_FRONTEND, so it's passed
+# explicitly via env, and the apt-get options mirror AptInstaller's
+# (lock timeout, no pty, no colour, assume-yes). --force-confdef/confold
+# keeps existing config files rather than stalling on a conffile prompt.
+#
+# autoremove uses the native task, so it shows up as a mutating command
+# in the audit log like the CLI's `autoremove`.
+name: apt-dist-upgrade
+
+nodes:
+  - tst0
+  - tst1
+  - tst2
+  - tst3
+  - tst4
+  - tst5
+
+tasks:
+  - name: apt update
+    run_command:
+      command:
+        - env
+        - DEBIAN_FRONTEND=noninteractive
+        - apt-get
+        - -o
+        - DPkg::Lock::Timeout=60
+        - -o
+        - Dpkg::Use-Pty=0
+        - -o
+        - APT::Color=0
+        - update
+      timeout: 300
+
+  - name: apt dist-upgrade
+    run_command:
+      command:
+        - env
+        - DEBIAN_FRONTEND=noninteractive
+        - APT_LISTCHANGES_FRONTEND=none
+        - apt-get
+        - -o
+        - DPkg::Lock::Timeout=60
+        - -o
+        - Dpkg::Use-Pty=0
+        - -o
+        - APT::Color=0
+        - -o
+        - Dpkg::Options::=--force-confdef
+        - -o
+        - Dpkg::Options::=--force-confold
+        - -y
+        - dist-upgrade
+      timeout: 1800
+
+  - name: apt autoremove
+    autoremove:
+      purge: false
