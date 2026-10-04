@@ -354,8 +354,7 @@ object Main extends IOApp:
       resume: Boolean,
       config: Option[String]
   ): IO[ExitCode] =
-    if path.endsWith(".scala") then
-      runScalaPlaybookScript(path, resume, config)
+    if path.endsWith(".scala") then runScalaPlaybookScript(path, resume, config)
     else
       // Same reasoning as RunPlaybook above: --config only reaches a
       // running .scala script, never a YAML cluster-playbook, which has
@@ -408,9 +407,8 @@ object Main extends IOApp:
             scriptPath
           )
           if resume then builder.environment().put("ORPHERA_RESUME", "true")
-          config.foreach(path =>
-            builder.environment().put("ORPHERA_CONFIG", path)
-          )
+          config
+            .foreach(path => builder.environment().put("ORPHERA_CONFIG", path))
           val exit = builder
             .inheritIO()
             .start()
