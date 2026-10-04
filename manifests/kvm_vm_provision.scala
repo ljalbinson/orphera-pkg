@@ -100,61 +100,82 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 object kvm_vm_provision extends OrpheraClusterPlaybook:
 
   // `orphera cluster-playbook manifests/kvm_vm_provision.scala --vm-config
-  // config/testvm0-config.yml` now makes that file's parsed params
-  // available here as:
-  //   val vmConfig: Option[VmParams] = VmConfigYaml.fromEnv() match
-  //     case Some(Right(p))  => Some(p)
-  //     case Some(Left(err)) => throw new RuntimeException(err) // or handle however
-  //     case None             => None // --vm-config wasn't given
-  // The vals below are still hardcoded literals, not yet wired to read
-  // from `vmConfig` — intentionally left for a follow-up pass to replace
-  // them one at a time (hypervisorNode <- vmConfig.hypervisor, memoryMB
-  // <- vmConfig.memory.toInt, etc.) rather than done wholesale here.
-  // See VmConfigYaml.scala for the full VmParams/Nic0 shape.
+  // config/testvm0-config.yaml` makes that file's parsed params available
+  // here. `Left` (given but unparseable) fails the whole playbook loudly
+  // rather than silently falling back — a typo'd/corrupt --vm-config
+  // should never result in provisioning against the WRONG VM's sizing by
+  // accident. `None` (flag not given at all) is the one case every val
+  // below still falls back to its prior hardcoded literal for, so this
+  // file keeps working unchanged for anyone not using --vm-config yet.
+  private val vmConfig: Option[VmParams] =
+    VmConfigYaml.fromEnv() match
+      case Some(Right(p)) => Some(p)
+      case Some(Left(err)) =>
+        throw new RuntimeException(s"--vm-config given but failed to load: $err")
+      case None => None
 
   // NEW node, not yet in inventory.yaml — add it for real (host,
   // cluster_ip, and confirm the Orphera agent is actually reachable
   // there) before this playbook can run at all. Standing in for
   // Ansible's `{{ HYPERVISOR }}` (sourced from the VM's own
-  // config/{{TGT}}-config.yml in the original; hardcoded here the same
-  // way every other node list in this project is a Scala val, not a
-  // per-run parameter).
-  //
-  // Synced to the real testvm0-config.yml (kayobe0:~/kttb-virt-ansible/
-  // playbooks/config/) below, which gives `hypervisor: gs10` — NOTE this
-  // differs from "gs1", the hypervisor every real run of this playbook
-  // so far actually used successfully. Flagging rather than silently
-  // picking: if gs10 isn't the real intended target (or isn't in
-  // inventory.yaml yet), change this back before running again.
-  private val hypervisorNode = "gs10"
+  // config/{{TGT}}-config.yml in the original; previously hardcoded here
+  // the same way every other node list in this project is a Scala val —
+  // now read from vmConfig when --vm-config is given, same literal
+  // "gs10" as a fallback otherwise. NOTE "gs10" differs from "gs1", the
+  // hypervisor every real run of this playbook before --vm-config
+  // existed actually used successfully — carried over as the fallback
+  // rather than silently corrected, same flag as before.
+  private val hypervisorNode = vmConfig.map(_.hypervisor).getOrElse("gs10")
 
   // Standing in for the original's config/{{TGT}}-config.yml for ONE
   // concrete VM — Orphera playbooks are code per exercise, not a
   // generic parameterized role, same as every other manifest in this
   // project (ceph_observability.scala's node lists, wordpress_site.scala's
-  // db credentials). A second VM means a second object like this one
-  // with its own vals, not a parameter to this one.
+  // db credentials). A second VM now means a second --vm-config YAML
+  // file, not a second hardcoded object — the vals below just read
+  // whichever file --vm-config points at, falling back to testvm0's own
+  // real values (from testvm0-config.yaml) when run without the flag.
   //
-  // Values below synced to the real testvm0-config.yml's `params:` block
-  // (disk/memory/cpu/nic0.*) — previously placeholders. That file also
-  // carries `pre_basic_packages`/`basic_packages` (qemu-guest-agent,
-  // openvswitch-switch, htop, etc.) and `host_type: host-passthrough`;
-  // the package lists are NOT wired in here yet — installing packages
-  // on testvm0 itself needs a way to run commands there, and the only
-  // primitive that currently reaches an uninventoried VM at all is the
-  // SSH liveness probe (HealthCheck.Ssh), not a command-execution task —
-  // a real follow-up, not folded in here. `host_type` IS wired in below
-  // (`--cpu host-passthrough` on virt-install).
-  private val vmName = "testvm0"
-  private val baseImage =
-    "noble-server-cloudimg-amd64.img" // under /var/lib/libvirt/boot/ on the hypervisor
-  private val diskSizeGB = 32
-  private val swapSizeGB = 2 // not present in testvm0-config.yml at all; left at its prior placeholder value
-  private val memoryMB = 16384
-  private val vcpus = 4
-  private val nicName = "ens3" // testvm0-config.yml nic0.nic — the original's `enp1s0` placeholder was never real
-  private val nicBridge = "br-net1"
-  private val cpuMode = "host-passthrough" // testvm0-config.yml host_type
+  // `pre_basic_packages`/`basic_packages` (qemu-guest-agent,
+  // openvswitch-switch, htop, etc.) are parsed into vmConfig but NOT
+  // wired in here yet — installing packages on testvm0 itself needs a
+  // way to run commands there, and the only primitive that currently
+  // reaches an uninventoried VM at all is the SSH liveness probe
+  // (HealthCheck.Ssh), not a command-execution task — a real follow-up,
+  // not folded in here. `host_type` IS wired in below (`--cpu` on
+  // virt-install).
+  private val vmName = vmConfig.map(_.hostname).getOrElse("testvm0")
+  private val baseImage = vmConfig
+    .map(_.os)
+    .getOrElse(
+      "noble-server-cloudimg-amd64.img"
+    ) // under /var/lib/libvirt/boot/ on the hypervisor
+  private val diskSizeGB = vmConfig.map(_.disk.toInt).getOrElse(32)
+  private val swapSizeGB = 2 // not present in testvm0-config.yaml at all; no vmConfig field to read
+  private val memoryMB = vmConfig.map(_.memory.toInt).getOrElse(16384)
+  private val vcpus = vmConfig.map(_.cpu.toInt).getOrElse(4)
+  private val nicName = vmConfig.map(_.nic0.nic).getOrElse("ens3")
+  private val nicBridge = vmConfig.map(_.nic0.bridge).getOrElse("br-net1")
+  private val cpuMode = vmConfig.map(_.hostType).getOrElse("host-passthrough")
+  private val domainname =
+    vmConfig.map(_.domainname).getOrElse("ljalbinson.com")
+  private val dns1 = vmConfig.map(_.dns1).getOrElse("192.168.1.70")
+  private val dns2 = vmConfig.map(_.dns2).getOrElse("192.168.1.71")
+  private val ipAddress =
+    vmConfig.map(_.nic0.ipaddress).getOrElse("192.168.1.222")
+  private val gateway = vmConfig.map(_.nic0.gateway).getOrElse("192.168.1.1")
+  private val netmask =
+    vmConfig.map(_.nic0.netmask).getOrElse("255.255.255.0")
+  // Prefix length for the VLAN (netplan v2) template form — not
+  // currently exercised (NetworkConfigTemplate.render is always called
+  // with vlan = None below), but kept derived from nic0.cidr rather than
+  // a bare literal, same as everything else above. "192.168.1.0/24" ->
+  // 24; falls back to 24 outright if cidr is missing or malformed.
+  private val ipMask = vmConfig
+    .map(_.nic0.cidr)
+    .flatMap(_.split("/").lastOption)
+    .flatMap(_.toIntOption)
+    .getOrElse(24)
 
   // Mirrors EFSNAME/EDIR from the original (DFSNAME/DDIR — the second,
   // bulk-data filesystem — is out of scope here, see header comment).
@@ -265,11 +286,11 @@ object kvm_vm_provision extends OrpheraClusterPlaybook:
         .task("template user-data")(
           Task.WriteFile(
             content = CloudConfigTemplate.render(
-              "testvm0",
-              "ljalbinson.com",
-              "192.168.1.222",
-              "192.168.1.70",
-              "192.168.1.71",
+              vmName,
+              domainname,
+              ipAddress,
+              dns1,
+              dns2,
               "localadmin",
               "passw0rd",
               "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCh3x5I0xfDt1XWoJyRovdmhelVvU9HW8W5kUrK85q593JFAx0EazsTJ1wKBpQGw7YGhf5EzhiAMsPJjZpOMN0XuzT7+UzYcKRpTaZ5eWMXRSbjnYcd+BoOGaLMjJPN7x7yu6pbXbW2VP7vCZem+5yIJUW4gB/2GqhEQAxg+0+zM66/93PgJ5GPd9mvwN8MkU7z0AV53Hlz6QJo7310Vxehe80NGKwgmxOZz6rjcnf3155vau48Ol0stghE0hgBCFDQcL14Aqdvi3TX9VT0uHJQK9BcMzchd9RyteNVrO/lYf10gL2OH68BUFZPfv9QJrO9kempCMvZplGJl29rvT55 localadmin@xh4",
@@ -294,13 +315,13 @@ object kvm_vm_provision extends OrpheraClusterPlaybook:
           Task.WriteFile(
             content = NetworkConfigTemplate.render(
               nicName,
-              "192.168.1.222",
-              24,
-              "255.255.255.0",
-              "192.168.1.1",
-              "192.168.1.70",
-              "192.168.1.71",
-              "ljalbinson.com"
+              ipAddress,
+              ipMask,
+              netmask,
+              gateway,
+              dns1,
+              dns2,
+              domainname
             ),
             dest = s"$workingDir/network-config",
             owner = "localadmin",
@@ -358,6 +379,7 @@ object kvm_vm_provision extends OrpheraClusterPlaybook:
         .waitFor(
           HealthCheck.Ssh(
             onNode = vmName,
+            host = ipAddress,
             sshUser = "localadmin", // matches the `users:` entry CloudConfigTemplate renders
             sshKeyPath = None, // fill in a path if the operator's default identity isn't the right key
             remoteCommand = "true",
