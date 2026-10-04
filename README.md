@@ -640,7 +640,14 @@ designated node (`on_node:`) at `poll_interval` seconds until
   it can't be running the Orphera agent yet and usually isn't in
   inventory.yaml yet either. Deliberately does not install or start
   the agent itself; that stays a separate, explicit `orphera bootstrap`
-  step afterward.
+  step afterward. Deliberately does **not** pin or persist the remote
+  host key (`UserKnownHostsFile=/dev/null`) — this check exists only
+  for a VM expected to be destroyed and recreated at the same address
+  across runs, and cloud-init regenerates a fresh host key on every
+  boot; pinning it would make every run after the first fail with
+  "REMOTE HOST IDENTIFICATION HAS CHANGED" instead of actually probing
+  liveness. A failed poll's real ssh output (host-key/auth/connection
+  errors, not just "not ready yet") is printed, not swallowed.
 
 Only single-node `Sentinel`/`Command`/`Ssh` checks probe one designated node.
 `HealthCheck.Quorum` (`nodes`, `command`, `requiredCount`) is a genuine
@@ -825,10 +832,26 @@ note rather than silently ignoring the flag in that case.
 orphera cluster-playbook manifests/kvm_vm_provision.scala --vm-config config/testvm0-config.yml
 ```
 
-**Not yet done:** `kvm_vm_provision.scala` can call `VmConfigYaml.fromEnv()`
-but its vals aren't wired to read from the result yet — that's a
-deliberate follow-up, replacing one hardcoded val at a time rather than
-all at once.
+`kvm_vm_provision.scala` is wired to `VmConfigYaml.fromEnv()` end to
+end — every sizing/network val (`hypervisorNode`, `vmName`, `baseImage`,
+`diskSizeGB`, `memoryMB`, `vcpus`, `nicName`, `nicBridge`, `cpuMode`,
+`domainname`, `dns1`/`dns2`, `ipAddress`, `gateway`, `netmask`) reads
+from the parsed config when `--vm-config` is given, falling back to
+testvm0's own real hardcoded values (from `config/testvm0-config.yaml`)
+when it isn't. `pre_basic_packages`/`basic_packages` are parsed into
+`VmParams` but still not wired in anywhere — installing packages on
+the VM itself needs a command-execution primitive that can reach an
+uninventoried node, which doesn't exist yet (`HealthCheck.Ssh` only
+probes liveness, it doesn't run arbitrary commands).
+
+The one value this file does **not** read from `--vm-config` is the SSH
+key authorized on the new VM — there's no field for that in the
+kttb-virt-ansible config shape. Instead it reads a real public key off
+disk at provision time (`ORPHERA_SSH_PUBKEY_PATH` env var if set, else
+`~/.ssh/id_ed25519.pub`, else `~/.ssh/id_rsa.pub`) and bakes that into
+cloud-init's `authorized_keys`, rather than a hardcoded literal — so
+whichever identity actually connects (interactively, or via
+`HealthCheck.Ssh` above) is the one the new VM trusts.
 
 ## Observability
 

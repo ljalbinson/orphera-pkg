@@ -33,9 +33,52 @@ a `.yaml` file or a compiled, registered playbook — neither has any
 code of its own that could read the env var — `orphera` prints a note
 rather than silently ignoring the flag in that case.
 
-`kvm_vm_provision.scala` is NOT yet wired to read from `VmConfigYaml` —
-deliberately left as a follow-up, replacing its hardcoded vals one at a
-time rather than all at once.
+`kvm_vm_provision.scala` is now wired to `VmConfigYaml.fromEnv()` end
+to end — `hypervisorNode`, `vmName`, `baseImage`, `diskSizeGB`,
+`memoryMB`, `vcpus`, `nicName`, `nicBridge`, `cpuMode`, `domainname`,
+`dns1`/`dns2`, `ipAddress`, `gateway`, and `netmask` all read from the
+parsed config when `--vm-config` is given, falling back to testvm0's
+own prior hardcoded values otherwise. `pre_basic_packages`/
+`basic_packages` are parsed but still not wired in anywhere — no
+command-execution primitive reaches an uninventoried node yet.
+
+### Fixed — `confirm-vm-reachable` (`manifests/kvm_vm_provision.scala`) failing for three separate, real reasons
+
+Three distinct bugs, each found by a real run against `gs1`/`testvm0`,
+each of which independently made this stage fail:
+
+1. **30s timeout too tight.** A real fresh boot's sshd started
+   listening ~11s after boot, but the first successful pubkey auth
+   didn't happen until ~47s after THAT (~60s after boot) —
+   cloud-init's users/ssh module writes `authorized_keys` late in its
+   "Final" stage, well after sshd itself comes up. Bumped
+   `HealthCheck.Ssh`'s `timeoutSeconds` from 30 to 180.
+2. **Stale host key on the IP, mistaken for a timeout.** `testvm0` is
+   destroyed and recreated at the same IP across runs by design, and
+   cloud-init regenerates a fresh host key every boot. Once the
+   operator's own `known_hosts` recorded a key for that IP from an
+   earlier run, every later run hit "REMOTE HOST IDENTIFICATION HAS
+   CHANGED" / "Host key verification failed" on every poll —
+   `SshDeployer.checkAlive`'s `.attempt.map(_.isRight)` swallowed the
+   real reason, so it looked identical to a plain timeout. Fixed by
+   adding a `persistHostKey` flag to `SshDeployer.sshRun`/
+   `sshBaseArgs`; `checkAlive` now passes `persistHostKey = false`,
+   adding `-o UserKnownHostsFile=/dev/null` for this one path — correct
+   specifically because `HealthCheck.Ssh` exists only for a VM whose
+   host key is expected to change across runs. `bootstrap`/`teardown`/
+   `scp` (real, persistent nodes) are unaffected. `checkAlive` also no
+   longer discards the real per-poll ssh output — it's now printed on
+   each failed poll instead of silently swallowed.
+3. **Hardcoded, stale authorized key.** `CloudConfigTemplate`'s
+   cloud-init user-data baked in one hardcoded public-key literal
+   (from an unrelated, long-gone machine) as the sole key in
+   `testvm0`'s `authorized_keys`, regardless of what identity the
+   operator/orphera actually connects with — so pubkey auth could fail
+   even with the above two fixed. `kvm_vm_provision.scala` now reads a
+   real public key off disk at provision time
+   (`ORPHERA_SSH_PUBKEY_PATH` env var, else `~/.ssh/id_ed25519.pub`,
+   else `~/.ssh/id_rsa.pub`) instead, throwing loudly if none is found
+   rather than silently falling back to the stale key.
 
 ### Added — `HealthCheck.Ssh` (SSH-based health check)
 
