@@ -384,7 +384,17 @@ object kvm_vm_provision extends OrpheraClusterPlaybook:
             sshKeyPath = None, // fill in a path if the operator's default identity isn't the right key
             remoteCommand = "true",
             pollIntervalSeconds = 10,
-            timeoutSeconds = 30
+            // Real run finding #3: sshd starts listening well before pubkey
+            // auth actually works. On a real fresh boot, sshd logged
+            // "Server listening" ~11s after boot, but the first successful
+            // pubkey auth didn't happen until ~47s after THAT (~60s after
+            // boot) — cloud-init's ssh/users module writes
+            // ~/.ssh/authorized_keys late in its "Final" stage, well after
+            // sshd itself comes up. The original 30s timeout (3 polls at
+            // 10s) never reached that point and always timed out. Bumped to
+            // 180s (18 polls) to leave real margin above the ~60s observed,
+            // since a slower/loaded hypervisor could push this further.
+            timeoutSeconds = 180
           )
         )
         .task(s"$vmName provisioned and reachable")(
