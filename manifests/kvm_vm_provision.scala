@@ -154,7 +154,7 @@ object kvm_vm_provision extends OrpheraClusterPlaybook:
   private val swapSizeGB = 2 // not present in testvm0-config.yaml at all; no vmConfig field to read
   private val memoryMB = vmConfig.map(_.memory.toInt).getOrElse(16384)
   private val vcpus = vmConfig.map(_.cpu.toInt).getOrElse(4)
-  private val nicName = vmConfig.map(_.nic0.nic).getOrElse("ens3")
+  private val nicName = vmConfig.map(_.nic0.nic).getOrElse("enp1s0")
   private val nicBridge = vmConfig.map(_.nic0.bridge).getOrElse("br-net1")
   private val cpuMode = vmConfig.map(_.hostType).getOrElse("host-passthrough")
   private val domainname =
@@ -520,7 +520,6 @@ object NetworkConfigTemplate {
         s"""version: 1
            |config:
            |   - type: physical
-           |     name: ens3
            |     name: $nic
            |     subnets:
            |        - type: static

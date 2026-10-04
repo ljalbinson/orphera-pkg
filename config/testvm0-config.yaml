@@ -1,0 +1,35 @@
+params:
+  pre_basic_packages:
+  - qemu-guest-agent
+  - openvswitch-switch
+  basic_packages:
+  - htop
+  - tree
+  - etckeeper
+  - molly-guard
+  - cpu-checker
+  - iperf3
+  - fping
+  nic0:
+    nic: enp1s0
+    ipaddress: '192.168.1.222'
+    gateway: '192.168.1.1'
+    bridge: br-net1
+    netmask: '255.255.255.0'
+    table: 1
+    priority: 101
+    cidr: '192.168.1.0/24'
+    mtu: 1500
+  hypervisor: gs1
+  hostname: testvm0
+  disk: '32'
+  dns1: '192.168.1.70'
+  memory: '16384'
+  os: noble-server-cloudimg-amd64.img
+  nics: []
+  domainname: ljalbinson.com
+  host_type: host-passthrough
+  dns2: '192.168.1.71'
+  disks: []
+  cpu: '4'
+  pdisks: []
