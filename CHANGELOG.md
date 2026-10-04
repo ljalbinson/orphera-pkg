@@ -6,9 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-### Added — `--vm-config` (per-VM YAML config files for `.scala` scripts)
+### Added — `--config` (per-VM YAML config files for `.scala` scripts)
 
-A new `playbook`/`cluster-playbook` flag, `--vm-config <path>`, for
+A new `playbook`/`cluster-playbook` flag, `--config <path>`, for
 reading real per-VM sizing/network values into a `.scala` script
 instead of hardcoding one Scala val per field per VM. Motivated by
 `manifests/kvm_vm_provision.scala`, which previously hardcoded
@@ -21,14 +21,14 @@ project's own per-VM config file shape (`params:` block with
 `hypervisor`/`hostname`/`disk`/`memory`/`cpu`/`dns1`/`dns2`/
 `host_type`/a nested `nic0:`/etc. — not a format invented here) into
 `VmParams`/`Nic0` case classes. `VmConfigYaml.fromEnv()` is what a
-script calls — reads the path from `ORPHERA_VM_CONFIG`, the same
+script calls — reads the path from `ORPHERA_CONFIG`, the same
 environment-variable hand-off `--resume`/`ORPHERA_RESUME` already uses,
 since `IOApp.Simple`'s `run: IO[Unit]` has no access to process args at
 all.
 
 `Command.RunPlaybook`/`RunClusterPlaybook` (`Cli.scala`) both gained a
-`vmConfig: Option[String]` field; `Main.scala`'s `runScalaPlaybookScript`
-sets `ORPHERA_VM_CONFIG` on the subprocess when given. Has no effect on
+`config: Option[String]` field; `Main.scala`'s `runScalaPlaybookScript`
+sets `ORPHERA_CONFIG` on the subprocess when given. Has no effect on
 a `.yaml` file or a compiled, registered playbook — neither has any
 code of its own that could read the env var — `orphera` prints a note
 rather than silently ignoring the flag in that case.
@@ -37,7 +37,7 @@ rather than silently ignoring the flag in that case.
 to end — `hypervisorNode`, `vmName`, `baseImage`, `diskSizeGB`,
 `memoryMB`, `vcpus`, `nicName`, `nicBridge`, `cpuMode`, `domainname`,
 `dns1`/`dns2`, `ipAddress`, `gateway`, and `netmask` all read from the
-parsed config when `--vm-config` is given, falling back to testvm0's
+parsed config when `--config` is given, falling back to testvm0's
 own prior hardcoded values otherwise. `pre_basic_packages`/
 `basic_packages` are parsed but still not wired in anywhere — no
 command-execution primitive reaches an uninventoried node yet.

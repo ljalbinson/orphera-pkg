@@ -136,14 +136,14 @@ object VmConfigYaml:
 
   /** The hand-off a playbook actually calls. See this file's header comment:
     * IOApp.Simple's `run: IO[Unit]` has no access to process args, so
-    * ORPHERA_VM_CONFIG is how `orphera cluster-playbook somefile.scala
-    * --vm-config path/to/testvm0-config.yml` reaches the running script at all
+    * ORPHERA_CONFIG is how `orphera cluster-playbook somefile.scala
+    * --config path/to/testvm0-config.yml` reaches the running script at all
     * — same hand-off OrpheraClusterPlaybook already uses for ORPHERA_RESUME
     * (see Main.scala's runScalaPlaybookScript, which sets both). None means
-    * --vm-config was never given; Some(Left(...)) means it was given but failed
+    * --config was never given; Some(Left(...)) means it was given but failed
     * to load or parse. Which to do about either case (fall back to hardcoded
     * defaults? fail the whole playbook?) is left to the calling playbook — this
     * module has no opinion on it.
     */
   def fromEnv(): Option[Either[String, VmParams]] =
-    sys.env.get("ORPHERA_VM_CONFIG").map(load)
+    sys.env.get("ORPHERA_CONFIG").map(load)

@@ -99,20 +99,20 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 //     exists" (the original's own scope).
 object kvm_vm_provision extends OrpheraClusterPlaybook:
 
-  // `orphera cluster-playbook manifests/kvm_vm_provision.scala --vm-config
+  // `orphera cluster-playbook manifests/kvm_vm_provision.scala --config
   // config/testvm0-config.yaml` makes that file's parsed params available
   // here. `Left` (given but unparseable) fails the whole playbook loudly
-  // rather than silently falling back — a typo'd/corrupt --vm-config
+  // rather than silently falling back — a typo'd/corrupt --config
   // should never result in provisioning against the WRONG VM's sizing by
   // accident. `None` (flag not given at all) is the one case every val
   // below still falls back to its prior hardcoded literal for, so this
-  // file keeps working unchanged for anyone not using --vm-config yet.
-  private val vmConfig: Option[VmParams] =
+  // file keeps working unchanged for anyone not using --config yet.
+  private val config: Option[VmParams] =
     VmConfigYaml.fromEnv() match
       case Some(Right(p))  => Some(p)
       case Some(Left(err)) =>
         throw new RuntimeException(
-          s"--vm-config given but failed to load: $err"
+          s"--config given but failed to load: $err"
         )
       case None => None
 
@@ -122,59 +122,59 @@ object kvm_vm_provision extends OrpheraClusterPlaybook:
   // Ansible's `{{ HYPERVISOR }}` (sourced from the VM's own
   // config/{{TGT}}-config.yml in the original; previously hardcoded here
   // the same way every other node list in this project is a Scala val —
-  // now read from vmConfig when --vm-config is given, same literal
+  // now read from config when --config is given, same literal
   // "gs10" as a fallback otherwise. NOTE "gs10" differs from "gs1", the
-  // hypervisor every real run of this playbook before --vm-config
+  // hypervisor every real run of this playbook before --config
   // existed actually used successfully — carried over as the fallback
   // rather than silently corrected, same flag as before.
-  private val hypervisorNode = vmConfig.map(_.hypervisor).getOrElse("gs10")
+  private val hypervisorNode = config.map(_.hypervisor).getOrElse("gs10")
 
   // Standing in for the original's config/{{TGT}}-config.yml for ONE
   // concrete VM — Orphera playbooks are code per exercise, not a
   // generic parameterized role, same as every other manifest in this
   // project (ceph_observability.scala's node lists, wordpress_site.scala's
-  // db credentials). A second VM now means a second --vm-config YAML
+  // db credentials). A second VM now means a second --config YAML
   // file, not a second hardcoded object — the vals below just read
-  // whichever file --vm-config points at, falling back to testvm0's own
+  // whichever file --config points at, falling back to testvm0's own
   // real values (from testvm0-config.yaml) when run without the flag.
   //
   // `pre_basic_packages`/`basic_packages` (qemu-guest-agent,
-  // openvswitch-switch, htop, etc.) are parsed into vmConfig but NOT
+  // openvswitch-switch, htop, etc.) are parsed into config but NOT
   // wired in here yet — installing packages on testvm0 itself needs a
   // way to run commands there, and the only primitive that currently
   // reaches an uninventoried VM at all is the SSH liveness probe
   // (HealthCheck.Ssh), not a command-execution task — a real follow-up,
   // not folded in here. `host_type` IS wired in below (`--cpu` on
   // virt-install).
-  private val vmName = vmConfig.map(_.hostname).getOrElse("testvm0")
-  private val baseImage = vmConfig
+  private val vmName = config.map(_.hostname).getOrElse("testvm0")
+  private val baseImage = config
     .map(_.os)
     .getOrElse(
       "noble-server-cloudimg-amd64.img"
     ) // under /var/lib/libvirt/boot/ on the hypervisor
-  private val diskSizeGB = vmConfig.map(_.disk.toInt).getOrElse(32)
+  private val diskSizeGB = config.map(_.disk.toInt).getOrElse(32)
   private val swapSizeGB =
-    2 // not present in testvm0-config.yaml at all; no vmConfig field to read
-  private val memoryMB = vmConfig.map(_.memory.toInt).getOrElse(16384)
-  private val vcpus = vmConfig.map(_.cpu.toInt).getOrElse(4)
-  private val nicName = vmConfig.map(_.nic0.nic).getOrElse("enp1s0")
-  private val nicBridge = vmConfig.map(_.nic0.bridge).getOrElse("br-net1")
-  private val cpuMode = vmConfig.map(_.hostType).getOrElse("host-passthrough")
+    2 // not present in testvm0-config.yaml at all; no config field to read
+  private val memoryMB = config.map(_.memory.toInt).getOrElse(16384)
+  private val vcpus = config.map(_.cpu.toInt).getOrElse(4)
+  private val nicName = config.map(_.nic0.nic).getOrElse("enp1s0")
+  private val nicBridge = config.map(_.nic0.bridge).getOrElse("br-net1")
+  private val cpuMode = config.map(_.hostType).getOrElse("host-passthrough")
   private val domainname =
-    vmConfig.map(_.domainname).getOrElse("ljalbinson.com")
-  private val dns1 = vmConfig.map(_.dns1).getOrElse("192.168.1.70")
-  private val dns2 = vmConfig.map(_.dns2).getOrElse("192.168.1.71")
+    config.map(_.domainname).getOrElse("ljalbinson.com")
+  private val dns1 = config.map(_.dns1).getOrElse("192.168.1.70")
+  private val dns2 = config.map(_.dns2).getOrElse("192.168.1.71")
   private val ipAddress =
-    vmConfig.map(_.nic0.ipaddress).getOrElse("192.168.1.222")
-  private val gateway = vmConfig.map(_.nic0.gateway).getOrElse("192.168.1.1")
+    config.map(_.nic0.ipaddress).getOrElse("192.168.1.222")
+  private val gateway = config.map(_.nic0.gateway).getOrElse("192.168.1.1")
   private val netmask =
-    vmConfig.map(_.nic0.netmask).getOrElse("255.255.255.0")
+    config.map(_.nic0.netmask).getOrElse("255.255.255.0")
   // Prefix length for the VLAN (netplan v2) template form — not
   // currently exercised (NetworkConfigTemplate.render is always called
   // with vlan = None below), but kept derived from nic0.cidr rather than
   // a bare literal, same as everything else above. "192.168.1.0/24" ->
   // 24; falls back to 24 outright if cidr is missing or malformed.
-  private val ipMask = vmConfig
+  private val ipMask = config
     .map(_.nic0.cidr)
     .flatMap(_.split("/").lastOption)
     .flatMap(_.toIntOption)
