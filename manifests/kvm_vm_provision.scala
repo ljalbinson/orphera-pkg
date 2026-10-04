@@ -177,6 +177,38 @@ object kvm_vm_provision extends OrpheraClusterPlaybook:
     .flatMap(_.toIntOption)
     .getOrElse(24)
 
+  // Real run finding: this used to be a single hardcoded "ssh-rsa ...
+  // localadmin@xh4" literal baked straight into CloudConfigTemplate's
+  // authorized_keys — a key from some other, long-gone machine ("xh4"),
+  // not anything actually present on whatever host runs this playbook.
+  // HealthCheck.Ssh's own BatchMode=yes connection (and anyone manually
+  // reproducing it, see SshDeployer.checkAlive's doc comment) tries
+  // ssh's default identity files for the CURRENT operator/host — if that
+  // doesn't match the hardcoded key, pubkey auth fails outright, no
+  // matter how clean the network/host-key story is (confirmed by hand:
+  // host-key checking passed, auth still failed). Reading the real
+  // public key off disk here means whichever identity ssh actually ends
+  // up using to CONNECT is the exact same one authorized to log in.
+  // ORPHERA_SSH_PUBKEY_PATH overrides the path outright; otherwise tries
+  // the two standard default pubkeys in order. Throws loudly rather than
+  // silently falling back to the stale "xh4" key — a VM provisioned with
+  // the wrong key baked in fails the exact same way all over again.
+  private val sshPublicKey: String =
+    val home = sys.props.getOrElse("user.home", "/root")
+    val candidates = sys.env.get("ORPHERA_SSH_PUBKEY_PATH").toList ++
+      List(s"$home/.ssh/id_ed25519.pub", s"$home/.ssh/id_rsa.pub")
+    candidates
+      .map(java.nio.file.Paths.get(_))
+      .find(java.nio.file.Files.exists(_))
+      .map(p => new String(java.nio.file.Files.readAllBytes(p)).trim)
+      .getOrElse(
+        throw new RuntimeException(
+          "No SSH public key found for provisioning testvm0's authorized_keys " +
+            s"(checked: ${candidates.mkString(", ")}). Set ORPHERA_SSH_PUBKEY_PATH " +
+            "to a pubkey file, or generate one with `ssh-keygen -t ed25519`."
+        )
+      )
+
   // Mirrors EFSNAME/EDIR from the original (DFSNAME/DDIR — the second,
   // bulk-data filesystem — is out of scope here, see header comment).
   private val workingFs = s"tank/kvm/$hypervisorNode/$vmName"
@@ -293,7 +325,7 @@ object kvm_vm_provision extends OrpheraClusterPlaybook:
               dns2,
               "localadmin",
               "passw0rd",
-              "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCh3x5I0xfDt1XWoJyRovdmhelVvU9HW8W5kUrK85q593JFAx0EazsTJ1wKBpQGw7YGhf5EzhiAMsPJjZpOMN0XuzT7+UzYcKRpTaZ5eWMXRSbjnYcd+BoOGaLMjJPN7x7yu6pbXbW2VP7vCZem+5yIJUW4gB/2GqhEQAxg+0+zM66/93PgJ5GPd9mvwN8MkU7z0AV53Hlz6QJo7310Vxehe80NGKwgmxOZz6rjcnf3155vau48Ol0stghE0hgBCFDQcL14Aqdvi3TX9VT0uHJQK9BcMzchd9RyteNVrO/lYf10gL2OH68BUFZPfv9QJrO9kempCMvZplGJl29rvT55 localadmin@xh4",
+              sshPublicKey,
               "Europe/London"
             ),
             dest = s"$workingDir/user-data",
