@@ -265,8 +265,7 @@ object Main extends IOApp:
               // run's checkpoint file — see PlaybookRunner/Checkpoint.
               PlaybookRunner
                 .run(pb, resume)
-                .map(ok => if ok then ExitCode.Success else ExitCode.Error)
-          )
+                .map(ok => if ok then ExitCode.Success else ExitCode.Error))
 
       case Right(
             Command.Reboot(nodeNames, delaySeconds, wait, waitTimeoutSeconds)
@@ -376,19 +375,18 @@ object Main extends IOApp:
           // ClusterPlaybookRunner/Checkpoint.
           ClusterPlaybookRunner
             .run(pb, resume)
-            .map(ok => if ok then ExitCode.Success else ExitCode.Error)
-      )
+            .map(ok => if ok then ExitCode.Success else ExitCode.Error))
 
   /** Compiles and runs a standalone `.scala` playbook script in a separate
-    * `java` process (see scripting/Main.scala). `resume`/`vmConfig` are
-    * passed via the `ORPHERA_RESUME`/`ORPHERA_VM_CONFIG` environment
-    * variables rather than as process arguments: OrpheraPlaybook/
-    * OrpheraClusterPlaybook extend `IOApp.Simple`, whose `run: IO[Unit]`
-    * has no access to the process's command-line args at all, so an env
-    * var is the only way to reach them here without changing that
-    * trait's shape (and without needing to touch scripting/Main.scala's own
-    * arg-forwarding, which this file has no visibility into). A script
-    * reads ORPHERA_VM_CONFIG via VmConfigYaml.fromEnv(), same file.
+    * `java` process (see scripting/Main.scala). `resume`/`vmConfig` are passed
+    * via the `ORPHERA_RESUME`/`ORPHERA_VM_CONFIG` environment variables rather
+    * than as process arguments: OrpheraPlaybook/ OrpheraClusterPlaybook extend
+    * `IOApp.Simple`, whose `run: IO[Unit]` has no access to the process's
+    * command-line args at all, so an env var is the only way to reach them here
+    * without changing that trait's shape (and without needing to touch
+    * scripting/Main.scala's own arg-forwarding, which this file has no
+    * visibility into). A script reads ORPHERA_VM_CONFIG via
+    * VmConfigYaml.fromEnv(), same file.
     */
   private def runScalaPlaybookScript(
       scriptPath: String,

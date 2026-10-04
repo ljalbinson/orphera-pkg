@@ -109,9 +109,11 @@ object kvm_vm_provision extends OrpheraClusterPlaybook:
   // file keeps working unchanged for anyone not using --vm-config yet.
   private val vmConfig: Option[VmParams] =
     VmConfigYaml.fromEnv() match
-      case Some(Right(p)) => Some(p)
+      case Some(Right(p))  => Some(p)
       case Some(Left(err)) =>
-        throw new RuntimeException(s"--vm-config given but failed to load: $err")
+        throw new RuntimeException(
+          s"--vm-config given but failed to load: $err"
+        )
       case None => None
 
   // NEW node, not yet in inventory.yaml — add it for real (host,
@@ -151,7 +153,8 @@ object kvm_vm_provision extends OrpheraClusterPlaybook:
       "noble-server-cloudimg-amd64.img"
     ) // under /var/lib/libvirt/boot/ on the hypervisor
   private val diskSizeGB = vmConfig.map(_.disk.toInt).getOrElse(32)
-  private val swapSizeGB = 2 // not present in testvm0-config.yaml at all; no vmConfig field to read
+  private val swapSizeGB =
+    2 // not present in testvm0-config.yaml at all; no vmConfig field to read
   private val memoryMB = vmConfig.map(_.memory.toInt).getOrElse(16384)
   private val vcpus = vmConfig.map(_.cpu.toInt).getOrElse(4)
   private val nicName = vmConfig.map(_.nic0.nic).getOrElse("enp1s0")
@@ -380,8 +383,10 @@ object kvm_vm_provision extends OrpheraClusterPlaybook:
           HealthCheck.Ssh(
             onNode = vmName,
             host = ipAddress,
-            sshUser = "localadmin", // matches the `users:` entry CloudConfigTemplate renders
-            sshKeyPath = None, // fill in a path if the operator's default identity isn't the right key
+            sshUser =
+              "localadmin", // matches the `users:` entry CloudConfigTemplate renders
+            sshKeyPath =
+              None, // fill in a path if the operator's default identity isn't the right key
             remoteCommand = "true",
             pollIntervalSeconds = 10,
             // Real run finding #3: sshd starts listening well before pubkey

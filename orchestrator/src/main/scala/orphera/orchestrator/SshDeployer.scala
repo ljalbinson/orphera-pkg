@@ -27,33 +27,32 @@ object SshDeployer:
     yield ()
 
   /** Runs `remoteCommand` over plain SSH and reports true/false on
-    * exit-0/non-zero, swallowing the failure rather than raising it —
-    * unlike bootstrap/teardown above, which legitimately want to blow up
-    * loudly on failure, this is a liveness POLL: connection refused
-    * (sshd not up yet), auth failure, and a non-zero remote command are
-    * all just "not ready yet, try again on the next interval" to a
-    * caller like ClusterPlaybookRunner.checkOnce. Built for HealthCheck.Ssh
-    * — confirming a brand-new VM is reachable before any Orphera agent
-    * could possibly be running on it yet, see that case's doc comment.
+    * exit-0/non-zero, swallowing the failure rather than raising it — unlike
+    * bootstrap/teardown above, which legitimately want to blow up loudly on
+    * failure, this is a liveness POLL: connection refused (sshd not up yet),
+    * auth failure, and a non-zero remote command are all just "not ready yet,
+    * try again on the next interval" to a caller like
+    * ClusterPlaybookRunner.checkOnce. Built for HealthCheck.Ssh — confirming a
+    * brand-new VM is reachable before any Orphera agent could possibly be
+    * running on it yet, see that case's doc comment.
     *
     * Real run finding: this is the ONE ssh path that deliberately does NOT
-    * pin/persist the remote host key (see sshBaseArgs' `persistHostKey`
-    * flag below). HealthCheck.Ssh exists specifically for a VM that gets
-    * destroyed and recreated at the same IP across runs (the whole point —
-    * a test VM under active development), and cloud-init regenerates a
-    * fresh host key on every boot. Recording that key in the operator's
-    * real known_hosts the first time just means every SUBSEQUENT
-    * recreation at that IP hits "WARNING: REMOTE HOST IDENTIFICATION HAS
-    * CHANGED" / "Host key verification failed" — not a timeout, but
-    * checkAlive's .attempt swallows the real reason, so it LOOKS like a
-    * timeout from the runner's "Health check timed out after Ns" message.
-    * Confirmed by hand: `ssh -o StrictHostKeyChecking=accept-new -o
-    * BatchMode=yes localadmin@<ip> true` failed with exactly that until
-    * `ssh-keygen -R <ip>` purged the stale entry. Using
-    * UserKnownHostsFile=/dev/null here means every poll (and every run)
-    * starts from a clean slate — appropriate for THIS check only; real
-    * trust-on-first-use pinning still applies to bootstrap/teardown/scp
-    * above, which target already-provisioned, persistent nodes.
+    * pin/persist the remote host key (see sshBaseArgs' `persistHostKey` flag
+    * below). HealthCheck.Ssh exists specifically for a VM that gets destroyed
+    * and recreated at the same IP across runs (the whole point — a test VM
+    * under active development), and cloud-init regenerates a fresh host key on
+    * every boot. Recording that key in the operator's real known_hosts the
+    * first time just means every SUBSEQUENT recreation at that IP hits
+    * "WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED" / "Host key verification
+    * failed" — not a timeout, but checkAlive's .attempt swallows the real
+    * reason, so it LOOKS like a timeout from the runner's "Health check timed
+    * out after Ns" message. Confirmed by hand: `ssh -o
+    * StrictHostKeyChecking=accept-new -o BatchMode=yes localadmin@<ip> true`
+    * failed with exactly that until `ssh-keygen -R <ip>` purged the stale
+    * entry. Using UserKnownHostsFile=/dev/null here means every poll (and every
+    * run) starts from a clean slate — appropriate for THIS check only; real
+    * trust-on-first-use pinning still applies to bootstrap/teardown/scp above,
+    * which target already-provisioned, persistent nodes.
     */
   def checkAlive(
       node: Node,
@@ -81,7 +80,7 @@ object SshDeployer:
         persistHostKey = false
       ).attempt
       ok <- result match
-        case Right(_) => IO.pure(true)
+        case Right(_)  => IO.pure(true)
         case Left(err) =>
           lines.get.flatMap { collected =>
             val detail = collected.reverse.mkString(" | ")

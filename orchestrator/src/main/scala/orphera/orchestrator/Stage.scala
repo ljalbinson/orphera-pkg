@@ -39,26 +39,26 @@ enum HealthCheck:
   )
 
   /** Polls `host` over plain SSH instead of Orphera's own agent RPC — for
-    * exactly one situation: confirming a brand-new VM is alive before it
-    * can possibly be running the Orphera agent yet (kvm_vm_provision.scala's
-    * confirm-vm-reachable stage is the motivating case — its first attempt
-    * used HealthCheck.Command, which goes through NodeClient to an agent
-    * that cloud-init never installs, so every poll failed the same way
-    * until the overall timeout gave up). SSH is the one thing a stock
-    * cloud image's cloud-init guarantees is listening once boot finishes
-    * (the users/ssh_authorized_keys block every cloud-init template in
-    * this project already sets), so it's the only honest liveness probe
-    * available at this point in a VM's life — deliberately NOT a vehicle
-    * for installing or starting the agent itself; that stays a separate,
-    * explicit `orphera bootstrap` step run by hand afterward, same as
-    * every other node in this project's history.
+    * exactly one situation: confirming a brand-new VM is alive before it can
+    * possibly be running the Orphera agent yet (kvm_vm_provision.scala's
+    * confirm-vm-reachable stage is the motivating case — its first attempt used
+    * HealthCheck.Command, which goes through NodeClient to an agent that
+    * cloud-init never installs, so every poll failed the same way until the
+    * overall timeout gave up). SSH is the one thing a stock cloud image's
+    * cloud-init guarantees is listening once boot finishes (the
+    * users/ssh_authorized_keys block every cloud-init template in this project
+    * already sets), so it's the only honest liveness probe available at this
+    * point in a VM's life — deliberately NOT a vehicle for installing or
+    * starting the agent itself; that stays a separate, explicit
+    * `orphera bootstrap` step run by hand afterward, same as every other node
+    * in this project's history.
     *
-    * Takes its own `host` directly, unlike every other HealthCheck
-    * variant, which names a node already in inventory.yaml and looks its
-    * address up from there — deliberately, since the entire point is
-    * checking a VM nothing has registered anywhere yet. `onNode` is a
-    * display label only (shows up in log lines; doesn't have to match
-    * anything in inventory.yaml, and usually can't yet).
+    * Takes its own `host` directly, unlike every other HealthCheck variant,
+    * which names a node already in inventory.yaml and looks its address up from
+    * there — deliberately, since the entire point is checking a VM nothing has
+    * registered anywhere yet. `onNode` is a display label only (shows up in log
+    * lines; doesn't have to match anything in inventory.yaml, and usually can't
+    * yet).
     */
   case Ssh(
       onNode: String,

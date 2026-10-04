@@ -8,19 +8,18 @@ import java.nio.file.{Files, Paths}
 
 /** One VM's sizing/network parameters, in the shape of the kayobe/
   * kttb-virt-ansible project's own per-VM config file — e.g.
-  * `playbooks/config/testvm0-config.yml` there — NOT a format Orphera
-  * invented. Lets a KVM-provisioning playbook (manifests/kvm_vm_provision.scala
-  * is the motivating case) read real values instead of hardcoding one
-  * Scala val per field per VM, while keeping this project's existing
-  * "playbooks are code, not a generic templated role" convention intact:
-  * this only replaces the VALUES a playbook's own vals would otherwise
-  * hardcode, not the playbook's structure — a playbook still decides for
-  * itself which fields it uses and how.
+  * `playbooks/config/testvm0-config.yml` there — NOT a format Orphera invented.
+  * Lets a KVM-provisioning playbook (manifests/kvm_vm_provision.scala is the
+  * motivating case) read real values instead of hardcoding one Scala val per
+  * field per VM, while keeping this project's existing "playbooks are code, not
+  * a generic templated role" convention intact: this only replaces the VALUES a
+  * playbook's own vals would otherwise hardcode, not the playbook's structure —
+  * a playbook still decides for itself which fields it uses and how.
   *
   * Top-level shape is `params: {...}` — one extra level of nesting versus
   * everything else this project parses from YAML (inventory.yaml,
-  * cluster-playbook YAML), because that's how the real kttb-virt-ansible
-  * files are actually shaped, not a convention chosen here.
+  * cluster-playbook YAML), because that's how the real kttb-virt-ansible files
+  * are actually shaped, not a convention chosen here.
   */
 case class Nic0(
     nic: String,
@@ -70,8 +69,17 @@ object VmConfigYaml:
       table <- c.getOrElse[Int]("table")(0)
       priority <- c.getOrElse[Int]("priority")(0)
       mtu <- c.getOrElse[Int]("mtu")(1500)
-    yield Nic0(nic, ipaddress, gateway, bridge, netmask, cidr, table, priority,
-      mtu)
+    yield Nic0(
+      nic,
+      ipaddress,
+      gateway,
+      bridge,
+      netmask,
+      cidr,
+      table,
+      priority,
+      mtu
+    )
 
   private def decodeParams(c: HCursor): Either[DecodingFailure, VmParams] =
     for
@@ -126,17 +134,16 @@ object VmConfigYaml:
       params <- decodeParams(paramsJson.hcursor).left.map(_.getMessage)
     yield params
 
-  /** The hand-off a playbook actually calls. See this file's header
-    * comment: IOApp.Simple's `run: IO[Unit]` has no access to process
-    * args, so ORPHERA_VM_CONFIG is how `orphera cluster-playbook
-    * somefile.scala --vm-config path/to/testvm0-config.yml` reaches the
-    * running script at all — same hand-off OrpheraClusterPlaybook
-    * already uses for ORPHERA_RESUME (see Main.scala's
-    * runScalaPlaybookScript, which sets both). None means --vm-config
-    * was never given; Some(Left(...)) means it was given but failed to
-    * load or parse. Which to do about either case (fall back to
-    * hardcoded defaults? fail the whole playbook?) is left to the
-    * calling playbook — this module has no opinion on it.
+  /** The hand-off a playbook actually calls. See this file's header comment:
+    * IOApp.Simple's `run: IO[Unit]` has no access to process args, so
+    * ORPHERA_VM_CONFIG is how `orphera cluster-playbook somefile.scala
+    * --vm-config path/to/testvm0-config.yml` reaches the running script at all
+    * — same hand-off OrpheraClusterPlaybook already uses for ORPHERA_RESUME
+    * (see Main.scala's runScalaPlaybookScript, which sets both). None means
+    * --vm-config was never given; Some(Left(...)) means it was given but failed
+    * to load or parse. Which to do about either case (fall back to hardcoded
+    * defaults? fail the whole playbook?) is left to the calling playbook — this
+    * module has no opinion on it.
     */
   def fromEnv(): Option[Either[String, VmParams]] =
     sys.env.get("ORPHERA_VM_CONFIG").map(load)

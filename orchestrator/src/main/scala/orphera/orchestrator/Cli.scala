@@ -165,8 +165,8 @@ object Cli:
       case "run" :: rest => parseRunCommand(rest, Nil, None, 60)
       case other => Left(s"Unknown command: ${other.headOption.getOrElse("")}")
 
-  /** Shared flag parser for `playbook`/`cluster-playbook`. Kept separate
-    * rather than inlined since both commands need identical handling — see
+  /** Shared flag parser for `playbook`/`cluster-playbook`. Kept separate rather
+    * than inlined since both commands need identical handling — see
     * `Command.RunPlaybook`/`RunClusterPlaybook` for what `resume`
     * (checkpoint-based restart skipping, `Checkpoint.scala`) and `vmConfig`
     * (ORPHERA_VM_CONFIG hand-off, `VmConfigYaml.scala`) do.
@@ -177,7 +177,7 @@ object Cli:
       vmConfig: Option[String]
   ): Either[String, (Boolean, Option[String])] =
     args match
-      case Nil => Right((resume, vmConfig))
+      case Nil                => Right((resume, vmConfig))
       case "--resume" :: rest =>
         parsePlaybookFlags(rest, resume = true, vmConfig)
       case "--vm-config" :: path :: rest =>
