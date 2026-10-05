@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed — `manifests/set_dns.scala` treated a masked systemd-resolved as present
+
+The per-node detection added for tst0 used `systemctl cat systemd-resolved.service`,
+which succeeds for a *masked* unit. On gs2 and gs3 (resolved masked, static
+resolv.conf) the script took the resolved path and failed at the restart
+("Unit systemd-resolved.service is masked"); gs1, with resolved running,
+worked. Detection now checks `systemctl show -p LoadState --value`, which is
+`loaded` only for a usable unit (`masked`/`not-found` otherwise), so masked and
+missing both take the static-resolv.conf path. Not compiled or run yet.
+
 ### Fixed — `manifests/set_dns.scala` failed on nodes without systemd-resolved
 
 A real run against tst0 failed at `systemctl restart systemd-resolved`

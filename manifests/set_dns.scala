@@ -31,11 +31,14 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 //     resolved still also uses any per-link DNS a link gets from DHCP or
 //     netplan `nameservers:` — this adds global servers, it doesn't strip
 //     per-link ones.
-//   - no systemd-resolved (tst0 is like this: a plain static
-//     /etc/resolv.conf, networkd only, no DHCP client): a static
-//     /etc/resolv.conf is written instead. Found by a real run — the
-//     first version assumed resolved everywhere and failed on tst0 at the
-//     restart step ("Unit systemd-resolved.service not found").
+//   - resolved missing or masked (tst0 has no unit at all: plain static
+//     /etc/resolv.conf, networkd only, no DHCP client; gs2/gs3 have it
+//     masked): a static /etc/resolv.conf is written instead. "Usable" is
+//     decided by the unit's LoadState being `loaded` — `systemctl cat`
+//     was tried first and wrongly says yes for a masked unit. Both found
+//     by real runs: the first version assumed resolved everywhere and
+//     failed on tst0 ("Unit systemd-resolved.service not found"), the
+//     second on gs2/gs3 ("...is masked").
 //
 // round_robin: true switches mechanism. systemd-resolved has no rotate
 // option — it sticks to one upstream server and only fails over — so
@@ -230,7 +233,7 @@ object set_dns extends OrpheraClusterPlaybook:
     else
       s"""set -e
          |$writeFileFn
-         |if systemctl cat systemd-resolved.service >/dev/null 2>&1; then
+         |if [ "$$(systemctl show -p LoadState --value systemd-resolved.service 2>/dev/null)" = "loaded" ]; then
          |$resolvedBranch
          |else
          |echo "no systemd-resolved on this node: writing static $resolvConf"
