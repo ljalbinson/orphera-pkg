@@ -91,6 +91,11 @@ nodes:
     vars:
       cluster_ip: "192.168.1.20"
 
+  - name: gs3
+    host: gs3.ljalbinson.com
+    vars:
+      cluster_ip: "192.168.1.49"
+
 groups:
   - name: mons
     members: [tst0, tst1, tst2]

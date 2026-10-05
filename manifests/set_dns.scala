@@ -186,8 +186,13 @@ object set_dns extends OrpheraClusterPlaybook:
 
   private val resolvedStage: Stage =
     stage("set-dns", config.nodes*)
-      .task("restore resolved stub resolv.conf if a round_robin run replaced it")(
-        Task.RunCommand(List("sh", "-c", restoreStubScript), timeoutSeconds = 30)
+      .task(
+        "restore resolved stub resolv.conf if a round_robin run replaced it"
+      )(
+        Task.RunCommand(
+          List("sh", "-c", restoreStubScript),
+          timeoutSeconds = 30
+        )
       )
       .task("create resolved drop-in directory")(
         Task.RunCommand(List("mkdir", "-p", dropInDir), timeoutSeconds = 30)

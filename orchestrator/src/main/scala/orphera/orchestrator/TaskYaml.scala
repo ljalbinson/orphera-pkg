@@ -29,7 +29,9 @@ object TaskYaml:
         body.getOrElse[Boolean]("purge")(false).map(Task.AutoRemove.apply)
 
       case "dist_upgrade" =>
-        body.getOrElse[Boolean]("update_cache")(true).map(Task.DistUpgrade.apply)
+        body
+          .getOrElse[Boolean]("update_cache")(true)
+          .map(Task.DistUpgrade.apply)
 
       case "copy" =>
         for

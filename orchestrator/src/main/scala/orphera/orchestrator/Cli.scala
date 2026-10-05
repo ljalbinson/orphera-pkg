@@ -110,8 +110,8 @@ object Cli:
     args match
       case "install" :: rest =>
         parseInstall(rest, Nil, None, updateCache = false)
-      case "remove" :: rest     => parseRemove(rest, Nil, None, purge = false)
-      case "autoremove" :: rest => parseAutoRemove(rest, None, purge = false)
+      case "remove" :: rest       => parseRemove(rest, Nil, None, purge = false)
+      case "autoremove" :: rest   => parseAutoRemove(rest, None, purge = false)
       case "dist-upgrade" :: rest =>
         parseDistUpgrade(rest, None, updateCache = true)
       case "copy" :: local :: dest :: rest =>
