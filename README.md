@@ -987,6 +987,14 @@ an unlocked key or agent-forwarded key, no passphrase prompts, and if
 succeeds and the systemd service is running, all future updates go
 through `deploy-agent` (gRPC), not `bootstrap` again.
 
+Before pushing the `.deb`, `bootstrap` runs `apt-get update` and
+`apt-get install -y default-jre` on each node over SSH. The agent needs
+a Java runtime (the package `Depends:` on `default-jre-headless >= 17`),
+and `dpkg -i` doesn't resolve dependencies — on a fresh node it would
+leave the agent unconfigured. If either step fails, that node's
+bootstrap stops there. Needs the same passwordless `sudo` as the
+`dpkg` step, and the node must be able to reach its apt mirrors.
+
 ## Decommissioning a host
 
 ```bash

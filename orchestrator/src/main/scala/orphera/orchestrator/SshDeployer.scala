@@ -7,6 +7,23 @@ import java.io.*
 
 object SshDeployer:
 
+  /** apt-get invocation shared by bootstrap's two prerequisite steps. Same
+    * options the agent's own AptInstaller uses (lock timeout, no pty, no
+    * colour, assume-yes) plus DEBIAN_FRONTEND=noninteractive set explicitly,
+    * since an ssh command has no tty to answer a prompt.
+    */
+  private def aptGet(args: String): String =
+    "sudo env DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=60 " +
+      s"-o Dpkg::Use-Pty=0 -o APT::Color=0 -o APT::Get::Assume-Yes=true $args"
+
+  /** First-time agent install. The .deb Depends on a Java runtime
+    * (default-jre-headless >= 17), but `dpkg -i` never resolves dependencies —
+    * on a fresh node with no JRE it leaves the package unconfigured and the
+    * agent unable to start. So the node's package index is refreshed and
+    * `default-jre` installed BEFORE the .deb is copied over and installed; a
+    * failure at either step aborts the bootstrap there rather than pushing a
+    * package that can't work.
+    */
   def bootstrap(
       node: Node,
       localDebPath: String,
@@ -16,6 +33,14 @@ object SshDeployer:
       onLine: String => IO[Unit]
   ): IO[Unit] =
     for
+      _ <- sshRun(node, sshUser, sshKeyPath, aptGet("update"), onLine)
+      _ <- sshRun(
+        node,
+        sshUser,
+        sshKeyPath,
+        aptGet("install -y default-jre"),
+        onLine
+      )
       _ <- scp(node, localDebPath, sshUser, sshKeyPath, remotePath, onLine)
       _ <- sshRun(
         node,

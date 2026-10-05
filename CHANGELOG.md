@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed — `bootstrap` installs a JRE first
+
+`orphera bootstrap` now runs `apt-get update` and `apt-get install -y
+default-jre` over SSH before copying the agent `.deb` over and `dpkg -i`-ing
+it. The package `Depends:` on `default-jre-headless (>= 17)`, but `dpkg -i`
+doesn't resolve dependencies, so on a fresh node with no Java it left the
+agent unconfigured. Both steps use the agent's apt options with
+`DEBIAN_FRONTEND=noninteractive` (`SshDeployer.aptGet`); a failure at either
+aborts that node's bootstrap before anything is pushed. Not compiled or run
+yet.
+
 ### Fixed — `manifests/set_dns.scala` treated a masked systemd-resolved as present
 
 The per-node detection added for tst0 used `systemctl cat systemd-resolved.service`,
