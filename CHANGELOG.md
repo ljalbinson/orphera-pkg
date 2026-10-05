@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed — `manifests/set_dns.scala` failed on nodes without systemd-resolved
+
+A real run against tst0 failed at `systemctl restart systemd-resolved`
+("Unit systemd-resolved.service not found"): tst0 has a plain static
+`/etc/resolv.conf`, networkd only, and no resolved — the playbook had assumed
+resolved everywhere. The apply step is now one script that detects resolved
+per node at run time: with resolved it writes the drop-in and restarts it as
+before; without it, it writes a static `/etc/resolv.conf` (same Orphera marker
+line, `options rotate` only under `round_robin`) and checks it. WriteFile can't
+express this since the target file depends on the node, so the script does its
+own temp-file-then-rename write. `round_robin` is unchanged in effect (static
+file always, drop-in removed). Verified only by rendering the generated shell
+and running it locally against a scratch path, not by compiling or running the
+playbook.
+
 ### Added — `dist-upgrade` CLI command
 
 `orphera dist-upgrade [--nodes host1,host2] [--no-update-cache]` runs the new

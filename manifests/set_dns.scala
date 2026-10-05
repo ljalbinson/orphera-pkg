@@ -22,20 +22,26 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 // so a per-VM file (config/testvm0-config.yaml) also works as --config.
 // nodes falls back to tst0-tst5.
 //
-// Mechanism: a systemd-resolved drop-in at
-// /etc/systemd/resolved.conf.d/orphera-dns.conf, then a resolved restart.
-// That sets the GLOBAL resolvers and works the same whether the node's
-// network is netplan- or networkd-managed, without touching the link
-// config NetworkReloader backs up and rolls back. Caveat: resolved still
-// also uses any per-link DNS a link gets from DHCP or netplan
-// `nameservers:` — this playbook adds global servers, it doesn't strip
-// per-link ones.
+// Mechanism, chosen per node at run time:
+//   - systemd-resolved present: a drop-in at
+//     /etc/systemd/resolved.conf.d/orphera-dns.conf, then a resolved
+//     restart. That sets the GLOBAL resolvers and works the same whether
+//     the node's network is netplan- or networkd-managed, without touching
+//     the link config NetworkReloader backs up and rolls back. Caveat:
+//     resolved still also uses any per-link DNS a link gets from DHCP or
+//     netplan `nameservers:` — this adds global servers, it doesn't strip
+//     per-link ones.
+//   - no systemd-resolved (tst0 is like this: a plain static
+//     /etc/resolv.conf, networkd only, no DHCP client): a static
+//     /etc/resolv.conf is written instead. Found by a real run — the
+//     first version assumed resolved everywhere and failed on tst0 at the
+//     restart step ("Unit systemd-resolved.service not found").
 //
 // round_robin: true switches mechanism. systemd-resolved has no rotate
 // option — it sticks to one upstream server and only fails over — so
 // instead the node gets a static /etc/resolv.conf (replacing the
-// resolved stub symlink) with `options rotate`, which makes glibc
-// spread queries across the listed servers. Costs, on those nodes:
+// resolved stub symlink, if there is one) with `options rotate`, which
+// makes glibc spread queries across the listed servers. Costs, on those nodes:
 // resolved's stub, caching and per-link DNS are bypassed for anything
 // that reads resolv.conf, and a dead server costs a resolver timeout
 // each time it's picked. glibc only honours 3 nameservers, so
@@ -140,109 +146,102 @@ object set_dns extends OrpheraClusterPlaybook:
   private val resolvConf = "/etc/resolv.conf"
   private val stubResolvConf = "/run/systemd/resolve/stub-resolv.conf"
 
-  // round_robin: a static resolv.conf. `search` only when domains exist.
-  private val resolvConfContent =
+  // Static resolv.conf. `search` only when domains exist; `options rotate`
+  // only for round_robin. Trailing newline stripped because it's embedded
+  // in a heredoc below.
+  private val staticContent: String =
     val nameservers = config.servers.map(s => s"nameserver $s\n").mkString
     val searchLine =
       if config.searchDomains.isEmpty then ""
       else s"search ${config.searchDomains.mkString(" ")}\n"
-    s"$managedMarker — edits are overwritten.\n" +
-      nameservers + searchLine + "options rotate\n"
+    val rotateLine = if config.roundRobin then "options rotate\n" else ""
+    (s"$managedMarker — edits are overwritten.\n" +
+      nameservers + searchLine + rotateLine).stripSuffix("\n")
 
-  // `resolvectl dns` prints the global servers on a "Global:" line;
-  // fail the task unless every configured server is on it.
-  private val verifyScript =
-    val checks = config.servers
-      .map(s =>
-        s"""if ! echo "$$G" | grep -qwF '$s'; then echo 'missing: $s'; exit 1; fi"""
-      )
-      .mkString("\n")
-    s"""G=$$(resolvectl dns | grep '^Global:')
-       |echo "$$G"
-       |$checks""".stripMargin
+  private val dropInText: String = dropInContent.stripSuffix("\n")
 
-  // round_robin: the file must be a regular file (not the resolved stub
-  // symlink), carry `options rotate`, and list every server.
-  private val verifyRotateScript =
-    val checks = config.servers
+  // WriteFile can't be used for the apply step: which file gets written
+  // depends on whether the NODE has systemd-resolved, which is only known
+  // at run time. So one script does the detection and the write, with
+  // the same temp-file-then-rename the agent's own file writes use. Values
+  // are validated IP literals / hostnames (see decode), so embedding them
+  // is safe; contents go in quoted heredocs, so nothing is expanded.
+  private val writeFileFn =
+    """write_file() {
+      |  tmp="$1.orphera-tmp"
+      |  cat > "$tmp"
+      |  chown root:root "$tmp"
+      |  chmod 0644 "$tmp"
+      |  mv -f "$tmp" "$1"
+      |}""".stripMargin
+
+  // Writes the static file, then checks it: a regular file (not the
+  // resolved stub symlink), every server present, rotate present when asked.
+  private val staticBranch: String =
+    val serverChecks = config.servers
       .map(s =>
         s"""grep -qxF 'nameserver $s' $resolvConf || { echo 'missing: $s'; exit 1; }"""
       )
       .mkString("\n")
-    s"""cat $resolvConf
+    val rotateCheck =
+      if config.roundRobin then
+        s"""grep -qxF 'options rotate' $resolvConf || { echo 'options rotate missing'; exit 1; }"""
+      else ""
+    s"""write_file $resolvConf <<'ORPHERA_EOF'
+       |$staticContent
+       |ORPHERA_EOF
+       |cat $resolvConf
        |if [ -L $resolvConf ]; then echo '$resolvConf is still a symlink'; exit 1; fi
-       |grep -qxF 'options rotate' $resolvConf || { echo 'options rotate missing'; exit 1; }
-       |$checks""".stripMargin
+       |$serverChecks
+       |$rotateCheck""".stripMargin
 
-  // Undo a previous round_robin run: put the stub symlink back, but only
-  // if the file is ours (marker line present) and not a symlink already.
-  private val restoreStubScript =
-    s"""if [ ! -L $resolvConf ] && grep -qF '$managedMarker' $resolvConf 2>/dev/null; then
+  // resolved path: put the stub symlink back if a round_robin run
+  // replaced it (only when the file carries our marker — a hand-written
+  // resolv.conf is left alone), write the drop-in, restart, and check
+  // `resolvectl dns`'s "Global:" line has every server.
+  private val resolvedBranch: String =
+    val checks = config.servers
+      .map(s =>
+        s"""echo "$$G" | grep -qwF '$s' || { echo 'missing: $s'; exit 1; }"""
+      )
+      .mkString("\n")
+    s"""echo "systemd-resolved present: using drop-in"
+       |if [ ! -L $resolvConf ] && grep -qF '$managedMarker' $resolvConf 2>/dev/null; then
        |  ln -sf $stubResolvConf $resolvConf
        |  echo "restored $resolvConf -> $stubResolvConf"
-       |else
-       |  echo "$resolvConf not managed by Orphera or already the stub; left alone"
-       |fi""".stripMargin
+       |fi
+       |mkdir -p $dropInDir
+       |write_file $dropIn <<'ORPHERA_EOF'
+       |$dropInText
+       |ORPHERA_EOF
+       |systemctl restart systemd-resolved
+       |G=$$(resolvectl dns | grep '^Global:' || true)
+       |echo "$$G"
+       |$checks""".stripMargin
 
-  private val resolvedStage: Stage =
-    stage("set-dns", config.nodes*)
-      .task(
-        "restore resolved stub resolv.conf if a round_robin run replaced it"
-      )(
-        Task.RunCommand(
-          List("sh", "-c", restoreStubScript),
-          timeoutSeconds = 30
-        )
-      )
-      .task("create resolved drop-in directory")(
-        Task.RunCommand(List("mkdir", "-p", dropInDir), timeoutSeconds = 30)
-      )
-      .task("write resolved DNS drop-in")(
-        Task.WriteFile(
-          content = dropInContent,
-          dest = dropIn,
-          owner = "root",
-          group = "root",
-          mode = Integer.parseInt("0644", 8)
-        )
-      )
-      .task("restart systemd-resolved")(
-        Task.RunCommand(
-          List("systemctl", "restart", "systemd-resolved"),
-          timeoutSeconds = 60
-        )
-      )
-      .task("verify global DNS servers")(
-        Task.RunCommand(List("sh", "-c", verifyScript), timeoutSeconds = 30)
-      )
-      .build
-
-  // WriteFile stages a temp file and atomically renames it over the
-  // destination, which replaces the stub symlink itself rather than
-  // writing through it into /run.
-  private val roundRobinStage: Stage =
-    stage("set-dns", config.nodes*)
-      .task("remove resolved DNS drop-in from a non-round_robin run")(
-        Task.RunCommand(List("rm", "-f", dropIn), timeoutSeconds = 30)
-      )
-      .task("write static resolv.conf with options rotate")(
-        Task.WriteFile(
-          content = resolvConfContent,
-          dest = resolvConf,
-          owner = "root",
-          group = "root",
-          mode = Integer.parseInt("0644", 8)
-        )
-      )
-      .task("verify resolv.conf rotates across every server")(
-        Task.RunCommand(
-          List("sh", "-c", verifyRotateScript),
-          timeoutSeconds = 30
-        )
-      )
-      .build
+  private val applyScript: String =
+    if config.roundRobin then
+      // Static file regardless of resolved; drop any drop-in left by a
+      // previous non-round_robin run.
+      s"""set -e
+         |$writeFileFn
+         |rm -f $dropIn
+         |$staticBranch""".stripMargin
+    else
+      s"""set -e
+         |$writeFileFn
+         |if systemctl cat systemd-resolved.service >/dev/null 2>&1; then
+         |$resolvedBranch
+         |else
+         |echo "no systemd-resolved on this node: writing static $resolvConf"
+         |$staticBranch
+         |fi""".stripMargin
 
   val playbook: ClusterPlaybook =
     clusterPlaybook("set-dns")(
-      if config.roundRobin then roundRobinStage else resolvedStage
+      stage("set-dns", config.nodes*)
+        .task("apply DNS config (resolved drop-in, or static resolv.conf)")(
+          Task.RunCommand(List("sh", "-c", applyScript), timeoutSeconds = 90)
+        )
+        .build
     )
