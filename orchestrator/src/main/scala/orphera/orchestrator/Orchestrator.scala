@@ -150,7 +150,8 @@ object Orchestrator:
       localDebPath: String,
       sshUser: String,
       sshKeyPath: Option[String],
-      remotePath: String = "/tmp/orphera-agent.deb"
+      remotePath: String = "/tmp/orphera-agent.deb",
+      forgetHostKey: Boolean = false
   ): IO[Unit] =
     requireOrpheraAgentPackage(localDebPath) >>
       nodes.parTraverse_ { node =>
@@ -160,7 +161,8 @@ object Orchestrator:
           sshUser,
           sshKeyPath,
           remotePath,
-          line => IO.println(s"[${node.name}] $line")
+          line => IO.println(s"[${node.name}] $line"),
+          forgetHostKey
         )
       }
 

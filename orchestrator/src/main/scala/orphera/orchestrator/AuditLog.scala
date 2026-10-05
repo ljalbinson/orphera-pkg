@@ -80,7 +80,7 @@ object AuditLog:
       case Command.WriteFile(_, _, _, _, _, _) => true
       case Command.NetworkApply(_, _)          => true
       case Command.DeployAgent(_, _, _)        => true
-      case Command.Bootstrap(_, _, _, _, _)    => true
+      case Command.Bootstrap(_, _, _, _, _, _) => true
       case Command.Teardown(_, _, _, _, _)     => true
       case Command.RunPlaybook(_, _, _)        => true
       case Command.Reboot(_, _, _, _)          => true
@@ -188,10 +188,12 @@ object AuditLog:
             nodes,
             sshUser,
             sshKeyPath,
-            remotePath
+            remotePath,
+            forgetHostKey
           ) =>
         List(
           "command" -> "bootstrap",
+          "forget_host_key" -> forgetHostKey.toString,
           "local_path" -> localPath.getOrElse("(auto-discovered)"),
           "ssh_user" -> sshUser,
           "nodes" -> nodesField(nodes)

@@ -157,7 +157,8 @@ object Main extends IOApp:
               nodeNames,
               sshUser,
               sshKeyPath,
-              remotePath
+              remotePath,
+              forgetHostKey
             )
           ) =>
         resolveDebPath(localOpt) match
@@ -170,7 +171,8 @@ object Main extends IOApp:
                 local,
                 sshUser,
                 sshKeyPath,
-                remotePath
+                remotePath,
+                forgetHostKey
               )
             }
 

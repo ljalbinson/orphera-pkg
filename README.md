@@ -280,7 +280,7 @@ explicit targeting — see below).
 | `reboot [--delay 5] [--wait] [--wait-timeout 300]` | Reboot a host. Runs fully detached from the agent's own process (`systemd-run`), for the same reason as `deploy-agent` below — the agent's own systemd unit would otherwise be killed by the reboot before it can schedule it. `--wait` polls the agent afterward and reports when it's reachable again (or times out) — see [Known gaps](#known-gaps--not-yet-built) for exactly what "reachable" does and doesn't confirm |
 | `version [--nodes ...]` | Report each agent's running version, baked in at build time from the `VERSION` file — see [Versioning](#versioning) |
 | `deploy-agent <local.deb> [--remote-path]` | Push and install an updated agent `.deb` on a host **that already has an agent running**. The install runs fully detached from the agent's own process (`systemd-run`), since the agent's own service restart would otherwise kill its own upgrade mid-unpack, so the RPC call that launches it can't itself confirm completion — instead, each node is polled afterward via the `version` RPC (60s default timeout) until it reports the `.deb`'s own version or the timeout elapses; the command's exit code and printed summary reflect that confirmation, not just that the install was launched — see [Versioning](#versioning) |
-| `bootstrap <local.deb> --nodes ... [--ssh-user] [--ssh-key]` | First-time agent install via SSH, for a host with **no agent yet** |
+| `bootstrap <local.deb> --nodes ... [--ssh-user] [--ssh-key] [--forget-host-key]` | First-time agent install via SSH, for a host with **no agent yet** |
 | `teardown --nodes ... --yes [--purge]` | Uninstall the agent via SSH. Requires explicit `--nodes` and `--yes` — no fleet-wide default, given the host becomes unmanageable via gRPC afterward |
 | `fetch <remote-path> [--out ./dir]` | Pull a file back from one or more agents into a local directory, one file per node (named `<node>-<filename>`) |
 | `facts [--nodes ...]` | Gather and print basic host facts (OS, kernel, CPU/memory, disks, interfaces) from one or more agents |
@@ -994,6 +994,13 @@ and `dpkg -i` doesn't resolve dependencies — on a fresh node it would
 leave the agent unconfigured. If either step fails, that node's
 bootstrap stops there. Needs the same passwordless `sudo` as the
 `dpkg` step, and the node must be able to reach its apt mirrors.
+
+`--forget-host-key` runs `ssh-keygen -R <host>` against your own
+`known_hosts` before connecting. Use it when the node was just rebuilt (cloud-init
+regenerates host keys on every boot, so a reused IP/hostname otherwise fails
+with "REMOTE HOST IDENTIFICATION HAS CHANGED"). It is opt-in: without it a
+changed host key still stops the bootstrap. The new key is then trusted on first
+connect (`StrictHostKeyChecking=accept-new`).
 
 ## Decommissioning a host
 

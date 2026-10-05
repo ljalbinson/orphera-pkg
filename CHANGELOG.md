@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — `orphera bootstrap --forget-host-key`
+
+Opt-in flag that runs `ssh-keygen -R <host>` locally before bootstrap's first
+SSH step, so a rebuilt VM (new host keys, reused IP/hostname) no longer fails
+with "REMOTE HOST IDENTIFICATION HAS CHANGED". Without the flag a changed key
+still stops the bootstrap. Recorded in the audit log as `forget_host_key`;
+added to the completion file, usage text, and `kvm_vm_provision.scala`'s closing
+message. Not compiled or run yet.
+
 ### Changed — `bootstrap` installs a JRE first
 
 `orphera bootstrap` now runs `apt-get update` and `apt-get install -y

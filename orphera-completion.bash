@@ -192,7 +192,7 @@ _orphera_completions() {
         --ssh-user) COMPREPLY=() ;;
         --ssh-key) COMPREPLY=($(compgen -f -- "$cur")) ;;
         --remote-path) COMPREPLY=() ;;
-        *) COMPREPLY=($(compgen -W "--file --nodes --ssh-user --ssh-key --remote-path" -- "$cur")) ;;
+        *) COMPREPLY=($(compgen -W "--file --nodes --ssh-user --ssh-key --remote-path --forget-host-key" -- "$cur")) ;;
       esac
       ;;
 

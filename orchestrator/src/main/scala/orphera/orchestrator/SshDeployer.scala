@@ -30,9 +30,11 @@ object SshDeployer:
       sshUser: String,
       sshKeyPath: Option[String],
       remotePath: String,
-      onLine: String => IO[Unit]
+      onLine: String => IO[Unit],
+      forgetHostKey: Boolean = false
   ): IO[Unit] =
     for
+      _ <- if forgetHostKey then forgetKnownHost(node, onLine) else IO.unit
       _ <- sshRun(node, sshUser, sshKeyPath, aptGet("update"), onLine)
       _ <- sshRun(
         node,
@@ -50,6 +52,30 @@ object SshDeployer:
         onLine
       )
     yield ()
+
+  /** `ssh-keygen -R <host>` against the operator's known_hosts, so a rebuilt VM
+    * (cloud-init regenerates host keys every boot) doesn't trip "REMOTE HOST
+    * IDENTIFICATION HAS CHANGED". Opt-in only (`bootstrap --forget-host-key`):
+    * the normal path still refuses a changed key. Failure (no known_hosts, no
+    * entry, ssh-keygen missing) is ignored — nothing to forget is fine.
+    */
+  private def forgetKnownHost(
+      node: Node,
+      onLine: String => IO[Unit]
+  ): IO[Unit] =
+    IO.blocking {
+      try
+        val p = new ProcessBuilder("ssh-keygen", "-R", node.host)
+          .redirectErrorStream(true)
+          .start()
+        val out = scala.io.Source.fromInputStream(p.getInputStream).mkString
+        p.waitFor()
+        out.linesIterator.map(_.trim).filter(_.nonEmpty).toList
+      catch case _: java.io.IOException => List("ssh-keygen not available")
+    }.flatMap(lines =>
+      onLine(s"forgetting any known_hosts entry for ${node.host}") >>
+        lines.foldLeft(IO.unit)((acc, l) => acc >> onLine(l))
+    )
 
   /** Runs `remoteCommand` over plain SSH and reports true/false on
     * exit-0/non-zero, swallowing the failure rather than raising it — unlike

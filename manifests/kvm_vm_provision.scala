@@ -437,7 +437,7 @@ object kvm_vm_provision extends OrpheraClusterPlaybook:
         .task(s"$vmName provisioned and reachable")(
           Task.Debug(
             s"$vmName is up and answering SSH. The Orphera agent is NOT installed yet — " +
-              "run `orphera bootstrap` against it by hand before targeting it from any other manifest."
+              "run `orphera bootstrap --forget-host-key` against it by hand (the flag clears the stale known_hosts entry a rebuilt VM leaves behind) before targeting it from any other manifest."
           )
         )
         .build

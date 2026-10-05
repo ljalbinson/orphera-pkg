@@ -47,7 +47,8 @@ enum Command:
       nodes: Option[List[String]],
       sshUser: String,
       sshKeyPath: Option[String],
-      remotePath: String
+      remotePath: String,
+      forgetHostKey: Boolean = false
   )
   case Teardown(
       nodes: List[String],
@@ -472,11 +473,19 @@ object Cli:
       nodes: Option[List[String]],
       sshUser: String,
       sshKeyPath: Option[String],
-      remotePath: String
+      remotePath: String,
+      forgetHostKey: Boolean = false
   ): Either[String, Command] =
     args match
       case Nil =>
-        Right(Command.Bootstrap(local, nodes, sshUser, sshKeyPath, remotePath))
+        Right(Command.Bootstrap(
+            local,
+            nodes,
+            sshUser,
+            sshKeyPath,
+            remotePath,
+            forgetHostKey
+          ))
       case "--file" :: value :: rest =>
         parseBootstrap(
           rest,
@@ -484,7 +493,8 @@ object Cli:
           nodes,
           sshUser,
           sshKeyPath,
-          remotePath
+          remotePath,
+          forgetHostKey
         )
       case "--nodes" :: value :: rest =>
         parseBootstrap(
@@ -493,14 +503,41 @@ object Cli:
           Some(value.split(",").toList.map(_.trim)),
           sshUser,
           sshKeyPath,
-          remotePath
+          remotePath,
+          forgetHostKey
         )
       case "--ssh-user" :: value :: rest =>
-        parseBootstrap(rest, local, nodes, value, sshKeyPath, remotePath)
+        parseBootstrap(rest, local, nodes, value, sshKeyPath, remotePath, forgetHostKey)
       case "--ssh-key" :: value :: rest =>
-        parseBootstrap(rest, local, nodes, sshUser, Some(value), remotePath)
+        parseBootstrap(
+          rest,
+          local,
+          nodes,
+          sshUser,
+          Some(value),
+          remotePath,
+          forgetHostKey
+        )
       case "--remote-path" :: value :: rest =>
-        parseBootstrap(rest, local, nodes, sshUser, sshKeyPath, value)
+        parseBootstrap(
+          rest,
+          local,
+          nodes,
+          sshUser,
+          sshKeyPath,
+          value,
+          forgetHostKey
+        )
+      case "--forget-host-key" :: rest =>
+        parseBootstrap(
+          rest,
+          local,
+          nodes,
+          sshUser,
+          sshKeyPath,
+          remotePath,
+          true
+        )
       case other :: _ =>
         Left(s"Unknown argument to bootstrap: $other")
 
@@ -692,7 +729,7 @@ object Cli:
       |                      its control metadata, refused otherwise); auto-discovers
       |                      the freshly built orphera-agent_*.deb in the current
       |                      directory if --file is omitted
-      |  bootstrap         [--file <local.deb>] --nodes host1,host2 [--ssh-user root] [--ssh-key ~/.ssh/id_ed25519] [--remote-path /tmp/x.deb]
+      |  bootstrap         [--file <local.deb>] --nodes host1,host2 [--ssh-user root] [--ssh-key ~/.ssh/id_ed25519] [--remote-path /tmp/x.deb] [--forget-host-key]
       |                    — same package check and auto-discovery as deploy-agent
       |  teardown          --nodes host1,host2 --yes [--purge] [--ssh-user root] [--ssh-key ~/.ssh/id_ed25519]
       |  playbook          <file.yaml | file.scala | compiled-name> [--resume] [--config <path>]
