@@ -101,6 +101,11 @@ nodes:
     vars:
       cluster_ip: "192.168.1.49"
 
+  - name: st0
+    host: st0.ljalbinson.com
+    vars:
+      cluster_ip: "192.168.1.81"
+
 groups:
   - name: mons
     members: [tst0, tst1, tst2]

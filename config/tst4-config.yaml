@@ -12,16 +12,16 @@ params:
   - fping
   nic0:
     nic: enp1s0
-    ipaddress: '192.168.1.224'
-    gateway: '192.168.1.1'
-    bridge: br-net1
+    ipaddress: '10.10.5.16'
+    gateway: '10.10.5.1'
+    bridge: br-net105
     netmask: '255.255.255.0'
     table: 1
     priority: 101
-    cidr: '192.168.1.0/24'
+    cidr: '10.10.5.0/24'
     mtu: 1500
-  hypervisor: gs1
-  hostname: testvm2
+  hypervisor: gs3
+  hostname: tst4
   disk: '32'
   dns1: '192.168.1.70'
   memory: '16384'
