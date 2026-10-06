@@ -21,8 +21,10 @@ nodes:
       #   currently use, so a disk that drops out of osd_disks in a
       #   future edit still gets its stale signature cleared on the next
       #   teardown rather than silently keeping one from a much earlier run.
-      osd_disks: "/dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_drive-scsi0-0-0-2,/dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_drive-scsi0-0-0-3"
-      zap_disks: "/dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_drive-scsi0-0-0-2,/dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_drive-scsi0-0-0-3"
+      # tst0 was rebuilt by kvm_vm_provision.scala with fixed disk serials
+      # (<vm>-dataN), so these by-id names no longer depend on SCSI slot.
+      osd_disks: "/dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_tst0-data1,/dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_tst0-data2"
+      zap_disks: "/dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_tst0-data1,/dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_tst0-data2"
 
   - name: tst1
     host: tst1.ljalbinson.com
