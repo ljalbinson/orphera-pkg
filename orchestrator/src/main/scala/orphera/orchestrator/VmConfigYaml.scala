@@ -81,6 +81,23 @@ object VmConfigYaml:
       mtu
     )
 
+  /** `disks:`/`pdisks:` entries come in several shapes in real kttb-virt-ansible
+    * files: a bare string or number (`- '64'`, `- 64`), or a one-key map like
+    * `- disk: 128`. All are reduced to a string — the bare value, or for a
+    * single-key map that key's value — rather than rejecting the file; anything
+    * else keeps its compact JSON text so nothing is silently dropped.
+    */
+  private def diskEntry(j: Json): String =
+    j.asString
+      .orElse(j.asNumber.map(_.toString))
+      .orElse(
+        j.asObject
+          .filter(_.size == 1)
+          .flatMap(_.values.headOption)
+          .map(v => v.asString.getOrElse(v.noSpaces))
+      )
+      .getOrElse(j.noSpaces)
+
   private def decodeParams(c: HCursor): Either[DecodingFailure, VmParams] =
     for
       hypervisor <- c.get[String]("hypervisor")
@@ -95,8 +112,8 @@ object VmConfigYaml:
       hostType <- c.get[String]("host_type")
       nic0Json <- c.get[Json]("nic0")
       nic0 <- decodeNic0(nic0Json.hcursor)
-      disks <- c.getOrElse[List[String]]("disks")(Nil)
-      pdisks <- c.getOrElse[List[String]]("pdisks")(Nil)
+      disks <- c.getOrElse[List[Json]]("disks")(Nil).map(_.map(diskEntry))
+      pdisks <- c.getOrElse[List[Json]]("pdisks")(Nil).map(_.map(diskEntry))
       nics <- c.getOrElse[List[Json]]("nics")(Nil)
       preBasicPackages <- c.getOrElse[List[String]]("pre_basic_packages")(Nil)
       basicPackages <- c.getOrElse[List[String]]("basic_packages")(Nil)

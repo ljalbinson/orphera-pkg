@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed — `--config` rejected `disks: [- disk: 128]`
+
+`VmConfigYaml` decoded `disks`/`pdisks` as `List[String]`, so a real config
+with `disks: [{disk: 128}]` failed with "wrong type, expecting string". Entries
+may now be a string, a number, or a one-key map (`disk: 128`), each reduced to
+its value as a string. Needs `make orpheracli`. Not compiled or run yet.
+
 ### Added — `--node-groups` targeting
 
 `--node-groups g1,g2` on any command that takes `--nodes`: expands to the
