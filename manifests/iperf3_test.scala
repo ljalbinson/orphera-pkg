@@ -26,7 +26,12 @@ object iperf3_test extends OrpheraClusterPlaybook:
   // client runs can genuinely happen at once.
   val portForClient: Map[String, Int] = Map(
     "tst1" -> 5201,
-    "tst2" -> 5202
+    "tst2" -> 5202,
+    "tst3" -> 5203,
+    "tst4" -> 5204,
+    "tst5" -> 5205,
+    "tst6" -> 5206,
+    "tst7" -> 5207
   )
   private val serverHost: String = "tst0"
   private val clientHosts: List[String] = portForClient.keys.toList.sorted
