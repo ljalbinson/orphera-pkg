@@ -86,7 +86,8 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 //
 // DELIBERATELY OUT OF SCOPE for this first translation (all present in
 // the original Ansible play):
-//   - The `ddisks`/`pdisks` extra-disk loops, including the
+//   - (`disks:` extra data disks ARE now created — see extraDisksGB.)
+//     The `pdisks` extra-disk loop, including the
 //     create-loopback-device / sfdisk / mkfs.ext4 / mount / write a
 //     "purpose" file / unmount / losetup -d sequence used to label a
 //     data disk before attaching it. Narrow, and multiplies the
@@ -155,6 +156,31 @@ object kvm_vm_provision extends OrpheraClusterPlaybook:
   private val diskSizeGB = config.map(_.disk.toInt).getOrElse(32)
   private val swapSizeGB =
     2 // not present in testvm0-config.yaml at all; no config field to read
+  // Extra data disks from `disks:` in --config — each entry is a size in GB
+  // (`- disk: 128` or `- '128'`, see ConfigYaml.diskEntry). One qcow2 per
+  // entry, `<vm>-data1.qcow2`, `<vm>-data2.qcow2`, ..., created blank and
+  // attached after the swap disk. `pdisks:` (the original's loopback-
+  // partitioned/labelled disks) is still not implemented; warned about below.
+  private val extraDisksGB: List[Int] =
+    config.map(_.disks).getOrElse(Nil).map { d =>
+      scala.util
+        .Try(d.trim.toInt)
+        .toOption
+        .filter(_ > 0)
+        .getOrElse(
+          throw new RuntimeException(
+            s"disks: entry '$d' is not a positive size in GB"
+          )
+        )
+    }
+  if config.exists(_.pdisks.nonEmpty) then
+    Console.err.println(
+      "WARNING: pdisks: in --config is not implemented by kvm_vm_provision.scala and is ignored."
+    )
+  private val extraDiskFiles: List[(Int, String)] =
+    extraDisksGB.zipWithIndex.map { case (gb, i) =>
+      (gb, s"$vmName-data${i + 1}.qcow2")
+    }
   private val memoryMB = config.map(_.memory.toInt).getOrElse(16384)
   private val vcpus = config.map(_.cpu.toInt).getOrElse(4)
   private val nicName = config.map(_.nic0.nic).getOrElse("enp1s0")
@@ -242,11 +268,24 @@ object kvm_vm_provision extends OrpheraClusterPlaybook:
   // `cp --no-clobber` mirrors the original's `copy: ... force: false` —
   // never overwrite an image that's already there from a previous
   // partial run.
+  private val extraDiskCreateLines =
+    extraDiskFiles
+      .map { case (gb, f) =>
+        s"qemu-img create -q -f qcow2 $workingDir/$f ${gb}G"
+      }
+      .mkString("\n")
+
+  private val extraDiskVirtInstallArgs =
+    extraDiskFiles
+      .map { case (_, f) => s" --disk $workingDir/$f,format=qcow2,bus=scsi" }
+      .mkString
+
   private val stageImageScript =
     s"""cp --no-clobber /var/lib/libvirt/boot/$baseImage $workingDir/$vmName.qcow2
        |qemu-img resize $workingDir/$vmName.qcow2 ${diskSizeGB}G
        |qemu-img create -q -f qcow2 $workingDir/$vmName-swap.qcow2 ${swapSizeGB}G
-       |echo "base image staged and resized to ${diskSizeGB}G, ${swapSizeGB}G swap image created"""".stripMargin
+       |$extraDiskCreateLines
+       |echo "base image staged and resized to ${diskSizeGB}G, ${swapSizeGB}G swap image created, ${extraDiskFiles.size} extra data disk(s) created"""".stripMargin
 
   // Task.Copy's Mustache rendering stands in for the original's
   // `template:` + .j2 files — these three source paths are plain local
@@ -283,7 +322,7 @@ object kvm_vm_provision extends OrpheraClusterPlaybook:
   // never use one here, not to trust it works in a "safer-looking"
   // spot.
   private val defineAndStartVmScript =
-    s"""virt-install --connect qemu:///system --name $vmName --memory $memoryMB --vcpus $vcpus --cpu $cpuMode --disk $workingDir/$vmName.qcow2,format=qcow2,bus=scsi --disk $workingDir/$vmName-swap.qcow2,format=qcow2,bus=scsi --disk $workingDir/$vmName-cidata.iso,device=cdrom --network bridge=$nicBridge,model=virtio,virtualport_type=openvswitch --os-variant ubuntu24.04 --import --noautoconsole
+    s"""virt-install --connect qemu:///system --name $vmName --memory $memoryMB --vcpus $vcpus --cpu $cpuMode --disk $workingDir/$vmName.qcow2,format=qcow2,bus=scsi --disk $workingDir/$vmName-swap.qcow2,format=qcow2,bus=scsi$extraDiskVirtInstallArgs --disk $workingDir/$vmName-cidata.iso,device=cdrom --network bridge=$nicBridge,model=virtio,virtualport_type=openvswitch --os-variant ubuntu24.04 --import --noautoconsole
        |echo "$vmName defined and started"""".stripMargin
 
   val playbook: ClusterPlaybook =

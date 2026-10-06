@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed — `kvm_vm_provision.scala` ignored `disks:` from `--config`
+
+The extra disks listed under `disks:` (e.g. `- disk: 128`) were parsed but never
+created, so tst0 came up with only the root disk and swap. Each entry (a size in
+GB) now becomes a blank qcow2 `<vm>-dataN.qcow2` in the VM's directory, created
+in the stage-vm-image step and attached by `virt-install` after the swap disk.
+A non-numeric or non-positive entry fails the run up front. `pdisks:` is still
+not implemented and now prints a warning instead of being silently ignored.
+Applies on the next provision; an already-built VM is not changed. Not compiled
+or run yet.
+
 ### Changed — `VmConfigYaml` renamed to `ConfigYaml`
 
 `VmConfigYaml.scala` / `object VmConfigYaml` is now `ConfigYaml`, since `--config`
