@@ -31,7 +31,7 @@ params:
   host_type: host-passthrough
   dns2: '192.168.1.71'
   disks:
-  - disk: 128
+  - disk: 256
   - disk: 256
   cpu: '4'
   pdisks: []
