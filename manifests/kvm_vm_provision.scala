@@ -277,8 +277,22 @@ object kvm_vm_provision extends OrpheraClusterPlaybook:
 
   private val extraDiskVirtInstallArgs =
     extraDiskFiles
-      .map { case (_, f) => s" --disk $workingDir/$f,format=qcow2,bus=scsi" }
+      .map { case (_, f) =>
+        s" --disk $workingDir/$f,format=qcow2,bus=scsi,serial=${serialOf(f)}"
+      }
       .mkString
+
+  // Every disk gets an explicit QEMU serial so its guest-side
+  // /dev/disk/by-id name is fixed by us, not by libvirt's auto-assigned
+  // drive alias (drive-scsi0-0-0-N), which depends on slot/order and moved
+  // under tst0 once already. Inside the guest the path is
+  // /dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_<serial> (prefix per the
+  // QEMU scsi-hd model; confirm once with `ls -l /dev/disk/by-id/`).
+  private def serialOf(file: String): String = file.stripSuffix(".qcow2")
+  private def byId(serial: String): String =
+    s"/dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_$serial"
+  private val extraDiskByIds: List[String] =
+    extraDiskFiles.map { case (_, f) => byId(serialOf(f)) }
 
   private val stageImageScript =
     s"""cp --no-clobber /var/lib/libvirt/boot/$baseImage $workingDir/$vmName.qcow2
@@ -322,7 +336,7 @@ object kvm_vm_provision extends OrpheraClusterPlaybook:
   // never use one here, not to trust it works in a "safer-looking"
   // spot.
   private val defineAndStartVmScript =
-    s"""virt-install --connect qemu:///system --name $vmName --memory $memoryMB --vcpus $vcpus --cpu $cpuMode --disk $workingDir/$vmName.qcow2,format=qcow2,bus=scsi --disk $workingDir/$vmName-swap.qcow2,format=qcow2,bus=scsi$extraDiskVirtInstallArgs --disk $workingDir/$vmName-cidata.iso,device=cdrom --network bridge=$nicBridge,model=virtio,virtualport_type=openvswitch --os-variant ubuntu24.04 --import --noautoconsole
+    s"""virt-install --connect qemu:///system --name $vmName --memory $memoryMB --vcpus $vcpus --cpu $cpuMode --disk $workingDir/$vmName.qcow2,format=qcow2,bus=scsi,serial=$vmName-root --disk $workingDir/$vmName-swap.qcow2,format=qcow2,bus=scsi,serial=$vmName-swap$extraDiskVirtInstallArgs --disk $workingDir/$vmName-cidata.iso,device=cdrom --network bridge=$nicBridge,model=virtio,virtualport_type=openvswitch --os-variant ubuntu24.04 --import --noautoconsole
        |echo "$vmName defined and started"""".stripMargin
 
   val playbook: ClusterPlaybook =
@@ -476,7 +490,11 @@ object kvm_vm_provision extends OrpheraClusterPlaybook:
         .task(s"$vmName provisioned and reachable")(
           Task.Debug(
             s"$vmName is up and answering SSH. The Orphera agent is NOT installed yet — " +
-              "run `orphera bootstrap --forget-host-key` against it by hand (the flag clears the stale known_hosts entry a rebuilt VM leaves behind) before targeting it from any other manifest."
+              "run `orphera bootstrap --forget-host-key` against it by hand (the flag clears the stale known_hosts entry a rebuilt VM leaves behind) before targeting it from any other manifest." +
+              (if extraDiskByIds.isEmpty then ""
+               else
+                 " Extra data disks (stable by-id paths for inventory.yaml " +
+                   "osd_disks/zap_disks): " + extraDiskByIds.mkString(", "))
           )
         )
         .build

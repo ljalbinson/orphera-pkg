@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed — `kvm_vm_provision.scala` gives every disk a fixed QEMU serial
+
+`virt-install` now passes `serial=<vm>-root`, `<vm>-swap` and `<vm>-dataN` for
+each disk, so the guest's `/dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_<serial>`
+path is chosen by us rather than derived from libvirt's slot-dependent
+`drive-scsi0-0-0-N` alias (which moved once already). The final message prints
+the by-id path of each extra data disk, ready for `osd_disks`/`zap_disks` in
+`inventory.yaml`. Applies to newly provisioned VMs only. The exact by-id prefix
+is not yet confirmed on real hardware — check once with `ls -l /dev/disk/by-id/`.
+Not compiled or run yet.
+
 ### Fixed — `kvm_vm_provision.scala` ignored `disks:` from `--config`
 
 The extra disks listed under `disks:` (e.g. `- disk: 128`) were parsed but never
