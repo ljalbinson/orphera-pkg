@@ -175,6 +175,13 @@ swapping the transport away from `grpc-netty-shaded` to a native-image-
 friendly alternative (e.g. `http4s-grpc`). Neither has been attempted
 yet.
 
+### Versions and tags
+
+`VERSION` is bumped by the build (`make bump-patch`), and releases are tagged
+`v<VERSION>` as annotated git tags. The first tag is `v0.1.156`, a development
+baseline that compiles; see [CHANGELOG.md](CHANGELOG.md). To check out the code
+a given `.deb` was built from: `git checkout v0.1.156`.
+
 ## Certificates
 
 Orphera uses TLS between orchestrator and agent, verified against a

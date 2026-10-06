@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [v0.1.156] - 2026-10-06 — development baseline
+
+First git tag (`v0.1.156`, commit `3dfb438`, matching `VERSION` 0.1.156 and
+`orphera-agent_0.1.156_amd64.deb`). Marks a state that compiles; everything
+listed below up to the previous entry was included in it, and not every item
+has been exercised on real nodes (those say "not compiled or run yet", which
+predates this tag compiling). Later changes go under [Unreleased] until the next
+tag.
+
 ### Changed — `kvm_vm_provision.scala` gives every disk a fixed QEMU serial
 
 `virt-install` now passes `serial=<vm>-root`, `<vm>-swap` and `<vm>-dataN` for
