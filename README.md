@@ -876,6 +876,14 @@ the VM itself needs a command-execution primitive that can reach an
 uninventoried node, which doesn't exist yet (`HealthCheck.Ssh` only
 probes liveness, it doesn't run arbitrary commands).
 
+`manifests/kvm_vm_start.scala` takes the same file and starts that VM on its
+`hypervisor` (running is left alone, paused is resumed, an undefined domain
+fails) and waits for SSH; `--config` is mandatory there, with no fallbacks:
+
+```bash
+orphera cluster-playbook manifests/kvm_vm_start.scala --config config/tst0.yaml
+```
+
 The one value this file does **not** read from `--config` is the SSH
 key authorized on the new VM — there's no field for that in the
 kttb-virt-ansible config shape. Instead it reads a real public key off

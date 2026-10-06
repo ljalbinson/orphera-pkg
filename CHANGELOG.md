@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — `manifests/kvm_vm_start.scala`
+
+`orphera cluster-playbook manifests/kvm_vm_start.scala --config config/tst0.yaml`
+starts the VM named by the config's `hostname` on the hypervisor named by its
+`hypervisor`, using the same per-VM config file as `kvm_vm_provision.scala`
+(also reads `nic0.ipaddress` to wait for SSH). `--config` is required, with no
+hardcoded fallbacks. Idempotent: running is left alone, paused is resumed,
+shut-off is started, an undefined domain fails (it never creates one). Waits up
+to 180s for SSH on the guest. The counterpart to `orphera shutdown` for VMs.
+Not compiled or run yet.
+
 ### Added — `orphera shutdown`
 
 `orphera shutdown --nodes tst0,tst1 --yes [--delay 5]` (or `--node-groups`)
