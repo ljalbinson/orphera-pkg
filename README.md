@@ -258,13 +258,28 @@ templates and `when:`-style lookups, nested under
 — see [Cross-node data and vars](#cross-node-data-and-vars) for the
 full merge and precedence rules.
 
+**Targeting groups.** Any command that takes `--nodes` also takes
+`--node-groups g1,g2`, which expands to the members of those `groups:`
+entries. Combined with `--nodes` it is a union (duplicates dropped).
+An unknown group name is an error listing the defined groups, rather
+than quietly targeting fewer nodes. The expansion happens before the
+command is parsed, so it also works for `bootstrap` and `teardown`
+(which require explicit targeting) and the audit log records the
+resulting node list:
+
+```
+orphera dist-upgrade --node-groups mons
+orphera run --node-groups mons --nodes tst5 -- uptime
+```
+
 There is no dynamic inventory source (cloud provider API, etc.) —
 static and hand-edited only, for now.
 
 ## CLI reference
 
 Run `sbt "orchestrator/run help"` for the live version of this. Every
-command accepts `--nodes host1,host2` to target a subset of inventory;
+command accepts `--nodes host1,host2` (and/or `--node-groups g1,g2`) to target a
+subset of inventory;
 omitted, it targets everything (**except** `teardown`, which requires
 explicit targeting — see below).
 

@@ -26,6 +26,13 @@
 # names a directory (contains a "/" — including "manifests/" itself, once
 # the user has navigated into it) is left to ordinary completion, which
 # already handles that correctly on its own.
+# Group names from inventory.yaml (the `groups:` section), for --node-groups.
+_orphera_groups() {
+  local inv="${ORPHERA_INVENTORY:-inventory.yaml}"
+  [ -r "$inv" ] || return 0
+  awk '/^groups:/ {g=1; next} /^[^ #-]/ {g=0} g && /^[ ]*- name:/ {print $NF}' "$inv"
+}
+
 _orphera_playbook_path_completions() {
   local cur="$1"
   local -a matches
@@ -72,37 +79,42 @@ _orphera_completions() {
     install)
       case "$prev" in
         --nodes) COMPREPLY=() ;;
-        *) COMPREPLY=($(compgen -W "--nodes --update-cache" -- "$cur")) ;;
+        --node-groups) COMPREPLY=($(compgen -W "$(_orphera_groups)" -- "$cur")) ;;
+        *) COMPREPLY=($(compgen -W "--nodes --node-groups --update-cache" -- "$cur")) ;;
       esac
       ;;
 
     remove)
       case "$prev" in
         --nodes) COMPREPLY=() ;;
-        *) COMPREPLY=($(compgen -W "--nodes --purge" -- "$cur")) ;;
+        --node-groups) COMPREPLY=($(compgen -W "$(_orphera_groups)" -- "$cur")) ;;
+        *) COMPREPLY=($(compgen -W "--nodes --node-groups --purge" -- "$cur")) ;;
       esac
       ;;
 
     autoremove)
       case "$prev" in
         --nodes) COMPREPLY=() ;;
-        *) COMPREPLY=($(compgen -W "--nodes --purge" -- "$cur")) ;;
+        --node-groups) COMPREPLY=($(compgen -W "$(_orphera_groups)" -- "$cur")) ;;
+        *) COMPREPLY=($(compgen -W "--nodes --node-groups --purge" -- "$cur")) ;;
       esac
       ;;
 
     dist-upgrade)
       case "$prev" in
         --nodes) COMPREPLY=() ;;
-        *) COMPREPLY=($(compgen -W "--nodes --no-update-cache" -- "$cur")) ;;
+        --node-groups) COMPREPLY=($(compgen -W "$(_orphera_groups)" -- "$cur")) ;;
+        *) COMPREPLY=($(compgen -W "--nodes --node-groups --no-update-cache" -- "$cur")) ;;
       esac
       ;;
 
     copy)
       case "$prev" in
         --nodes) COMPREPLY=() ;;
+        --node-groups) COMPREPLY=($(compgen -W "$(_orphera_groups)" -- "$cur")) ;;
         --owner|--group|--mode) COMPREPLY=() ;;
         copy) COMPREPLY=($(compgen -f -- "$cur")) ;; # local path
-        *) COMPREPLY=($(compgen -W "--nodes --owner --group --mode" -- "$cur")) ;;
+        *) COMPREPLY=($(compgen -W "--nodes --node-groups --owner --group --mode" -- "$cur")) ;;
       esac
       ;;
 
@@ -112,42 +124,47 @@ _orphera_completions() {
       # complete against, so only --content-file's value gets -f.
       case "$prev" in
         --nodes) COMPREPLY=() ;;
+        --node-groups) COMPREPLY=($(compgen -W "$(_orphera_groups)" -- "$cur")) ;;
         --owner|--group|--mode) COMPREPLY=() ;;
         --content) COMPREPLY=() ;;
         --content-file) COMPREPLY=($(compgen -f -- "$cur")) ;;
-        *) COMPREPLY=($(compgen -W "--content --content-file --nodes --owner --group --mode" -- "$cur")) ;;
+        *) COMPREPLY=($(compgen -W "--content --content-file --nodes --node-groups --owner --group --mode" -- "$cur")) ;;
       esac
       ;;
 
     network-apply)
       case "$prev" in
         --nodes) COMPREPLY=() ;;
+        --node-groups) COMPREPLY=($(compgen -W "$(_orphera_groups)" -- "$cur")) ;;
         --timeout) COMPREPLY=() ;;
-        *) COMPREPLY=($(compgen -W "--nodes --timeout" -- "$cur")) ;;
+        *) COMPREPLY=($(compgen -W "--nodes --node-groups --timeout" -- "$cur")) ;;
       esac
       ;;
 
     reboot)
       case "$prev" in
         --nodes) COMPREPLY=() ;;
+        --node-groups) COMPREPLY=($(compgen -W "$(_orphera_groups)" -- "$cur")) ;;
         --delay|--wait-timeout) COMPREPLY=() ;;
-        *) COMPREPLY=($(compgen -W "--nodes --delay --wait --wait-timeout" -- "$cur")) ;;
+        *) COMPREPLY=($(compgen -W "--nodes --node-groups --delay --wait --wait-timeout" -- "$cur")) ;;
       esac
       ;;
 
     uptime)
       case "$prev" in
         --nodes) COMPREPLY=() ;;
-        *) COMPREPLY=($(compgen -W "--nodes" -- "$cur")) ;;
+        --node-groups) COMPREPLY=($(compgen -W "$(_orphera_groups)" -- "$cur")) ;;
+        *) COMPREPLY=($(compgen -W "--nodes --node-groups" -- "$cur")) ;;
       esac
       ;;
 
     run)
       case "$prev" in
         --nodes) COMPREPLY=() ;;
+        --node-groups) COMPREPLY=($(compgen -W "$(_orphera_groups)" -- "$cur")) ;;
         --timeout) COMPREPLY=() ;;
         --) COMPREPLY=() ;;
-        *) COMPREPLY=($(compgen -W "--nodes --timeout --" -- "$cur")) ;;
+        *) COMPREPLY=($(compgen -W "--nodes --node-groups --timeout --" -- "$cur")) ;;
       esac
       ;;
 
@@ -179,7 +196,8 @@ _orphera_completions() {
         --file) COMPREPLY=($(compgen -f -X '!*.deb' -- "$cur")) ;;
         --remote-path) COMPREPLY=() ;;
         --nodes) COMPREPLY=() ;;
-        *) COMPREPLY=($(compgen -W "--file --remote-path --nodes" -- "$cur")) ;;
+        --node-groups) COMPREPLY=($(compgen -W "$(_orphera_groups)" -- "$cur")) ;;
+        *) COMPREPLY=($(compgen -W "--file --remote-path --nodes --node-groups" -- "$cur")) ;;
       esac
       ;;
 
@@ -189,19 +207,21 @@ _orphera_completions() {
       case "$prev" in
         --file) COMPREPLY=($(compgen -f -X '!*.deb' -- "$cur")) ;;
         --nodes) COMPREPLY=() ;;
+        --node-groups) COMPREPLY=($(compgen -W "$(_orphera_groups)" -- "$cur")) ;;
         --ssh-user) COMPREPLY=() ;;
         --ssh-key) COMPREPLY=($(compgen -f -- "$cur")) ;;
         --remote-path) COMPREPLY=() ;;
-        *) COMPREPLY=($(compgen -W "--file --nodes --ssh-user --ssh-key --remote-path --forget-host-key" -- "$cur")) ;;
+        *) COMPREPLY=($(compgen -W "--file --nodes --node-groups --ssh-user --ssh-key --remote-path --forget-host-key" -- "$cur")) ;;
       esac
       ;;
 
     teardown)
       case "$prev" in
         --nodes) COMPREPLY=() ;;
+        --node-groups) COMPREPLY=($(compgen -W "$(_orphera_groups)" -- "$cur")) ;;
         --ssh-user) COMPREPLY=() ;;
         --ssh-key) COMPREPLY=($(compgen -f -- "$cur")) ;;
-        *) COMPREPLY=($(compgen -W "--nodes --ssh-user --ssh-key --purge --yes" -- "$cur")) ;;
+        *) COMPREPLY=($(compgen -W "--nodes --node-groups --ssh-user --ssh-key --purge --yes" -- "$cur")) ;;
       esac
       ;;
 
@@ -209,14 +229,16 @@ _orphera_completions() {
       case "$prev" in
         --out) COMPREPLY=($(compgen -d -- "$cur")) ;;
         --nodes) COMPREPLY=() ;;
-        *) COMPREPLY=($(compgen -W "--out --nodes" -- "$cur")) ;;
+        --node-groups) COMPREPLY=($(compgen -W "$(_orphera_groups)" -- "$cur")) ;;
+        *) COMPREPLY=($(compgen -W "--out --nodes --node-groups" -- "$cur")) ;;
       esac
       ;;
 
     facts|version)
       case "$prev" in
         --nodes) COMPREPLY=() ;;
-        *) COMPREPLY=($(compgen -W "--nodes" -- "$cur")) ;;
+        --node-groups) COMPREPLY=($(compgen -W "$(_orphera_groups)" -- "$cur")) ;;
+        *) COMPREPLY=($(compgen -W "--nodes --node-groups" -- "$cur")) ;;
       esac
       ;;
 

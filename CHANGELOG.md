@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — `--node-groups` targeting
+
+`--node-groups g1,g2` on any command that takes `--nodes`: expands to the
+members of those `inventory.yaml` `groups:` entries (union with any `--nodes`,
+duplicates dropped). Unknown group names fail with the list of defined groups.
+Implemented as an argument rewrite in `Cli.expandNodeGroups` ahead of the
+per-command parsers, so no command needed changes and the audit log shows the
+expanded node list. Usage text, README and bash completion (group names read
+from `inventory.yaml`) updated. Not compiled or run yet.
+
 ### Added — `orphera bootstrap --forget-host-key`
 
 Opt-in flag that runs `ssh-keygen -R <host>` locally before bootstrap's first

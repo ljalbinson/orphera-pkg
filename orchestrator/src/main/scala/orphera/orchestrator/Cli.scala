@@ -107,7 +107,60 @@ enum Command:
 
 object Cli:
 
-  def parse(args: List[String]): Either[String, Command] =
+  /** `--node-groups g1,g2` is sugar for `--nodes <members of g1 and g2>`:
+    * rewritten away before any command parser runs, so every command that takes
+    * `--nodes` (teardown and bootstrap included) accepts it without per-command
+    * plumbing, and the audit log records the expanded node list. Combined with
+    * an explicit `--nodes` it is a union (order kept, duplicates dropped). With
+    * no `--node-groups` present the args pass through untouched. An unknown
+    * group is an error rather than a silently smaller target set.
+    */
+  def expandNodeGroups(
+      args: List[String],
+      groups: List[Group] = Inventory.groups
+  ): Either[String, List[String]] =
+    def split(v: String): List[String] =
+      v.split(",").toList.map(_.trim).filter(_.nonEmpty)
+
+    @scala.annotation.tailrec
+    def scan(
+        in: List[String],
+        rest: List[String],
+        nodes: List[String],
+        grps: List[String],
+        sawNodes: Boolean
+    ): (List[String], List[String], List[String], Boolean) =
+      in match
+        case "--node-groups" :: v :: tl =>
+          scan(tl, rest, nodes, grps ++ split(v), sawNodes)
+        case "--nodes" :: v :: tl =>
+          scan(tl, rest, nodes ++ split(v), grps, sawNodes = true)
+        case h :: tl => scan(tl, rest :+ h, nodes, grps, sawNodes)
+        case Nil     => (rest, nodes, grps, sawNodes)
+
+    if !args.contains("--node-groups") then Right(args)
+    else
+      val (rest, nodes, grps, _) = scan(args, Nil, Nil, Nil, sawNodes = false)
+      val unknown = grps.filterNot(g => groups.exists(_.name == g))
+      if unknown.nonEmpty then
+        Left(
+          s"Unknown node group(s): ${unknown.mkString(", ")}. " +
+            s"Defined in inventory: ${
+                if groups.isEmpty then "(none)"
+                else groups.map(_.name).mkString(", ")
+              }"
+        )
+      else
+        val members = grps.flatMap(g =>
+          groups.find(_.name == g).toList.flatMap(_.members)
+        )
+        val merged = (nodes ++ members).distinct
+        Right(rest ++ List("--nodes", merged.mkString(",")))
+
+  def parse(rawArgs: List[String]): Either[String, Command] =
+    expandNodeGroups(rawArgs).flatMap(parseExpanded)
+
+  private def parseExpanded(args: List[String]): Either[String, Command] =
     args match
       case "install" :: rest =>
         parseInstall(rest, Nil, None, updateCache = false)
@@ -708,6 +761,9 @@ object Cli:
   val usage: String =
     """orphera-orchestrator - test CLI for the Orphera agent protocol
       |
+      |Targeting: every command taking --nodes also takes
+      |  --node-groups g1,g2   (groups from inventory.yaml; union with --nodes)
+      |
       |Usage:
       |  install           <package> [<package> ...] [--nodes host1,host2] [--update-cache]
       |  remove            <package> [<package> ...] [--nodes host1,host2] [--purge]
@@ -764,6 +820,7 @@ object Cli:
       |  remove nginx --purge --nodes web1
       |  autoremove --purge
       |  dist-upgrade --nodes tst0,tst1
+      |  dist-upgrade --node-groups mons
       |  copy /tmp/test.txt /etc/orphera-test.txt --owner root --group root --mode 0644
       |  write-file /etc/motd --content "Welcome to tst0" --nodes tst0
       |  network-apply --nodes web1 --timeout 90
