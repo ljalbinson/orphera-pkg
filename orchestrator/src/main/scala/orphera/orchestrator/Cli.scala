@@ -151,9 +151,8 @@ object Cli:
               }"
         )
       else
-        val members = grps.flatMap(g =>
-          groups.find(_.name == g).toList.flatMap(_.members)
-        )
+        val members =
+          grps.flatMap(g => groups.find(_.name == g).toList.flatMap(_.members))
         val merged = (nodes ++ members).distinct
         Right(rest ++ List("--nodes", merged.mkString(",")))
 
@@ -531,14 +530,16 @@ object Cli:
   ): Either[String, Command] =
     args match
       case Nil =>
-        Right(Command.Bootstrap(
+        Right(
+          Command.Bootstrap(
             local,
             nodes,
             sshUser,
             sshKeyPath,
             remotePath,
             forgetHostKey
-          ))
+          )
+        )
       case "--file" :: value :: rest =>
         parseBootstrap(
           rest,
@@ -560,7 +561,15 @@ object Cli:
           forgetHostKey
         )
       case "--ssh-user" :: value :: rest =>
-        parseBootstrap(rest, local, nodes, value, sshKeyPath, remotePath, forgetHostKey)
+        parseBootstrap(
+          rest,
+          local,
+          nodes,
+          value,
+          sshKeyPath,
+          remotePath,
+          forgetHostKey
+        )
       case "--ssh-key" :: value :: rest =>
         parseBootstrap(
           rest,
