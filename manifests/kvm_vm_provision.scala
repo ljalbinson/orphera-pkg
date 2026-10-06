@@ -337,7 +337,8 @@ object kvm_vm_provision extends OrpheraClusterPlaybook:
   // spot.
   private val defineAndStartVmScript =
     s"""virt-install --connect qemu:///system --name $vmName --memory $memoryMB --vcpus $vcpus --cpu $cpuMode --disk $workingDir/$vmName.qcow2,format=qcow2,bus=scsi,serial=$vmName-root --disk $workingDir/$vmName-swap.qcow2,format=qcow2,bus=scsi,serial=$vmName-swap$extraDiskVirtInstallArgs --disk $workingDir/$vmName-cidata.iso,device=cdrom --network bridge=$nicBridge,model=virtio,virtualport_type=openvswitch --os-variant ubuntu24.04 --import --noautoconsole
-       |echo "$vmName defined and started"""".stripMargin
+       |virsh --connect qemu:///system autostart $vmName
+       |echo "$vmName defined, started, and set to autostart with the hypervisor"""".stripMargin
 
   val playbook: ClusterPlaybook =
     clusterPlaybook("kvm-vm-provision")(
@@ -426,7 +427,7 @@ object kvm_vm_provision extends OrpheraClusterPlaybook:
         .build,
 
       stage("define-and-start-vm", hypervisorNode)
-        .task(s"virt-install $vmName and boot it")(
+        .task(s"virt-install $vmName, boot it, and mark it autostart")(
           Task.RunCommand(
             List("sh", "-c", defineAndStartVmScript),
             timeoutSeconds = 60

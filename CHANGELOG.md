@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed — `kvm_vm_provision.scala` sets the VM to autostart
+
+After `virt-install` the same task runs `virsh --connect qemu:///system
+autostart <vm>`, so a VM this playbook creates comes back on its own when the
+hypervisor reboots. Idempotent (re-running on an existing domain is harmless; the
+playbook already destroys and recreates it). Applies to newly provisioned VMs; an
+existing one needs `virsh autostart <vm>` once by hand. Not compiled or run yet.
+
 ## [v0.1.156] - 2026-10-06 — development baseline
 
 First git tag (`v0.1.156`, commit `3dfb438`, matching `VERSION` 0.1.156 and
