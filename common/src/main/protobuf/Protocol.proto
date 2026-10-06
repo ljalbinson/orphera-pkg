@@ -111,6 +111,14 @@ message RebootAck {
   string message = 1;
 }
 
+message ShutdownRequest {
+  uint32 delay_seconds = 1;
+}
+
+message ShutdownAck {
+  string message = 1;
+}
+
 message VersionRequest {}
 
 message VersionInfo {
@@ -168,6 +176,7 @@ service Agent {
   rpc RemoteFetchFile(FetchFile) returns (stream FileData);
   rpc GatherFacts(FactsRequest) returns (Facts);
   rpc TriggerReboot(RebootRequest) returns (RebootAck);
+  rpc TriggerShutdown(ShutdownRequest) returns (ShutdownAck);
   rpc GetVersion(VersionRequest) returns (VersionInfo);
   rpc GetUptime(UptimeRequest) returns (UptimeInfo);
   rpc ExecuteCommand(RunCommandRequest) returns (stream Event);

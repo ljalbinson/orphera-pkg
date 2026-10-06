@@ -84,6 +84,7 @@ object AuditLog:
       case Command.Teardown(_, _, _, _, _)     => true
       case Command.RunPlaybook(_, _, _)        => true
       case Command.Reboot(_, _, _, _)          => true
+      case Command.Shutdown(_, _, _)           => true
       case Command.RunClusterPlaybook(_, _, _) => true
       case Command.RunCommand(_, _, _)         => true
       case Command.Fetch(_, _, _)              => false
@@ -220,6 +221,12 @@ object AuditLog:
           ) =>
         List(
           "command" -> "reboot",
+          "nodes" -> nodesField(nodes),
+          "delay_seconds" -> delaySeconds
+        )
+      case Command.Shutdown(nodes, delaySeconds, confirmed) =>
+        List(
+          "command" -> "shutdown",
           "nodes" -> nodesField(nodes),
           "delay_seconds" -> delaySeconds
         )

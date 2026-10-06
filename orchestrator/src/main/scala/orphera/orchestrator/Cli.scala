@@ -71,6 +71,11 @@ enum Command:
       waitForReturn: Boolean,
       waitTimeoutSeconds: Int
   )
+  case Shutdown(
+      nodes: Option[List[String]],
+      delaySeconds: Int,
+      confirmed: Boolean
+  )
   case Version(nodes: Option[List[String]])
   case Uptime(nodes: Option[List[String]])
   // `paths` is one or more — `cluster-playbook a.scala b.scala c.scala`
@@ -193,6 +198,8 @@ object Cli:
         }
       case "version" :: rest => parseVersion(rest, None)
       case "uptime" :: rest  => parseUptime(rest, None)
+      case "shutdown" :: rest =>
+        parseShutdown(rest, None, 5, confirmed = false)
       case "reboot" :: rest  =>
         parseReboot(rest, None, 5, waitForReturn = false, 300)
       case "cluster-playbook" :: rest =>
@@ -715,6 +722,31 @@ object Cli:
       case other :: _ =>
         Left(s"Unknown argument to reboot: $other")
 
+  private def parseShutdown(
+      args: List[String],
+      nodes: Option[List[String]],
+      delaySeconds: Int,
+      confirmed: Boolean
+  ): Either[String, Command] =
+    args match
+      case Nil =>
+        Right(Command.Shutdown(nodes, delaySeconds, confirmed))
+      case "--nodes" :: value :: rest =>
+        parseShutdown(
+          rest,
+          Some(value.split(",").toList.map(_.trim)),
+          delaySeconds,
+          confirmed
+        )
+      case "--delay" :: value :: rest =>
+        scala.util.Try(value.toInt).toOption match
+          case Some(parsed) => parseShutdown(rest, nodes, parsed, confirmed)
+          case None         => Left(s"Invalid delay: $value")
+      case "--yes" :: rest =>
+        parseShutdown(rest, nodes, delaySeconds, confirmed = true)
+      case other :: _ =>
+        Left(s"Unknown argument to shutdown: $other")
+
   private def parseVersion(
       args: List[String],
       nodes: Option[List[String]]
@@ -813,6 +845,9 @@ object Cli:
       |  fetch             <remote-path> [--out ./local-dir] [--nodes host1,host2]
       |  facts             [--nodes host1,host2]
       |  reboot            [--nodes host1,host2] [--delay 5] [--wait] [--wait-timeout 300]
+      |  shutdown          --nodes host1,host2 --yes [--delay 5]
+      |                    — powers the host OFF (not reboot); needs explicit targets and
+      |                      --yes, and there is no remote way to power it back on
       |  version           [--nodes host1,host2]
       |  uptime            [--nodes host1,host2]
       |  log-summary       <playbook-name | file.jsonl>

@@ -281,6 +281,20 @@ object Main extends IOApp:
           Orchestrator.reboot(targets, delaySeconds, wait, waitTimeoutSeconds)
         }
 
+      case Right(Command.Shutdown(nodeNames, delaySeconds, confirmed)) =>
+        if !confirmed then
+          IO.println(
+            "Refusing to run shutdown without --yes (this powers the host OFF; it cannot be powered back on remotely)."
+          ) >> IO.pure(ExitCode.Error)
+        else if nodeNames.isEmpty then
+          IO.println(
+            "Refusing to run shutdown without explicit targets: pass --nodes or --node-groups."
+          ) >> IO.pure(ExitCode.Error)
+        else
+          withTargets(nodeNames) { targets =>
+            Orchestrator.shutdown(targets, delaySeconds)
+          }
+
       case Right(Command.Uptime(nodeNames)) =>
         withTargets(nodeNames) { targets =>
           Orchestrator.getUptimes(targets).flatMap { uptimes =>

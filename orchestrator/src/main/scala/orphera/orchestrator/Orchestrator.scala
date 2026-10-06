@@ -337,6 +337,15 @@ object Orchestrator:
       )
     }
 
+  def shutdown(nodes: List[Node], delaySeconds: Int = 5): IO[Unit] =
+    nodes.parTraverse_ { node =>
+      NodeClient.shutdown(
+        node,
+        delaySeconds,
+        line => IO.println(s"[${node.name}] $line")
+      )
+    }
+
   def getUptimes(nodes: List[Node]): IO[Map[String, UptimeInfo]] =
     nodes
       .parTraverse { node =>

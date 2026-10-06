@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — `orphera shutdown`
+
+`orphera shutdown --nodes tst0,tst1 --yes [--delay 5]` (or `--node-groups`)
+powers the hosts off. New `TriggerShutdown`/`ShutdownRequest`/`ShutdownAck` RPC;
+the agent's `Shutdowner` runs `shutdown -P now` after the delay, detached via
+`systemd-run` (same approach as `Rebooter`). Unlike most verbs it never defaults
+to "all nodes": it refuses without explicit targets and without `--yes`, since
+there is no remote way to power a host back on. Success means the agent
+acknowledged scheduling it, not that the host has gone down. Audit-logged;
+usage, completion and README updated. Needs `make orpheracli` **and** an agent
+redeploy (protocol change). Not compiled or run yet. No playbook `shutdown:`
+task yet.
+
 ### Changed — `kvm_vm_provision.scala` sets the VM to autostart
 
 After `virt-install` the same task runs `virsh --connect qemu:///system

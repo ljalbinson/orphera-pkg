@@ -86,6 +86,12 @@ class AgentServiceImpl(
   def triggerReboot(request: RebootRequest, ctx: Metadata): IO[RebootAck] =
     Rebooter.trigger(request)
 
+  def triggerShutdown(
+      request: ShutdownRequest,
+      ctx: Metadata
+  ): IO[ShutdownAck] =
+    Shutdowner.trigger(request)
+
   def getVersion(request: VersionRequest, ctx: Metadata): IO[VersionInfo] =
     IO.pure(VersionInfo(BuildInfo.version))
 

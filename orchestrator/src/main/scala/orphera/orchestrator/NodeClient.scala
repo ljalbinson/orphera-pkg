@@ -340,6 +340,23 @@ object NodeClient:
             pollUntilBack(node, waitTimeoutSeconds, onLine)
     yield ()
 
+  /** Powers the host off after `delaySeconds`. Returns once the agent has
+    * acknowledged scheduling it — the host going down afterwards is not
+    * confirmed (the agent is the thing being shut down), see `uptime`/ping.
+    */
+  def shutdown(
+      node: Node,
+      delaySeconds: Int,
+      onLine: String => IO[Unit]
+  ): IO[Unit] =
+    for
+      ack <- channelBuilder(node)
+        .resource[IO]
+        .flatMap(AgentFs2Grpc.stubResource[IO])
+        .use(_.triggerShutdown(ShutdownRequest(delaySeconds), authMetadata()))
+      _ <- onLine(ack.message)
+    yield ()
+
   private def pollUntilBack(
       node: Node,
       timeoutSeconds: Int,
