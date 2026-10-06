@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — `manifests/vm_packages.scala`
+
+`orphera cluster-playbook manifests/vm_packages.scala --config config/tst0.yaml`
+installs `pre_basic_packages` then `basic_packages` from the per-VM config on
+that VM (the config's `hostname`, as an inventory node), finally wiring up the two
+lists `VmParams` has been parsing without using. Missing or empty lists are
+skipped (both empty: a message and nothing else); blank and duplicate entries are
+dropped, and a package in both lists is installed once, in the `pre` stage;
+`apt-get update` runs once. The VM needs the Orphera agent and an `inventory.yaml`
+entry first (`orphera bootstrap --forget-host-key`). `--config` is required. Not
+compiled or run yet.
+
 ### Added — `manifests/kvm_vm_start.scala`
 
 `orphera cluster-playbook manifests/kvm_vm_start.scala --config config/tst0.yaml`
