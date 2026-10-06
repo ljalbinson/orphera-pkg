@@ -61,7 +61,7 @@ enum Command:
   case Facts(nodes: Option[List[String]])
   // config (--config <path>) is handed to the running script as
   // ORPHERA_CONFIG, the same way `resume` becomes ORPHERA_RESUME —
-  // see Main.scala's runScalaPlaybookScript and VmConfigYaml.fromEnv.
+  // see Main.scala's runScalaPlaybookScript and ConfigYaml.fromEnv.
   // Only meaningful for a .scala script; ignored for .yaml/a registered
   // compiled playbook, which have no way to read it at all.
   case RunPlaybook(path: String, resume: Boolean, config: Option[String])
@@ -226,7 +226,7 @@ object Cli:
     * than inlined since both commands need identical handling — see
     * `Command.RunPlaybook`/`RunClusterPlaybook` for what `resume`
     * (checkpoint-based restart skipping, `Checkpoint.scala`) and `config`
-    * (ORPHERA_CONFIG hand-off, `VmConfigYaml.scala`) do.
+    * (ORPHERA_CONFIG hand-off, `ConfigYaml.scala`) do.
     */
   private def parsePlaybookFlags(
       args: List[String],
@@ -794,7 +794,7 @@ object Cli:
       |                      .orphera-state/ checkpoint); --config points at a
       |                      kttb-virt-ansible-style per-VM YAML config file (e.g.
       |                      hypervisor/memory/cpu/nic0.*) that a .scala script can
-      |                      read via VmConfigYaml.fromEnv() — ignored by .yaml/
+      |                      read via ConfigYaml.fromEnv() — ignored by .yaml/
       |                      compiled playbooks, which have no way to read it
       |  cluster-playbook  <file.yaml | file.scala> [<file2> ...] [--resume] [--config <path>]
       |                    — same --resume/--config semantics, per stage/task/node;

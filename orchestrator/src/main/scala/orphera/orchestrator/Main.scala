@@ -258,7 +258,7 @@ object Main extends IOApp:
           val configWarning =
             if config.isDefined then
               IO.println(
-                "Note: --config has no effect on a .yaml file or a compiled playbook — only a .scala script can read it (via VmConfigYaml.fromEnv())."
+                "Note: --config has no effect on a .yaml file or a compiled playbook — only a .scala script can read it (via ConfigYaml.fromEnv())."
               )
             else IO.unit
 
@@ -369,7 +369,7 @@ object Main extends IOApp:
       val configWarning =
         if config.isDefined then
           IO.println(
-            "Note: --config has no effect on a .yaml cluster-playbook — only a .scala script can read it (via VmConfigYaml.fromEnv())."
+            "Note: --config has no effect on a .yaml cluster-playbook — only a .scala script can read it (via ConfigYaml.fromEnv())."
           )
         else IO.unit
 
@@ -392,7 +392,7 @@ object Main extends IOApp:
     * without changing that trait's shape (and without needing to touch
     * scripting/Main.scala's own arg-forwarding, which this file has no
     * visibility into). A script reads ORPHERA_CONFIG via
-    * VmConfigYaml.fromEnv(), same file.
+    * ConfigYaml.fromEnv(), same file.
     */
   private def runScalaPlaybookScript(
       scriptPath: String,

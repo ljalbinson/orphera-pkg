@@ -108,7 +108,7 @@ object kvm_vm_provision extends OrpheraClusterPlaybook:
   // below still falls back to its prior hardcoded literal for, so this
   // file keeps working unchanged for anyone not using --config yet.
   private val config: Option[VmParams] =
-    VmConfigYaml.fromEnv() match
+    ConfigYaml.fromEnv() match
       case Some(Right(p))  => Some(p)
       case Some(Left(err)) =>
         throw new RuntimeException(

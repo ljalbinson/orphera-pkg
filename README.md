@@ -301,7 +301,7 @@ explicit targeting — see below).
 | `facts [--nodes ...]` | Gather and print basic host facts (OS, kernel, CPU/memory, disks, interfaces) from one or more agents |
 | `uptime [--nodes ...]` | Report each agent's host uptime and 1-minute load average — the concrete way to confirm a `reboot` genuinely rebooted the host, not just that the agent came back |
 | `run <command...> [--nodes] [--timeout 60]` | Run an arbitrary command on one or more agents, streaming stdout/stderr and reporting the real exit code. Use `--` before the command to separate it from `run`'s own flags, e.g. `orphera run --nodes tst0 -- systemctl status nginx` |
-| `playbook <file.yaml \| file.scala \| compiled-name> [--resume] [--config <path>]` | Run an ordered, multi-task playbook — from a YAML file, a run-time-compiled Scala script, or a compiled DSL playbook by registered name — see [Playbooks](#playbooks). `--resume` skips tasks already completed in a previous run — see [Restartability](#restartability). `--config` points a `.scala` script at a per-VM YAML config file (`VmConfigYaml.fromEnv()`, see [Per-VM config files](#per-vm-config-files---config)); has no effect on a `.yaml`/compiled playbook, which has no code of its own to read it |
+| `playbook <file.yaml \| file.scala \| compiled-name> [--resume] [--config <path>]` | Run an ordered, multi-task playbook — from a YAML file, a run-time-compiled Scala script, or a compiled DSL playbook by registered name — see [Playbooks](#playbooks). `--resume` skips tasks already completed in a previous run — see [Restartability](#restartability). `--config` points a `.scala` script at a per-VM YAML config file (`ConfigYaml.fromEnv()`, see [Per-VM config files](#per-vm-config-files---config)); has no effect on a `.yaml`/compiled playbook, which has no code of its own to read it |
 | `cluster-playbook <file.yaml \| file.scala> [<file2> ...] [--resume] [--config <path>]` | Run a staged, cross-node-coordinated playbook — see [Cross-node coordination](#cross-node-coordination-and-staged-playbooks). Same `--resume`/`--config` support as `playbook`, applied independently to each file. One or more files run in the order given, stopping at the first one that fails — a shorthand for a fixed sequence (e.g. tear down, then rebuild) without a wrapper script |
 | `log-summary <playbook-name \| file.jsonl>` | Print a human-readable table (per-task status/duration, failures called out) from a run's `.orphera-logs` output. A playbook name resolves to that playbook's most recently modified log file — see [Observability](#observability) |
 
@@ -834,7 +834,7 @@ variable (`ORPHERA_CONFIG`), since `OrpheraPlaybook`/
 has no access to process args at all. A script reads it with:
 
 ```scala
-VmConfigYaml.fromEnv() match
+ConfigYaml.fromEnv() match
   case Some(Right(params)) => // --config was given and parsed; params: VmParams
   case Some(Left(err))     => // --config was given but failed to load/parse
   case None                 => // --config wasn't given at all
@@ -848,7 +848,7 @@ block with `hypervisor`, `hostname`, `domainname`, `os`, `disk`,
 (`nic`, `ipaddress`, `gateway`, `bridge`, `netmask`, `cidr`, `table`,
 `priority`, `mtu`), and `disks`/`pdisks`/`nics`/`pre_basic_packages`/
 `basic_packages` lists — parsed into `VmParams`/`Nic0` case classes by
-`VmConfigYaml.scala`. Has no effect on a `.yaml` or compiled playbook,
+`ConfigYaml.scala`. Has no effect on a `.yaml` or compiled playbook,
 which has no code of its own to read an env var; `orphera` prints a
 note rather than silently ignoring the flag in that case.
 
@@ -856,7 +856,7 @@ note rather than silently ignoring the flag in that case.
 orphera cluster-playbook manifests/kvm_vm_provision.scala --config config/testvm0-config.yml
 ```
 
-`kvm_vm_provision.scala` is wired to `VmConfigYaml.fromEnv()` end to
+`kvm_vm_provision.scala` is wired to `ConfigYaml.fromEnv()` end to
 end — every sizing/network val (`hypervisorNode`, `vmName`, `baseImage`,
 `diskSizeGB`, `memoryMB`, `vcpus`, `nicName`, `nicBridge`, `cpuMode`,
 `domainname`, `dns1`/`dns2`, `ipAddress`, `gateway`, `netmask`) reads

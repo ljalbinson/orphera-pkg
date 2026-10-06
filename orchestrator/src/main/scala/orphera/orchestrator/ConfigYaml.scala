@@ -56,7 +56,7 @@ case class VmParams(
     basicPackages: List[String] = Nil
 )
 
-object VmConfigYaml:
+object ConfigYaml:
 
   private def decodeNic0(c: HCursor): Either[DecodingFailure, Nic0] =
     for
