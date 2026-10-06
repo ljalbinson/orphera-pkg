@@ -6,9 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed — `VmConfigYaml` renamed to `ConfigYaml`
+
+`VmConfigYaml.scala` / `object VmConfigYaml` is now `ConfigYaml`, since `--config`
+is no longer VM-specific. Same API (`ConfigYaml.fromEnv()`, `load`); the
+`VmParams`/`Nic0` case classes keep their names. References in the CLI help,
+`kvm_vm_provision.scala`, README and earlier changelog entries were updated to
+match. Manifests that call `VmConfigYaml.fromEnv()` must switch to
+`ConfigYaml.fromEnv()`. Not compiled yet.
+
 ### Fixed — `--config` rejected `disks: [- disk: 128]`
 
-`VmConfigYaml` decoded `disks`/`pdisks` as `List[String]`, so a real config
+`ConfigYaml` decoded `disks`/`pdisks` as `List[String]`, so a real config
 with `disks: [{disk: 128}]` failed with "wrong type, expecting string". Entries
 may now be a string, a number, or a one-key map (`disk: 128`), each reduced to
 its value as a string. Needs `make orpheracli`. Not compiled or run yet.
@@ -118,11 +127,11 @@ memory/cpu/disk/nic values and, once a real `testvm0-config.yml` was
 seen, turned out to not match it in several places (wrong NIC name,
 placeholder sizing).
 
-New file `VmConfigYaml.scala` parses the kayobe/kttb-virt-ansible
+New file `ConfigYaml.scala` parses the kayobe/kttb-virt-ansible
 project's own per-VM config file shape (`params:` block with
 `hypervisor`/`hostname`/`disk`/`memory`/`cpu`/`dns1`/`dns2`/
 `host_type`/a nested `nic0:`/etc. — not a format invented here) into
-`VmParams`/`Nic0` case classes. `VmConfigYaml.fromEnv()` is what a
+`VmParams`/`Nic0` case classes. `ConfigYaml.fromEnv()` is what a
 script calls — reads the path from `ORPHERA_CONFIG`, the same
 environment-variable hand-off `--resume`/`ORPHERA_RESUME` already uses,
 since `IOApp.Simple`'s `run: IO[Unit]` has no access to process args at
@@ -135,7 +144,7 @@ a `.yaml` file or a compiled, registered playbook — neither has any
 code of its own that could read the env var — `orphera` prints a note
 rather than silently ignoring the flag in that case.
 
-`kvm_vm_provision.scala` is now wired to `VmConfigYaml.fromEnv()` end
+`kvm_vm_provision.scala` is now wired to `ConfigYaml.fromEnv()` end
 to end — `hypervisorNode`, `vmName`, `baseImage`, `diskSizeGB`,
 `memoryMB`, `vcpus`, `nicName`, `nicBridge`, `cpuMode`, `domainname`,
 `dns1`/`dns2`, `ipAddress`, `gateway`, and `netmask` all read from the
