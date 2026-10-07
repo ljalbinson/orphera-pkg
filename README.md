@@ -909,6 +909,20 @@ back to tst0-tst5):
 orphera cluster-playbook manifests/gen_set_dns.scala --config config/tst0.yaml
 ```
 
+### Building a set of new VMs end to end
+
+`manifests/mk-new-and-empty.sh` chains the steps above for tst0-tst7 (or the nodes
+named on the command line): provision, `bootstrap --forget-host-key`,
+`gen_set_dns.scala`, `dist-upgrade`, `gen_packages.scala`. A failed step stops
+that node and the script moves on, listing failures and exiting non-zero.
+`manifests/par-mk-new-and-empty.sh` does the same with the nodes built in
+parallel (`-j N`, default 4; `-q` for banners only; `-f <deb>`): output is
+prefixed per node and saved under `.orphera-build-logs/<time>/<node>.log`,
+provisioning is serialized per hypervisor and `bootstrap` globally (it edits
+`known_hosts`), and Ctrl-C stops every node. Don't use `--resume` with it —
+checkpoint state is per playbook name. Both pick the newest
+`orphera-agent_*_amd64.deb` in the current directory unless given `-f`.
+
 The one value this file does **not** read from `--config` is the SSH
 key authorized on the new VM — there's no field for that in the
 kttb-virt-ansible config shape. Instead it reads a real public key off
@@ -1042,6 +1056,12 @@ an unlocked key or agent-forwarded key, no passphrase prompts, and if
 `--ssh-user` isn't root, passwordless `sudo` for `dpkg`. Once bootstrap
 succeeds and the systemd service is running, all future updates go
 through `deploy-agent` (gRPC), not `bootstrap` again.
+
+`cephadm_teardown.scala` also removes a leftover `download.ceph.com` apt source
+(left behind by `cephadm add-repo`; on noble its 404 makes every later
+`apt-get update` fail on that host). If `apt-get update` does fail during a
+`Task.Install`, the agent now ends the task with a FAILED result and the apt
+error rather than leaving the run waiting.
 
 Before pushing the `.deb`, `bootstrap` runs `apt-get update` and
 `apt-get install -y default-jre` on each node over SSH. The agent needs
