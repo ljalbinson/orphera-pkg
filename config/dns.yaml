@@ -3,9 +3,11 @@
 #
 # Same top-level `params:` shape as the per-VM config files, so the
 # playbook can also be pointed at one of those (config/testvm0-config.yaml)
-# and pick up its dns1/dns2/domainname instead of the keys below.
+# and pick up its hostname (as the single target node) and
+# dns1/dns2/domainname instead of the keys below.
 params:
-  # Nodes to configure. Must be names from inventory.yaml.
+  # Nodes to configure. Must be names from inventory.yaml. If omitted, a
+  # per-VM file's `hostname:` is used (one node); with neither, tst0-tst5.
   nodes: [tst0, tst1, tst2, tst3, tst4, tst5]
 
   # Resolvers, in order of preference. IPv4 or IPv6 literals only.

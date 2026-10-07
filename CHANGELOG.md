@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed — `set_dns.scala` takes its target node from the config's `hostname`
+
+With a per-VM config (`--config config/tst0.yaml`) the playbook ignored the file's
+`hostname:` and fell through to the default list tst0-tst5, applying DNS to six
+nodes. The target is now `nodes:` if present, otherwise the config's `hostname:`
+(one node), and only with neither the old tst0-tst5 default. `config/dns.yaml`
+(which has `nodes:`) behaves as before. Manifest only — `git pull` is enough.
+Not compiled or run yet.
+
 ### Added — `manifests/vm_packages.scala`
 
 `orphera cluster-playbook manifests/vm_packages.scala --config config/tst0.yaml`

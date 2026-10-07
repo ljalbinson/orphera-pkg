@@ -20,7 +20,9 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 //
 // dns_servers falls back to dns1/dns2, and search_domains to domainname,
 // so a per-VM file (config/testvm0-config.yaml) also works as --config.
-// nodes falls back to tst0-tst5.
+// nodes falls back to the config's `hostname` (a per-VM file such as
+// config/tst0.yaml then targets just that VM), and only if that is absent
+// too, to tst0-tst5.
 //
 // Mechanism, chosen per node at run time:
 //   - systemd-resolved present: a drop-in at
@@ -76,7 +78,13 @@ object set_dns extends OrpheraClusterPlaybook:
   private def decode(c: HCursor): Either[String, DnsConfig] =
     def err(e: DecodingFailure) = e.getMessage
     for
-      nodes <- c.getOrElse[List[String]]("nodes")(defaultNodes).left.map(err)
+      listedNodes <- c.get[Option[List[String]]]("nodes").left.map(err)
+      hostname <- c.get[Option[String]]("hostname").left.map(err)
+      // `nodes:` wins; else a per-VM config's own `hostname:` (so
+      // `--config config/tst0.yaml` targets tst0 only); else the default list.
+      nodes = listedNodes
+        .orElse(hostname.filter(_.nonEmpty).map(List(_)))
+        .getOrElse(defaultNodes)
       listed <- c.get[Option[List[String]]]("dns_servers").left.map(err)
       dns1 <- c.get[Option[String]]("dns1").left.map(err)
       dns2 <- c.get[Option[String]]("dns2").left.map(err)
