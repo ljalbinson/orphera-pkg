@@ -6,6 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed — shellcheck findings in `manifests/test_vip_failover.sh`
+
+Three SC2029 and a set of SC2317 reports, all info-level:
+- `holds_vip` no longer builds a remote `grep` command: it fetches `ip -4 addr
+  show` over ssh and greps locally (also avoids `ssh | grep -q` under `pipefail`
+  failing on SIGPIPE when grep exits early). Matching is now a fixed-string
+  `$VIP/` instead of a regex where the dots matched anything.
+- `ssh_cmd` and `vip_reachable` genuinely do send caller-built / script-constant
+  strings to the node, so those carry a `shellcheck disable=SC2029` with the
+  reason beside it.
+- `cleanup` (trap) and the `check_moved_on` / `check_reclaimed` predicates (called
+  via `"$check_fn"`) were flagged unreachable (SC2317) only because shellcheck
+  can't follow indirect calls; annotated, and the predicates are now defined once
+  at top level instead of three times inline.
+- Dropped a stale comment saying `test_mariadb_galera.sh` still used the wrong
+  SSH user.
+Syntax-checked, and the new `holds_vip` logic was exercised against a stubbed
+`ssh` (VIP present / absent / node down); shellcheck itself and the real drill
+have not been rerun.
+
 ### Fixed — `manifests/test_mariadb_galera.sh` shellcheck SC2029
 
 `mariadb_query` built its remote command as `sudo mariadb -N -e "$sql"`, which

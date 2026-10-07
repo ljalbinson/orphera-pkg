@@ -57,9 +57,8 @@ set -uo pipefail
 NODES=(tst0 tst1 tst2)
 SSH_USER="localadmin"       # the real login on these nodes — confirmed
                              # from an actual session against them; NOT
-                             # "ubuntu" (test_mariadb_galera.sh's own
-                             # SSH_USER is wrong for the same reason and
-                             # worth fixing there too, see CHANGELOG).
+                             # "ubuntu" (test_mariadb_galera.sh had the same
+                             # mistake; fixed there too).
 VIP="10.10.5.100"
 CLUSTERCHECK_USER="clustercheck"
 CLUSTERCHECK_PASSWORD="orphera-test-clustercheck-password"   # must match
@@ -85,8 +84,12 @@ assert_true() {
   fi
 }
 
+# $2 is a complete command line the caller built; it is meant to be sent to
+# the node as-is, so shellcheck's "expands on the client side" (SC2029) is the
+# intended behaviour here, not a bug.
 ssh_cmd() {
   local host="$1" cmd="$2"
+  # shellcheck disable=SC2029
   ssh "${SSH_USER}@${host}" "$cmd" 2>&1
 }
 
@@ -94,8 +97,13 @@ ssh_cmd() {
 # holds the VIP on its own interface — never guessed from haproxy/keepalived
 # status output, always the real interface state.
 holds_vip() {
-  local host="$1"
-  if ssh "${SSH_USER}@${host}" "ip -4 addr show | grep -q '$VIP/'" 2>/dev/null; then
+  local host="$1" addrs
+  # Fetch first, grep locally: nothing from this script is interpolated into
+  # the remote command line (SC2029), and `ssh | grep -q` under `pipefail`
+  # would report failure whenever grep exits early and ssh gets SIGPIPE.
+  # Unreachable node or no match both mean "false", as before.
+  if addrs=$(ssh "${SSH_USER}@${host}" ip -4 addr show 2>/dev/null) \
+    && grep -qF -- "$VIP/" <<<"$addrs"; then
     echo "true"
   else
     echo "false"
@@ -131,6 +139,9 @@ vip_reachable() {
     done
   fi
   local result
+  # HOST/USER/PASSWORD are this script's own constants (top of file), expanded
+  # on purpose into the remote command line — SC2029 does not apply.
+  # shellcheck disable=SC2029
   result=$(ssh "${SSH_USER}@${from_host}" \
     "mariadb -h $VIP -P 3306 -u $CLUSTERCHECK_USER -p'$CLUSTERCHECK_PASSWORD' -N -e 'SELECT 1'" 2>&1)
   [ "$result" = "1" ] && echo "true" || echo "false"
@@ -157,9 +168,19 @@ poll_until() {
   return 1
 }
 
+# Predicates for poll_until, which calls them through "$check_fn" — shellcheck
+# can't see that, so it calls these bodies unreachable (SC2317). check_moved_on
+# reads ORIGINAL_HOLDER, set before the first poll.
+# shellcheck disable=SC2317
+check_moved_on() { [ "$(holds_vip "$ORIGINAL_HOLDER")" = "false" ] && echo "true" || echo "false"; }
+# shellcheck disable=SC2317
+check_reclaimed() { [ "$(holds_vip "tst0")" = "true" ] && echo "true" || echo "false"; }
+
 # Always restores haproxy on whatever node this script stopped it on,
 # whether the run passed, failed, or was interrupted — a chaos test that
 # leaves the cluster broken on exit is worse than not running it.
+# Only ever invoked by the EXIT trap below, which shellcheck can't see (SC2317).
+# shellcheck disable=SC2317
 cleanup() {
   if [ -n "$STOPPED_HOST" ]; then
     log "Cleanup: restarting haproxy on $STOPPED_HOST ..."
@@ -191,7 +212,6 @@ ssh_cmd "$ORIGINAL_HOLDER" "sudo systemctl stop haproxy" > /dev/null
 STOPPED_HOST="$ORIGINAL_HOLDER"
 
 log "Waiting for keepalived to move the VIP off $ORIGINAL_HOLDER (up to 60s) ..."
-check_moved_on() { [ "$(holds_vip "$ORIGINAL_HOLDER")" = "false" ] && echo "true" || echo "false"; }
 poll_until "VIP released by $ORIGINAL_HOLDER" check_moved_on
 assert_true "$ORIGINAL_HOLDER released the VIP" "$([ "$(holds_vip "$ORIGINAL_HOLDER")" = "false" ] && echo true || echo false)"
 
@@ -209,12 +229,10 @@ STOPPED_HOST=""   # restored explicitly here; nothing left for the trap to do
 
 if [ "$ORIGINAL_HOLDER" = "tst0" ]; then
   log "Waiting for tst0 (highest keepalived priority, no nopreempt set) to reclaim the VIP (up to 60s) ..."
-  check_reclaimed() { [ "$(holds_vip "tst0")" = "true" ] && echo "true" || echo "false"; }
   poll_until "tst0 reclaimed the VIP" check_reclaimed
   assert_true "tst0 reclaimed the VIP after recovering" "$(holds_vip "tst0")"
 else
   log "$ORIGINAL_HOLDER wasn't tst0, so tst0's own haproxy was never touched — waiting for tst0 to reclaim via preemption anyway (up to 60s) ..."
-  check_reclaimed() { [ "$(holds_vip "tst0")" = "true" ] && echo "true" || echo "false"; }
   poll_until "tst0 reclaimed the VIP" check_reclaimed
   assert_true "tst0 holds the VIP at rest (priority 101, highest)" "$(holds_vip "tst0")"
 fi
