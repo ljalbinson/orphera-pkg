@@ -874,9 +874,20 @@ when it isn't. `pre_basic_packages`/`basic_packages` are not used by provisionin
 with no agent yet can't be told to install anything); `gen_packages.scala`
 installs them once the VM has been bootstrapped.
 
+Each `disks:` entry (a size in GB, as a bare number, a string, or a one-key
+`- disk: 128` map) becomes a blank `<vm>-dataN.qcow2` attached to the VM; `pdisks`
+is ignored with a warning. Every disk gets a fixed QEMU serial (`<vm>-root`,
+`<vm>-swap`, `<vm>-dataN`), so inside the guest it appears at the stable path
+`/dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_<serial>`, which provisioning prints
+for use in `inventory.yaml` (`osd_disks`/`zap_disks`). The VM is also marked
+**autostart** on the hypervisor. After provisioning, run
+`orphera bootstrap --forget-host-key` to clear a stale `known_hosts` entry for a
+rebuilt host.
+
 `manifests/kvm_vm_start.scala` takes the same file and starts that VM on its
-`hypervisor` (running is left alone, paused is resumed, an undefined domain
-fails) and waits for SSH; `--config` is mandatory there, with no fallbacks:
+`hypervisor` (paused is resumed, an undefined domain fails; a domain libvirt
+calls running but that is unreachable for ~24 s is hard-reset, since a halted guest
+still reports `running`) and waits for SSH; `--config` is mandatory there, with no fallbacks:
 
 ```bash
 orphera cluster-playbook manifests/kvm_vm_start.scala --config config/tst0.yaml
@@ -888,6 +899,14 @@ entry (either list may be absent or empty):
 
 ```bash
 orphera cluster-playbook manifests/gen_packages.scala --config config/tst0.yaml
+```
+
+`manifests/gen_set_dns.scala` writes the resolver config on the node named by
+the config's `nodes:` list, else its `hostname:` (with no config at all it falls
+back to tst0-tst5):
+
+```bash
+orphera cluster-playbook manifests/gen_set_dns.scala --config config/tst0.yaml
 ```
 
 The one value this file does **not** read from `--config` is the SSH
