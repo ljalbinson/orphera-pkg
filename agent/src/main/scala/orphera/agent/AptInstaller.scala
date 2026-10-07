@@ -34,12 +34,28 @@ object AptInstaller:
         "-y"
       ) ++ cmd.packages
 
-    update >> runInstallWithPostCheck(
-      installCommand,
-      "Installing packages",
-      cmd.packages,
-      queue
-    )
+    // A failed `apt-get update` must end the stream with a FAILED RESULT, as in
+    // distUpgrade: runNoResult only raises, the raise dies in the detached
+    // fiber, and the orchestrator (which waits for a RESULT) would hang. Seen
+    // on tst0 with a stray download.ceph.com/debian-squid noble source (404).
+    update.attempt.flatMap {
+      case Right(_) =>
+        runInstallWithPostCheck(
+          installCommand,
+          "Installing packages",
+          cmd.packages,
+          queue
+        )
+      case Left(err) =>
+        queue.offer(
+          Event(
+            kind = Event.Kind.RESULT,
+            message = s"FAILED: ${err.getMessage}",
+            exitCode = 1,
+            success = false
+          )
+        )
+    }
 
   def remove(cmd: RemovePackages, queue: Queue[IO, Event]): IO[Unit] =
     val subcommand = if cmd.purge then "purge" else "remove"

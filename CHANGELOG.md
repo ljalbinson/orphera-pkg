@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed — agent hung when `apt-get update` failed during an install
+
+`AptInstaller.install` chained `apt-get update` (via `runNoResult`, which raises
+on a non-zero exit) before the install without catching the raise. The error died
+in the detached fiber, no RESULT event was queued, and the orchestrator's stream
+never ended — `Task.Install` on that node hung forever (seen on tst0 after a
+`download.ceph.com/debian-squid noble` source 404'd). It now emits a FAILED
+RESULT with the error, as `distUpgrade` already did. Not compiled or run here;
+needs `make` and an agent redeploy on the affected nodes.
+
 ### Changed — `inventory.yaml`: tst0, tst1 and tst2 data disks use serial-based by-id paths
 
 `osd_disks` / `zap_disks` for tst0, tst1 and tst2 now name the fixed QEMU serials
