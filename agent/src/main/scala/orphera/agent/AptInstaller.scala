@@ -300,6 +300,13 @@ object AptInstaller:
         queue.offer(Event(Event.Kind.OUTPUT, line)) >> read(reader, queue)
     }
 
+  /** Waits until every `/usr/bin` and `/usr/sbin` file a package ships exists
+    * and is executable — the install can report success a moment before that is
+    * true. It must NEVER run the binaries: an earlier version executed each
+    * one with no arguments to "prove" it worked, which on a package shipping
+    * `halt`/`reboot`/`poweroff`/`shutdown` (molly-guard, systemd-sysv) halted
+    * the host the moment the install finished (tst0, 2026-10-07).
+    */
   private def waitForBinariesVisible(packages: Seq[String]): IO[Unit] =
     IO.blocking {
       val allFailed = scala.collection.mutable.ListBuffer.empty[String]
@@ -328,20 +335,7 @@ object AptInstaller:
             ready =
               try
                 val f = new java.io.File(path)
-                f.exists() && f.canExecute() && {
-                  val proc = new ProcessBuilder(path)
-                    .redirectOutput(ProcessBuilder.Redirect.DISCARD)
-                    .redirectError(ProcessBuilder.Redirect.DISCARD)
-                    .redirectInput(
-                      ProcessBuilder.Redirect
-                        .from(new java.io.File("/dev/null"))
-                    )
-                    .start()
-                  val exited =
-                    proc.waitFor(2, java.util.concurrent.TimeUnit.SECONDS)
-                  if !exited then proc.destroyForcibly()
-                  true
-                }
+                f.exists() && f.canExecute()
               catch case _: Throwable => false
 
             if !ready then

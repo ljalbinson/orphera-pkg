@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed — agent's apt post-check executed every installed binary (halted tst0)
+
+After an install, `AptInstaller.waitForBinariesVisible` listed each package's
+files with `dpkg -L` and **ran every `/usr/bin` and `/usr/sbin` binary with no
+arguments** to check it was "ready". For a package that ships `halt`,
+`poweroff`, `reboot` or `shutdown` that halts or reboots the host: installing
+(or even re-running install on) `molly-guard` — whose wrappers a non-SSH caller
+like the agent passes straight through — halted tst0 at the end of the run,
+twice (2026-10-07 13:23:29 and ~13:50 BST), with libvirt still reporting the VM
+as `running`. It now only waits for the file to exist and be executable.
+Affects every apt-based task, not just `vm_packages`. **Needs the agent rebuilt
+and redeployed** (`make`, then `deploy-agent`); until a node runs the fixed
+agent, do not install `molly-guard`, `systemd-sysv` or anything else shipping
+those commands on it. Not compiled or run yet.
+
 ### Changed — `kvm_vm_start.scala` resets a "running" VM that is actually dead
 
 libvirt reports a halted or hung guest as `running`, so the playbook used to say
