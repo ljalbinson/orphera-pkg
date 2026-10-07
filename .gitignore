@@ -29,5 +29,6 @@ orphera-orchestrator
 .orphera-state/
 .orphera-logs/
 .orphera-audit/
+.orphera-build-logs/
 
 tmp/
