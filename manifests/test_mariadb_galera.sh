@@ -93,7 +93,12 @@ run_playbook() {
 mariadb_query() {
   local host="$1" sql="$2"
   local raw
-  if ! raw=$(ssh "${SSH_USER}@${host}" "sudo mariadb -N -e \"$sql\"" 2>&1); then
+  # The SQL goes to mariadb on stdin (batch mode: same -N output as -e), not
+  # interpolated into the remote command line. That fixes shellcheck SC2029
+  # properly rather than silencing it: with the old `-e \"$sql\"` form the
+  # remote shell re-parsed the statement, so a double quote, backtick or `$` in
+  # it would have been mangled or expanded on the node.
+  if ! raw=$(printf '%s\n' "$sql" | ssh "${SSH_USER}@${host}" sudo mariadb -N 2>&1); then
     log "  mariadb_query($host): ssh/mariadb command failed — raw output was:"
     log "  $raw"
     echo "ERROR"

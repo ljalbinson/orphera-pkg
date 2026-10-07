@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed — `manifests/test_mariadb_galera.sh` shellcheck SC2029
+
+`mariadb_query` built its remote command as `sudo mariadb -N -e "$sql"`, which
+expands `$sql` on the client and has the remote shell re-parse it (so a double
+quote, backtick or `$` in a statement would break or expand on the node).
+The SQL is now piped to `sudo mariadb -N` on stdin. Same output format (batch
+mode); shellcheck is clean for that line. Not run against the cluster yet.
+
 ### Changed — `vm_packages.scala` renamed to `gen_packages.scala`
 
 `manifests/vm_packages.scala` is now `manifests/gen_packages.scala` (object and
