@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — `manifests/par-mk-new-and-empty.sh`: parallel version of mk-new-and-empty.sh
+
+Builds each node's pipeline (provision, bootstrap, DNS, dist-upgrade, packages) as
+its own background job, `-j N` at a time (default 4; `-j 1` is sequential with
+plain output). Options: `-f <deb>`, `-q` (banners and summary only on the
+terminal), optional node arguments. Output is prefixed `[tst3]`, and every node's
+full output is saved in `.orphera-build-logs/<time>/<node>.log`. A failed step
+stops that node only; the summary lists status and time per node and the tail of
+each failed log, and the exit code is non-zero if any node failed. Ctrl-C stops
+all running nodes.
+Two steps are serialized with `flock`: provisioning (one VM at a time per
+hypervisor, read from the config) and `bootstrap` (it edits `~/.ssh/known_hosts`).
+Launches are staggered by about a second so same-playbook run logs
+(`.orphera-logs/<kind>-<playbook>-<second>.jsonl`) don't share a file. Don't combine
+with `--resume`: checkpoint state is per playbook name. `mk-new-and-empty.sh`
+itself is unchanged. Exercised only against a stubbed `orphera` (concurrency,
+lock queueing, failure isolation, `-q`, `-j 1`, stop on TERM).
+
 ### Changed — `manifests/mk-new-and-empty.sh`
 
 - The agent package is now the newest `orphera-agent_*_amd64.deb` in the current
