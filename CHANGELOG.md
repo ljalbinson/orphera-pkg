@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed — `manifests/mk-new-and-empty.sh`
+
+- The agent package is now the newest `orphera-agent_*_amd64.deb` in the current
+  directory (or `-f <file>`), failing clearly if none exists; the old
+  `orphera-agent_0.1.???_amd64.deb` glob passed the literal pattern, or several
+  files, to `--file` when there was no single match.
+- `bootstrap` gets `--forget-host-key`, since a rebuilt VM keeps its name but has a
+  new SSH host key.
+- A failing step now stops that node (the old script carried on, e.g. running
+  `dist-upgrade` against a VM that never got an agent); the script moves to the
+  next node, lists the failures at the end and exits non-zero.
+- Optional node arguments (`3`, `tst3`) instead of always building tst0-tst7; every
+  `config/<node>.yaml` is checked up front, before any VM is created.
+- Timestamped step headers. Exercised only against a stubbed `orphera`.
+
 ### Fixed — `cephadm_teardown.scala` removes the leftover download.ceph.com apt source
 
 `cephadm add-repo` leaves `/etc/apt/sources.list.d/ceph.list` (and a signing key)
