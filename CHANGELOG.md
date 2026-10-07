@@ -6,7 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-### Changed — `set_dns.scala` takes its target node from the config's `hostname`
+### Changed — `set_dns.scala` renamed to `gen_set_dns.scala`
+
+`manifests/set_dns.scala` is now `manifests/gen_set_dns.scala` (object, playbook
+name `gen-set-dns`, error prefix and the marker comment it writes all follow);
+earlier entries below use the new name. Run it as
+`orphera cluster-playbook manifests/gen_set_dns.scala --config config/dns.yaml`.
+Resolv.conf files already written under the old marker
+(`# Managed by Orphera (manifests/set_dns.scala)`) are still recognised when a
+later run without `round_robin` restores the resolved stub. The playbook name
+change means an old `--resume` checkpoint for `set-dns` won't carry over.
+Not compiled or run yet.
+
+### Changed — `gen_set_dns.scala` takes its target node from the config's `hostname`
 
 With a per-VM config (`--config config/tst0.yaml`) the playbook ignored the file's
 `hostname:` and fell through to the default list tst0-tst5, applying DNS to six
@@ -136,7 +148,7 @@ agent unconfigured. Both steps use the agent's apt options with
 aborts that node's bootstrap before anything is pushed. Not compiled or run
 yet.
 
-### Fixed — `manifests/set_dns.scala` treated a masked systemd-resolved as present
+### Fixed — `manifests/gen_set_dns.scala` treated a masked systemd-resolved as present
 
 The per-node detection added for tst0 used `systemctl cat systemd-resolved.service`,
 which succeeds for a *masked* unit. On gs2 and gs3 (resolved masked, static
@@ -146,7 +158,7 @@ worked. Detection now checks `systemctl show -p LoadState --value`, which is
 `loaded` only for a usable unit (`masked`/`not-found` otherwise), so masked and
 missing both take the static-resolv.conf path. Not compiled or run yet.
 
-### Fixed — `manifests/set_dns.scala` failed on nodes without systemd-resolved
+### Fixed — `manifests/gen_set_dns.scala` failed on nodes without systemd-resolved
 
 A real run against tst0 failed at `systemctl restart systemd-resolved`
 ("Unit systemd-resolved.service not found"): tst0 has a plain static
@@ -171,7 +183,7 @@ parallel, same shape as `autoremove`. Unlike `install`'s opt-in
 like the other mutating package commands (`dist-upgrade` with `nodes` and
 `update_cache` fields), and added to bash completion. Not compiled or run yet.
 
-### Added — `round_robin` option for `manifests/set_dns.scala`
+### Added — `round_robin` option for `manifests/gen_set_dns.scala`
 
 `round_robin: true` in the `--config` file (default `false`) spreads DNS
 queries across the configured servers. systemd-resolved, which the playbook

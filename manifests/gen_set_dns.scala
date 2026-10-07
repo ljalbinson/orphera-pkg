@@ -9,7 +9,7 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 // Sets the DNS servers (and optional search domains) on a set of nodes,
 // with every value read from a YAML config file:
 //
-//   orphera cluster-playbook manifests/set_dns.scala --config config/dns.yaml
+//   orphera cluster-playbook manifests/gen_set_dns.scala --config config/dns.yaml
 //
 // Config shape (see config/dns.yaml):
 //   params:
@@ -58,7 +58,7 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 // Unlike kvm_vm_provision.scala, there's no hardcoded fallback when
 // --config is missing: the config file is the whole input here, so a
 // missing or bad one fails before any node is touched.
-object set_dns extends OrpheraClusterPlaybook:
+object gen_set_dns extends OrpheraClusterPlaybook:
 
   private case class DnsConfig(
       nodes: List[String],
@@ -138,7 +138,7 @@ object set_dns extends OrpheraClusterPlaybook:
           .map(e => s"missing top-level 'params:' key (${e.getMessage})")
         cfg <- decode(params.hcursor)
       yield cfg
-    result.fold(e => throw new RuntimeException(s"set_dns: $e"), identity)
+    result.fold(e => throw new RuntimeException(s"gen_set_dns: $e"), identity)
 
   private val dropInDir = "/etc/systemd/resolved.conf.d"
   private val dropIn = s"$dropInDir/orphera-dns.conf"
@@ -147,12 +147,14 @@ object set_dns extends OrpheraClusterPlaybook:
     val domainsLine =
       if config.searchDomains.isEmpty then ""
       else s"Domains=${config.searchDomains.mkString(" ")}\n"
-    s"""# Managed by Orphera (manifests/set_dns.scala) — edits are overwritten.
+    s"""# Managed by Orphera (manifests/gen_set_dns.scala) — edits are overwritten.
        |[Resolve]
        |DNS=${config.servers.mkString(" ")}
        |""".stripMargin + domainsLine
 
-  private val managedMarker = "# Managed by Orphera (manifests/set_dns.scala)"
+  private val managedMarker = "# Managed by Orphera (manifests/gen_set_dns.scala)"
+  // Files written before the rename carry the old name; still recognise them.
+  private val legacyMarker = "# Managed by Orphera (manifests/set_dns.scala)"
 
   private val resolvConf = "/etc/resolv.conf"
   private val stubResolvConf = "/run/systemd/resolve/stub-resolv.conf"
@@ -217,7 +219,7 @@ object set_dns extends OrpheraClusterPlaybook:
       )
       .mkString("\n")
     s"""echo "systemd-resolved present: using drop-in"
-       |if [ ! -L $resolvConf ] && grep -qF '$managedMarker' $resolvConf 2>/dev/null; then
+       |if [ ! -L $resolvConf ] && grep -qF -e '$managedMarker' -e '$legacyMarker' $resolvConf 2>/dev/null; then
        |  ln -sf $stubResolvConf $resolvConf
        |  echo "restored $resolvConf -> $stubResolvConf"
        |fi
@@ -249,8 +251,8 @@ object set_dns extends OrpheraClusterPlaybook:
          |fi""".stripMargin
 
   val playbook: ClusterPlaybook =
-    clusterPlaybook("set-dns")(
-      stage("set-dns", config.nodes*)
+    clusterPlaybook("gen-set-dns")(
+      stage("gen-set-dns", config.nodes*)
         .task("apply DNS config (resolved drop-in, or static resolv.conf)")(
           Task.RunCommand(List("sh", "-c", applyScript), timeoutSeconds = 90)
         )

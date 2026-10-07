@@ -1,5 +1,5 @@
-# DNS settings for manifests/set_dns.scala. Run with:
-#   orphera cluster-playbook manifests/set_dns.scala --config config/dns.yaml
+# DNS settings for manifests/gen_set_dns.scala. Run with:
+#   orphera cluster-playbook manifests/gen_set_dns.scala --config config/dns.yaml
 #
 # Same top-level `params:` shape as the per-VM config files, so the
 # playbook can also be pointed at one of those (config/testvm0-config.yaml)
