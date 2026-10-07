@@ -93,6 +93,22 @@ object cephadm_teardown extends OrpheraClusterPlaybook:
       |# run with no daemons left to report it), so a later `cephadm shell`
       |# invocation never again finds more than one fsid to infer from.
       |rm -rf /var/lib/ceph/* /etc/ceph/* /var/log/ceph/* /var/run/ceph/* 2>/dev/null
+      |
+      |# `cephadm add-repo` (or `cephadm install`) leaves an apt source for
+      |# download.ceph.com behind, and rm-cluster does not remove it. On noble
+      |# the debian-squid repo has no Release file (404), so every later
+      |# `apt-get update` on the host fails — which broke the MariaDB Galera
+      |# install stage on tst0 (2026-10-07). Remove only files under
+      |# sources.list.d that reference download.ceph.com, plus the signing key
+      |# add-repo installed alongside them; installed packages are left alone.
+      |for f in $(grep -lsE 'download\.ceph\.com' /etc/apt/sources.list.d/* 2>/dev/null); do
+      |  echo "Removing leftover Ceph apt source: $f"
+      |  rm -f "$f"
+      |  removed_ceph_source=1
+      |done
+      |if [ -n "$removed_ceph_source" ]; then
+      |  rm -f /etc/apt/trusted.gpg.d/ceph.release.gpg /etc/apt/keyrings/ceph.release.gpg 2>/dev/null
+      |fi
       |true
       |""".stripMargin
 

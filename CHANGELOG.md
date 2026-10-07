@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed — `cephadm_teardown.scala` removes the leftover download.ceph.com apt source
+
+`cephadm add-repo` leaves `/etc/apt/sources.list.d/ceph.list` (and a signing key)
+behind and `cephadm rm-cluster` doesn't touch them. On noble the `debian-squid`
+repo has no Release file, so afterwards every `apt-get update` on that host
+failed — which hung the MariaDB Galera install stage on tst0. The teardown's
+cluster-removal step now deletes any `sources.list.d` file that references
+`download.ceph.com`, plus the `ceph.release.gpg` key, only when such a source was
+found. Installed packages are left alone. Not run against a host yet;
+`cephadm_teardown.yaml` (the older YAML playbook) is unchanged.
+
 ### Fixed — agent hung when `apt-get update` failed during an install
 
 `AptInstaller.install` chained `apt-get update` (via `runNoResult`, which raises
