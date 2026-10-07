@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed — `kvm_vm_start.scala` resets a "running" VM that is actually dead
+
+libvirt reports a halted or hung guest as `running`, so the playbook used to say
+"already running" and then time out on SSH (tst0, 2026-10-07: guest halted at
+13:23:29 BST by something outside Orphera's audit log, still `running`). If the
+domain is `running` but answers neither ping nor TCP 22 from the hypervisor for
+24s, the playbook now hard-resets it (`virsh reset`) and continues to the SSH
+wait. A VM it starts itself is never reset. Cause of that halt not found:
+ruled out the audit log, shell history, gs1's journal and the cloud-init config.
+Not compiled or run yet.
+
 ### Changed — `set_dns.scala` renamed to `gen_set_dns.scala`
 
 `manifests/set_dns.scala` is now `manifests/gen_set_dns.scala` (object, playbook
