@@ -19,7 +19,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   next node, lists the failures at the end and exits non-zero.
 - Optional node arguments (`3`, `tst3`) instead of always building tst0-tst7; every
   `config/<node>.yaml` is checked up front, before any VM is created.
-- Timestamped step headers. Exercised only against a stubbed `orphera`.
+- Timestamped step headers, printed in green when stdout is a colour-capable
+  terminal (off when piped, with `NO_COLOR` set, or `TERM=dumb`). Exercised only
+  against a stubbed `orphera`.
 
 ### Fixed — `cephadm_teardown.scala` removes the leftover download.ceph.com apt source
 

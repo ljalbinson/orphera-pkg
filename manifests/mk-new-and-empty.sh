@@ -39,6 +39,15 @@ else
     nodes=(tst{0..7})
 fi
 
+# Banner colour: green, only when stdout is a terminal that can show it
+# (honours the NO_COLOR convention and TERM=dumb).
+if [ -t 1 ] && [ -z "${NO_COLOR:-}" ] && [ "${TERM:-dumb}" != dumb ]; then
+    green=$'\033[1;32m' reset=$'\033[0m'
+else
+    green="" reset=""
+fi
+banner() { printf '%s%s%s\n' "$green" "$*" "$reset"; }
+
 command -v orphera >/dev/null || { echo "orphera not found in PATH" >&2; exit 1; }
 
 if [ -z "$deb" ]; then
@@ -48,7 +57,7 @@ if [ -z "$deb" ]; then
     deb=$(ls -t orphera-agent_*_amd64.deb 2>/dev/null | head -n 1)
 fi
 [ -f "$deb" ] || { echo "no agent .deb found (use -f <file>)" >&2; exit 1; }
-echo "Agent package: $deb"
+banner "Agent package: $deb"
 
 # All config files must exist before anything is created, so a typo in the
 # node list fails now rather than after seven VMs have been built.
@@ -58,7 +67,7 @@ done
 
 build_node() {
     local node=$1 cfg="config/$1.yaml"
-    step() { echo; echo "=== $(date '+%F %T') $node: $* ==="; }
+    step() { echo; banner "=== $(date '+%F %T') $node: $* ==="; }
 
     step "provision VM"
     orphera cluster-playbook manifests/kvm_vm_provision.scala --config "$cfg" || return 1
@@ -91,4 +100,4 @@ if [ ${#failed[@]} -gt 0 ]; then
     echo "Failed: ${failed[*]}" >&2
     exit 1
 fi
-echo "All done: ${nodes[*]}"
+banner "All done: ${nodes[*]}"
