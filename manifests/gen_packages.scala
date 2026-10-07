@@ -5,7 +5,7 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 
 // Installs the packages a per-VM config file asks for, on that VM:
 //
-//   orphera cluster-playbook manifests/vm_packages.scala --config config/tst0.yaml
+//   orphera cluster-playbook manifests/gen_packages.scala --config config/tst0.yaml
 //
 // Reads `pre_basic_packages` and `basic_packages` from the same `params:` file
 // kvm_vm_provision.scala / kvm_vm_start.scala take, and installs them in that
@@ -20,7 +20,7 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 // inventory.yaml). That is the reason this is a separate playbook from
 // kvm_vm_provision.scala, which cannot install anything on a VM that has no
 // agent yet. --config is required; there are no hardcoded fallbacks.
-object vm_packages extends OrpheraClusterPlaybook:
+object gen_packages extends OrpheraClusterPlaybook:
 
   private val params: VmParams =
     ConfigYaml.fromEnv() match
@@ -29,7 +29,7 @@ object vm_packages extends OrpheraClusterPlaybook:
         throw new RuntimeException(s"--config given but failed to load: $err")
       case None =>
         throw new RuntimeException(
-          "vm_packages requires --config <vm config.yaml> " +
+          "gen_packages requires --config <vm config.yaml> " +
             "(e.g. --config config/tst0.yaml)"
         )
 
@@ -81,4 +81,4 @@ object vm_packages extends OrpheraClusterPlaybook:
     )
 
   val playbook: ClusterPlaybook =
-    clusterPlaybook("vm-packages")(stages*)
+    clusterPlaybook("gen-packages")(stages*)

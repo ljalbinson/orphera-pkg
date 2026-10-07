@@ -871,7 +871,7 @@ end — every sizing/network val (`hypervisorNode`, `vmName`, `baseImage`,
 from the parsed config when `--config` is given, falling back to
 testvm0's own real hardcoded values (from `config/testvm0-config.yaml`)
 when it isn't. `pre_basic_packages`/`basic_packages` are not used by provisioning (a VM
-with no agent yet can't be told to install anything); `vm_packages.scala`
+with no agent yet can't be told to install anything); `gen_packages.scala`
 installs them once the VM has been bootstrapped.
 
 `manifests/kvm_vm_start.scala` takes the same file and starts that VM on its
@@ -882,12 +882,12 @@ fails) and waits for SSH; `--config` is mandatory there, with no fallbacks:
 orphera cluster-playbook manifests/kvm_vm_start.scala --config config/tst0.yaml
 ```
 
-`manifests/vm_packages.scala` installs the config's `pre_basic_packages`, then
+`manifests/gen_packages.scala` installs the config's `pre_basic_packages`, then
 `basic_packages`, on that VM once it has the agent and an `inventory.yaml`
 entry (either list may be absent or empty):
 
 ```bash
-orphera cluster-playbook manifests/vm_packages.scala --config config/tst0.yaml
+orphera cluster-playbook manifests/gen_packages.scala --config config/tst0.yaml
 ```
 
 The one value this file does **not** read from `--config` is the SSH

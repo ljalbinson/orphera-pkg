@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed — `vm_packages.scala` renamed to `gen_packages.scala`
+
+`manifests/vm_packages.scala` is now `manifests/gen_packages.scala` (object and
+playbook name `gen-packages` follow, as with `gen_set_dns.scala`); earlier entries
+use the new name. Run it as `orphera cluster-playbook manifests/gen_packages.scala
+--config config/tst0.yaml`. Old `--resume` checkpoints for `vm-packages` don't
+carry over. Not compiled or run yet.
+
 ### Fixed — agent's apt post-check executed every installed binary (halted tst0)
 
 After an install, `AptInstaller.waitForBinariesVisible` listed each package's
@@ -16,7 +24,7 @@ arguments** to check it was "ready". For a package that ships `halt`,
 like the agent passes straight through — halted tst0 at the end of the run,
 twice (2026-10-07 13:23:29 and ~13:50 BST), with libvirt still reporting the VM
 as `running`. It now only waits for the file to exist and be executable.
-Affects every apt-based task, not just `vm_packages`. **Needs the agent rebuilt
+Affects every apt-based task, not just `gen_packages`. **Needs the agent rebuilt
 and redeployed** (`make`, then `deploy-agent`); until a node runs the fixed
 agent, do not install `molly-guard`, `systemd-sysv` or anything else shipping
 those commands on it. Not compiled or run yet.
@@ -53,9 +61,9 @@ nodes. The target is now `nodes:` if present, otherwise the config's `hostname:`
 (which has `nodes:`) behaves as before. Manifest only — `git pull` is enough.
 Not compiled or run yet.
 
-### Added — `manifests/vm_packages.scala`
+### Added — `manifests/gen_packages.scala`
 
-`orphera cluster-playbook manifests/vm_packages.scala --config config/tst0.yaml`
+`orphera cluster-playbook manifests/gen_packages.scala --config config/tst0.yaml`
 installs `pre_basic_packages` then `basic_packages` from the per-VM config on
 that VM (the config's `hostname`, as an inventory node), finally wiring up the two
 lists `VmParams` has been parsing without using. Missing or empty lists are
