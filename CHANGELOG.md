@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed — `inventory.yaml`: tst0, tst1 and tst2 data disks use serial-based by-id paths
+
+`osd_disks` / `zap_disks` for tst0, tst1 and tst2 now name the fixed QEMU serials
+that `kvm_vm_provision.scala` assigns (`/dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_<vm>-data1`
+and `-data2`) instead of the old `drive-scsi0-0-0-N` names, which depended on
+attach order. tst0 was confirmed against `ls -l /dev/disk/by-id` on the VM; tst1
+and tst2 follow the same naming but must have been (re)provisioned with the
+serials for the paths to exist. tst3/tst4 and the other nodes are unchanged.
+
 ### Fixed — shellcheck findings in `manifests/test_vip_failover.sh`
 
 Three SC2029 and a set of SC2317 reports, all info-level:
