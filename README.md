@@ -916,11 +916,12 @@ named on the command line): provision, `bootstrap --forget-host-key`,
 `gen_set_dns.scala`, `dist-upgrade`, `gen_packages.scala`. A failed step stops
 that node and the script moves on, listing failures and exiting non-zero.
 `manifests/par-mk-new-and-empty.sh` does the same with the nodes built in
-parallel (`-j N`, default 4; `-q` for banners only; `-f <deb>`; `-L` to
-drop the per-hypervisor provisioning lock): output is
-prefixed per node and saved under `.orphera-build-logs/<time>/<node>.log`,
-provisioning is serialized per hypervisor and `bootstrap` globally (it edits
-`known_hosts`), and Ctrl-C stops every node. Don't use `--resume` with it —
+parallel (`-j N`, default 4; `-q` for banners only; `-f <deb>`; `-H` to
+provision one VM at a time per hypervisor): output is prefixed per node and
+saved under `.orphera-build-logs/<time>/<node>.log`. Only the removal of a node's
+old SSH host key (`ssh-keygen -R`, which rewrites `known_hosts`) is serialized;
+everything else, including the rest of `bootstrap`, runs in parallel. Ctrl-C
+stops every node. Don't use `--resume` with it —
 checkpoint state is per playbook name. Both pick the newest
 `orphera-agent_*_amd64.deb` in the current directory unless given `-f`.
 

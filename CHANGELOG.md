@@ -6,13 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-### Added — `par-mk-new-and-empty.sh -L`: skip the per-hypervisor provisioning lock
+### Changed — `par-mk-new-and-empty.sh`: lock only the host-key removal; hypervisor lock off by default
 
-The lock that makes VMs on one hypervisor provision one at a time is a precaution
-against load, not a known conflict (each VM has its own ZFS dataset, disk files
-and domain; the shared base image is only read). `-L` provisions them
-concurrently so the lock's necessity can be tested; the `known_hosts` lock for
-`bootstrap` stays. Default is unchanged (locked). Not run against hypervisors yet.
+Measured on scala0 (2026-10-08, 8 nodes): provisioning all eight VMs at once, two
+per hypervisor, took 35-45 s each (a lone provision is about 33 s) with no
+failures, so the per-hypervisor lock is now opt-in (`-H`; `-L` is accepted and
+ignored). That alone did not help — a full run still took 16m37s — because the
+whole of `bootstrap` was serialized on the `known_hosts` lock (60-90 s per node,
+tst7 waited about 9.5 minutes). Only `ssh-keygen -R`, which rewrites
+`~/.ssh/known_hosts`, needs the lock, so the script now runs that itself
+(host read from `inventory.yaml`) under the lock and runs `bootstrap` unlocked,
+without `--forget-host-key`; bootstrap's own ssh only appends the new key. A node
+with no `host:` in `inventory.yaml` falls back to the old behaviour (bootstrap
+`--forget-host-key`, locked). A concurrent rewrite can at worst drop another
+node's just-appended key, which `accept-new` re-adds on the next connection.
+Exercised against stubs only (overlapping bootstraps, locked `ssh-keygen`,
+fallback); not yet run on the real nodes.
 
 ### Added — `manifests/par-mk-new-and-empty.sh`: parallel version of mk-new-and-empty.sh
 

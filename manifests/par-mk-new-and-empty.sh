@@ -7,7 +7,7 @@
 #   4. dist-upgrade                           (orphera dist-upgrade)
 #   5. install the config's package lists     (gen_packages.scala)
 #
-# Usage: manifests/par-mk-new-and-empty.sh [-f agent.deb] [-j jobs] [-q] [-L] [node ...]
+# Usage: manifests/par-mk-new-and-empty.sh [-f agent.deb] [-j jobs] [-q] [-H] [node ...]
 #   node   a name (tst3) or a bare number (3); default is tst0..tst7
 #   -f     agent package to install; default is the newest
 #          orphera-agent_*_amd64.deb in the current directory
@@ -15,10 +15,10 @@
 #          another, with plain unprefixed output)
 #   -q     quiet: the terminal shows only step banners and the summary; the
 #          full output of every node is in its log file
-#   -L     no per-hypervisor lock: provision VMs on the same hypervisor at the
-#          same time. The lock is a precaution against load (two image copies,
-#          zfs creates and boots on one host), not a known conflict; use -L to
-#          find out whether it is needed. The known_hosts lock stays.
+#   -H     provision only one VM at a time per hypervisor. Off by default:
+#          provisioning eight VMs at once, two per hypervisor, worked fine
+#          (2026-10-08). The lock is a precaution against load, not a known
+#          conflict. (-L is still accepted and does nothing.)
 #
 # Run from the repository root (config/ and manifests/ are relative paths).
 #
@@ -26,10 +26,11 @@
 # others carry on, and the script lists the failures at the end and exits
 # non-zero. Full per-node output goes to .orphera-build-logs/<time>/<node>.log.
 #
-# Two steps are serialized on purpose, everything else runs in parallel:
-#   - provisioning (unless -L): one VM at a time per hypervisor (config
-#     `hypervisor:`), so tst0 and tst1 on gs1 queue while tst2 on gs2 proceeds
-#   - bootstrap: one at a time, because it edits ~/.ssh/known_hosts
+# Only one thing is serialized: dropping a node's old SSH host key
+# (`ssh-keygen -R`, which rewrites ~/.ssh/known_hosts). That takes a second per
+# node and is done under a lock; the rest of bootstrap (apt, JRE, agent
+# install; about a minute) then runs in parallel. With -H, provisioning is also
+# limited to one VM at a time per hypervisor (config `hypervisor:`).
 # Do not combine with `--resume`: checkpoint state is per playbook name, so
 # parallel runs of the same playbook would overwrite each other's.
 # Ctrl-C stops every running node (a VM caught mid-provision is left half-built).
@@ -39,13 +40,14 @@ set -uo pipefail
 jobs_max=4
 deb=""
 quiet=0
-hv_lock=1
-while getopts "f:j:qLh" opt; do
+hv_lock=0
+while getopts "f:j:qHLh" opt; do
     case $opt in
         f) deb=$OPTARG ;;
         j) jobs_max=$OPTARG ;;
         q) quiet=1 ;;
-        L) hv_lock=0 ;;
+        H) hv_lock=1 ;;
+        L) ;;  # old flag: the hypervisor lock is off by default now
         *) sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
     esac
 done
@@ -118,6 +120,13 @@ with_lock() {
     ) 9>"$lockdir/$name"
 }
 
+# The inventory.yaml `host:` of a node (what bootstrap connects to and what
+# `bootstrap --forget-host-key` passes to ssh-keygen -R).
+inventory_host() {
+    awk -v n="$1" '$1 == "-" && $2 == "name:" {cur = $3}
+                   $1 == "host:" && cur == n {print $2; exit}' inventory.yaml 2>/dev/null
+}
+
 hypervisor_of() {
     local hv
     hv=$(awk -F: '/^[[:space:]]*hypervisor:/ {gsub(/[[:space:]"'\'']/, "", $2); print $2; exit}' "config/$1.yaml")
@@ -136,10 +145,22 @@ build_node() {
         orphera cluster-playbook manifests/kvm_vm_provision.scala --config "$cfg" || return 1
     fi
 
-    # --forget-host-key: a rebuilt VM has a new SSH host key under the same name.
+    # A rebuilt VM has a new SSH host key under the same name, so the old one is
+    # dropped first. ssh-keygen -R rewrites known_hosts, so that (and only that)
+    # is done under the lock; bootstrap itself then runs unlocked and just
+    # appends the new key. If the node's host can't be found in inventory.yaml,
+    # fall back to bootstrap's own --forget-host-key, with bootstrap locked.
     step "install agent"
-    with_lock known_hosts orphera bootstrap --file "$deb" --ssh-user localadmin \
-        --nodes "$node" --forget-host-key || return 1
+    local host
+    host=$(inventory_host "$node")
+    if [ -n "$host" ]; then
+        with_lock known_hosts ssh-keygen -R "$host" || true
+        orphera bootstrap --file "$deb" --ssh-user localadmin --nodes "$node" || return 1
+    else
+        echo "no host for $node in inventory.yaml — using bootstrap --forget-host-key under the lock"
+        with_lock known_hosts orphera bootstrap --file "$deb" --ssh-user localadmin \
+            --nodes "$node" --forget-host-key || return 1
+    fi
 
     step "set DNS"
     orphera cluster-playbook manifests/gen_set_dns.scala --config "$cfg" || return 1
