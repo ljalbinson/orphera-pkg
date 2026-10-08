@@ -98,7 +98,7 @@ object LogSummary:
         val pattern =
           ("^(playbook|cluster)-" + java.util.regex.Pattern.quote(
             sanitized
-          ) + "-\\d{8}-\\d{6}\\.jsonl$").r
+          ) + "-\\d{8}-\\d{6}(-[A-Za-z0-9._-]+)?\\.jsonl$").r
         val matches = Option(dir.toFile.listFiles()).toList.flatten
           .filter(f => f.isFile && pattern.matches(f.getName))
         if matches.isEmpty then

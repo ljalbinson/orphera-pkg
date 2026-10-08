@@ -6,6 +6,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — `cluster-playbook` runs its chain for several `--config` files in parallel
+
+`orphera cluster-playbook a.scala b.scala --config config/tst*.yaml [--parallel N] [--quiet]`
+runs the whole chain (in order, stopping at the first failure) once per config, the
+configs in parallel — at most `--parallel` at a time, default min(4, number of configs).
+- `--config` takes several files (values run up to the next `--flag`, so a shell glob
+  works; comma-separated lists and repeating the flag work too). With zero or one config
+  nothing changes.
+- A failure stops that config's chain only; the others carry on. Each config's output is
+  prefixed `[tst3]`, appended to `.orphera-build-logs/<time>/<config>.log`, and the run
+  ends with a per-config summary (status, time, where it stopped, log path, last lines
+  of failed logs). Exit status is non-zero if any config failed. `--quiet` limits the
+  terminal to stage headers, failures and the summary. Ctrl-C kills every child
+  process tree.
+- `.scala` playbooks only in this mode (a YAML playbook cannot read a config). Config
+  file names (without extension) must be distinct, since they label the output.
+- Each child gets `ORPHERA_RUN_TAG=<config name>`; `RunLog` and `Checkpoint` add it to
+  their file names (`...-<timestamp>-<tag>.jsonl`, `...-<playbook>-<tag>.txt`) so
+  parallel runs of the same playbook no longer share a file, and `--resume` resumes each
+  config where it stopped. `log-summary <playbook>` still finds tagged logs. Untagged
+  runs are named as before.
+- Audit log records every config and the parallelism. Shell completion offers
+  `--parallel`/`--quiet` and completes files after each `--config` value.
+- **Not compiled or run**: this was written without access to a Scala compiler (and the
+  build uses `-Werror`); only the shell completion was exercised. Needs `make` and a
+  test with the playbook chain before relying on it. `bootstrap` and `dist-upgrade` are
+  not playbooks, so they still need `par-mk-new-and-empty.sh`.
+
 ### Changed — `par-mk-new-and-empty.sh`: lock only the host-key removal; hypervisor lock off by default
 
 Measured on scala0 (2026-10-08, 8 nodes): provisioning all eight VMs at once, two

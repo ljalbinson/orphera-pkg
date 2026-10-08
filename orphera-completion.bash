@@ -185,12 +185,25 @@ _orphera_completions() {
       # every other verb below, and in case a verb-specific flag needs its
       # own branch here later (--resume already falls through to no
       # completion via the flag literal below).
+      # cluster-playbook's --config takes several files in a row (up to the
+      # next --flag), so the last flag on the line decides whether a bare
+      # word is a config file or a playbook path.
+      local last_flag="" w
+      for w in "${words[@]:2:cword-2}"; do
+        [[ "$w" == --* ]] && last_flag="$w"
+      done
       case "$prev" in
-        --resume) COMPREPLY=() ;;
-        --config) COMPREPLY=($(compgen -f -- "$cur")) ;;
+        --resume|--quiet) COMPREPLY=() ;;
+        --parallel) COMPREPLY=() ;;
         *)
           if [[ "$cur" == --* ]]; then
-            COMPREPLY=($(compgen -W "--resume --config" -- "$cur"))
+            if [[ "$verb" == cluster-playbook ]]; then
+              COMPREPLY=($(compgen -W "--resume --config --parallel --quiet" -- "$cur"))
+            else
+              COMPREPLY=($(compgen -W "--resume --config" -- "$cur"))
+            fi
+          elif [[ "$last_flag" == --config ]]; then
+            COMPREPLY=($(compgen -f -- "$cur"))
           else
             _orphera_playbook_path_completions "$cur"
           fi

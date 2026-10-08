@@ -310,8 +310,16 @@ object Main extends IOApp:
           }
         }
 
-      case Right(Command.RunClusterPlaybook(paths, resume, config)) =>
-        runClusterPlaybookSequence(paths, resume, config)
+      case Right(
+            Command.RunClusterPlaybook(paths, resume, configs, parallel, quiet)
+          ) =>
+        configs match
+          case Nil =>
+            runClusterPlaybookSequence(paths, resume, None)
+          case single :: Nil =>
+            runClusterPlaybookSequence(paths, resume, Some(single))
+          case many =>
+            runClusterPlaybookMatrix(paths, resume, many, parallel, quiet)
 
       case Right(Command.RunCommand(command, nodeNames, timeoutSeconds)) =>
         withTargets(nodeNames) { targets =>
@@ -369,6 +377,236 @@ object Main extends IOApp:
             case failed           => IO.pure(failed)
           }
     go(paths.zipWithIndex.map { case (p, i) => (p, i + 1) })
+
+  /** One result row of a multi-config run. */
+  private final case class MatrixResult(
+      label: String,
+      ok: Boolean,
+      seconds: Long,
+      failedAt: Option[String],
+      log: java.nio.file.Path
+  )
+
+  /** The short name of a config file for output prefixes and log names: its
+    * file name without the extension (`config/tst3.yaml` -> `tst3`).
+    */
+  private def configLabel(config: String): String =
+    val name = Paths.get(config).getFileName.toString
+    val dot = name.lastIndexOf('.')
+    if dot > 0 then name.substring(0, dot) else name
+
+  /** `cluster-playbook <chain> --config a b c ...`: runs the whole playbook
+    * sequence once per config, at most `parallel` configs at a time (default
+    * min(4, number of configs)). Within one config the sequence is exactly the
+    * single-run behaviour — in order, stopping at the first failure — and a
+    * failure stops only that config; the others carry on. Each playbook is the
+    * same child process a single run starts, with `ORPHERA_CONFIG` set to that
+    * config and `ORPHERA_RUN_TAG` set to its label (so the run-log and
+    * checkpoint files of parallel runs of the same playbook don't collide; see
+    * RunLog/Checkpoint). Only `.scala` playbooks: a YAML playbook can't read
+    * the config, so running it once per config would just repeat it.
+    *
+    * Output of each child is read line by line, prefixed `[label]`, appended to
+    * `.orphera-build-logs/<time>/<label>.log`, and printed (or, with `quiet`,
+    * printed only if it is a stage header or a failure).
+    */
+  private def runClusterPlaybookMatrix(
+      paths: List[String],
+      resume: Boolean,
+      configs: List[String],
+      parallel: Option[Int],
+      quiet: Boolean
+  ): IO[ExitCode] =
+    val labels = configs.map(configLabel)
+    if labels.distinct.size != labels.size then
+      IO.println(
+        "Error: the --config files must have distinct names (file name without extension), " +
+          "since the name labels each run's output and logs"
+      ) >> IO.pure(ExitCode.Error)
+    else if paths.exists(!_.endsWith(".scala")) then
+      IO.println(
+        "Error: several --config files need .scala playbooks only — a .yaml playbook cannot read a config"
+      ) >> IO.pure(ExitCode.Error)
+    else
+      val width = math.min(parallel.getOrElse(4), configs.size)
+      for
+        stamp <- IO.delay(
+          java.time.LocalDateTime
+            .now()
+            .format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"))
+        )
+        logDir = Paths.get(".orphera-build-logs", stamp)
+        _ <- IO.blocking(java.nio.file.Files.createDirectories(logDir))
+        _ <- IO.println(
+          s"Running ${paths.size} playbook(s) for ${configs.size} config(s), " +
+            s"$width at a time — logs in $logDir"
+        )
+        sem <- cats.effect.std.Semaphore[IO](width.toLong)
+        results <- configs.zip(labels).parTraverse { case (config, label) =>
+          sem.permit.use { _ =>
+            runChainForConfig(paths, resume, config, label, logDir, quiet)
+          }
+        }
+        code <- summarizeMatrix(results)
+      yield code
+
+  private def runChainForConfig(
+      paths: List[String],
+      resume: Boolean,
+      config: String,
+      label: String,
+      logDir: java.nio.file.Path,
+      quiet: Boolean
+  ): IO[MatrixResult] =
+    val logFile = logDir.resolve(s"$label.log")
+
+    // Returns the path of the playbook that failed, or None if all passed.
+    def go(remaining: List[(String, Int)]): IO[Option[String]] =
+      remaining match
+        case Nil                   => IO.pure(None)
+        case (path, index) :: rest =>
+          val header = s"[$index/${paths.size}] $path"
+          IO.blocking(
+            java.nio.file.Files.write(
+              logFile,
+              java.util.Collections.singletonList(header),
+              java.nio.file.StandardOpenOption.CREATE,
+              java.nio.file.StandardOpenOption.APPEND
+            )
+          ) >> IO.println(s"[$label] $header") >>
+            runScalaPlaybookCaptured(path, resume, config, label, logFile, quiet)
+              .flatMap {
+                case ExitCode.Success => go(rest)
+                case _                => IO.pure(Some(path))
+              }
+
+    for
+      start <- IO.monotonic
+      failedAt <- go(paths.zipWithIndex.map { case (p, i) => (p, i + 1) })
+      end <- IO.monotonic
+    yield MatrixResult(
+      label,
+      failedAt.isEmpty,
+      (end - start).toSeconds,
+      failedAt,
+      logFile
+    )
+
+  /** Same child process as runScalaPlaybookScript, but with its output piped
+    * through this process instead of inherited: each line is prefixed with
+    * `[label]`, appended to `logFile`, and printed (all of it, or only progress
+    * lines and failures when `quiet`). The child and everything it started are
+    * killed if this fiber is cancelled (Ctrl-C).
+    */
+  private def runScalaPlaybookCaptured(
+      scriptPath: String,
+      resume: Boolean,
+      config: String,
+      label: String,
+      logFile: java.nio.file.Path,
+      quiet: Boolean
+  ): IO[ExitCode] =
+    IO.blocking(
+      findLatestJar("scripting/target", "scripting-assembly", ".jar")
+    ).flatMap {
+      case None =>
+        IO.println(
+          s"[$label] Error: scripting-assembly jar not found under scripting/target/. Run 'sbt scripting/assembly' first."
+        ) >> IO.pure(ExitCode.Error)
+      case Some(jar) =>
+        val builder = new ProcessBuilder(
+          "java",
+          "-cp",
+          jar,
+          "orphera.scripting.Main",
+          scriptPath
+        )
+        builder.redirectErrorStream(true)
+        builder.environment().put("ORPHERA_CONFIG", config)
+        builder.environment().put("ORPHERA_RUN_TAG", label)
+        if resume then builder.environment().put("ORPHERA_RESUME", "true")
+        Resource
+          .make(IO.blocking(builder.start()))(killProcessTree)
+          .use { process =>
+            for
+              _ <- IO.blocking(process.getOutputStream.close())
+              pump <- pumpLines(process, label, logFile, quiet).start
+              exit <- IO.interruptible(process.waitFor())
+              _ <- pump.joinWithNever
+            yield if exit == 0 then ExitCode.Success else ExitCode.Error
+          }
+    }
+
+  private def killProcessTree(process: Process): IO[Unit] =
+    IO.blocking {
+      process.descendants().forEach { h =>
+        h.destroyForcibly()
+        ()
+      }
+      process.destroyForcibly()
+      ()
+    }
+
+  private def pumpLines(
+      process: Process,
+      label: String,
+      logFile: java.nio.file.Path,
+      quiet: Boolean
+  ): IO[Unit] =
+    IO.blocking {
+      val reader = new java.io.BufferedReader(
+        new java.io.InputStreamReader(process.getInputStream)
+      )
+      val writer = java.nio.file.Files.newBufferedWriter(
+        logFile,
+        java.nio.charset.StandardCharsets.UTF_8,
+        java.nio.file.StandardOpenOption.CREATE,
+        java.nio.file.StandardOpenOption.APPEND
+      )
+      try
+        var line = reader.readLine()
+        while line != null do
+          writer.write(line)
+          writer.newLine()
+          writer.flush()
+          if !quiet || isProgressLine(line) then println(s"[$label] $line")
+          line = reader.readLine()
+      finally writer.close()
+    }
+
+  /** Lines worth showing in a `--quiet` multi-config run. */
+  private def isProgressLine(line: String): Boolean =
+    line.startsWith("--- Stage") ||
+      line.startsWith("Running cluster playbook") ||
+      line.startsWith("Error") ||
+      line.contains("FAILED")
+
+  private def summarizeMatrix(results: List[MatrixResult]): IO[ExitCode] =
+    val rows = results.map { r =>
+      val secs = "%02d".format(r.seconds % 60)
+      val time = s"${r.seconds / 60}m${secs}s"
+      val name = r.label.padTo(10, ' ')
+      val stoppedAt = r.failedAt.getOrElse("?")
+      if r.ok then s"  $name OK      $time"
+      else s"  $name FAILED  $time  (stopped at $stoppedAt; log ${r.log})"
+    }
+    val failed = results.filterNot(_.ok)
+    val tails = failed.flatTraverse { r =>
+      IO.blocking {
+        val all = java.nio.file.Files.readAllLines(r.log)
+        val n = all.size
+        s"--- last lines of ${r.label} ---" ::
+          (math.max(0, n - 8) until n).map(i => all.get(i)).toList
+      }.handleError(_ => Nil)
+    }
+    for
+      _ <- IO.println("")
+      _ <- IO.println("=== Summary ===")
+      _ <- rows.traverse_(row => IO.println(row))
+      lines <- tails
+      _ <- if lines.nonEmpty then IO.println("") else IO.unit
+      _ <- lines.traverse_(line => IO.println(line))
+    yield if failed.isEmpty then ExitCode.Success else ExitCode.Error
 
   private def runOneClusterPlaybook(
       path: String,

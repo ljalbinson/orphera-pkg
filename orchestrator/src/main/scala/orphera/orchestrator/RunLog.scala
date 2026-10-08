@@ -63,7 +63,17 @@ object RunLog:
       timestamp = DateTimeFormatter
         .ofPattern("yyyyMMdd-HHmmss")
         .format(java.time.LocalDateTime.now())
-      file = dir.resolve(s"$kind-${sanitize(playbookName)}-$timestamp.jsonl")
+      // ORPHERA_RUN_TAG is set by a multi-config `cluster-playbook` run so
+      // parallel runs of the same playbook each get their own file; it goes
+      // after the timestamp so `log-summary <playbook>` still finds them.
+      tag = sys.env
+        .get("ORPHERA_RUN_TAG")
+        .filter(_.nonEmpty)
+        .map(t => "-" + sanitize(t))
+        .getOrElse("")
+      file = dir.resolve(
+        s"$kind-${sanitize(playbookName)}-$timestamp$tag.jsonl"
+      )
       lock <- Semaphore[IO](1)
     yield new Handle(file, lock)
 

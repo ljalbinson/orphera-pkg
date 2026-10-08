@@ -85,11 +85,19 @@ enum Command:
   // the common case of a fixed sequence (teardown, then rebuild, then a
   // follow-up exercise) without needing a wrapper shell script.
   // Same config hand-off as RunPlaybook above, applied to every path
-  // in the sequence.
+  // in the sequence. `configs` may hold several files: the whole sequence
+  // is then run once per config, the configs in parallel (at most
+  // `parallel` at a time; default min(4, number of configs)), each with
+  // its own prefixed output and log file — see Main.runClusterPlaybookMatrix.
+  // With zero or one config the behaviour is exactly the single-run one.
+  // `quiet` (multi-config only) limits the terminal to stage headers,
+  // failures and the final summary; the full output is in the log files.
   case RunClusterPlaybook(
       paths: List[String],
       resume: Boolean,
-      config: Option[String]
+      configs: List[String],
+      parallel: Option[Int],
+      quiet: Boolean
   )
   case RunCommand(
       command: List[String],
@@ -213,9 +221,14 @@ object Cli:
         if paths.isEmpty then
           Left("cluster-playbook requires at least one playbook path")
         else
-          parsePlaybookFlags(flagArgs, resume = false, config = None).map {
-            case (resume, config) =>
-              Command.RunClusterPlaybook(paths, resume, config)
+          parseClusterPlaybookFlags(
+            flagArgs,
+            resume = false,
+            configs = Nil,
+            parallel = None,
+            quiet = false
+          ).map { case (resume, configs, parallel, quiet) =>
+            Command.RunClusterPlaybook(paths, resume, configs, parallel, quiet)
           }
       case "log-summary" :: Nil =>
         Left(
@@ -250,6 +263,53 @@ object Cli:
       case other :: _ =>
         Left(
           s"Unknown argument: $other (expected at most --resume and/or --config <path>)"
+        )
+
+  /** Flag parser for `cluster-playbook`: `playbook`'s `--resume`, plus
+    *   - `--config <path> [<path> ...]`: one or more files (values run up to the
+    *     next `--flag`, so a shell glob like `config/tst*.yaml` works; a
+    *     comma-separated list and repeating the flag work too),
+    *   - `--parallel <n>`: how many configs to run at once,
+    *   - `--quiet`: terse terminal output for a multi-config run.
+    */
+  private def parseClusterPlaybookFlags(
+      args: List[String],
+      resume: Boolean,
+      configs: List[String],
+      parallel: Option[Int],
+      quiet: Boolean
+  ): Either[String, (Boolean, List[String], Option[Int], Boolean)] =
+    args match
+      case Nil =>
+        Right((resume, configs.distinct, parallel, quiet))
+      case "--resume" :: rest =>
+        parseClusterPlaybookFlags(rest, true, configs, parallel, quiet)
+      case "--quiet" :: rest =>
+        parseClusterPlaybookFlags(rest, resume, configs, parallel, true)
+      case "--config" :: rest =>
+        val raw = rest.takeWhile(!_.startsWith("--"))
+        val values =
+          raw.flatMap(_.split(',').toList).map(_.trim).filter(_.nonEmpty)
+        if values.isEmpty then Left("--config requires at least one path")
+        else
+          parseClusterPlaybookFlags(
+            rest.drop(raw.length),
+            resume,
+            configs ++ values,
+            parallel,
+            quiet
+          )
+      case "--parallel" :: n :: rest =>
+        n.toIntOption.filter(_ > 0) match
+          case Some(v) =>
+            parseClusterPlaybookFlags(rest, resume, configs, Some(v), quiet)
+          case None =>
+            Left(s"--parallel requires a positive number, got '$n'")
+      case "--parallel" :: Nil =>
+        Left("--parallel requires a number")
+      case other :: _ =>
+        Left(
+          s"Unknown argument: $other (expected --resume, --config <path> [<path> ...], --parallel <n> and/or --quiet)"
         )
 
   private def parseLogSummary(
@@ -837,9 +897,15 @@ object Cli:
       |                      hypervisor/memory/cpu/nic0.*) that a .scala script can
       |                      read via ConfigYaml.fromEnv() — ignored by .yaml/
       |                      compiled playbooks, which have no way to read it
-      |  cluster-playbook  <file.yaml | file.scala> [<file2> ...] [--resume] [--config <path>]
+      |  cluster-playbook  <file.yaml | file.scala> [<file2> ...] [--resume] [--config <path> [<path> ...]] [--parallel <n>] [--quiet]
       |                    — same --resume/--config semantics, per stage/task/node;
-      |                      one or more files run in order, stopping at the first failure
+      |                      one or more files run in order, stopping at the first failure.
+      |                      Several --config files (e.g. config/tst*.yaml) run the whole
+      |                      sequence once per config, the configs in parallel (--parallel,
+      |                      default 4): .scala playbooks only; output is prefixed [config],
+      |                      saved to .orphera-build-logs/<time>/<config>.log, and ends with a
+      |                      summary; a failure stops that config only. --quiet shows only
+      |                      stage headers and failures on the terminal
       |  run               <command...> [--nodes host1,host2] [--timeout 60]
       |                    — run an arbitrary command, capturing stdout/stderr
       |  fetch             <remote-path> [--out ./local-dir] [--nodes host1,host2]

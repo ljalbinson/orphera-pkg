@@ -909,6 +909,26 @@ back to tst0-tst5):
 orphera cluster-playbook manifests/gen_set_dns.scala --config config/tst0.yaml
 ```
 
+### One chain, many configs, in parallel
+
+`cluster-playbook` already runs several playbooks in order. Give `--config` several
+files and it runs that whole chain once per config, the configs in parallel:
+
+```bash
+orphera cluster-playbook manifests/kvm_vm_provision.scala manifests/gen_set_dns.scala \
+  manifests/gen_packages.scala --config config/tst*.yaml --parallel 8 --quiet
+```
+
+`--parallel N` limits how many configs run at once (default: 4, or fewer if there are
+fewer configs); `--quiet` shows only stage headers, failures and the summary on the
+terminal. Output is prefixed with the config's name (`[tst3]`) and saved in
+`.orphera-build-logs/<time>/<config>.log`. A failure stops that config's chain only; the
+run ends with a summary table and exits non-zero if any config failed. Only `.scala`
+playbooks (a YAML playbook cannot read the config), and config file names must be
+distinct. Parallel runs get their own run-log and checkpoint files (the config's name is
+added to them), so `--resume` resumes each config where it stopped. `bootstrap` and
+`dist-upgrade` are not playbooks, so building VMs end to end still uses the script below.
+
 ### Building a set of new VMs end to end
 
 `manifests/mk-new-and-empty.sh` chains the steps above for tst0-tst7 (or the nodes

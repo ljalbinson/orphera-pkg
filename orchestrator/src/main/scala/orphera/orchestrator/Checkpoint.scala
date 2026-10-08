@@ -113,7 +113,15 @@ object Checkpoint:
   def load(kind: String, playbookName: String, resume: Boolean): IO[Handle] =
     for
       dir <- IO.blocking(Files.createDirectories(Paths.get(".orphera-state")))
-      file = dir.resolve(s"$kind-${sanitize(playbookName)}.txt")
+      // A multi-config `cluster-playbook` run sets ORPHERA_RUN_TAG (the
+      // config's name) so each parallel run keeps its own checkpoint, and
+      // `--resume` resumes each config where it stopped.
+      tag = sys.env
+        .get("ORPHERA_RUN_TAG")
+        .filter(_.nonEmpty)
+        .map(t => "-" + sanitize(t))
+        .getOrElse("")
+      file = dir.resolve(s"$kind-${sanitize(playbookName)}$tag.txt")
       initial <- if resume then readExisting(file) else IO.pure(emptyState)
       ref <- Ref.of[IO, State](initial)
       lock <- Semaphore[IO](1)
