@@ -85,7 +85,7 @@ object AuditLog:
       case Command.RunPlaybook(_, _, _)        => true
       case Command.Reboot(_, _, _, _)          => true
       case Command.Shutdown(_, _, _)           => true
-      case Command.RunClusterPlaybook(_, _, _, _, _) => true
+      case Command.RunClusterPlaybook(_, _, _, _, _, _) => true
       case Command.RunCommand(_, _, _)         => true
       case Command.Fetch(_, _, _)              => false
       case Command.Facts(_)                    => false
@@ -230,7 +230,7 @@ object AuditLog:
           "nodes" -> nodesField(nodes),
           "delay_seconds" -> delaySeconds
         )
-      case Command.RunClusterPlaybook(paths, resume, configs, parallel, _) =>
+      case Command.RunClusterPlaybook(paths, resume, configs, parallel, _, _) =>
         List(
           "command" -> "cluster-playbook",
           "path" -> paths.mkString(","),

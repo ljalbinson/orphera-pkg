@@ -311,15 +311,29 @@ object Main extends IOApp:
         }
 
       case Right(
-            Command.RunClusterPlaybook(paths, resume, configs, parallel, quiet)
+            Command.RunClusterPlaybook(
+              paths,
+              resume,
+              configs,
+              parallel,
+              quiet,
+              bootstrap
+            )
           ) =>
         configs match
           case Nil =>
-            runClusterPlaybookSequence(paths, resume, None)
+            runClusterPlaybookSequence(paths, resume, None, bootstrap)
           case single :: Nil =>
-            runClusterPlaybookSequence(paths, resume, Some(single))
+            runClusterPlaybookSequence(paths, resume, Some(single), bootstrap)
           case many =>
-            runClusterPlaybookMatrix(paths, resume, many, parallel, quiet)
+            runClusterPlaybookMatrix(
+              paths,
+              resume,
+              many,
+              parallel,
+              quiet,
+              bootstrap
+            )
 
       case Right(Command.RunCommand(command, nodeNames, timeoutSeconds)) =>
         withTargets(nodeNames) { targets =>
@@ -363,7 +377,8 @@ object Main extends IOApp:
   private def runClusterPlaybookSequence(
       paths: List[String],
       resume: Boolean,
-      config: Option[String]
+      config: Option[String],
+      bootstrap: BootstrapOpts
   ): IO[ExitCode] =
     val total = paths.size
     def go(remaining: List[(String, Int)]): IO[ExitCode] =
@@ -372,7 +387,11 @@ object Main extends IOApp:
         case (path, index) :: rest =>
           val header =
             if total > 1 then IO.println(s"[$index/$total] $path") else IO.unit
-          header >> runOneClusterPlaybook(path, resume, config).flatMap {
+          val step =
+            if path == Cli.BootstrapStep then
+              runBootstrapStep(config, bootstrap, line => IO.println(line))
+            else runOneClusterPlaybook(path, resume, config)
+          header >> step.flatMap {
             case ExitCode.Success => go(rest)
             case failed           => IO.pure(failed)
           }
@@ -415,7 +434,8 @@ object Main extends IOApp:
       resume: Boolean,
       configs: List[String],
       parallel: Option[Int],
-      quiet: Boolean
+      quiet: Boolean,
+      bootstrap: BootstrapOpts
   ): IO[ExitCode] =
     val labels = configs.map(configLabel)
     if labels.distinct.size != labels.size then
@@ -423,9 +443,12 @@ object Main extends IOApp:
         "Error: the --config files must have distinct names (file name without extension), " +
           "since the name labels each run's output and logs"
       ) >> IO.pure(ExitCode.Error)
-    else if paths.exists(!_.endsWith(".scala")) then
+    else if paths.exists(p =>
+        !p.endsWith(".scala") && !Cli.builtinSteps.contains(p)
+      )
+    then
       IO.println(
-        "Error: several --config files need .scala playbooks only — a .yaml playbook cannot read a config"
+        "Error: several --config files need .scala playbooks (or the @bootstrap step) only — a .yaml playbook cannot read a config"
       ) >> IO.pure(ExitCode.Error)
     else
       val width = math.min(parallel.getOrElse(4), configs.size)
@@ -444,7 +467,15 @@ object Main extends IOApp:
         sem <- cats.effect.std.Semaphore[IO](width.toLong)
         results <- configs.zip(labels).parTraverse { case (config, label) =>
           sem.permit.use { _ =>
-            runChainForConfig(paths, resume, config, label, logDir, quiet)
+            runChainForConfig(
+              paths,
+              resume,
+              config,
+              label,
+              logDir,
+              quiet,
+              bootstrap
+            )
           }
         }
         code <- summarizeMatrix(results)
@@ -456,9 +487,25 @@ object Main extends IOApp:
       config: String,
       label: String,
       logDir: java.nio.file.Path,
-      quiet: Boolean
+      quiet: Boolean,
+      bootstrap: BootstrapOpts
   ): IO[MatrixResult] =
     val logFile = logDir.resolve(s"$label.log")
+
+    // Output of in-process steps (@bootstrap): same destination as a child
+    // playbook's lines — the config's log file, and the terminal (all of it,
+    // or only errors/failures when quiet), prefixed with the config's name.
+    def emit(line: String): IO[Unit] =
+      IO.blocking(
+        java.nio.file.Files.write(
+          logFile,
+          java.util.Collections.singletonList(line),
+          java.nio.file.StandardOpenOption.CREATE,
+          java.nio.file.StandardOpenOption.APPEND
+        )
+      ) >> (if !quiet || isProgressLine(line) then
+              IO.println(s"[$label] $line")
+            else IO.unit)
 
     // Returns the path of the playbook that failed, or None if all passed.
     def go(remaining: List[(String, Int)]): IO[Option[String]] =
@@ -473,12 +520,24 @@ object Main extends IOApp:
               java.nio.file.StandardOpenOption.CREATE,
               java.nio.file.StandardOpenOption.APPEND
             )
-          ) >> IO.println(s"[$label] $header") >>
-            runScalaPlaybookCaptured(path, resume, config, label, logFile, quiet)
-              .flatMap {
-                case ExitCode.Success => go(rest)
-                case _                => IO.pure(Some(path))
-              }
+          ) >> IO.println(s"[$label] $header") >> {
+            val step =
+              if path == Cli.BootstrapStep then
+                runBootstrapStep(Some(config), bootstrap, emit)
+              else
+                runScalaPlaybookCaptured(
+                  path,
+                  resume,
+                  config,
+                  label,
+                  logFile,
+                  quiet
+                )
+            step.flatMap {
+              case ExitCode.Success => go(rest)
+              case _                => IO.pure(Some(path))
+            }
+          }
 
     for
       start <- IO.monotonic
@@ -607,6 +666,54 @@ object Main extends IOApp:
       _ <- if lines.nonEmpty then IO.println("") else IO.unit
       _ <- lines.traverse_(line => IO.println(line))
     yield if failed.isEmpty then ExitCode.Success else ExitCode.Error
+
+  /** The `@bootstrap` chain step: installs the agent on the node named by the
+    * config's `hostname` (which must be in inventory.yaml), over SSH, exactly as
+    * `orphera bootstrap` does for that node. `emit` receives every progress
+    * line and error message.
+    */
+  private def runBootstrapStep(
+      config: Option[String],
+      opts: BootstrapOpts,
+      emit: String => IO[Unit]
+  ): IO[ExitCode] =
+    def fail(message: String): IO[ExitCode] =
+      emit(s"Error: $message") >> IO.pure(ExitCode.Error)
+
+    config match
+      case None =>
+        fail(
+          s"${Cli.BootstrapStep} needs --config (the node to bootstrap is the config's hostname)"
+        )
+      case Some(path) =>
+        ConfigYaml.load(path) match
+          case Left(err) => fail(err)
+          case Right(params) =>
+            Inventory.all.find(_.name == params.hostname) match
+              case None =>
+                fail(
+                  s"${params.hostname} (hostname in $path) is not in inventory.yaml — add it first"
+                )
+              case Some(node) =>
+                resolveDebPath(opts.file) match
+                  case Left(err)    => fail(err)
+                  case Right(local) =>
+                    Orchestrator
+                      .bootstrapAgent(
+                        List(node),
+                        local,
+                        opts.sshUser,
+                        opts.sshKeyPath,
+                        "/tmp/orphera-agent.deb",
+                        opts.forgetHostKey,
+                        (n, line) => emit(s"[${n.name}] $line")
+                      )
+                      .attempt
+                      .flatMap {
+                        case Right(_)  => IO.pure(ExitCode.Success)
+                        case Left(err) =>
+                          fail(s"bootstrap of ${node.name} failed: ${err.getMessage}")
+                      }
 
   private def runOneClusterPlaybook(
       path: String,

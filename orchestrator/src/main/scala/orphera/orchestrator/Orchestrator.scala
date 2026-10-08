@@ -151,7 +151,11 @@ object Orchestrator:
       sshUser: String,
       sshKeyPath: Option[String],
       remotePath: String = "/tmp/orphera-agent.deb",
-      forgetHostKey: Boolean = false
+      forgetHostKey: Boolean = false,
+      // Where each progress line goes. The default prints it prefixed with the
+      // node's name; a parallel cluster-playbook run passes its own sink.
+      onLine: (Node, String) => IO[Unit] = (node, line) =>
+        IO.println(s"[${node.name}] $line")
   ): IO[Unit] =
     requireOrpheraAgentPackage(localDebPath) >>
       nodes.parTraverse_ { node =>
@@ -161,7 +165,7 @@ object Orchestrator:
           sshUser,
           sshKeyPath,
           remotePath,
-          line => IO.println(s"[${node.name}] $line"),
+          line => onLine(node, line),
           forgetHostKey
         )
       }

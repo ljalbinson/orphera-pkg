@@ -926,8 +926,19 @@ terminal. Output is prefixed with the config's name (`[tst3]`) and saved in
 run ends with a summary table and exits non-zero if any config failed. Only `.scala`
 playbooks (a YAML playbook cannot read the config), and config file names must be
 distinct. Parallel runs get their own run-log and checkpoint files (the config's name is
-added to them), so `--resume` resumes each config where it stopped. `bootstrap` and
-`dist-upgrade` are not playbooks, so building VMs end to end still uses the script below.
+added to them), so `--resume` resumes each config where it stopped. `bootstrap` is not a playbook, so the chain has a
+built-in step for it: `@bootstrap` installs the agent on the config's `hostname` node over SSH
+(it must be in `inventory.yaml`), using the `--ssh-user` (default root), `--ssh-key`, `--file`
+and `--forget-host-key` options that `orphera bootstrap` has. `gen_dist_upgrade.scala` covers
+`dist-upgrade`, so a whole build is one command:
+
+```bash
+orphera cluster-playbook manifests/kvm_vm_provision.scala @bootstrap \
+  manifests/gen_set_dns.scala manifests/gen_dist_upgrade.scala manifests/gen_packages.scala \
+  --ssh-user localadmin --forget-host-key --config config/tst*.yaml --parallel 8 --quiet
+```
+
+The shell script below does the same with more locking and a different output layout.
 
 ### Building a set of new VMs end to end
 

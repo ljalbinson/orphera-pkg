@@ -193,12 +193,13 @@ _orphera_completions() {
         [[ "$w" == --* ]] && last_flag="$w"
       done
       case "$prev" in
-        --resume|--quiet) COMPREPLY=() ;;
-        --parallel) COMPREPLY=() ;;
+        --resume|--quiet|--forget-host-key) COMPREPLY=() ;;
+        --parallel|--ssh-user|--ssh-key) COMPREPLY=() ;;
+        --file) COMPREPLY=($(compgen -f -X '!*.deb' -- "$cur")) ;;
         *)
           if [[ "$cur" == --* ]]; then
             if [[ "$verb" == cluster-playbook ]]; then
-              COMPREPLY=($(compgen -W "--resume --config --parallel --quiet" -- "$cur"))
+              COMPREPLY=($(compgen -W "--resume --config --parallel --quiet --ssh-user --ssh-key --file --forget-host-key" -- "$cur"))
             else
               COMPREPLY=($(compgen -W "--resume --config" -- "$cur"))
             fi

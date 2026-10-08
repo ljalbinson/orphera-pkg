@@ -2,6 +2,26 @@
 
 package orphera.orchestrator
 
+/** How the `@bootstrap` step of a `cluster-playbook` chain connects: the same
+  * values `orphera bootstrap` takes (`--ssh-user`, `--ssh-key`, `--file`,
+  * `--forget-host-key`), with the same defaults.
+  */
+final case class BootstrapOpts(
+    sshUser: String = "root",
+    sshKeyPath: Option[String] = None,
+    file: Option[String] = None,
+    forgetHostKey: Boolean = false
+)
+
+/** Everything `cluster-playbook` accepts after its list of playbooks. */
+private final case class ClusterFlags(
+    resume: Boolean = false,
+    configs: List[String] = Nil,
+    parallel: Option[Int] = None,
+    quiet: Boolean = false,
+    bootstrap: BootstrapOpts = BootstrapOpts()
+)
+
 enum Command:
   case Install(
       packages: List[String],
@@ -92,12 +112,17 @@ enum Command:
   // With zero or one config the behaviour is exactly the single-run one.
   // `quiet` (multi-config only) limits the terminal to stage headers,
   // failures and the final summary; the full output is in the log files.
+  // A path of `@bootstrap` is a built-in step, not a playbook: it installs
+  // the agent on the config's `hostname` node over SSH (like `orphera
+  // bootstrap`, with the `bootstrap` options), so a VM built by a playbook
+  // earlier in the chain can be used by the ones after it. Needs --config.
   case RunClusterPlaybook(
       paths: List[String],
       resume: Boolean,
       configs: List[String],
       parallel: Option[Int],
-      quiet: Boolean
+      quiet: Boolean,
+      bootstrap: BootstrapOpts
   )
   case RunCommand(
       command: List[String],
@@ -119,6 +144,10 @@ enum Command:
   case Help
 
 object Cli:
+
+  /** Built-in chain step names (cluster-playbook), as opposed to playbook files. */
+  val BootstrapStep = "@bootstrap"
+  val builtinSteps: Set[String] = Set(BootstrapStep)
 
   /** `--node-groups g1,g2` is sugar for `--nodes <members of g1 and g2>`:
     * rewritten away before any command parser runs, so every command that takes
@@ -218,18 +247,27 @@ object Cli:
         // with "--".
         val paths = rest.takeWhile(!_.startsWith("--"))
         val flagArgs = rest.drop(paths.length)
+        val unknownStep =
+          paths.find(p => p.startsWith("@") && !builtinSteps.contains(p))
         if paths.isEmpty then
           Left("cluster-playbook requires at least one playbook path")
         else
-          parseClusterPlaybookFlags(
-            flagArgs,
-            resume = false,
-            configs = Nil,
-            parallel = None,
-            quiet = false
-          ).map { case (resume, configs, parallel, quiet) =>
-            Command.RunClusterPlaybook(paths, resume, configs, parallel, quiet)
-          }
+          unknownStep match
+            case Some(bad) =>
+              Left(
+                s"Unknown step '$bad' (the built-in step is $BootstrapStep)"
+              )
+            case None =>
+              parseClusterPlaybookFlags(flagArgs, ClusterFlags()).map { f =>
+                Command.RunClusterPlaybook(
+                  paths,
+                  f.resume,
+                  f.configs,
+                  f.parallel,
+                  f.quiet,
+                  f.bootstrap
+                )
+              }
       case "log-summary" :: Nil =>
         Left(
           "log-summary requires a target: a .jsonl file path, or a playbook name (finds its most recent run)"
@@ -270,22 +308,27 @@ object Cli:
     *     next `--flag`, so a shell glob like `config/tst*.yaml` works; a
     *     comma-separated list and repeating the flag work too),
     *   - `--parallel <n>`: how many configs to run at once,
-    *   - `--quiet`: terse terminal output for a multi-config run.
+    *   - `--quiet`: terse terminal output for a multi-config run,
+    *   - `--ssh-user`, `--ssh-key`, `--file`, `--forget-host-key`: how the
+    *     `@bootstrap` step connects and which agent package it installs (the
+    *     same options, and defaults, as `orphera bootstrap`).
     */
   private def parseClusterPlaybookFlags(
       args: List[String],
-      resume: Boolean,
-      configs: List[String],
-      parallel: Option[Int],
-      quiet: Boolean
-  ): Either[String, (Boolean, List[String], Option[Int], Boolean)] =
+      flags: ClusterFlags
+  ): Either[String, ClusterFlags] =
     args match
       case Nil =>
-        Right((resume, configs.distinct, parallel, quiet))
+        Right(flags.copy(configs = flags.configs.distinct))
       case "--resume" :: rest =>
-        parseClusterPlaybookFlags(rest, true, configs, parallel, quiet)
+        parseClusterPlaybookFlags(rest, flags.copy(resume = true))
       case "--quiet" :: rest =>
-        parseClusterPlaybookFlags(rest, resume, configs, parallel, true)
+        parseClusterPlaybookFlags(rest, flags.copy(quiet = true))
+      case "--forget-host-key" :: rest =>
+        parseClusterPlaybookFlags(
+          rest,
+          flags.copy(bootstrap = flags.bootstrap.copy(forgetHostKey = true))
+        )
       case "--config" :: rest =>
         val raw = rest.takeWhile(!_.startsWith("--"))
         val values =
@@ -294,22 +337,38 @@ object Cli:
         else
           parseClusterPlaybookFlags(
             rest.drop(raw.length),
-            resume,
-            configs ++ values,
-            parallel,
-            quiet
+            flags.copy(configs = flags.configs ++ values)
           )
       case "--parallel" :: n :: rest =>
         n.toIntOption.filter(_ > 0) match
           case Some(v) =>
-            parseClusterPlaybookFlags(rest, resume, configs, Some(v), quiet)
+            parseClusterPlaybookFlags(rest, flags.copy(parallel = Some(v)))
           case None =>
             Left(s"--parallel requires a positive number, got '$n'")
-      case "--parallel" :: Nil =>
-        Left("--parallel requires a number")
+      case "--ssh-user" :: user :: rest =>
+        parseClusterPlaybookFlags(
+          rest,
+          flags.copy(bootstrap = flags.bootstrap.copy(sshUser = user))
+        )
+      case "--ssh-key" :: key :: rest =>
+        parseClusterPlaybookFlags(
+          rest,
+          flags.copy(bootstrap =
+            flags.bootstrap.copy(sshKeyPath = Some(key))
+          )
+        )
+      case "--file" :: file :: rest =>
+        parseClusterPlaybookFlags(
+          rest,
+          flags.copy(bootstrap = flags.bootstrap.copy(file = Some(file)))
+        )
+      case flag :: Nil
+          if List("--parallel", "--ssh-user", "--ssh-key", "--file")
+            .contains(flag) =>
+        Left(s"$flag requires a value")
       case other :: _ =>
         Left(
-          s"Unknown argument: $other (expected --resume, --config <path> [<path> ...], --parallel <n> and/or --quiet)"
+          s"Unknown argument: $other (expected --resume, --config <path> [<path> ...], --parallel <n>, --quiet, --ssh-user, --ssh-key, --file and/or --forget-host-key)"
         )
 
   private def parseLogSummary(
@@ -897,7 +956,8 @@ object Cli:
       |                      hypervisor/memory/cpu/nic0.*) that a .scala script can
       |                      read via ConfigYaml.fromEnv() — ignored by .yaml/
       |                      compiled playbooks, which have no way to read it
-      |  cluster-playbook  <file.yaml | file.scala> [<file2> ...] [--resume] [--config <path> [<path> ...]] [--parallel <n>] [--quiet]
+      |  cluster-playbook  <file.yaml | file.scala | @bootstrap> [<file2> ...] [--resume] [--config <path> [<path> ...]] [--parallel <n>] [--quiet]
+      |                      [--ssh-user root] [--ssh-key ~/.ssh/id_ed25519] [--file <local.deb>] [--forget-host-key]
       |                    — same --resume/--config semantics, per stage/task/node;
       |                      one or more files run in order, stopping at the first failure.
       |                      Several --config files (e.g. config/tst*.yaml) run the whole
@@ -905,7 +965,10 @@ object Cli:
       |                      default 4): .scala playbooks only; output is prefixed [config],
       |                      saved to .orphera-build-logs/<time>/<config>.log, and ends with a
       |                      summary; a failure stops that config only. --quiet shows only
-      |                      stage headers and failures on the terminal
+      |                      stage headers and failures on the terminal. The step
+      |                      @bootstrap (not a file) installs the agent on the config's
+      |                      hostname node over SSH, as `bootstrap` does (the last four
+      |                      options are its), so a chain can build a VM and then use it
       |  run               <command...> [--nodes host1,host2] [--timeout 60]
       |                    — run an arbitrary command, capturing stdout/stderr
       |  fetch             <remote-path> [--out ./local-dir] [--nodes host1,host2]

@@ -6,6 +6,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — `@bootstrap` chain step and `manifests/gen_dist_upgrade.scala`
+
+So one `cluster-playbook` command can take a VM from nothing to configured:
+```bash
+orphera cluster-playbook manifests/kvm_vm_provision.scala @bootstrap \
+  manifests/gen_set_dns.scala manifests/gen_dist_upgrade.scala manifests/gen_packages.scala \
+  --ssh-user localadmin --forget-host-key --config config/tst*.yaml --parallel 8 --quiet
+```
+- `@bootstrap` is a built-in step, not a file: it installs the agent on the config's
+  `hostname` node (which must already be in `inventory.yaml`) over SSH, through the same
+  code as `orphera bootstrap`. Its options are new `cluster-playbook` flags with
+  `bootstrap`'s defaults: `--ssh-user` (default root), `--ssh-key`, `--file` (default:
+  newest `orphera-agent_*_amd64.deb` here), `--forget-host-key`. It needs `--config`,
+  works in a single run and in a parallel multi-config run, and its output goes to the
+  config's prefixed output and log like a playbook's. A failure stops that config's chain.
+  Any other `@name` is rejected up front.
+- `manifests/gen_dist_upgrade.scala` (playbook `gen-dist-upgrade`): `apt-get update` and
+  `dist-upgrade` on the config's `hostname` node, via `Task.DistUpgrade`.
+- Internals: `Orchestrator.bootstrapAgent` takes an optional `onLine` sink (default
+  unchanged); `Command.RunClusterPlaybook` gained a `BootstrapOpts` field.
+- **Not compiled or run** (no Scala compiler here, build uses `-Werror`); shell
+  completion updated and exercised against a stub.
+
 ### Added — `cluster-playbook` runs its chain for several `--config` files in parallel
 
 `orphera cluster-playbook a.scala b.scala --config config/tst*.yaml [--parallel N] [--quiet]`
