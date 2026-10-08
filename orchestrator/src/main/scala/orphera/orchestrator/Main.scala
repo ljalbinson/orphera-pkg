@@ -340,6 +340,9 @@ object Main extends IOApp:
           Orchestrator.executeCommand(targets, command, timeoutSeconds)
         }
 
+      case Right(Command.Pipeline(steps, nodeNames, parallel, quiet)) =>
+        runPipeline(steps, nodeNames.getOrElse(Nil), parallel, quiet)
+
       case Right(Command.LogSummary(target)) =>
         // Read-only reporting command: its own exit code reflects
         // whether the summary could be produced (file found/parsed),
@@ -581,21 +584,34 @@ object Main extends IOApp:
           "orphera.scripting.Main",
           scriptPath
         )
-        builder.redirectErrorStream(true)
         builder.environment().put("ORPHERA_CONFIG", config)
         builder.environment().put("ORPHERA_RUN_TAG", label)
         if resume then builder.environment().put("ORPHERA_RESUME", "true")
-        Resource
-          .make(IO.blocking(builder.start()))(killProcessTree)
-          .use { process =>
-            for
-              _ <- IO.blocking(process.getOutputStream.close())
-              pump <- pumpLines(process, label, logFile, quiet).start
-              exit <- IO.interruptible(process.waitFor())
-              _ <- pump.joinWithNever
-            yield if exit == 0 then ExitCode.Success else ExitCode.Error
-          }
+        runProcessCaptured(builder, label, logFile, quiet)
     }
+
+  /** Starts `builder` with its stderr merged into stdout and its stdin closed,
+    * pumps the output through pumpLines (prefix, log file, quiet filter), and
+    * waits for it. The process and everything it started are killed if this
+    * fiber is cancelled (Ctrl-C).
+    */
+  private def runProcessCaptured(
+      builder: ProcessBuilder,
+      label: String,
+      logFile: java.nio.file.Path,
+      quiet: Boolean
+  ): IO[ExitCode] =
+    builder.redirectErrorStream(true)
+    Resource
+      .make(IO.blocking(builder.start()))(killProcessTree)
+      .use { process =>
+        for
+          _ <- IO.blocking(process.getOutputStream.close())
+          pump <- pumpLines(process, label, logFile, quiet).start
+          exit <- IO.interruptible(process.waitFor())
+          _ <- pump.joinWithNever
+        yield if exit == 0 then ExitCode.Success else ExitCode.Error
+      }
 
   private def killProcessTree(process: Process): IO[Unit] =
     IO.blocking {
@@ -629,7 +645,11 @@ object Main extends IOApp:
           writer.write(line)
           writer.newLine()
           writer.flush()
-          if !quiet || isProgressLine(line) then println(s"[$label] $line")
+          // A verb run as a child already prefixes its lines with [node];
+          // don't print the label twice.
+          val shown =
+            if line.startsWith(s"[$label]") then line else s"[$label] $line"
+          if !quiet || isProgressLine(line) then println(shown)
           line = reader.readLine()
       finally writer.close()
     }
@@ -639,7 +659,8 @@ object Main extends IOApp:
     line.startsWith("--- Stage") ||
       line.startsWith("Running cluster playbook") ||
       line.startsWith("Error") ||
-      line.contains("FAILED")
+      line.contains("FAILED") ||
+      line.contains("success=false")
 
   private def summarizeMatrix(results: List[MatrixResult]): IO[ExitCode] =
     val rows = results.map { r =>
@@ -667,6 +688,104 @@ object Main extends IOApp:
       _ <- if lines.nonEmpty then IO.println("") else IO.unit
       _ <- lines.traverse_(line => IO.println(line))
     yield if failed.isEmpty then ExitCode.Success else ExitCode.Error
+
+  /** `pipeline <step>... --nodes a,b,c`: every node runs the steps in order
+    * (each step is one orphera verb line, run against that node alone as a
+    * child `orphera` process), the nodes in parallel — at most `parallel` at a
+    * time, default min(4, number of nodes). A failed step stops that node only.
+    * Output, per-node logs, summary and exit code work as in the multi-config
+    * `cluster-playbook`.
+    */
+  private def runPipeline(
+      steps: List[String],
+      nodes: List[String],
+      parallel: Option[Int],
+      quiet: Boolean
+  ): IO[ExitCode] =
+    val targets = nodes.distinct
+    val unknown = targets.filterNot(n => Inventory.all.exists(_.name == n))
+    if unknown.nonEmpty then
+      IO.println(
+        s"Error: not in inventory.yaml: ${unknown.mkString(", ")}"
+      ) >> IO.pure(ExitCode.Error)
+    else
+      val width = math.min(parallel.getOrElse(4), targets.size)
+      for
+        stamp <- IO.delay(
+          java.time.LocalDateTime
+            .now()
+            .format(
+              java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss")
+            )
+        )
+        logDir = Paths.get(".orphera-build-logs", stamp)
+        _ <- IO.blocking(java.nio.file.Files.createDirectories(logDir))
+        _ <- IO.println(
+          s"Running ${steps.size} step(s) on ${targets.size} node(s), " +
+            s"$width at a time — logs in $logDir"
+        )
+        sem <- cats.effect.std.Semaphore[IO](width.toLong)
+        results <- targets.parTraverse { node =>
+          sem.permit.use(_ => runPipelineForNode(steps, node, logDir, quiet))
+        }
+        code <- summarizeMatrix(results)
+      yield code
+
+  /** The command line that runs this same orchestrator with `args`. */
+  private def selfCommand(args: List[String]): List[String] =
+    List(
+      Paths.get(System.getProperty("java.home"), "bin", "java").toString,
+      "-cp",
+      System.getProperty("java.class.path"),
+      "orphera.orchestrator.Main"
+    ) ++ args
+
+  private def runPipelineForNode(
+      steps: List[String],
+      node: String,
+      logDir: java.nio.file.Path,
+      quiet: Boolean
+  ): IO[MatrixResult] =
+    val logFile = logDir.resolve(s"$node.log")
+
+    def note(line: String): IO[Unit] =
+      IO.blocking(
+        java.nio.file.Files.write(
+          logFile,
+          java.util.Collections.singletonList(line),
+          java.nio.file.StandardOpenOption.CREATE,
+          java.nio.file.StandardOpenOption.APPEND
+        )
+      ) >> IO.println(s"[$node] $line")
+
+    // Returns the step that failed, or None if all passed.
+    def go(remaining: List[(String, Int)]): IO[Option[String]] =
+      remaining match
+        case Nil                  => IO.pure(None)
+        case (step, index) :: rest =>
+          Cli.stepArgs(step, node) match
+            case Left(err) =>
+              note(s"Error: $err") >> IO.pure(Some(step))
+            case Right(args) =>
+              note(s"[$index/${steps.size}] $step") >> {
+                val builder = new ProcessBuilder(selfCommand(args)*)
+                runProcessCaptured(builder, node, logFile, quiet).flatMap {
+                  case ExitCode.Success => go(rest)
+                  case _                => IO.pure(Some(step))
+                }
+              }
+
+    for
+      start <- IO.monotonic
+      failedAt <- go(steps.zipWithIndex.map { case (s, i) => (s, i + 1) })
+      end <- IO.monotonic
+    yield MatrixResult(
+      node,
+      failedAt.isEmpty,
+      (end - start).toSeconds,
+      failedAt,
+      logFile
+    )
 
   /** The `@bootstrap` chain step: installs the agent on the node named by the
     * config's `hostname` (which must be in inventory.yaml), over SSH, exactly

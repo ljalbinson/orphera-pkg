@@ -6,6 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — `pipeline` verb: a chain of verbs on each node, nodes in parallel
+
+    orphera pipeline "install tree" "dist-upgrade" "reboot --wait" --node-groups mons
+
+Each step is one quoted verb line (`install`, `remove`, `autoremove`,
+`dist-upgrade`, `copy`, `write-file`, `network-apply`, `deploy-agent`, `run`,
+`fetch`, `facts`, `version`, `uptime`, `reboot`, `shutdown`). Every node runs
+the steps in order and a failed step stops that node only; the nodes run in
+parallel (`--parallel N`, default min(4, nodes)). Targets must be given with
+`--nodes` or `--node-groups`, and a step may not carry its own. Output is
+prefixed `[node]`, saved to `.orphera-build-logs/<time>/<node>.log`, and ends
+with the same summary table as multi-config `cluster-playbook`; exit 1 if any
+node failed. `--quiet` shows only step headers and failures. Each step runs as
+a child `orphera` process, so it is audited like a hand-typed command and
+Ctrl-C kills it. Steps are validated before anything runs.
+
+Also: a child's output that already starts with `[label]` is no longer prefixed
+a second time (removes the doubled `[tst1] [tst1]` in `cluster-playbook`), and
+`--quiet` now also shows `success=false` lines.
+
 ## [0.1.163] - 2026-10-08
 
 ### Fixed — ad-hoc verbs exit non-zero when a node reports failure

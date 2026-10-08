@@ -141,6 +141,15 @@ enum Command:
   // one playbook run's task-by-task detail, this is a flat trail
   // across every mutating command ever run here.
   case ShowAuditLog(limit: Int)
+  // `pipeline`: each step is a verb line (e.g. "install tree"); the whole
+  // list runs on every node, nodes in parallel, steps in order per node —
+  // see Main.runPipeline.
+  case Pipeline(
+      steps: List[String],
+      nodes: Option[List[String]],
+      parallel: Option[Int],
+      quiet: Boolean
+  )
   case Help
 
 object Cli:
@@ -276,6 +285,7 @@ object Cli:
         )
       case "log-summary" :: target :: rest =>
         parseLogSummary(rest, target)
+      case "pipeline" :: rest                => parsePipeline(rest)
       case "audit-log" :: rest               => parseAuditLog(rest, 20)
       case "help" :: _ | "--help" :: _ | Nil => Right(Command.Help)
       case "run" :: rest => parseRunCommand(rest, Nil, None, 60)
@@ -315,6 +325,123 @@ object Cli:
     *     `@bootstrap` step connects and which agent package it installs (the
     *     same options, and defaults, as `orphera bootstrap`).
     */
+  /** Verbs that may be a `pipeline` step: the ones that act on nodes and take
+    * `--nodes`. (`playbook`/`cluster-playbook`, `bootstrap`/`teardown` and the
+    * read-only reporting commands are not.)
+    */
+  val pipelineVerbs: Set[String] = Set(
+    "install",
+    "remove",
+    "autoremove",
+    "dist-upgrade",
+    "copy",
+    "write-file",
+    "network-apply",
+    "deploy-agent",
+    "run",
+    "fetch",
+    "facts",
+    "version",
+    "uptime",
+    "reboot",
+    "shutdown"
+  )
+
+  /** Splits one pipeline step into words, shell style: whitespace separates,
+    * single or double quotes group (and are removed). No escapes.
+    */
+  def splitStep(step: String): Either[String, List[String]] =
+    val out = scala.collection.mutable.ListBuffer.empty[String]
+    val cur = new StringBuilder
+    var quote: Option[Char] = None
+    var inToken = false
+    step.foreach { c =>
+      quote match
+        case Some(q) =>
+          if c == q then quote = None
+          else
+            cur.append(c)
+            ()
+        case None =>
+          if c == '"' || c == '\'' then
+            quote = Some(c)
+            inToken = true
+          else if c.isWhitespace then
+            if inToken then
+              out += cur.toString
+              cur.clear()
+              inToken = false
+          else
+            cur.append(c)
+            inToken = true
+    }
+    if quote.isDefined then Left(s"Unterminated quote in pipeline step: $step")
+    else
+      if inToken then out += cur.toString
+      Right(out.toList)
+
+  /** The full argument list that runs `step` against one `node`: the step's own
+    * words plus `--nodes <node>`. Left if the step is empty, is not a pipeline
+    * verb, names its own targets, or does not parse as that verb.
+    */
+  def stepArgs(step: String, node: String): Either[String, List[String]] =
+    splitStep(step).flatMap { tokens =>
+      tokens match
+        case Nil => Left("Empty pipeline step")
+        case verb :: _ if !pipelineVerbs.contains(verb) =>
+          Left(
+            s"'$verb' cannot be a pipeline step (allowed: ${pipelineVerbs.toList.sorted.mkString(", ")})"
+          )
+        case _ if tokens.exists(t => t == "--nodes" || t == "--node-groups") =>
+          Left(
+            s"A pipeline step must not give its own --nodes/--node-groups (the pipeline's targets apply): $step"
+          )
+        case _ =>
+          val full = tokens ++ List("--nodes", node)
+          parse(full).map(_ => full)
+    }
+
+  private def parsePipeline(args: List[String]): Either[String, Command] =
+    @scala.annotation.tailrec
+    def go(
+        in: List[String],
+        steps: List[String],
+        nodes: Option[List[String]],
+        parallel: Option[Int],
+        quiet: Boolean
+    ): Either[String, Command] =
+      in match
+        case Nil =>
+          if steps.isEmpty then
+            Left(
+              "pipeline needs at least one step, e.g. pipeline --nodes tst0,tst1 \"install tree\" \"dist-upgrade\""
+            )
+          else if nodes.forall(_.isEmpty) then
+            Left("pipeline needs --nodes or --node-groups (explicit targets)")
+          else
+            steps
+              .foldLeft[Either[String, Unit]](Right(())) { (acc, step) =>
+                acc.flatMap(_ => stepArgs(step, "probe").map(_ => ()))
+              }
+              .map(_ => Command.Pipeline(steps, nodes, parallel, quiet))
+        case "--nodes" :: v :: tl =>
+          go(
+            tl,
+            steps,
+            Some(v.split(",").toList.map(_.trim).filter(_.nonEmpty)),
+            parallel,
+            quiet
+          )
+        case "--quiet" :: tl => go(tl, steps, nodes, parallel, true)
+        case "--parallel" :: n :: tl =>
+          n.toIntOption.filter(_ > 0) match
+            case Some(p) => go(tl, steps, nodes, Some(p), quiet)
+            case None    => Left(s"Invalid --parallel value: $n")
+        case flag :: _ if flag.startsWith("--") =>
+          Left(s"Unknown argument to pipeline: $flag")
+        case step :: tl => go(tl, steps :+ step, nodes, parallel, quiet)
+    go(args, Nil, None, None, false)
+
   private def parseClusterPlaybookFlags(
       args: List[String],
       flags: ClusterFlags
@@ -969,6 +1096,12 @@ object Cli:
       |                      @bootstrap (not a file) installs the agent on the config's
       |                      hostname node over SSH, as `bootstrap` does (the last four
       |                      options are its), so a chain can build a VM and then use it
+      |  pipeline          <step> [<step> ...] --nodes host1,host2 [--parallel <n>] [--quiet]
+      |                    — each <step> is one quoted verb line, e.g. "install tree" or
+      |                      "reboot --wait"; every node runs the steps in order, the nodes
+      |                      in parallel (default 4 at a time); a failed step stops that
+      |                      node only. Output is prefixed [node] and saved to
+      |                      .orphera-build-logs/<time>/<node>.log, with a summary at the end
       |  run               <command...> [--nodes host1,host2] [--timeout 60]
       |                    — run an arbitrary command, capturing stdout/stderr
       |  fetch             <remote-path> [--out ./local-dir] [--nodes host1,host2]
@@ -994,6 +1127,7 @@ object Cli:
       |  autoremove --purge
       |  dist-upgrade --nodes tst0,tst1
       |  dist-upgrade --node-groups mons
+      |  pipeline "install tree" "dist-upgrade" "reboot --wait" --node-groups mons
       |  copy /tmp/test.txt /etc/orphera-test.txt --owner root --group root --mode 0644
       |  write-file /etc/motd --content "Welcome to tst0" --nodes tst0
       |  network-apply --nodes web1 --timeout 90

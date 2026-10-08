@@ -56,7 +56,7 @@ _orphera_completions() {
 
   local verbs="install remove autoremove dist-upgrade copy write-file network-apply reboot shutdown uptime run
     playbook cluster-playbook deploy-agent bootstrap teardown fetch facts
-    version log-summary audit-log help"
+    version log-summary audit-log pipeline help"
 
   # Flags common to most verbs that take --nodes
   local nodes_flag="--nodes"
@@ -138,6 +138,14 @@ _orphera_completions() {
         --node-groups) COMPREPLY=($(compgen -W "$(_orphera_groups)" -- "$cur")) ;;
         --timeout) COMPREPLY=() ;;
         *) COMPREPLY=($(compgen -W "--nodes --node-groups --timeout" -- "$cur")) ;;
+      esac
+      ;;
+
+    pipeline)
+      case "$prev" in
+        --nodes|--parallel) COMPREPLY=() ;;
+        --node-groups) COMPREPLY=($(compgen -W "$(_orphera_groups)" -- "$cur")) ;;
+        *) COMPREPLY=($(compgen -W "--nodes --node-groups --parallel --quiet" -- "$cur")) ;;
       esac
       ;;
 
