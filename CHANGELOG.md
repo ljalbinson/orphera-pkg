@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed — ad-hoc verbs exit non-zero when a node reports failure
+
+`install`, `remove`, `dist-upgrade`, `run`, `copy` and the other verbs that
+act on nodes printed `success=false` for a failed task but still exited 0.
+`ConsoleRenderer` now counts unsuccessful RESULT events and the CLI exits 1 if
+any node failed, so scripts and `cluster-playbook` chains can rely on `$?`.
+
 ### Added — `@bootstrap` chain step and `manifests/gen_dist_upgrade.scala`
 
 So one `cluster-playbook` command can take a VM from nothing to configured:

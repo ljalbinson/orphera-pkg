@@ -879,4 +879,11 @@ object Main extends IOApp:
       IO.println("No matching nodes found in inventory.") >> IO.pure(
         ExitCode.Error
       )
-    else action(targets) >> IO.pure(ExitCode.Success)
+    else
+      // A node reporting an unsuccessful RESULT (see ConsoleRenderer) makes
+      // the command exit non-zero; previously this always returned Success.
+      IO.delay(ConsoleRenderer.resetFailures()) >> action(targets) >>
+        IO.delay(
+          if ConsoleRenderer.failureCount == 0 then ExitCode.Success
+          else ExitCode.Error
+        )
