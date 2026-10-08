@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed — agent: a task that raises before sending a RESULT no longer hangs the stream
+
+The agent ends each task's response stream only on a RESULT event, and runs
+the task in a detached fiber, so an exception raised before the task had sent
+one died silently in the fiber and left the orchestrator waiting forever (first
+seen as the failed-`apt-get update` hang, fixed earlier for `install` and
+`dist-upgrade` only). `AgentServiceImpl.streamTask` now wraps all seven
+streaming handlers (install, remove, autoremove, dist-upgrade, copy-file,
+install-deb, run-command): any error becomes a `FAILED` RESULT. Needs the agent
+redeployed to take effect.
+
 ### Added — `pipeline` verb: a chain of verbs on each node, nodes in parallel
 
     orphera pipeline "install tree" "dist-upgrade" "reboot --wait" --node-groups mons

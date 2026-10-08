@@ -12,48 +12,51 @@ class AgentServiceImpl(
     networkPending: Ref[IO, Map[String, Fiber[IO, Throwable, Unit]]]
 ) extends AgentFs2Grpc[IO, Metadata]:
 
-  def install(request: InstallPackages, ctx: Metadata): Stream[IO, Event] =
+  /** Runs `work` in a detached fiber and streams its queue to the caller until
+    * a RESULT event. RESULT is the only thing that ends the stream, so a task
+    * that raises before it has sent one would die silently inside the fiber and
+    * leave the stream — and the orchestrator reading it — open forever (seen
+    * with a failed `apt-get update`). Any such error is therefore turned into a
+    * FAILED RESULT here. If `work` already sent its RESULT the extra event is
+    * queued behind it and never read.
+    */
+  private def streamTask[A](
+      work: Queue[IO, Event] => IO[A]
+  ): Stream[IO, Event] =
     Stream.eval(Queue.unbounded[IO, Event]).flatMap { queue =>
-      Stream.eval(Dispatcher.dispatch(request, queue).start) >>
+      val guarded = work(queue).void.handleErrorWith { err =>
+        queue.offer(
+          Event(
+            kind = Event.Kind.RESULT,
+            message = s"FAILED: ${err.getMessage}",
+            exitCode = 1,
+            success = false
+          )
+        )
+      }
+      Stream.eval(guarded.start) >>
         Stream
           .fromQueueUnterminated(queue)
           .takeThrough(_.kind != Event.Kind.RESULT)
     }
+
+  def install(request: InstallPackages, ctx: Metadata): Stream[IO, Event] =
+    streamTask(queue => Dispatcher.dispatch(request, queue))
 
   def remove(request: RemovePackages, ctx: Metadata): Stream[IO, Event] =
-    Stream.eval(Queue.unbounded[IO, Event]).flatMap { queue =>
-      Stream.eval(Dispatcher.dispatchRemove(request, queue).start) >>
-        Stream
-          .fromQueueUnterminated(queue)
-          .takeThrough(_.kind != Event.Kind.RESULT)
-    }
+    streamTask(queue => Dispatcher.dispatchRemove(request, queue))
 
   def runAutoRemove(request: AutoRemove, ctx: Metadata): Stream[IO, Event] =
-    Stream.eval(Queue.unbounded[IO, Event]).flatMap { queue =>
-      Stream.eval(Dispatcher.dispatchAutoRemove(request, queue).start) >>
-        Stream
-          .fromQueueUnterminated(queue)
-          .takeThrough(_.kind != Event.Kind.RESULT)
-    }
+    streamTask(queue => Dispatcher.dispatchAutoRemove(request, queue))
 
   def runDistUpgrade(request: DistUpgrade, ctx: Metadata): Stream[IO, Event] =
-    Stream.eval(Queue.unbounded[IO, Event]).flatMap { queue =>
-      Stream.eval(Dispatcher.dispatchDistUpgrade(request, queue).start) >>
-        Stream
-          .fromQueueUnterminated(queue)
-          .takeThrough(_.kind != Event.Kind.RESULT)
-    }
+    streamTask(queue => Dispatcher.dispatchDistUpgrade(request, queue))
 
   def copyFile(
       request: Stream[IO, FileChunk],
       ctx: Metadata
   ): Stream[IO, Event] =
-    Stream.eval(Queue.unbounded[IO, Event]).flatMap { queue =>
-      Stream.eval(FileTransfer.receive(request, queue).start) >>
-        Stream
-          .fromQueueUnterminated(queue)
-          .takeThrough(_.kind != Event.Kind.RESULT)
-    }
+    streamTask(queue => FileTransfer.receive(request, queue))
 
   def checkFile(request: FileCheck, ctx: Metadata): IO[FileCheckResult] =
     FileTransfer.check(request)
@@ -70,12 +73,7 @@ class AgentServiceImpl(
     )
 
   def installDebPackage(request: InstallDeb, ctx: Metadata): Stream[IO, Event] =
-    Stream.eval(Queue.unbounded[IO, Event]).flatMap { queue =>
-      Stream.eval(Dispatcher.dispatchInstallDeb(request, queue).start) >>
-        Stream
-          .fromQueueUnterminated(queue)
-          .takeThrough(_.kind != Event.Kind.RESULT)
-    }
+    streamTask(queue => Dispatcher.dispatchInstallDeb(request, queue))
 
   def remoteFetchFile(request: FetchFile, ctx: Metadata): Stream[IO, FileData] =
     FileTransfer.send(request)
@@ -102,9 +100,4 @@ class AgentServiceImpl(
       request: RunCommandRequest,
       ctx: Metadata
   ): Stream[IO, Event] =
-    Stream.eval(Queue.unbounded[IO, Event]).flatMap { queue =>
-      Stream.eval(Dispatcher.dispatchRunCommand(request, queue).start) >>
-        Stream
-          .fromQueueUnterminated(queue)
-          .takeThrough(_.kind != Event.Kind.RESULT)
-    }
+    streamTask(queue => Dispatcher.dispatchRunCommand(request, queue))
