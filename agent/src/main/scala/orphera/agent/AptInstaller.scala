@@ -318,8 +318,8 @@ object AptInstaller:
 
   /** Waits until every `/usr/bin` and `/usr/sbin` file a package ships exists
     * and is executable — the install can report success a moment before that is
-    * true. It must NEVER run the binaries: an earlier version executed each
-    * one with no arguments to "prove" it worked, which on a package shipping
+    * true. It must NEVER run the binaries: an earlier version executed each one
+    * with no arguments to "prove" it worked, which on a package shipping
     * `halt`/`reboot`/`poweroff`/`shutdown` (molly-guard, systemd-sysv) halted
     * the host the moment the install finished (tst0, 2026-10-07).
     */

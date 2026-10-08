@@ -152,7 +152,8 @@ object gen_set_dns extends OrpheraClusterPlaybook:
        |DNS=${config.servers.mkString(" ")}
        |""".stripMargin + domainsLine
 
-  private val managedMarker = "# Managed by Orphera (manifests/gen_set_dns.scala)"
+  private val managedMarker =
+    "# Managed by Orphera (manifests/gen_set_dns.scala)"
   // Files written before the rename carry the old name; still recognise them.
   private val legacyMarker = "# Managed by Orphera (manifests/set_dns.scala)"
 

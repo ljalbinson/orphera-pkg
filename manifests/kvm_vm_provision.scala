@@ -276,11 +276,9 @@ object kvm_vm_provision extends OrpheraClusterPlaybook:
       .mkString("\n")
 
   private val extraDiskVirtInstallArgs =
-    extraDiskFiles
-      .map { case (_, f) =>
-        s" --disk $workingDir/$f,format=qcow2,bus=scsi,serial=${serialOf(f)}"
-      }
-      .mkString
+    extraDiskFiles.map { case (_, f) =>
+      s" --disk $workingDir/$f,format=qcow2,bus=scsi,serial=${serialOf(f)}"
+    }.mkString
 
   // Every disk gets an explicit QEMU serial so its guest-side
   // /dev/disk/by-id name is fixed by us, not by libvirt's auto-assigned

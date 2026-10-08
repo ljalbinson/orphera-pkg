@@ -145,7 +145,9 @@ enum Command:
 
 object Cli:
 
-  /** Built-in chain step names (cluster-playbook), as opposed to playbook files. */
+  /** Built-in chain step names (cluster-playbook), as opposed to playbook
+    * files.
+    */
   val BootstrapStep = "@bootstrap"
   val builtinSteps: Set[String] = Set(BootstrapStep)
 
@@ -233,11 +235,11 @@ object Cli:
         parsePlaybookFlags(rest, resume = false, config = None).map {
           case (resume, config) => Command.RunPlaybook(path, resume, config)
         }
-      case "version" :: rest => parseVersion(rest, None)
-      case "uptime" :: rest  => parseUptime(rest, None)
+      case "version" :: rest  => parseVersion(rest, None)
+      case "uptime" :: rest   => parseUptime(rest, None)
       case "shutdown" :: rest =>
         parseShutdown(rest, None, 5, confirmed = false)
-      case "reboot" :: rest  =>
+      case "reboot" :: rest =>
         parseReboot(rest, None, 5, waitForReturn = false, 300)
       case "cluster-playbook" :: rest =>
         // One or more paths, all before any flag — `--resume`/`--config`
@@ -304,8 +306,8 @@ object Cli:
         )
 
   /** Flag parser for `cluster-playbook`: `playbook`'s `--resume`, plus
-    *   - `--config <path> [<path> ...]`: one or more files (values run up to the
-    *     next `--flag`, so a shell glob like `config/tst*.yaml` works; a
+    *   - `--config <path> [<path> ...]`: one or more files (values run up to
+    *     the next `--flag`, so a shell glob like `config/tst*.yaml` works; a
     *     comma-separated list and repeating the flag work too),
     *   - `--parallel <n>`: how many configs to run at once,
     *   - `--quiet`: terse terminal output for a multi-config run,
@@ -353,9 +355,7 @@ object Cli:
       case "--ssh-key" :: key :: rest =>
         parseClusterPlaybookFlags(
           rest,
-          flags.copy(bootstrap =
-            flags.bootstrap.copy(sshKeyPath = Some(key))
-          )
+          flags.copy(bootstrap = flags.bootstrap.copy(sshKeyPath = Some(key)))
         )
       case "--file" :: file :: rest =>
         parseClusterPlaybookFlags(

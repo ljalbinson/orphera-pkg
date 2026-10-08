@@ -81,11 +81,12 @@ object ConfigYaml:
       mtu
     )
 
-  /** `disks:`/`pdisks:` entries come in several shapes in real kttb-virt-ansible
-    * files: a bare string or number (`- '64'`, `- 64`), or a one-key map like
-    * `- disk: 128`. All are reduced to a string — the bare value, or for a
-    * single-key map that key's value — rather than rejecting the file; anything
-    * else keeps its compact JSON text so nothing is silently dropped.
+  /** `disks:`/`pdisks:` entries come in several shapes in real
+    * kttb-virt-ansible files: a bare string or number (`- '64'`, `- 64`), or a
+    * one-key map like `- disk: 128`. All are reduced to a string — the bare
+    * value, or for a single-key map that key's value — rather than rejecting
+    * the file; anything else keeps its compact JSON text so nothing is silently
+    * dropped.
     */
   private def diskEntry(j: Json): String =
     j.asString

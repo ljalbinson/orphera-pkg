@@ -72,28 +72,28 @@ object AuditLog:
 
   def isAuditable(command: Command): Boolean =
     command match
-      case Command.Install(_, _, _)            => true
-      case Command.Remove(_, _, _)             => true
-      case Command.AutoRemove(_, _)            => true
-      case Command.DistUpgrade(_, _)           => true
-      case Command.Copy(_, _, _, _, _, _)      => true
-      case Command.WriteFile(_, _, _, _, _, _) => true
-      case Command.NetworkApply(_, _)          => true
-      case Command.DeployAgent(_, _, _)        => true
-      case Command.Bootstrap(_, _, _, _, _, _) => true
-      case Command.Teardown(_, _, _, _, _)     => true
-      case Command.RunPlaybook(_, _, _)        => true
-      case Command.Reboot(_, _, _, _)          => true
-      case Command.Shutdown(_, _, _)           => true
+      case Command.Install(_, _, _)                     => true
+      case Command.Remove(_, _, _)                      => true
+      case Command.AutoRemove(_, _)                     => true
+      case Command.DistUpgrade(_, _)                    => true
+      case Command.Copy(_, _, _, _, _, _)               => true
+      case Command.WriteFile(_, _, _, _, _, _)          => true
+      case Command.NetworkApply(_, _)                   => true
+      case Command.DeployAgent(_, _, _)                 => true
+      case Command.Bootstrap(_, _, _, _, _, _)          => true
+      case Command.Teardown(_, _, _, _, _)              => true
+      case Command.RunPlaybook(_, _, _)                 => true
+      case Command.Reboot(_, _, _, _)                   => true
+      case Command.Shutdown(_, _, _)                    => true
       case Command.RunClusterPlaybook(_, _, _, _, _, _) => true
-      case Command.RunCommand(_, _, _)         => true
-      case Command.Fetch(_, _, _)              => false
-      case Command.Facts(_)                    => false
-      case Command.Version(_)                  => false
-      case Command.Uptime(_)                   => false
-      case Command.LogSummary(_)               => false
-      case Command.ShowAuditLog(_)             => false
-      case Command.Help                        => false
+      case Command.RunCommand(_, _, _)                  => true
+      case Command.Fetch(_, _, _)                       => false
+      case Command.Facts(_)                             => false
+      case Command.Version(_)                           => false
+      case Command.Uptime(_)                            => false
+      case Command.LogSummary(_)                        => false
+      case Command.ShowAuditLog(_)                      => false
+      case Command.Help                                 => false
 
   def recordStart(command: Command, invocationId: String): IO[Unit] =
     append(

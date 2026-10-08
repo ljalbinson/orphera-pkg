@@ -6,10 +6,10 @@ import cats.effect.*
 import orphera.common.*
 
 /** Powers the host off (not halt, not reboot) after a short delay. Detached via
-  * systemd-run for the same reason as Rebooter: the agent's own unit is
-  * stopped by the shutdown, so the command has to outlive it and the ack has to
-  * reach the orchestrator first. There is no remote way to power the host back
-  * on from here.
+  * systemd-run for the same reason as Rebooter: the agent's own unit is stopped
+  * by the shutdown, so the command has to outlive it and the ack has to reach
+  * the orchestrator first. There is no remote way to power the host back on
+  * from here.
   */
 object Shutdowner:
 

@@ -456,7 +456,9 @@ object Main extends IOApp:
         stamp <- IO.delay(
           java.time.LocalDateTime
             .now()
-            .format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"))
+            .format(
+              java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss")
+            )
         )
         logDir = Paths.get(".orphera-build-logs", stamp)
         _ <- IO.blocking(java.nio.file.Files.createDirectories(logDir))
@@ -503,8 +505,7 @@ object Main extends IOApp:
           java.nio.file.StandardOpenOption.CREATE,
           java.nio.file.StandardOpenOption.APPEND
         )
-      ) >> (if !quiet || isProgressLine(line) then
-              IO.println(s"[$label] $line")
+      ) >> (if !quiet || isProgressLine(line) then IO.println(s"[$label] $line")
             else IO.unit)
 
     // Returns the path of the playbook that failed, or None if all passed.
@@ -668,8 +669,8 @@ object Main extends IOApp:
     yield if failed.isEmpty then ExitCode.Success else ExitCode.Error
 
   /** The `@bootstrap` chain step: installs the agent on the node named by the
-    * config's `hostname` (which must be in inventory.yaml), over SSH, exactly as
-    * `orphera bootstrap` does for that node. `emit` receives every progress
+    * config's `hostname` (which must be in inventory.yaml), over SSH, exactly
+    * as `orphera bootstrap` does for that node. `emit` receives every progress
     * line and error message.
     */
   private def runBootstrapStep(
@@ -687,7 +688,7 @@ object Main extends IOApp:
         )
       case Some(path) =>
         ConfigYaml.load(path) match
-          case Left(err) => fail(err)
+          case Left(err)     => fail(err)
           case Right(params) =>
             Inventory.all.find(_.name == params.hostname) match
               case None =>
@@ -712,7 +713,9 @@ object Main extends IOApp:
                       .flatMap {
                         case Right(_)  => IO.pure(ExitCode.Success)
                         case Left(err) =>
-                          fail(s"bootstrap of ${node.name} failed: ${err.getMessage}")
+                          fail(
+                            s"bootstrap of ${node.name} failed: ${err.getMessage}"
+                          )
                       }
 
   private def runOneClusterPlaybook(
@@ -750,8 +753,8 @@ object Main extends IOApp:
     * command-line args at all, so an env var is the only way to reach them here
     * without changing that trait's shape (and without needing to touch
     * scripting/Main.scala's own arg-forwarding, which this file has no
-    * visibility into). A script reads ORPHERA_CONFIG via
-    * ConfigYaml.fromEnv(), same file.
+    * visibility into). A script reads ORPHERA_CONFIG via ConfigYaml.fromEnv(),
+    * same file.
     */
   private def runScalaPlaybookScript(
       scriptPath: String,
