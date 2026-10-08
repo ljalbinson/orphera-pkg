@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.1.163] - 2026-10-08
+
 ### Fixed — ad-hoc verbs exit non-zero when a node reports failure
 
 `install`, `remove`, `dist-upgrade`, `run`, `copy` and the other verbs that

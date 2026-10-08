@@ -290,6 +290,8 @@ subset of inventory;
 omitted, it targets everything (**except** `teardown`, which requires
 explicit targeting — see below).
 
+Verbs that act on nodes (`install`, `remove`, `dist-upgrade`, `run`, `copy`, `write-file`, ...) exit non-zero if any node reports `success=false`, so `$?` can be relied on in scripts.
+
 | Command | Purpose |
 |---|---|
 | `install <pkg...> [--update-cache]` | `apt-get install` |
