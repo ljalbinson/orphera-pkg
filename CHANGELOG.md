@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — `par-mk-new-and-empty.sh -L`: skip the per-hypervisor provisioning lock
+
+The lock that makes VMs on one hypervisor provision one at a time is a precaution
+against load, not a known conflict (each VM has its own ZFS dataset, disk files
+and domain; the shared base image is only read). `-L` provisions them
+concurrently so the lock's necessity can be tested; the `known_hosts` lock for
+`bootstrap` stays. Default is unchanged (locked). Not run against hypervisors yet.
+
 ### Added — `manifests/par-mk-new-and-empty.sh`: parallel version of mk-new-and-empty.sh
 
 Builds each node's pipeline (provision, bootstrap, DNS, dist-upgrade, packages) as

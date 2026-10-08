@@ -7,7 +7,7 @@
 #   4. dist-upgrade                           (orphera dist-upgrade)
 #   5. install the config's package lists     (gen_packages.scala)
 #
-# Usage: manifests/par-mk-new-and-empty.sh [-f agent.deb] [-j jobs] [-q] [node ...]
+# Usage: manifests/par-mk-new-and-empty.sh [-f agent.deb] [-j jobs] [-q] [-L] [node ...]
 #   node   a name (tst3) or a bare number (3); default is tst0..tst7
 #   -f     agent package to install; default is the newest
 #          orphera-agent_*_amd64.deb in the current directory
@@ -15,6 +15,10 @@
 #          another, with plain unprefixed output)
 #   -q     quiet: the terminal shows only step banners and the summary; the
 #          full output of every node is in its log file
+#   -L     no per-hypervisor lock: provision VMs on the same hypervisor at the
+#          same time. The lock is a precaution against load (two image copies,
+#          zfs creates and boots on one host), not a known conflict; use -L to
+#          find out whether it is needed. The known_hosts lock stays.
 #
 # Run from the repository root (config/ and manifests/ are relative paths).
 #
@@ -23,8 +27,8 @@
 # non-zero. Full per-node output goes to .orphera-build-logs/<time>/<node>.log.
 #
 # Two steps are serialized on purpose, everything else runs in parallel:
-#   - provisioning: one VM at a time per hypervisor (config `hypervisor:`), so
-#     tst0 and tst1 on gs1 queue while tst2 on gs2 proceeds
+#   - provisioning (unless -L): one VM at a time per hypervisor (config
+#     `hypervisor:`), so tst0 and tst1 on gs1 queue while tst2 on gs2 proceeds
 #   - bootstrap: one at a time, because it edits ~/.ssh/known_hosts
 # Do not combine with `--resume`: checkpoint state is per playbook name, so
 # parallel runs of the same playbook would overwrite each other's.
@@ -35,11 +39,13 @@ set -uo pipefail
 jobs_max=4
 deb=""
 quiet=0
-while getopts "f:j:qh" opt; do
+hv_lock=1
+while getopts "f:j:qLh" opt; do
     case $opt in
         f) deb=$OPTARG ;;
         j) jobs_max=$OPTARG ;;
         q) quiet=1 ;;
+        L) hv_lock=0 ;;
         *) sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
     esac
 done
@@ -124,7 +130,11 @@ build_node() {
     step() { echo; banner "=== $(date '+%F %T') $node: $* ==="; }
 
     step "provision VM (hypervisor $hv)"
-    with_lock "hv-$hv" orphera cluster-playbook manifests/kvm_vm_provision.scala --config "$cfg" || return 1
+    if [ "$hv_lock" -eq 1 ]; then
+        with_lock "hv-$hv" orphera cluster-playbook manifests/kvm_vm_provision.scala --config "$cfg" || return 1
+    else
+        orphera cluster-playbook manifests/kvm_vm_provision.scala --config "$cfg" || return 1
+    fi
 
     # --forget-host-key: a rebuilt VM has a new SSH host key under the same name.
     step "install agent"
