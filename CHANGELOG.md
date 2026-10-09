@@ -37,7 +37,7 @@ entry; note that `config/tst*.yaml` globs now include it. Verified on tst8
 NetworkManager keyfiles (`/etc/NetworkManager/system-connections`, `nmcli connection
 reload` + `up`) on hosts that have nmcli and no networkctl; `gen_set_dns` tells
 NetworkManager `dns=none` before writing a static resolv.conf; a failed RESULT's
-reason (`FAILED: ...`) is now printed by the CLI. `make release` also builds the .rpm when rpmbuild is installed. The
+reason (`FAILED: ...`) is now printed by the CLI. cloud-init now also sets root's console password (same as localadmin's), fixes the `lock_passwd` typo, and `kvm_vm_provision` adds the qemu guest-agent channel. `make release` also builds the .rpm when rpmbuild is installed. The
 NetworkManager backend compiles; not yet exercised on a node.
 
 ### Fixed — agent: a task that raises before sending a RESULT no longer hangs the stream

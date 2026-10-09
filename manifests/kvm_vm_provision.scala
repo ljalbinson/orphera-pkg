@@ -553,7 +553,7 @@ object CloudConfigTemplate {
        |      groups:
        |        - wheel
        |      shell: /bin/bash
-       |      oock_passwd: false
+       |      lock_passwd: false
        |      sudo:
        |        - ALL=(ALL) NOPASSWD:ALL
        |      ssh-authorized-keys:
@@ -562,6 +562,7 @@ object CloudConfigTemplate {
        |chpasswd:
        |  list:
        |    - "$username:$password"
+       |    - "root:$password"
        |  expire: false
        |
        |# Configure where output will go
