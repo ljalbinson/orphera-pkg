@@ -6,39 +6,77 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-### Added (branch `rocky-support`) — agent package tasks on Red Hat-family hosts
+### Added (branch `rocky-support`) — Rocky Linux / Red Hat-family hosts
 
-The agent picks apt or dnf by what the host has (`/usr/bin/apt-get`, else
-`/usr/bin/dnf`) and runs install, remove, autoremove, dist-upgrade and
-install-package (`InstallDebPackage` RPC) through `DnfInstaller` /
-`RpmInstaller` on Rocky, Alma, RHEL and Fedora; a host with neither gets an
-immediate FAILED result. `dist-upgrade` maps to `dnf upgrade`, `--update-cache`
-to a metadata refresh, `purge` is ignored and `name=version` becomes
-`name-version`. The process helpers moved from `AptInstaller` into
-`PackageSteps` unchanged (the install post-check now takes the file-listing
-command).
+Orphera now manages Rocky (tested on Rocky 10), and by design Alma, RHEL and
+Fedora, alongside Debian/Ubuntu, with no extra command-line options: each
+node's package manager and network backend are detected on the node.
 
-Also on the branch: `make rpm` builds `orphera-agent-<version>-1.noarch.rpm`
-from the same staged tree (spec in `packaging/orphera-agent.spec.template`;
-needs `rpmbuild`; not part of `make release`). The spec requires
-`java-headless`, labels `run.sh` `bin_t` for SELinux and opens 50051/tcp in
-firewalld when they are present. `bootstrap`, `@bootstrap`, `teardown` and
-`deploy-agent` now take the `.deb` and/or `.rpm` (`--file` picks one by
-extension; with no `--file` the newest of each is found) and choose per node:
-bootstrap and teardown ask the host over SSH which package manager it has,
-deploy-agent uses the node's reported OS, so one command can serve a mixed
-Ubuntu/Rocky fleet. `kvm_vm_provision.scala` now derives `--os-variant` from the
-image name (`Rocky-10-...` -> `rocky10`, otherwise `ubuntu24.04`) and falls back
-to `generic` where virt-install's own list (`--osinfo list`) lacks it; the define-and-start script now runs under `set -e` so a failed virt-install fails the stage (it used to report success). It also passes `--machine q35` and a `virtio-scsi` controller explicitly: with the `generic` os-variant virt-install otherwise picks i440fx and an LSI controller, which a Rocky kernel cannot boot from. New test node
-`tst8` (Rocky 10, 10.10.5.20, on gs3): `config/tst8.yaml` and an inventory
-entry; note that `config/tst*.yaml` globs now include it. Verified on tst8
-(Rocky 10, SELinux enforcing): provision, `@bootstrap` with the rpm, `dist-upgrade`
-(dnf), `install`, failed install exit code. Also: `NetworkReloader` uses
-NetworkManager keyfiles (`/etc/NetworkManager/system-connections`, `nmcli connection
-reload` + `up`) on hosts that have nmcli and no networkctl; `gen_set_dns` tells
-NetworkManager `dns=none` before writing a static resolv.conf; a failed RESULT's
-reason (`FAILED: ...`) is now printed by the CLI. `network-apply` rollback fixed (both backends): it restored the config as it was at apply time, which already contained the pushed change, so it never undid anything. The agent now keeps a known-good snapshot (taken at first start, refreshed on each confirmed apply) and rolls back to that. cloud-init now also sets root's console password (same as localadmin's), fixes the `lock_passwd` typo, and `kvm_vm_provision` adds the qemu guest-agent channel. Multi-config `cluster-playbook`: the `@bootstrap` step's lines were printed as `[tst0] [tst0] ...`; the label is no longer repeated. `make release` also builds the .rpm when rpmbuild is installed. The
-NetworkManager backend compiles; not yet exercised on a node.
+- **Agent package tasks.** The agent picks apt or dnf by what the host has
+  (`/usr/bin/apt-get`, else `/usr/bin/dnf`); a host with neither gets an
+  immediate FAILED result. `DnfInstaller` / `RpmInstaller` implement install,
+  remove, autoremove, dist-upgrade and install-package (`InstallDebPackage`
+  RPC). `dist-upgrade` maps to `dnf upgrade`, `--update-cache` to a metadata
+  refresh, `purge` is ignored and `name=version` becomes `name-version`. The
+  process helpers moved from `AptInstaller` into `PackageSteps` unchanged.
+- **RPM package.** `make rpm` builds `orphera-agent-<version>-1.noarch.rpm`
+  from the same staged tree as the `.deb` (spec: `packaging/orphera-agent.spec.template`;
+  needs `rpmbuild`). It requires `java-headless`, labels `run.sh` `bin_t` for
+  SELinux and opens 50051/tcp in firewalld when they are present. `make release`
+  now also builds it when `rpmbuild` is installed and skips it otherwise.
+- **Mixed fleets.** `bootstrap`, `@bootstrap`, `teardown` and `deploy-agent`
+  take the `.deb` and/or `.rpm` (`--file` picks one by extension; with no
+  `--file` the newest of each is found). `bootstrap` and `teardown` ask the host
+  over SSH which package manager it has; `deploy-agent` uses the node's
+  reported OS. A failed package-manager probe now reports the ssh output and
+  user (a missing `--ssh-user` shows as "Permission denied" for root).
+- **`network-apply` on NetworkManager.** On a host with `nmcli` and no
+  `networkctl` the agent backs up and restores
+  `/etc/NetworkManager/system-connections/*.nmconnection`, applies with
+  `nmcli connection reload` then `up` per profile. systemd-networkd hosts are
+  unchanged.
+- **`gen_set_dns.scala`** tells NetworkManager `dns=none`
+  (`/etc/NetworkManager/conf.d/90-orphera-dns.conf`) before writing a static
+  `/etc/resolv.conf` on hosts without systemd-resolved. `gen_dist_upgrade.scala`
+  no longer says "apt" in its task label.
+- **`kvm_vm_provision.scala`.** Derives `--os-variant` from the image name
+  (`Rocky-10-...` -> `rocky10`, otherwise `ubuntu24.04`) and falls back to
+  `generic` where `virt-install --osinfo list` lacks it. The define-and-start
+  script runs under `set -e` (a failed virt-install used to report success).
+  It passes `--machine q35`, a `virtio-scsi` controller (with the `generic`
+  variant virt-install picks i440fx and an LSI controller, which a Rocky kernel
+  cannot boot from) and the qemu guest-agent channel. The cloud-init template
+  now also sets root's console password (same as localadmin's) and the
+  `lock_passwd` typo (`oock_passwd`) is fixed.
+- **Test node `tst8`** (Rocky 10, 10.10.5.20, on gs3): `config/tst8.yaml` and
+  an inventory entry. Note that `config/tst*.yaml` globs now include it.
+- **Tested on tst8:** provision, `@bootstrap` with the rpm, `dist-upgrade`
+  (dnf), `install` and its failure exit code, `deploy-agent` upgrade from an
+  rpm, `gen_set_dns`, SELinux enforcing. Ubuntu regression: cephadm
+  lifecycle passes with this code. See `docs/TESTS.md` section I. Not yet
+  exercised: `network-apply` on either backend since the rollback fix below,
+  the firewalld rule, the manifests that still use Ubuntu package names (ceph,
+  etcd, galera, observability, wordpress).
+
+### Fixed — `network-apply` rollback never undid the change (both backends)
+
+The backup was taken when `network-apply` ran, but the new files are pushed
+(`copy` / `write-file`) before that, so the backup already contained the
+change and a rollback restored the same broken config. The agent now keeps a
+known-good snapshot (`/var/lib/orphera/network-backups/known-good`), taken the
+first time the agent starts and refreshed after every confirmed apply, and
+rolls back to that. Found on tst8 when a deliberately wrong address stayed in
+place after the timeout. Needs the agent redeployed; the snapshot is taken from
+whatever config exists when the new agent first starts, so make sure it is good
+at that moment.
+
+### Fixed — CLI output
+
+- A failed RESULT's reason (`FAILED: Cannot run program ...`) is now printed
+  before `exit=1 success=false`; before, a spawn failure looked like a command
+  that merely returned non-zero.
+- Multi-config `cluster-playbook`: the `@bootstrap` step's lines were printed
+  as `[tst8] [tst8] ...`; the label is no longer repeated.
 
 ### Fixed — agent: a task that raises before sending a RESULT no longer hangs the stream
 
