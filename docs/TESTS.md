@@ -219,7 +219,7 @@ Expect: `.deb` chosen automatically, teardown -> install -> add-mons -> add-osds
 every independent check passes.  Reported OK by the user (cephadm part), 2026-10-09.
 MariaDB/Galera regression: pending.
 
-### I8. Ubuntu regression with the Rocky changes - PENDING (rest of it)
+### I8. Ubuntu regression with the Rocky changes - PASSED
     git pull && make release
     orphera deploy-agent --nodes tst7
     orphera install tree --nodes tst7; echo "exit=$?"
@@ -227,6 +227,9 @@ MariaDB/Galera regression: pending.
     ls /var/lib/orphera/network-backups/known-good     (on tst7)
 Expect: the `.deb` is chosen automatically, install exit 0, network-apply
 confirms, known-good holds the `.network` files.
+Result 2026-10-09 (tst7, agent 0.1.171): `install tree` exit 0 via apt; `install
+nosuchpkgxyz` showed apt's E: line, node exit=100 success=false, CLI exit 1;
+network-apply covered by I7b.
 
 ## J. MariaDB / WordPress regression and two environment faults (2026-10-09)
 
