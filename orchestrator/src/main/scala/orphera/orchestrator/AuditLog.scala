@@ -93,8 +93,9 @@ object AuditLog:
       case Command.Uptime(_)                            => false
       case Command.LogSummary(_)                        => false
       case Command.ShowAuditLog(_)                      => false
-      case Command.Pipeline(_, _, _, _)                 => false // each step runs as its own audited orphera command
-      case Command.Help                                 => false
+      case Command.Pipeline(_, _, _, _)                 =>
+        false // each step runs as its own audited orphera command
+      case Command.Help => false
 
   def recordStart(command: Command, invocationId: String): IO[Unit] =
     append(

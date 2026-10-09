@@ -312,7 +312,9 @@ object Orchestrator:
   ): IO[Map[String, Boolean]] =
     gatherFacts(nodes).flatMap { facts =>
       val (rpmNodes, debNodes) = nodes.partition(n =>
-        facts.get(n.name).exists(f => AgentPackages.rpmHostOsIds.contains(f.osId))
+        facts
+          .get(n.name)
+          .exists(f => AgentPackages.rpmHostOsIds.contains(f.osId))
       )
 
       def deployGroup(

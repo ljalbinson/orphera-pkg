@@ -283,7 +283,8 @@ object SshDeployer:
       case RemotePm.Dnf =>
         // rpm has no purge: after removal, --purge also deletes the config
         // directory, which is what dpkg --purge does for conffiles.
-        val purge = if purgeConfig then " && sudo rm -rf /etc/orphera-agent" else ""
+        val purge =
+          if purgeConfig then " && sudo rm -rf /etc/orphera-agent" else ""
         sshRun(
           node,
           sshUser,

@@ -11,7 +11,7 @@ RPM_TOP      := $(CURDIR)/pkg/rpmbuild
 JAR_SRC      := agent/target/scala-3.8.4/agent-assembly-$(VERSION).jar
 CERTS_DIR    := certs
 
-all: clean test assembly deb
+all: clean test assembly deb rpm
 
 release: bump-patch
 	$(MAKE) _build_all

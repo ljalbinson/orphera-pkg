@@ -770,7 +770,7 @@ object Main extends IOApp:
     // Returns the step that failed, or None if all passed.
     def go(remaining: List[(String, Int)]): IO[Option[String]] =
       remaining match
-        case Nil                  => IO.pure(None)
+        case Nil                   => IO.pure(None)
         case (step, index) :: rest =>
           Cli.stepArgs(step, node) match
             case Left(err) =>
