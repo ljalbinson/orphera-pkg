@@ -46,9 +46,12 @@ object Main extends IOApp:
     Cli.parse(args) match
 
       case Left(error) =>
-        IO.println(s"Error: $error") >> IO.println(Cli.usage) >> IO.pure(
-          ExitCode.Error
-        )
+        // The whole usage text only for an unknown command; for a bad
+        // argument it would bury the one-line error.
+        val hint =
+          if error.startsWith("Unknown command") then IO.println(Cli.usage)
+          else IO.println("Run 'orphera help' for usage.")
+        IO.println(s"Error: $error") >> hint >> IO.pure(ExitCode.Error)
 
       case Right(Command.Help) =>
         IO.println(Cli.usage) >> IO.pure(ExitCode.Success)

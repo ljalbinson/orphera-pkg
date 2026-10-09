@@ -93,6 +93,25 @@ tst3-tst7: no data disks, no inventory change needed.
     manifests/par-mk-new-and-empty.sh -j 8 -q
 Expect: all 8 VMs built, about 11 min.  PASSED (earlier session).
 
+## H. `pipeline` verb (added after v0.1.163)
+
+### H1. Working run
+    orphera pipeline "install tree" --nodes tst0
+Expect: one `[tst0]` prefix per line, step header `[1/1] install tree`,
+summary `OK`, exit 0.  PASSED.
+
+### H2. Refused step
+    orphera pipeline "bootstrap" --nodes tst7
+Expect: "'bootstrap' cannot be a pipeline step (allowed: ...)" before anything
+runs.  PASSED.  (Printed the whole usage text afterwards; changed to a one-line
+hint for bad arguments.)
+
+### H3. Failing step
+    orphera pipeline "install tree" "run false" "uptime" --nodes tst6,tst7 --quiet; echo "exit=$?"
+Expect: step 2 fails on both nodes, step 3 never runs, summary shows both
+FAILED "stopped at run false" with log paths and the last lines of each log,
+exit=1; with --quiet only step headers and failures on the terminal.  PASSED.
+
 ## Not tested
 - Reboot of a hypervisor to confirm VMs autostart on their own.
 - `--forget-host-key` in practice (scala0 does not use known_hosts for these hosts).
