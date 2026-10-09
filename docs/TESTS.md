@@ -192,7 +192,14 @@ If a test VM becomes unreachable and the guest-agent channel exists:
 `virsh domifaddr tst8 --source agent` on the hypervisor; the console now has a
 root password (`passw0rd`, set by cloud-init).
 
-### I8. Ubuntu regression with the Rocky changes - PENDING
+### I8a. Ceph lifecycle on Ubuntu with the Rocky-branch code
+    orphera deploy-agent --nodes tst0,tst1,tst2
+    manifests/test_ceph_lifecycle.sh 2>&1 | tee /tmp/ceph-lifecycle.log
+Expect: `.deb` chosen automatically, teardown -> install -> add-mons -> add-osds,
+every independent check passes.  Reported OK by the user (cephadm part), 2026-10-09.
+MariaDB/Galera regression: pending.
+
+### I8. Ubuntu regression with the Rocky changes - PENDING (rest of it)
     git pull && make release
     orphera deploy-agent --nodes tst7
     orphera install tree --nodes tst7; echo "exit=$?"
