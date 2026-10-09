@@ -1,6 +1,6 @@
 # RPM spec for the Orphera agent, filled in and built by `make rpm` from the
 # same staged tree as the .deb (pkg/orphera-agent). The tree is copied in from
-# %{stagedir}, which `make rpm` defines, so rpmbuild needs no sources.
+# %%{stagedir}, which `make rpm` defines, so rpmbuild needs no sources.
 Name:           orphera-agent
 Version:        @VERSION@
 Release:        1
