@@ -88,6 +88,12 @@ nodes:
     vars:
       cluster_ip: "10.10.5.19"
 
+  # Rocky Linux 10 (the dnf/rpm test node), on gs3.
+  - name: tst8
+    host: tst8.ljalbinson.com
+    vars:
+      cluster_ip: "10.10.5.20"
+
   - name: gs1
     host: gs1.ljalbinson.com
     vars:

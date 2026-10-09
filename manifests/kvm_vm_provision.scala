@@ -333,8 +333,22 @@ object kvm_vm_provision extends OrpheraClusterPlaybook:
   // this project (observability_stack.scala); the proven fix is to
   // never use one here, not to trust it works in a "safer-looking"
   // spot.
+  // The libosinfo short-id for virt-install's --os-variant, from the base
+  // image's name: Rocky-10-GenericCloud... -> rocky10, anything else keeps the
+  // original ubuntu24.04. A hypervisor whose osinfo database does not know the
+  // id (rocky10 needs a recent osinfo-db) falls back to `generic` at run time,
+  // so an older host still defines the VM; the id only tunes device defaults.
+  private val osVariantWanted: String =
+    """(?i)rocky-(\d+)""".r
+      .findFirstMatchIn(baseImage)
+      .map(m => s"rocky${m.group(1)}")
+      .getOrElse("ubuntu24.04")
+
   private val defineAndStartVmScript =
-    s"""virt-install --connect qemu:///system --name $vmName --memory $memoryMB --vcpus $vcpus --cpu $cpuMode --disk $workingDir/$vmName.qcow2,format=qcow2,bus=scsi,serial=$vmName-root --disk $workingDir/$vmName-swap.qcow2,format=qcow2,bus=scsi,serial=$vmName-swap$extraDiskVirtInstallArgs --disk $workingDir/$vmName-cidata.iso,device=cdrom --network bridge=$nicBridge,model=virtio,virtualport_type=openvswitch --os-variant ubuntu24.04 --import --noautoconsole
+    s"""want=$osVariantWanted
+       |if ! command -v osinfo-query >/dev/null 2>&1 || osinfo-query -f short-id os 2>/dev/null | grep -qx "$$want"; then variant=$$want; else variant=generic; fi
+       |echo "using --os-variant $$variant"
+       |virt-install --connect qemu:///system --name $vmName --memory $memoryMB --vcpus $vcpus --cpu $cpuMode --disk $workingDir/$vmName.qcow2,format=qcow2,bus=scsi,serial=$vmName-root --disk $workingDir/$vmName-swap.qcow2,format=qcow2,bus=scsi,serial=$vmName-swap$extraDiskVirtInstallArgs --disk $workingDir/$vmName-cidata.iso,device=cdrom --network bridge=$nicBridge,model=virtio,virtualport_type=openvswitch --os-variant $$variant --import --noautoconsole
        |virsh --connect qemu:///system autostart $vmName
        |echo "$vmName defined, started, and set to autostart with the hypervisor"""".stripMargin
 
