@@ -340,6 +340,11 @@ object kvm_vm_provision extends OrpheraClusterPlaybook:
   // so an older host still defines the VM; the id only tunes device defaults.
   // virt-install is asked itself (`--osinfo list`), not osinfo-query, which
   // may be missing or read a different database (gs3: rocky10 rejected).
+  // --machine q35 and the virtio-scsi controller are explicit because, with
+  // the `generic` os-variant, virt-install picks i440fx and an LSI SCSI
+  // controller: the NIC is then ens3 (not enp1s0) and a RHEL-family kernel,
+  // which no longer has that driver, cannot find its root disk (seen on tst8).
+  // Ubuntu variants already got both, so those VMs are unchanged.
   // The script runs under `set -e`: before, a failed virt-install was followed
   // by a successful `virsh autostart`/`echo`, so the stage reported success.
   private val osVariantWanted: String =
@@ -353,7 +358,7 @@ object kvm_vm_provision extends OrpheraClusterPlaybook:
        |want=$osVariantWanted
        |if virt-install --osinfo list 2>/dev/null | grep -qw -- "$$want"; then variant=$$want; else variant=generic; fi
        |echo "using --os-variant $$variant"
-       |virt-install --connect qemu:///system --name $vmName --memory $memoryMB --vcpus $vcpus --cpu $cpuMode --disk $workingDir/$vmName.qcow2,format=qcow2,bus=scsi,serial=$vmName-root --disk $workingDir/$vmName-swap.qcow2,format=qcow2,bus=scsi,serial=$vmName-swap$extraDiskVirtInstallArgs --disk $workingDir/$vmName-cidata.iso,device=cdrom --network bridge=$nicBridge,model=virtio,virtualport_type=openvswitch --os-variant $$variant --import --noautoconsole
+       |virt-install --connect qemu:///system --name $vmName --memory $memoryMB --vcpus $vcpus --cpu $cpuMode --disk $workingDir/$vmName.qcow2,format=qcow2,bus=scsi,serial=$vmName-root --disk $workingDir/$vmName-swap.qcow2,format=qcow2,bus=scsi,serial=$vmName-swap$extraDiskVirtInstallArgs --disk $workingDir/$vmName-cidata.iso,device=cdrom --network bridge=$nicBridge,model=virtio,virtualport_type=openvswitch --machine q35 --controller type=scsi,model=virtio-scsi --os-variant $$variant --import --noautoconsole
        |virsh --connect qemu:///system autostart $vmName
        |echo "$vmName defined, started, and set to autostart with the hypervisor"""".stripMargin
 
