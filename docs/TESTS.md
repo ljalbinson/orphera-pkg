@@ -156,8 +156,10 @@ Expect: rpm copied, detached install, "Confirmed running <new version>".  PASSED
     orphera cluster-playbook manifests/gen_set_dns.scala --config config/tst8.yaml
     orphera run sh -c "cat /etc/resolv.conf; ls /etc/NetworkManager/conf.d" --nodes tst8
 Expect: no systemd-resolved, so a static `/etc/resolv.conf`; NetworkManager told
-`dns=none` via `90-orphera-dns.conf`.  PASSED.  NOT YET CHECKED: that the file
-survives a reboot (`orphera reboot --nodes tst8`, then `cat /etc/resolv.conf`).
+`dns=none` via `90-orphera-dns.conf`.  PASSED, including after `orphera reboot`
+(static file and conf.d drop-in both survive; agent starts on boot; IP persists),
+2026-10-09.  Note: a rebuilt VM has no DNS drop-in until the manifest is applied,
+so apply it before the reboot check.
 
 ### I7. `network-apply`, NetworkManager backend - PENDING
 Profile `cloud-init enp1s0` in
@@ -191,7 +193,8 @@ each confirmed apply).  Applies to the networkd backend too.
 PASSED on tst8 (agent 0.1.171, 2026-10-09): the agent journal shows the bad
 profile activated, then a second activation exactly 20 s later (the watchdog
 restoring known-good); node back on 10.10.5.20 with the original `address1`.
-Test A result not yet recorded.  Known gap: `network-apply` prints only
+Test A PASSED (address2 added, both addresses live, known-good refreshed with
+address2, original restored and re-confirmed).  Known gap: `network-apply` prints only
 "Reload applied, backup <id>" when the connectivity check fails; it does not say
 that the confirm was skipped and a rollback will follow.
 If a test VM becomes unreachable and the guest-agent channel exists:
