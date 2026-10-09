@@ -1,4 +1,4 @@
-.PHONY: all release bump-patch _build_all clean test assembly pkg-stage deb rpm verify certs certs-clean fmt fmt-manifests scripting
+.PHONY: all release rpm-if-available bump-patch _build_all clean test assembly pkg-stage deb rpm verify certs certs-clean fmt fmt-manifests scripting
 
 VERSION_FILE := VERSION
 VERSION      := $(shell cat $(VERSION_FILE))
@@ -16,7 +16,7 @@ all: clean test assembly deb
 release: bump-patch
 	$(MAKE) _build_all
 
-_build_all: clean test assembly deb orpheracli scripting
+_build_all: clean test assembly deb rpm-if-available orpheracli scripting
 	@echo "Released $$(cat $(VERSION_FILE))"
 
 bump-patch:
@@ -131,8 +131,9 @@ deb: pkg-stage
 	@echo "Built $(DEB_FILE)"
 
 # Red Hat-family (Rocky) package from the same staged tree as the .deb. Needs
-# rpmbuild (on Ubuntu: sudo apt install rpm). Not part of `make release`, so a
-# host without rpmbuild still builds the .deb as before.
+# rpmbuild (on Ubuntu: sudo apt install rpm). `make release` builds it too when
+# rpmbuild is installed (rpm-if-available) and skips it otherwise, so a host
+# without rpmbuild still builds the .deb as before.
 rpm: pkg-stage
 	@command -v rpmbuild >/dev/null || (echo "ERROR: rpmbuild not found (Ubuntu: sudo apt install rpm)" && exit 1)
 	rm -rf $(RPM_TOP)
@@ -141,6 +142,9 @@ rpm: pkg-stage
 	rpmbuild -bb --define "_topdir $(RPM_TOP)" --define "stagedir $(CURDIR)/$(PKG_DIR)" --define "_binary_payload w19.zstdio" $(RPM_TOP)/orphera-agent.spec
 	cp $(RPM_TOP)/RPMS/noarch/$(RPM_FILE) .
 	@echo "Built $(RPM_FILE)"
+
+rpm-if-available:
+	@if command -v rpmbuild >/dev/null; then $(MAKE) rpm; else echo "rpmbuild not found: skipping the .rpm"; fi
 
 verify: deb
 	dpkg-deb --info $(DEB_FILE)
