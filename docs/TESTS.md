@@ -208,6 +208,40 @@ MariaDB/Galera regression: pending.
 Expect: the `.deb` is chosen automatically, install exit 0, network-apply
 confirms, known-good holds the `.network` files.
 
+## J. MariaDB / WordPress regression and two environment faults (2026-10-09)
+
+### J1. `wordpress_site.scala` on tst5 (Galera + haproxy/keepalived VIP)
+    orphera cluster-playbook manifests/wordpress_site.scala
+Expect: database and `wordpress_user` created on tst0, nginx + php-fpm installed
+on tst5, WordPress downloaded, `wp-config.php` pointing at `10.10.5.100:3306`,
+health check passes.  PASSED (reported by the user) after the two faults below
+were fixed; Galera `wsrep_cluster_size` 3 and haproxy/keepalived active on
+tst0-tst2 when checked.
+
+Two faults found while getting there; neither was an Orphera bug:
+
+- **gs3 storage.** First run failed on tst5 with `Input/output error` during
+  `apt` ("FAILED - UNAVAILABLE: Network closed"; perl modules missing). `zpool
+  status` on gs3 showed checksum errors on all four raidz1 drives (14-17 each)
+  and 2 permanent data errors, although `zpool list` said ONLINE. The pool was
+  rebuilt on new disks and the install then completed. If checksum errors reappear
+  on the new pool, suspect what the disks share (HBA `mpt3sas`, cabling, memory),
+  not the drives. Check `zpool status -v tank` after a scrub.
+- **Duplicate IP for the VIP.** The health check timed out with HTTP 500
+  ("Database Error"): from tst5 `10.10.5.100:3306` was refused. `arping` from
+  tst5 showed two MACs answering for the VIP, tst0's (`52:54:00:49:99:02`) and a
+  device outside our four hypervisors (`52:54:00:2c:c2:f8`), which answered first.
+  scala0 sits behind the router (192.168.1.x), so its SSH to the VIP still reached
+  tst0 and hid the conflict. Fixed by removing the address from the other device.
+  Diagnosis commands: `arping -I enp1s0 -c 4 10.10.5.100` from a host on the
+  segment; `ovs-appctl fdb/show br-net105`; pinning a MAC with `ip neigh replace
+  ... nud permanent` needs `ip neigh del` afterwards (`flush` does not remove it).
+  Idea, not built: have `mariadb_haproxy_keepalived.scala` check for a duplicate
+  VIP address (`arping -D`) before starting keepalived.
+
+### J2. Ceph lifecycle on Ubuntu with the Rocky-branch code
+See I8a.  PASSED.
+
 ## Not tested
 - Reboot of a hypervisor to confirm VMs autostart on their own.
 - `--forget-host-key` in practice (scala0 does not use known_hosts for these hosts).
