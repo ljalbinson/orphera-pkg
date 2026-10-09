@@ -87,7 +87,20 @@ object SshDeployer:
           "elif command -v dnf >/dev/null 2>&1; then echo ORPHERA_PM=dnf; " +
           "else echo ORPHERA_PM=none; fi",
         line => seen.update(line :: _)
-      )
+      ).handleErrorWith { err =>
+        // The ssh output (e.g. "Permission denied") was collected, not
+        // printed, so put the last lines into the error or it is invisible.
+        seen.get.flatMap { lines =>
+          val tail = lines.reverse.takeRight(5).mkString("; ")
+          IO.raiseError(
+            new RuntimeException(
+              s"${err.getMessage}" +
+                (if tail.isEmpty then "" else s" — ssh said: $tail") +
+                s" (ssh user: $sshUser; pass --ssh-user if it is not $sshUser)"
+            )
+          )
+        }
+      }
       lines <- seen.get
       pm <-
         if lines.exists(_.trim == "ORPHERA_PM=apt") then IO.pure(RemotePm.Apt)
