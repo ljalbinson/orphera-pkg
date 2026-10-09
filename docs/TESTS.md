@@ -1,7 +1,8 @@
-# Orphera tests run for v0.1.163 (all passed, 2026-10-08)
+# Orphera tests (A-G run for v0.1.163 on 2026-10-08, H after it, I on branch rocky-support 2026-10-09)
 
 Run from `~/orphera-pkg` on scala0 after `git pull && make orpheracli`.
-Test VMs: tst0-tst7 (tst0-tst2 have OSD data disks; tst7 is the spare).
+Test VMs: tst0-tst7 (tst0-tst2 have OSD data disks; tst7 is the spare) and
+tst8 (Rocky 10, on gs3, 10.10.5.20; section I).
 
 ## A. Multi-config `cluster-playbook`
 
@@ -112,7 +113,97 @@ Expect: step 2 fails on both nodes, step 3 never runs, summary shows both
 FAILED "stopped at run false" with log paths and the last lines of each log,
 exit=1; with --quiet only step headers and failures on the terminal.  PASSED.
 
+## I. Rocky Linux support (branch `rocky-support`, 2026-10-09)
+
+Test node: tst8 (Rocky 10, SELinux enforcing, NetworkManager, no firewalld
+running), built from `config/tst8.yaml`. Needs `make rpm` (or `make release`
+on a host with rpmbuild) for the agent `.rpm`.
+
+### I1. Provision, bootstrap and upgrade in one chain
+    orphera cluster-playbook manifests/kvm_vm_provision.scala @bootstrap manifests/gen_dist_upgrade.scala \
+      --config config/tst8.yaml --ssh-user localadmin --forget-host-key
+Expect: VM defined (q35, virtio-scsi), SSH up in about 20 s, the `.rpm` chosen
+automatically and installed with `java-21-openjdk-headless`, then `dnf upgrade`
+runs and ends `exit=0 success=true`.  PASSED.
+(Before the q35 + virtio-scsi change the `generic` os-variant gave i440fx and an
+LSI controller, and the guest dropped to an emergency shell.  Rocky 10 needs
+host-passthrough for x86-64-v3.)
+
+### I2. Verbs on a dnf host
+    orphera version --nodes tst8
+    orphera install tree --nodes tst8; echo "exit=$?"
+    orphera install nosuchpkg --nodes tst8; echo "exit=$?"
+Expect: version shown; install exit 0; bad package prints dnf's "No match" and
+`success=false`, exit 1, no hang.  PASSED.
+
+### I3. Agent under SELinux
+    orphera run sh -c "rpm -q tree; getenforce; systemctl is-active firewalld; ss -ltn | grep 50051" --nodes tst8
+Expect: Enforcing, agent listening on 50051.  PASSED.  (firewalld was inactive,
+so the rpm's firewall-cmd step is not exercised yet.)
+
+### I4. Spawn failure is explained
+    orphera run nosuchcmd --nodes tst8; echo "exit=$?"
+Expect: `FAILED: Cannot run program "nosuchcmd"...`, `success=false`, exit 1.  PASSED.
+(`run` takes an argv with no shell: use `run sh -c "..."` for pipelines.)
+
+### I5. `deploy-agent` upgrade with the rpm
+    make rpm
+    orphera deploy-agent --nodes tst8
+Expect: rpm copied, detached install, "Confirmed running <new version>".  PASSED
+(0.1.166 -> 0.1.167).
+
+### I6. DNS on a NetworkManager host
+    orphera cluster-playbook manifests/gen_set_dns.scala --config config/tst8.yaml
+    orphera run sh -c "cat /etc/resolv.conf; ls /etc/NetworkManager/conf.d" --nodes tst8
+Expect: no systemd-resolved, so a static `/etc/resolv.conf`; NetworkManager told
+`dns=none` via `90-orphera-dns.conf`.  PASSED.  NOT YET CHECKED: that the file
+survives a reboot (`orphera reboot --nodes tst8`, then `cat /etc/resolv.conf`).
+
+### I7. `network-apply`, NetworkManager backend - PENDING
+Profile `cloud-init enp1s0` in
+`/etc/NetworkManager/system-connections/cloud-init-enp1s0.nmconnection`.
+Needs the agent built with the known-good snapshot fix (commit 7007394).
+Before deploying, make sure the file has the correct `address1=10.10.5.20/...`:
+the agent snapshots whatever is there when it first starts.
+Check: `ls /var/lib/orphera/network-backups/known-good` on the node.
+
+A. Additive change, confirmed:
+
+    orphera run sh -c "sudo cp -p /etc/NetworkManager/system-connections/cloud-init-enp1s0.nmconnection /root/nm-orig.bak && sudo sed -i '/^address1=/a address2=10.10.5.120/24' /etc/NetworkManager/system-connections/cloud-init-enp1s0.nmconnection" --nodes tst8
+    orphera network-apply --nodes tst8 --timeout 30
+    orphera run sh -c "ip -4 addr show enp1s0" --nodes tst8
+Expect: "Confirmed - connectivity OK"; both 10.10.5.20 and 10.10.5.120 present.
+Then restore the original file from `/root/nm-orig.bak` (`nmcli connection reload`,
+`nmcli connection up 'cloud-init enp1s0'`).
+
+B. Rollback:
+
+    orphera run sh -c "sudo sed -i 's#^address1=10.10.5.20/#address1=10.10.5.99/#' /etc/NetworkManager/system-connections/cloud-init-enp1s0.nmconnection" --nodes tst8
+    orphera network-apply --nodes tst8 --timeout 20
+    sleep 40
+    orphera version --nodes tst8
+Expect: connectivity check fails, no confirm; about 20 s later the agent restores
+the known-good file and tst8 answers on 10.10.5.20 again.
+FAILED the first time (the node stayed on .99): the per-apply backup was taken
+after the new file was pushed, so rollback restored the same broken file.  Fixed
+by rolling back to a known-good snapshot (taken at first agent start and after
+each confirmed apply).  Applies to the networkd backend too.
+If a test VM becomes unreachable and the guest-agent channel exists:
+`virsh domifaddr tst8 --source agent` on the hypervisor; the console now has a
+root password (`passw0rd`, set by cloud-init).
+
+### I8. Ubuntu regression with the Rocky changes - PENDING
+    git pull && make release
+    orphera deploy-agent --nodes tst7
+    orphera install tree --nodes tst7; echo "exit=$?"
+    orphera network-apply --nodes tst7 --timeout 30
+    ls /var/lib/orphera/network-backups/known-good     (on tst7)
+Expect: the `.deb` is chosen automatically, install exit 0, network-apply
+confirms, known-good holds the `.network` files.
+
 ## Not tested
 - Reboot of a hypervisor to confirm VMs autostart on their own.
 - `--forget-host-key` in practice (scala0 does not use known_hosts for these hosts).
 - Galera and VIP-failover tests.
+- Rocky: firewalld rule from the rpm (firewalld was not running on tst8).
+- Manifests other than gen_set_dns, gen_dist_upgrade, gen_packages and kvm_vm_provision on Rocky (ceph, etcd, galera, observability, wordpress are still Ubuntu-specific).
