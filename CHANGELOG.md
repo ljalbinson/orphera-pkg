@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added (branch `rocky-support`) — agent package tasks on Red Hat-family hosts
+
+The agent picks apt or dnf by what the host has (`/usr/bin/apt-get`, else
+`/usr/bin/dnf`) and runs install, remove, autoremove, dist-upgrade and
+install-package (`InstallDebPackage` RPC) through `DnfInstaller` /
+`RpmInstaller` on Rocky, Alma, RHEL and Fedora; a host with neither gets an
+immediate FAILED result. `dist-upgrade` maps to `dnf upgrade`, `--update-cache`
+to a metadata refresh, `purge` is ignored and `name=version` becomes
+`name-version`. The process helpers moved from `AptInstaller` into
+`PackageSteps` unchanged (the install post-check now takes the file-listing
+command). Not yet: rpm packaging of the agent, SSH bootstrap/teardown, the
+network-apply backend and the manifests; not yet compiled or run on Rocky.
+
 ### Fixed — agent: a task that raises before sending a RESULT no longer hangs the stream
 
 The agent ends each task's response stream only on a RESULT event, and runs
