@@ -358,7 +358,7 @@ object kvm_vm_provision extends OrpheraClusterPlaybook:
        |want=$osVariantWanted
        |if virt-install --osinfo list 2>/dev/null | grep -qw -- "$$want"; then variant=$$want; else variant=generic; fi
        |echo "using --os-variant $$variant"
-       |virt-install --connect qemu:///system --name $vmName --memory $memoryMB --vcpus $vcpus --cpu $cpuMode --disk $workingDir/$vmName.qcow2,format=qcow2,bus=scsi,serial=$vmName-root --disk $workingDir/$vmName-swap.qcow2,format=qcow2,bus=scsi,serial=$vmName-swap$extraDiskVirtInstallArgs --disk $workingDir/$vmName-cidata.iso,device=cdrom --network bridge=$nicBridge,model=virtio,virtualport_type=openvswitch --machine q35 --controller type=scsi,model=virtio-scsi --os-variant $$variant --import --noautoconsole
+       |virt-install --connect qemu:///system --name $vmName --memory $memoryMB --vcpus $vcpus --cpu $cpuMode --disk $workingDir/$vmName.qcow2,format=qcow2,bus=scsi,serial=$vmName-root --disk $workingDir/$vmName-swap.qcow2,format=qcow2,bus=scsi,serial=$vmName-swap$extraDiskVirtInstallArgs --disk $workingDir/$vmName-cidata.iso,device=cdrom --network bridge=$nicBridge,model=virtio,virtualport_type=openvswitch --machine q35 --controller type=scsi,model=virtio-scsi --channel unix,target_type=virtio,name=org.qemu.guest_agent.0 --os-variant $$variant --import --noautoconsole
        |virsh --connect qemu:///system autostart $vmName
        |echo "$vmName defined, started, and set to autostart with the hypervisor"""".stripMargin
 
