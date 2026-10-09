@@ -271,3 +271,19 @@ See I8a.  PASSED.
 - Galera and VIP-failover tests.
 - Rocky: firewalld rule from the rpm (firewalld was not running on tst8).
 - Manifests other than gen_set_dns, gen_dist_upgrade, gen_packages and kvm_vm_provision on Rocky (ceph, etcd, galera, observability, wordpress are still Ubuntu-specific).
+
+## K. Keystone, single node with TLS - NOT YET RUN
+Written without a Scala toolchain, so the first run on scala0 is also the first
+compile.  Prerequisites: Galera + VIP healthy (J), agent on tst7 (Ubuntu).
+
+    git pull && git checkout keystone
+    orphera cluster-playbook manifests/keystone_single_node.scala
+    manifests/test_keystone.sh 2>&1 | tee /tmp/keystone.log
+Expect: all four stages complete, `GET /v3/` over TLS returns 200, password auth
+returns 201, plain HTTP and TLS without the CA do not return the API, the
+`keystone` database exists on tst1, `openstack user list` shows admin, and a
+second run keeps the same CA and fernet keys.
+Things most likely to need a fix on the first run: the Ubuntu keystone package
+enabling its own Apache site on 5000 (the manifest disables `keystone` and
+`wsgi-keystone`), the debconf preseed, and mod_wsgi/`keystone-wsgi-public` paths.
+Teardown: `orphera cluster-playbook manifests/keystone_teardown.scala`.

@@ -4,6 +4,21 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added — OpenStack Keystone, single node with TLS (untested)
+
+- `manifests/keystone_single_node.scala`: Keystone on one node (default tst7)
+  using the Galera cluster behind the 10.10.5.100 VIP as its database. Installs
+  keystone, Apache with mod_wsgi and the openstack client; writes
+  `keystone.conf`; creates a private test CA and a server certificate under
+  `/etc/keystone/ssl` (reused on re-runs, CA added to the node's trust store);
+  runs `db_sync`, fernet/credential setup and `bootstrap`; serves the v3 API on
+  https://<node>:5000/v3/; writes `/etc/keystone/admin-openrc`. Confirms with a
+  TLS health check and a real admin token. Ubuntu only. Not yet run.
+- `manifests/keystone_teardown.scala` and `manifests/test_keystone.sh`
+  (lifecycle, independent checks, idempotence).
+
 ## [0.1.171] - 2026-10-09
 
 ### Added (branch `rocky-support`) — Rocky Linux / Red Hat-family hosts
