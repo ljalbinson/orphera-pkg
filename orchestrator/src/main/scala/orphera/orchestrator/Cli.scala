@@ -432,7 +432,7 @@ object Cli:
             parallel,
             quiet
           )
-        case "--quiet" :: tl => go(tl, steps, nodes, parallel, true)
+        case "--quiet" :: tl         => go(tl, steps, nodes, parallel, true)
         case "--parallel" :: n :: tl =>
           n.toIntOption.filter(_ > 0) match
             case Some(p) => go(tl, steps, nodes, Some(p), quiet)

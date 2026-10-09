@@ -25,6 +25,8 @@ params:
   domainname: ljalbinson.com
   host_type: host-passthrough
   dns2: '192.168.1.71'
-  disks: []
-  cpu: '4'
+  disks:
+  - disk: 128
+  - disk: 128
+  cpu: '8'
   pdisks: []

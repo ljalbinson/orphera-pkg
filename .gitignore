@@ -18,6 +18,7 @@ metals.sbt
 .DS_Store
 
 *.deb
+*.rpm
 
 runtime
 
@@ -31,4 +32,5 @@ orphera-orchestrator
 .orphera-audit/
 .orphera-build-logs/
 
+pkg/
 tmp/

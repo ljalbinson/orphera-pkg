@@ -11,8 +11,8 @@ import orphera.common.*
   * rules: only this project's own agent package may be installed, verified from
   * the package's own metadata (`rpm -qp --queryformat %{NAME}`), and the
   * install runs detached via systemd-run because it restarts the agent whose
-  * connection is running it. `dnf install <file>` is used rather than
-  * `rpm -i` so the agent's Java dependency is resolved from the repositories.
+  * connection is running it. `dnf install <file>` is used rather than `rpm -i`
+  * so the agent's Java dependency is resolved from the repositories.
   */
 object RpmInstaller:
 

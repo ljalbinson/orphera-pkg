@@ -69,7 +69,11 @@ object AgentPackages:
         else Right(found)
 
   // By modification time, not name: "0.1.9" sorts after "0.1.10" as a string.
-  private def latest(dir: String, prefix: String, suffix: String): Option[String] =
+  private def latest(
+      dir: String,
+      prefix: String,
+      suffix: String
+  ): Option[String] =
     val base = new java.io.File(dir)
     if !base.isDirectory then None
     else

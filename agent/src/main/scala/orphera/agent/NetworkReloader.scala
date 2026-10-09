@@ -20,11 +20,11 @@ object NetworkReloader:
   private val backupRoot = Paths.get("/var/lib/orphera/network-backups")
 
   /** Last network config known to work: taken when the agent first starts
-    * (before anything has been pushed) and refreshed on every confirmed
-    * apply. A rollback restores THIS, not the per-apply backup: new files
-    * are pushed (copy / write-file) before `network-apply` runs, so the
-    * per-apply backup already contains the change being applied and
-    * restoring it would undo nothing.
+    * (before anything has been pushed) and refreshed on every confirmed apply.
+    * A rollback restores THIS, not the per-apply backup: new files are pushed
+    * (copy / write-file) before `network-apply` runs, so the per-apply backup
+    * already contains the change being applied and restoring it would undo
+    * nothing.
     */
   private val knownGood = backupRoot.resolve("known-good")
 
@@ -79,7 +79,10 @@ object NetworkReloader:
     pending.modify { current =>
       current.get(backupId) match
         case Some(fiber) =>
-          (current - backupId, fiber.cancel >> snapshotKnownGood(backend).attempt.void)
+          (
+            current - backupId,
+            fiber.cancel >> snapshotKnownGood(backend).attempt.void
+          )
         case None => (current, IO.unit)
     }.flatten
 
@@ -128,8 +131,8 @@ object NetworkReloader:
 
   /** NetworkManager: re-read the keyfiles, then activate each profile so the
     * change takes effect (a bare reload only updates stored profiles).
-    * Activation of an individual profile is best effort; a bad profile must
-    * not stop the rest.
+    * Activation of an individual profile is best effort; a bad profile must not
+    * stop the rest.
     */
   private def runNmcliReload(): IO[Unit] =
     IO.blocking {
@@ -137,7 +140,9 @@ object NetworkReloader:
         new ProcessBuilder(("nmcli" +: args)*).inheritIO().start().waitFor()
       val exit = nmcli("connection", "reload")
       if exit != 0 then
-        throw new RuntimeException(s"nmcli connection reload failed with exit $exit")
+        throw new RuntimeException(
+          s"nmcli connection reload failed with exit $exit"
+        )
       val dir = Paths.get("/etc/NetworkManager/system-connections")
       if Files.exists(dir) then
         Files

@@ -8,9 +8,9 @@ import orphera.common.*
 
 /** The dnf (Rocky, Alma, RHEL, Fedora) counterpart of AptInstaller, speaking
   * the same protocol: PROGRESS/OUTPUT events and exactly one terminal RESULT.
-  * The wire messages are package-manager neutral, so their apt-flavoured
-  * fields map as follows: `updateCache` refreshes repository metadata
-  * (`dnf makecache`), `purge` has no dnf equivalent and is ignored, and a
+  * The wire messages are package-manager neutral, so their apt-flavoured fields
+  * map as follows: `updateCache` refreshes repository metadata (`dnf
+  * makecache`), `purge` has no dnf equivalent and is ignored, and a
   * `name=version` package becomes dnf's `name-version`.
   */
 object DnfInstaller:
@@ -64,8 +64,8 @@ object DnfInstaller:
     PackageSteps.run(dnf ++ List("autoremove"), "Auto-removing packages", queue)
 
   /** `dnf upgrade` (Red Hat has no separate dist-upgrade: it applies all
-    * available updates within the installed release). Modified config files
-    * are kept by rpm, with the new version saved as `.rpmnew`.
+    * available updates within the installed release). Modified config files are
+    * kept by rpm, with the new version saved as `.rpmnew`.
     */
   def distUpgrade(cmd: DistUpgrade, queue: Queue[IO, Event]): IO[Unit] =
     val refresh = if cmd.updateCache then List("--refresh") else Nil
