@@ -188,6 +188,12 @@ FAILED the first time (the node stayed on .99): the per-apply backup was taken
 after the new file was pushed, so rollback restored the same broken file.  Fixed
 by rolling back to a known-good snapshot (taken at first agent start and after
 each confirmed apply).  Applies to the networkd backend too.
+PASSED on tst8 (agent 0.1.171, 2026-10-09): the agent journal shows the bad
+profile activated, then a second activation exactly 20 s later (the watchdog
+restoring known-good); node back on 10.10.5.20 with the original `address1`.
+Test A result not yet recorded.  Known gap: `network-apply` prints only
+"Reload applied, backup <id>" when the connectivity check fails; it does not say
+that the confirm was skipped and a rollback will follow.
 If a test VM becomes unreachable and the guest-agent channel exists:
 `virsh domifaddr tst8 --source agent` on the hypervisor; the console now has a
 root password (`passw0rd`, set by cloud-init).
