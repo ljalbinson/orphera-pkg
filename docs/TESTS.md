@@ -161,7 +161,7 @@ Expect: no systemd-resolved, so a static `/etc/resolv.conf`; NetworkManager told
 2026-10-09.  Note: a rebuilt VM has no DNS drop-in until the manifest is applied,
 so apply it before the reboot check.
 
-### I7. `network-apply`, NetworkManager backend - PENDING
+### I7. `network-apply`, NetworkManager backend - PASSED (tests A and B)
 Profile `cloud-init enp1s0` in
 `/etc/NetworkManager/system-connections/cloud-init-enp1s0.nmconnection`.
 Needs the agent built with the known-good snapshot fix (commit 7007394).
@@ -200,6 +200,17 @@ that the confirm was skipped and a rollback will follow.
 If a test VM becomes unreachable and the guest-agent channel exists:
 `virsh domifaddr tst8 --source agent` on the hypervisor; the console now has a
 root password (`passw0rd`, set by cloud-init).
+
+I7b. Same two tests on the networkd backend (Ubuntu tst7, agent 0.1.171), PASSED
+2026-10-09.  netplan's file lives in /run/systemd/network, so the test used files
+in /etc/systemd/network: A) `50-orphera-test.netdev` (dummy `orph0`) +
+`.network` (10.99.0.1/24), `network-apply --timeout 30`: interface created,
+`known-good` refreshed with both files.  B) `05-orphera-bad.network` matching
+enp1s0 with Address=10.10.5.98/24 (sorts before netplan's 10-, so it wins),
+`network-apply --timeout 20`, `sleep 40`: networkd journal shows enp1s0
+reconfigured from the bad file at 20:35:52 and from netplan's file again at
+20:36:12 (watchdog restoring known-good); node back on 10.10.5.19.  Cleanup:
+remove the files, `ip link del orph0`, `network-apply` (known-good empty again).
 
 ### I8a. Ceph lifecycle on Ubuntu with the Rocky-branch code
     orphera deploy-agent --nodes tst0,tst1,tst2
