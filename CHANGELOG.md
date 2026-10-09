@@ -16,8 +16,20 @@ immediate FAILED result. `dist-upgrade` maps to `dnf upgrade`, `--update-cache`
 to a metadata refresh, `purge` is ignored and `name=version` becomes
 `name-version`. The process helpers moved from `AptInstaller` into
 `PackageSteps` unchanged (the install post-check now takes the file-listing
-command). Not yet: rpm packaging of the agent, SSH bootstrap/teardown, the
-network-apply backend and the manifests; not yet compiled or run on Rocky.
+command).
+
+Also on the branch: `make rpm` builds `orphera-agent-<version>-1.noarch.rpm`
+from the same staged tree (spec in `packaging/orphera-agent.spec.template`;
+needs `rpmbuild`; not part of `make release`). The spec requires
+`java-headless`, labels `run.sh` `bin_t` for SELinux and opens 50051/tcp in
+firewalld when they are present. `bootstrap`, `@bootstrap`, `teardown` and
+`deploy-agent` now take the `.deb` and/or `.rpm` (`--file` picks one by
+extension; with no `--file` the newest of each is found) and choose per node:
+bootstrap and teardown ask the host over SSH which package manager it has,
+deploy-agent uses the node's reported OS, so one command can serve a mixed
+Ubuntu/Rocky fleet. Not yet: the network-apply backend (NetworkManager), the
+manifests and the Rocky cloud-image provisioning; not yet compiled or run on
+Rocky.
 
 ### Fixed — agent: a task that raises before sending a RESULT no longer hangs the stream
 

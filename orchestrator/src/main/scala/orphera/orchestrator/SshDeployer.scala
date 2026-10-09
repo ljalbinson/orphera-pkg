@@ -26,15 +26,90 @@ object SshDeployer:
     */
   def bootstrap(
       node: Node,
-      localDebPath: String,
+      packages: AgentPackages,
       sshUser: String,
       sshKeyPath: Option[String],
       remotePath: String,
       onLine: String => IO[Unit],
       forgetHostKey: Boolean = false
   ): IO[Unit] =
+    def fail(reason: String): IO[Unit] =
+      IO.raiseError(new RuntimeException(s"${node.name}: $reason"))
+
     for
       _ <- if forgetHostKey then forgetKnownHost(node, onLine) else IO.unit
+      pm <- remotePackageManager(node, sshUser, sshKeyPath)
+      _ <- pm match
+        case RemotePm.Apt =>
+          packages.pick(rpmHost = false) match
+            case Left(reason) => fail(reason)
+            case Right(deb)   =>
+              bootstrapApt(
+                node,
+                deb,
+                sshUser,
+                sshKeyPath,
+                AgentPackages.remotePathFor(false, remotePath),
+                onLine
+              )
+        case RemotePm.Dnf =>
+          packages.pick(rpmHost = true) match
+            case Left(reason) => fail(reason)
+            case Right(rpm)   =>
+              bootstrapDnf(
+                node,
+                rpm,
+                sshUser,
+                sshKeyPath,
+                AgentPackages.remotePathFor(true, remotePath),
+                onLine
+              )
+    yield ()
+
+  private enum RemotePm:
+    case Apt, Dnf
+
+  /** Asks the host which package manager it has, over SSH (there is no agent to
+    * ask yet during bootstrap).
+    */
+  private def remotePackageManager(
+      node: Node,
+      sshUser: String,
+      sshKeyPath: Option[String]
+  ): IO[RemotePm] =
+    for
+      seen <- Ref.of[IO, List[String]](Nil)
+      _ <- sshRun(
+        node,
+        sshUser,
+        sshKeyPath,
+        "if command -v apt-get >/dev/null 2>&1; then echo ORPHERA_PM=apt; " +
+          "elif command -v dnf >/dev/null 2>&1; then echo ORPHERA_PM=dnf; " +
+          "else echo ORPHERA_PM=none; fi",
+        line => seen.update(line :: _)
+      )
+      lines <- seen.get
+      pm <-
+        if lines.exists(_.trim == "ORPHERA_PM=apt") then IO.pure(RemotePm.Apt)
+        else if lines.exists(_.trim == "ORPHERA_PM=dnf") then
+          IO.pure(RemotePm.Dnf)
+        else
+          IO.raiseError(
+            new RuntimeException(
+              s"${node.name}: found neither apt-get nor dnf on the host"
+            )
+          )
+    yield pm
+
+  private def bootstrapApt(
+      node: Node,
+      localDebPath: String,
+      sshUser: String,
+      sshKeyPath: Option[String],
+      remotePath: String,
+      onLine: String => IO[Unit]
+  ): IO[Unit] =
+    for
       _ <- sshRun(node, sshUser, sshKeyPath, aptGet("update"), onLine)
       _ <- sshRun(
         node,
@@ -49,6 +124,39 @@ object SshDeployer:
         sshUser,
         sshKeyPath,
         s"sudo dpkg -i $remotePath",
+        onLine
+      )
+    yield ()
+
+  /** The dnf path. `dnf install <file>` resolves the package's Java dependency
+    * (`java-headless`) from the repositories itself, so unlike `dpkg -i` it
+    * needs no prerequisite step. The package name is checked on the host from
+    * the rpm's own metadata before installing — as for the .deb, this
+    * client-side check is the only enforcement during bootstrap.
+    */
+  private def bootstrapDnf(
+      node: Node,
+      localRpmPath: String,
+      sshUser: String,
+      sshKeyPath: Option[String],
+      remotePath: String,
+      onLine: String => IO[Unit]
+  ): IO[Unit] =
+    for
+      _ <- scp(node, localRpmPath, sshUser, sshKeyPath, remotePath, onLine)
+      _ <- sshRun(
+        node,
+        sshUser,
+        sshKeyPath,
+        s"""test "$$(rpm -qp --queryformat '%{NAME}' $remotePath)" = orphera-agent """ +
+          """|| { echo "Refusing to install: not the orphera-agent package"; exit 1; }""",
+        onLine
+      )
+      _ <- sshRun(
+        node,
+        sshUser,
+        sshKeyPath,
+        s"sudo dnf -y install $remotePath",
         onLine
       )
     yield ()
@@ -149,14 +257,28 @@ object SshDeployer:
       purgeConfig: Boolean,
       onLine: String => IO[Unit]
   ): IO[Unit] =
-    val purgeOrRemove = if purgeConfig then "purge" else "remove"
-    sshRun(
-      node,
-      sshUser,
-      sshKeyPath,
-      s"sudo dpkg --$purgeOrRemove orphera-agent",
-      onLine
-    )
+    remotePackageManager(node, sshUser, sshKeyPath).flatMap {
+      case RemotePm.Apt =>
+        val purgeOrRemove = if purgeConfig then "purge" else "remove"
+        sshRun(
+          node,
+          sshUser,
+          sshKeyPath,
+          s"sudo dpkg --$purgeOrRemove orphera-agent",
+          onLine
+        )
+      case RemotePm.Dnf =>
+        // rpm has no purge: after removal, --purge also deletes the config
+        // directory, which is what dpkg --purge does for conffiles.
+        val purge = if purgeConfig then " && sudo rm -rf /etc/orphera-agent" else ""
+        sshRun(
+          node,
+          sshUser,
+          sshKeyPath,
+          s"sudo dnf -y remove orphera-agent$purge",
+          onLine
+        )
+    }
 
   private def sshBaseArgs(
       sshKeyPath: Option[String],

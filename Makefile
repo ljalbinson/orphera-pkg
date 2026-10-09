@@ -1,4 +1,4 @@
-.PHONY: all release bump-patch _build_all clean test assembly pkg-stage deb verify certs certs-clean fmt fmt-manifests scripting
+.PHONY: all release bump-patch _build_all clean test assembly pkg-stage deb rpm verify certs certs-clean fmt fmt-manifests scripting
 
 VERSION_FILE := VERSION
 VERSION      := $(shell cat $(VERSION_FILE))
@@ -6,6 +6,8 @@ ARCH         := amd64
 PKG_NAME     := orphera-agent
 PKG_DIR      := pkg/$(PKG_NAME)
 DEB_FILE     := $(PKG_NAME)_$(VERSION)_$(ARCH).deb
+RPM_FILE     := $(PKG_NAME)-$(VERSION)-1.noarch.rpm
+RPM_TOP      := $(CURDIR)/pkg/rpmbuild
 JAR_SRC      := agent/target/scala-3.8.4/agent-assembly-$(VERSION).jar
 CERTS_DIR    := certs
 
@@ -92,7 +94,7 @@ sleep30:
 clean:
 	sbt clean
 	rm -rf pkg $(DEB_FILE)
-	rm -f orphera-agent_*_amd64.deb
+	rm -f orphera-agent_*_amd64.deb orphera-agent-*.rpm
 
 test:
 	sbt test
@@ -127,6 +129,18 @@ pkg-stage: assembly
 deb: pkg-stage
 	dpkg-deb --build --root-owner-group $(PKG_DIR) $(DEB_FILE)
 	@echo "Built $(DEB_FILE)"
+
+# Red Hat-family (Rocky) package from the same staged tree as the .deb. Needs
+# rpmbuild (on Ubuntu: sudo apt install rpm). Not part of `make release`, so a
+# host without rpmbuild still builds the .deb as before.
+rpm: pkg-stage
+	@command -v rpmbuild >/dev/null || (echo "ERROR: rpmbuild not found (Ubuntu: sudo apt install rpm)" && exit 1)
+	rm -rf $(RPM_TOP)
+	mkdir -p $(RPM_TOP)
+	sed "s/@VERSION@/$(VERSION)/" packaging/orphera-agent.spec.template > $(RPM_TOP)/orphera-agent.spec
+	rpmbuild -bb --define "_topdir $(RPM_TOP)" --define "stagedir $(CURDIR)/$(PKG_DIR)" --define "_binary_payload w19.zstdio" $(RPM_TOP)/orphera-agent.spec
+	cp $(RPM_TOP)/RPMS/noarch/$(RPM_FILE) .
+	@echo "Built $(RPM_FILE)"
 
 verify: deb
 	dpkg-deb --info $(DEB_FILE)

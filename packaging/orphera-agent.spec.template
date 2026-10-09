@@ -1,0 +1,66 @@
+# RPM spec for the Orphera agent, filled in and built by `make rpm` from the
+# same staged tree as the .deb (pkg/orphera-agent). The tree is copied in from
+# %{stagedir}, which `make rpm` defines, so rpmbuild needs no sources.
+Name:           orphera-agent
+Version:        @VERSION@
+Release:        1
+Summary:        Orphera orchestration agent
+License:        Apache-2.0
+BuildArch:      noarch
+# A Java runtime (the .deb asks for default-jre-headless >= 17). java-headless
+# is the virtual provide every OpenJDK headless package carries.
+Requires:       java-headless
+# No automatic dependency scanning of the jar and scripts.
+AutoReqProv:    no
+
+%description
+Receives and executes package management, file distribution, and network
+configuration commands over gRPC.
+
+%prep
+
+%build
+
+%install
+mkdir -p %{buildroot}
+cp -a %{stagedir}/. %{buildroot}/
+rm -rf %{buildroot}/DEBIAN
+
+%files
+%defattr(-,root,root,-)
+/opt/orphera-agent
+%config(noreplace) /etc/orphera-agent/agent.env
+%dir /etc/orphera-agent
+%dir /etc/orphera-agent/certs
+/etc/orphera-agent/certs/server.crt
+/etc/orphera-agent/certs/ca.crt
+%attr(0600,root,root) /etc/orphera-agent/certs/server.key
+/etc/systemd/system/orphera-agent.service
+%dir /var/lib/orphera
+%dir /var/lib/orphera/network-backups
+
+%post
+systemctl daemon-reload
+# SELinux (enforcing on Rocky): systemd's init_t may only execute run.sh if it
+# is labelled bin_t. Skipped where the SELinux tools are not installed.
+if command -v semanage >/dev/null 2>&1 && command -v restorecon >/dev/null 2>&1; then
+  semanage fcontext -a -t bin_t '/opt/orphera-agent/run.sh' 2>/dev/null || true
+  restorecon -F /opt/orphera-agent/run.sh 2>/dev/null || true
+fi
+# firewalld (default on Rocky): open the agent's gRPC port if it is running.
+if command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state >/dev/null 2>&1; then
+  firewall-cmd --permanent --add-port=50051/tcp >/dev/null 2>&1 || true
+  firewall-cmd --reload >/dev/null 2>&1 || true
+fi
+systemctl enable orphera-agent.service
+systemctl restart orphera-agent.service
+
+%preun
+# $1 is 0 on erase and 1 on upgrade: stop only when really removing.
+if [ "$1" -eq 0 ]; then
+  systemctl stop orphera-agent.service || true
+  systemctl disable orphera-agent.service || true
+fi
+
+%postun
+systemctl daemon-reload || true

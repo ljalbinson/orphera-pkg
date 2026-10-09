@@ -147,7 +147,7 @@ object Orchestrator:
 
   def bootstrapAgent(
       nodes: List[Node],
-      localDebPath: String,
+      packages: AgentPackages,
       sshUser: String,
       sshKeyPath: Option[String],
       remotePath: String = "/tmp/orphera-agent.deb",
@@ -157,11 +157,11 @@ object Orchestrator:
       onLine: (Node, String) => IO[Unit] = (node, line) =>
         IO.println(s"[${node.name}] $line")
   ): IO[Unit] =
-    requireOrpheraAgentPackage(localDebPath) >>
+    packages.paths.traverse_(requireOrpheraAgentPackage) >>
       nodes.parTraverse_ { node =>
         SshDeployer.bootstrap(
           node,
-          localDebPath,
+          packages,
           sshUser,
           sshKeyPath,
           remotePath,
@@ -199,7 +199,7 @@ object Orchestrator:
   // for the single-field case, and it broke the moment Version was
   // added alongside it). Parsed as `Field: value` pairs now, not
   // positionally, so it doesn't matter which order dpkg-deb prints them in.
-  private def requireOrpheraAgentPackage(localDebPath: String): IO[String] =
+  private def requireDebPackage(localDebPath: String): IO[String] =
     val expectedPackageName = "orphera-agent"
 
     // Checked up front, separately from dpkg-deb's own exit code:
@@ -272,6 +272,72 @@ object Orchestrator:
               )
             )
         }
+
+  /** Checks that `path` is this project's agent package and returns its
+    * version. A `.deb` is read with dpkg-deb (requireDebPackage). An `.rpm` is
+    * checked by file name, `orphera-agent-<version>-<release>.<arch>.rpm`,
+    * since the orchestrator host (Ubuntu) may not have `rpm`; the name inside
+    * the package is verified for real on the target (the agent's RpmInstaller
+    * for deploy-agent, an `rpm -qp` over SSH for bootstrap).
+    */
+  private def requireOrpheraAgentPackage(path: String): IO[String] =
+    if AgentPackages.isRpm(path) then requireRpmPackage(path)
+    else requireDebPackage(path)
+
+  private val rpmFileName = """orphera-agent-([^-]+)-[^-]+\.[^.]+\.rpm""".r
+
+  private def requireRpmPackage(path: String): IO[String] =
+    if !Files.exists(Paths.get(path)) then
+      IO.raiseError(new RuntimeException(s"No such file: $path"))
+    else
+      Paths.get(path).getFileName.toString match
+        case rpmFileName(version) => IO.pure(version)
+        case other                =>
+          IO.raiseError(
+            new RuntimeException(
+              s"Refusing to deploy $path: '$other' is not named orphera-agent-<version>-<release>.<arch>.rpm — build one with 'make rpm'."
+            )
+          )
+
+  /** deploy-agent for a possibly mixed fleet: each node is asked for its OS
+    * (facts), apt hosts get the `.deb` and dnf hosts the `.rpm`, and the
+    * per-node confirmation results are merged. A group whose package file is
+    * missing is reported and counted as not confirmed.
+    */
+  def deployAgent(
+      nodes: List[Node],
+      packages: AgentPackages,
+      remotePath: String = "/tmp/orphera-agent.deb",
+      confirmTimeoutSeconds: Int = 60
+  ): IO[Map[String, Boolean]] =
+    gatherFacts(nodes).flatMap { facts =>
+      val (rpmNodes, debNodes) = nodes.partition(n =>
+        facts.get(n.name).exists(f => AgentPackages.rpmHostOsIds.contains(f.osId))
+      )
+
+      def deployGroup(
+          group: List[Node],
+          rpm: Boolean
+      ): IO[Map[String, Boolean]] =
+        if group.isEmpty then IO.pure(Map.empty)
+        else
+          packages.pick(rpm) match
+            case Left(reason) =>
+              IO.println(s"Error: ${group.map(_.name).mkString(", ")}: $reason")
+                .as(group.map(_.name -> false).toMap)
+            case Right(path) =>
+              deployDeb(
+                group,
+                Paths.get(path),
+                AgentPackages.remotePathFor(rpm, remotePath),
+                confirmTimeoutSeconds
+              )
+
+      for
+        debResults <- deployGroup(debNodes, rpm = false)
+        rpmResults <- deployGroup(rpmNodes, rpm = true)
+      yield debResults ++ rpmResults
+    }
 
   def teardownAgent(
       nodes: List[Node],

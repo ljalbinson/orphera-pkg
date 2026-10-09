@@ -117,10 +117,10 @@ object Main extends IOApp:
         }
 
       case Right(Command.DeployAgent(localOpt, remotePath, nodeNames)) =>
-        resolveDebPath(localOpt) match
+        AgentPackages.resolve(localOpt) match
           case Left(err) =>
             IO.println(s"Error: $err") >> IO.pure(ExitCode.Error)
-          case Right(local) =>
+          case Right(packages) =>
             val targets = nodeNames match
               case Some(names) =>
                 Inventory.all.filter(n => names.contains(n.name))
@@ -138,7 +138,7 @@ object Main extends IOApp:
               // ever meant "every install was launched," not "every
               // node actually finished upgrading."
               Orchestrator
-                .deployDeb(targets, java.nio.file.Paths.get(local), remotePath)
+                .deployAgent(targets, packages, remotePath)
                 .flatMap { confirmed =>
                   val (ok, failed) =
                     targets.partition(n => confirmed.getOrElse(n.name, false))
@@ -161,14 +161,14 @@ object Main extends IOApp:
               forgetHostKey
             )
           ) =>
-        resolveDebPath(localOpt) match
+        AgentPackages.resolve(localOpt) match
           case Left(err) =>
             IO.println(s"Error: $err") >> IO.pure(ExitCode.Error)
-          case Right(local) =>
+          case Right(packages) =>
             withTargets(nodeNames) { targets =>
               Orchestrator.bootstrapAgent(
                 targets,
-                local,
+                packages,
                 sshUser,
                 sshKeyPath,
                 remotePath,
@@ -815,13 +815,13 @@ object Main extends IOApp:
                   s"${params.hostname} (hostname in $path) is not in inventory.yaml — add it first"
                 )
               case Some(node) =>
-                resolveDebPath(opts.file) match
-                  case Left(err)    => fail(err)
-                  case Right(local) =>
+                AgentPackages.resolve(opts.file) match
+                  case Left(err)       => fail(err)
+                  case Right(packages) =>
                     Orchestrator
                       .bootstrapAgent(
                         List(node),
-                        local,
+                        packages,
                         opts.sshUser,
                         opts.sshKeyPath,
                         "/tmp/orphera-agent.deb",
@@ -931,42 +931,6 @@ object Main extends IOApp:
               Left(s"Could not read --content-file '$path': ${err.getMessage}")
             case Right(bytes) => Right(bytes)
           }
-
-  /** Resolves `bootstrap`/`deploy-agent`'s local `.deb` path: an explicit
-    * `--file` wins, otherwise auto-discovers the freshly built
-    * `orphera-agent_*.deb` in the current directory — the same "find it by
-    * naming convention" approach as findLatestJar below, for the same
-    * underlying reason: neither command should be taking an arbitrary free-form
-    * path as its normal mode of use. Whatever path this resolves to still gets
-    * checked against its own package metadata in
-    * Orchestrator.requireOrpheraAgentPackage before anything is pushed anywhere
-    * — this only decides which file, not whether it's trusted.
-    */
-  private def resolveDebPath(explicit: Option[String]): Either[String, String] =
-    explicit match
-      case Some(path) => Right(path)
-      case None       =>
-        findLatestDeb(".").toRight(
-          "No orphera-agent_*.deb found in the current directory, and no --file given. " +
-            "Run 'make deb' (or 'make release') first, or pass --file <path>."
-        )
-
-  private def findLatestDeb(dir: String): Option[String] =
-    val base = new java.io.File(dir)
-    if !base.isDirectory then None
-    else
-      Option(base.listFiles()).toList.flatten
-        .filter(f =>
-          f.isFile && f.getName.startsWith("orphera-agent_") && f.getName
-            .endsWith("_amd64.deb")
-        )
-        // mtime, not name — unlike findLatestJar's build-directory
-        // names, "0.1.9" sorts after "0.1.10" as a string, so a
-        // lexicographic sort here would silently pick the wrong file
-        // once the version climbs past a single digit.
-        .sortBy(_.lastModified())
-        .lastOption
-        .map(_.getAbsolutePath)
 
   private def findLatestJar(
       dir: String,
