@@ -511,7 +511,8 @@ object Main extends IOApp:
           java.nio.file.StandardOpenOption.CREATE,
           java.nio.file.StandardOpenOption.APPEND
         )
-      ) >> (if !quiet || isProgressLine(line) then IO.println(s"[$label] $line")
+      ) >> (if !quiet || isProgressLine(line) then
+              IO.println(withLabel(label, line))
             else IO.unit)
 
     // Returns the path of the playbook that failed, or None if all passed.
@@ -626,6 +627,13 @@ object Main extends IOApp:
       ()
     }
 
+  /** `[label] line`, unless the line already starts with `[label]` (verbs and
+    * the @bootstrap step prefix their own output with the node name, which is
+    * also the config's label).
+    */
+  private def withLabel(label: String, line: String): String =
+    if line.startsWith(s"[$label]") then line else s"[$label] $line"
+
   private def pumpLines(
       process: Process,
       label: String,
@@ -650,9 +658,7 @@ object Main extends IOApp:
           writer.flush()
           // A verb run as a child already prefixes its lines with [node];
           // don't print the label twice.
-          val shown =
-            if line.startsWith(s"[$label]") then line else s"[$label] $line"
-          if !quiet || isProgressLine(line) then println(shown)
+          if !quiet || isProgressLine(line) then println(withLabel(label, line))
           line = reader.readLine()
       finally writer.close()
     }
