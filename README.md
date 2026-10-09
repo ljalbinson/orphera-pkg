@@ -17,7 +17,7 @@ three ways to describe what should happen: declarative YAML, a typed
 Scala DSL with compile-time checking, or run-time-compiled Scala
 scripts — all sharing the same staged, health-gated execution engine
 underneath. It currently targets Debian/Ubuntu hosts (`apt`,
-`systemd-networkd`), built for a small, deliberately understood feature
+`systemd-networkd`) and Rocky/Red Hat-family hosts (`dnf`, NetworkManager), built for a small, deliberately understood feature
 set rather than broad platform coverage first.
 
 **Status: early / pre-production.** No automated test coverage yet beyond
@@ -61,8 +61,8 @@ orchestrator (CLI)  --gRPC/TLS-->  agent (daemon, runs as root on managed host)
 ```
 
 - **`agent`** — a small daemon, one per managed host, listening on
-  `50051`. Executes commands locally (`apt-get`, file writes,
-  `networkctl reload`, `dpkg`, `shutdown`) and streams progress back.
+  `50051`. Executes commands locally (`apt-get` or `dnf`, file writes,
+  `networkctl reload` or `nmcli`, `dpkg` or `rpm`, `shutdown`) and streams progress back.
 - **`orchestrator`** — a CLI you run from your workstation or a control
   host. Reads a static inventory, dispatches commands to one or more
   agents in parallel, and renders their event streams to the console.
@@ -99,6 +99,9 @@ shape.
   needed unless your network blocks Maven Central, in which case the
   first `sbt compile` will fail trying to download it.
 - **`openssl`**, for certificate generation (`make certs`).
+- **`rpmbuild`** (optional; Ubuntu: `sudo apt install rpm`), for the Rocky/Red Hat
+  `.rpm` package (`make rpm`). `make release` builds it when present and skips it
+  otherwise.
 - **`dpkg-deb`**, for building the `.deb` package (`make deb`). This
   effectively means the `.deb` must be built on a Debian/Ubuntu-family
   machine (or a container thereof) — it is not cross-buildable from,
@@ -110,13 +113,15 @@ shape.
 
 **Target (managed) hosts:**
 
-- Debian/Ubuntu with `systemd` and `apt`.
+- Debian/Ubuntu with `systemd` and `apt`, or a Red Hat-family host (tested: Rocky 10)
+  with `systemd` and `dnf`. The agent chooses the package manager on the host, so
+  one command can serve a mixed fleet.
 - `systemd-networkd` or `NetworkManager` if using `network-apply`: the agent
   uses networkd (`networkctl reload`, `/etc/systemd/network/*.{network,netdev,link}`)
   unless the host has `nmcli` and no `networkctl` (Rocky/RHEL), in which case it
   uses NetworkManager keyfiles.
 - A JRE (`default-jre-headless` or equivalent) — pulled in
-  automatically as a `.deb` dependency; no manual install needed if
+  automatically as a `.deb` dependency (`java-headless` for the `.rpm`); no manual install needed if
   installing via the package.
 - Root privileges for the agent process itself (package management,
   file ownership changes, network reconfiguration, and reboot all
@@ -295,17 +300,17 @@ Verbs that act on nodes (`install`, `remove`, `dist-upgrade`, `run`, `copy`, `wr
 
 | Command | Purpose |
 |---|---|
-| `install <pkg...> [--update-cache]` | `apt-get install` |
-| `remove <pkg...> [--purge]` | `apt-get remove`/`purge` |
-| `autoremove [--purge]` | `apt-get autoremove` |
-| `dist-upgrade [--no-update-cache]` | `apt-get update` then `apt-get dist-upgrade`, keeping existing config files and never prompting; `--no-update-cache` skips the update. Also available as the `dist_upgrade` playbook task |
+| `install <pkg...> [--update-cache]` | `apt-get install` (`dnf install` on Red Hat-family hosts) |
+| `remove <pkg...> [--purge]` | `apt-get remove`/`purge` (`dnf remove`; `--purge` ignored) |
+| `autoremove [--purge]` | `apt-get autoremove` (`dnf autoremove`) |
+| `dist-upgrade [--no-update-cache]` | `apt-get update` then `apt-get dist-upgrade`, keeping existing config files and never prompting; `--no-update-cache` skips the update. On Red Hat-family hosts it is `dnf upgrade` (with a metadata refresh unless `--no-update-cache`). Also available as the `dist_upgrade` playbook task |
 | `copy <local> <remote> [--owner] [--group] [--mode]` | Push a file, with an idempotent pre-check (content hash + owner/group/mode) so unchanged files are skipped |
 | `write-file <remote> (--content <string> \| --content-file <local>) [--owner] [--group] [--mode]` | Write a literal string straight to a file on the agent — no local source file required first, unlike `copy`. `--content-file` is for when the string is awkward to pass inline (multi-line, shell-quoting-sensitive); it still just reads that local file and sends its bytes, same mechanism as `copy` |
-| `network-apply [--timeout 60]` | Apply pushed `.network`/`.netdev`/`.link` files with automatic rollback if not confirmed within the timeout — see [Network config safety](#network-config-safety) |
+| `network-apply [--timeout 60]` | Apply pushed `.network`/`.netdev`/`.link` files (or, on NetworkManager hosts, `.nmconnection` keyfiles) with automatic rollback if not confirmed within the timeout — see [Network config safety](#network-config-safety) |
 | `reboot [--delay 5] [--wait] [--wait-timeout 300]` | Reboot a host. Runs fully detached from the agent's own process (`systemd-run`), for the same reason as `deploy-agent` below — the agent's own systemd unit would otherwise be killed by the reboot before it can schedule it. `--wait` polls the agent afterward and reports when it's reachable again (or times out) — see [Known gaps](#known-gaps--not-yet-built) for exactly what "reachable" does and doesn't confirm |
 | `version [--nodes ...]` | Report each agent's running version, baked in at build time from the `VERSION` file — see [Versioning](#versioning) |
-| `deploy-agent <local.deb> [--remote-path]` | Push and install an updated agent `.deb` on a host **that already has an agent running**. The install runs fully detached from the agent's own process (`systemd-run`), since the agent's own service restart would otherwise kill its own upgrade mid-unpack, so the RPC call that launches it can't itself confirm completion — instead, each node is polled afterward via the `version` RPC (60s default timeout) until it reports the `.deb`'s own version or the timeout elapses; the command's exit code and printed summary reflect that confirmation, not just that the install was launched — see [Versioning](#versioning) |
-| `bootstrap <local.deb> --nodes ... [--ssh-user] [--ssh-key] [--forget-host-key]` | First-time agent install via SSH, for a host with **no agent yet** |
+| `deploy-agent [--file <local.deb\|.rpm>] [--remote-path]` | Push and install an updated agent package (`.deb` or `.rpm`, chosen per node; found automatically when `--file` is omitted) on a host **that already has an agent running**. The install runs fully detached from the agent's own process (`systemd-run`), since the agent's own service restart would otherwise kill its own upgrade mid-unpack, so the RPC call that launches it can't itself confirm completion — instead, each node is polled afterward via the `version` RPC (60s default timeout) until it reports the `.deb`'s own version or the timeout elapses; the command's exit code and printed summary reflect that confirmation, not just that the install was launched — see [Versioning](#versioning) |
+| `bootstrap [--file <local.deb\|.rpm>] --nodes ... [--ssh-user] [--ssh-key] [--forget-host-key]` | First-time agent install via SSH, for a host with **no agent yet**. The host's package manager decides whether the `.deb` or `.rpm` is used. `--ssh-user` defaults to `root`; the cloud images used here block root login, so pass `--ssh-user localadmin` |
 | `teardown --nodes ... --yes [--purge]` | Uninstall the agent via SSH. Requires explicit `--nodes` and `--yes` — no fleet-wide default, given the host becomes unmanageable via gRPC afterward |
 | `fetch <remote-path> [--out ./dir]` | Pull a file back from one or more agents into a local directory, one file per node (named `<node>-<filename>`) |
 | `facts [--nodes ...]` | Gather and print basic host facts (OS, kernel, CPU/memory, disks, interfaces) from one or more agents |
@@ -1089,6 +1094,7 @@ node isn't confirmed within the timeout, and it prints which ones.
 ```bash
 make certs DOMAIN=yourdomain.com   # once, if not already done
 make deb                            # build the agent .deb
+make rpm                            # and/or the .rpm, for Rocky/Red Hat hosts
 
 sbt "orchestrator/run bootstrap orphera-agent_0.1.0_amd64.deb \
   --nodes newhost --ssh-user root --ssh-key ~/.ssh/id_ed25519"
@@ -1096,7 +1102,7 @@ sbt "orchestrator/run bootstrap orphera-agent_0.1.0_amd64.deb \
 
 `bootstrap` requires non-interactive SSH key auth (`BatchMode=yes`) —
 an unlocked key or agent-forwarded key, no passphrase prompts, and if
-`--ssh-user` isn't root, passwordless `sudo` for `dpkg`. Once bootstrap
+`--ssh-user` isn't root, passwordless `sudo` for `dpkg` (`dnf` on Red Hat-family hosts). Once bootstrap
 succeeds and the systemd service is running, all future updates go
 through `deploy-agent` (gRPC), not `bootstrap` again.
 
@@ -1113,6 +1119,12 @@ and `dpkg -i` doesn't resolve dependencies — on a fresh node it would
 leave the agent unconfigured. If either step fails, that node's
 bootstrap stops there. Needs the same passwordless `sudo` as the
 `dpkg` step, and the node must be able to reach its apt mirrors.
+
+On a Red Hat-family host `bootstrap` copies the `.rpm`, checks its package name
+with `rpm -qp`, and runs `sudo dnf -y install` on it; dnf pulls in the Java
+runtime itself (`java-headless`), so there is no separate Java step. Which
+branch runs is decided by asking the host over SSH whether it has `apt-get` or
+`dnf`.
 
 `--forget-host-key` runs `ssh-keygen -R <host>` against your own
 `known_hosts` before connecting. Use it when the node was just rebuilt (cloud-init
@@ -1136,14 +1148,15 @@ auto-updated; remove the entry manually.
 | Target | Does |
 |---|---|
 | `make` / `make all` | clean → test → assembly → deb |
-| `make clean` | `sbt clean`, removes `pkg/` and any built `.deb` |
+| `make clean` | `sbt clean`, removes `pkg/` and any built `.deb` / `.rpm` |
 | `make test` | `sbt test` |
 | `make assembly` | `sbt agent/assembly` |
 | `make deb` | stages package contents, runs `dpkg-deb --build` |
+| `make rpm` | stages the same contents, runs `rpmbuild` to produce `orphera-agent-<version>-1.noarch.rpm` for Rocky/Red Hat hosts. Needs `rpmbuild` |
 | `make verify` | builds, then prints `.deb` contents/metadata |
 | `make certs DOMAIN=...` | generates CA + wildcard server cert. Refuses to run if `certs/ca.crt` already exists |
 | `make certs-clean` | deletes `certs/` — interactive confirmation required; invalidates every already-deployed agent's trust |
-| `make release` | bumps the patch version in `VERSION`, then runs the full clean/test/assembly/deb chain at the new version |
+| `make release` | bumps the patch version in `VERSION`, then runs the full clean/test/assembly/deb chain (plus the `.rpm` when `rpmbuild` is installed) at the new version |
 
 `certs`, `certs-clean`, and `release` are intentionally **not** part of
 the default `all` chain. Cert (re)generation is a deliberate,

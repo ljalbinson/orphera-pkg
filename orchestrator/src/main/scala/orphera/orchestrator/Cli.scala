@@ -1067,12 +1067,12 @@ object Cli:
       |                      multi-line; it still reads that file and sends its bytes,
       |                      same as copy, just under this command's own flags)
       |  network-apply     [--nodes host1,host2] [--timeout 60]
-      |  deploy-agent      [--file <local.deb>] [--remote-path /tmp/orphera-agent.deb] [--nodes host1,host2]
+      |  deploy-agent      [--file <local.deb|.rpm>] [--remote-path /tmp/orphera-agent.deb] [--nodes host1,host2]
       |                    — installs only the orphera-agent package (verified against
       |                      its control metadata, refused otherwise); auto-discovers
       |                      the freshly built orphera-agent_*.deb in the current
       |                      directory if --file is omitted
-      |  bootstrap         [--file <local.deb>] --nodes host1,host2 [--ssh-user root] [--ssh-key ~/.ssh/id_ed25519] [--remote-path /tmp/x.deb] [--forget-host-key]
+      |  bootstrap         [--file <local.deb|.rpm>] --nodes host1,host2 [--ssh-user root] [--ssh-key ~/.ssh/id_ed25519] [--remote-path /tmp/x.deb] [--forget-host-key]
       |                    — same package check and auto-discovery as deploy-agent
       |  teardown          --nodes host1,host2 --yes [--purge] [--ssh-user root] [--ssh-key ~/.ssh/id_ed25519]
       |  playbook          <file.yaml | file.scala | compiled-name> [--resume] [--config <path>]
