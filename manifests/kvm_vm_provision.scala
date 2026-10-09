@@ -338,6 +338,10 @@ object kvm_vm_provision extends OrpheraClusterPlaybook:
   // original ubuntu24.04. A hypervisor whose osinfo database does not know the
   // id (rocky10 needs a recent osinfo-db) falls back to `generic` at run time,
   // so an older host still defines the VM; the id only tunes device defaults.
+  // virt-install is asked itself (`--osinfo list`), not osinfo-query, which
+  // may be missing or read a different database (gs3: rocky10 rejected).
+  // The script runs under `set -e`: before, a failed virt-install was followed
+  // by a successful `virsh autostart`/`echo`, so the stage reported success.
   private val osVariantWanted: String =
     """(?i)rocky-(\d+)""".r
       .findFirstMatchIn(baseImage)
@@ -345,8 +349,9 @@ object kvm_vm_provision extends OrpheraClusterPlaybook:
       .getOrElse("ubuntu24.04")
 
   private val defineAndStartVmScript =
-    s"""want=$osVariantWanted
-       |if ! command -v osinfo-query >/dev/null 2>&1 || osinfo-query -f short-id os 2>/dev/null | grep -qx "$$want"; then variant=$$want; else variant=generic; fi
+    s"""set -e
+       |want=$osVariantWanted
+       |if virt-install --osinfo list 2>/dev/null | grep -qw -- "$$want"; then variant=$$want; else variant=generic; fi
        |echo "using --os-variant $$variant"
        |virt-install --connect qemu:///system --name $vmName --memory $memoryMB --vcpus $vcpus --cpu $cpuMode --disk $workingDir/$vmName.qcow2,format=qcow2,bus=scsi,serial=$vmName-root --disk $workingDir/$vmName-swap.qcow2,format=qcow2,bus=scsi,serial=$vmName-swap$extraDiskVirtInstallArgs --disk $workingDir/$vmName-cidata.iso,device=cdrom --network bridge=$nicBridge,model=virtio,virtualport_type=openvswitch --os-variant $$variant --import --noautoconsole
        |virsh --connect qemu:///system autostart $vmName

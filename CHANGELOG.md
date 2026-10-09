@@ -29,7 +29,7 @@ bootstrap and teardown ask the host over SSH which package manager it has,
 deploy-agent uses the node's reported OS, so one command can serve a mixed
 Ubuntu/Rocky fleet. `kvm_vm_provision.scala` now derives `--os-variant` from the
 image name (`Rocky-10-...` -> `rocky10`, otherwise `ubuntu24.04`) and falls back
-to `generic` where the hypervisor's osinfo database lacks it. New test node
+to `generic` where virt-install's own list (`--osinfo list`) lacks it; the define-and-start script now runs under `set -e` so a failed virt-install fails the stage (it used to report success). New test node
 `tst8` (Rocky 10, 10.10.5.20, on gs3): `config/tst8.yaml` and an inventory
 entry; note that `config/tst*.yaml` globs now include it. Not yet: the network-apply backend (NetworkManager), the
 manifests and the Rocky cloud-image provisioning; not yet compiled or run on
