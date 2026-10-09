@@ -111,9 +111,10 @@ shape.
 **Target (managed) hosts:**
 
 - Debian/Ubuntu with `systemd` and `apt`.
-- `systemd-networkd` specifically (not `NetworkManager`) if using
-  `network-apply` — the agent shells out to `networkctl reload` and
-  reads/writes `/etc/systemd/network/*.{network,netdev,link}`.
+- `systemd-networkd` or `NetworkManager` if using `network-apply`: the agent
+  uses networkd (`networkctl reload`, `/etc/systemd/network/*.{network,netdev,link}`)
+  unless the host has `nmcli` and no `networkctl` (Rocky/RHEL), in which case it
+  uses NetworkManager keyfiles.
 - A JRE (`default-jre-headless` or equivalent) — pulled in
   automatically as a `.deb` dependency; no manual install needed if
   installing via the package.
@@ -736,15 +737,21 @@ ordering guarantee.
 `network-apply` exists because a bad `.network` file can permanently
 sever the connection you're managing a host over. The design:
 
-1. Agent backs up current `/etc/systemd/network/*.{network,netdev,link}`
-   before applying anything.
-2. Agent reloads (`networkctl reload`) and arms a rollback timer,
-   entirely locally — it does not depend on the orchestrator being
-   reachable to trigger the rollback.
+1. The agent keeps a *known-good* snapshot of the network config
+   (`/etc/systemd/network/*.{network,netdev,link}`, or on NetworkManager
+   hosts `/etc/NetworkManager/system-connections/*.nmconnection`). It is
+   taken the first time the agent starts, before anything is pushed, and
+   refreshed after every confirmed apply. (Files are pushed with `copy` /
+   `write-file` *before* `network-apply`, so a backup taken at apply time
+   would already contain the change.)
+2. Agent reloads (`networkctl reload`, or `nmcli connection reload` + `up`)
+   and arms a rollback timer, entirely locally — it does not depend on the
+   orchestrator being reachable to trigger the rollback.
 3. Orchestrator waits briefly, probes connectivity itself, and only
-   sends an explicit confirm if the probe succeeds.
+   sends an explicit confirm if the probe succeeds; the agent then makes
+   the applied config the new known-good snapshot.
 4. If confirm never arrives (because the reload broke connectivity),
-   the agent's own timer restores the backup and reloads again.
+   the agent's own timer restores the known-good snapshot and reloads again.
 
 This protects against **immediate, detectable** breakage on **this**
 host. It does not protect against config that's valid and confirms

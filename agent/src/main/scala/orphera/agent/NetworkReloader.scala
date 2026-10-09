@@ -19,6 +19,15 @@ object NetworkReloader:
 
   private val backupRoot = Paths.get("/var/lib/orphera/network-backups")
 
+  /** Last network config known to work: taken when the agent first starts
+    * (before anything has been pushed) and refreshed on every confirmed
+    * apply. A rollback restores THIS, not the per-apply backup: new files
+    * are pushed (copy / write-file) before `network-apply` runs, so the
+    * per-apply backup already contains the change being applied and
+    * restoring it would undo nothing.
+    */
+  private val knownGood = backupRoot.resolve("known-good")
+
   private def exists(path: String): Boolean = Files.exists(Paths.get(path))
 
   /** systemd-networkd (Ubuntu) unless only NetworkManager is installed
@@ -69,9 +78,28 @@ object NetworkReloader:
   ): IO[Unit] =
     pending.modify { current =>
       current.get(backupId) match
-        case Some(fiber) => (current - backupId, fiber.cancel)
-        case None        => (current, IO.unit)
+        case Some(fiber) =>
+          (current - backupId, fiber.cancel >> snapshotKnownGood(backend).attempt.void)
+        case None => (current, IO.unit)
     }.flatten
+
+  /** Snapshots the agent's current network config as known-good unless one
+    * already exists. Called once at agent start-up; failures are ignored (a
+    * host with no network dir, a read-only filesystem) because the rollback
+    * then falls back to the per-apply backup.
+    */
+  def initKnownGood(): IO[Unit] =
+    IO.blocking(Files.exists(knownGood)).flatMap { has =>
+      if has then IO.unit
+      else snapshotKnownGood(backend).attempt.void
+    }
+
+  private def snapshotKnownGood(be: Backend): IO[Unit] =
+    IO.blocking {
+      if Files.exists(knownGood) then
+        Files.list(knownGood).iterator().asScala.foreach(Files.delete)
+      Files.createDirectories(knownGood)
+    } >> backupCurrentConfig(be, knownGood)
 
   private def backupCurrentConfig(be: Backend, backupDir: Path): IO[Unit] =
     IO.blocking {
@@ -130,6 +158,11 @@ object NetworkReloader:
     }
 
   private def rollback(be: Backend, backupDir: Path): IO[Unit] =
+    IO.blocking(Files.exists(knownGood)).flatMap { hasGood =>
+      restore(be, if hasGood then knownGood else backupDir)
+    }
+
+  private def restore(be: Backend, backupDir: Path): IO[Unit] =
     IO.blocking {
       if Files.exists(be.dir) then
         Files

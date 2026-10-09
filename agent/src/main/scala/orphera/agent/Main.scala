@@ -17,6 +17,7 @@ object Main extends IOApp.Simple:
       .build()
 
     for
+      _ <- NetworkReloader.initKnownGood()
       pending <- Ref.of[IO, Map[String, Fiber[IO, Throwable, Unit]]](Map.empty)
       service = new AgentServiceImpl(pending)
 
