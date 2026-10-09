@@ -3,7 +3,7 @@
 import orphera.orchestrator.*
 import orphera.orchestrator.ClusterPlaybookDsl.*
 
-// apt-get update + dist-upgrade on the VM described by a per-VM config:
+// Package update + dist-upgrade (apt or dnf, chosen by the agent) on the VM described by a per-VM config:
 //
 //   orphera cluster-playbook manifests/gen_dist_upgrade.scala --config config/tst0.yaml
 //
@@ -33,7 +33,7 @@ object gen_dist_upgrade extends OrpheraClusterPlaybook:
   val playbook: ClusterPlaybook =
     clusterPlaybook("gen-dist-upgrade")(
       stage("dist-upgrade", vmName)
-        .task(s"apt update and dist-upgrade on $vmName")(
+        .task(s"update all packages (dist-upgrade) on $vmName")(
           Task.DistUpgrade(updateCache = true)
         )
         .build

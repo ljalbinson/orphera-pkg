@@ -10,9 +10,35 @@ import orphera.common.*
 
 object NetworkReloader:
 
-  private val networkDir = Paths.get("/etc/systemd/network")
+  /** Where a network backend keeps its configuration and how it re-reads it. */
+  private case class Backend(
+      dir: Path,
+      extensions: Set[String],
+      reload: IO[Unit]
+  )
+
   private val backupRoot = Paths.get("/var/lib/orphera/network-backups")
-  private val trackedExtensions = Set(".network", ".netdev", ".link")
+
+  private def exists(path: String): Boolean = Files.exists(Paths.get(path))
+
+  /** systemd-networkd (Ubuntu) unless only NetworkManager is installed
+    * (Rocky/RHEL, which ship nmcli and no networkctl).
+    */
+  private def backend: Backend =
+    if exists("/usr/bin/nmcli") && !exists("/usr/bin/networkctl") &&
+      !exists("/bin/networkctl")
+    then
+      Backend(
+        Paths.get("/etc/NetworkManager/system-connections"),
+        Set(".nmconnection"),
+        runNmcliReload()
+      )
+    else
+      Backend(
+        Paths.get("/etc/systemd/network"),
+        Set(".network", ".netdev", ".link"),
+        runNetworkctlReload()
+      )
 
   def reload(
       request: NetworkReload,
@@ -22,14 +48,16 @@ object NetworkReloader:
       backupId <- IO(java.time.Instant.now.toEpochMilli.toString)
       backupDir = backupRoot.resolve(backupId)
       _ <- IO.blocking(Files.createDirectories(backupDir))
-      _ <- backupCurrentConfig(backupDir)
-      _ <- runNetworkctlReload()
+      be = backend
+      _ <- backupCurrentConfig(be, backupDir)
+      _ <- be.reload
 
       timeoutSeconds =
         if request.confirmTimeoutSeconds > 0 then request.confirmTimeoutSeconds
         else 60
 
       watchdog <- (IO.sleep(timeoutSeconds.seconds) >> rollback(
+        be,
         backupDir
       ) >> pending.update(_ - backupId)).start
       _ <- pending.update(_ + (backupId -> watchdog))
@@ -45,14 +73,14 @@ object NetworkReloader:
         case None        => (current, IO.unit)
     }.flatten
 
-  private def backupCurrentConfig(backupDir: Path): IO[Unit] =
+  private def backupCurrentConfig(be: Backend, backupDir: Path): IO[Unit] =
     IO.blocking {
-      if Files.exists(networkDir) then
+      if Files.exists(be.dir) then
         Files
-          .list(networkDir)
+          .list(be.dir)
           .iterator()
           .asScala
-          .filter(p => trackedExtensions.exists(p.toString.endsWith))
+          .filter(p => be.extensions.exists(p.toString.endsWith))
           .foreach(p =>
             Files.copy(
               p,
@@ -70,14 +98,45 @@ object NetworkReloader:
         throw new RuntimeException(s"networkctl reload failed with exit $exit")
     }
 
-  private def rollback(backupDir: Path): IO[Unit] =
+  /** NetworkManager: re-read the keyfiles, then activate each profile so the
+    * change takes effect (a bare reload only updates stored profiles).
+    * Activation of an individual profile is best effort; a bad profile must
+    * not stop the rest.
+    */
+  private def runNmcliReload(): IO[Unit] =
     IO.blocking {
-      if Files.exists(networkDir) then
+      def nmcli(args: String*): Int =
+        new ProcessBuilder(("nmcli" +: args)*).inheritIO().start().waitFor()
+      val exit = nmcli("connection", "reload")
+      if exit != 0 then
+        throw new RuntimeException(s"nmcli connection reload failed with exit $exit")
+      val dir = Paths.get("/etc/NetworkManager/system-connections")
+      if Files.exists(dir) then
         Files
-          .list(networkDir)
+          .list(dir)
           .iterator()
           .asScala
-          .filter(p => trackedExtensions.exists(p.toString.endsWith))
+          .filter(_.toString.endsWith(".nmconnection"))
+          .foreach { p =>
+            val id = Files
+              .readAllLines(p)
+              .asScala
+              .find(_.startsWith("id="))
+              .map(_.stripPrefix("id=").trim)
+              .getOrElse(p.getFileName.toString.stripSuffix(".nmconnection"))
+            nmcli("connection", "up", id)
+            ()
+          }
+    }
+
+  private def rollback(be: Backend, backupDir: Path): IO[Unit] =
+    IO.blocking {
+      if Files.exists(be.dir) then
+        Files
+          .list(be.dir)
+          .iterator()
+          .asScala
+          .filter(p => be.extensions.exists(p.toString.endsWith))
           .foreach(Files.delete)
 
       Files
@@ -87,8 +146,8 @@ object NetworkReloader:
         .foreach(p =>
           Files.copy(
             p,
-            networkDir.resolve(p.getFileName),
+            be.dir.resolve(p.getFileName),
             StandardCopyOption.COPY_ATTRIBUTES
           )
         )
-    } >> runNetworkctlReload()
+    } >> be.reload

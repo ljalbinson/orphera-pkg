@@ -31,9 +31,14 @@ Ubuntu/Rocky fleet. `kvm_vm_provision.scala` now derives `--os-variant` from the
 image name (`Rocky-10-...` -> `rocky10`, otherwise `ubuntu24.04`) and falls back
 to `generic` where virt-install's own list (`--osinfo list`) lacks it; the define-and-start script now runs under `set -e` so a failed virt-install fails the stage (it used to report success). It also passes `--machine q35` and a `virtio-scsi` controller explicitly: with the `generic` os-variant virt-install otherwise picks i440fx and an LSI controller, which a Rocky kernel cannot boot from. New test node
 `tst8` (Rocky 10, 10.10.5.20, on gs3): `config/tst8.yaml` and an inventory
-entry; note that `config/tst*.yaml` globs now include it. Not yet: the network-apply backend (NetworkManager), the
-manifests and the Rocky cloud-image provisioning; not yet compiled or run on
-Rocky.
+entry; note that `config/tst*.yaml` globs now include it. Verified on tst8
+(Rocky 10, SELinux enforcing): provision, `@bootstrap` with the rpm, `dist-upgrade`
+(dnf), `install`, failed install exit code. Also: `NetworkReloader` uses
+NetworkManager keyfiles (`/etc/NetworkManager/system-connections`, `nmcli connection
+reload` + `up`) on hosts that have nmcli and no networkctl; `gen_set_dns` tells
+NetworkManager `dns=none` before writing a static resolv.conf; a failed RESULT's
+reason (`FAILED: ...`) is now printed by the CLI. Not yet compiled or run: the
+NetworkManager backend and the DNS change.
 
 ### Fixed — agent: a task that raises before sending a RESULT no longer hangs the stream
 

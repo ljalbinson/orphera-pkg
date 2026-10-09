@@ -41,6 +41,9 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 //     by real runs: the first version assumed resolved everywhere and
 //     failed on tst0 ("Unit systemd-resolved.service not found"), the
 //     second on gs2/gs3 ("...is masked").
+//     On NetworkManager hosts (Rocky/RHEL, no resolved by default) the static
+//     branch also writes /etc/NetworkManager/conf.d/90-orphera-dns.conf
+//     (dns=none) and reloads NetworkManager, or NM rewrites resolv.conf.
 //
 // round_robin: true switches mechanism. systemd-resolved has no rotate
 // option — it sticks to one upstream server and only fails over — so
@@ -201,7 +204,17 @@ object gen_set_dns extends OrpheraClusterPlaybook:
       if config.roundRobin then
         s"""grep -qxF 'options rotate' $resolvConf || { echo 'options rotate missing'; exit 1; }"""
       else ""
-    s"""write_file $resolvConf <<'ORPHERA_EOF'
+    s"""if [ -x /usr/bin/nmcli ] && systemctl is-active --quiet NetworkManager; then
+       |  echo "NetworkManager active: telling it not to manage $resolvConf"
+       |  mkdir -p /etc/NetworkManager/conf.d
+       |  write_file /etc/NetworkManager/conf.d/90-orphera-dns.conf <<'ORPHERA_EOF'
+       |$managedMarker
+       |[main]
+       |dns=none
+       |ORPHERA_EOF
+       |  systemctl reload NetworkManager
+       |fi
+       |write_file $resolvConf <<'ORPHERA_EOF'
        |$staticContent
        |ORPHERA_EOF
        |cat $resolvConf
