@@ -343,6 +343,24 @@ keyring at /mnt/cinder.keyring; RabbitMQ not reachable by the services at
 10.10.5.22:5672; the Ceph pool replication size vs the OSD layout.
 Teardown (destroys the `volumes` pool): `orphera cluster-playbook manifests/cinder_teardown.scala`.
 
+### K3. apt cache on tst11 - NOT YET RUN
+Needs the tst11 VM (`config/tst11.yaml`, hypervisor st0 assumed) with an agent, and
+`tst11.ljalbinson.com` resolvable from the clients.
+
+    git pull
+    manifests/test_apt_cache.sh 2>&1 | tee /tmp/apt_cache.log
+Expect: the cache answers on port 3142 from tst0; the client config uses the
+auto-detect script and it prints `http://tst11.ljalbinson.com:3142`; the package
+`figlet` downloaded from tst0 and then tst1 appears once as fetched into the cache and
+twice as delivered (the cache's `apt-cacher.log`, `I` and `O` lines - this reading of the
+log format is from memory and is the first thing to check if that assertion fails); the
+`.deb` is stored under /var/cache/apt-cacher-ng; with the cache stopped the script
+prints `DIRECT` and `apt-get update` on a client still succeeds; a second run of both
+playbooks succeeds. Teardown: `orphera cluster-playbook manifests/apt_cache_teardown.scala`.
+Most likely to need a fix on the first run: the drop-in config not being read (the
+playbook's tunnelling check fails with a proxy refusal), and Scala string escaping in the
+new manifests (first compile).
+
 ### K2. OpenStack clients on scala0 - PASSED (2026-10-10): token issued, cinder-scheduler and cinder-volume@ceph up (needed python3.12-venv installed first)
     utils/openstack-client-setup.sh
     source ~/.config/openstack/admin-openrc.sh
@@ -354,7 +372,7 @@ cinder-volume@ceph both up. Needs python3-venv on scala0 and tst6 resolvable fro
 ## L. Node reassignment (2026-10-10) - steps 1-2 PASSED, steps 3-5 NOT YET RUN
 New roles: tst0-tst2 Ceph; tst3-tst5 Galera + haproxy + keepalived (VIP
 10.10.5.100); tst6 Keystone; tst7 WordPress and Prometheus/Grafana; tst8 Rocky;
-tst9 Kolla cache; tst10 Cinder.  The manifests, tests and inventory comments were
+tst9 Kolla cache; tst10 Cinder; tst11 apt cache.  The manifests, tests and inventory comments were
 retargeted; the results recorded in J were obtained on the OLD layout (Galera on
 tst0-tst2, WordPress on tst5, monitoring on tst6).
 
