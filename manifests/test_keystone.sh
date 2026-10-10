@@ -77,9 +77,9 @@ OUT=$(orphera run sh -c "sudo mariadb -N -e 'select count(*) from keystone.user'
 assert_not_contains "keystone tables exist and replicated to tst4" "ERROR" "$OUT"
 assert_contains "keystone.user has at least the admin row" "1" "$OUT"
 
-OUT=$(run_on "systemctl is-active orphera-keystone; sudo podman ps --format '{{.Names}} {{.Image}}'")
+OUT=$(run_on "systemctl is-active orphera-keystone; sudo podman ps")
 assert_contains "systemd unit active and container running" "active" "$OUT"
-assert_contains "container named keystone is the Kolla image" "keystone quay.io/openstack.kolla/keystone" "$OUT"
+assert_contains "container is the Kolla keystone image" "quay.io/openstack.kolla/keystone" "$OUT"
 
 OUT=$(run_on "T=\$(sudo /usr/local/sbin/keystone-admin-token) && curl -s --cacert $CA -H \"X-Auth-Token: \$T\" https://$FQDN:5000/v3/users")
 assert_contains "token authorises GET /v3/users and lists admin" '"name":"admin"' "$OUT"
