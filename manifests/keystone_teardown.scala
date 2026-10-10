@@ -4,12 +4,14 @@ import orphera.orchestrator.*
 import orphera.orchestrator.ClusterPlaybookDsl.*
 
 // Undoes keystone_single_node.scala: drops the keystone database and user on
-// the Galera cluster, then purges the packages, the Apache site, the keys,
-// the test CA and its system-trust entry from the Keystone node. Safe to run
-// when nothing is installed. Keep `node` in step with keystone_single_node.
+// the Galera cluster, then stops and removes the container, its systemd unit,
+// the config, keys, logs, the test CA and its system-trust entry from the
+// Keystone node. podman itself is left installed. Safe to run when nothing is
+// installed. Keep `node` and `image` in step with keystone_single_node.
 object keystone_teardown extends OrpheraClusterPlaybook:
 
   private val node = "tst7"
+  private val image = "quay.io/openstack.kolla/keystone:2025.1-ubuntu-noble"
   private val dbName = "keystone"
   private val dbUser = "keystone"
 
@@ -17,17 +19,24 @@ object keystone_teardown extends OrpheraClusterPlaybook:
     s"""mariadb -N -e "DROP DATABASE IF EXISTS $dbName; DROP USER IF EXISTS '$dbUser'@'%'; FLUSH PRIVILEGES;""""
 
   private val stopScript =
-    """a2dissite orphera-keystone 2>/dev/null || true
-      |systemctl stop apache2 2>/dev/null || true
-      |echo "apache2 stopped"""".stripMargin
+    """systemctl disable --now orphera-keystone 2>/dev/null || true
+      |rm -f /etc/systemd/system/orphera-keystone.service
+      |systemctl daemon-reload
+      |if command -v podman >/dev/null 2>&1; then podman rm -f keystone 2>/dev/null || true; fi
+      |echo "keystone container and unit removed"""".stripMargin
 
   private val cleanupScript =
-    """rm -f /etc/apache2/sites-available/orphera-keystone.conf
-      |rm -rf /etc/keystone /var/lib/keystone /var/log/keystone
-      |rm -f /var/log/apache2/keystone.log /var/log/apache2/keystone_access.log
-      |rm -f /usr/local/share/ca-certificates/orphera-test-ca.crt
-      |update-ca-certificates --fresh
-      |echo "keystone files, site config and test CA removed"""".stripMargin
+    s"""rm -rf /etc/kolla/keystone /etc/kolla/keystone-ca /var/lib/orphera/keystone /var/log/kolla/keystone
+       |rm -f /usr/local/sbin/keystone-admin-token
+       |if command -v update-ca-certificates >/dev/null 2>&1; then
+       |  rm -f /usr/local/share/ca-certificates/orphera-test-ca.crt
+       |  update-ca-certificates --fresh
+       |elif command -v update-ca-trust >/dev/null 2>&1; then
+       |  rm -f /etc/pki/ca-trust/source/anchors/orphera-test-ca.crt
+       |  update-ca-trust
+       |fi
+       |if command -v podman >/dev/null 2>&1; then podman rmi -f $image 2>/dev/null || true; fi
+       |echo "keystone config, keys, logs, test CA and image removed"""".stripMargin
 
   val playbook: ClusterPlaybook =
     clusterPlaybook("keystone-teardown")(
@@ -38,25 +47,11 @@ object keystone_teardown extends OrpheraClusterPlaybook:
         .build,
 
       stage("teardown-keystone-node", node)
-        .task("stop apache2 and disable the keystone site")(
+        .task("stop and remove the keystone container and unit")(
           Task.RunCommand(List("sh", "-c", stopScript))
         )
-        .task("purge keystone, apache2, mod_wsgi and the openstack client")(
-          Task.Remove(
-            packages = List(
-              "keystone",
-              "libapache2-mod-wsgi-py3",
-              "apache2",
-              "python3-openstackclient"
-            ),
-            purge = true
-          )
-        )
-        .task("autoremove now-unneeded dependencies")(
-          Task.AutoRemove(purge = true)
-        )
-        .task("remove leftover keystone files and the test CA")(
-          Task.RunCommand(List("sh", "-c", cleanupScript))
+        .task("remove keystone files, test CA and image")(
+          Task.RunCommand(List("sh", "-c", cleanupScript), timeoutSeconds = 120)
         )
         .build
     )

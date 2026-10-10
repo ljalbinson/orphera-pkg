@@ -2,8 +2,9 @@
 #
 # End-to-end test for the single-node Keystone playbooks.
 #
-# Lifecycle: keystone_teardown -> keystone_single_node -> keystone_single_node
-# again (idempotence: existing CA, certificate and fernet keys must be reused),
+# Lifecycle: keystone_teardown -> keystone_single_node (Kolla container) ->
+# keystone_single_node again (idempotence: existing CA, certificate and fernet
+# keys must be reused),
 # with independent checks run on the Keystone node over `orphera run` rather
 # than trusting the playbook's own health check.
 #
@@ -17,7 +18,7 @@ set -uo pipefail
 
 NODE="tst7"
 FQDN="tst7.ljalbinson.com"
-CA="/etc/keystone/ssl/ca.crt"
+CA="/etc/kolla/keystone/ssl/ca.crt"   # world-readable copy of the test CA
 
 PASS=0
 FAIL=0
@@ -76,8 +77,12 @@ OUT=$(orphera run sh -c "sudo mariadb -N -e 'select count(*) from keystone.user'
 assert_not_contains "keystone tables exist and replicated to tst1" "ERROR" "$OUT"
 assert_contains "keystone.user has at least the admin row" "1" "$OUT"
 
-OUT=$(run_on ". /etc/keystone/admin-openrc && openstack user list -f value -c Name")
-assert_contains "openstack client lists the admin user" "admin" "$OUT"
+OUT=$(run_on "systemctl is-active orphera-keystone; sudo podman ps --format '{{.Names}} {{.Image}}'")
+assert_contains "systemd unit active and container running" "active" "$OUT"
+assert_contains "container named keystone is the Kolla image" "keystone quay.io/openstack.kolla/keystone" "$OUT"
+
+OUT=$(run_on "T=\$(sudo /usr/local/sbin/keystone-admin-token) && curl -s --cacert $CA -H \"X-Auth-Token: \$T\" https://$FQDN:5000/v3/users")
+assert_contains "token authorises GET /v3/users and lists admin" '"name":"admin"' "$OUT"
 
 # Idempotence: the CA fingerprint must not change on a second run, and the
 # fernet keys must still be there.
@@ -92,7 +97,7 @@ if [ "$FP1" = "$FP2" ] && printf '%s' "$FP1" | grep -q Fingerprint; then
 else
   log "FAIL: CA changed between runs"; FAIL=$((FAIL + 1))
 fi
-OUT=$(run_on "sudo ls /etc/keystone/fernet-keys")
+OUT=$(run_on "sudo ls /var/lib/orphera/keystone/fernet-keys")
 assert_contains "fernet keys still present" "0" "$OUT"
 
 log "passed=$PASS failed=$FAIL"

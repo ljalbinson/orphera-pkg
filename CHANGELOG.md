@@ -6,16 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-### Added — OpenStack Keystone, single node with TLS (untested)
+### Added — OpenStack Keystone from Kolla images, single node with TLS (untested)
 
 - `manifests/keystone_single_node.scala`: Keystone on one node (default tst7)
-  using the Galera cluster behind the 10.10.5.100 VIP as its database. Installs
-  keystone, Apache with mod_wsgi and the openstack client; writes
-  `keystone.conf`; creates a private test CA and a server certificate under
-  `/etc/keystone/ssl` (reused on re-runs, CA added to the node's trust store);
-  runs `db_sync`, fernet/credential setup and `bootstrap`; serves the v3 API on
-  https://<node>:5000/v3/; writes `/etc/keystone/admin-openrc`. Confirms with a
-  TLS health check and a real admin token. Ubuntu only. Not yet run.
+  using the Galera cluster behind the 10.10.5.100 VIP as its database. Runs the
+  Kolla `keystone` container image under podman and a systemd unit; Orphera
+  writes what kolla-ansible would (`keystone.conf`, the Apache vhost, Kolla
+  `config.json`, with the WSGI script path and Apache flavour detected from the
+  image), a private test CA and server certificate (reused on re-runs, CA added
+  to the node's trust store), and runs `db_sync`, fernet/credential setup and
+  `bootstrap` in one-off containers. API on https://<node>:5000/v3/. Confirms
+  with a TLS health check and a real admin token. Written to work on Ubuntu or
+  Rocky hosts. Not yet run.
 - `manifests/keystone_teardown.scala` and `manifests/test_keystone.sh`
   (lifecycle, independent checks, idempotence).
 
