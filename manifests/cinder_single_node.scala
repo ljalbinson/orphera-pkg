@@ -316,7 +316,7 @@ object cinder_single_node extends OrpheraClusterPlaybook:
   // for SELinux hosts and is ignored elsewhere.
   private val dbSyncScript =
     s"""set -e
-       |podman run --rm --network host --entrypoint cinder-manage -v $srcDir/cinder.conf:/etc/cinder/cinder.conf:ro,z -v $logDir:/var/log/kolla/cinder:z -v $stateDir:/var/lib/cinder:z $apiImage db sync
+       |podman run --rm --network host --user root --entrypoint cinder-manage -v $srcDir/cinder.conf:/etc/cinder/cinder.conf:ro,z -v $logDir:/var/log/kolla/cinder:z -v $stateDir:/var/lib/cinder:z $apiImage db sync
        |echo "cinder database synced"""".stripMargin
 
   private val unitsScript =
