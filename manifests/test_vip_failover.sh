@@ -132,10 +132,13 @@ current_vip_holder() {
 # wordpress_site.scala having been applied.
 vip_reachable() {
   local from_host="tst7"
-  if ! ssh "${SSH_USER}@${from_host}" true 2>/dev/null; then
-    from_host=$(current_vip_holder)
+  # tst7 must be reachable AND have a mariadb client (it is a plain app node,
+  # unlike the Galera nodes, and a missing client would look like a dead VIP).
+  if ! ssh "${SSH_USER}@${from_host}" 'command -v mariadb >/dev/null' 2>/dev/null; then
+    local holder host
+    holder=$(current_vip_holder)
     for host in "${NODES[@]}"; do
-      [ "$host" != "$from_host" ] && { from_host="$host"; break; }
+      [ "$host" != "$holder" ] && { from_host="$host"; break; }
     done
   fi
   local result
