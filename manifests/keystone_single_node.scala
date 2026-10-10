@@ -244,7 +244,7 @@ object keystone_single_node extends OrpheraClusterPlaybook:
     s"""set -e
        |mkdir -p $dataDir/fernet-keys $dataDir/credential-keys $logDir
        |ks() {
-       |  podman run --rm --network host --entrypoint keystone-manage -v $confDir/keystone.conf:/etc/keystone/keystone.conf:ro,z -v $dataDir/fernet-keys:/etc/keystone/fernet-keys:z -v $dataDir/credential-keys:/etc/keystone/credential-keys:z -v $logDir:/var/log/kolla/keystone:z $image "$$@"
+       |  podman run --rm --network host --user root --entrypoint keystone-manage -v $confDir/keystone.conf:/etc/keystone/keystone.conf:ro,z -v $dataDir/fernet-keys:/etc/keystone/fernet-keys:z -v $dataDir/credential-keys:/etc/keystone/credential-keys:z -v $logDir:/var/log/kolla/keystone:z $image "$$@"
        |}
        |ks db_sync
        |[ -f $dataDir/fernet-keys/0 ] || ks fernet_setup --keystone-user keystone --keystone-group keystone
