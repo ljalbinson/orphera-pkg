@@ -165,6 +165,7 @@ object keystone_single_node extends OrpheraClusterPlaybook:
        |cat > $confDir/keystone.conf <<'CONF'
        |[DEFAULT]
        |log_dir = /var/log/kolla/keystone
+       |use_stderr = true
        |
        |[database]
        |connection = mysql+pymysql://$dbUser:$dbPassword@$vip:3306/$dbName
