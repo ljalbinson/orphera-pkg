@@ -18,6 +18,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `bootstrap` in one-off containers. API on https://<node>:5000/v3/. Confirms
   with a TLS health check and a real admin token. Written to work on Ubuntu or
   Rocky hosts. Not yet run.
+- `manifests/kolla_cache.scala` (+ `kolla_cache_teardown.scala`): a Kolla image
+  cache on a new node, tst9 (10.10.5.21): the stock `registry:2` image as a
+  pull-through mirror of quay.io under podman/systemd, with the Keystone image
+  pre-pulled. `keystone_single_node.scala` points podman at it as a mirror and
+  falls back to quay.io. New `config/tst9.yaml` (Ubuntu VM, 120 GB disk) and
+  inventory entry. Not yet run.
 - `manifests/keystone_teardown.scala` and `manifests/test_keystone.sh`
   (lifecycle, independent checks, idempotence).
 

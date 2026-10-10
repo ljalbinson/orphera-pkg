@@ -289,3 +289,18 @@ prints a hint; `registry`/`release`/`baseTag` are at the top of the manifest),
 the SSL module being present in the image's Apache, and Kolla's `config.json`
 behaviour (check `journalctl -u orphera-keystone` and /var/log/kolla/keystone).
 Teardown: `orphera cluster-playbook manifests/keystone_teardown.scala`.
+
+### K0. Kolla image cache on tst9 - NOT YET RUN
+tst9 (10.10.5.21) is created by the user from `config/tst9.yaml` (check the
+hypervisor: st0 is assumed), then:
+
+    orphera @bootstrap ... tst9   (as for the other Ubuntu nodes)
+    orphera cluster-playbook manifests/kolla_cache.scala
+    orphera run sh -c "curl -s http://localhost:5000/v2/_catalog; sudo du -sh /var/lib/orphera/kolla-cache" --nodes tst9
+Expect: the catalog lists `openstack.kolla/keystone` after the warm-up, and the
+data directory is non-empty.  Then run K (keystone): its pull should come from
+tst9 (`journalctl -u orphera-keystone` is not enough; check tst9's registry log:
+`sudo podman logs kolla-cache | tail`).  Not tested: whether quay.io works as
+the proxied remote for every Kolla repository (the main risk), and whether the
+mirror path mapping `quay.io/openstack.kolla/x` -> `tst9:5000/openstack.kolla/x`
+is what podman sends.

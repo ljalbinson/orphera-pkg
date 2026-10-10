@@ -87,6 +87,24 @@ object keystone_single_node extends OrpheraClusterPlaybook:
 
   private val hostPackages = List("podman", "openssl", "curl", "ca-certificates")
 
+  // Kolla image cache from kolla_cache.scala (tst9). podman tries this mirror
+  // first and falls back to quay.io if it is unreachable, so the manifest
+  // still works with the cache down or not yet built.
+  private val cacheHostPort = "tst9.ljalbinson.com:5000"
+
+  private val useCacheScript =
+    s"""mkdir -p /etc/containers/registries.conf.d
+       |cat > /etc/containers/registries.conf.d/orphera-kolla-cache.conf <<'REG'
+       |[[registry]]
+       |prefix = "quay.io"
+       |location = "quay.io"
+       |
+       |[[registry.mirror]]
+       |location = "$cacheHostPort"
+       |insecure = true
+       |REG
+       |echo "podman will try $cacheHostPort before quay.io"""".stripMargin
+
   // tst0 only. IF NOT EXISTS / re-GRANT make a re-run a no-op. `@'%'` for the
   // same reason as wordpress_site.scala: haproxy's tcp mode hides the real
   // client address.
@@ -300,6 +318,9 @@ object keystone_single_node extends OrpheraClusterPlaybook:
       stage("install-keystone", node)
         .task("install podman and the TLS tools")(
           Task.Install(packages = hostPackages, updateCache = true)
+        )
+        .task("use the Kolla cache as a mirror for quay.io")(
+          Task.RunCommand(List("sh", "-c", useCacheScript))
         )
         .task("pull the Kolla keystone image")(
           Task.RunCommand(List("sh", "-c", pullScript), timeoutSeconds = 1200)
