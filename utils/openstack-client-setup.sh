@@ -53,7 +53,8 @@ if [ ! -x "$VENV_DIR/bin/python" ]; then
   mkdir -p "$(dirname "$VENV_DIR")"
   if ! python3 -m venv "$VENV_DIR" 2>/dev/null; then
     rm -rf "$VENV_DIR"
-    die "python3 -m venv failed - on Ubuntu/Debian install it with: sudo apt-get install python3-venv"
+    PYVENV_PKG="$(python3 -c 'import sys; print("python%d.%d-venv" % sys.version_info[:2])')"
+    die "python3 -m venv failed - on Ubuntu/Debian install it with: sudo apt-get install $PYVENV_PKG   (then re-run this script)"
   fi
 else
   log "reusing virtualenv $VENV_DIR"
