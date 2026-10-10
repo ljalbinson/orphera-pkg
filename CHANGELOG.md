@@ -14,6 +14,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the move-over order. `etcd_grow_cluster.scala` is marked as not runnable
   against tst3/tst4 any more.
 
+### Changed — `cephadm_install.scala` allows the legacy cephx cipher
+- After bootstrap it runs `ceph mon set auth_allowed_ciphers aes,aes256k` (only
+  on Ceph releases that have the option), so clients with older Ceph libraries,
+  such as the OpenStack Kolla images, can authenticate against a patched
+  (19.2.6+) cluster. A test-cluster compromise; enforce `aes256k` once the
+  clients are upgraded.
+
 ### Added — OpenStack Keystone, Kolla cache and Cinder from Kolla images (run on the test fleet 2026-10-10)
 
 - `manifests/keystone_single_node.scala`: Keystone on one node (default tst7)

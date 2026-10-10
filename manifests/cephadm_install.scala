@@ -41,5 +41,25 @@ object cephadm_install extends OrpheraClusterPlaybook:
             timeoutSeconds = 300
           )
         )
+        .task("allow the aes cephx cipher alongside aes256k (older clients)")(
+          // Ceph 19.2.6+ / 20.2.4+ (CVE-2025-30156) accepts only the new aes256k
+          // cipher by default. OpenStack clients from the Kolla images
+          // (Ubuntu's Ceph 19.2.3) only know the older `aes`, so they are
+          // refused with "RADOS permission denied". TEST CLUSTER COMPROMISE:
+          // allow both until all clients are upgraded, then enforce with
+          // `ceph mon set auth_allowed_ciphers aes256k` and rotate client keys.
+          // Only set where the release knows the option; idempotent.
+          Task.RunCommand(
+            List(
+              "sh",
+              "-c",
+              "if cephadm shell -- ceph mon dump 2>/dev/null | grep -q auth_allowed_ciphers; then " +
+                "cephadm shell -- ceph mon set auth_allowed_ciphers aes,aes256k && " +
+                "echo 'cephx ciphers allowed: aes,aes256k'; " +
+                "else echo 'this Ceph release has no auth_allowed_ciphers; nothing to set'; fi"
+            ),
+            timeoutSeconds = 120
+          )
+        )
         .build
     )
