@@ -186,13 +186,20 @@ object keystone_single_node extends OrpheraClusterPlaybook:
        |if [ -z "$$WSGI" ]; then echo "keystone-wsgi-public not found in $image" >&2; exit 1; fi
        |if podman run --rm --entrypoint sh $image -c 'test -d /etc/apache2/conf-enabled'; then
        |  APACHE_CONF=/etc/apache2/conf-enabled/wsgi-keystone.conf
-       |  APACHE_CMD="apache2 -DFOREGROUND"
+       |  APACHE_CMD="apache2"
        |else
        |  APACHE_CONF=/etc/httpd/conf.d/wsgi-keystone.conf
-       |  APACHE_CMD="/usr/sbin/httpd -DFOREGROUND"
+       |  APACHE_CMD="/usr/sbin/httpd"
        |fi
-       |echo "wsgi script: $$WSGI; apache config: $$APACHE_CONF"
+       |# kolla_start appends -DFOREGROUND itself. mod_ssl is not always loaded in
+       |# the image, so load it explicitly from wherever the image keeps it.
+       |SSLMOD=$$(podman run --rm --entrypoint sh $image -c 'ls /usr/lib/apache2/modules/mod_ssl.so /etc/httpd/modules/mod_ssl.so /usr/lib64/httpd/modules/mod_ssl.so 2>/dev/null | head -n 1')
+       |if [ -z "$$SSLMOD" ]; then echo "mod_ssl.so not found in $image" >&2; exit 1; fi
+       |echo "wsgi script: $$WSGI; apache config: $$APACHE_CONF; mod_ssl: $$SSLMOD"
        |cat > $confDir/wsgi-keystone.conf <<WSGICONF
+       |<IfModule !ssl_module>
+       |LoadModule ssl_module $$SSLMOD
+       |</IfModule>
        |Listen 0.0.0.0:5000
        |ServerSignature Off
        |ServerTokens Prod
