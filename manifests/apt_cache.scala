@@ -22,7 +22,7 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 //     the cache so the indexes are stored before any other node asks.
 //
 // Disk: the cache lives in /var/cache/apt-cacher-ng. config/tst11.yaml gives
-// the VM a 100 GB disk. apt-cacher-ng expires files that are no longer in any
+// the VM a 120 GB disk. apt-cacher-ng expires files that are no longer in any
 // index (daily maintenance), so it does not grow without bound.
 //
 // Not compiled where this was written; the first run on scala0 is the first

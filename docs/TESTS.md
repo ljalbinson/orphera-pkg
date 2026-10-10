@@ -343,7 +343,7 @@ keyring at /mnt/cinder.keyring; RabbitMQ not reachable by the services at
 10.10.5.22:5672; the Ceph pool replication size vs the OSD layout.
 Teardown (destroys the `volumes` pool): `orphera cluster-playbook manifests/cinder_teardown.scala`.
 
-### K3. apt cache on tst11 - NOT YET RUN
+### K3. apt cache on tst11 - PASSED, 12/12 (2026-10-10)
 Needs the tst11 VM (`config/tst11.yaml`, hypervisor st0 assumed) with an agent, and
 `tst11.ljalbinson.com` resolvable from the clients.
 

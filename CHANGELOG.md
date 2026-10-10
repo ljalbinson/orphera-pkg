@@ -21,7 +21,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (19.2.6+) cluster. A test-cluster compromise; enforce `aes256k` once the
   clients are upgraded.
 
-### Added — apt package cache on tst11 (untested)
+### Added — apt package cache on tst11 (test_apt_cache.sh 12/12)
 - `manifests/apt_cache.scala` (+ `apt_cache_teardown.scala`, `test_apt_cache.sh`):
   apt-cacher-ng on a new node, tst11 (10.10.5.23), caching plain-HTTP Ubuntu
   repositories; it refreshes its own package indexes through the cache once up.
@@ -29,9 +29,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   with a proxy auto-detect script (`/usr/local/sbin/orphera-apt-proxy`), so a
   node uses the cache when it answers and fetches directly when it does not;
   HTTPS repositories are always fetched directly. New `config/tst11.yaml` (Ubuntu
-  VM, 100 GB disk) and inventory entry. The test downloads a package from two
+  VM, 120 GB disk) and inventory entry. The test downloads a package from two
   nodes and checks the cache's own log for one fetch and two deliveries, then
-  stops the cache to prove the fallback. Not yet run.
+  stops the cache to prove the fallback. Passed on the test fleet.
 
 ### Added — OpenStack command-line clients on scala0
 - `utils/openstack-client-setup.sh`: creates a virtualenv with
