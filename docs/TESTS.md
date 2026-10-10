@@ -369,7 +369,7 @@ Expect: the script ends with "OK - the clients can authenticate"; `service list`
 keystone and cinderv3; `volume service list` shows cinder-scheduler and
 cinder-volume@ceph both up. Needs python3-venv on scala0 and tst6 resolvable from there.
 
-## L. Node reassignment (2026-10-10) - steps 1-2 PASSED, steps 3-5 NOT YET RUN
+## L. Node reassignment (2026-10-10) - steps 1-3 and 5 done; step 4 (observability) NOT YET RUN
 New roles: tst0-tst2 Ceph; tst3-tst5 Galera + haproxy + keepalived (VIP
 10.10.5.100); tst6 Keystone; tst7 WordPress and Prometheus/Grafana; tst8 Rocky;
 tst9 Kolla cache; tst10 Cinder; tst11 apt cache.  The manifests, tests and inventory comments were
@@ -408,6 +408,14 @@ haproxy was stopped on tst3, reachable throughout, tst3 reclaimed it about 5s af
 haproxy came back). The first drill attempt failed only because the probe host tst7
 had no mariadb client; the drill now uses tst7 only when it has one, otherwise a
 Galera node that does not hold the VIP.
+
+Result, steps 3 and 5 (2026-10-10): WordPress applied on tst7 (reported running; its
+test script was not run). Keystone on tst6 (K) 11/11 and Cinder on tst10 (K1) 12/12 both
+pass on the new Galera/VIP. Also added and passed that day: the Kolla cache on tst9 (K0),
+OpenStack clients on scala0 (K2) and the apt cache on tst11 (K3, 12/12).
+Still to do: step 4, `manifests/test_observability.sh` against tst7, and re-running
+`cephadm_install.scala` to confirm its new cephx-cipher task (the live cluster already
+has the setting from `cinder_single_node.scala`).
 
 Expect: each of the tests above passes as before.  Not changed: the Ceph
 manifests (tst0-tst2).  `etcd_grow_cluster.scala` still names tst3/tst4 as the
