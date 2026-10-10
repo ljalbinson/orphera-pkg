@@ -284,7 +284,9 @@ object keystone_single_node extends OrpheraClusterPlaybook:
        |systemctl restart orphera-keystone
        |sleep 5
        |if ! systemctl is-active --quiet orphera-keystone; then
-       |  echo "orphera-keystone failed to start - see 'journalctl -xeu orphera-keystone' and $logDir" >&2
+       |  journalctl -u orphera-keystone -n 40 --no-pager >&2 || true
+       |  tail -n 20 $logDir/*.log >&2 2>/dev/null || true
+       |  echo "orphera-keystone failed to start - see above and $logDir" >&2
        |  exit 1
        |fi
        |echo "orphera-keystone running"""".stripMargin
