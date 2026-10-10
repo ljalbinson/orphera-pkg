@@ -243,6 +243,12 @@ object keystone_single_node extends OrpheraClusterPlaybook:
   private val initScript =
     s"""set -e
        |mkdir -p $dataDir/fernet-keys $dataDir/credential-keys $logDir
+       |# keystone-manage creates key files as the image's keystone user (it switches
+       |# its effective uid), so the host directories must belong to that uid.
+       |KUID=$$(podman run --rm --entrypoint id $image -u keystone)
+       |KGID=$$(podman run --rm --entrypoint id $image -g keystone)
+       |chown -R $$KUID:$$KGID $dataDir/fernet-keys $dataDir/credential-keys
+       |chmod 700 $dataDir/fernet-keys $dataDir/credential-keys
        |ks() {
        |  podman run --rm --network host --user root --entrypoint keystone-manage -v $confDir/keystone.conf:/etc/keystone/keystone.conf:ro,z -v $dataDir/fernet-keys:/etc/keystone/fernet-keys:z -v $dataDir/credential-keys:/etc/keystone/credential-keys:z -v $logDir:/var/log/kolla/keystone:z $image "$$@"
        |}
