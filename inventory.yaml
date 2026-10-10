@@ -54,6 +54,7 @@ nodes:
   #   tst8        Rocky Linux test node
   #   tst9        Kolla image cache
   #   tst10       Cinder + RabbitMQ
+  #   tst11       apt cache (apt-cacher-ng)
   # No osd_disks/zap_disks on tst3 and up: no Ceph role there (see the
   # incident note on tst0 above for why disk paths are never guessed).
   - name: tst3
@@ -101,6 +102,13 @@ nodes:
     host: tst10.ljalbinson.com
     vars:
       cluster_ip: "10.10.5.22"
+
+  # apt package cache (apt-cacher-ng): manifests/apt_cache.scala; nodes are
+  # pointed at it by manifests/apt_cache_clients.scala.
+  - name: tst11
+    host: tst11.ljalbinson.com
+    vars:
+      cluster_ip: "10.10.5.23"
 
   - name: gs1
     host: gs1.ljalbinson.com

@@ -1251,6 +1251,7 @@ Fleet layout used by these manifests (see `inventory.yaml`):
 | tst7 | WordPress, Prometheus/Grafana |
 | tst9 | Kolla image cache (`registry:2` pull-through proxy of quay.io) |
 | tst10 | Cinder (API, scheduler, volume, RabbitMQ) |
+| tst11 | apt cache (apt-cacher-ng) for the Ubuntu nodes |
 
 Run order, each with its own teardown and an end-to-end test that checks the
 result independently of the playbook's own health checks:
@@ -1262,6 +1263,13 @@ result independently of the playbook's own health checks:
     manifests/test_keystone.sh                                  # applies keystone_single_node.scala
     manifests/test_cinder.sh                                    # applies cinder_single_node.scala
     utils/openstack-client-setup.sh                             # CLI on the machine you run orphera from
+
+Separately, `manifests/apt_cache.scala` builds an apt package cache
+(apt-cacher-ng on tst11) and `manifests/apt_cache_clients.scala` points the
+Ubuntu nodes at it. Nodes check the cache with a small auto-detect script and
+fetch directly when it is down, so nothing depends on it. `test_apt_cache.sh`
+proves a package is fetched from the mirror once and served from the cache to a
+second node.
 
 `test_mariadb_galera.sh` and `test_vip_failover.sh` cover the database layer
 (including a forced VIP failover). `test_cinder.sh` creates a real volume and
