@@ -43,6 +43,10 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 //   /etc/systemd/system/orphera-keystone.service
 //   /usr/local/sbin/keystone-admin-token
 //
+// The certificate Apache serves is the server certificate followed by the CA
+// (server-chain.crt), so a new client node can fetch the CA from the TLS
+// handshake itself (trust on first use; see cinder_single_node.scala).
+//
 // TLS: the self-signed CA is created once and reused on re-runs, and added to
 // the node's system trust store. Other hosts that talk to Keystone need
 // /etc/kolla/keystone-ca/ca.crt.
@@ -143,6 +147,7 @@ object keystone_single_node extends OrpheraClusterPlaybook:
        |  chmod 600 server.key
        |fi
        |cp $caDir/ca.crt $sslDir/ca.crt
+       |cat $sslDir/server.crt $caDir/ca.crt > $sslDir/server-chain.crt
        |openssl verify -CAfile $caDir/ca.crt $sslDir/server.crt
        |if command -v update-ca-certificates >/dev/null 2>&1; then
        |  cp $caDir/ca.crt /usr/local/share/ca-certificates/orphera-test-ca.crt
@@ -216,7 +221,7 @@ object keystone_single_node extends OrpheraClusterPlaybook:
        |  "config_files": [
        |    {"source": "/var/lib/kolla/config_files/keystone.conf", "dest": "/etc/keystone/keystone.conf", "owner": "keystone", "perm": "0600"},
        |    {"source": "/var/lib/kolla/config_files/wsgi-keystone.conf", "dest": "$$APACHE_CONF", "owner": "keystone", "perm": "0600"},
-       |    {"source": "/var/lib/kolla/config_files/ssl/server.crt", "dest": "/etc/keystone/ssl/server.crt", "owner": "keystone", "perm": "0644"},
+       |    {"source": "/var/lib/kolla/config_files/ssl/server-chain.crt", "dest": "/etc/keystone/ssl/server.crt", "owner": "keystone", "perm": "0644"},
        |    {"source": "/var/lib/kolla/config_files/ssl/server.key", "dest": "/etc/keystone/ssl/server.key", "owner": "keystone", "perm": "0600"}
        |  ],
        |  "permissions": [

@@ -304,3 +304,18 @@ tst9 (`journalctl -u orphera-keystone` is not enough; check tst9's registry log:
 the proxied remote for every Kolla repository (the main risk), and whether the
 mirror path mapping `quay.io/openstack.kolla/x` -> `tst9:5000/openstack.kolla/x`
 is what podman sends.
+
+### K1. Cinder on tst10 (draft) - NOT YET RUN
+Needs: Galera + VIP, Ceph with OSDs, Keystone (K) re-applied so it serves the
+CA chain, tst10 created from `config/tst10.yaml` and bootstrapped.
+
+    orphera cluster-playbook manifests/keystone_single_node.scala   (picks up server-chain.crt)
+    manifests/test_cinder.sh 2>&1 | tee /tmp/cinder.log
+Expect: four units active, scheduler and volume `up` through the API, a 1 GB
+volume created and visible as `volume-<id>` in `rbd ls volumes` on Ceph, deleted
+cleanly, second run succeeds.
+Likeliest first-run problems: the Kolla image names/tags and config.json
+behaviour for cinder-api/scheduler/volume; `cephadm shell --mount` placing the
+keyring at /mnt/cinder.keyring; RabbitMQ not reachable by the services at
+10.10.5.22:5672; the Ceph pool replication size vs the OSD layout.
+Teardown (destroys the `volumes` pool): `orphera cluster-playbook manifests/cinder_teardown.scala`.

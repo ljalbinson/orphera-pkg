@@ -24,6 +24,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   pre-pulled. `keystone_single_node.scala` points podman at it as a mirror and
   falls back to quay.io. New `config/tst9.yaml` (Ubuntu VM, 120 GB disk) and
   inventory entry. Not yet run.
+- DRAFT `manifests/cinder_single_node.scala` (+ `cinder_teardown.scala`,
+  `test_cinder.sh`): Cinder on a new node, tst10 (10.10.5.22), from Kolla images
+  under podman/systemd (cinder-api, cinder-scheduler, cinder-volume) with a
+  RabbitMQ container, volumes stored as RBD images in the existing Ceph cluster
+  (pool `volumes`, cephx user `client.cinder` with a fixed test key), database
+  on Galera, identity from Keystone (the CA is taken from Keystone's TLS
+  handshake). Registers the service and endpoints in Keystone through a small
+  stdlib-Python helper. Keystone now serves leaf + CA (`server-chain.crt`).
+  New `config/tst10.yaml` and inventory entry. Not yet run.
 - `manifests/keystone_teardown.scala` and `manifests/test_keystone.sh`
   (lifecycle, independent checks, idempotence).
 
