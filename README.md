@@ -49,6 +49,7 @@ untrusted networks or adversarial input.
 - [Testing](#testing)
 - [Development notes](#development-notes)
 - [Example: a real Ceph cluster deployment](#example-a-real-ceph-cluster-deployment)
+- [Example: OpenStack Keystone and Cinder from Kolla images](#example-openstack-keystone-and-cinder-from-kolla-images)
 - [Example: parallel network throughput test (iperf3)](#example-parallel-network-throughput-test-iperf3)
 - [Known gaps / not yet built](#known-gaps--not-yet-built)
 
@@ -1229,6 +1230,72 @@ per-node devices (`osd_devices` inventory/group var) or left to
 
 The two paths are not meant to be run against the same hosts — pick
 one per cluster.
+
+## Example: OpenStack Keystone and Cinder from Kolla images
+
+A larger worked example that builds a small OpenStack control plane on the test
+fleet out of the pieces above. It uses the upstream **Kolla container images**
+(`quay.io/openstack.kolla/<service>:2025.1-ubuntu-noble`) under rootful `podman`
+and `systemd`, not distribution packages: Orphera writes what kolla-ansible
+would (service config, Apache vhost, Kolla `config.json`), runs the one-off
+`*-manage` commands in containers, and manages the long-running containers as
+`orphera-<name>.service` units.
+
+Fleet layout used by these manifests (see `inventory.yaml`):
+
+| Nodes | Role |
+|---|---|
+| tst0-tst2 | Ceph (cephadm) |
+| tst3-tst5 | MariaDB Galera + haproxy + keepalived, VIP 10.10.5.100 |
+| tst6 | Keystone (TLS, test CA) |
+| tst7 | WordPress, Prometheus/Grafana |
+| tst9 | Kolla image cache (`registry:2` pull-through proxy of quay.io) |
+| tst10 | Cinder (API, scheduler, volume, RabbitMQ) |
+
+Run order, each with its own teardown and an end-to-end test that checks the
+result independently of the playbook's own health checks:
+
+    orphera cluster-playbook manifests/cephadm_install.scala  # ... then mons and OSDs
+    orphera cluster-playbook manifests/mariadb_galera_cluster.scala
+    orphera cluster-playbook manifests/mariadb_haproxy_keepalived.scala
+    orphera cluster-playbook manifests/kolla_cache.scala        # optional, speeds up pulls
+    manifests/test_keystone.sh                                  # applies keystone_single_node.scala
+    manifests/test_cinder.sh                                    # applies cinder_single_node.scala
+    utils/openstack-client-setup.sh                             # CLI on the machine you run orphera from
+
+`test_mariadb_galera.sh` and `test_vip_failover.sh` cover the database layer
+(including a forced VIP failover). `test_cinder.sh` creates a real volume and
+checks that it appears, and is removed, as an RBD image in the Ceph `volumes`
+pool.
+
+`utils/openstack-client-setup.sh` creates a virtualenv with
+`python-openstackclient` outside the repository (`~/.venvs/openstack`), fetches
+Keystone's test CA, and writes `~/.config/openstack/admin-openrc.sh`:
+
+    source ~/.config/openstack/admin-openrc.sh
+    openstack token issue
+    openstack volume service list
+    deactivate-openstack
+
+Worth knowing:
+
+- **Test credentials are hard-coded** in the manifests (admin, database,
+  RabbitMQ, the Ceph `client.cinder` key) by project convention. This is test
+  infrastructure; do not reuse any of it for anything real.
+- **Ceph cipher compromise.** Ceph 19.2.6 and later (CVE-2025-30156) accepts
+  only the new `aes256k` cephx cipher by default, but the Kolla images carry
+  Ubuntu's Ceph 19.2.3 client, which only knows the older `aes`. The
+  `cephadm_install.scala` and `cinder_single_node.scala` playbooks therefore run
+  `ceph mon set auth_allowed_ciphers aes,aes256k`. Once the clients are upgraded,
+  enforce `aes256k` only (`ceph mon set auth_allowed_ciphers aes256k`) and
+  rotate `client.cinder`.
+- **Kolla specifics learned the hard way:** `keystone-manage fernet_setup`
+  switches to the image's `keystone` user, so the host key directories must be
+  owned by that uid; the image's Apache has `mod_ssl` but does not load it;
+  `kolla_start` adds `-DFOREGROUND` itself; and services configured with
+  `log_dir` log only to files unless `use_stderr = true` is also set.
+- **Not built yet:** Glance (Ceph RBD), Placement, Nova, and Neutron (provider
+  networks only).
 
 ## Example: parallel network throughput test (iperf3)
 
