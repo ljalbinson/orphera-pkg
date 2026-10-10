@@ -28,8 +28,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   file (`~/.config/openstack/admin-openrc.sh`, mode 600). `source` it, then
   `openstack token issue`, `openstack volume list` and so on;
   `deactivate-openstack` undoes it. The credentials are the project's test
-  values. Idempotent; checks itself by issuing a token. Untested against the
-  real fleet.
+  values. Idempotent; checks itself by issuing a token. Passed on scala0 against the
+  real fleet (needs the python3-venv package).
 
 ### Added — OpenStack Keystone, Kolla cache and Cinder from Kolla images (run on the test fleet 2026-10-10)
 

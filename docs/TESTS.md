@@ -343,7 +343,7 @@ keyring at /mnt/cinder.keyring; RabbitMQ not reachable by the services at
 10.10.5.22:5672; the Ceph pool replication size vs the OSD layout.
 Teardown (destroys the `volumes` pool): `orphera cluster-playbook manifests/cinder_teardown.scala`.
 
-### K2. OpenStack clients on scala0 - NOT YET RUN
+### K2. OpenStack clients on scala0 - PASSED (2026-10-10): token issued, cinder-scheduler and cinder-volume@ceph up (needed python3.12-venv installed first)
     utils/openstack-client-setup.sh
     source ~/.config/openstack/admin-openrc.sh
     openstack token issue && openstack service list && openstack volume service list
