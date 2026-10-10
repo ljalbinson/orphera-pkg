@@ -82,7 +82,7 @@ assert_contains "systemd unit active and container running" "active" "$OUT"
 assert_contains "container is the Kolla keystone image" "quay.io/openstack.kolla/keystone" "$OUT"
 
 OUT=$(run_on "T=\$(sudo /usr/local/sbin/keystone-admin-token) && curl -s --cacert $CA -H \"X-Auth-Token: \$T\" https://$FQDN:5000/v3/users")
-assert_contains "token authorises GET /v3/users and lists admin" '"name":"admin"' "$OUT"
+assert_contains "token authorises GET /v3/users and lists admin" '"name": "admin"' "$OUT"
 
 # Idempotence: the CA fingerprint must not change on a second run, and the
 # fernet keys must still be there.

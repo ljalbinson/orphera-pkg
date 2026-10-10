@@ -272,7 +272,7 @@ See I8a.  PASSED.
 - Rocky: firewalld rule from the rpm (firewalld was not running on tst8).
 - Manifests other than gen_set_dns, gen_dist_upgrade, gen_packages and kvm_vm_provision on Rocky (ceph, etcd, galera, observability, wordpress are still Ubuntu-specific).
 
-## K. Keystone (Kolla image under podman), single node with TLS - NOT YET RUN
+## K. Keystone (Kolla image under podman), single node with TLS - PASSED on tst6 (2026-10-10)
 Written without a Scala toolchain, so the first run on scala0 is also the first
 compile.  Prerequisites: Galera + VIP healthy (J, now on tst3-tst5, see L), agent on tst6.
 
@@ -289,6 +289,20 @@ prints a hint; `registry`/`release`/`baseTag` are at the top of the manifest),
 the SSL module being present in the image's Apache, and Kolla's `config.json`
 behaviour (check `journalctl -u orphera-keystone` and /var/log/kolla/keystone).
 Teardown: `orphera cluster-playbook manifests/keystone_teardown.scala`.
+
+Result (2026-10-10): image `quay.io/openstack.kolla/keystone:2025.1-ubuntu-noble`
+pulls from quay.io as assumed (the tst9 cache did not exist yet, so podman fell back).
+Four fixes were needed on the way, all now in the manifest:
+1. `fernet_setup` switches to the image's keystone uid before writing keys, so the
+   host key directories must be chowned to that uid (root in the container is not
+   enough; `--user root` alone did not help).
+2. Keystone logged only to a file (`log_dir`), hiding errors; `use_stderr = true` added.
+3. The image's Apache has mod_ssl but does not load it: `LoadModule ssl_module` added.
+4. `kolla_start` appends `-DFOREGROUND` itself, so config.json's command is plain
+   `apache2` / `httpd`.
+Final run: 10 of 11 checks passed; the 11th was a test bug (Keystone prints
+`"name": "admin"` with a space), fixed in test_keystone.sh. Second run kept the same CA
+and fernet keys.
 
 ### K0. Kolla image cache on tst9 - NOT YET RUN
 tst9 (10.10.5.21) is created by the user from `config/tst9.yaml` (check the
