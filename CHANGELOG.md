@@ -14,7 +14,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the move-over order. `etcd_grow_cluster.scala` is marked as not runnable
   against tst3/tst4 any more.
 
-### Added — OpenStack Keystone from Kolla images, single node with TLS (untested)
+### Added — OpenStack Keystone, Kolla cache and Cinder from Kolla images (run on the test fleet 2026-10-10)
 
 - `manifests/keystone_single_node.scala`: Keystone on one node (default tst7)
   using the Galera cluster behind the 10.10.5.100 VIP as its database. Runs the
@@ -25,14 +25,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   to the node's trust store), and runs `db_sync`, fernet/credential setup and
   `bootstrap` in one-off containers. API on https://<node>:5000/v3/. Confirms
   with a TLS health check and a real admin token. Written to work on Ubuntu or
-  Rocky hosts. Not yet run.
+  Rocky hosts. Passed on tst6 (Ubuntu): `test_keystone.sh` 11/11.
 - `manifests/kolla_cache.scala` (+ `kolla_cache_teardown.scala`): a Kolla image
   cache on a new node, tst9 (10.10.5.21): the stock `registry:2` image as a
   pull-through mirror of quay.io under podman/systemd, with the Keystone image
   pre-pulled. `keystone_single_node.scala` points podman at it as a mirror and
   falls back to quay.io. New `config/tst9.yaml` (Ubuntu VM, 120 GB disk) and
-  inventory entry. Not yet run.
-- DRAFT `manifests/cinder_single_node.scala` (+ `cinder_teardown.scala`,
+  inventory entry. Passed on tst9; tst6 pulls through it.
+- `manifests/cinder_single_node.scala` (+ `cinder_teardown.scala`,
   `test_cinder.sh`): Cinder on a new node, tst10 (10.10.5.22), from Kolla images
   under podman/systemd (cinder-api, cinder-scheduler, cinder-volume) with a
   RabbitMQ container, volumes stored as RBD images in the existing Ceph cluster
@@ -40,7 +40,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   on Galera, identity from Keystone (the CA is taken from Keystone's TLS
   handshake). Registers the service and endpoints in Keystone through a small
   stdlib-Python helper. Keystone now serves leaf + CA (`server-chain.crt`).
-  New `config/tst10.yaml` and inventory entry. Not yet run.
+  New `config/tst10.yaml` and inventory entry. Passed on tst10: `test_cinder.sh`
+  12/12 (a volume becomes a real RBD image and is deleted cleanly). Note: the
+  playbook runs `ceph mon set auth_allowed_ciphers aes,aes256k` because patched
+  Ceph (19.2.6+) accepts only the new `aes256k` cipher by default and the Kolla
+  images' Ceph 19.2.3 client only knows `aes`. This is a test-cluster
+  compromise to remove once the images carry a newer client.
 - `manifests/keystone_teardown.scala` and `manifests/test_keystone.sh`
   (lifecycle, independent checks, idempotence).
 
