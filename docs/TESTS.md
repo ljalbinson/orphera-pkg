@@ -320,7 +320,7 @@ keyring at /mnt/cinder.keyring; RabbitMQ not reachable by the services at
 10.10.5.22:5672; the Ceph pool replication size vs the OSD layout.
 Teardown (destroys the `volumes` pool): `orphera cluster-playbook manifests/cinder_teardown.scala`.
 
-## L. Node reassignment (2026-10-10) - NOT YET RUN
+## L. Node reassignment (2026-10-10) - steps 1-2 PASSED, steps 3-5 NOT YET RUN
 New roles: tst0-tst2 Ceph; tst3-tst5 Galera + haproxy + keepalived (VIP
 10.10.5.100); tst6 Keystone; tst7 WordPress and Prometheus/Grafana; tst8 Rocky;
 tst9 Kolla cache; tst10 Cinder.  The manifests, tests and inventory comments were
@@ -352,6 +352,14 @@ two hosts will answer for 10.10.5.100 again):
    `observability_stack.scala` / `observability_extended.scala` (monitoring node
    now tst7; scrape targets tst0-tst6).
 5. Keystone on tst6 (K) and Cinder on tst10 (K1), which use the new Galera.
+Result, steps 1-2 (2026-10-10): Galera rebuilt on tst3-tst5, `test_mariadb_galera.sh`
+11 passed; haproxy+keepalived applied (VIP on tst3, priority 101/100/99);
+`test_vip_failover.sh` 6 passed, 0 failed (VIP moved tst3 -> tst4 in about 5s after
+haproxy was stopped on tst3, reachable throughout, tst3 reclaimed it about 5s after
+haproxy came back). The first drill attempt failed only because the probe host tst7
+had no mariadb client; the drill now uses tst7 only when it has one, otherwise a
+Galera node that does not hold the VIP.
+
 Expect: each of the tests above passes as before.  Not changed: the Ceph
 manifests (tst0-tst2).  `etcd_grow_cluster.scala` still names tst3/tst4 as the
 members it adds; those are Galera nodes now, so that test is retired until it is
