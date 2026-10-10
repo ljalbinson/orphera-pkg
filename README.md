@@ -1252,6 +1252,7 @@ Fleet layout used by these manifests (see `inventory.yaml`):
 | tst9 | Kolla image cache (`registry:2` pull-through proxy of quay.io) |
 | tst10 | Cinder (API, scheduler, volume, RabbitMQ) |
 | tst11 | apt cache (apt-cacher-ng) for the Ubuntu nodes |
+| tst12 | rpm cache (nginx caching mirror of Rocky/EPEL) for the Rocky nodes |
 
 Run order, each with its own teardown and an end-to-end test that checks the
 result independently of the playbook's own health checks:
@@ -1270,6 +1271,15 @@ Ubuntu nodes at it. Nodes check the cache with a small auto-detect script and
 fetch directly when it is down, so nothing depends on it. `test_apt_cache.sh`
 proves a package is fetched from the mirror once and served from the cache to a
 second node.
+
+Likewise `manifests/rpm_cache.scala` builds an rpm package cache on tst12: an
+nginx caching mirror (port 8080) of the Rocky and EPEL download hosts. A mirror
+rather than a proxy, because Rocky repositories are fetched over HTTPS, which a
+plain proxy cannot cache. `manifests/rpm_cache_clients.scala` gives the Rocky
+node (tst8) a repository file listing the cache first and the official host
+second, so dnf falls back to the internet when tst12 is down; package signatures
+are still checked. `test_rpm_cache.sh` proves a package is fetched once (MISS) and
+then served from the cache (HIT) and that dnf works with the cache stopped.
 
 `test_mariadb_galera.sh` and `test_vip_failover.sh` cover the database layer
 (including a forced VIP failover). `test_cinder.sh` creates a real volume and

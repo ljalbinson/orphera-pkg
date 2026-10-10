@@ -21,6 +21,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (19.2.6+) cluster. A test-cluster compromise; enforce `aes256k` once the
   clients are upgraded.
 
+### Added — rpm package cache on tst12 (test_rpm_cache.sh NOT YET RUN)
+- `manifests/rpm_cache.scala` (+ `rpm_cache_teardown.scala`, `test_rpm_cache.sh`):
+  nginx caching mirror on a new node, tst12 (10.10.5.24), port 8080, for the
+  Rocky and EPEL download hosts (verified HTTPS upstream; 30-day lifetime for
+  files, 5 minutes for repomd.xml; 80 GB limit). `manifests/rpm_cache_clients.scala`
+  writes a dnf repository file on tst8 with the cache first and the official
+  Rocky host as the second baseurl, and sets the stock Rocky repo files aside
+  (`*.orphera-off`; the teardown restores them). New `config/tst12.yaml` and
+  inventory entry. Not compiled or run yet.
+
 ### Added — apt package cache on tst11 (test_apt_cache.sh 12/12)
 - `manifests/apt_cache.scala` (+ `apt_cache_teardown.scala`, `test_apt_cache.sh`):
   apt-cacher-ng on a new node, tst11 (10.10.5.23), caching plain-HTTP Ubuntu

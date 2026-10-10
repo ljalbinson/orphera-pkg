@@ -361,6 +361,23 @@ Most likely to need a fix on the first run: the drop-in config not being read (t
 playbook's tunnelling check fails with a proxy refusal), and Scala string escaping in the
 new manifests (first compile).
 
+### K4. rpm cache on tst12 - NOT YET RUN
+Needs the tst12 VM (`config/tst12.yaml`, Ubuntu, hypervisor st0 assumed) with an agent,
+`tst12.ljalbinson.com` resolvable from tst8, and tst8 (Rocky 10) up.
+
+    git pull
+    manifests/test_rpm_cache.sh 2>&1 | tee /tmp/rpm_cache.log
+Expect: `/healthz` answers on port 8080 from tst8; `dnf repolist` on tst8 shows the
+`orphera-*` repositories and the stock Rocky repo files are renamed `*.orphera-off`;
+`tree` downloaded twice (client copy cleaned between) shows one MISS then one HIT in
+`/var/log/nginx/rpm-cache.log` on tst12; with nginx stopped `dnf makecache` still
+succeeds via the official host; a second run of both playbooks succeeds.
+Teardown: `orphera cluster-playbook manifests/rpm_cache_teardown.scala`.
+Most likely to need a fix on the first run: the Rocky 10 upstream path or repo file names
+(check the warm-up stage's HTTP codes), nginx resolving through 127.0.0.53, `tree` already
+installed or not in the enabled repos (the test removes it first), the log-count regex,
+and Scala string escaping (first compile).
+
 ### K2. OpenStack clients on scala0 - PASSED (2026-10-10): token issued, cinder-scheduler and cinder-volume@ceph up (needed python3.12-venv installed first)
     utils/openstack-client-setup.sh
     source ~/.config/openstack/admin-openrc.sh
@@ -372,7 +389,7 @@ cinder-volume@ceph both up. Needs python3-venv on scala0 and tst6 resolvable fro
 ## L. Node reassignment (2026-10-10) - steps 1-3 and 5 done; step 4 (observability) NOT YET RUN
 New roles: tst0-tst2 Ceph; tst3-tst5 Galera + haproxy + keepalived (VIP
 10.10.5.100); tst6 Keystone; tst7 WordPress and Prometheus/Grafana; tst8 Rocky;
-tst9 Kolla cache; tst10 Cinder; tst11 apt cache.  The manifests, tests and inventory comments were
+tst9 Kolla cache; tst10 Cinder; tst11 apt cache; tst12 rpm cache (K4, not yet run).  The manifests, tests and inventory comments were
 retargeted; the results recorded in J were obtained on the OLD layout (Galera on
 tst0-tst2, WordPress on tst5, monitoring on tst6).
 

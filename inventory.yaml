@@ -55,6 +55,7 @@ nodes:
   #   tst9        Kolla image cache
   #   tst10       Cinder + RabbitMQ
   #   tst11       apt cache (apt-cacher-ng)
+  #   tst12       rpm cache (nginx caching mirror of Rocky/EPEL)
   # No osd_disks/zap_disks on tst3 and up: no Ceph role there (see the
   # incident note on tst0 above for why disk paths are never guessed).
   - name: tst3
@@ -109,6 +110,14 @@ nodes:
     host: tst11.ljalbinson.com
     vars:
       cluster_ip: "10.10.5.23"
+
+  # rpm package cache (nginx caching mirror of Rocky and EPEL):
+  # manifests/rpm_cache.scala; Rocky nodes are pointed at it by
+  # manifests/rpm_cache_clients.scala.
+  - name: tst12
+    host: tst12.ljalbinson.com
+    vars:
+      cluster_ip: "10.10.5.24"
 
   - name: gs1
     host: gs1.ljalbinson.com
