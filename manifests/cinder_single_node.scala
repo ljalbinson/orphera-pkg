@@ -102,6 +102,13 @@ object cinder_single_node extends OrpheraClusterPlaybook:
   // makes FILE visible at /mnt/<name> inside the shell container.
   private val cephScript =
     s"""set -e
+       |# Ceph 19.2.6+ (CVE-2025-30156) defaults to the aes256k cephx cipher. The
+       |# Kolla images carry Ubuntu's Ceph 19.2.3 client libraries, which only
+       |# understand the older `aes` cipher (and the monitors refuse an `aes` key
+       |# unless `aes` is still allowed). TEST CLUSTER COMPROMISE: allow both
+       |# until the Kolla images ship a newer client, then enforce aes256k only
+       |# with `ceph mon set auth_allowed_ciphers aes256k` and rotate this key.
+       |cephadm shell -- ceph mon set auth_allowed_ciphers aes,aes256k
        |cephadm shell -- ceph osd pool create $cephPool
        |cephadm shell -- rbd pool init $cephPool
        |cat > /tmp/cinder.keyring <<'KEYRING'

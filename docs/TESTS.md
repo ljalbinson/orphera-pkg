@@ -319,7 +319,16 @@ the proxied remote for every Kolla repository (the main risk), and whether the
 mirror path mapping `quay.io/openstack.kolla/x` -> `tst9:5000/openstack.kolla/x`
 is what podman sends.
 
-### K1. Cinder on tst10 - playbook applied OK first run (2026-10-10); test_cinder.sh not yet run
+### K1. Cinder on tst10 - playbook applied OK; volume create FAILED on Ceph auth (2026-10-10), fix pending a re-run
+Finding: the cluster runs a patched Ceph (19.2.6+, CVE-2025-30156) whose monitors
+accept only the new `aes256k` cephx cipher by default, and `ceph -s` warned
+`AUTH_INSECURE_CLIENT_KEY_TYPE` for the hand-made `aes` key. The Kolla cinder-volume
+image carries Ubuntu's Ceph 19.2.3 client, which only knows `aes`. Result:
+`RADOS permission denied` on connect, volumes ending in `error` (and the first test run's
+`available` volume had no RBD image). Fix in cinder_single_node.scala: the Ceph stage runs
+`ceph mon set auth_allowed_ciphers aes,aes256k` (test-cluster compromise, as OSSN-0108
+recommends while clients are older). Remove it once the Kolla images ship Ceph >= 19.2.6:
+`ceph mon set auth_allowed_ciphers aes256k`, then rotate client.cinder.
 Needs: Galera + VIP, Ceph with OSDs, Keystone (K) re-applied so it serves the
 CA chain, tst10 created from `config/tst10.yaml` and bootstrapped.
 
