@@ -12,7 +12,7 @@ params:
   - fping
   nic0:
     nic: enp1s0
-    ipaddress: '10.10.5.22'
+    ipaddress: '10.10.5.23'
     gateway: '10.10.5.1'
     bridge: br-net105
     netmask: '255.255.255.0'
@@ -21,7 +21,7 @@ params:
     cidr: '10.10.5.0/24'
     mtu: 1500
   hypervisor: st0
-  hostname: tst10
+  hostname: tst11
   disk: '120'
   dns1: '192.168.1.70'
   memory: '4096'
