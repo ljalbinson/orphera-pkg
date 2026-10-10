@@ -304,7 +304,7 @@ Final run: 10 of 11 checks passed; the 11th was a test bug (Keystone prints
 `"name": "admin"` with a space), fixed in test_keystone.sh. Second run kept the same CA
 and fernet keys.
 
-### K0. Kolla image cache on tst9 - NOT YET RUN
+### K0. Kolla image cache on tst9 - applied OK (2026-10-10); mirror use from tst6 not yet confirmed
 tst9 (10.10.5.21) is created by the user from `config/tst9.yaml` (check the
 hypervisor: st0 is assumed), then:
 
