@@ -274,14 +274,14 @@ See I8a.  PASSED.
 
 ## K. Keystone (Kolla image under podman), single node with TLS - NOT YET RUN
 Written without a Scala toolchain, so the first run on scala0 is also the first
-compile.  Prerequisites: Galera + VIP healthy (J), agent on tst7.
+compile.  Prerequisites: Galera + VIP healthy (J, now on tst3-tst5, see L), agent on tst6.
 
     git pull && git checkout keystone
     orphera cluster-playbook manifests/keystone_single_node.scala
     manifests/test_keystone.sh 2>&1 | tee /tmp/keystone.log
 Expect: all stages complete, `GET /v3/` over TLS returns 200, password auth
 returns 201, plain HTTP and TLS without the CA do not return the API, the
-`keystone` database exists on tst1, the `orphera-keystone` unit is active with
+`keystone` database exists on tst4, the `orphera-keystone` unit is active with
 a `keystone` container on the Kolla image, a token lists the admin user, and a
 second run keeps the same CA and fernet keys.
 Most likely to need a fix on the first run: the image path/tag (the pull task
@@ -319,3 +319,40 @@ behaviour for cinder-api/scheduler/volume; `cephadm shell --mount` placing the
 keyring at /mnt/cinder.keyring; RabbitMQ not reachable by the services at
 10.10.5.22:5672; the Ceph pool replication size vs the OSD layout.
 Teardown (destroys the `volumes` pool): `orphera cluster-playbook manifests/cinder_teardown.scala`.
+
+## L. Node reassignment (2026-10-10) - NOT YET RUN
+New roles: tst0-tst2 Ceph; tst3-tst5 Galera + haproxy + keepalived (VIP
+10.10.5.100); tst6 Keystone; tst7 WordPress and Prometheus/Grafana; tst8 Rocky;
+tst9 Kolla cache; tst10 Cinder.  The manifests, tests and inventory comments were
+retargeted; the results recorded in J were obtained on the OLD layout (Galera on
+tst0-tst2, WordPress on tst5, monitoring on tst6).
+
+Moving over, in this order (the old VIP must go before the new one comes up, or
+two hosts will answer for 10.10.5.100 again):
+
+1. Tear down the old layout with the OLD manifests, from a second checkout of `main`
+   (the retargeted teardowns would look at the new nodes):
+
+       git worktree add ../orphera-old main
+       cd ../orphera-old
+       orphera cluster-playbook manifests/wordpress_teardown.scala
+       orphera cluster-playbook manifests/mariadb_galera_teardown.scala
+       orphera cluster-playbook manifests/etcd_teardown.scala      (optional: clears etcd on tst0-tst4)
+       orphera run sh -c "sudo systemctl disable --now prometheus grafana-server prometheus-node-exporter" --nodes tst6
+       cd ../orphera-pkg
+   (`main` still has the old node names; the inventory is unchanged for tst0-tst2.)
+2. Bring up the new Galera on tst3-tst5 and the VIP:
+
+       orphera cluster-playbook manifests/mariadb_galera_cluster.scala
+       orphera cluster-playbook manifests/mariadb_haproxy_keepalived.scala
+       manifests/test_mariadb_galera.sh
+       manifests/test_vip_failover.sh
+3. WordPress on tst7: `orphera cluster-playbook manifests/wordpress_site.scala`.
+4. Observability on tst7: `manifests/test_observability.sh` and
+   `observability_stack.scala` / `observability_extended.scala` (monitoring node
+   now tst7; scrape targets tst0-tst6).
+5. Keystone on tst6 (K) and Cinder on tst10 (K1), which use the new Galera.
+Expect: each of the tests above passes as before.  Not changed: the Ceph
+manifests (tst0-tst2).  `etcd_grow_cluster.scala` still names tst3/tst4 as the
+members it adds; those are Galera nodes now, so that test is retired until it is
+pointed at other nodes.

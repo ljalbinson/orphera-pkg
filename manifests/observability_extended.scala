@@ -16,10 +16,10 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 //     instead of the `{{cluster_ip}}` address the frontend is actually
 //     bound to — fixed, see haproxyMetricsScript's own comment.
 //   - prometheus-mysqld-exporter for Galera/wsrep metrics, also on
-//     tst0/tst1/tst2 — one exporter per node, each reading its own local
+//     tst3/tst4/tst5 — one exporter per node, each reading its own local
 //     mysqld over a unix socket, same "every node exports its own view"
 //     shape as node_exporter.
-// Then tst6's prometheus.yml is rewritten to scrape both, on top of the
+// Then tst7's prometheus.yml is rewritten to scrape both, on top of the
 // node_exporter + self jobs observability_stack.scala already wrote —
 // this file assumes that one is already applied and healthy, and does
 // NOT repeat its stages.
@@ -30,7 +30,7 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 // once on this project (a wildcard bind on a node that ALSO runs other
 // services on the same host collides with whichever of them binds a
 // specific address on the same port first). 8404 is unused by anything
-// else already running on tst0-2 (haproxy's own :3306/:3307 listeners
+// else already running on tst3-2 (haproxy's own :3306/:3307 listeners
 // are on the VIP, not this address), so no conflict is expected here,
 // but the bind is still scoped deliberately rather than left wildcard
 // out of habit.
@@ -46,8 +46,8 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 // mysqld_exporter credentials: a dedicated, minimally-privileged
 // 'exporter'@'localhost' MariaDB user (PROCESS + REPLICATION CLIENT +
 // SELECT — the exact grant set mysqld_exporter's own docs recommend,
-// nothing wider), created once on tst0 and relying on Galera to
-// replicate the CREATE USER/GRANT to tst1/tst2 automatically — identical
+// nothing wider), created once on tst3 and relying on Galera to
+// replicate the CREATE USER/GRANT to tst4/tst5 automatically — identical
 // reasoning to clustercheckUser in mariadb_haproxy_keepalived.scala.
 // '@localhost' (not '@%') is deliberate and sufficient here: unlike
 // clustercheck, which also needs a grant for haproxy's proxied TCP path,
@@ -70,9 +70,9 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 // inside that file was wrong.
 object observability_extended extends OrpheraClusterPlaybook:
 
-  private val haProxyNodes = List("tst0", "tst1", "tst2")
-  private val monitoringNode = "tst6"
-  private val allNodes = List("tst0", "tst1", "tst2", "tst3", "tst4", "tst5")
+  private val haProxyNodes = List("tst3", "tst4", "tst5")
+  private val monitoringNode = "tst7"
+  private val allNodes = List("tst0", "tst1", "tst2", "tst3", "tst4", "tst5", "tst6")
 
   private val haproxyMetricsPort = 8404
 
@@ -81,7 +81,7 @@ object observability_extended extends OrpheraClusterPlaybook:
   private val exporterUser = "exporter"
   private val exporterPassword = "orphera-test-mysqld-exporter-password"
 
-  // tst0/tst1/tst2 only. Appends (idempotently) a small Prometheus-format
+  // tst3/tst4/tst5 only. Appends (idempotently) a small Prometheus-format
   // stats frontend to the haproxy.cfg that mariadb_haproxy_keepalived.scala
   // already wrote — assumes that file is already applied; this does not
   // write a full haproxy.cfg of its own.
@@ -111,12 +111,12 @@ object observability_extended extends OrpheraClusterPlaybook:
        |fi
        |echo "haproxy prometheus-exporter frontend listening on :$haproxyMetricsPort"""".stripMargin
 
-  // tst0 only — see header comment for why '@localhost' (not '@%') is
+  // tst3 only — see header comment for why '@localhost' (not '@%') is
   // sufficient here, unlike clustercheckUser.
   private val createExporterUserScript =
     s"""mariadb -N -e "CREATE USER IF NOT EXISTS '$exporterUser'@'localhost' IDENTIFIED BY '$exporterPassword'; GRANT PROCESS, REPLICATION CLIENT, SELECT ON *.* TO '$exporterUser'@'localhost'; FLUSH PRIVILEGES;""""
 
-  // tst0/tst1/tst2 only.
+  // tst3/tst4/tst5 only.
   //
   // Real run finding: the flagged, unconfirmed assumption in this file's
   // header comment was wrong — confirmed via a real `journalctl -u
@@ -139,8 +139,8 @@ object observability_extended extends OrpheraClusterPlaybook:
   // `prometheus` system user this service runs as needs to read it, but
   // it holds a password so it's not world-readable) and pointing ARGS at
   // it. Deliberately NOT under `/etc/prometheus/` — that directory only
-  // exists on tst6, where the `prometheus` package itself is installed;
-  // tst0/tst1/tst2 only ever install `prometheus-mysqld-exporter`, a
+  // exists on tst7, where the `prometheus` package itself is installed;
+  // tst3/tst4/tst5 only ever install `prometheus-mysqld-exporter`, a
   // separate package that creates no such directory. The local unix
   // socket itself needs no extra grant beyond what
   // createExporterUserScript already created — MariaDB's default Debian
@@ -149,7 +149,7 @@ object observability_extended extends OrpheraClusterPlaybook:
   // the real access control, same as every other local-socket connection
   // in this project (clustercheck's own script, mariadb -N).
   //
-  // Also found on a real run (tst0 specifically, same config as tst1/tst2
+  // Also found on a real run (tst3 specifically, same config as tst4/tst5
   // which both passed): `systemctl restart` returns once the process
   // starts, but the exporter's own HTTP listener binds a moment after
   // that log line — the exact same class of race this project already
@@ -164,7 +164,7 @@ object observability_extended extends OrpheraClusterPlaybook:
   // successful request.
   //
   // A third real-run finding, on a genuinely FRESH package install this
-  // time (the earlier tst0/tst1/tst2 runs had the package already
+  // time (the earlier tst3/tst4/tst5 runs had the package already
   // installed from prior testing, which skips this): the package's own
   // postinst auto-starts the service with no config present yet (same
   // auto-start-on-install gotcha documented elsewhere in this project —
@@ -215,7 +215,7 @@ object observability_extended extends OrpheraClusterPlaybook:
        |fi
        |echo "mysqld_exporter running on :9104, reading this node's own mysqld over the local socket"""".stripMargin
 
-  // tst6 only. Full rewrite of prometheus.yml, now four scrape jobs
+  // tst7 only. Full rewrite of prometheus.yml, now four scrape jobs
   // instead of observability_stack.scala's original two — node_exporter
   // and the self-scrape job are carried over unchanged, haproxy and
   // mysqld are new. This file owns the full prometheus.yml from this
@@ -292,9 +292,9 @@ object observability_extended extends OrpheraClusterPlaybook:
         )
         .build,
 
-      // tst0 only — replicates to tst1/tst2 via Galera, same as
+      // tst3 only — replicates to tst4/tst5 via Galera, same as
       // clustercheckUser in mariadb_haproxy_keepalived.scala.
-      stage("create-mysqld-exporter-user", "tst0")
+      stage("create-mysqld-exporter-user", "tst3")
         .task("create the exporter MariaDB user (replicates cluster-wide)")(
           Task.RunCommand(List("sh", "-c", createExporterUserScript))
         )
@@ -339,7 +339,7 @@ object observability_extended extends OrpheraClusterPlaybook:
         )
         .task("extended observability confirmed")(
           Task.Debug(
-            s"Prometheus at http://tst6.ljalbinson.com:9090 now also scraping ${haProxyNodes.length} haproxy " +
+            s"Prometheus at http://tst7.ljalbinson.com:9090 now also scraping ${haProxyNodes.length} haproxy " +
               s"(:$haproxyMetricsPort/metrics) and ${haProxyNodes.length} mysqld_exporter (:9104/metrics) targets, " +
               s"$expectedTargets targets total, all up."
           )

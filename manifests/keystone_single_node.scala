@@ -9,7 +9,7 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 // Same shape as wordpress_site.scala: an ordinary application on top of the
 // already-working Galera cluster behind the 10.10.5.100 VIP. Prerequisite,
 // not checked here: mariadb_galera_cluster.scala AND
-// mariadb_haproxy_keepalived.scala are applied and healthy on tst0-tst2.
+// mariadb_haproxy_keepalived.scala are applied and healthy on tst3-tst5.
 //
 // Why Kolla: a pinned, tested image replaces the distro package (no
 // package-owned Apache site or debconf questions to fight), and the same image
@@ -19,7 +19,7 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 // (config.json at /var/lib/kolla/config_files, KOLLA_CONFIG_STRATEGY).
 //
 // Stages:
-//   - create-keystone-database (tst0): `keystone` database and user, via the
+//   - create-keystone-database (tst3): `keystone` database and user, via the
 //     unix-socket root login, same as wordpress_site.scala.
 //   - install-keystone (keystoneNode): podman, pull the image, a test CA and
 //     server certificate, keystone.conf, the Apache vhost and Kolla
@@ -58,9 +58,9 @@ object keystone_single_node extends OrpheraClusterPlaybook:
 
   // Change these to move Keystone to another node. The node must be in
   // inventory.yaml and have the agent installed.
-  private val node = "tst7"
-  private val fqdn = "tst7.ljalbinson.com"
-  private val nodeIp = "10.10.5.19"
+  private val node = "tst6"
+  private val fqdn = "tst6.ljalbinson.com"
+  private val nodeIp = "10.10.5.18"
 
   // Kolla image: <registry>/keystone:<release>-<distro>-<version>. Confirm the
   // tag exists (`podman pull`) before changing it; the pull task prints a hint
@@ -77,7 +77,7 @@ object keystone_single_node extends OrpheraClusterPlaybook:
   private val dbPassword = "orphera-test-keystone-db-password"
   private val adminPassword = "orphera-test-keystone-admin-password"
 
-  // Floating IP held by keepalived on whichever of tst0-tst2 is current.
+  // Floating IP held by keepalived on whichever of tst3-tst5 is current.
   private val vip = "10.10.5.100"
 
   private val endpoint = s"https://$fqdn:5000/v3/"
@@ -109,7 +109,7 @@ object keystone_single_node extends OrpheraClusterPlaybook:
        |REG
        |echo "podman will try $cacheHostPort before quay.io"""".stripMargin
 
-  // tst0 only. IF NOT EXISTS / re-GRANT make a re-run a no-op. `@'%'` for the
+  // tst3 only. IF NOT EXISTS / re-GRANT make a re-run a no-op. `@'%'` for the
   // same reason as wordpress_site.scala: haproxy's tcp mode hides the real
   // client address.
   private val createDatabaseScript =
@@ -314,7 +314,7 @@ object keystone_single_node extends OrpheraClusterPlaybook:
 
   val playbook: ClusterPlaybook =
     clusterPlaybook("keystone-single-node")(
-      stage("create-keystone-database", "tst0")
+      stage("create-keystone-database", "tst3")
         .task(s"create $dbName database and $dbUser on the Galera cluster")(
           Task.RunCommand(List("sh", "-c", createDatabaseScript))
         )

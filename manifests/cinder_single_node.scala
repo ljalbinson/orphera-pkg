@@ -10,7 +10,7 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 //   - Galera + VIP healthy (mariadb_galera_cluster.scala,
 //     mariadb_haproxy_keepalived.scala)
 //   - Ceph healthy with OSDs (cephadm_*.scala)
-//   - Keystone up on tst7 (keystone_single_node.scala), serving the CA chain
+//   - Keystone up on tst6 (keystone_single_node.scala), serving the CA chain
 //     (the version that writes server-chain.crt)
 //   - agent on tst10; tst9's Kolla cache is optional
 //
@@ -24,8 +24,9 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 //                     the RBD driver against pool `volumes`
 //
 // Stages:
-//   - ceph-and-database (tst0): the `cinder` database and user on Galera, the
-//     `volumes` pool, and the `client.cinder` cephx user with a FIXED test key
+//   - cinder-database (tst3, a Galera node): the `cinder` database and user.
+//   - ceph-pool-and-user (tst0, a Ceph node): the `volumes` pool, and the
+//     `client.cinder` cephx user with a FIXED test key
 //     (see cephKey). A fixed key is used because a stage cannot capture
 //     another node's command output (there is no register mechanism; see the
 //     header of etcd_grow_cluster.scala), and importing a key we already know
@@ -52,7 +53,7 @@ object cinder_single_node extends OrpheraClusterPlaybook:
   private val fqdn = "tst10.ljalbinson.com"
   private val nodeIp = "10.10.5.22"
 
-  private val ksFqdn = "tst7.ljalbinson.com"
+  private val ksFqdn = "tst6.ljalbinson.com"
   private val vip = "10.10.5.100"
 
   // Keep in step with keystone_single_node.scala / kolla_cache.scala.
@@ -91,7 +92,7 @@ object cinder_single_node extends OrpheraClusterPlaybook:
   private val hostPackages =
     List("podman", "openssl", "curl", "ca-certificates", "python3")
 
-  // ---- tst0 -----------------------------------------------------------
+  // ---- tst3 (Galera) and tst0 (Ceph) ----------------------------------
 
   private val createDatabaseScript =
     s"""mariadb -N -e "CREATE DATABASE IF NOT EXISTS $dbName; CREATE USER IF NOT EXISTS '$dbUser'@'%' IDENTIFIED BY '$dbPassword'; GRANT ALL PRIVILEGES ON $dbName.* TO '$dbUser'@'%'; FLUSH PRIVILEGES;""""
@@ -539,10 +540,13 @@ if __name__ == '__main__':
 
   val playbook: ClusterPlaybook =
     clusterPlaybook("cinder-single-node")(
-      stage("ceph-and-database", "tst0")
+      stage("cinder-database", "tst3")
         .task(s"create $dbName database and $dbUser on the Galera cluster")(
           Task.RunCommand(List("sh", "-c", createDatabaseScript))
         )
+        .build,
+
+      stage("ceph-pool-and-user", "tst0")
         .task(s"create the $cephPool pool and the client.cinder cephx user")(
           Task.RunCommand(List("sh", "-c", cephScript), timeoutSeconds = 180)
         )

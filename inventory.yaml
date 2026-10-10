@@ -46,12 +46,16 @@ nodes:
       osd_disks: "/dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_tst2-data1,/dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_tst2-data2"
       zap_disks: "/dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_tst2-data1,/dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_tst2-data2"
 
-  # tst3/tst4: added 2026-09-30 for etcd cluster-growth testing
-  # (manifests/etcd_grow_cluster.scala). No osd_disks/zap_disks yet — they
-  # haven't been used for any Ceph exercise, so nothing is guessed here;
-  # add real by-id paths, confirmed via lsblk on the host itself, if/when
-  # that changes (see the incident note on tst0 above for why guessing at
-  # disk paths instead of confirming them is what caused real drift before).
+  # Node roles (reassigned 2026-10-10):
+  #   tst0-tst2   Ceph (mon + OSDs); etcd, when used, also lives here
+  #   tst3-tst5   MariaDB Galera + haproxy + keepalived (VIP 10.10.5.100)
+  #   tst6        Keystone
+  #   tst7        WordPress, Prometheus + Grafana (small test workloads)
+  #   tst8        Rocky Linux test node
+  #   tst9        Kolla image cache
+  #   tst10       Cinder + RabbitMQ
+  # No osd_disks/zap_disks on tst3 and up: no Ceph role there (see the
+  # incident note on tst0 above for why disk paths are never guessed).
   - name: tst3
     host: tst3.ljalbinson.com
     vars:
@@ -62,22 +66,11 @@ nodes:
     vars:
       cluster_ip: "10.10.5.16"
 
-  # Not part of the ceph mons group or the Galera/haproxy trio — a separate
-  # single node for manifests/wordpress_site.scala, deliberately outside
-  # tst0-tst2 so trying a new stack doesn't risk state on the
-  # already-working cluster nodes. No osd_disks/zap_disks: this node runs
-  # no ceph role at all.
   - name: tst5
     host: tst5.ljalbinson.com
     vars:
       cluster_ip: "10.10.5.17"
 
-  # Dedicated monitoring node for manifests/observability_stack.scala
-  # (Prometheus + Grafana) — deliberately a NEW node rather than reusing
-  # tst5, so the monitoring stack doesn't share fate with the one
-  # workload node it would otherwise live on (losing tst5 would mean
-  # losing WordPress AND the ability to see anything was wrong, at the
-  # same time). No osd_disks/zap_disks: this node runs no ceph role.
   - name: tst6
     host: tst6.ljalbinson.com
     vars:

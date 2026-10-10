@@ -7,21 +7,21 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 // everything before it: not another clustered service (etcd, Ceph,
 // Galera) and not an app on top of one (wordpress_site.scala) — a
 // cross-cutting exercise that reaches across the ENTIRE fleet at once
-// (tst0-tst5, six nodes spanning three unrelated earlier exercises) rather
+// (tst0-tst6, seven nodes spanning several unrelated exercises) rather
 // than building one more self-contained thing.
 //
 // Two groups of nodes, two different jobs:
-//   - node_exporter on EVERY existing node (tst0-tst5): a single metrics
+//   - node_exporter on EVERY existing node (tst0-tst6; the monitoring node itself is scraped separately): a single metrics
 //     endpoint (:9100) per node, scraped by Prometheus. No config beyond
 //     installing the package — it exports whatever it finds on that host
 //     with zero per-node customization needed, unlike every other
 //     exercise in this project so far (which all needed per-node IPs,
 //     priorities, or peer lists templated in).
-//   - Prometheus + Grafana on a NEW node (tst6, 10.10.5.18, added to
-//     inventory.yaml) — deliberately not reused from tst5, so the
-//     monitoring stack doesn't share fate with the one workload node it
-//     would otherwise live on: losing tst5 would mean losing WordPress
-//     AND the ability to see anything was wrong, at the same time.
+//   - Prometheus + Grafana on tst7 (10.10.5.19), a node outside Ceph, Galera
+//     and Keystone, so losing any of those never takes the monitoring down
+//     with it. (WordPress now lives on tst7 too, an accepted overlap: both
+//     are small test workloads. Originally the monitoring node was kept
+//     separate from the WordPress node for exactly this reason.)
 //
 // A genuinely new technique for this project, not seen in any earlier
 // manifest: Grafana has no official Ubuntu/Debian package at all (it
@@ -41,8 +41,8 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 // incremental approach every earlier exercise in this project took.
 object observability_stack extends OrpheraClusterPlaybook:
 
-  private val monitoringNode = "tst6"
-  private val allNodes = List("tst0", "tst1", "tst2", "tst3", "tst4", "tst5")
+  private val monitoringNode = "tst7"
+  private val allNodes = List("tst0", "tst1", "tst2", "tst3", "tst4", "tst5", "tst6")
 
   // Grafana's default admin/admin credentials on a truly fresh install —
   // same "test-only, fine for disposable infrastructure" convention as
@@ -78,7 +78,7 @@ object observability_stack extends OrpheraClusterPlaybook:
       |fi
       |echo "node_exporter running on :9100"""".stripMargin
 
-  // tst6 only. Ubuntu's `prometheus` package ships a working default
+  // tst7 only. Ubuntu's `prometheus` package ships a working default
   // config and systemd unit; this overwrites the scrape config with the
   // real fleet target list and nothing else (alerting/rules are left at
   // package defaults — out of scope for this first pass).
@@ -109,7 +109,7 @@ object observability_stack extends OrpheraClusterPlaybook:
        |fi
        |echo "prometheus running on :9090, configured to scrape ${allNodes.length} node_exporter targets"""".stripMargin
 
-  // tst6 only. The one genuinely new technique in this file — see the
+  // tst7 only. The one genuinely new technique in this file — see the
   // header comment. `signed-by` (not the deprecated `apt-key add`) is
   // Debian/Ubuntu's current recommended way to scope a keyring to one
   // repo rather than trusting it for every repo on the system.
@@ -122,7 +122,7 @@ object observability_stack extends OrpheraClusterPlaybook:
       |apt-get install -y -qq grafana
       |echo "grafana package installed from apt.grafana.com"""".stripMargin
 
-  // tst6 only. Grafana only reads its provisioning directory at startup,
+  // tst7 only. Grafana only reads its provisioning directory at startup,
   // so writing this file alone does nothing until the next restart —
   // deliberately a separate task/script from installGrafanaScript so the
   // restart-and-check pattern below applies to both the initial install
@@ -334,8 +334,8 @@ object observability_stack extends OrpheraClusterPlaybook:
         )
         .task("observability stack confirmed")(
           Task.Debug(
-            s"Prometheus at http://tst6.ljalbinson.com:9090 (scraping ${allNodes.length} node_exporter targets + itself), " +
-              s"Grafana at http://tst6.ljalbinson.com:3000 (login $grafanaAdminUser/$grafanaAdminPassword, Prometheus datasource pre-wired)."
+            s"Prometheus at http://tst7.ljalbinson.com:9090 (scraping ${allNodes.length} node_exporter targets + itself), " +
+              s"Grafana at http://tst7.ljalbinson.com:3000 (login $grafanaAdminUser/$grafanaAdminPassword, Prometheus datasource pre-wired)."
           )
         )
         .build

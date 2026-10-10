@@ -8,7 +8,7 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 // bootstrap ordering, cluster-wide health) from install-complexity that
 // has nothing to do with Orphera itself.
 //
-// Targets tst0/tst1/tst2 — the same three nodes etcd_cluster.scala used.
+// Targets tst3/tst4/tst5 — the same three nodes etcd_cluster.scala used.
 // Run manifests/etcd_teardown.scala first if etcd is still installed on
 // them; nothing here removes it, and the two would otherwise coexist
 // fine (different ports, no real conflict), which is exactly why this
@@ -21,13 +21,13 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 //     flag lists the same full peer set) AND symmetric START (all three
 //     start at once, nothing waits on anything).
 //   - ceph_mon_quorum.scala: asymmetric CONFIG (fsid/monmap generated
-//     ONCE on tst0, then DistributeFile'd to the others) — nobody else
+//     ONCE on tst3, then DistributeFile'd to the others) — nobody else
 //     could even start correctly without that first node's output.
 //   - THIS file: symmetric CONFIG (every node's `wsrep_cluster_address`
 //     lists the exact same three peers, rendered via the same
 //     {{nodes.<name>.cluster_ip}} templating as etcd_cluster.scala — no
 //     DistributeFile needed) but ASYMMETRIC START ORDER — exactly one
-//     node (tst0) must be launched with `galera_new_cluster` (which
+//     node (tst3) must be launched with `galera_new_cluster` (which
 //     bootstraps a brand-new cluster, ignoring the peer list since none
 //     of them are up yet) BEFORE the other two do a normal
 //     `systemctl start mariadb`, which makes them actually try to
@@ -72,7 +72,7 @@ object mariadb_galera_cluster extends OrpheraClusterPlaybook:
   private val clusterName = "orphera-galera-test"
 
   private val galeraPeers =
-    "gcomm://{{nodes.tst0.cluster_ip}},{{nodes.tst1.cluster_ip}},{{nodes.tst2.cluster_ip}}"
+    "gcomm://{{nodes.tst3.cluster_ip}},{{nodes.tst4.cluster_ip}},{{nodes.tst5.cluster_ip}}"
 
   // Writes the exact same peer list on every node (see header comment) —
   // only $name/$clusterIp vary. A fresh overwrite every run, same
@@ -106,7 +106,7 @@ object mariadb_galera_cluster extends OrpheraClusterPlaybook:
   // same way, so this uses the exact same `$(hostname -s)` convention as
   // ceph_mon_quorum.scala/etcd_cluster.scala's own equivalent, with the
   // same assumption: each node's hostname matches its inventory name
-  // (tst0/tst1/tst2).
+  // (tst3/tst4/tst5).
   private val galeraConfigScript =
     s"""NAME=$$(hostname -s)
        |cat > /etc/mysql/mariadb.conf.d/60-galera.cnf <<EOF
@@ -131,7 +131,7 @@ object mariadb_galera_cluster extends OrpheraClusterPlaybook:
   private val wsrepClusterSizeScript =
     """mariadb -N -e "SHOW STATUS LIKE 'wsrep_cluster_size'" 2>/dev/null | awk '{print $2}'"""
 
-  // tst0 only. `galera_new_cluster` (from the galera-4 package) starts
+  // tst3 only. `galera_new_cluster` (from the galera-4 package) starts
   // mariadb with the special `--wsrep-new-cluster` flag that bootstraps
   // a brand-new cluster from this node's own local data, ignoring
   // wsrep_cluster_address entirely for this one startup — it's the
@@ -141,7 +141,7 @@ object mariadb_galera_cluster extends OrpheraClusterPlaybook:
   // package-install-time standalone auto-start described in the header
   // comment, whether or not this is a first run.
   //
-  // Two real bugs found from an actual run against tst0/tst1/tst2, both
+  // Two real bugs found from an actual run against tst3/tst4/tst5, both
   // fixed below:
   //
   // 1. Masked failure, same shape as the haproxy `systemctl restart`
@@ -171,7 +171,7 @@ object mariadb_galera_cluster extends OrpheraClusterPlaybook:
   //    discard committed data. Forcing it here instead (rewriting
   //    `safe_to_bootstrap: 0` to `1` in grastate.dat before calling
   //    `galera_new_cluster`) is deliberately a test-cluster-only shortcut:
-  //    this playbook always treats tst0 as the sole bootstrap node by
+  //    this playbook always treats tst3 as the sole bootstrap node by
   //    design, and mariadb_galera_teardown.scala's own job is to wipe
   //    /var/lib/mysql clean between runs anyway — so a stale
   //    safe_to_bootstrap: 0 here only ever means "this node's leftover
@@ -185,7 +185,7 @@ object mariadb_galera_cluster extends OrpheraClusterPlaybook:
        |else
        |  systemctl stop mariadb 2>/dev/null || true
        |  if [ -f /var/lib/mysql/grastate.dat ] && grep -q 'safe_to_bootstrap: 0' /var/lib/mysql/grastate.dat; then
-       |    echo "grastate.dat says safe_to_bootstrap: 0 (leftover state from a previous run) — forcing it to 1 to bootstrap this disposable test cluster from tst0"
+       |    echo "grastate.dat says safe_to_bootstrap: 0 (leftover state from a previous run) — forcing it to 1 to bootstrap this disposable test cluster from tst3"
        |    sed -i 's/safe_to_bootstrap: 0/safe_to_bootstrap: 1/' /var/lib/mysql/grastate.dat
        |  fi
        |  if ! galera_new_cluster; then
@@ -198,12 +198,12 @@ object mariadb_galera_cluster extends OrpheraClusterPlaybook:
        |# an existing user and privileges is a no-op, not an error.
        |mariadb -N -e "CREATE USER IF NOT EXISTS 'sst_user'@'%' IDENTIFIED BY '$sstPassword'; GRANT RELOAD, LOCK TABLES, PROCESS, REPLICATION CLIENT ON *.* TO 'sst_user'@'%'; FLUSH PRIVILEGES;"""".stripMargin
 
-  // tst1/tst2 only. A normal `systemctl start mariadb` — no bootstrap
+  // tst4/tst5 only. A normal `systemctl start mariadb` — no bootstrap
   // flag — which makes this node try to connect to the peers already
   // listed in its own wsrep_cluster_address and pull a State Snapshot
   // Transfer (SST, via mariabackup — see wsrep_sst_method in the config
   // above) from whichever of them is reachable and further ahead. Only
-  // works once tst0 has actually finished bootstrapping — see the
+  // works once tst3 has actually finished bootstrapping — see the
   // register-tst3/join-tst3 two-stage split precedent in
   // etcd_member_rejoin.scala/etcd_grow_cluster.scala for why that
   // ordering is enforced as separate STAGES below, not just separate
@@ -218,7 +218,7 @@ object mariadb_galera_cluster extends OrpheraClusterPlaybook:
        |  echo "Started mariadb — joining the existing cluster via SST"
        |fi""".stripMargin
 
-  // Checked independently on EACH node (not just tst0's view) — same
+  // Checked independently on EACH node (not just tst3's view) — same
   // per-node convention etcd_cluster.scala's HealthCheck.Quorum uses,
   // rather than trusting a single node's report of cluster-wide state.
   // wsrep_cluster_size alone isn't enough: a node mid-SST can already
@@ -238,7 +238,7 @@ object mariadb_galera_cluster extends OrpheraClusterPlaybook:
 
   val playbook: ClusterPlaybook =
     clusterPlaybook("mariadb-galera-cluster")(
-      stage("install-mariadb", "tst0", "tst1", "tst2")
+      stage("install-mariadb", "tst3", "tst4", "tst5")
         .task("install mariadb-server, mariadb-backup, galera-4")(
           Task.Install(
             packages = List(
@@ -254,31 +254,31 @@ object mariadb_galera_cluster extends OrpheraClusterPlaybook:
 
       // Config on all three now — cheap and symmetric, so no reason to
       // delay writing it until just before each node's own start step.
-      stage("write-galera-config", "tst0", "tst1", "tst2")
+      stage("write-galera-config", "tst3", "tst4", "tst5")
         .task("write /etc/mysql/mariadb.conf.d/60-galera.cnf")(
           Task.RunCommand(List("sh", "-c", galeraConfigScript))
         )
         .build,
 
-      // tst0 only, and strictly before join-others below — see the
+      // tst3 only, and strictly before join-others below — see the
       // header comment's asymmetric-start-order explanation.
-      stage("bootstrap-tst0", "tst0")
+      stage("bootstrap-tst3", "tst3")
         .task("bootstrap a new Galera cluster and create the SST user")(
           Task
             .RunCommand(List("sh", "-c", bootstrapScript), timeoutSeconds = 90)
         )
         .build,
 
-      stage("join-others", "tst1", "tst2")
-        .task("join the cluster via SST from tst0")(
+      stage("join-others", "tst4", "tst5")
+        .task("join the cluster via SST from tst3")(
           Task.RunCommand(List("sh", "-c", joinScript), timeoutSeconds = 120)
         )
         .build,
 
-      stage("confirm-cluster-healthy", "tst0")
+      stage("confirm-cluster-healthy", "tst3")
         .waitFor(
           HealthCheck.Quorum(
-            nodes = List("tst0", "tst1", "tst2"),
+            nodes = List("tst3", "tst4", "tst5"),
             command = List("sh", "-c", healthCheckScript),
             requiredCount = 3,
             pollIntervalSeconds = 5,

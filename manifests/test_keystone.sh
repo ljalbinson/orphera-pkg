@@ -16,8 +16,8 @@
 
 set -uo pipefail
 
-NODE="tst7"
-FQDN="tst7.ljalbinson.com"
+NODE="tst6"
+FQDN="tst6.ljalbinson.com"
 CA="/etc/kolla/keystone/ssl/ca.crt"   # world-readable copy of the test CA
 
 PASS=0
@@ -72,9 +72,9 @@ assert_not_contains "plain HTTP on 5000 does not return the API" "http=200" "$OU
 OUT=$(run_on "curl -s -o /dev/null -w 'http=%{http_code}' --max-time 5 --cacert /dev/null https://$FQDN:5000/v3/ ; echo rc=\$?")
 assert_not_contains "TLS without the CA is rejected" "http=200" "$OUT"
 
-# The tst7 node has no mariadb client; ask a Galera node (unix-socket root).
-OUT=$(orphera run sh -c "sudo mariadb -N -e 'select count(*) from keystone.user'" --nodes tst1 2>&1)
-assert_not_contains "keystone tables exist and replicated to tst1" "ERROR" "$OUT"
+# The Keystone node has no mariadb client; ask a Galera node (unix-socket root).
+OUT=$(orphera run sh -c "sudo mariadb -N -e 'select count(*) from keystone.user'" --nodes tst4 2>&1)
+assert_not_contains "keystone tables exist and replicated to tst4" "ERROR" "$OUT"
 assert_contains "keystone.user has at least the admin row" "1" "$OUT"
 
 OUT=$(run_on "systemctl is-active orphera-keystone; sudo podman ps --format '{{.Names}} {{.Image}}'")

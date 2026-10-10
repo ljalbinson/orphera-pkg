@@ -10,7 +10,7 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 // installed. Keep `node` and `image` in step with keystone_single_node.
 object keystone_teardown extends OrpheraClusterPlaybook:
 
-  private val node = "tst7"
+  private val node = "tst6"
   private val image = "quay.io/openstack.kolla/keystone:2025.1-ubuntu-noble"
   private val dbName = "keystone"
   private val dbUser = "keystone"
@@ -40,7 +40,7 @@ object keystone_teardown extends OrpheraClusterPlaybook:
 
   val playbook: ClusterPlaybook =
     clusterPlaybook("keystone-teardown")(
-      stage("drop-keystone-database", "tst0")
+      stage("drop-keystone-database", "tst3")
         .task(s"drop $dbName database and $dbUser on the Galera cluster")(
           Task.RunCommand(List("sh", "-c", dropDatabaseScript))
         )

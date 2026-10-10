@@ -3,14 +3,14 @@
 # Chaos/failover regression test for mariadb_haproxy_keepalived.scala.
 #
 # Every earlier confirmation of that file only ever proved the VIP works
-# while nothing is broken (tst0 holding it, haproxy healthy everywhere).
+# while nothing is broken (tst3 holding it, haproxy healthy everywhere).
 # This is the gap explicitly flagged — but never built — in this
 # project's own CHANGELOG ("not yet exercised: an actual failover").
 #
-# What it does, against the real tst0/tst1/tst2 cluster (no teardown/
+# What it does, against the real tst3/tst4/tst5 cluster (no teardown/
 # rebuild — this runs against whatever's already up):
 #   1. Finds which node currently holds the VIP (whichever it is — doesn't
-#      assume tst0, even though that's the expected steady state given
+#      assume tst3, even though that's the expected steady state given
 #      keepalived's priorities).
 #   2. Confirms the VIP is reachable BEFORE touching anything, so a
 #      failure later can't be confused with a pre-existing problem this
@@ -30,9 +30,9 @@
 #      address moved.
 #   6. Restarts haproxy on the original holder and polls for failback.
 #      keepalived.conf sets no `nopreempt`, so this is a firm, deterministic
-#      assertion, not a maybe: priorities are fixed at tst0=101 > tst1=100
-#      > tst2=99, so once every node's haproxy is healthy again the VIP
-#      MUST return to tst0 specifically, whichever node was stopped.
+#      assertion, not a maybe: priorities are fixed at tst3=101 > tst4=100
+#      > tst5=99, so once every node's haproxy is healthy again the VIP
+#      MUST return to tst3 specifically, whichever node was stopped.
 #
 # Honest limitation, inherited from mariadb_haproxy_keepalived.scala's own
 # HealthCheck.Quorum confirm stage: this never checks for split-brain by
@@ -54,7 +54,7 @@
 set -uo pipefail
 
 # ---- Configuration -----------------------------------------------------
-NODES=(tst0 tst1 tst2)
+NODES=(tst3 tst4 tst5)
 SSH_USER="localadmin"       # the real login on these nodes — confirmed
                              # from an actual session against them; NOT
                              # "ubuntu" (test_mariadb_galera.sh had the same
@@ -124,14 +124,14 @@ current_vip_holder() {
 # Proves the client-facing path, not just that an address exists somewhere
 # — same reasoning as mariadb_haproxy_keepalived.scala's own
 # vipConnectivityScript, reusing the clustercheck user rather than adding a
-# fourth test credential to the project. Run from tst5 when available
+# fourth test credential to the project. Run from tst7 when available
 # (a genuinely external client, not one of the three backend nodes), since
 # that's the configuration this whole exercise is meant to serve — but
-# falls back to running from whichever of tst0/tst1/tst2 isn't the current
-# VIP holder if tst5 isn't reachable, so this test doesn't hard-depend on
+# falls back to running from whichever of tst3/tst4/tst5 isn't the current
+# VIP holder if tst7 isn't reachable, so this test doesn't hard-depend on
 # wordpress_site.scala having been applied.
 vip_reachable() {
-  local from_host="tst5"
+  local from_host="tst7"
   if ! ssh "${SSH_USER}@${from_host}" true 2>/dev/null; then
     from_host=$(current_vip_holder)
     for host in "${NODES[@]}"; do
@@ -174,7 +174,7 @@ poll_until() {
 # shellcheck disable=SC2317
 check_moved_on() { [ "$(holds_vip "$ORIGINAL_HOLDER")" = "false" ] && echo "true" || echo "false"; }
 # shellcheck disable=SC2317
-check_reclaimed() { [ "$(holds_vip "tst0")" = "true" ] && echo "true" || echo "false"; }
+check_reclaimed() { [ "$(holds_vip "tst3")" = "true" ] && echo "true" || echo "false"; }
 
 # Always restores haproxy on whatever node this script stopped it on,
 # whether the run passed, failed, or was interrupted — a chaos test that
@@ -227,14 +227,14 @@ log "Restoring haproxy on $ORIGINAL_HOLDER ..."
 ssh_cmd "$ORIGINAL_HOLDER" "sudo systemctl start haproxy" > /dev/null
 STOPPED_HOST=""   # restored explicitly here; nothing left for the trap to do
 
-if [ "$ORIGINAL_HOLDER" = "tst0" ]; then
-  log "Waiting for tst0 (highest keepalived priority, no nopreempt set) to reclaim the VIP (up to 60s) ..."
-  poll_until "tst0 reclaimed the VIP" check_reclaimed
-  assert_true "tst0 reclaimed the VIP after recovering" "$(holds_vip "tst0")"
+if [ "$ORIGINAL_HOLDER" = "tst3" ]; then
+  log "Waiting for tst3 (highest keepalived priority, no nopreempt set) to reclaim the VIP (up to 60s) ..."
+  poll_until "tst3 reclaimed the VIP" check_reclaimed
+  assert_true "tst3 reclaimed the VIP after recovering" "$(holds_vip "tst3")"
 else
-  log "$ORIGINAL_HOLDER wasn't tst0, so tst0's own haproxy was never touched — waiting for tst0 to reclaim via preemption anyway (up to 60s) ..."
-  poll_until "tst0 reclaimed the VIP" check_reclaimed
-  assert_true "tst0 holds the VIP at rest (priority 101, highest)" "$(holds_vip "tst0")"
+  log "$ORIGINAL_HOLDER wasn't tst3, so tst3's own haproxy was never touched — waiting for tst3 to reclaim via preemption anyway (up to 60s) ..."
+  poll_until "tst3 reclaimed the VIP" check_reclaimed
+  assert_true "tst3 holds the VIP at rest (priority 101, highest)" "$(holds_vip "tst3")"
 fi
 
 log "Confirming VIP is reachable after failback ..."

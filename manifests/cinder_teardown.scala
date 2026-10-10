@@ -50,10 +50,13 @@ object cinder_teardown extends OrpheraClusterPlaybook:
         )
         .build,
 
-      stage("drop-ceph-and-database", "tst0")
+      stage("drop-cinder-database", "tst3")
         .task(s"drop $dbName database and $dbUser on the Galera cluster")(
           Task.RunCommand(List("sh", "-c", dropDatabaseScript))
         )
+        .build,
+
+      stage("drop-ceph-pool-and-user", "tst0")
         .task(s"delete the $cephPool pool and client.cinder")(
           Task.RunCommand(List("sh", "-c", cephScript), timeoutSeconds = 180)
         )

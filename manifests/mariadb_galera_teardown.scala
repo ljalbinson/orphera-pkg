@@ -2,7 +2,7 @@ import orphera.orchestrator.*
 import orphera.orchestrator.ClusterPlaybookDsl.*
 
 // Tears down what mariadb_galera_cluster.scala AND mariadb_haproxy_keepalived.scala
-// (both above) build on tst0/tst1/tst2 — the base Galera cluster and the
+// (both above) build on tst3/tst4/tst5 — the base Galera cluster and the
 // haproxy+keepalived VIP frontend on top of it. One combined teardown
 // rather than two, since the HA frontend can't meaningfully outlive the
 // Galera cluster it fronts (there'd be nothing left to load-balance).
@@ -100,7 +100,7 @@ object mariadb_galera_teardown extends OrpheraClusterPlaybook:
 
   val playbook: ClusterPlaybook =
     clusterPlaybook("mariadb-galera-teardown")(
-      teardownStage("tst0"),
-      teardownStage("tst1"),
-      teardownStage("tst2")
+      teardownStage("tst3"),
+      teardownStage("tst4"),
+      teardownStage("tst5")
     )

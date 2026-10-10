@@ -4,12 +4,12 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 // Fifth infrastructure exercise: fronts the mariadb_galera_cluster.scala
 // 3-node cluster with a floating IP (10.10.5.100/24, user-provided) so a
 // client talks to one stable address instead of needing to know which of
-// tst0/tst1/tst2 to reach, with automatic failover if whichever node
+// tst3/tst4/tst5 to reach, with automatic failover if whichever node
 // currently holds that address goes down.
 //
-// Colocated on tst0/tst1/tst2 — haproxy + keepalived run on the same
+// Colocated on tst3/tst4/tst5 — haproxy + keepalived run on the same
 // three nodes as mariadb/galera itself, rather than on dedicated LB nodes
-// (e.g. tst3/tst4) — the user's own choice when asked, and also the more
+// (e.g. a separate pair of nodes) — the user's own choice when asked, and also the more
 // common reference topology for a 3-node Galera cluster specifically:
 // three LB instances gives keepalived's VRRP election three candidates
 // instead of two, without standing up a separate node pair.
@@ -29,14 +29,14 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 // would be a correctness bug, not just a slow query.
 //
 // HAProxy runs two listeners, same split the reference guide uses:
-//   - :3306 (write) — one primary node (tst0) takes all traffic, the
-//     other two are `backup` (only receiving traffic if tst0's own
+//   - :3306 (write) — one primary node (tst3) takes all traffic, the
+//     other two are `backup` (only receiving traffic if tst3's own
 //     health check fails). Pinning writes to one node at a time avoids
 //     Galera's well-known multi-writer certification-conflict problem
 //     (two nodes committing conflicting writes concurrently — one gets
 //     rolled back by Galera's optimistic locking, surfacing to the
 //     client as a deadlock-style error) under normal operation, while
-//     still failing over automatically if tst0 goes down.
+//     still failing over automatically if tst3 goes down.
 //   - :3307 (read) — round-robin across all three, safe for reads
 //     regardless of which node serves them once that node's own :9200
 //     check confirms it's Synced.
@@ -71,7 +71,7 @@ object mariadb_haproxy_keepalived extends OrpheraClusterPlaybook:
   private val clustercheckPassword = "orphera-test-clustercheck-password"
   private val vrrpAuthPass = "orphera-test-vrrp-pass"
 
-  // Created once, on tst0 only — like sst_user in mariadb_galera_cluster.scala,
+  // Created once, on tst3 only — like sst_user in mariadb_galera_cluster.scala,
   // CREATE USER/GRANT are ordinary DML/DDL that Galera replicates to every
   // node automatically, so this doesn't need repeating per-node.
   //
@@ -85,7 +85,7 @@ object mariadb_haproxy_keepalived extends OrpheraClusterPlaybook:
   // plain `mode tcp` doesn't preserve the original client's address for
   // the backend — mysqld sees it as coming from whichever address
   // HAProxy itself used to reach that backend (confirmed by the real
-  // failure: `Access denied for user 'clustercheck'@'10.10.5.12'`, tst0's
+  // failure: `Access denied for user 'clustercheck'@'10.10.5.15'`, tst3's
   // own address, not 'localhost' and not the client's real origin
   // either). Fixed by also granting 'clustercheck'@'%' — both grants are
   // needed under the same username for the two genuinely different
@@ -168,7 +168,7 @@ object mariadb_haproxy_keepalived extends OrpheraClusterPlaybook:
   // Round 2: with the masking bug fixed, the real error surfaced —
   // `journalctl` showed `cannot bind socket (Address already in use) for
   // [0.0.0.0:3306]`, even though `ss` confirmed mysqld was correctly
-  // bound to only its own specific address (`10.10.5.12:3306`), not the
+  // bound to only its own specific address (`10.10.5.15:3306`), not the
   // wildcard — meaning the bind-address fix in
   // mariadb_galera_cluster.scala, while independently reasonable, never
   // actually addressed this conflict. The real cause: on Linux, a
@@ -216,9 +216,9 @@ object mariadb_haproxy_keepalived extends OrpheraClusterPlaybook:
        |    option httpchk GET /
        |    http-check expect status 200
        |    default-server port 9200 inter 2s downinter 5s rise 3 fall 2 on-marked-down shutdown-sessions
-       |    server tst0 {{nodes.tst0.cluster_ip}}:3306 check
-       |    server tst1 {{nodes.tst1.cluster_ip}}:3306 check backup
-       |    server tst2 {{nodes.tst2.cluster_ip}}:3306 check backup
+       |    server tst3 {{nodes.tst3.cluster_ip}}:3306 check
+       |    server tst4 {{nodes.tst4.cluster_ip}}:3306 check backup
+       |    server tst5 {{nodes.tst5.cluster_ip}}:3306 check backup
        |
        |listen galera_read
        |    bind $vip:3307
@@ -227,9 +227,9 @@ object mariadb_haproxy_keepalived extends OrpheraClusterPlaybook:
        |    option httpchk GET /
        |    http-check expect status 200
        |    default-server port 9200 inter 2s downinter 5s rise 3 fall 2
-       |    server tst0 {{nodes.tst0.cluster_ip}}:3306 check
-       |    server tst1 {{nodes.tst1.cluster_ip}}:3306 check
-       |    server tst2 {{nodes.tst2.cluster_ip}}:3306 check
+       |    server tst3 {{nodes.tst3.cluster_ip}}:3306 check
+       |    server tst4 {{nodes.tst4.cluster_ip}}:3306 check
+       |    server tst5 {{nodes.tst5.cluster_ip}}:3306 check
        |EOF
        |systemctl enable --now haproxy
        |systemctl restart haproxy
@@ -238,12 +238,12 @@ object mariadb_haproxy_keepalived extends OrpheraClusterPlaybook:
        |  echo "haproxy failed to start on this node — see 'systemctl status haproxy' / 'journalctl -xeu haproxy' for the real reason" >&2
        |  exit 1
        |fi
-       |echo 'haproxy configured: write listener on :3306 (tst0 primary), read listener on :3307 (round-robin), bound to the VIP only'""".stripMargin
+       |echo 'haproxy configured: write listener on :3306 (tst3 primary), read listener on :3307 (round-robin), bound to the VIP only'""".stripMargin
 
   // NOT symmetric, unlike the two scripts above — priority/state differ
   // per node, so this is three separate per-host stages below rather than
   // one shared stage, same "asymmetric content needs asymmetric stages"
-  // pattern as mariadb_galera_cluster.scala's bootstrap-tst0/join-others
+  // pattern as mariadb_galera_cluster.scala's bootstrap-tst3/join-others
   // split. `interface` is detected at runtime (`ip -4 route show
   // default`) rather than hardcoded as e.g. "eth0" — guessing OS-level
   // device names instead of confirming them is exactly the class of bug
@@ -251,7 +251,7 @@ object mariadb_haproxy_keepalived extends OrpheraClusterPlaybook:
   // and there's no reason to repeat that mistake for a NIC name here when
   // detecting it is one line.
   //
-  // `state MASTER` only on the highest-priority node (tst0), `BACKUP` on
+  // `state MASTER` only on the highest-priority node (tst3), `BACKUP` on
   // the other two, matching the reference guide's own convention exactly
   // — some operators prefer `state BACKUP` on every node instead (letting
   // priority alone decide the election, avoiding a narrow startup-race
@@ -259,15 +259,15 @@ object mariadb_haproxy_keepalived extends OrpheraClusterPlaybook:
   // the VIP), which is worth knowing about but not what this file does.
   private def keepalivedPriorityAndState(host: String): (Int, String) =
     host match
-      case "tst0" => (101, "MASTER")
-      case "tst1" => (100, "BACKUP")
-      case "tst2" => (99, "BACKUP")
+      case "tst3" => (101, "MASTER")
+      case "tst4" => (100, "BACKUP")
+      case "tst5" => (99, "BACKUP")
 
   private def keepalivedPeers(host: String): List[String] =
     host match
-      case "tst0" => List("tst1", "tst2")
-      case "tst1" => List("tst0", "tst2")
-      case "tst2" => List("tst0", "tst1")
+      case "tst3" => List("tst4", "tst5")
+      case "tst4" => List("tst3", "tst5")
+      case "tst5" => List("tst3", "tst4")
 
   private def keepalivedConfigScript(host: String): String =
     val (priority, state) = keepalivedPriorityAndState(host)
@@ -339,7 +339,7 @@ object mariadb_haproxy_keepalived extends OrpheraClusterPlaybook:
 
   val playbook: ClusterPlaybook =
     clusterPlaybook("mariadb-haproxy-keepalived")(
-      stage("install-haproxy-keepalived", "tst0", "tst1", "tst2")
+      stage("install-haproxy-keepalived", "tst3", "tst4", "tst5")
         .task("install haproxy, keepalived")(
           Task.Install(
             packages = List("haproxy", "keepalived"),
@@ -348,21 +348,21 @@ object mariadb_haproxy_keepalived extends OrpheraClusterPlaybook:
         )
         .build,
 
-      // tst0 only — replicates to tst1/tst2 automatically via Galera, see
+      // tst3 only — replicates to tst4/tst5 automatically via Galera, see
       // createClustercheckUserScript's own comment.
-      stage("create-clustercheck-user", "tst0")
+      stage("create-clustercheck-user", "tst3")
         .task("create the clustercheck MariaDB user (replicates cluster-wide)")(
           Task.RunCommand(List("sh", "-c", createClustercheckUserScript))
         )
         .build,
 
-      stage("write-clustercheck-healthcheck", "tst0", "tst1", "tst2")
+      stage("write-clustercheck-healthcheck", "tst3", "tst4", "tst5")
         .task("install the :9200 clustercheck health-check endpoint")(
           Task.RunCommand(List("sh", "-c", installClustercheckScript))
         )
         .build,
 
-      stage("write-haproxy-config", "tst0", "tst1", "tst2")
+      stage("write-haproxy-config", "tst3", "tst4", "tst5")
         .task("write /etc/haproxy/haproxy.cfg and (re)start haproxy")(
           Task.RunCommand(List("sh", "-c", haproxyConfigScript))
         )
@@ -371,28 +371,28 @@ object mariadb_haproxy_keepalived extends OrpheraClusterPlaybook:
       // Three separate single-node stages — see keepalivedConfigScript's
       // own comment for why this can't be one shared stage like the two
       // above.
-      stage("write-keepalived-tst0", "tst0")
+      stage("write-keepalived-tst3", "tst3")
         .task("write /etc/keepalived/keepalived.conf and (re)start keepalived")(
-          Task.RunCommand(List("sh", "-c", keepalivedConfigScript("tst0")))
+          Task.RunCommand(List("sh", "-c", keepalivedConfigScript("tst3")))
         )
         .build,
 
-      stage("write-keepalived-tst1", "tst1")
+      stage("write-keepalived-tst4", "tst4")
         .task("write /etc/keepalived/keepalived.conf and (re)start keepalived")(
-          Task.RunCommand(List("sh", "-c", keepalivedConfigScript("tst1")))
+          Task.RunCommand(List("sh", "-c", keepalivedConfigScript("tst4")))
         )
         .build,
 
-      stage("write-keepalived-tst2", "tst2")
+      stage("write-keepalived-tst5", "tst5")
         .task("write /etc/keepalived/keepalived.conf and (re)start keepalived")(
-          Task.RunCommand(List("sh", "-c", keepalivedConfigScript("tst2")))
+          Task.RunCommand(List("sh", "-c", keepalivedConfigScript("tst5")))
         )
         .build,
 
-      stage("confirm-ha-frontend", "tst1")
+      stage("confirm-ha-frontend", "tst4")
         .waitFor(
           HealthCheck.Quorum(
-            nodes = List("tst0", "tst1", "tst2"),
+            nodes = List("tst3", "tst4", "tst5"),
             command = List("sh", "-c", vipHeldScript),
             requiredCount = 1,
             pollIntervalSeconds = 5,
