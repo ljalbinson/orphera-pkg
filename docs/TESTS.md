@@ -343,6 +343,14 @@ keyring at /mnt/cinder.keyring; RabbitMQ not reachable by the services at
 10.10.5.22:5672; the Ceph pool replication size vs the OSD layout.
 Teardown (destroys the `volumes` pool): `orphera cluster-playbook manifests/cinder_teardown.scala`.
 
+### K2. OpenStack clients on scala0 - NOT YET RUN
+    utils/openstack-client-setup.sh
+    source ~/.config/openstack/admin-openrc.sh
+    openstack token issue && openstack service list && openstack volume service list
+Expect: the script ends with "OK - the clients can authenticate"; `service list` shows
+keystone and cinderv3; `volume service list` shows cinder-scheduler and
+cinder-volume@ceph both up. Needs python3-venv on scala0 and tst6 resolvable from there.
+
 ## L. Node reassignment (2026-10-10) - steps 1-2 PASSED, steps 3-5 NOT YET RUN
 New roles: tst0-tst2 Ceph; tst3-tst5 Galera + haproxy + keepalived (VIP
 10.10.5.100); tst6 Keystone; tst7 WordPress and Prometheus/Grafana; tst8 Rocky;

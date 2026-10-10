@@ -21,6 +21,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (19.2.6+) cluster. A test-cluster compromise; enforce `aes256k` once the
   clients are upgraded.
 
+### Added — OpenStack command-line clients on scala0
+- `utils/openstack-client-setup.sh`: creates a virtualenv with
+  `python-openstackclient` outside the repository (`~/.venvs/openstack`), fetches
+  Keystone's test CA (ssh, falling back to the TLS handshake) and writes an rc
+  file (`~/.config/openstack/admin-openrc.sh`, mode 600). `source` it, then
+  `openstack token issue`, `openstack volume list` and so on;
+  `deactivate-openstack` undoes it. The credentials are the project's test
+  values. Idempotent; checks itself by issuing a token. Untested against the
+  real fleet.
+
 ### Added — OpenStack Keystone, Kolla cache and Cinder from Kolla images (run on the test fleet 2026-10-10)
 
 - `manifests/keystone_single_node.scala`: Keystone on one node (default tst7)
