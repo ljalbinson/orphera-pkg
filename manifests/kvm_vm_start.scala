@@ -4,21 +4,21 @@ import orphera.orchestrator.*
 import orphera.orchestrator.ClusterPlaybookDsl.*
 
 // Starts a VM that already exists on its libvirt/KVM hypervisor — the
-// companion to kvm_vm_provision.scala, and the way back up after
+// companion to kvm_zfs_vm_provision.scala, and the way back up after
 // `orphera shutdown` (or a hypervisor-side power-off) on a VM.
 //
 //   orphera cluster-playbook manifests/kvm_vm_start.scala --config config/tst0.yaml
 //
-// The SAME per-VM config file kvm_vm_provision.scala takes. Only three of its
+// The SAME per-VM config file kvm_zfs_vm_provision.scala takes. Only three of its
 // fields are used: `hypervisor` (which inventory node to run `virsh` on),
 // `hostname` (the libvirt domain name) and `nic0.ipaddress` (what to probe for
-// SSH once it is up). Unlike kvm_vm_provision.scala there are NO hardcoded
+// SSH once it is up). Unlike kvm_zfs_vm_provision.scala there are NO hardcoded
 // fallbacks: --config is required, because "start some default VM on some
 // default hypervisor" is never what anyone meant.
 //
 // Idempotent: running and reachable -> reported and left alone; paused ->
 // resumed; shut off -> started; not defined on that hypervisor -> fails (this
-// playbook never creates a VM — use kvm_vm_provision.scala for that). Never
+// playbook never creates a VM — use kvm_zfs_vm_provision.scala for that). Never
 // destroys or redefines anything.
 //
 // One deliberate exception to "leave a running VM alone": libvirt reports a
@@ -31,7 +31,7 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 // is never reset, it just gets the 180s SSH wait below.
 //
 // Needs the hypervisor to be an inventory node running the Orphera agent
-// (same requirement as kvm_vm_provision.scala's stages). The guest itself does
+// (same requirement as kvm_zfs_vm_provision.scala's stages). The guest itself does
 // NOT need the agent: readiness is a plain SSH probe, as in provisioning.
 object kvm_vm_start extends OrpheraClusterPlaybook:
 
@@ -54,7 +54,7 @@ object kvm_vm_start extends OrpheraClusterPlaybook:
   // command substitutions below must reach `sh` untouched.
   private val startVmScript =
     s"""reachable() { ping -c1 -W1 $ipAddress >/dev/null 2>&1 || timeout 3 bash -c 'echo > /dev/tcp/$ipAddress/22' >/dev/null 2>&1; }
-       |state=$$(virsh --connect qemu:///system domstate '$vmName' 2>/dev/null) || { echo "ERROR: domain '$vmName' is not defined on this hypervisor - provision it with kvm_vm_provision.scala" >&2; exit 1; }
+       |state=$$(virsh --connect qemu:///system domstate '$vmName' 2>/dev/null) || { echo "ERROR: domain '$vmName' is not defined on this hypervisor - provision it with kvm_zfs_vm_provision.scala" >&2; exit 1; }
        |case "$$state" in
        |  running)
        |    ok=0
@@ -84,7 +84,7 @@ object kvm_vm_start extends OrpheraClusterPlaybook:
         .build,
       // HealthCheck.Ssh carries its own `host`, so this stage's node list
       // (the hypervisor) only decides where the check is driven from, same as
-      // kvm_vm_provision.scala's confirm-vm-reachable. 180s covers a cold boot
+      // kvm_zfs_vm_provision.scala's confirm-vm-reachable. 180s covers a cold boot
       // (sshd up ~11s, pubkey auth working ~60s after boot on a real run).
       stage("confirm-vm-reachable", hypervisorNode)
         .waitFor(

@@ -678,7 +678,7 @@ designated node (`on_node:`) at `poll_interval` seconds until
   Orphera's own agent RPC, and against `host` directly rather than an
   `on_node:` looked up in inventory.yaml. The one case for this:
   confirming a brand-new VM (e.g. one `virt-install`ed by a playbook —
-  see `manifests/kvm_vm_provision.scala`) is alive, when by definition
+  see `manifests/kvm_zfs_vm_provision.scala`) is alive, when by definition
   it can't be running the Orphera agent yet and usually isn't in
   inventory.yaml yet either. Deliberately does not install or start
   the agent itself; that stays a separate, explicit `orphera bootstrap`
@@ -847,7 +847,7 @@ comment for the exact mechanism.
 `playbook`/`cluster-playbook` also accept `--config <path>`, for a
 `.scala` script that needs real per-VM sizing/network values instead of
 hardcoded Scala vals — the motivating case is
-`manifests/kvm_vm_provision.scala`, which provisions a brand-new KVM VM
+`manifests/kvm_zfs_vm_provision.scala`, which provisions a brand-new KVM VM
 and previously had to hardcode memory/cpu/disk/nic values one Scala val
 at a time per VM.
 
@@ -877,10 +877,10 @@ which has no code of its own to read an env var; `orphera` prints a
 note rather than silently ignoring the flag in that case.
 
 ```bash
-orphera cluster-playbook manifests/kvm_vm_provision.scala --config config/testvm0-config.yml
+orphera cluster-playbook manifests/kvm_zfs_vm_provision.scala --config config/testvm0-config.yml
 ```
 
-`kvm_vm_provision.scala` is wired to `ConfigYaml.fromEnv()` end to
+`kvm_zfs_vm_provision.scala` is wired to `ConfigYaml.fromEnv()` end to
 end — every sizing/network val (`hypervisorNode`, `vmName`, `baseImage`,
 `diskSizeGB`, `memoryMB`, `vcpus`, `nicName`, `nicBridge`, `cpuMode`,
 `domainname`, `dns1`/`dns2`, `ipAddress`, `gateway`, `netmask`) reads
@@ -899,6 +899,13 @@ for use in `inventory.yaml` (`osd_disks`/`zap_disks`). The VM is also marked
 **autostart** on the hypervisor. After provisioning, run
 `orphera bootstrap --forget-host-key` to clear a stale `known_hosts` entry for a
 rebuilt host.
+
+There are two provisioning scripts, with identical behaviour apart from storage:
+`manifests/kvm_zfs_vm_provision.scala` keeps each VM in its own ZFS filesystem
+(`tank/kvm/<hypervisor>/<vm>`, mounted under `/exports/kvm`), and
+`manifests/kvm_native_vm_provision.scala` uses a plain directory
+(`/var/lib/libvirt/images/orphera/<vm>`, or under `$ORPHERA_VM_DIR_ROOT`) on any
+hypervisor, with no ZFS needed. Both take the same `--config` file.
 
 `manifests/kvm_vm_start.scala` takes the same file and starts that VM on its
 `hypervisor` (paused is resumed, an undefined domain fails; a domain libvirt
@@ -931,7 +938,7 @@ orphera cluster-playbook manifests/gen_set_dns.scala --config config/tst0.yaml
 files and it runs that whole chain once per config, the configs in parallel:
 
 ```bash
-orphera cluster-playbook manifests/kvm_vm_provision.scala manifests/gen_set_dns.scala \
+orphera cluster-playbook manifests/kvm_zfs_vm_provision.scala manifests/gen_set_dns.scala \
   manifests/gen_packages.scala --config config/tst*.yaml --parallel 8 --quiet
 ```
 
@@ -949,7 +956,7 @@ and `--forget-host-key` options that `orphera bootstrap` has. `gen_dist_upgrade.
 `dist-upgrade`, so a whole build is one command:
 
 ```bash
-orphera cluster-playbook manifests/kvm_vm_provision.scala @bootstrap \
+orphera cluster-playbook manifests/kvm_zfs_vm_provision.scala @bootstrap \
   manifests/gen_set_dns.scala manifests/gen_dist_upgrade.scala manifests/gen_packages.scala \
   --ssh-user localadmin --forget-host-key --config config/tst*.yaml --parallel 8 --quiet
 ```

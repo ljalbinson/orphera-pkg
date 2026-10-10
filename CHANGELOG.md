@@ -21,6 +21,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (19.2.6+) cluster. A test-cluster compromise; enforce `aes256k` once the
   clients are upgraded.
 
+### Changed — VM provisioning split into ZFS and native variants (not yet run)
+- `manifests/kvm_vm_provision.scala` renamed to `kvm_zfs_vm_provision.scala` (the
+  object and playbook name follow; behaviour unchanged). References in
+  `kvm_vm_start.scala`, README, inventory and the CLI help were updated; older
+  CHANGELOG entries keep the old name.
+- New `manifests/kvm_native_vm_provision.scala`: the same playbook without ZFS.
+  Each VM's files go in a plain directory, `/var/lib/libvirt/images/orphera/<vm>`
+  by default (`ORPHERA_VM_DIR_ROOT` changes the parent), created with `mkdir` and
+  removed with `rm -rf` on re-provisioning. Not compiled or run yet.
+
 ### Added — rpm package cache on tst12 (test_rpm_cache.sh NOT YET RUN)
 - `manifests/rpm_cache.scala` (+ `rpm_cache_teardown.scala`, `test_rpm_cache.sh`):
   nginx caching mirror on a new node, tst12 (10.10.5.24), port 8080, for the
