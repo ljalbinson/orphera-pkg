@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-## [0.1.175] - 2026-10-11
+## [0.1.177] - 2026-10-11
 
 ### Fixed — Cinder: create a volume from a qcow2 image failed (`FailedToDropPrivileges`)
 - `openstack volume create --image <qcow2 image>` went to `error`: the RBD driver can only clone
