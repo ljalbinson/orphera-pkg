@@ -46,7 +46,7 @@ object apt_cache extends OrpheraClusterPlaybook:
        |# apt-cacher-ng 3.7.4 fail to store it ("storage error [Checked size beyond
        |# EOF] ... File exists") and drop the connection, leaving apt hung on a
        |# half-closed socket. Pass them straight through instead of storing them.
-       |DontCacheRequested: /(In)?Release([.]gpg)?$
+       |DontCacheRequested: /(In)?Release([.]gpg)?$$
        |CONF
        |systemctl enable apt-cacher-ng
        |systemctl restart apt-cacher-ng
