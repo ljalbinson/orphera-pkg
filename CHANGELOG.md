@@ -14,8 +14,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   exit code is non-zero. Like `--nodes` and `--timeout` the flag is recognised anywhere in the
   arguments, so a remote command that needs its own literal `--quiet` cannot be run with it.
   Changes: `ConsoleRenderer.renderQuiet`, `Command.RunCommand.quiet`, `parseRunCommand`,
-  `Orchestrator.executeCommand`, the usage text and bash completion. Not compiled here; the
-  first build on scala0 is the first compile.
+  `Orchestrator.executeCommand`, the usage text and bash completion. Built and tried on scala0
+  (2026-10-11): output only, `[node]` prefixes kept, a failing command prints its exit line and
+  exits non-zero.
 
 ## [0.1.173] - 2026-10-11
 
