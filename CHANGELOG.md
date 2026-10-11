@@ -42,7 +42,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   proxy API, and that re-applying both playbooks is idempotent. `NO_APPLY=1` checks without
   applying. (`test_observability.sh`, the run-log test, is separate and passed 26/26.)
 
-### Fix being tested — apt cache: concurrent Release-file requests make apt hang
+### Fixed (symptom) — apt cache: concurrent Release-file requests make apt hang
 - Cause of the hung `apt update` on tst5 and tst1: with many nodes asking for the same stale
   `InRelease` at once (any playbook installing on several nodes), apt-cacher-ng 3.7.4 logs
   `storage error [Checked size beyond EOF] ... File exists` / `Failure to move file ... out of
@@ -57,6 +57,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   cache freshly rebuilt): all 10 `apt update` runs completed, none hung, but the cache still
   logged 4 storage errors, so the race is not removed (test 13 passed, 1 failed). Whether the
   hang itself is gone needs repeated runs; see docs/TESTS.md K3.
+- Five further rounds (Release files deleted from the cache each time, ten clients updating at
+  once) all finished on all ten clients: 60 clean runs in total, where roughly 1 in 10 hung
+  before. The cache still logs `Failure to move file ... File exists` (it renames the stale
+  file to a name made from the current second, so same-second requests collide); apt recovers
+  with the client settings, so the test now reports this as a warning.
 
 ### Fixed — apt clients could hang on a half-closed connection to the apt cache (did not help; see above)
 - `apt_cache_clients.scala` now also writes `Acquire::http::Pipeline-Depth "0"`,
