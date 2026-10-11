@@ -32,6 +32,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   removed with `rm -rf` on re-provisioning. Run on gs3 for tst13 (10.10.5.25): all six
   stages completed first time and the VM answered SSH ~10 s after start.
 
+### Added — test_observability_stack.sh (NOT YET RUN)
+- `manifests/test_observability_stack.sh` tests the Prometheus/Grafana stack on tst7
+  end to end from the machine running it: applies `observability_stack.scala` and
+  `observability_extended.scala`, then checks over HTTP that every target is up per job
+  (node_exporter 7, haproxy 3, mysqld 3, prometheus 1), that real data arrives (CPU metrics
+  from all 7 nodes, `wsrep_cluster_size` 3 on each Galera node, `mysql_up`, haproxy metrics),
+  that Grafana is healthy and its Prometheus datasource answers a query through Grafana's own
+  proxy API, and that re-applying both playbooks is idempotent. `NO_APPLY=1` checks without
+  applying. (`test_observability.sh`, the run-log test, is separate and passed 26/26.)
+
 ### Fixed — apt clients could hang on a half-closed connection to the apt cache
 - `apt_cache_clients.scala` now also writes `Acquire::http::Pipeline-Depth "0"`,
   `Acquire::http::Timeout "30"` and `Acquire::Retries "3"`. Seen on tst5: `apt-get update`

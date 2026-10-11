@@ -378,6 +378,21 @@ Result: passed first time, no fixes needed. (Had it failed, the likeliest causes
 installed or not in the enabled repos (the test removes it first), the log-count regex,
 and Scala string escaping.)
 
+### K5. Prometheus and Grafana on tst7 - NOT YET RUN
+Replaces the old step 4 gap in section L: nothing tested the monitoring stack itself.
+
+    git pull
+    manifests/test_observability_stack.sh 2>&1 | tee /tmp/observability_stack.log
+    NO_APPLY=1 manifests/test_observability_stack.sh   # check only, apply nothing
+Expect: prometheus healthy; targets up per job `haproxy=3/3 mysqld=3/3 node_exporter=7/7
+prometheus=1/1` (14 in all); CPU metrics from 7 nodes; `wsrep_cluster_size` 3 on all three
+Galera nodes; `mysql_up` 3; haproxy metrics from 3; Grafana database ok; a query through
+Grafana's Prometheus datasource sees 14 targets; second run of both playbooks completes
+with every target up. Needs ports 9090 and 3000 on tst7 reachable from scala0.
+Most likely to need a fix on the first run: an exporter on a Galera node that lost its
+database user in the rebuild (the extended playbook recreates it), the haproxy metric
+name pattern, and Grafana's datasource proxy path for the installed version.
+
 ### K2. OpenStack clients on scala0 - PASSED (2026-10-10): token issued, cinder-scheduler and cinder-volume@ceph up (needed python3.12-venv installed first)
     utils/openstack-client-setup.sh
     source ~/.config/openstack/admin-openrc.sh
@@ -433,9 +448,7 @@ pass on the new Galera/VIP. Also added and passed that day: the Kolla cache on t
 OpenStack clients on scala0 (K2) and the apt cache on tst11 (K3, 12/12).
 Also passed 2026-10-11: K4 rpm cache (11/11) and `test_observability.sh` (26/26; it checks the
 JSON run log on tst0, not the Prometheus/Grafana stack).
-Still to do: step 4's monitoring stack, i.e. apply `observability_stack.scala` and
-`observability_extended.scala` with tst7 as the monitoring node (no test script covers it),
-and re-running
+Still to do: step 4's monitoring stack (K5, `test_observability_stack.sh`, written, not yet run), and re-running
 `cephadm_install.scala` to confirm its new cephx-cipher task (the live cluster already
 has the setting from `cinder_single_node.scala`).
 
