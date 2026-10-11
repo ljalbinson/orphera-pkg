@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-### Added — Placement on tst13 (branch `placement`, DRAFT, not yet run)
+### Added — Placement on tst13 (branch `placement`; test_placement.sh passed 2026-10-11)
 - `manifests/placement_single_node.scala`: placement-api from the Kolla image under podman/systemd
   on tst13 (shared with Glance; `node`/`fqdn`/`nodeIp` at the top move it), Apache + mod_wsgi on
   8780, plain HTTP. Creates the `placement` database on Galera, writes `placement.conf`, runs
@@ -21,8 +21,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the smoke test.
 - `utils/openstack-client-setup.sh` also installs `osc-placement`, so `openstack resource provider
   list` works from scala0.
-- Open: the Apache vhost and the `placement-api` WSGI script lookup follow the Cinder pattern and
-  are the most likely things to need a fix on the first run.
+- Passed on the first run on scala0: all functional checks, and the idempotent re-apply once
+  `unattended-upgrades` on tst13 had released the dpkg lock (the agent waits only 60 s; the first
+  re-apply failed with apt exit 100 while an upgrade of 302 packages held it - environmental, see
+  "apt/dpkg lock contention" in the README).
 
 ## [0.1.177] - 2026-10-11
 
