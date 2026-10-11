@@ -53,7 +53,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Now set: `VfileUseRangeOps: 0` in the drop-in (the documented way to stop Range-based
   revalidation of volatile files; the error is a size check during that revalidation).
   `test_apt_cache.sh` has a check that runs `apt-get update` on all ten clients at once and
-  asserts none hang and no new storage errors are logged. Not yet run with the fix.
+  asserts none hang and no new storage errors are logged. First run with the fix (2026-10-11,
+  cache freshly rebuilt): all 10 `apt update` runs completed, none hung, but the cache still
+  logged 4 storage errors, so the race is not removed (test 13 passed, 1 failed). Whether the
+  hang itself is gone needs repeated runs; see docs/TESTS.md K3.
 
 ### Fixed — apt clients could hang on a half-closed connection to the apt cache (did not help; see above)
 - `apt_cache_clients.scala` now also writes `Acquire::http::Pipeline-Depth "0"`,
