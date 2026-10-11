@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — Placement on tst13 (branch `placement`, DRAFT, not yet run)
+- `manifests/placement_single_node.scala`: placement-api from the Kolla image under podman/systemd
+  on tst13 (shared with Glance; `node`/`fqdn`/`nodeIp` at the top move it), Apache + mod_wsgi on
+  8780, plain HTTP. Creates the `placement` database on Galera, writes `placement.conf`, runs
+  `placement-manage db sync`, registers service `placement` with three endpoints and user
+  `placement` in Keystone. No Ceph, no message bus.
+- `manifests/placement_teardown.scala`: unregisters from Keystone, removes the container, unit,
+  config and state, drops the database; Glance on the node is untouched.
+- `manifests/test_placement.sh`: unit active, version document 200, unauthenticated request 401,
+  admin-token resource provider create/read/delete, catalog lists `placement`, Glance still
+  answers, idempotent re-apply; `NO_APPLY=1`.
+- `build_openstack_stack.sh`: new `placement` step after `glance`, plus a resource provider in
+  the smoke test.
+- Open: the Apache vhost and the `placement-api` WSGI script lookup follow the Cinder pattern and
+  are the most likely things to need a fix on the first run.
+
 ## [0.1.177] - 2026-10-11
 
 ### Fixed — Cinder: create a volume from a qcow2 image failed (`FailedToDropPrivileges`)
