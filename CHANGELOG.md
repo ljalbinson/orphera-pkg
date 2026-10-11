@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed — apt/dpkg lock wait raised from 60 s to 10 minutes
+- `AptInstaller` (the agent) and `SshDeployer` now pass `-o DPkg::Lock::Timeout=600` instead of
+  `60`, held in one constant in `AptInstaller`. On a freshly provisioned VM `unattended-upgrades`
+  can hold the dpkg lock for several minutes (seen on tst13: an upgrade of 302 packages made a
+  playbook's Install task fail with apt exit 100 after 60 s). Takes effect on a node once its agent
+  is rebuilt and redeployed.
+
 ### Added — Placement on tst13 (branch `placement`; test_placement.sh passed 2026-10-11)
 - `manifests/placement_single_node.scala`: placement-api from the Kolla image under podman/systemd
   on tst13 (shared with Glance; `node`/`fqdn`/`nodeIp` at the top move it), Apache + mod_wsgi on

@@ -462,9 +462,9 @@ check whether facts are actually being retrieved from that node before
 assuming the condition itself is wrong.
 
 **`apt`/`dpkg` lock contention:** every `apt-get`/`dpkg` invocation on
-the agent passes `-o DPkg::Lock::Timeout=60`, so a task that hits the
+the agent passes `-o DPkg::Lock::Timeout=600`, so a task that hits the
 lock (background unattended-upgrades, another concurrent Orphera task,
-etc.) waits up to 60 seconds and retries automatically rather than
+etc.) waits up to 10 minutes and retries automatically rather than
 failing immediately with exit 100. This was added after hitting the
 failure directly in practice — see [Known gaps](#known-gaps--not-yet-built)
 for the retry/backoff work this doesn't yet fully cover.
