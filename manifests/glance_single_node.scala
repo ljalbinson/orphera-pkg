@@ -475,7 +475,10 @@ if __name__ == '__main__':
           Task.RunCommand(List("sh", "-c", glanceConfScript))
         )
         .task("write the Kolla config")(
-          Task.RunCommand(List("sh", "-c", kollaConfigScript), timeoutSeconds = 60)
+          Task.RunCommand(
+            List("sh", "-c", kollaConfigScript),
+            timeoutSeconds = 60
+          )
         )
         .task("glance-manage db_sync")(
           Task.RunCommand(List("sh", "-c", dbSyncScript), timeoutSeconds = 600)

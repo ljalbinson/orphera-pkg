@@ -425,7 +425,10 @@ if __name__ == '__main__':
           Task.RunCommand(List("sh", "-c", placementConfScript))
         )
         .task("write the Kolla config and the Apache vhost")(
-          Task.RunCommand(List("sh", "-c", kollaConfigScript), timeoutSeconds = 120)
+          Task.RunCommand(
+            List("sh", "-c", kollaConfigScript),
+            timeoutSeconds = 120
+          )
         )
         .task("placement-manage db sync")(
           Task.RunCommand(List("sh", "-c", dbSyncScript), timeoutSeconds = 600)
