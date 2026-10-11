@@ -454,7 +454,7 @@ pass on the new Galera/VIP. Also added and passed that day: the Kolla cache on t
 OpenStack clients on scala0 (K2) and the apt cache on tst11 (K3, 12/12).
 Also passed 2026-10-11: K4 rpm cache (11/11) and `test_observability.sh` (26/26; it checks the
 JSON run log on tst0, not the Prometheus/Grafana stack).
-Step 4's monitoring stack passed (K5). Also 2026-10-11: `cephadm_install.scala` re-run completed ok (its cephx-cipher task included), and Keystone (K) and Cinder (K1) were rebuilt and passed again after an accidental Galera wipe by the old `test_wordpress.sh` (now `rebuild_galera_and_wordpress.sh`; the new `test_wordpress.sh` is non-destructive and not yet run).
+Step 4's monitoring stack passed (K5). Also 2026-10-11: `cephadm_install.scala` re-run completed ok (its cephx-cipher task included), and Keystone (K) and Cinder (K1) were rebuilt and passed again after an accidental Galera wipe by the old `test_wordpress.sh` (now `rebuild_galera_and_wordpress.sh`; the new non-destructive `test_wordpress.sh` PASSED and the site is reachable).
 Nothing else remains from section L.
 
 Expect: each of the tests above passes as before.  Not changed: the Ceph

@@ -14,7 +14,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   applies `wordpress_site.scala` only and checks the Galera cluster and VIP, the `wordpress`
   database and user, nginx and php-fpm, and that the site answers 200 over HTTP and shows no
   database connection error; also checks idempotence. `NO_APPLY=1` checks without applying.
-  Not yet run.
+  Passed on the test fleet (2026-10-11).
 
 ## [0.1.172] - 2026-10-11
 
