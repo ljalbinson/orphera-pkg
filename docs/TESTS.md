@@ -386,7 +386,7 @@ Expect: the script ends with "OK - the clients can authenticate"; `service list`
 keystone and cinderv3; `volume service list` shows cinder-scheduler and
 cinder-volume@ceph both up. Needs python3-venv on scala0 and tst6 resolvable from there.
 
-## L. Node reassignment (2026-10-10) - steps 1-3 and 5 done; step 4 (observability) NOT YET RUN
+## L. Node reassignment (2026-10-10) - steps 1-3 and 5 done; step 4: run-log test passed, Prometheus/Grafana stack on tst7 NOT YET RUN
 New roles: tst0-tst2 Ceph; tst3-tst5 Galera + haproxy + keepalived (VIP
 10.10.5.100); tst6 Keystone; tst7 WordPress and Prometheus/Grafana; tst8 Rocky;
 tst9 Kolla cache; tst10 Cinder; tst11 apt cache; tst12 rpm cache (K4, passed).  The manifests, tests and inventory comments were
@@ -414,7 +414,8 @@ two hosts will answer for 10.10.5.100 again):
        manifests/test_mariadb_galera.sh
        manifests/test_vip_failover.sh
 3. WordPress on tst7: `orphera cluster-playbook manifests/wordpress_site.scala`.
-4. Observability on tst7: `manifests/test_observability.sh` and
+4. Observability: `manifests/test_observability.sh` (the structured run log; it runs against
+   tst0 and is independent of the monitoring node - PASSED 26/26, 2026-10-11), and on tst7
    `observability_stack.scala` / `observability_extended.scala` (monitoring node
    now tst7; scrape targets tst0-tst6).
 5. Keystone on tst6 (K) and Cinder on tst10 (K1), which use the new Galera.
@@ -430,7 +431,11 @@ Result, steps 3 and 5 (2026-10-10): WordPress applied on tst7 (reported running;
 test script was not run). Keystone on tst6 (K) 11/11 and Cinder on tst10 (K1) 12/12 both
 pass on the new Galera/VIP. Also added and passed that day: the Kolla cache on tst9 (K0),
 OpenStack clients on scala0 (K2) and the apt cache on tst11 (K3, 12/12).
-Still to do: step 4, `manifests/test_observability.sh` against tst7, and re-running
+Also passed 2026-10-11: K4 rpm cache (11/11) and `test_observability.sh` (26/26; it checks the
+JSON run log on tst0, not the Prometheus/Grafana stack).
+Still to do: step 4's monitoring stack, i.e. apply `observability_stack.scala` and
+`observability_extended.scala` with tst7 as the monitoring node (no test script covers it),
+and re-running
 `cephadm_install.scala` to confirm its new cephx-cipher task (the live cluster already
 has the setting from `cinder_single_node.scala`).
 
