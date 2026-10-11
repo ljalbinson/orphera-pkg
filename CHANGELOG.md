@@ -32,7 +32,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   removed with `rm -rf` on re-provisioning. Run on gs3 for tst13 (10.10.5.25): all six
   stages completed first time and the VM answered SSH ~10 s after start.
 
-### Added — rpm package cache on tst12 (test_rpm_cache.sh NOT YET RUN)
+### Added — rpm package cache on tst12 (test_rpm_cache.sh 11/11)
 - `manifests/rpm_cache.scala` (+ `rpm_cache_teardown.scala`, `test_rpm_cache.sh`):
   nginx caching mirror on a new node, tst12 (10.10.5.24), port 8080, for the
   Rocky and EPEL download hosts (verified HTTPS upstream; 30-day lifetime for
@@ -40,7 +40,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   writes a dnf repository file on tst8 with the cache first and the official
   Rocky host as the second baseurl, and sets the stock Rocky repo files aside
   (`*.orphera-off`; the teardown restores them). New `config/tst12.yaml` and
-  inventory entry. Not compiled or run yet.
+  inventory entry. Passed on the test fleet first time: `tree` was a MISS then a HIT in
+  the cache log, and `dnf makecache` worked with nginx stopped (official-host fallback).
 
 ### Added — apt package cache on tst11 (test_apt_cache.sh 12/12)
 - `manifests/apt_cache.scala` (+ `apt_cache_teardown.scala`, `test_apt_cache.sh`):
