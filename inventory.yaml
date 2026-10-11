@@ -119,6 +119,12 @@ nodes:
     vars:
       cluster_ip: "10.10.5.24"
 
+  # provisioned with manifests/kvm_native_vm_provision.scala; no role yet.
+  - name: tst13
+    host: tst13.ljalbinson.com
+    vars:
+      cluster_ip: "10.10.5.25"
+
   - name: gs1
     host: gs1.ljalbinson.com
     vars:
