@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-### Added — Glance on tst13 (branch `glance`, DRAFT, not yet run)
+### Added — Glance on tst13 (branch `glance`; test_glance.sh passed 11/11 on 2026-10-11)
 - `manifests/glance_single_node.scala`: glance-api from the Kolla image under podman/systemd on
   tst13, plain HTTP on 9292, images stored as RBD images in a new Ceph pool `images` with a
   `client.glance` cephx user (fixed test key, same convention and cipher compromise as Cinder).
@@ -18,8 +18,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `manifests/test_glance.sh`: unit active, API answers, image upload reaches `active` and exists
   as an RBD image, deletes cleanly, catalog lists `image`, idempotent re-apply; `NO_APPLY=1`.
 - inventory.yaml: tst13 role comment; README fleet table and run order.
-- Open: the Kolla `glance-api` command and config layout are written from memory of 2025.1 and
-  are the most likely things to need a fix on the first run.
+- Passed on the first run of the playbook on scala0 (after Keystone and Cinder were rebuilt
+  following a Galera wipe by an earlier `test_mariadb_galera.sh` run): glance-api starts with the
+  plain `glance-api` command, the RBD store works, and the second run is idempotent.
+- Note: `test_mariadb_galera.sh` and `rebuild_galera_and_wordpress.sh` tear Galera down and wipe
+  every database (Keystone, Cinder, Glance); rebuild order afterwards is test_keystone.sh,
+  test_cinder.sh, openstack-client-setup.sh, test_glance.sh.
 
 ### Added — `orphera run --quiet`
 - `orphera run <command> --nodes ... --quiet` prints only the command's own output (still
