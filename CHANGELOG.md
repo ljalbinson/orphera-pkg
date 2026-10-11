@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed — Cinder: create a volume from a qcow2 image failed (`FailedToDropPrivileges`)
+- `openstack volume create --image <qcow2 image>` went to `error`: the RBD driver can only clone
+  raw images, so Cinder downloads other formats and inspects/converts them through its privsep
+  helper, which cannot start in a podman container without CAP_SYS_ADMIN, CAP_NET_ADMIN and
+  CAP_DAC_READ_SEARCH ("Privsep daemon failed to start"). `cinder_single_node.scala` now adds those
+  capabilities to the orphera-cinder-volume unit only. Re-apply the playbook to pick it up.
+  A raw image (`qemu-img convert -O raw`) skips the download and is cloned copy-on-write.
+  Not yet re-tested.
+
 ### Added — master build script
 - `manifests/build_openstack_stack.sh`: empty VMs with an agent to a working Ceph + Galera +
   Keystone + Cinder + Glance stack with the clients set up on scala0, in dependency order.
