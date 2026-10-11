@@ -19,6 +19,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   answers, idempotent re-apply; `NO_APPLY=1`.
 - `build_openstack_stack.sh`: new `placement` step after `glance`, plus a resource provider in
   the smoke test.
+- `utils/openstack-client-setup.sh` also installs `osc-placement`, so `openstack resource provider
+  list` works from scala0.
 - Open: the Apache vhost and the `placement-api` WSGI script lookup follow the Cinder pattern and
   are the most likely things to need a fix on the first run.
 
