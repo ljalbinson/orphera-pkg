@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.1.172] - 2026-10-11
+
 ### Changed — test fleet roles reassigned
 - tst0-tst2 Ceph only; MariaDB Galera + haproxy + keepalived moved to tst3-tst5
   (VIP unchanged); Keystone on tst6; WordPress and Prometheus/Grafana on tst7.
