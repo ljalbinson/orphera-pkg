@@ -98,9 +98,16 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 //     needs is created here.
 //   - Snapshot handling beyond "delete the current snapshot if one
 //     exists" (the original's own scope).
-object kvm_vm_provision extends OrpheraClusterPlaybook:
+// NATIVE VARIANT: this is kvm_zfs_vm_provision.scala without ZFS. Everything
+// else (config handling, cloud-init, virt-install, autostart, reachability
+// check) is identical; only the per-VM storage differs: a plain directory
+// ($ORPHERA_VM_DIR_ROOT, default /var/lib/libvirt/images/orphera)/<vm> instead of
+// a ZFS filesystem tank/kvm/<hypervisor>/<vm> mounted under /exports/kvm.
+// Destroying a VM removes that directory with rm -rf (no snapshots or
+// recursive zfs destroy), so keep anything you want to retain elsewhere.
+object kvm_native_vm_provision extends OrpheraClusterPlaybook:
 
-  // `orphera cluster-playbook manifests/kvm_vm_provision.scala --config
+  // `orphera cluster-playbook manifests/kvm_native_vm_provision.scala --config
   // config/testvm0-config.yaml` makes that file's parsed params available
   // here. `Left` (given but unparseable) fails the whole playbook loudly
   // rather than silently falling back — a typo'd/corrupt --config
@@ -175,7 +182,7 @@ object kvm_vm_provision extends OrpheraClusterPlaybook:
     }
   if config.exists(_.pdisks.nonEmpty) then
     Console.err.println(
-      "WARNING: pdisks: in --config is not implemented by kvm_vm_provision.scala and is ignored."
+      "WARNING: pdisks: in --config is not implemented by kvm_native_vm_provision.scala and is ignored."
     )
   private val extraDiskFiles: List[(Int, String)] =
     extraDisksGB.zipWithIndex.map { case (gb, i) =>
@@ -240,8 +247,13 @@ object kvm_vm_provision extends OrpheraClusterPlaybook:
 
   // Mirrors EFSNAME/EDIR from the original (DFSNAME/DDIR — the second,
   // bulk-data filesystem — is out of scope here, see header comment).
-  private val workingFs = s"tank/kvm/$hypervisorNode/$vmName"
-  private val workingDir = s"/exports/kvm/$hypervisorNode/$vmName"
+  // Native variant: no ZFS. The VM's files live in a plain directory on the
+  // hypervisor's own filesystem (default libvirt image area), created with
+  // mkdir and removed with rm -rf. Set ORPHERA_VM_DIR_ROOT to use another
+  // parent directory (for example a separate mount).
+  private val dirRoot =
+    sys.env.getOrElse("ORPHERA_VM_DIR_ROOT", "/var/lib/libvirt/images/orphera")
+  private val workingDir = s"$dirRoot/$vmName"
 
   // Mirrors the original's exists/snapshot/destroy/undefine sequence —
   // one shell script with inline `if`/`grep` checks standing in for
@@ -256,14 +268,14 @@ object kvm_vm_provision extends OrpheraClusterPlaybook:
        |  virsh --quiet destroy $vmName 2>/dev/null || true
        |  virsh --quiet undefine $vmName || true
        |fi
-       |zfs destroy -r '$workingFs' 2>/dev/null || true
-       |echo "'$vmName' destroyed/undefined if it existed; '$workingFs' removed if present"""".stripMargin
+       |rm -rf '$workingDir'
+       |echo "'$vmName' destroyed/undefined if it existed; '$workingDir' removed if present"""".stripMargin
 
   private val createFilesystemScript =
-    s"""zfs create '$workingFs'
+    s"""mkdir -p '$workingDir'
        |chown localadmin:localadmin '$workingDir'
        |chmod 0755 '$workingDir'
-       |echo "zfs filesystem '$workingFs' mounted at '$workingDir'"""".stripMargin
+       |echo "directory '$workingDir' ready"""".stripMargin
 
   // `cp --no-clobber` mirrors the original's `copy: ... force: false` —
   // never overwrite an image that's already there from a previous
@@ -363,10 +375,10 @@ object kvm_vm_provision extends OrpheraClusterPlaybook:
        |echo "$vmName defined, started, and set to autostart with the hypervisor"""".stripMargin
 
   val playbook: ClusterPlaybook =
-    clusterPlaybook("kvm-vm-provision")(
+    clusterPlaybook("kvm-native-vm-provision")(
       stage("destroy-existing-vm", hypervisorNode)
         .task(
-          s"destroy/undefine $vmName and its zfs filesystem if they already exist"
+          s"destroy/undefine $vmName and its directory if they already exist"
         )(
           Task.RunCommand(
             List("sh", "-c", destroyExistingVmScript),
@@ -375,8 +387,8 @@ object kvm_vm_provision extends OrpheraClusterPlaybook:
         )
         .build,
 
-      stage("create-vm-filesystem", hypervisorNode)
-        .task(s"create $workingFs and set ownership")(
+      stage("create-vm-directory", hypervisorNode)
+        .task(s"create $workingDir and set ownership")(
           Task.RunCommand(
             List("sh", "-c", createFilesystemScript),
             timeoutSeconds = 30

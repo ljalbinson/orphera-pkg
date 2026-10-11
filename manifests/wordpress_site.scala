@@ -8,14 +8,14 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 // mariadb_haproxy_keepalived.scala): those were all about building the
 // clustered infrastructure itself. This one is the first "ordinary app on
 // top of already-working infrastructure" exercise — a single WordPress
-// node (tst5, deliberately NOT one of tst0/tst1/tst2) using the existing
+// node (tst7, deliberately NOT one of tst3/tst4/tst5) using the existing
 // Galera cluster fronted by mariadb_haproxy_keepalived.scala's floating IP
 // (10.10.5.100) as its database, rather than standing up its own.
 //
 // Prerequisite, not checked by this file: mariadb_galera_cluster.scala AND
 // mariadb_haproxy_keepalived.scala must already be applied and healthy on
-// tst0/tst1/tst2 — this playbook only ever talks to the cluster through
-// the VIP, on the write listener (port 3306, pinned to tst0 with tst1/tst2
+// tst3/tst4/tst5 — this playbook only ever talks to the cluster through
+// the VIP, on the write listener (port 3306, pinned to tst3 with tst4/tst5
 // as backup — see that file's header comment), never the round-robin read
 // listener on 3307, since WordPress uses one connection for both reads and
 // writes and needs write capability throughout, not just for the initial
@@ -26,16 +26,16 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 // or "one node's output feeds the others" (ceph_mon_quorum.scala), but
 // "one stage prepares shared state on a DIFFERENT cluster than the one
 // this manifest is actually building":
-//   - create-wordpress-database (tst0 only): creates the `wordpress`
+//   - create-wordpress-database (tst3 only): creates the `wordpress`
 //     database and `wordpress_user`, run locally via unix-socket root auth
-//     on tst0 — reusing the exact same trusted-root assumption
+//     on tst3 — reusing the exact same trusted-root assumption
 //     mariadb_galera_cluster.scala's own bootstrapScript/joinScript
 //     depend on. Because Galera replicates DDL/DML synchronously, this one
-//     write on tst0 is immediately visible on tst1/tst2 too; no need to
+//     write on tst3 is immediately visible on tst4/tst5 too; no need to
 //     repeat it on all three.
-//   - install-wordpress (tst5 only): installs nginx + php-fpm, downloads
+//   - install-wordpress (tst7 only): installs nginx + php-fpm, downloads
 //     WordPress, and writes wp-config.php pointing at the VIP.
-//   - confirm-wordpress-healthy (tst5 only): a SEPARATE stage for the
+//   - confirm-wordpress-healthy (tst7 only): a SEPARATE stage for the
 //     `wait_for` health check and its confirm task, not more tasks on
 //     install-wordpress above — `ClusterPlaybookRunner.runStage` checks a
 //     stage's `waitFor` BEFORE that stage's own tasks run, not after, so a
@@ -66,23 +66,23 @@ object wordpress_site extends OrpheraClusterPlaybook:
   private val dbPassword = "orphera-test-wordpress-password"
 
   // The floating IP mariadb_haproxy_keepalived.scala adds to whichever of
-  // tst0/tst1/tst2 currently holds it — WordPress never needs to know
+  // tst3/tst4/tst5 currently holds it — WordPress never needs to know
   // which real node is actually serving it.
   private val vip = "10.10.5.100"
 
-  // tst0 only. `IF NOT EXISTS`/re-GRANTing is a no-op on a re-run, same
+  // tst3 only. `IF NOT EXISTS`/re-GRANTing is a no-op on a re-run, same
   // idempotency convention as createClustercheckUserScript in
   // mariadb_haproxy_keepalived.scala. Deliberately `@'%'`, not
-  // `@'10.10.5.17'`: WordPress's own traffic arrives at whichever node
+  // `@'10.10.5.19'`: WordPress's own traffic arrives at whichever node
   // HAProxy is routing to as a plain TCP connection from that node's own
-  // address, not from tst5 directly (haproxy's `mode tcp` doesn't forward
+  // address, not from tst7 directly (haproxy's `mode tcp` doesn't forward
   // the original client address to the backend leg — the exact same
   // reason mariadb_haproxy_keepalived.scala's own clustercheck user needed
   // `@'%'` rather than a specific host).
   private val createDatabaseScript =
     s"""mariadb -N -e "CREATE DATABASE IF NOT EXISTS $dbName; CREATE USER IF NOT EXISTS '$dbUser'@'%' IDENTIFIED BY '$dbPassword'; GRANT ALL PRIVILEGES ON $dbName.* TO '$dbUser'@'%'; FLUSH PRIVILEGES;""""
 
-  // tst5 only. Ubuntu 24.04's default PHP is 8.3; the packages below are
+  // tst7 only. Ubuntu 24.04's default PHP is 8.3; the packages below are
   // the minimum WordPress core actually needs (mysqli driver, image
   // handling for media uploads, multibyte-string handling, XML for
   // XML-RPC/import, zip for plugin/theme installs/updates).
@@ -264,13 +264,13 @@ object wordpress_site extends OrpheraClusterPlaybook:
 
   val playbook: ClusterPlaybook =
     clusterPlaybook("wordpress-site")(
-      stage("create-wordpress-database", "tst0")
+      stage("create-wordpress-database", "tst3")
         .task(s"create $dbName database and $dbUser on the Galera cluster")(
           Task.RunCommand(List("sh", "-c", createDatabaseScript))
         )
         .build,
 
-      stage("install-wordpress", "tst5")
+      stage("install-wordpress", "tst7")
         .task("install nginx, php-fpm and required PHP extensions")(
           Task.Install(packages = wordpressPackages, updateCache = true)
         )
@@ -296,16 +296,16 @@ object wordpress_site extends OrpheraClusterPlaybook:
       // BEFORE running that same stage's own tasks (it's a precondition
       // gate on entry, not a postcondition on exit) — confirmed the hard
       // way on a real first run, where `siteHealthScript` was being polled
-      // against tst5 before nginx/php-fpm were even installed, so it just
+      // against tst7 before nginx/php-fpm were even installed, so it just
       // timed out every time. `mariadb_galera_cluster.scala`'s own
       // confirm-cluster-healthy stage happens to already follow this
       // correctly (nothing else in that stage depends on running before
       // its own waitFor), which is exactly why this same mistake was easy
       // to make here without noticing until a real run caught it.
-      stage("confirm-wordpress-healthy", "tst5")
+      stage("confirm-wordpress-healthy", "tst7")
         .waitFor(
           HealthCheck.Command(
-            onNode = "tst5",
+            onNode = "tst7",
             command = List("sh", "-c", siteHealthScript),
             pollIntervalSeconds = 5,
             timeoutSeconds = 60
@@ -313,7 +313,7 @@ object wordpress_site extends OrpheraClusterPlaybook:
         )
         .task("wordpress site confirmed")(
           Task.Debug(
-            s"WordPress reachable at http://tst5.ljalbinson.com/ (10.10.5.17), database on the Galera cluster via $vip:3306 — open it in a browser to run the WordPress install wizard."
+            s"WordPress reachable at http://tst7.ljalbinson.com/ (10.10.5.19), database on the Galera cluster via $vip:3306 — open it in a browser to run the WordPress install wizard."
           )
         )
         .build

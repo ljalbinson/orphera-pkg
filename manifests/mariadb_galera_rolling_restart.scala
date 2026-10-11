@@ -20,8 +20,8 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 // explicitly restarts it. This file is that "something" — a deliberate,
 // one-at-a-time restart, not a re-run of the whole build.
 //
-// Targets tst0/tst1/tst2, the same three nodes mariadb_galera_cluster.scala
-// builds. Order (tst0, then tst1, then tst2) doesn't matter for
+// Targets tst3/tst4/tst5, the same three nodes mariadb_galera_cluster.scala
+// builds. Order (tst3, then tst4, then tst5) doesn't matter for
 // correctness here — unlike that file's own bootstrap-before-join
 // ordering, every node here is already a full member of an existing,
 // healthy cluster, so any one of them restarting and rejoining via
@@ -70,7 +70,7 @@ object mariadb_galera_rolling_restart extends OrpheraClusterPlaybook:
 
   val playbook: ClusterPlaybook =
     clusterPlaybook("mariadb-galera-rolling-restart")(
-      restartStage("tst0"),
-      restartStage("tst1"),
-      restartStage("tst2")
+      restartStage("tst3"),
+      restartStage("tst4"),
+      restartStage("tst5")
     )

@@ -1133,6 +1133,6 @@ object Cli:
       |  network-apply --nodes web1 --timeout 90
       |  cluster-playbook manifests/cephadm_add_osds.scala --resume
       |  cluster-playbook manifests/etcd_teardown.scala manifests/etcd_cluster.scala
-      |  cluster-playbook manifests/kvm_vm_provision.scala --config config/testvm0-config.yml
+      |  cluster-playbook manifests/kvm_zfs_vm_provision.scala --config config/testvm0-config.yml
       |  log-summary cephadm-add-osds
       |""".stripMargin

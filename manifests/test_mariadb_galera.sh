@@ -13,8 +13,8 @@
 #
 # Goes one step further than a status-flags check, too: after confirming
 # wsrep_cluster_size/wsrep_cluster_status/wsrep_ready independently on all
-# three nodes, it writes a uniquely-marked row on tst0 and reads it back
-# from tst1 and tst2 — proving actual synchronous replication happened,
+# three nodes, it writes a uniquely-marked row on tst3 and reads it back
+# from tst4 and tst5 — proving actual synchronous replication happened,
 # not just that every node's status flags happen to say the right words.
 # A cluster could plausibly report wsrep_ready=ON on all three nodes while
 # actually being split into two Primary components of size 3 that never
@@ -32,12 +32,12 @@
 set -uo pipefail
 
 # ---- Configuration -----------------------------------------------------
-NODES=(tst0 tst1 tst2)
+NODES=(tst3 tst4 tst5)
 SSH_USER="localadmin"      # the real login on these nodes — was "ubuntu"
                             # (a guess, never confirmed against real
                             # infra); corrected after a real session
-                            # against tst0/tst1/tst2/tst5 this session
-                            # showed `localadmin@tst0:~$` prompts
+                            # against tst0/tst1/tst2/tst5 (the Galera nodes were tst0-tst2 at the time; they are now tst3-tst5) this session
+                            # showed `localadmin@tst3:~$` prompts
                             # throughout. Root SSH login is still blocked
                             # by cloud-init on these images, same as the
                             # Ceph test hits — commands below go through
@@ -87,7 +87,7 @@ run_playbook() {
 # Runs a single `mariadb -N -e "..."` statement on $1 over SSH (as root,
 # via sudo — same unix_socket-auth assumption mariadb_galera_cluster.scala
 # itself documents and flags as worth confirming on a first real run; this
-# test IS that confirmation, for every node, not just tst0). Returns "ERROR"
+# test IS that confirmation, for every node, not just tst3). Returns "ERROR"
 # on any SSH/command failure rather than silently coercing a failure into
 # an empty string that might accidentally satisfy a later comparison.
 mariadb_query() {
@@ -151,18 +151,18 @@ for host in "${NODES[@]}"; do
   fi
 done
 
-# --- Real replication proof: write on tst0, read back on tst1 and tst2 ---
+# --- Real replication proof: write on tst3, read back on tst4 and tst5 ---
 # A status-flags-only check can't distinguish "actually replicating" from
 # "three nodes that each independently believe they're in a healthy
 # Primary component" — this proves data actually moved between nodes.
-log "Writing marker row on tst0 ($TEST_MARKER) ..."
-write_result=$(mariadb_query "tst0" "
+log "Writing marker row on tst3 ($TEST_MARKER) ..."
+write_result=$(mariadb_query "tst3" "
   CREATE DATABASE IF NOT EXISTS $TEST_DB;
   CREATE TABLE IF NOT EXISTS $TEST_DB.replication_probe (marker VARCHAR(128) PRIMARY KEY);
   INSERT INTO $TEST_DB.replication_probe (marker) VALUES ('$TEST_MARKER');
 ")
 if [ "$write_result" = "ERROR" ]; then
-  log "FATAL: could not write the replication marker row on tst0 — aborting test run"
+  log "FATAL: could not write the replication marker row on tst3 — aborting test run"
   exit 1
 fi
 
@@ -185,7 +185,7 @@ poll_for_marker() {
   echo "$found"   # last attempt's value (possibly empty or ERROR), for diagnostics
 }
 
-for host in tst1 tst2; do
+for host in tst4 tst5; do
   log "Polling for the marker row on $host (up to 20s) ..."
   seen=$(poll_for_marker "$host")
   if require_fetched "$host: replicated marker row fetched" "$seen"; then
@@ -193,13 +193,13 @@ for host in tst1 tst2; do
   fi
 done
 
-# Cleanup: drop the test database on tst0 — Galera replicates DDL too, so
-# this removes it cluster-wide, not just on tst0. Best-effort; a leftover
+# Cleanup: drop the test database on tst3 — Galera replicates DDL too, so
+# this removes it cluster-wide, not just on tst3. Best-effort; a leftover
 # test database from a failed run doesn't affect a later run's correctness
 # (CREATE DATABASE/TABLE IF NOT EXISTS above tolerate it), so this isn't
 # wrapped in its own pass/fail assertion.
 log "Cleaning up test database ..."
-mariadb_query "tst0" "DROP DATABASE IF EXISTS $TEST_DB;" > /dev/null
+mariadb_query "tst3" "DROP DATABASE IF EXISTS $TEST_DB;" > /dev/null
 
 # ---- Summary --------------------------------------------------------------
 
