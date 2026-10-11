@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.1.173] - 2026-10-11
+
 ### Changed — test_wordpress.sh is now a non-destructive test
 - The old `manifests/test_wordpress.sh` tore down and rebuilt Galera before applying WordPress,
   which wiped every database on the cluster (Keystone's and Cinder's included: Keystone then
