@@ -129,6 +129,21 @@ sleep 3
 OUT=$(run_on "$CLIENT_A" "/usr/local/sbin/orphera-apt-proxy")
 assert_contains "auto-detect picks the cache again when it is back" "http://$CACHE_FQDN:$PORT" "$OUT"
 
+# ---- many clients at once ---------------------------------------------------
+
+# Regression test for a race in apt-cacher-ng: every client asking for the same
+# Release file at the same moment used to make it drop connections, and apt hung
+# for good. `orphera run` runs on all nodes in parallel, like a playbook does.
+ALL_CLIENTS="tst0,tst1,tst2,tst3,tst4,tst5,tst6,tst7,tst9,tst10"
+NCLIENTS=10
+ERRLOG="/var/log/apt-cacher-ng/apt-cacher.err"
+ERR_BEFORE=$(run_on "$CACHE" "sudo wc -l < $ERRLOG 2>/dev/null || echo 0" | grep -Eo '^\[[a-z0-9]+\] [0-9]+$' | awk '{print $2}' | tail -1)
+OUT=$(run_on "$ALL_CLIENTS" "sudo timeout 150 apt-get update >/dev/null 2>&1; echo rc=\$?")
+RC0=$(printf '%s\n' "$OUT" | grep -c 'rc=0$')
+assert_equals "apt update on all $NCLIENTS clients at once completes (none hung)" "$NCLIENTS" "$RC0"
+ERR_AFTER=$(run_on "$CACHE" "sudo wc -l < $ERRLOG 2>/dev/null || echo 0" | grep -Eo '^\[[a-z0-9]+\] [0-9]+$' | awk '{print $2}' | tail -1)
+assert_equals "the cache logged no new storage errors meanwhile" "${ERR_BEFORE:-?}" "${ERR_AFTER:-?}"
+
 # ---- idempotence -----------------------------------------------------------
 
 log "re-apply (idempotence)"

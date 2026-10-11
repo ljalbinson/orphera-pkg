@@ -42,7 +42,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   proxy API, and that re-applying both playbooks is idempotent. `NO_APPLY=1` checks without
   applying. (`test_observability.sh`, the run-log test, is separate and passed 26/26.)
 
-### Fixed — apt clients could hang on a half-closed connection to the apt cache
+### Fixed — apt cache: concurrent Release-file requests made apt hang (cause found)
+- Root cause of the hung `apt update` on tst5 and tst1: with many nodes asking for the same
+  `InRelease` at once (any playbook installing on several nodes), apt-cacher-ng 3.7.4 logs
+  `storage error [Checked size beyond EOF] ... File exists` and drops one client's connection,
+  leaving apt waiting on a half-closed socket. The entry below (pipelining/timeout) did not
+  fix it. `apt_cache.scala` now adds `DontCacheRequested: /(In)?Release([.]gpg)?$`, so Release
+  files are passed through instead of stored (packages and by-hash indexes stay cached).
+  `test_apt_cache.sh` gained a check that runs `apt-get update` on all ten clients at once and
+  asserts none hang and no new storage errors appear. Re-run `apt_cache.scala` to apply.
+
+### Fixed — apt clients could hang on a half-closed connection to the apt cache (did not help; see above)
 - `apt_cache_clients.scala` now also writes `Acquire::http::Pipeline-Depth "0"`,
   `Acquire::http::Timeout "30"` and `Acquire::Retries "3"`. Seen on tst5: `apt-get update`
   stuck for 7 minutes, both sockets to tst11:3142 in CLOSE-WAIT, while the cache itself was

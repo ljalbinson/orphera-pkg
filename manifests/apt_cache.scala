@@ -21,6 +21,8 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 //     tunnelling works, then refreshes this node's own package indexes through
 //     the cache so the indexes are stored before any other node asks.
 //
+// Release/InRelease files are passed through, not stored (see configScript).
+//
 // Disk: the cache lives in /var/cache/apt-cacher-ng. config/tst11.yaml gives
 // the VM a 120 GB disk. apt-cacher-ng expires files that are no longer in any
 // index (daily maintenance), so it does not grow without bound.
@@ -39,6 +41,12 @@ object apt_cache extends OrpheraClusterPlaybook:
     s"""cat > /etc/apt-cacher-ng/zz_orphera.conf <<'CONF'
        |# Managed by Orphera (apt_cache.scala)
        |PassThroughPattern: .*
+       |# Release files are small and must be fresh anyway. Several clients asking for
+       |# the same one at once (a playbook running apt update on many nodes) made
+       |# apt-cacher-ng 3.7.4 fail to store it ("storage error [Checked size beyond
+       |# EOF] ... File exists") and drop the connection, leaving apt hung on a
+       |# half-closed socket. Pass them straight through instead of storing them.
+       |DontCacheRequested: /(In)?Release([.]gpg)?$
        |CONF
        |systemctl enable apt-cacher-ng
        |systemctl restart apt-cacher-ng
