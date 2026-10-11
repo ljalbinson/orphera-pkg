@@ -13,7 +13,7 @@ object SshDeployer:
     * since an ssh command has no tty to answer a prompt.
     */
   private def aptGet(args: String): String =
-    "sudo env DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=60 " +
+    "sudo env DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=600 " +
       s"-o Dpkg::Use-Pty=0 -o APT::Color=0 -o APT::Get::Assume-Yes=true $args"
 
   /** First-time agent install. The .deb Depends on a Java runtime

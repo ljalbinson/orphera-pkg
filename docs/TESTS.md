@@ -423,6 +423,15 @@ A qcow2 image first failed (`FailedToDropPrivileges`); after `cinder_single_node
 cinder-volume the SYS_ADMIN, NET_ADMIN and DAC_READ_SEARCH capabilities the volume reached
 `available`. Raw images are cloned copy-on-write instead of downloaded.
 
+### K8. Placement on tst13 - PASSED (2026-10-11), first run (branch `placement`)
+    manifests/test_placement.sh 2>&1 | tee /tmp/placement.log
+Expect: orphera-placement-api active; version document 200 on 8780; 401 without a token; a test
+resource provider is created, read back, listed and deleted; the catalog lists `placement`;
+Glance on tst13 still answers; second run completes. The first re-apply hit the dpkg lock
+(unattended-upgrades on a fresh VM, apt exit 100 after the agent's 60 s wait); rerunning the
+playbook once the upgrade finished completed. Prerequisites: Galera + VIP, Keystone,
+agent on tst13. Teardown: `orphera cluster-playbook manifests/placement_teardown.scala`.
+
 ## L. Node reassignment (2026-10-10) - steps 1-3 and 5 done; step 4: run-log test passed, Prometheus/Grafana stack on tst7 NOT YET RUN
 New roles: tst0-tst2 Ceph; tst3-tst5 Galera + haproxy + keepalived (VIP
 10.10.5.100); tst6 Keystone; tst7 WordPress and Prometheus/Grafana; tst8 Rocky;

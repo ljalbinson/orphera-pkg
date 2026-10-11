@@ -9,11 +9,16 @@ import orphera.common.*
 
 object AptInstaller:
 
+  // How long apt/dpkg waits for another process (typically unattended-upgrades
+  // on a freshly provisioned VM, which can run for several minutes) to release
+  // the dpkg lock before giving up with exit 100. Was 60 s, which was too short.
+  private val lockTimeout = "DPkg::Lock::Timeout=600"
+
   def install(cmd: InstallPackages, queue: Queue[IO, Event]): IO[Unit] =
     val update =
       if cmd.updateCache then
         runNoResult(
-          List("apt-get", "-o", "DPkg::Lock::Timeout=60", "update"),
+          List("apt-get", "-o", lockTimeout, "update"),
           "Updating package cache",
           queue
         )
@@ -23,7 +28,7 @@ object AptInstaller:
       List(
         "apt-get",
         "-o",
-        "DPkg::Lock::Timeout=60",
+        lockTimeout,
         "-o",
         "Dpkg::Use-Pty=0",
         "-o",
@@ -66,7 +71,7 @@ object AptInstaller:
       List(
         "apt-get",
         "-o",
-        "DPkg::Lock::Timeout=60",
+        lockTimeout,
         "-o",
         "Dpkg::Use-Pty=0",
         "-o",
@@ -89,7 +94,7 @@ object AptInstaller:
       List(
         "apt-get",
         "-o",
-        "DPkg::Lock::Timeout=60",
+        lockTimeout,
         "-o",
         "Dpkg::Use-Pty=0",
         "-o",
@@ -114,7 +119,7 @@ object AptInstaller:
   def distUpgrade(cmd: DistUpgrade, queue: Queue[IO, Event]): IO[Unit] =
     val aptOptions = List(
       "-o",
-      "DPkg::Lock::Timeout=60",
+      lockTimeout,
       "-o",
       "Dpkg::Use-Pty=0",
       "-o",

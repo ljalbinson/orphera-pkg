@@ -462,9 +462,9 @@ check whether facts are actually being retrieved from that node before
 assuming the condition itself is wrong.
 
 **`apt`/`dpkg` lock contention:** every `apt-get`/`dpkg` invocation on
-the agent passes `-o DPkg::Lock::Timeout=60`, so a task that hits the
+the agent passes `-o DPkg::Lock::Timeout=600`, so a task that hits the
 lock (background unattended-upgrades, another concurrent Orphera task,
-etc.) waits up to 60 seconds and retries automatically rather than
+etc.) waits up to 10 minutes and retries automatically rather than
 failing immediately with exit 100. This was added after hitting the
 failure directly in practice — see [Known gaps](#known-gaps--not-yet-built)
 for the retry/backoff work this doesn't yet fully cover.
@@ -1260,7 +1260,7 @@ Fleet layout used by these manifests (see `inventory.yaml`):
 | tst10 | Cinder (API, scheduler, volume, RabbitMQ) |
 | tst11 | apt cache (apt-cacher-ng) for the Ubuntu nodes |
 | tst12 | rpm cache (nginx caching mirror of Rocky/EPEL) for the Rocky nodes |
-| tst13 | Glance (glance-api, images in Ceph pool `images`) |
+| tst13 | Glance (glance-api, images in Ceph pool `images`) and Placement (port 8780) |
 
 Run order, each with its own teardown and an end-to-end test that checks the
 result independently of the playbook's own health checks:
@@ -1272,10 +1272,11 @@ result independently of the playbook's own health checks:
     manifests/test_keystone.sh                                  # applies keystone_single_node.scala
     manifests/test_cinder.sh                                    # applies cinder_single_node.scala
     manifests/test_glance.sh                                    # applies glance_single_node.scala
+    manifests/test_placement.sh                                 # applies placement_single_node.scala
     utils/openstack-client-setup.sh                             # CLI on the machine you run orphera from
 
 To build the whole stack in one go from freshly provisioned VMs that only have the agent, run
-`manifests/build_openstack_stack.sh` (Ceph, Galera + VIP, Keystone, Cinder, Glance, the clients
+`manifests/build_openstack_stack.sh` (Ceph, Galera + VIP, Keystone, Cinder, Glance, Placement, the clients
 on scala0, then a smoke test that creates and deletes a real volume and image). It only applies
 playbooks, never tears anything down, checks each step independently before the next, and on a
 failure prints the `--from STEP` command to resume. `--with-caches` builds the apt and Kolla
@@ -1330,7 +1331,9 @@ Worth knowing:
   `log_dir` log only to files unless `use_stderr = true` is also set.
 - **Glance** (tst13) is a single `glance-api` container with the RBD store; it needs no
   message bus. Its teardown also removes it from Keystone.
-- **Not built yet:** Placement, Nova, and Neutron (provider networks only).
+- **Placement** shares tst13 with Glance (a small stateless Apache + mod_wsgi API with its own
+  database); `test_placement.sh` creates and deletes a resource provider.
+- **Not built yet:** Nova and Neutron (provider networks only).
 
 ## Example: parallel network throughput test (iperf3)
 

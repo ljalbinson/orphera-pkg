@@ -3,7 +3,7 @@
 # Sets up the OpenStack command-line clients on the machine you run `orphera`
 # from (scala0), OUTSIDE this repository:
 #
-#   ~/.venvs/openstack                  Python virtualenv with python-openstackclient
+#   ~/.venvs/openstack                  Python virtualenv with python-openstackclient + osc-placement
 #   ~/.config/openstack/keystone-ca.crt the test CA that signed Keystone's certificate
 #   ~/.config/openstack/admin-openrc.sh the credentials file (mode 600)
 #
@@ -60,9 +60,9 @@ else
   log "reusing virtualenv $VENV_DIR"
 fi
 
-log "installing python-openstackclient (this takes a minute)"
+log "installing python-openstackclient and osc-placement (this takes a minute)"
 "$VENV_DIR/bin/python" -m pip install --quiet --upgrade pip
-"$VENV_DIR/bin/python" -m pip install --quiet --upgrade python-openstackclient
+"$VENV_DIR/bin/python" -m pip install --quiet --upgrade python-openstackclient osc-placement
 log "installed: $("$VENV_DIR/bin/openstack" --version 2>&1)"
 
 # ---- 2. Keystone's CA -----------------------------------------------------

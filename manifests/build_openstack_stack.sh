@@ -11,8 +11,9 @@
 #   keystone tst6        keystone_single_node
 #   cinder   tst10       cinder_single_node (pool `volumes`)
 #   glance   tst13       glance_single_node (pool `images`)
+#   placement tst13      placement_single_node (port 8780, shares tst13 with Glance)
 #   clients  scala0      utils/openstack-client-setup.sh
-#   smoke                a real volume and a real image created and deleted
+#   smoke                a real volume, image and resource provider created and deleted
 #
 # It only APPLIES playbooks: nothing is torn down, so it is safe to re-run on
 # a half-built or fully built stack (every playbook is idempotent) and it will
@@ -29,7 +30,7 @@
 #   --with-caches   build the apt cache, point the Ubuntu nodes at it, and
 #                   build the Kolla image cache first (tst9, tst11 required)
 #   --from STEP     start at STEP (caches ceph galera keystone cinder glance
-#                   clients smoke) - for resuming after a failure
+#                   placement clients smoke) - for resuming after a failure
 #   --only STEP     run just that one step
 #   --list          print the plan and exit
 #   -h, --help      this text
@@ -42,7 +43,7 @@ set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
 MANIFESTS="manifests"
 
-ALL_STEPS=(caches ceph galera keystone cinder glance clients smoke)
+ALL_STEPS=(caches ceph galera keystone cinder glance placement clients smoke)
 WITH_CACHES=""
 FROM=""
 ONLY=""
@@ -208,6 +209,15 @@ step_glance() {
   check "Glance lists images through Keystone" contains "images:" "$out"
 }
 
+step_placement() {
+  playbook placement_single_node.scala
+  local out
+  out=$(run_on tst13 "curl -s -o /dev/null -w 'http=%{http_code}' http://localhost:8780/")
+  check "Placement answers its version document" contains "http=200" "$out"
+  out=$(run_on tst13 "sudo /usr/local/sbin/orphera-placement-api rp-list")
+  check "Placement lists resource providers with an admin token" contains "resource providers:" "$out"
+}
+
 step_clients() {
   log "setting up the OpenStack clients on this machine"
   if utils/openstack-client-setup.sh; then log "PASS: clients set up"; PASS=$((PASS + 1)); else die "utils/openstack-client-setup.sh failed"; fi
@@ -232,6 +242,14 @@ step_smoke() {
     run_on tst13 "sudo /usr/local/sbin/orphera-glance-api image-delete $id" >/dev/null
   else
     log "FAIL: image create returned no id"; FAIL=$((FAIL + 1))
+  fi
+  out=$(run_on tst13 "sudo /usr/local/sbin/orphera-placement-api rp-create")
+  id=$(printf '%s\n' "$out" | grep -Eo '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | tail -1)
+  if [ -n "$id" ]; then
+    out=$(run_on tst13 "sudo /usr/local/sbin/orphera-placement-api rp-delete $id")
+    check "a Placement resource provider was created and deleted" contains "deleted $id" "$out"
+  else
+    log "FAIL: resource provider create returned no id"; FAIL=$((FAIL + 1))
   fi
 }
 

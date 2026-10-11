@@ -6,6 +6,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed — apt/dpkg lock wait raised from 60 s to 10 minutes
+- `AptInstaller` (the agent) and `SshDeployer` now pass `-o DPkg::Lock::Timeout=600` instead of
+  `60`, held in one constant in `AptInstaller`. On a freshly provisioned VM `unattended-upgrades`
+  can hold the dpkg lock for several minutes (seen on tst13: an upgrade of 302 packages made a
+  playbook's Install task fail with apt exit 100 after 60 s). Takes effect on a node once its agent
+  is rebuilt and redeployed.
+
+### Added — Placement on tst13 (branch `placement`; test_placement.sh passed 2026-10-11)
+- `manifests/placement_single_node.scala`: placement-api from the Kolla image under podman/systemd
+  on tst13 (shared with Glance; `node`/`fqdn`/`nodeIp` at the top move it), Apache + mod_wsgi on
+  8780, plain HTTP. Creates the `placement` database on Galera, writes `placement.conf`, runs
+  `placement-manage db sync`, registers service `placement` with three endpoints and user
+  `placement` in Keystone. No Ceph, no message bus.
+- `manifests/placement_teardown.scala`: unregisters from Keystone, removes the container, unit,
+  config and state, drops the database; Glance on the node is untouched.
+- `manifests/test_placement.sh`: unit active, version document 200, unauthenticated request 401,
+  admin-token resource provider create/read/delete, catalog lists `placement`, Glance still
+  answers, idempotent re-apply; `NO_APPLY=1`.
+- `build_openstack_stack.sh`: new `placement` step after `glance`, plus a resource provider in
+  the smoke test.
+- `utils/openstack-client-setup.sh` also installs `osc-placement`, so `openstack resource provider
+  list` works from scala0.
+- Passed on the first run on scala0: all functional checks, and the idempotent re-apply once
+  `unattended-upgrades` on tst13 had released the dpkg lock (the agent waits only 60 s; the first
+  re-apply failed with apt exit 100 while an upgrade of 302 packages held it - environmental, see
+  "apt/dpkg lock contention" in the README).
+
 ## [0.1.177] - 2026-10-11
 
 ### Fixed — Cinder: create a volume from a qcow2 image failed (`FailedToDropPrivileges`)
