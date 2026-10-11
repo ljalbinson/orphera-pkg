@@ -271,3 +271,194 @@ See I8a.  PASSED.
 - Galera and VIP-failover tests.
 - Rocky: firewalld rule from the rpm (firewalld was not running on tst8).
 - Manifests other than gen_set_dns, gen_dist_upgrade, gen_packages and kvm_vm_provision on Rocky (ceph, etcd, galera, observability, wordpress are still Ubuntu-specific).
+
+## K. Keystone (Kolla image under podman), single node with TLS - PASSED on tst6 (2026-10-10)
+Written without a Scala toolchain, so the first run on scala0 is also the first
+compile.  Prerequisites: Galera + VIP healthy (J, now on tst3-tst5, see L), agent on tst6.
+
+    git pull && git checkout keystone
+    orphera cluster-playbook manifests/keystone_single_node.scala
+    manifests/test_keystone.sh 2>&1 | tee /tmp/keystone.log
+Expect: all stages complete, `GET /v3/` over TLS returns 200, password auth
+returns 201, plain HTTP and TLS without the CA do not return the API, the
+`keystone` database exists on tst4, the `orphera-keystone` unit is active with
+a `keystone` container on the Kolla image, a token lists the admin user, and a
+second run keeps the same CA and fernet keys.
+Most likely to need a fix on the first run: the image path/tag (the pull task
+prints a hint; `registry`/`release`/`baseTag` are at the top of the manifest),
+the SSL module being present in the image's Apache, and Kolla's `config.json`
+behaviour (check `journalctl -u orphera-keystone` and /var/log/kolla/keystone).
+Teardown: `orphera cluster-playbook manifests/keystone_teardown.scala`.
+
+Result (2026-10-10): image `quay.io/openstack.kolla/keystone:2025.1-ubuntu-noble`
+pulls from quay.io as assumed (the tst9 cache did not exist yet, so podman fell back).
+Four fixes were needed on the way, all now in the manifest:
+1. `fernet_setup` switches to the image's keystone uid before writing keys, so the
+   host key directories must be chowned to that uid (root in the container is not
+   enough; `--user root` alone did not help).
+2. Keystone logged only to a file (`log_dir`), hiding errors; `use_stderr = true` added.
+3. The image's Apache has mod_ssl but does not load it: `LoadModule ssl_module` added.
+4. `kolla_start` appends `-DFOREGROUND` itself, so config.json's command is plain
+   `apache2` / `httpd`.
+Final run: 10 of 11 checks passed; the 11th was a test bug (Keystone prints
+`"name": "admin"` with a space), fixed in test_keystone.sh. Second run kept the same CA
+and fernet keys.
+
+### K0. Kolla image cache on tst9 - PASSED (2026-10-10): tst6 pulls through the mirror (166 cache hits logged)
+tst9 (10.10.5.21) is created by the user from `config/tst9.yaml` (check the
+hypervisor: st0 is assumed), then:
+
+    orphera @bootstrap ... tst9   (as for the other Ubuntu nodes)
+    orphera cluster-playbook manifests/kolla_cache.scala
+    orphera run sh -c "curl -s http://localhost:5000/v2/_catalog; sudo du -sh /var/lib/orphera/kolla-cache" --nodes tst9
+Expect: the catalog lists `openstack.kolla/keystone` after the warm-up, and the
+data directory is non-empty.  Then run K (keystone): its pull should come from
+tst9 (`journalctl -u orphera-keystone` is not enough; check tst9's registry log:
+`sudo podman logs kolla-cache | tail`).  Not tested: whether quay.io works as
+the proxied remote for every Kolla repository (the main risk), and whether the
+mirror path mapping `quay.io/openstack.kolla/x` -> `tst9:5000/openstack.kolla/x`
+is what podman sends.
+
+### K1. Cinder on tst10 - PASSED, 12/12 (2026-10-10), after the Ceph cipher fix below
+Finding: the cluster runs a patched Ceph (19.2.6+, CVE-2025-30156) whose monitors
+accept only the new `aes256k` cephx cipher by default, and `ceph -s` warned
+`AUTH_INSECURE_CLIENT_KEY_TYPE` for the hand-made `aes` key. The Kolla cinder-volume
+image carries Ubuntu's Ceph 19.2.3 client, which only knows `aes`. Result:
+`RADOS permission denied` on connect, volumes ending in `error` (and the first test run's
+`available` volume had no RBD image). Fix in cinder_single_node.scala: the Ceph stage runs
+`ceph mon set auth_allowed_ciphers aes,aes256k` (test-cluster compromise, as OSSN-0108
+recommends while clients are older). Re-run result: all 12 checks passed (volume created as an RBD image in pool `volumes`, deleted cleanly, second run idempotent). Remove the setting once the Kolla images ship Ceph >= 19.2.6:
+`ceph mon set auth_allowed_ciphers aes256k`, then rotate client.cinder.
+Needs: Galera + VIP, Ceph with OSDs, Keystone (K) re-applied so it serves the
+CA chain, tst10 created from `config/tst10.yaml` and bootstrapped.
+
+    orphera cluster-playbook manifests/keystone_single_node.scala   (picks up server-chain.crt)
+    manifests/test_cinder.sh 2>&1 | tee /tmp/cinder.log
+Expect: four units active, scheduler and volume `up` through the API, a 1 GB
+volume created and visible as `volume-<id>` in `rbd ls volumes` on Ceph, deleted
+cleanly, second run succeeds.
+Likeliest first-run problems: the Kolla image names/tags and config.json
+behaviour for cinder-api/scheduler/volume; `cephadm shell --mount` placing the
+keyring at /mnt/cinder.keyring; RabbitMQ not reachable by the services at
+10.10.5.22:5672; the Ceph pool replication size vs the OSD layout.
+Teardown (destroys the `volumes` pool): `orphera cluster-playbook manifests/cinder_teardown.scala`.
+
+### K3. apt cache on tst11 - 12/12 on 2026-10-10; with the concurrency check added (2026-10-11): 13 passed, 1 failed
+The failing check: after `VfileUseRangeOps: 0`, ten simultaneous `apt update` runs all completed
+(no hang) but the cache still logged 4 storage errors. Followed up: five more rounds (Release files
+deleted from the cache first) all completed on all ten clients, so the hang is not reproduced; the
+errors are apt-cacher-ng renaming a stale Release file to a per-second name, which collides for
+same-second requests. `test_apt_cache.sh` now reports them as a warning, not a failure.
+
+Needs the tst11 VM (`config/tst11.yaml`, hypervisor st0 assumed) with an agent, and
+`tst11.ljalbinson.com` resolvable from the clients.
+
+    git pull
+    manifests/test_apt_cache.sh 2>&1 | tee /tmp/apt_cache.log
+Expect: the cache answers on port 3142 from tst0; the client config uses the
+auto-detect script and it prints `http://tst11.ljalbinson.com:3142`; the package
+`figlet` downloaded from tst0 and then tst1 appears once as fetched into the cache and
+twice as delivered (the cache's `apt-cacher.log`, `I` and `O` lines - this reading of the
+log format is from memory and is the first thing to check if that assertion fails); the
+`.deb` is stored under /var/cache/apt-cacher-ng; with the cache stopped the script
+prints `DIRECT` and `apt-get update` on a client still succeeds; a second run of both
+playbooks succeeds. Teardown: `orphera cluster-playbook manifests/apt_cache_teardown.scala`.
+Most likely to need a fix on the first run: the drop-in config not being read (the
+playbook's tunnelling check fails with a proxy refusal), and Scala string escaping in the
+new manifests (first compile).
+
+### K4. rpm cache on tst12 - PASSED, 11/11 (2026-10-11)
+Needs the tst12 VM (`config/tst12.yaml`, Ubuntu, hypervisor st0 assumed) with an agent,
+`tst12.ljalbinson.com` resolvable from tst8, and tst8 (Rocky 10) up.
+
+    git pull
+    manifests/test_rpm_cache.sh 2>&1 | tee /tmp/rpm_cache.log
+Expect: `/healthz` answers on port 8080 from tst8; `dnf repolist` on tst8 shows the
+`orphera-*` repositories and the stock Rocky repo files are renamed `*.orphera-off`;
+`tree` downloaded twice (client copy cleaned between) shows one MISS then one HIT in
+`/var/log/nginx/rpm-cache.log` on tst12; with nginx stopped `dnf makecache` still
+succeeds via the official host; a second run of both playbooks succeeds.
+Teardown: `orphera cluster-playbook manifests/rpm_cache_teardown.scala`.
+Result: passed first time, no fixes needed. (Had it failed, the likeliest causes were: the Rocky 10 upstream path or repo file names
+(check the warm-up stage's HTTP codes), nginx resolving through 127.0.0.53, `tree` already
+installed or not in the enabled repos (the test removes it first), the log-count regex,
+and Scala string escaping.)
+
+### K5. Prometheus and Grafana on tst7 - PASSED (2026-10-11; reported as running without error, pass count not recorded)
+Replaces the old step 4 gap in section L: nothing tested the monitoring stack itself.
+
+    git pull
+    manifests/test_observability_stack.sh 2>&1 | tee /tmp/observability_stack.log
+    NO_APPLY=1 manifests/test_observability_stack.sh   # check only, apply nothing
+Expect: prometheus healthy; targets up per job `haproxy=3/3 mysqld=3/3 node_exporter=7/7
+prometheus=1/1` (14 in all); CPU metrics from 7 nodes; `wsrep_cluster_size` 3 on all three
+Galera nodes; `mysql_up` 3; haproxy metrics from 3; Grafana database ok; a query through
+Grafana's Prometheus datasource sees 14 targets; second run of both playbooks completes
+with every target up. Needs ports 9090 and 3000 on tst7 reachable from scala0.
+Most likely to need a fix on the first run: an exporter on a Galera node that lost its
+database user in the rebuild (the extended playbook recreates it), the haproxy metric
+name pattern, and Grafana's datasource proxy path for the installed version.
+
+### K2. OpenStack clients on scala0 - PASSED (2026-10-10): token issued, cinder-scheduler and cinder-volume@ceph up (needed python3.12-venv installed first)
+    utils/openstack-client-setup.sh
+    source ~/.config/openstack/admin-openrc.sh
+    openstack token issue && openstack service list && openstack volume service list
+Expect: the script ends with "OK - the clients can authenticate"; `service list` shows
+keystone and cinderv3; `volume service list` shows cinder-scheduler and
+cinder-volume@ceph both up. Needs python3-venv on scala0 and tst6 resolvable from there.
+
+## L. Node reassignment (2026-10-10) - steps 1-3 and 5 done; step 4: run-log test passed, Prometheus/Grafana stack on tst7 NOT YET RUN
+New roles: tst0-tst2 Ceph; tst3-tst5 Galera + haproxy + keepalived (VIP
+10.10.5.100); tst6 Keystone; tst7 WordPress and Prometheus/Grafana; tst8 Rocky;
+tst9 Kolla cache; tst10 Cinder; tst11 apt cache; tst12 rpm cache (K4, passed).  The manifests, tests and inventory comments were
+retargeted; the results recorded in J were obtained on the OLD layout (Galera on
+tst0-tst2, WordPress on tst5, monitoring on tst6).
+
+Moving over, in this order (the old VIP must go before the new one comes up, or
+two hosts will answer for 10.10.5.100 again):
+
+1. Tear down the old layout with the OLD manifests, from a second checkout of `main`
+   (the retargeted teardowns would look at the new nodes):
+
+       git worktree add ../orphera-old main
+       cd ../orphera-old
+       orphera cluster-playbook manifests/wordpress_teardown.scala
+       orphera cluster-playbook manifests/mariadb_galera_teardown.scala
+       orphera cluster-playbook manifests/etcd_teardown.scala      (optional: clears etcd on tst0-tst4)
+       orphera run sh -c "sudo systemctl disable --now prometheus grafana-server prometheus-node-exporter" --nodes tst6
+       cd ../orphera-pkg
+   (`main` still has the old node names; the inventory is unchanged for tst0-tst2.)
+2. Bring up the new Galera on tst3-tst5 and the VIP:
+
+       orphera cluster-playbook manifests/mariadb_galera_cluster.scala
+       orphera cluster-playbook manifests/mariadb_haproxy_keepalived.scala
+       manifests/test_mariadb_galera.sh
+       manifests/test_vip_failover.sh
+3. WordPress on tst7: `orphera cluster-playbook manifests/wordpress_site.scala`.
+4. Observability: `manifests/test_observability.sh` (the structured run log; it runs against
+   tst0 and is independent of the monitoring node - PASSED 26/26, 2026-10-11), and on tst7
+   `observability_stack.scala` / `observability_extended.scala` (monitoring node
+   now tst7; scrape targets tst0-tst6).
+5. Keystone on tst6 (K) and Cinder on tst10 (K1), which use the new Galera.
+Result, steps 1-2 (2026-10-10): Galera rebuilt on tst3-tst5, `test_mariadb_galera.sh`
+11 passed; haproxy+keepalived applied (VIP on tst3, priority 101/100/99);
+`test_vip_failover.sh` 6 passed, 0 failed (VIP moved tst3 -> tst4 in about 5s after
+haproxy was stopped on tst3, reachable throughout, tst3 reclaimed it about 5s after
+haproxy came back). The first drill attempt failed only because the probe host tst7
+had no mariadb client; the drill now uses tst7 only when it has one, otherwise a
+Galera node that does not hold the VIP.
+
+Result, steps 3 and 5 (2026-10-10): WordPress applied on tst7 (reported running; its
+test script was not run). Keystone on tst6 (K) 11/11 and Cinder on tst10 (K1) 12/12 both
+pass on the new Galera/VIP. Also added and passed that day: the Kolla cache on tst9 (K0),
+OpenStack clients on scala0 (K2) and the apt cache on tst11 (K3, 12/12).
+Also passed 2026-10-11: K4 rpm cache (11/11) and `test_observability.sh` (26/26; it checks the
+JSON run log on tst0, not the Prometheus/Grafana stack).
+Step 4's monitoring stack passed (K5). Still to do: the apt cache concurrency check (K3 gained a ten-client simultaneous `apt update` test; run `test_apt_cache.sh` after applying `VfileUseRangeOps: 0`), and re-running
+`cephadm_install.scala` to confirm its new cephx-cipher task (the live cluster already
+has the setting from `cinder_single_node.scala`).
+
+Expect: each of the tests above passes as before.  Not changed: the Ceph
+manifests (tst0-tst2).  `etcd_grow_cluster.scala` still names tst3/tst4 as the
+members it adds; those are Galera nodes now, so that test is retired until it is
+pointed at other nodes.

@@ -35,6 +35,9 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 // (see etcd_cluster.scala's commentary), so tst0/tst1/tst2 don't need
 // restarting or reconfiguring just because the cluster's membership grew
 // around them.
+// NOTE (2026-10-10): tst3 and tst4 now run Galera (see the node roles in
+// inventory.yaml), so this growth test must not be run against them as written;
+// point it at free nodes first.
 object etcd_grow_cluster extends OrpheraClusterPlaybook:
 
   private val etcdVersion = "v3.5.21"

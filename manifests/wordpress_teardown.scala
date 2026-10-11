@@ -5,17 +5,17 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 
 // Tears down what wordpress_site.scala (above) builds: the wordpress
 // database/user on the Galera cluster, and the nginx + php8.3-fpm +
-// WordPress install on tst5. Two stages, mirroring that file's own
-// asymmetric shape — one targets tst0 (the Galera cluster), the other
-// targets tst5 (the standalone WordPress node) — rather than one shared
+// WordPress install on tst7. Two stages, mirroring that file's own
+// asymmetric shape — one targets tst3 (the Galera cluster), the other
+// targets tst7 (the standalone WordPress node) — rather than one shared
 // stage, since they're two different machines doing two unrelated kinds
 // of cleanup.
 //
 // Same full-purge convention as mariadb_galera_teardown.scala, not
 // cephadm_teardown.scala's leave-packages-in-place approach: nginx,
 // php8.3-fpm and friends are normal, fast apt packages (not
-// slow-to-reinstall cephadm/podman), and tst5 exists solely for this one
-// exercise (see inventory.yaml's own comment on tst5), so there's no
+// slow-to-reinstall cephadm/podman), and tst7 exists solely for this one
+// exercise (see inventory.yaml's own comment on tst7), so there's no
 // reason to leave anything behind between runs.
 object wordpress_teardown extends OrpheraClusterPlaybook:
 
@@ -27,10 +27,10 @@ object wordpress_teardown extends OrpheraClusterPlaybook:
   private val dbName = "wordpress"
   private val dbUser = "wordpress_user"
 
-  // tst0 only. `DROP ... IF EXISTS` is idempotent — safe to run again even
+  // tst3 only. `DROP ... IF EXISTS` is idempotent — safe to run again even
   // if wordpress_site.scala's create-wordpress-database stage never ran
   // (or already failed) on this cluster. Galera replicates this
-  // synchronously to tst1/tst2 as well, same reasoning as the CREATE on
+  // synchronously to tst4/tst5 as well, same reasoning as the CREATE on
   // the way up.
   private val dropDatabaseScript =
     s"""mariadb -N -e "DROP DATABASE IF EXISTS $dbName; DROP USER IF EXISTS '$dbUser'@'%'; FLUSH PRIVILEGES;""""
@@ -49,13 +49,13 @@ object wordpress_teardown extends OrpheraClusterPlaybook:
 
   val playbook: ClusterPlaybook =
     clusterPlaybook("wordpress-teardown")(
-      stage("drop-wordpress-database", "tst0")
+      stage("drop-wordpress-database", "tst3")
         .task(s"drop $dbName database and $dbUser on the Galera cluster")(
           Task.RunCommand(List("sh", "-c", dropDatabaseScript))
         )
         .build,
 
-      stage("teardown-tst5", "tst5")
+      stage("teardown-tst7", "tst7")
         .task("stop nginx and php8.3-fpm")(
           Task.RunCommand(
             List(

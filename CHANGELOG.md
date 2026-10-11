@@ -4,6 +4,141 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+## [0.1.172] - 2026-10-11
+
+### Changed — test fleet roles reassigned
+- tst0-tst2 Ceph only; MariaDB Galera + haproxy + keepalived moved to tst3-tst5
+  (VIP unchanged); Keystone on tst6; WordPress and Prometheus/Grafana on tst7.
+  `mariadb_*`, `wordpress_*`, `observability_*`, `keystone_*`, `cinder_*`, their
+  tests and `inventory.yaml` are retargeted; see `docs/TESTS.md` section L for
+  the move-over order. `etcd_grow_cluster.scala` is marked as not runnable
+  against tst3/tst4 any more.
+
+### Changed — `cephadm_install.scala` allows the legacy cephx cipher
+- After bootstrap it runs `ceph mon set auth_allowed_ciphers aes,aes256k` (only
+  on Ceph releases that have the option), so clients with older Ceph libraries,
+  such as the OpenStack Kolla images, can authenticate against a patched
+  (19.2.6+) cluster. A test-cluster compromise; enforce `aes256k` once the
+  clients are upgraded.
+
+### Changed — VM provisioning split into ZFS and native variants (native variant run on gs3)
+- `manifests/kvm_vm_provision.scala` renamed to `kvm_zfs_vm_provision.scala` (the
+  object and playbook name follow; behaviour unchanged). References in
+  `kvm_vm_start.scala`, README, inventory and the CLI help were updated; older
+  CHANGELOG entries keep the old name.
+- New `manifests/kvm_native_vm_provision.scala`: the same playbook without ZFS.
+  Each VM's files go in a plain directory, `/var/lib/libvirt/images/orphera/<vm>`
+  by default (`ORPHERA_VM_DIR_ROOT` changes the parent), created with `mkdir` and
+  removed with `rm -rf` on re-provisioning. Run on gs3 for tst13 (10.10.5.25): all six
+  stages completed first time and the VM answered SSH ~10 s after start.
+
+### Added — test_observability_stack.sh (ran clean, 2026-10-11)
+- `manifests/test_observability_stack.sh` tests the Prometheus/Grafana stack on tst7
+  end to end from the machine running it: applies `observability_stack.scala` and
+  `observability_extended.scala`, then checks over HTTP that every target is up per job
+  (node_exporter 7, haproxy 3, mysqld 3, prometheus 1), that real data arrives (CPU metrics
+  from all 7 nodes, `wsrep_cluster_size` 3 on each Galera node, `mysql_up`, haproxy metrics),
+  that Grafana is healthy and its Prometheus datasource answers a query through Grafana's own
+  proxy API, and that re-applying both playbooks is idempotent. `NO_APPLY=1` checks without
+  applying. (`test_observability.sh`, the run-log test, is separate and passed 26/26.)
+
+### Fixed (symptom) — apt cache: concurrent Release-file requests make apt hang
+- Cause of the hung `apt update` on tst5 and tst1: with many nodes asking for the same stale
+  `InRelease` at once (any playbook installing on several nodes), apt-cacher-ng 3.7.4 logs
+  `storage error [Checked size beyond EOF] ... File exists` / `Failure to move file ... out of
+  the way` and drops one client's connection; apt then waits on a half-closed socket. The
+  pipelining/timeout entry below did not fix it.
+- Tried and reverted: `DontCacheRequested: /(In)?Release([.]gpg)?$` makes apt-cacher-ng answer
+  `400 Bad Request` for every Release file, which broke `apt update` on all clients. Do not use.
+- Now set: `VfileUseRangeOps: 0` in the drop-in (the documented way to stop Range-based
+  revalidation of volatile files; the error is a size check during that revalidation).
+  `test_apt_cache.sh` has a check that runs `apt-get update` on all ten clients at once and
+  asserts none hang and no new storage errors are logged. First run with the fix (2026-10-11,
+  cache freshly rebuilt): all 10 `apt update` runs completed, none hung, but the cache still
+  logged 4 storage errors, so the race is not removed (test 13 passed, 1 failed). Whether the
+  hang itself is gone needs repeated runs; see docs/TESTS.md K3.
+- Five further rounds (Release files deleted from the cache each time, ten clients updating at
+  once) all finished on all ten clients: 60 clean runs in total, where roughly 1 in 10 hung
+  before. The cache still logs `Failure to move file ... File exists` (it renames the stale
+  file to a name made from the current second, so same-second requests collide); apt recovers
+  with the client settings, so the test now reports this as a warning.
+
+### Fixed — apt clients could hang on a half-closed connection to the apt cache (did not help; see above)
+- `apt_cache_clients.scala` now also writes `Acquire::http::Pipeline-Depth "0"`,
+  `Acquire::http::Timeout "30"` and `Acquire::Retries "3"`. Seen on tst5: `apt-get update`
+  stuck for 7 minutes, both sockets to tst11:3142 in CLOSE-WAIT, while the cache itself was
+  healthy. Re-apply `apt_cache_clients.scala` to pick it up.
+
+### Added — rpm package cache on tst12 (test_rpm_cache.sh 11/11)
+- `manifests/rpm_cache.scala` (+ `rpm_cache_teardown.scala`, `test_rpm_cache.sh`):
+  nginx caching mirror on a new node, tst12 (10.10.5.24), port 8080, for the
+  Rocky and EPEL download hosts (verified HTTPS upstream; 30-day lifetime for
+  files, 5 minutes for repomd.xml; 80 GB limit). `manifests/rpm_cache_clients.scala`
+  writes a dnf repository file on tst8 with the cache first and the official
+  Rocky host as the second baseurl, and sets the stock Rocky repo files aside
+  (`*.orphera-off`; the teardown restores them). New `config/tst12.yaml` and
+  inventory entry. Passed on the test fleet first time: `tree` was a MISS then a HIT in
+  the cache log, and `dnf makecache` worked with nginx stopped (official-host fallback).
+
+### Added — apt package cache on tst11 (test_apt_cache.sh 12/12)
+- `manifests/apt_cache.scala` (+ `apt_cache_teardown.scala`, `test_apt_cache.sh`):
+  apt-cacher-ng on a new node, tst11 (10.10.5.23), caching plain-HTTP Ubuntu
+  repositories; it refreshes its own package indexes through the cache once up.
+  `manifests/apt_cache_clients.scala` points apt on the Ubuntu test nodes at it
+  with a proxy auto-detect script (`/usr/local/sbin/orphera-apt-proxy`), so a
+  node uses the cache when it answers and fetches directly when it does not;
+  HTTPS repositories are always fetched directly. New `config/tst11.yaml` (Ubuntu
+  VM, 120 GB disk) and inventory entry. The test downloads a package from two
+  nodes and checks the cache's own log for one fetch and two deliveries, then
+  stops the cache to prove the fallback. Passed on the test fleet.
+
+### Added — OpenStack command-line clients on scala0
+- `utils/openstack-client-setup.sh`: creates a virtualenv with
+  `python-openstackclient` outside the repository (`~/.venvs/openstack`), fetches
+  Keystone's test CA (ssh, falling back to the TLS handshake) and writes an rc
+  file (`~/.config/openstack/admin-openrc.sh`, mode 600). `source` it, then
+  `openstack token issue`, `openstack volume list` and so on;
+  `deactivate-openstack` undoes it. The credentials are the project's test
+  values. Idempotent; checks itself by issuing a token. Passed on scala0 against the
+  real fleet (needs the python3-venv package).
+
+### Added — OpenStack Keystone, Kolla cache and Cinder from Kolla images (run on the test fleet 2026-10-10)
+
+- `manifests/keystone_single_node.scala`: Keystone on one node (default tst7)
+  using the Galera cluster behind the 10.10.5.100 VIP as its database. Runs the
+  Kolla `keystone` container image under podman and a systemd unit; Orphera
+  writes what kolla-ansible would (`keystone.conf`, the Apache vhost, Kolla
+  `config.json`, with the WSGI script path and Apache flavour detected from the
+  image), a private test CA and server certificate (reused on re-runs, CA added
+  to the node's trust store), and runs `db_sync`, fernet/credential setup and
+  `bootstrap` in one-off containers. API on https://<node>:5000/v3/. Confirms
+  with a TLS health check and a real admin token. Written to work on Ubuntu or
+  Rocky hosts. Passed on tst6 (Ubuntu): `test_keystone.sh` 11/11.
+- `manifests/kolla_cache.scala` (+ `kolla_cache_teardown.scala`): a Kolla image
+  cache on a new node, tst9 (10.10.5.21): the stock `registry:2` image as a
+  pull-through mirror of quay.io under podman/systemd, with the Keystone image
+  pre-pulled. `keystone_single_node.scala` points podman at it as a mirror and
+  falls back to quay.io. New `config/tst9.yaml` (Ubuntu VM, 120 GB disk) and
+  inventory entry. Passed on tst9; tst6 pulls through it.
+- `manifests/cinder_single_node.scala` (+ `cinder_teardown.scala`,
+  `test_cinder.sh`): Cinder on a new node, tst10 (10.10.5.22), from Kolla images
+  under podman/systemd (cinder-api, cinder-scheduler, cinder-volume) with a
+  RabbitMQ container, volumes stored as RBD images in the existing Ceph cluster
+  (pool `volumes`, cephx user `client.cinder` with a fixed test key), database
+  on Galera, identity from Keystone (the CA is taken from Keystone's TLS
+  handshake). Registers the service and endpoints in Keystone through a small
+  stdlib-Python helper. Keystone now serves leaf + CA (`server-chain.crt`).
+  New `config/tst10.yaml` and inventory entry. Passed on tst10: `test_cinder.sh`
+  12/12 (a volume becomes a real RBD image and is deleted cleanly). Note: the
+  playbook runs `ceph mon set auth_allowed_ciphers aes,aes256k` because patched
+  Ceph (19.2.6+) accepts only the new `aes256k` cipher by default and the Kolla
+  images' Ceph 19.2.3 client only knows `aes`. This is a test-cluster
+  compromise to remove once the images carry a newer client.
+- `manifests/keystone_teardown.scala` and `manifests/test_keystone.sh`
+  (lifecycle, independent checks, idempotence).
+
 ## [0.1.171] - 2026-10-09
 
 ### Added (branch `rocky-support`) — Rocky Linux / Red Hat-family hosts
