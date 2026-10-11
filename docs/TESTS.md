@@ -407,6 +407,22 @@ Expect: the script ends with "OK - the clients can authenticate"; `service list`
 keystone and cinderv3; `volume service list` shows cinder-scheduler and
 cinder-volume@ceph both up. Needs python3-venv on scala0 and tst6 resolvable from there.
 
+### K6. Glance on tst13 - PASSED, 11/11 (2026-10-11), first run (branch `glance`)
+    manifests/test_glance.sh 2>&1 | tee /tmp/glance.log
+Expect: orphera-glance-api active; API answers on 9292; image list through Keystone; a test
+image uploads, becomes `active`, appears as an RBD image in pool `images`, deletes and
+disappears from the pool; the catalog lists `image`; second run completes. Prerequisites:
+Galera + VIP, Ceph with OSDs, Keystone, agent on tst13. An earlier attempt failed at Keystone
+registration with HTTP 500 because Galera had been wiped (keystone and cinder databases gone);
+fixed by rerunning test_keystone.sh, test_cinder.sh and openstack-client-setup.sh. Teardown: `orphera cluster-playbook manifests/glance_teardown.scala`.
+
+### K7. Cinder volume from a Glance image - PASSED (2026-10-11), after the privsep capability fix
+    openstack image create my-image --file ubuntu.img --disk-format qcow2 --container-format bare --public
+    openstack volume create --image my-image --size 5 test-from-image
+A qcow2 image first failed (`FailedToDropPrivileges`); after `cinder_single_node.scala` gave
+cinder-volume the SYS_ADMIN, NET_ADMIN and DAC_READ_SEARCH capabilities the volume reached
+`available`. Raw images are cloned copy-on-write instead of downloaded.
+
 ## L. Node reassignment (2026-10-10) - steps 1-3 and 5 done; step 4: run-log test passed, Prometheus/Grafana stack on tst7 NOT YET RUN
 New roles: tst0-tst2 Ceph; tst3-tst5 Galera + haproxy + keepalived (VIP
 10.10.5.100); tst6 Keystone; tst7 WordPress and Prometheus/Grafana; tst8 Rocky;

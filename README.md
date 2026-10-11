@@ -1260,6 +1260,7 @@ Fleet layout used by these manifests (see `inventory.yaml`):
 | tst10 | Cinder (API, scheduler, volume, RabbitMQ) |
 | tst11 | apt cache (apt-cacher-ng) for the Ubuntu nodes |
 | tst12 | rpm cache (nginx caching mirror of Rocky/EPEL) for the Rocky nodes |
+| tst13 | Glance (glance-api, images in Ceph pool `images`) |
 
 Run order, each with its own teardown and an end-to-end test that checks the
 result independently of the playbook's own health checks:
@@ -1270,7 +1271,15 @@ result independently of the playbook's own health checks:
     orphera cluster-playbook manifests/kolla_cache.scala        # optional, speeds up pulls
     manifests/test_keystone.sh                                  # applies keystone_single_node.scala
     manifests/test_cinder.sh                                    # applies cinder_single_node.scala
+    manifests/test_glance.sh                                    # applies glance_single_node.scala
     utils/openstack-client-setup.sh                             # CLI on the machine you run orphera from
+
+To build the whole stack in one go from freshly provisioned VMs that only have the agent, run
+`manifests/build_openstack_stack.sh` (Ceph, Galera + VIP, Keystone, Cinder, Glance, the clients
+on scala0, then a smoke test that creates and deletes a real volume and image). It only applies
+playbooks, never tears anything down, checks each step independently before the next, and on a
+failure prints the `--from STEP` command to resume. `--with-caches` builds the apt and Kolla
+caches first; `--list` shows the plan.
 
 Separately, `manifests/apt_cache.scala` builds an apt package cache
 (apt-cacher-ng on tst11) and `manifests/apt_cache_clients.scala` points the
@@ -1291,7 +1300,7 @@ then served from the cache (HIT) and that dnf works with the cache stopped.
 `test_mariadb_galera.sh` and `test_vip_failover.sh` cover the database layer
 (including a forced VIP failover). `test_cinder.sh` creates a real volume and
 checks that it appears, and is removed, as an RBD image in the Ceph `volumes`
-pool.
+pool. `test_glance.sh` does the same for an image in the `images` pool.
 
 `utils/openstack-client-setup.sh` creates a virtualenv with
 `python-openstackclient` outside the repository (`~/.venvs/openstack`), fetches
@@ -1310,17 +1319,18 @@ Worth knowing:
 - **Ceph cipher compromise.** Ceph 19.2.6 and later (CVE-2025-30156) accepts
   only the new `aes256k` cephx cipher by default, but the Kolla images carry
   Ubuntu's Ceph 19.2.3 client, which only knows the older `aes`. The
-  `cephadm_install.scala` and `cinder_single_node.scala` playbooks therefore run
+  `cephadm_install.scala`, `cinder_single_node.scala` and `glance_single_node.scala` playbooks therefore run
   `ceph mon set auth_allowed_ciphers aes,aes256k`. Once the clients are upgraded,
   enforce `aes256k` only (`ceph mon set auth_allowed_ciphers aes256k`) and
-  rotate `client.cinder`.
+  rotate `client.cinder` and `client.glance`.
 - **Kolla specifics learned the hard way:** `keystone-manage fernet_setup`
   switches to the image's `keystone` user, so the host key directories must be
   owned by that uid; the image's Apache has `mod_ssl` but does not load it;
   `kolla_start` adds `-DFOREGROUND` itself; and services configured with
   `log_dir` log only to files unless `use_stderr = true` is also set.
-- **Not built yet:** Glance (Ceph RBD), Placement, Nova, and Neutron (provider
-  networks only).
+- **Glance** (tst13) is a single `glance-api` container with the RBD store; it needs no
+  message bus. Its teardown also removes it from Keystone.
+- **Not built yet:** Placement, Nova, and Neutron (provider networks only).
 
 ## Example: parallel network throughput test (iperf3)
 

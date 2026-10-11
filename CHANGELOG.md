@@ -6,6 +6,42 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed — Cinder: create a volume from a qcow2 image failed (`FailedToDropPrivileges`)
+- `openstack volume create --image <qcow2 image>` went to `error`: the RBD driver can only clone
+  raw images, so Cinder downloads other formats and inspects/converts them through its privsep
+  helper, which cannot start in a podman container without CAP_SYS_ADMIN, CAP_NET_ADMIN and
+  CAP_DAC_READ_SEARCH ("Privsep daemon failed to start"). `cinder_single_node.scala` now adds those
+  capabilities to the orphera-cinder-volume unit only. Re-apply the playbook to pick it up.
+  A raw image (`qemu-img convert -O raw`) skips the download and is cloned copy-on-write.
+  Re-tested on scala0 (2026-10-11): the volume created from the image reached `available`.
+
+### Added — master build script
+- `manifests/build_openstack_stack.sh`: empty VMs with an agent to a working Ceph + Galera +
+  Keystone + Cinder + Glance stack with the clients set up on scala0, in dependency order.
+  Apply-only (no teardowns, so it cannot wipe a database), preflight that every node answers,
+  an independent check after each step, `--from STEP` / `--only STEP` to resume, `--with-caches`
+  for the apt and Kolla caches, `--list`, a final smoke test (real volume and image, confirmed as
+  RBD images, then deleted) and a log in /tmp. Not yet run end to end.
+
+### Added — Glance on tst13 (branch `glance`; test_glance.sh passed 11/11 on 2026-10-11)
+- `manifests/glance_single_node.scala`: glance-api from the Kolla image under podman/systemd on
+  tst13, plain HTTP on 9292, images stored as RBD images in a new Ceph pool `images` with a
+  `client.glance` cephx user (fixed test key, same convention and cipher compromise as Cinder).
+  Creates the `glance` database on Galera, writes `glance-api.conf` (multi-store `ceph:rbd`,
+  `show_image_direct_url` on for later Cinder clone-from-image), runs `glance-manage db_sync`,
+  and registers service `image` with three endpoints and user `glance` in Keystone. No RabbitMQ.
+- `manifests/glance_teardown.scala`: unregisters from Keystone, removes the container, unit,
+  config and state, drops the database, deletes the `images` pool and `client.glance`.
+- `manifests/test_glance.sh`: unit active, API answers, image upload reaches `active` and exists
+  as an RBD image, deletes cleanly, catalog lists `image`, idempotent re-apply; `NO_APPLY=1`.
+- inventory.yaml: tst13 role comment; README fleet table and run order.
+- Passed on the first run of the playbook on scala0 (after Keystone and Cinder were rebuilt
+  following a Galera wipe by an earlier `test_mariadb_galera.sh` run): glance-api starts with the
+  plain `glance-api` command, the RBD store works, and the second run is idempotent.
+- Note: `test_mariadb_galera.sh` and `rebuild_galera_and_wordpress.sh` tear Galera down and wipe
+  every database (Keystone, Cinder, Glance); rebuild order afterwards is test_keystone.sh,
+  test_cinder.sh, openstack-client-setup.sh, test_glance.sh.
+
 ### Added — `orphera run --quiet`
 - `orphera run <command> --nodes ... --quiet` prints only the command's own output (still
   prefixed `[node]`, so several nodes stay readable) and drops the `Running: ...` and

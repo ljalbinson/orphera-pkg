@@ -326,11 +326,19 @@ object cinder_single_node extends OrpheraClusterPlaybook:
        |podman run --rm --network host --user root --entrypoint cinder-manage -v $srcDir/cinder.conf:/etc/cinder/cinder.conf:ro,z -v $logDir:/var/log/kolla/cinder:z -v $stateDir:/var/lib/cinder:z $apiImage db sync
        |echo "cinder database synced"""".stripMargin
 
+  // cinder-volume gets three extra capabilities: its privsep helper (used when a
+  // volume is created from an image that has to be downloaded and inspected or
+  // converted, e.g. a qcow2 image) must be able to set CAP_SYS_ADMIN,
+  // CAP_NET_ADMIN and CAP_DAC_READ_SEARCH, which podman drops by default;
+  // without them it fails with "FailedToDropPrivileges: Privsep daemon failed
+  // to start". (kolla-ansible runs this container privileged; these three are
+  // the narrower equivalent.) Plain volumes and raw-image clones do not need them.
   private val unitsScript =
     s"""set -e
        |mkunit() {
        |  name=$$1
        |  image=$$2
+       |  extra=$$3
        |  cat > /etc/systemd/system/orphera-$$name.service <<UNIT
        |[Unit]
        |Description=$$name (Kolla container) managed by Orphera
@@ -339,7 +347,7 @@ object cinder_single_node extends OrpheraClusterPlaybook:
        |
        |[Service]
        |ExecStartPre=-/usr/bin/podman rm -f $$name
-       |ExecStart=/usr/bin/podman run --rm --name $$name --network host -e KOLLA_CONFIG_STRATEGY=COPY_ALWAYS -v $confRoot/$$name:/var/lib/kolla/config_files:ro,z -v $logDir:/var/log/kolla/cinder:z -v $stateDir:/var/lib/cinder:z $$image
+       |ExecStart=/usr/bin/podman run --rm --name $$name --network host $$extra -e KOLLA_CONFIG_STRATEGY=COPY_ALWAYS -v $confRoot/$$name:/var/lib/kolla/config_files:ro,z -v $logDir:/var/log/kolla/cinder:z -v $stateDir:/var/lib/cinder:z $$image
        |ExecStop=/usr/bin/podman stop -t 30 $$name
        |Restart=on-failure
        |RestartSec=5
@@ -351,7 +359,7 @@ object cinder_single_node extends OrpheraClusterPlaybook:
        |}
        |mkunit cinder-api $apiImage
        |mkunit cinder-scheduler $schedulerImage
-       |mkunit cinder-volume $volumeImage
+       |mkunit cinder-volume $volumeImage "--cap-add=SYS_ADMIN --cap-add=NET_ADMIN --cap-add=DAC_READ_SEARCH"
        |systemctl daemon-reload
        |for u in cinder-api cinder-scheduler cinder-volume; do
        |  systemctl enable orphera-$$u
