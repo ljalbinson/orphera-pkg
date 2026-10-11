@@ -407,6 +407,15 @@ Expect: the script ends with "OK - the clients can authenticate"; `service list`
 keystone and cinderv3; `volume service list` shows cinder-scheduler and
 cinder-volume@ceph both up. Needs python3-venv on scala0 and tst6 resolvable from there.
 
+### K6. Glance on tst13 - NOT YET RUN (branch `glance`)
+    manifests/test_glance.sh 2>&1 | tee /tmp/glance.log
+Expect: orphera-glance-api active; API answers on 9292; image list through Keystone; a test
+image uploads, becomes `active`, appears as an RBD image in pool `images`, deletes and
+disappears from the pool; the catalog lists `image`; second run completes. Prerequisites:
+Galera + VIP, Ceph with OSDs, Keystone, agent on tst13. Most likely to need a fix on the first
+run: the glance-api command/config under Kolla (eventlet vs uwsgi), the RBD store options, the
+Glance policy for the admin token. Teardown: `orphera cluster-playbook manifests/glance_teardown.scala`.
+
 ## L. Node reassignment (2026-10-10) - steps 1-3 and 5 done; step 4: run-log test passed, Prometheus/Grafana stack on tst7 NOT YET RUN
 New roles: tst0-tst2 Ceph; tst3-tst5 Galera + haproxy + keepalived (VIP
 10.10.5.100); tst6 Keystone; tst7 WordPress and Prometheus/Grafana; tst8 Rocky;

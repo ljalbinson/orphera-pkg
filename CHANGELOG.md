@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — Glance on tst13 (branch `glance`, DRAFT, not yet run)
+- `manifests/glance_single_node.scala`: glance-api from the Kolla image under podman/systemd on
+  tst13, plain HTTP on 9292, images stored as RBD images in a new Ceph pool `images` with a
+  `client.glance` cephx user (fixed test key, same convention and cipher compromise as Cinder).
+  Creates the `glance` database on Galera, writes `glance-api.conf` (multi-store `ceph:rbd`,
+  `show_image_direct_url` on for later Cinder clone-from-image), runs `glance-manage db_sync`,
+  and registers service `image` with three endpoints and user `glance` in Keystone. No RabbitMQ.
+- `manifests/glance_teardown.scala`: unregisters from Keystone, removes the container, unit,
+  config and state, drops the database, deletes the `images` pool and `client.glance`.
+- `manifests/test_glance.sh`: unit active, API answers, image upload reaches `active` and exists
+  as an RBD image, deletes cleanly, catalog lists `image`, idempotent re-apply; `NO_APPLY=1`.
+- inventory.yaml: tst13 role comment; README fleet table and run order.
+- Open: the Kolla `glance-api` command and config layout are written from memory of 2025.1 and
+  are the most likely things to need a fix on the first run.
+
 ### Added — `orphera run --quiet`
 - `orphera run <command> --nodes ... --quiet` prints only the command's own output (still
   prefixed `[node]`, so several nodes stay readable) and drops the `Running: ...` and
