@@ -124,10 +124,16 @@ object rpm_cache extends OrpheraClusterPlaybook:
       |  echo "nginx failed to start - see 'journalctl -xeu nginx'" >&2
       |  exit 1
       |fi
-      |echo "nginx rpm cache running on port @PORT@"""".stripMargin.replace("@PORT@", port.toString))
+      |echo "nginx rpm cache running on port @PORT@"""".stripMargin.replace(
+        "@PORT@",
+        port.toString
+      ))
 
   private val healthScript =
-    """[ "$(curl -s http://localhost:@PORT@/healthz)" = "ok" ]""".replace("@PORT@", port.toString)
+    """[ "$(curl -s http://localhost:@PORT@/healthz)" = "ok" ]""".replace(
+      "@PORT@",
+      port.toString
+    )
 
   // Each fetch must return 200; a bad upstream path, a TLS verification
   // failure or a DNS problem shows up here rather than on the first client.

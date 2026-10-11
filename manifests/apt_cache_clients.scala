@@ -26,7 +26,18 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 object apt_cache_clients extends OrpheraClusterPlaybook:
 
   private val clients =
-    List("tst0", "tst1", "tst2", "tst3", "tst4", "tst5", "tst6", "tst7", "tst9", "tst10")
+    List(
+      "tst0",
+      "tst1",
+      "tst2",
+      "tst3",
+      "tst4",
+      "tst5",
+      "tst6",
+      "tst7",
+      "tst9",
+      "tst10"
+    )
 
   private val cacheHost = "tst11.ljalbinson.com"
   private val port = 3142

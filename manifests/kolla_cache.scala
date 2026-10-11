@@ -106,7 +106,10 @@ object kolla_cache extends OrpheraClusterPlaybook:
           Task.Install(packages = hostPackages, updateCache = true)
         )
         .task("pull the registry image")(
-          Task.RunCommand(List("sh", "-c", pullRegistryScript), timeoutSeconds = 600)
+          Task.RunCommand(
+            List("sh", "-c", pullRegistryScript),
+            timeoutSeconds = 600
+          )
         )
         .task("run the pull-through cache as a systemd-managed container")(
           Task.RunCommand(List("sh", "-c", unitScript), timeoutSeconds = 120)

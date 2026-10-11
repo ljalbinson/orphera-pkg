@@ -13,7 +13,18 @@ object apt_cache_teardown extends OrpheraClusterPlaybook:
   private val node = "tst11"
 
   private val clients =
-    List("tst0", "tst1", "tst2", "tst3", "tst4", "tst5", "tst6", "tst7", "tst9", "tst10")
+    List(
+      "tst0",
+      "tst1",
+      "tst2",
+      "tst3",
+      "tst4",
+      "tst5",
+      "tst6",
+      "tst7",
+      "tst9",
+      "tst10"
+    )
 
   private val clientScript =
     """rm -f /etc/apt/apt.conf.d/02orphera-apt-proxy /usr/local/sbin/orphera-apt-proxy

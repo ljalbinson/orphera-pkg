@@ -72,7 +72,8 @@ object observability_extended extends OrpheraClusterPlaybook:
 
   private val haProxyNodes = List("tst3", "tst4", "tst5")
   private val monitoringNode = "tst7"
-  private val allNodes = List("tst0", "tst1", "tst2", "tst3", "tst4", "tst5", "tst6")
+  private val allNodes =
+    List("tst0", "tst1", "tst2", "tst3", "tst4", "tst5", "tst6")
 
   private val haproxyMetricsPort = 8404
 

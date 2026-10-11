@@ -582,7 +582,10 @@ if __name__ == '__main__':
           Task.RunCommand(List("sh", "-c", cinderConfScript))
         )
         .task("write the Kolla config for the three services")(
-          Task.RunCommand(List("sh", "-c", kollaConfigScript), timeoutSeconds = 120)
+          Task.RunCommand(
+            List("sh", "-c", kollaConfigScript),
+            timeoutSeconds = 120
+          )
         )
         .task("cinder-manage db sync")(
           Task.RunCommand(List("sh", "-c", dbSyncScript), timeoutSeconds = 600)
@@ -611,7 +614,8 @@ if __name__ == '__main__':
           )
         )
         .task("scheduler and volume services report up")(
-          Task.RunCommand(List("sh", "-c", servicesScript), timeoutSeconds = 150)
+          Task
+            .RunCommand(List("sh", "-c", servicesScript), timeoutSeconds = 150)
         )
         .task("cinder confirmed")(
           Task.Debug(

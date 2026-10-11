@@ -42,7 +42,8 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 object observability_stack extends OrpheraClusterPlaybook:
 
   private val monitoringNode = "tst7"
-  private val allNodes = List("tst0", "tst1", "tst2", "tst3", "tst4", "tst5", "tst6")
+  private val allNodes =
+    List("tst0", "tst1", "tst2", "tst3", "tst4", "tst5", "tst6")
 
   // Grafana's default admin/admin credentials on a truly fresh install —
   // same "test-only, fine for disposable infrastructure" convention as

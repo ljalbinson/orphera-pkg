@@ -9,12 +9,13 @@ import java.nio.file.{Files, Paths}
 /** One VM's sizing/network parameters, in the shape of the kayobe/
   * kttb-virt-ansible project's own per-VM config file — e.g.
   * `playbooks/config/testvm0-config.yml` there — NOT a format Orphera invented.
-  * Lets a KVM-provisioning playbook (manifests/kvm_zfs_vm_provision.scala is the
-  * motivating case) read real values instead of hardcoding one Scala val per
-  * field per VM, while keeping this project's existing "playbooks are code, not
-  * a generic templated role" convention intact: this only replaces the VALUES a
-  * playbook's own vals would otherwise hardcode, not the playbook's structure —
-  * a playbook still decides for itself which fields it uses and how.
+  * Lets a KVM-provisioning playbook (manifests/kvm_zfs_vm_provision.scala is
+  * the motivating case) read real values instead of hardcoding one Scala val
+  * per field per VM, while keeping this project's existing "playbooks are code,
+  * not a generic templated role" convention intact: this only replaces the
+  * VALUES a playbook's own vals would otherwise hardcode, not the playbook's
+  * structure — a playbook still decides for itself which fields it uses and
+  * how.
   *
   * Top-level shape is `params: {...}` — one extra level of nesting versus
   * everything else this project parses from YAML (inventory.yaml,

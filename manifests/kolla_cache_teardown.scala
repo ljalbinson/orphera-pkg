@@ -24,7 +24,8 @@ object kolla_cache_teardown extends OrpheraClusterPlaybook:
     clusterPlaybook("kolla-cache-teardown")(
       stage("teardown-kolla-cache", node)
         .task("remove the kolla cache")(
-          Task.RunCommand(List("sh", "-c", teardownScript), timeoutSeconds = 120)
+          Task
+            .RunCommand(List("sh", "-c", teardownScript), timeoutSeconds = 120)
         )
         .build
     )

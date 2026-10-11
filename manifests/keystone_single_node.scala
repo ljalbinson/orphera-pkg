@@ -89,7 +89,8 @@ object keystone_single_node extends OrpheraClusterPlaybook:
   private val logDir = "/var/log/kolla/keystone"
   private val caCert = s"$caDir/ca.crt"
 
-  private val hostPackages = List("podman", "openssl", "curl", "ca-certificates")
+  private val hostPackages =
+    List("podman", "openssl", "curl", "ca-certificates")
 
   // Kolla image cache from kolla_cache.scala (tst9). podman tries this mirror
   // first and falls back to quay.io if it is unreachable, so the manifest
@@ -353,7 +354,10 @@ object keystone_single_node extends OrpheraClusterPlaybook:
           Task.RunCommand(List("sh", "-c", writeConfigScript))
         )
         .task("write the Apache vhost and Kolla config.json")(
-          Task.RunCommand(List("sh", "-c", kollaConfigScript), timeoutSeconds = 120)
+          Task.RunCommand(
+            List("sh", "-c", kollaConfigScript),
+            timeoutSeconds = 120
+          )
         )
         .task("db_sync, fernet and credential keys, bootstrap")(
           Task.RunCommand(List("sh", "-c", initScript), timeoutSeconds = 600)

@@ -82,7 +82,10 @@ object apt_cache extends OrpheraClusterPlaybook:
     clusterPlaybook("apt-cache")(
       stage("install-apt-cache", node)
         .task("install apt-cacher-ng")(
-          Task.Install(packages = List("apt-cacher-ng", "curl"), updateCache = true)
+          Task.Install(
+            packages = List("apt-cacher-ng", "curl"),
+            updateCache = true
+          )
         )
         .task("configure and start apt-cacher-ng")(
           Task.RunCommand(List("sh", "-c", configScript), timeoutSeconds = 120)
