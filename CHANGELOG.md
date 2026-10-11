@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed — test_wordpress.sh is now a non-destructive test
+- The old `manifests/test_wordpress.sh` tore down and rebuilt Galera before applying WordPress,
+  which wiped every database on the cluster (Keystone's and Cinder's included: Keystone then
+  answered HTTP 500 and `cinder_single_node.scala` failed to register). It is now
+  `manifests/rebuild_galera_and_wordpress.sh`, with a warning header. The new `test_wordpress.sh`
+  applies `wordpress_site.scala` only and checks the Galera cluster and VIP, the `wordpress`
+  database and user, nginx and php-fpm, and that the site answers 200 over HTTP and shows no
+  database connection error; also checks idempotence. `NO_APPLY=1` checks without applying.
+  Not yet run.
+
 ## [0.1.172] - 2026-10-11
 
 ### Changed — test fleet roles reassigned
