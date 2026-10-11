@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — master build script
+- `manifests/build_openstack_stack.sh`: empty VMs with an agent to a working Ceph + Galera +
+  Keystone + Cinder + Glance stack with the clients set up on scala0, in dependency order.
+  Apply-only (no teardowns, so it cannot wipe a database), preflight that every node answers,
+  an independent check after each step, `--from STEP` / `--only STEP` to resume, `--with-caches`
+  for the apt and Kolla caches, `--list`, a final smoke test (real volume and image, confirmed as
+  RBD images, then deleted) and a log in /tmp. Not yet run end to end.
+
 ### Added — Glance on tst13 (branch `glance`; test_glance.sh passed 11/11 on 2026-10-11)
 - `manifests/glance_single_node.scala`: glance-api from the Kolla image under podman/systemd on
   tst13, plain HTTP on 9292, images stored as RBD images in a new Ceph pool `images` with a
