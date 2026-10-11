@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — `orphera run --quiet`
+- `orphera run <command> --nodes ... --quiet` prints only the command's own output (still
+  prefixed `[node]`, so several nodes stay readable) and drops the `Running: ...` and
+  `exit=0 success=true` lines. A failing command is not silent: its
+  `[node] exit=N success=false` line (with any `FAILED: ...` reason) is still printed and the
+  exit code is non-zero. Like `--nodes` and `--timeout` the flag is recognised anywhere in the
+  arguments, so a remote command that needs its own literal `--quiet` cannot be run with it.
+  Changes: `ConsoleRenderer.renderQuiet`, `Command.RunCommand.quiet`, `parseRunCommand`,
+  `Orchestrator.executeCommand`, the usage text and bash completion. Not compiled here; the
+  first build on scala0 is the first compile.
+
 ## [0.1.173] - 2026-10-11
 
 ### Changed — test_wordpress.sh is now a non-destructive test
