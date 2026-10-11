@@ -11,6 +11,8 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 //   - /etc/apt/apt.conf.d/02orphera-apt-proxy: tells apt to run that script
 //     for plain-HTTP repositories (Acquire::http::Proxy-Auto-Detect) and to
 //     fetch HTTPS repositories directly (a proxy cannot cache those).
+// It also turns off HTTP pipelining and sets a 30 s timeout, because a half-closed
+// connection to the cache can otherwise leave apt hanging.
 // So a node uses the cache whenever it is up and quietly works without it when
 // it is not; nothing breaks if tst11 is rebuilt or switched off.
 //
@@ -48,6 +50,12 @@ object apt_cache_clients extends OrpheraClusterPlaybook:
        |// Managed by Orphera (apt_cache_clients.scala).
        |Acquire::http::Proxy-Auto-Detect "/usr/local/sbin/orphera-apt-proxy";
        |Acquire::https::Proxy "DIRECT";
+       |// apt-cacher-ng closes idle connections; with pipelining apt's download
+       |// workers can then wait forever on a half-closed socket (seen on tst5: an
+       |// `apt-get update` stuck for 7 minutes with the sockets in CLOSE-WAIT).
+       |Acquire::http::Pipeline-Depth "0";
+       |Acquire::http::Timeout "30";
+       |Acquire::Retries "3";
        |APTCONF
        |echo "apt on $$(hostname) uses the cache at $cacheHost:$port when it is reachable: $$(/usr/local/sbin/orphera-apt-proxy)"""".stripMargin
 

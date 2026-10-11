@@ -32,6 +32,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   removed with `rm -rf` on re-provisioning. Run on gs3 for tst13 (10.10.5.25): all six
   stages completed first time and the VM answered SSH ~10 s after start.
 
+### Fixed — apt clients could hang on a half-closed connection to the apt cache
+- `apt_cache_clients.scala` now also writes `Acquire::http::Pipeline-Depth "0"`,
+  `Acquire::http::Timeout "30"` and `Acquire::Retries "3"`. Seen on tst5: `apt-get update`
+  stuck for 7 minutes, both sockets to tst11:3142 in CLOSE-WAIT, while the cache itself was
+  healthy. Re-apply `apt_cache_clients.scala` to pick it up.
+
 ### Added — rpm package cache on tst12 (test_rpm_cache.sh 11/11)
 - `manifests/rpm_cache.scala` (+ `rpm_cache_teardown.scala`, `test_rpm_cache.sh`):
   nginx caching mirror on a new node, tst12 (10.10.5.24), port 8080, for the
