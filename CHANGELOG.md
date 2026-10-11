@@ -13,7 +13,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   CAP_DAC_READ_SEARCH ("Privsep daemon failed to start"). `cinder_single_node.scala` now adds those
   capabilities to the orphera-cinder-volume unit only. Re-apply the playbook to pick it up.
   A raw image (`qemu-img convert -O raw`) skips the download and is cloned copy-on-write.
-  Not yet re-tested.
+  Re-tested on scala0 (2026-10-11): the volume created from the image reached `available`.
 
 ### Added — master build script
 - `manifests/build_openstack_stack.sh`: empty VMs with an agent to a working Ceph + Galera +
