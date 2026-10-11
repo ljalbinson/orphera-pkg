@@ -18,6 +18,27 @@ object ConsoleRenderer:
 
   def failureCount: Int = failures.get()
 
+  /** Terse rendering for `orphera run --quiet`: only the command's own output
+    * (still prefixed with the node name, so several nodes stay readable). The
+    * "Running: ..." progress line and the "exit=0 success=true" line are
+    * dropped. A failure is NOT silent: it is counted (so the CLI exit code is
+    * non-zero) and printed with its exit code and any "FAILED: ..." reason.
+    */
+  def renderQuiet(node: Node, event: Event): IO[Unit] =
+    event.kind match
+      case Event.Kind.OUTPUT =>
+        IO.println(s"[${node.name}] ${event.message}")
+      case Event.Kind.RESULT if !event.success =>
+        val reason =
+          if event.message.startsWith("FAILED: ") then event.message + " "
+          else ""
+        IO.delay(failures.incrementAndGet()).void >>
+          IO.println(
+            s"[${node.name}] ${reason}exit=${event.exitCode} success=false"
+          )
+      case _ =>
+        IO.unit
+
   def render(node: Node, event: Event): IO[Unit] =
     event.kind match
       case Event.Kind.PROGRESS =>

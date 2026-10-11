@@ -124,10 +124,14 @@ enum Command:
       quiet: Boolean,
       bootstrap: BootstrapOpts
   )
+  // `quiet`: print only the command's own output (still prefixed [node]),
+  // not the "Running: ..." and "exit=0 success=true" lines; a failure still
+  // prints its exit line and sets the exit code. See ConsoleRenderer.renderQuiet.
   case RunCommand(
       command: List[String],
       nodes: Option[List[String]],
-      timeoutSeconds: Int
+      timeoutSeconds: Int,
+      quiet: Boolean = false
   )
   // Reads a .orphera-logs/*.jsonl run log and prints a human-readable
   // summary table — see LogSummary.scala. `target` is either a direct
@@ -288,7 +292,7 @@ object Cli:
       case "pipeline" :: rest                => parsePipeline(rest)
       case "audit-log" :: rest               => parseAuditLog(rest, 20)
       case "help" :: _ | "--help" :: _ | Nil => Right(Command.Help)
-      case "run" :: rest => parseRunCommand(rest, Nil, None, 60)
+      case "run" :: rest => parseRunCommand(rest, Nil, None, 60, false)
       case other => Left(s"Unknown command: ${other.headOption.getOrElse("")}")
 
   /** Shared flag parser for `playbook`/`cluster-playbook`. Kept separate rather
@@ -1019,31 +1023,39 @@ object Cli:
       args: List[String],
       command: List[String],
       nodes: Option[List[String]],
-      timeoutSeconds: Int
+      timeoutSeconds: Int,
+      quiet: Boolean
   ): Either[String, Command] =
     args match
       case Nil =>
         if command.isEmpty then Left("run requires a command")
-        else Right(Command.RunCommand(command, nodes, timeoutSeconds))
+        else Right(Command.RunCommand(command, nodes, timeoutSeconds, quiet))
 
       case "--nodes" :: value :: rest =>
         parseRunCommand(
           rest,
           command,
           Some(value.split(",").toList.map(_.trim)),
-          timeoutSeconds
+          timeoutSeconds,
+          quiet
         )
 
       case "--timeout" :: value :: rest =>
         scala.util.Try(value.toInt).toOption match
-          case Some(parsed) => parseRunCommand(rest, command, nodes, parsed)
-          case None         => Left(s"Invalid timeout: $value")
+          case Some(parsed) =>
+            parseRunCommand(rest, command, nodes, parsed, quiet)
+          case None => Left(s"Invalid timeout: $value")
+
+      // Like --nodes and --timeout, recognised anywhere in the arguments, so
+      // a command that itself needs a literal --quiet cannot be run this way.
+      case "--quiet" :: rest =>
+        parseRunCommand(rest, command, nodes, timeoutSeconds, true)
 
       case "--" :: rest =>
-        parseRunCommand(rest, command, nodes, timeoutSeconds)
+        parseRunCommand(rest, command, nodes, timeoutSeconds, quiet)
 
       case arg :: rest =>
-        parseRunCommand(rest, command :+ arg, nodes, timeoutSeconds)
+        parseRunCommand(rest, command :+ arg, nodes, timeoutSeconds, quiet)
 
   val usage: String =
     """orphera-orchestrator - test CLI for the Orphera agent protocol
@@ -1102,8 +1114,10 @@ object Cli:
       |                      in parallel (default 4 at a time); a failed step stops that
       |                      node only. Output is prefixed [node] and saved to
       |                      .orphera-build-logs/<time>/<node>.log, with a summary at the end
-      |  run               <command...> [--nodes host1,host2] [--timeout 60]
-      |                    — run an arbitrary command, capturing stdout/stderr
+      |  run               <command...> [--nodes host1,host2] [--timeout 60] [--quiet]
+      |                    — run an arbitrary command, capturing stdout/stderr;
+      |                      --quiet prints only the command's output (a failure still
+      |                      prints its exit line and sets the exit code)
       |  fetch             <remote-path> [--out ./local-dir] [--nodes host1,host2]
       |  facts             [--nodes host1,host2]
       |  reboot            [--nodes host1,host2] [--delay 5] [--wait] [--wait-timeout 300]

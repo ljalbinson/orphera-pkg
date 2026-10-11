@@ -430,13 +430,15 @@ object Orchestrator:
   def executeCommand(
       nodes: List[Node],
       command: List[String],
-      timeoutSeconds: Int = 60
+      timeoutSeconds: Int = 60,
+      quiet: Boolean = false
   ): IO[Unit] =
     nodes.parTraverse_ { node =>
       NodeClient.executeCommand(
         node,
         command,
         timeoutSeconds,
-        ConsoleRenderer.render(node, _)
+        if quiet then ConsoleRenderer.renderQuiet(node, _)
+        else ConsoleRenderer.render(node, _)
       )
     }

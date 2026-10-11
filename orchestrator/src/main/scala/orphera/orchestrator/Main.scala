@@ -338,9 +338,11 @@ object Main extends IOApp:
               bootstrap
             )
 
-      case Right(Command.RunCommand(command, nodeNames, timeoutSeconds)) =>
+      case Right(
+            Command.RunCommand(command, nodeNames, timeoutSeconds, quiet)
+          ) =>
         withTargets(nodeNames) { targets =>
-          Orchestrator.executeCommand(targets, command, timeoutSeconds)
+          Orchestrator.executeCommand(targets, command, timeoutSeconds, quiet)
         }
 
       case Right(Command.Pipeline(steps, nodeNames, parallel, quiet)) =>

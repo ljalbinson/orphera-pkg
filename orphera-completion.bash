@@ -181,7 +181,7 @@ _orphera_completions() {
         --node-groups) COMPREPLY=($(compgen -W "$(_orphera_groups)" -- "$cur")) ;;
         --timeout) COMPREPLY=() ;;
         --) COMPREPLY=() ;;
-        *) COMPREPLY=($(compgen -W "--nodes --node-groups --timeout --" -- "$cur")) ;;
+        *) COMPREPLY=($(compgen -W "--nodes --node-groups --timeout --quiet --" -- "$cur")) ;;
       esac
       ;;
 

@@ -86,7 +86,7 @@ object AuditLog:
       case Command.Reboot(_, _, _, _)                   => true
       case Command.Shutdown(_, _, _)                    => true
       case Command.RunClusterPlaybook(_, _, _, _, _, _) => true
-      case Command.RunCommand(_, _, _)                  => true
+      case Command.RunCommand(_, _, _, _)               => true
       case Command.Fetch(_, _, _)                       => false
       case Command.Facts(_)                             => false
       case Command.Version(_)                           => false
@@ -240,7 +240,7 @@ object AuditLog:
           "config" -> configs.mkString(","),
           "parallel" -> parallel.getOrElse(0)
         )
-      case Command.RunCommand(cmd, nodes, timeoutSeconds) =>
+      case Command.RunCommand(cmd, nodes, timeoutSeconds, _) =>
         List(
           "command" -> "run",
           "shell_command" -> cmd.mkString(" "),
