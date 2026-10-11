@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.1.178] - 2026-10-11
+
 ### Changed — apt/dpkg lock wait raised from 60 s to 10 minutes
 - `AptInstaller` (the agent) and `SshDeployer` now pass `-o DPkg::Lock::Timeout=600` instead of
   `60`, held in one constant in `AptInstaller`. On a freshly provisioned VM `unattended-upgrades`
