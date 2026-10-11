@@ -32,7 +32,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   removed with `rm -rf` on re-provisioning. Run on gs3 for tst13 (10.10.5.25): all six
   stages completed first time and the VM answered SSH ~10 s after start.
 
-### Added — test_observability_stack.sh (NOT YET RUN)
+### Added — test_observability_stack.sh (ran clean, 2026-10-11)
 - `manifests/test_observability_stack.sh` tests the Prometheus/Grafana stack on tst7
   end to end from the machine running it: applies `observability_stack.scala` and
   `observability_extended.scala`, then checks over HTTP that every target is up per job
@@ -42,7 +42,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   proxy API, and that re-applying both playbooks is idempotent. `NO_APPLY=1` checks without
   applying. (`test_observability.sh`, the run-log test, is separate and passed 26/26.)
 
-### Open — apt cache: concurrent Release-file requests make apt hang
+### Fix being tested — apt cache: concurrent Release-file requests make apt hang
 - Cause of the hung `apt update` on tst5 and tst1: with many nodes asking for the same stale
   `InRelease` at once (any playbook installing on several nodes), apt-cacher-ng 3.7.4 logs
   `storage error [Checked size beyond EOF] ... File exists` / `Failure to move file ... out of
@@ -50,8 +50,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   pipelining/timeout entry below did not fix it.
 - Tried and reverted: `DontCacheRequested: /(In)?Release([.]gpg)?$` makes apt-cacher-ng answer
   `400 Bad Request` for every Release file, which broke `apt update` on all clients. Do not use.
-- `test_apt_cache.sh` has a check that runs `apt-get update` on all ten clients at once; it
-  fails until a real fix is found.
+- Now set: `VfileUseRangeOps: 0` in the drop-in (the documented way to stop Range-based
+  revalidation of volatile files; the error is a size check during that revalidation).
+  `test_apt_cache.sh` has a check that runs `apt-get update` on all ten clients at once and
+  asserts none hang and no new storage errors are logged. Not yet run with the fix.
 
 ### Fixed — apt clients could hang on a half-closed connection to the apt cache (did not help; see above)
 - `apt_cache_clients.scala` now also writes `Acquire::http::Pipeline-Depth "0"`,

@@ -378,7 +378,7 @@ Result: passed first time, no fixes needed. (Had it failed, the likeliest causes
 installed or not in the enabled repos (the test removes it first), the log-count regex,
 and Scala string escaping.)
 
-### K5. Prometheus and Grafana on tst7 - NOT YET RUN
+### K5. Prometheus and Grafana on tst7 - PASSED (2026-10-11; reported as running without error, pass count not recorded)
 Replaces the old step 4 gap in section L: nothing tested the monitoring stack itself.
 
     git pull
@@ -448,7 +448,7 @@ pass on the new Galera/VIP. Also added and passed that day: the Kolla cache on t
 OpenStack clients on scala0 (K2) and the apt cache on tst11 (K3, 12/12).
 Also passed 2026-10-11: K4 rpm cache (11/11) and `test_observability.sh` (26/26; it checks the
 JSON run log on tst0, not the Prometheus/Grafana stack).
-Still to do: step 4's monitoring stack (K5, `test_observability_stack.sh`, written, not yet run), and re-running
+Step 4's monitoring stack passed (K5). Still to do: the apt cache concurrency check (K3 gained a ten-client simultaneous `apt update` test; run `test_apt_cache.sh` after applying `VfileUseRangeOps: 0`), and re-running
 `cephadm_install.scala` to confirm its new cephx-cipher task (the live cluster already
 has the setting from `cinder_single_node.scala`).
 

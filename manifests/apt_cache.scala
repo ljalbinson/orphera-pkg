@@ -21,9 +21,9 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 //     tunnelling works, then refreshes this node's own package indexes through
 //     the cache so the indexes are stored before any other node asks.
 //
-// Known problem: see the CHANGELOG entry on concurrent Release-file requests.
-// (DontCacheRequested for Release files was tried and makes apt-cacher-ng 3.7.4
-// answer 400 Bad Request; do not use it.)
+// VfileUseRangeOps: 0 works around a race on concurrent Release-file requests
+// (see the CHANGELOG). DontCacheRequested for Release files was tried and makes
+// apt-cacher-ng 3.7.4 answer 400 Bad Request; do not use it.
 //
 // Disk: the cache lives in /var/cache/apt-cacher-ng. config/tst11.yaml gives
 // the VM a 120 GB disk. apt-cacher-ng expires files that are no longer in any
@@ -43,6 +43,12 @@ object apt_cache extends OrpheraClusterPlaybook:
     s"""cat > /etc/apt-cacher-ng/zz_orphera.conf <<'CONF'
        |# Managed by Orphera (apt_cache.scala)
        |PassThroughPattern: .*
+       |# When many clients ask for the same stale Release file at once, the default
+       |# (VfileUseRangeOps: 1, validate it with a Range request) made apt-cacher-ng
+       |# 3.7.4 log "storage error [Checked size beyond EOF] ... File exists" and
+       |# drop a client's connection, which left apt hung. 0 uses only
+       |# If-Modified-Since and refetches the whole file if it changed.
+       |VfileUseRangeOps: 0
        |CONF
        |systemctl enable apt-cacher-ng
        |systemctl restart apt-cacher-ng
