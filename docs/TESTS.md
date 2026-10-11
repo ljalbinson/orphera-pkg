@@ -432,6 +432,15 @@ Glance on tst13 still answers; second run completes. The first re-apply hit the 
 playbook once the upgrade finished completed. Prerequisites: Galera + VIP, Keystone,
 agent on tst13. Teardown: `orphera cluster-playbook manifests/placement_teardown.scala`.
 
+### K9. Horizon on tst13 - NOT YET RUN (branch `horizon`)
+    manifests/test_horizon.sh 2>&1 | tee /tmp/horizon.log
+Expect: orphera-horizon active; root leads to the login page; a static file is served; admin
+signs in; http://tst13.ljalbinson.com:8080/auth/login/ answers 200 from scala0; Glance (9292) and
+Placement (8780) still answer; second run completes. Then open http://tst13.ljalbinson.com:8080/
+in a browser and sign in as admin / the Keystone admin password (domain Default): the project
+overview should show; Volumes, Images and the admin panels appear from the catalog. Prerequisite:
+Keystone, agent on tst13. Teardown: `orphera cluster-playbook manifests/horizon_teardown.scala`.
+
 ## L. Node reassignment (2026-10-10) - steps 1-3 and 5 done; step 4: run-log test passed, Prometheus/Grafana stack on tst7 NOT YET RUN
 New roles: tst0-tst2 Ceph; tst3-tst5 Galera + haproxy + keepalived (VIP
 10.10.5.100); tst6 Keystone; tst7 WordPress and Prometheus/Grafana; tst8 Rocky;

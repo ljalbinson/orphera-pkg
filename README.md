@@ -1260,7 +1260,7 @@ Fleet layout used by these manifests (see `inventory.yaml`):
 | tst10 | Cinder (API, scheduler, volume, RabbitMQ) |
 | tst11 | apt cache (apt-cacher-ng) for the Ubuntu nodes |
 | tst12 | rpm cache (nginx caching mirror of Rocky/EPEL) for the Rocky nodes |
-| tst13 | Glance (glance-api, images in Ceph pool `images`) and Placement (port 8780) |
+| tst13 | Glance (glance-api, images in Ceph pool `images`) Placement (port 8780) and Horizon (port 8080) |
 
 Run order, each with its own teardown and an end-to-end test that checks the
 result independently of the playbook's own health checks:
@@ -1273,10 +1273,11 @@ result independently of the playbook's own health checks:
     manifests/test_cinder.sh                                    # applies cinder_single_node.scala
     manifests/test_glance.sh                                    # applies glance_single_node.scala
     manifests/test_placement.sh                                 # applies placement_single_node.scala
+    manifests/test_horizon.sh                                   # applies horizon_single_node.scala
     utils/openstack-client-setup.sh                             # CLI on the machine you run orphera from
 
 To build the whole stack in one go from freshly provisioned VMs that only have the agent, run
-`manifests/build_openstack_stack.sh` (Ceph, Galera + VIP, Keystone, Cinder, Glance, Placement, the clients
+`manifests/build_openstack_stack.sh` (Ceph, Galera + VIP, Keystone, Cinder, Glance, Placement, Horizon, the clients
 on scala0, then a smoke test that creates and deletes a real volume and image). It only applies
 playbooks, never tears anything down, checks each step independently before the next, and on a
 failure prints the `--from STEP` command to resume. `--with-caches` builds the apt and Kolla
@@ -1333,6 +1334,9 @@ Worth knowing:
   message bus. Its teardown also removes it from Keystone.
 - **Placement** shares tst13 with Glance (a small stateless Apache + mod_wsgi API with its own
   database); `test_placement.sh` creates and deletes a resource provider.
+- **Horizon** (the dashboard) is at `http://tst13.ljalbinson.com:8080/` after
+  `manifests/test_horizon.sh`; sign in as `admin` (domain Default) with the Keystone admin
+  password. It keeps no database; sessions are signed cookies. The test performs a real login.
 - **Not built yet:** Nova and Neutron (provider networks only).
 
 ## Example: parallel network throughput test (iperf3)

@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — Horizon on tst13 (branch `horizon`, DRAFT, not yet run)
+- `manifests/horizon_single_node.scala`: the Horizon dashboard from the Kolla image under
+  podman/systemd on tst13 (shared with Glance and Placement), Apache + mod_wsgi on 8080, plain
+  HTTP, `http://tst13.ljalbinson.com:8080/`. No database (signed-cookie sessions), nothing to
+  register in Keystone; `local_settings.py` points at Keystone over TLS with the test CA. Writes a
+  small helper `orphera-horizon-check` that signs in as admin like a browser does.
+- `manifests/horizon_teardown.scala`: removes the container, unit, config and helper; Glance and
+  Placement are untouched.
+- `manifests/test_horizon.sh`: unit active, root leads to the login page, a static file is
+  served, a real admin login succeeds, the dashboard answers from scala0, Glance and Placement
+  still answer, idempotent re-apply; `NO_APPLY=1`.
+- `build_openstack_stack.sh`: new `horizon` step after `placement`.
+- Open: the Apache vhost, the site-packages path and the static-file Alias follow the Kolla
+  layout from memory and are the most likely things to need a fix on the first run.
+
 ## [0.1.178] - 2026-10-11
 
 ### Changed — apt/dpkg lock wait raised from 60 s to 10 minutes

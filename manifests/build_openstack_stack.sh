@@ -12,6 +12,7 @@
 #   cinder   tst10       cinder_single_node (pool `volumes`)
 #   glance   tst13       glance_single_node (pool `images`)
 #   placement tst13      placement_single_node (port 8780, shares tst13 with Glance)
+#   horizon  tst13       horizon_single_node (the dashboard, http://tst13:8080/)
 #   clients  scala0      utils/openstack-client-setup.sh
 #   smoke                a real volume, image and resource provider created and deleted
 #
@@ -30,7 +31,7 @@
 #   --with-caches   build the apt cache, point the Ubuntu nodes at it, and
 #                   build the Kolla image cache first (tst9, tst11 required)
 #   --from STEP     start at STEP (caches ceph galera keystone cinder glance
-#                   placement clients smoke) - for resuming after a failure
+#                   placement horizon clients smoke) - for resuming after a failure
 #   --only STEP     run just that one step
 #   --list          print the plan and exit
 #   -h, --help      this text
@@ -43,7 +44,7 @@ set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
 MANIFESTS="manifests"
 
-ALL_STEPS=(caches ceph galera keystone cinder glance placement clients smoke)
+ALL_STEPS=(caches ceph galera keystone cinder glance placement horizon clients smoke)
 WITH_CACHES=""
 FROM=""
 ONLY=""
@@ -216,6 +217,13 @@ step_placement() {
   check "Placement answers its version document" contains "http=200" "$out"
   out=$(run_on tst13 "sudo /usr/local/sbin/orphera-placement-api rp-list")
   check "Placement lists resource providers with an admin token" contains "resource providers:" "$out"
+}
+
+step_horizon() {
+  playbook horizon_single_node.scala
+  local out
+  out=$(run_on tst13 "sudo /usr/local/sbin/orphera-horizon-check login")
+  check "admin can sign in to the dashboard" contains "login ok as admin" "$out"
 }
 
 step_clients() {
