@@ -60,6 +60,21 @@ object horizon_single_node extends OrpheraClusterPlaybook:
   private val hostPackages =
     List("podman", "openssl", "curl", "ca-certificates", "python3")
 
+  // A freshly provisioned VM runs unattended-upgrades for a while after boot,
+  // and apt cannot take the dpkg lock meanwhile. Wait here, with an explicit
+  // task timeout, instead of relying on how long the agent's own apt call waits.
+  private val waitAptIdleScript =
+    """for i in $(seq 1 180); do
+      |  if pgrep -x unattended-upgr >/dev/null || pgrep -x apt-get >/dev/null || pgrep -x apt >/dev/null || pgrep -x dpkg >/dev/null; then
+      |    sleep 5
+      |  else
+      |    echo "apt and dpkg are idle"
+      |    exit 0
+      |  fi
+      |done
+      |echo "apt/dpkg still busy after 15 minutes (unattended-upgrades?)" >&2
+      |exit 1""".stripMargin
+
   private val useCacheScript =
     s"""mkdir -p /etc/containers/registries.conf.d
        |cat > /etc/containers/registries.conf.d/orphera-kolla-cache.conf <<'REG'
@@ -335,6 +350,9 @@ if __name__ == '__main__':
   val playbook: ClusterPlaybook =
     clusterPlaybook("horizon-single-node")(
       stage("install-horizon", node)
+        .task("wait until apt and dpkg are idle")(
+          Task.RunCommand(List("sh", "-c", waitAptIdleScript), timeoutSeconds = 960)
+        )
         .task("install podman and tools")(
           Task.Install(packages = hostPackages, updateCache = true)
         )
