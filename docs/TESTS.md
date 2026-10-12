@@ -440,8 +440,9 @@ scala0; Glance (9292) and Placement (8780) still answer; second run completes. T
 up on the way: the install was killed (exit 143) when unattended-upgrades finished and
 needrestart restarted the agent (see `disable_unattended_upgrades.scala`), and with no compute
 service in the catalog the default landing page /project/ is a 403; with Nova registered it is a
-500 instead (the Overview page needs a network service), so `user_home` is `/project/instances/`
-until Neutron exists. Prerequisite:
+500 instead (the Overview page needs a network service), so `user_home` was `/project/instances/`
+until Neutron existed; with Neutron registered the override is gone and the default page works.
+Prerequisite:
 Keystone, agent on tst13. Teardown:
 `orphera cluster-playbook manifests/horizon_teardown.scala`.
 
