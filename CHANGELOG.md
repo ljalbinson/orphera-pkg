@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed — Horizon lands on the Project dashboard again
+- Removed the `user_home`/`default_dashboard` override from `horizon_single_node.scala`. It
+  existed only because the Project dashboard was a 403 while the Keystone catalog had no compute
+  service; with Nova registered the Project dashboard loads (Project > Compute checked in a
+  browser), so Horizon's own default applies. Re-apply the playbook (or run `test_horizon.sh`) to
+  take effect; the test only checks that sign-in reaches a signed-in page.
+
 ### Added — extra NICs for new VMs (passed on tst19 with the ZFS script, 2026-10-12)
 - `--config` files may list additional NICs under `nics:`, in the same shape as `nic0`
   (`config/tst19.yaml` is the specimen: `br-net106`, `10.10.6.31/24`, gateway, `table: 2`,
