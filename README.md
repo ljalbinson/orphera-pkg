@@ -1261,6 +1261,7 @@ Fleet layout used by these manifests (see `inventory.yaml`):
 | tst11 | apt cache (apt-cacher-ng) for the Ubuntu nodes |
 | tst12 | rpm cache (nginx caching mirror of Rocky/EPEL) for the Rocky nodes |
 | tst13 | Glance (glance-api, images in Ceph pool `images`) Placement (port 8780) and Horizon (port 8080) |
+| tst14 | Nova control plane (API on 8774, scheduler, conductor, noVNC proxy on 6080); RabbitMQ vhost `nova` on tst10; no compute node yet |
 
 Run order, each with its own teardown and an end-to-end test that checks the
 result independently of the playbook's own health checks:
@@ -1273,11 +1274,12 @@ result independently of the playbook's own health checks:
     manifests/test_cinder.sh                                    # applies cinder_single_node.scala
     manifests/test_glance.sh                                    # applies glance_single_node.scala
     manifests/test_placement.sh                                 # applies placement_single_node.scala
+    manifests/test_nova.sh                                      # applies nova_single_node.scala
     manifests/test_horizon.sh                                   # applies horizon_single_node.scala
     utils/openstack-client-setup.sh                             # CLI on the machine you run orphera from
 
 To build the whole stack in one go from freshly provisioned VMs that only have the agent, run
-`manifests/build_openstack_stack.sh` (Ceph, Galera + VIP, Keystone, Cinder, Glance, Placement, Horizon, the clients
+`manifests/build_openstack_stack.sh` (Ceph, Galera + VIP, Keystone, Cinder, Glance, Placement, Nova, Horizon, the clients
 on scala0, then a smoke test that creates and deletes a real volume and image). It only applies
 playbooks, never tears anything down, checks each step independently before the next, and on a
 failure prints the `--from STEP` command to resume. `--with-caches` builds the apt and Kolla
@@ -1339,7 +1341,11 @@ Worth knowing:
   password. It keeps no database; sessions are signed cookies. The test performs a real login.
   Until Nova is registered the landing page is Identity (the Project dashboard needs a compute
   service in the catalog).
-- **Not built yet:** Nova and Neutron (provider networks only).
+- **Nova** (control plane only) is at `http://tst14.ljalbinson.com:8774` after
+  `manifests/test_nova.sh`: API (Apache + mod_wsgi), scheduler, conductor and the noVNC proxy, with
+  databases `nova_api`, `nova`, `nova_cell0` on Galera and its own vhost on the RabbitMQ on tst10.
+  There is no nova-compute yet, so no server can be booted; the test creates and deletes a flavor.
+- **Not built yet:** nova-compute and Neutron (provider networks only).
 
 ## Example: parallel network throughput test (iperf3)
 
