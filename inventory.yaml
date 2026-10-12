@@ -129,6 +129,31 @@ nodes:
     vars:
       cluster_ip: "10.10.5.25"
 
+  - name: tst14
+    host: tst14.ljalbinson.com
+    vars:
+      cluster_ip: "10.10.5.26"
+
+  - name: tst15
+    host: tst15.ljalbinson.com
+    vars:
+      cluster_ip: "10.10.5.27"
+
+  - name: tst16
+    host: tst16.ljalbinson.com
+    vars:
+      cluster_ip: "10.10.5.28"
+
+  - name: tst17
+    host: tst17.ljalbinson.com
+    vars:
+      cluster_ip: "10.10.5.29"
+
+  - name: tst18
+    host: tst18.ljalbinson.com
+    vars:
+      cluster_ip: "10.10.5.30"
+
   - name: tst19
     host: tst19.ljalbinson.com
     vars:
