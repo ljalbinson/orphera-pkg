@@ -6,6 +6,39 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — Horizon on tst13 (passed 7/7 on tst13, 2026-10-12)
+- `manifests/horizon_single_node.scala`: the Horizon dashboard from the Kolla image under
+  podman/systemd on tst13 (shared with Glance and Placement), Apache + mod_wsgi on 8080, plain
+  HTTP, `http://tst13.ljalbinson.com:8080/`. No database (signed-cookie sessions), nothing to
+  register in Keystone; `local_settings.py` points at Keystone over TLS with the test CA. Writes a
+  small helper `orphera-horizon-check` that signs in as admin like a browser does.
+- `manifests/horizon_teardown.scala`: removes the container, unit, config and helper; Glance and
+  Placement are untouched.
+- `manifests/test_horizon.sh`: unit active, root leads to the login page, a static file is
+  served, a real admin login succeeds, the dashboard answers from scala0, Glance and Placement
+  still answer, idempotent re-apply; `NO_APPLY=1`.
+- `build_openstack_stack.sh`: new `horizon` step after `placement`.
+- Found on the first runs: with no compute service in the Keystone catalog the Project dashboard's
+  Overview panel is hidden, so Horizon's default landing page `/project/` is a 403 right after a
+  successful login. `local_settings.py` therefore sets `user_home` to `/settings/` (always
+  available). The Identity panels (`/identity/projects/`) returned 404 for the admin token and
+  are not yet understood; revisit when Nova is registered, then drop the override.
+- The `csrftoken`/`sessionid` cookies are explicitly non-Secure (plain HTTP), with
+  `CSRF_TRUSTED_ORIGINS` set. On a login failure `orphera-horizon-check` prints the final URL, the
+  cookie flags and the tail of Horizon's access and error logs.
+
+### Added — turn off unattended upgrades (branch `no-auto-upgrades`, DRAFT, not yet run)
+- Cause: on a freshly provisioned VM `unattended-upgrades` holds the dpkg lock for minutes and,
+  when it finishes, needrestart restarts services including `orphera-agent`, killing the running
+  task (exit 143). Seen on tst13 (302 pending packages) with the Placement re-apply and Horizon.
+- `manifests/disable_unattended_upgrades.scala`: on the Ubuntu test VMs (tst0-tst7, tst9-tst13)
+  writes `/etc/apt/apt.conf.d/20auto-upgrades` with both periodic settings at 0, and stops,
+  disables and masks `apt-daily.timer`, `apt-daily-upgrade.timer` and `unattended-upgrades.service`
+  (without interrupting an upgrade already running), then verifies. Revert steps are in its header.
+- `kvm_native_vm_provision.scala` and `kvm_zfs_vm_provision.scala`: the cloud-init user-data now
+  writes the same `20auto-upgrades` and masks the units on first boot, so new VMs never start one.
+- `build_openstack_stack.sh`: new first step `prep` applies the playbook.
+
 ## [0.1.178] - 2026-10-11
 
 ### Changed — apt/dpkg lock wait raised from 60 s to 10 minutes

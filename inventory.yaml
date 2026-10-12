@@ -54,7 +54,7 @@ nodes:
   #   tst8        Rocky Linux test node
   #   tst9        Kolla image cache
   #   tst10       Cinder + RabbitMQ
-  #   tst13       Glance, Placement
+  #   tst13       Glance, Placement, Horizon
   #   tst11       apt cache (apt-cacher-ng)
   #   tst12       rpm cache (nginx caching mirror of Rocky/EPEL)
   # No osd_disks/zap_disks on tst3 and up: no Ceph role there (see the
@@ -121,7 +121,8 @@ nodes:
       cluster_ip: "10.10.5.24"
 
   # Glance (glance-api, Ceph RBD store): manifests/glance_single_node.scala,
-  # and Placement (port 8780): manifests/placement_single_node.scala.
+  # Placement (port 8780): manifests/placement_single_node.scala,
+  # and Horizon (port 8080): manifests/horizon_single_node.scala.
   # Provisioned with manifests/kvm_native_vm_provision.scala.
   - name: tst13
     host: tst13.ljalbinson.com

@@ -604,10 +604,17 @@ object CloudConfigTemplate {
        |      nameserver $dns1
        |      nameserver $dns2
        |      search $domainname
+       |  - path: /etc/apt/apt.conf.d/20auto-upgrades
+       |    content: |
+       |      // Managed by Orphera: no automatic package-list updates or unattended
+       |      // upgrades (they hold the dpkg lock and restart orphera-agent).
+       |      APT::Periodic::Update-Package-Lists "0";
+       |      APT::Periodic::Unattended-Upgrade "0";
        |
        |# Remove cloud-init
        |runcmd:
        |  - echo "Hi there"
+       |  - [ sh, -c, "command -v apt-get >/dev/null 2>&1 && systemctl mask --now apt-daily.timer apt-daily-upgrade.timer unattended-upgrades.service || true" ]
        |
        |# EOF
        |""".stripMargin
