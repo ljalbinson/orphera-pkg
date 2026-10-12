@@ -1337,7 +1337,7 @@ Worth knowing:
 - **Horizon** (the dashboard) is at `http://tst13.ljalbinson.com:8080/` after
   `manifests/test_horizon.sh`; sign in as `admin` (domain Default) with the Keystone admin
   password. It keeps no database; sessions are signed cookies. The test performs a real login.
-  Until Nova is registered the landing page is Settings (the Project dashboard needs a compute
+  Until Nova is registered the landing page is Identity (the Project dashboard needs a compute
   service in the catalog).
 - **Not built yet:** Nova and Neutron (provider networks only).
 

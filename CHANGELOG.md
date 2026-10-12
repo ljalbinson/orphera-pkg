@@ -20,9 +20,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `build_openstack_stack.sh`: new `horizon` step after `placement`.
 - Found on the first runs: with no compute service in the Keystone catalog the Project dashboard's
   Overview panel is hidden, so Horizon's default landing page `/project/` is a 403 right after a
-  successful login. `local_settings.py` therefore sets `user_home` to `/settings/` (always
-  available). The Identity panels (`/identity/projects/`) returned 404 for the admin token and
-  are not yet understood; revisit when Nova is registered, then drop the override.
+  successful login. `local_settings.py` therefore sets `user_home` to `/identity/` (the Identity
+  dashboard needs only Keystone; checked in a browser). `/identity/projects/` is not a valid path.
+  Revisit when Nova is registered, then drop the override.
 - The `csrftoken`/`sessionid` cookies are explicitly non-Secure (plain HTTP), with
   `CSRF_TRUSTED_ORIGINS` set. On a login failure `orphera-horizon-check` prints the final URL, the
   cookie flags and the tail of Horizon's access and error logs.
