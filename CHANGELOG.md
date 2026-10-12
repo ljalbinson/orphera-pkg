@@ -4,6 +4,24 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added — extra layer-2 NICs for new VMs (branch `extra-nic`, DRAFT, not yet run)
+- `--config` files may now list additional NICs under `nics:`, e.g. a provider network for
+  Neutron on tst19:
+      nics:
+      - bridge: br-provider      # OVS bridge on the hypervisor (required)
+        nic: enp2s0              # name inside the guest (optional, default enp2s0, enp3s0, ...)
+        mtu: 1500                # optional
+  `kvm_native_vm_provision.scala` and `kvm_zfs_vm_provision.scala` add one `--network` argument
+  per entry to `virt-install` (virtio, openvswitch virtualport, fixed MAC) and a cloud-init
+  `network-config` entry matched by that MAC, so the interface gets its name regardless of PCI
+  slot. The interface is brought up with no address (Neutron owns it). The MAC is derived from
+  hostname and position, so a re-provisioned VM keeps it.
+- `ConfigYaml.scala` (orchestrator): `ExtraNic` and `VmParams.extraNics`. Needs a recompile.
+- Existing VMs are untouched; adding a NIC to an already-defined VM means re-provisioning it
+  (these scripts destroy and recreate) or `virsh attach-interface` by hand.
+
 ## [0.1.184] - 2026-10-12
 
 ### Added — Horizon on tst13 (passed 7/7 on tst13, 2026-10-12)

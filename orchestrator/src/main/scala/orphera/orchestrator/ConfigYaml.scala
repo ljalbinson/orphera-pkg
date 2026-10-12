@@ -34,6 +34,15 @@ case class Nic0(
     mtu: Int = 1500
 )
 
+/** One additional NIC from the `nics:` list: a layer-2 interface with no address
+  * of its own, e.g. a Neutron provider network. Entry shape in the config:
+  * `- bridge: br-provider` with optional `nic:` (name inside the guest, default
+  * enp2s0, enp3s0, ...) and `mtu:` (default 1500). The MAC is derived from the
+  * hostname and the index, so it is stable across re-provisioning and the guest
+  * can match the interface by MAC instead of guessing its PCI slot.
+  */
+case class ExtraNic(nic: String, bridge: String, mtu: Int, mac: String)
+
 case class VmParams(
     hypervisor: String,
     hostname: String,
@@ -55,7 +64,30 @@ case class VmParams(
     nics: List[Json] = Nil,
     preBasicPackages: List[String] = Nil,
     basicPackages: List[String] = Nil
-)
+):
+  /** The `nics:` entries as layer-2-only NICs, in order (index 0 is the second
+    * NIC of the VM; nic0 is the first). An entry without `bridge` is an error,
+    * not silently skipped.
+    */
+  def extraNics: List[ExtraNic] =
+    nics.zipWithIndex.map { case (j, i) =>
+      val c = j.hcursor
+      val bridge = c.get[String]("bridge").getOrElse(
+        throw new RuntimeException(
+          s"nics: entry ${i + 1} has no 'bridge:' (expected '- bridge: <ovs bridge>')"
+        )
+      )
+      val h = java.security.MessageDigest
+        .getInstance("SHA-256")
+        .digest(s"$hostname/nic${i + 1}".getBytes("UTF-8"))
+      val mac = "52:54:00:" + h.take(3).map(b => f"${b & 0xff}%02x").mkString(":")
+      ExtraNic(
+        nic = c.getOrElse[String]("nic")(s"enp${i + 2}s0").getOrElse(s"enp${i + 2}s0"),
+        bridge = bridge,
+        mtu = c.getOrElse[Int]("mtu")(1500).getOrElse(1500),
+        mac = mac
+      )
+    }
 
 object ConfigYaml:
 

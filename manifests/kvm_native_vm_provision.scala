@@ -192,6 +192,15 @@ object kvm_native_vm_provision extends OrpheraClusterPlaybook:
   private val vcpus = config.map(_.cpu.toInt).getOrElse(4)
   private val nicName = config.map(_.nic0.nic).getOrElse("enp1s0")
   private val nicBridge = config.map(_.nic0.bridge).getOrElse("br-net1")
+  // Additional layer-2-only NICs from `nics:` (e.g. a provider network): one
+  // more --network argument each, with a fixed MAC, and a network-config entry
+  // matched by that MAC. No address is configured on them.
+  private val extraNics: List[ExtraNic] =
+    config.map(_.extraNics).getOrElse(Nil)
+  private val extraNicVirtInstallArgs: String =
+    extraNics.map { n =>
+      s" --network bridge=${n.bridge},model=virtio,mac=${n.mac},virtualport_type=openvswitch"
+    }.mkString
   private val cpuMode = config.map(_.hostType).getOrElse("host-passthrough")
   private val domainname =
     config.map(_.domainname).getOrElse("ljalbinson.com")
@@ -370,7 +379,7 @@ object kvm_native_vm_provision extends OrpheraClusterPlaybook:
        |want=$osVariantWanted
        |if virt-install --osinfo list 2>/dev/null | grep -qw -- "$$want"; then variant=$$want; else variant=generic; fi
        |echo "using --os-variant $$variant"
-       |virt-install --connect qemu:///system --name $vmName --memory $memoryMB --vcpus $vcpus --cpu $cpuMode --disk $workingDir/$vmName.qcow2,format=qcow2,bus=scsi,serial=$vmName-root --disk $workingDir/$vmName-swap.qcow2,format=qcow2,bus=scsi,serial=$vmName-swap$extraDiskVirtInstallArgs --disk $workingDir/$vmName-cidata.iso,device=cdrom --network bridge=$nicBridge,model=virtio,virtualport_type=openvswitch --machine q35 --controller type=scsi,model=virtio-scsi --channel unix,target_type=virtio,name=org.qemu.guest_agent.0 --os-variant $$variant --import --noautoconsole
+       |virt-install --connect qemu:///system --name $vmName --memory $memoryMB --vcpus $vcpus --cpu $cpuMode --disk $workingDir/$vmName.qcow2,format=qcow2,bus=scsi,serial=$vmName-root --disk $workingDir/$vmName-swap.qcow2,format=qcow2,bus=scsi,serial=$vmName-swap$extraDiskVirtInstallArgs --disk $workingDir/$vmName-cidata.iso,device=cdrom --network bridge=$nicBridge,model=virtio,virtualport_type=openvswitch$extraNicVirtInstallArgs --machine q35 --controller type=scsi,model=virtio-scsi --channel unix,target_type=virtio,name=org.qemu.guest_agent.0 --os-variant $$variant --import --noautoconsole
        |virsh --connect qemu:///system autostart $vmName
        |echo "$vmName defined, started, and set to autostart with the hypervisor"""".stripMargin
 
@@ -444,7 +453,8 @@ object kvm_native_vm_provision extends OrpheraClusterPlaybook:
               gateway,
               dns1,
               dns2,
-              domainname
+              domainname,
+              extraNics = extraNics
             ),
             dest = s"$workingDir/network-config",
             owner = "localadmin",
@@ -634,8 +644,19 @@ object NetworkConfigTemplate {
       dns1: String,
       dns2: String,
       domainname: String,
-      vlan: Option[Vlan] = None
+      vlan: Option[Vlan] = None,
+      extraNics: List[ExtraNic] = Nil
   ): String =
+    // Layer-2 only: matched by MAC, renamed, brought up, no address.
+    val extraNicLines = extraNics.map { n =>
+      s"""   - type: physical
+         |     name: ${n.nic}
+         |     mac_address: "${n.mac}"
+         |     mtu: ${n.mtu}
+         |     subnets:
+         |        - type: manual
+         |""".stripMargin
+    }.mkString
     vlan match {
       case Some(v) =>
         s"""network:
@@ -673,7 +694,7 @@ object NetworkConfigTemplate {
            |          address: $ipAddress
            |          netmask: $netmask
            |          gateway: $gateway
-           |   - type: nameserver
+           |$extraNicLines   - type: nameserver
            |     address:
            |        - $dns1
            |        - $dns2
