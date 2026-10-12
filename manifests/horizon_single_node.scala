@@ -154,13 +154,11 @@ object horizon_single_node extends OrpheraClusterPlaybook:
        |}
        |COMPRESS_OFFLINE = True
        |
-       |# The Project dashboard's default panel (Overview) requires a compute service
-       |# in the catalog, so until Nova is registered "/" -> /project/ is a 403.
-       |# Land on the Identity dashboard, which needs only Keystone.
-       |HORIZON_CONFIG['default_dashboard'] = 'identity'
-       |# "/" sends users to wherever user_home points (it ignores default_dashboard),
-       |# so name a concrete page: the Identity dashboard, which needs only Keystone.
-       |HORIZON_CONFIG['user_home'] = lambda user: '/identity/'
+       |# The Project Overview page (the default landing page) asks Neutron for network
+       |# quotas and returns a 500 ("Invalid service catalogue: network") until a
+       |# network service is registered; Instances works with Nova alone. Land there
+       |# (user_home is what "/" redirects to). Drop this once Neutron is registered.
+       |HORIZON_CONFIG['user_home'] = lambda user: '/project/instances/'
        |
        |OPENSTACK_HOST = '$ksFqdn'
        |OPENSTACK_KEYSTONE_URL = '$ksUrl/v3'

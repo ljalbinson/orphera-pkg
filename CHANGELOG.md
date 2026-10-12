@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed — Horizon lands on Project > Instances
+- With Nova registered the Project dashboard works (Project > Compute checked in a browser), but its
+  Overview page, which Horizon opens by default, returns a 500 (`Invalid service catalogue:
+  network`) until Neutron is registered. `horizon_single_node.scala` therefore sets `user_home` to
+  `/project/instances/` (replacing the earlier `/identity/` override). Drop it once Neutron exists.
+  Re-apply the playbook (or run `test_horizon.sh`) to take effect.
+
 ### Added — extra NICs for new VMs (passed on tst19 with the ZFS script, 2026-10-12)
 - `--config` files may list additional NICs under `nics:`, in the same shape as `nic0`
   (`config/tst19.yaml` is the specimen: `br-net106`, `10.10.6.31/24`, gateway, `table: 2`,

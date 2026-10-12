@@ -435,12 +435,14 @@ agent on tst13. Teardown: `orphera cluster-playbook manifests/placement_teardown
 ### K9. Horizon on tst13 - PASSED (2026-10-12), 7/7 (branch `horizon`)
     manifests/test_horizon.sh 2>&1 | tee /tmp/horizon.log
 Expect: orphera-horizon active; root leads to the login page; a static file is served; admin
-signs in (lands on /identity/); http://tst13.ljalbinson.com:8080/auth/login/ answers 200 from
+signs in; http://tst13.ljalbinson.com:8080/auth/login/ answers 200 from
 scala0; Glance (9292) and Placement (8780) still answer; second run completes. Two things showed
 up on the way: the install was killed (exit 143) when unattended-upgrades finished and
 needrestart restarted the agent (see `disable_unattended_upgrades.scala`), and with no compute
-service in the catalog the default landing page /project/ is a 403, so `user_home` is set to
-/identity/. In a browser the menu shows Project, Admin, Identity and Settings; Identity loads. Prerequisite: Keystone, agent on tst13. Teardown:
+service in the catalog the default landing page /project/ is a 403; with Nova registered it is a
+500 instead (the Overview page needs a network service), so `user_home` is `/project/instances/`
+until Neutron exists. Prerequisite:
+Keystone, agent on tst13. Teardown:
 `orphera cluster-playbook manifests/horizon_teardown.scala`.
 
 ### K10. Nova control plane on tst14 - PASSED (2026-10-12), 19/19 (branch `nova`)
