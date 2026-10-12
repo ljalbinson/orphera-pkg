@@ -3,6 +3,8 @@
 # Master script: builds the whole OpenStack control-plane stack from freshly
 # provisioned VMs that only have the Orphera agent, in dependency order:
 #
+#   prep                                turn off unattended-upgrades on the nodes
+#                                       (disable_unattended_upgrades.scala)
 #   caches   (optional, --with-caches)  apt cache (tst11) + its clients, Kolla
 #                                       image cache (tst9): speeds up the rest
 #   ceph     tst0-tst2   cephadm_install, cephadm_add_mons, cephadm_add_osds
@@ -29,7 +31,7 @@
 #
 #   --with-caches   build the apt cache, point the Ubuntu nodes at it, and
 #                   build the Kolla image cache first (tst9, tst11 required)
-#   --from STEP     start at STEP (caches ceph galera keystone cinder glance
+#   --from STEP     start at STEP (prep caches ceph galera keystone cinder glance
 #                   placement clients smoke) - for resuming after a failure
 #   --only STEP     run just that one step
 #   --list          print the plan and exit
@@ -43,7 +45,7 @@ set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
 MANIFESTS="manifests"
 
-ALL_STEPS=(caches ceph galera keystone cinder glance placement clients smoke)
+ALL_STEPS=(prep caches ceph galera keystone cinder glance placement clients smoke)
 WITH_CACHES=""
 FROM=""
 ONLY=""
@@ -148,6 +150,10 @@ preflight() {
 }
 
 # ---- steps ----------------------------------------------------------------
+
+step_prep() {
+  playbook disable_unattended_upgrades.scala
+}
 
 step_caches() {
   playbook apt_cache.scala
