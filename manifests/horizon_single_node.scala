@@ -142,6 +142,11 @@ object horizon_single_node extends OrpheraClusterPlaybook:
        |
        |SESSION_ENGINE = 'django.contrib.sessions.backends.signed_cookies'
        |SESSION_COOKIE_HTTPONLY = True
+       |# Plain HTTP on this test deployment: Secure-flagged cookies would never be
+       |# sent back by a client, which fails the CSRF check on every login.
+       |CSRF_COOKIE_SECURE = False
+       |SESSION_COOKIE_SECURE = False
+       |CSRF_TRUSTED_ORIGINS = ['http://localhost:$port', 'http://127.0.0.1:$port', 'http://$node.ljalbinson.com:$port']
        |CACHES = {
        |    'default': {
        |        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
@@ -309,7 +314,14 @@ def login():
     fields['password'] = PASSWORD
     s, url, body = fetch(op, BASE + '/auth/login/', urllib.parse.urlencode(fields).encode())
     if s != 200:
-        die('login post: HTTP %s at %s - %s (cookies held: %s)' % (s, url, why(body), ', '.join(sorted(c.name for c in JAR)) or 'none'))
+        flags = ', '.join('%s%s' % (c.name, ' [Secure]' if c.secure else '') for c in sorted(JAR, key=lambda c: c.name)) or 'none'
+        tail = ''
+        try:
+            with open('@@LOGDIR@@/horizon-error.log') as f:
+                tail = ' | error log: ' + ' / '.join(f.read().strip().splitlines()[-4:])[-600:]
+        except Exception:
+            pass
+        die('login post: HTTP %s at %s - %s (cookies held: %s)%s' % (s, url, why(body), flags, tail))
     if 'auth/logout' not in body:
         m = re.search(r'alert[^>]*>\s*([^<]{3,200})', body)
         die('login did not reach a signed-in page (at %s)%s' % (url, ': ' + m.group(1).strip() if m else ''))
@@ -344,6 +356,7 @@ if __name__ == '__main__':
     "cat > /usr/local/sbin/orphera-horizon-check <<'PYEOF'\n" +
       checkHelperPython
         .replace("@@BASE@@", s"http://localhost:$port")
+        .replace("@@LOGDIR@@", logDir)
         .replace("@@ADMINPW@@", adminPassword) +
       "\nPYEOF\nchmod 700 /usr/local/sbin/orphera-horizon-check\necho wrote /usr/local/sbin/orphera-horizon-check\n"
 
