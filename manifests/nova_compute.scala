@@ -593,7 +593,7 @@ def wait_for(fn, what, tries, delay):
         if last[0]:
             return last[1]
         time.sleep(delay)
-    die('%s: gave up (last: %s)' % (what, last[1]))
+    die('%s: gave up (last: %s)' % (what, str(last[1])[-400:]))
 
 
 def boot_cleanup():
@@ -687,7 +687,7 @@ def boot_test(path, keep=False):
         sys.stdout.flush()
 
         def console():
-            s, p, _ = call('POST', NOVA + '/servers/%s/action' % server, {'os-getConsoleOutput': {'length': 300}}, token)
+            s, p, _ = call('POST', NOVA + '/servers/%s/action' % server, {'os-getConsoleOutput': {'length': 5000}}, token)
             out = p.get('output', '') if s == 200 else ''
             return ('login:' in out, out)
         out = wait_for(console, 'login prompt on the console', 48, 5)
@@ -697,13 +697,13 @@ def boot_test(path, keep=False):
         # from the test subnet can only have come from DHCP. The login prompt appears
         # a few seconds after boot, usually before dhcpcd has finished, so wait for it.
         def leased():
-            s, p, _ = call('POST', NOVA + '/servers/%s/action' % server, {'os-getConsoleOutput': {'length': 300}}, token)
+            s, p, _ = call('POST', NOVA + '/servers/%s/action' % server, {'os-getConsoleOutput': {'length': 5000}}, token)
             o = p.get('output', '') if s == 200 else ''
             return (bool(re.search(r'10\.10\.6\.\d+', o)), o)
         try:
             out = wait_for(leased, 'DHCP lease on the console', 18, 5)
         except SystemExit:
-            s, p, _ = call('POST', NOVA + '/servers/%s/action' % server, {'os-getConsoleOutput': {'length': 300}}, token)
+            s, p, _ = call('POST', NOVA + '/servers/%s/action' % server, {'os-getConsoleOutput': {'length': 5000}}, token)
             o = p.get('output', '') if s == 200 else ''
             net = [l for l in o.splitlines() if re.search(r'dhcp|lease|carrier|eth0|udhcp|offer', l, re.I)]
             sys.stderr.write('no address from %s on the console after 90 s; network lines:\n%s\n' % (CIDR, '\n'.join(net[-25:])))
