@@ -130,7 +130,9 @@ object nova_compute extends OrpheraClusterPlaybook:
   // which is not in the host's libvirt group, so the libvirt sockets are made
   // world-accessible (test setup: anyone on the node can use libvirt). On Ubuntu the
   // socket is created by systemd, so the mode is set in a drop-in for libvirtd.socket
-  // (libvirtd.conf is only used when libvirtd opens the socket itself).
+  // (libvirtd.conf is only used when libvirtd opens the socket itself). Polkit is
+  // switched off (auth_unix_rw/ro = "none", as Kolla's own libvirt does): the caller's
+  // uid 42436 has no user record on the host, and polkit fails the connection.
   private val libvirtScript =
     """set -e
       |mkdir -p /etc/systemd/system/libvirtd.socket.d
@@ -138,6 +140,11 @@ object nova_compute extends OrpheraClusterPlaybook:
       |if ! grep -q '^unix_sock_rw_perms' /etc/libvirt/libvirtd.conf; then
       |  printf 'unix_sock_rw_perms = "0777"\n' >> /etc/libvirt/libvirtd.conf
       |fi
+      |for opt in auth_unix_rw auth_unix_ro; do
+      |  if ! grep -q "^$opt " /etc/libvirt/libvirtd.conf; then
+      |    printf '%s = "none"\n' "$opt" >> /etc/libvirt/libvirtd.conf
+      |  fi
+      |done
       |systemctl daemon-reload
       |systemctl stop libvirtd.service libvirtd.socket libvirtd-ro.socket libvirtd-admin.socket 2>/dev/null || true
       |systemctl start libvirtd.socket
