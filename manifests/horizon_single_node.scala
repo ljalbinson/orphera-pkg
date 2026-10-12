@@ -63,9 +63,14 @@ object horizon_single_node extends OrpheraClusterPlaybook:
   // A freshly provisioned VM runs unattended-upgrades for a while after boot,
   // and apt cannot take the dpkg lock meanwhile. Wait here, with an explicit
   // task timeout, instead of relying on how long the agent's own apt call waits.
+  // Matches the upgrade workers by exact command line: the always-running
+  // unattended-upgrade-shutdown daemon has the same 15-character process name.
+  // Note the upgrade can itself restart orphera-agent (needrestart), which
+  // kills any task in flight, this one included; if that happens, rerun once
+  // the upgrade has finished.
   private val waitAptIdleScript =
     """for i in $(seq 1 180); do
-      |  if pgrep -x unattended-upgr >/dev/null || pgrep -x apt-get >/dev/null || pgrep -x apt >/dev/null || pgrep -x dpkg >/dev/null; then
+      |  if pgrep -f '^/usr/bin/python3 /usr/bin/unattended-upgrade$' >/dev/null || pgrep -x apt-get >/dev/null || pgrep -x apt >/dev/null || pgrep -x dpkg >/dev/null; then
       |    sleep 5
       |  else
       |    echo "apt and dpkg are idle"
