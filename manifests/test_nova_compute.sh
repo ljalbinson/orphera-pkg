@@ -25,7 +25,8 @@
 # (only one is allowed), agents on tst17 and tst18, internet access from scala0 for
 # the CirrOS image (or CIRROS_IMAGE=/path/to/cirros.qcow2).
 # Run from scala0, in orphera-pkg:   manifests/test_nova_compute.sh
-# NO_APPLY=1 skips the playbook runs; SKIP_BOOT=1 skips the instance boot.
+# NO_APPLY=1 skips the playbook runs; SKIP_BOOT=1 skips the instance boot;
+# KEEP_BOOT=1 leaves the test instance, image, flavor and network in place for inspection.
 # Exit code: 0 if every assertion passes, 1 otherwise.
 
 set -uo pipefail
@@ -108,7 +109,7 @@ if [ -z "${SKIP_BOOT:-}" ]; then
   if [ -s "$CIRROS_LOCAL" ]; then
     if orphera copy "$CIRROS_LOCAL" /root/cirros-boot-test.qcow2 --owner root --group root --mode 0644 --nodes tst17 >/dev/null 2>&1; then
       log "booting a CirrOS instance (can take a few minutes)"
-      OUT=$(orphera run sh -c "sudo $HELPER boot-test /root/cirros-boot-test.qcow2" --nodes tst17 --timeout 900 2>&1)
+      OUT=$(orphera run sh -c "sudo $HELPER boot-test /root/cirros-boot-test.qcow2${KEEP_BOOT:+ --keep}" --nodes tst17 --timeout 900 2>&1)
       assert_contains "an instance boots on KVM, gets a DHCP lease and is cleaned up" "boot test passed" "$OUT"
       case "$OUT" in *"boot test passed"*) ;; *) printf '%s\n' "$OUT" | sed 's/^/    /' ;; esac
       run_on tst17 "rm -f /root/cirros-boot-test.qcow2" >/dev/null

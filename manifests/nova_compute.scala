@@ -487,7 +487,7 @@ object nova_compute extends OrpheraClusterPlaybook:
   //   compute-up <host> ...   every named host has an enabled nova-compute service that is up
   //   hypervisors             one line per hypervisor (state, vCPUs, memory)
   //   ovs-up <host> ...       every named host has an alive neutron-openvswitch-agent
-  //   boot-test <qcow2-file>  upload an image, create a flavor and a flat provider
+  //   boot-test <qcow2-file> [--keep]  upload an image, create a flavor and a flat provider
   //                           network with DHCP, boot an instance with a config drive,
   //                           wait for the console to show the login prompt and a DHCP
   //                           lease, then delete everything it created
@@ -594,11 +594,14 @@ def wait_for(fn, what, tries, delay):
     die('%s: gave up (last: %s)' % (what, last[1]))
 
 
-def boot_test(path):
+def boot_test(path, keep=False):
     token = admin_token()
     made = []
 
     def cleanup():
+        if keep:
+            print('--keep: left in place: ' + ', '.join(u for k, u in made))
+            return
         for kind, url in reversed(made):
             try:
                 call('DELETE', url, None, token)
@@ -657,7 +660,8 @@ def boot_test(path):
             return (sv.get('status') == 'ACTIVE', sv.get('status'))
         wait_for(state, 'server ACTIVE', 60, 5)
         s, p, _ = call('GET', NOVA + '/servers/' + server, None, token)
-        print('server %s ACTIVE on %s' % (server, p['server'].get('OS-EXT-SRV-ATTR:host')))
+        print('server %s ACTIVE on %s as %s' % (server, p['server'].get('OS-EXT-SRV-ATTR:host'), p['server'].get('OS-EXT-SRV-ATTR:instance_name')))
+        sys.stdout.flush()
 
         def console():
             s, p, _ = call('POST', NOVA + '/servers/%s/action' % server, {'os-getConsoleOutput': {'length': 300}}, token)
@@ -685,7 +689,7 @@ if __name__ == '__main__':
     elif cmd == 'ovs-up' and len(sys.argv) > 2:
         ovs_up(sys.argv[2:])
     elif cmd == 'boot-test' and len(sys.argv) > 2:
-        boot_test(sys.argv[2])
+        boot_test(sys.argv[2], '--keep' in sys.argv[3:])
     else:
         die('usage: orphera-compute-api compute-up <host>... | hypervisors | ovs-up <host>... | boot-test <qcow2-file>')
 """
