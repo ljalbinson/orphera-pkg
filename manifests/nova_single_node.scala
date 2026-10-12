@@ -95,9 +95,11 @@ object nova_single_node extends OrpheraClusterPlaybook:
 
   // ---- tst10 (RabbitMQ) ------------------------------------------------
 
+  // No {{...}} in any command: Orphera renders those as a template before running
+  // the command, so `podman ps --format '{{.Names}}'` arrives empty. Use filters.
   private val rabbitScript =
     s"""set -e
-       |if ! podman ps --format '{{.Names}}' | grep -qx rabbitmq; then
+       |if ! podman ps -q --filter 'name=^rabbitmq$$' | grep -q .; then
        |  echo "no running 'rabbitmq' container on this node - run cinder_single_node.scala first" >&2
        |  exit 1
        |fi

@@ -33,7 +33,7 @@ object nova_teardown extends OrpheraClusterPlaybook:
       |echo "nova containers, units, config and state removed"""".stripMargin
 
   private val rabbitScript =
-    """if podman ps --format '{{.Names}}' 2>/dev/null | grep -qx rabbitmq; then
+    """if podman ps -q --filter 'name=^rabbitmq$' 2>/dev/null | grep -q .; then
       |  podman exec rabbitmq rabbitmqctl delete_vhost nova || true
       |  podman exec rabbitmq rabbitmqctl delete_user nova || true
       |fi
