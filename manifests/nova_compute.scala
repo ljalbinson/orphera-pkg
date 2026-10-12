@@ -132,9 +132,15 @@ object nova_compute extends OrpheraClusterPlaybook:
   // socket is created by systemd, so the mode is set in a drop-in for libvirtd.socket
   // (libvirtd.conf is only used when libvirtd opens the socket itself). Polkit is
   // switched off (auth_unix_rw/ro = "none", as Kolla's own libvirt does): the caller's
-  // uid 42436 has no user record on the host, and polkit fails the connection.
+  // uid 42436 is not a host user, and a non-root caller would be refused.
+  // libvirtd also looks the caller's uid up in the host's user database to build its
+  // identity ("Failed to find user record for uid"), so a host user with the
+  // container nova user's uid (42436) is created first.
   private val libvirtScript =
     """set -e
+      |if ! getent group 42436 >/dev/null; then groupadd -g 42436 nova-kolla; fi
+      |if ! getent passwd 42436 >/dev/null; then useradd -r -u 42436 -g 42436 -M -s /usr/sbin/nologin nova-kolla; fi
+      |getent passwd 42436
       |mkdir -p /etc/systemd/system/libvirtd.socket.d
       |printf '[Socket]\nSocketMode=0777\n' > /etc/systemd/system/libvirtd.socket.d/orphera.conf
       |if ! grep -q '^unix_sock_rw_perms' /etc/libvirt/libvirtd.conf; then
