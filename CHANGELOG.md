@@ -33,7 +33,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-### Added — Nova control plane on tst14 (branch `nova`, DRAFT, not yet run)
+### Added — Nova control plane on tst14 (passed 19/19 on tst14, 2026-10-12)
 - `manifests/nova_single_node.scala`: nova-api (Apache + mod_wsgi, 8774), nova-scheduler,
   nova-conductor and nova-novncproxy (6080) from the Kolla images under podman/systemd on tst14.
   Databases `nova_api`, `nova` and `nova_cell0` on Galera; its own RabbitMQ vhost `nova` and user
@@ -52,9 +52,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   now includes tst14.
 - No nova-compute and no Neutron: the API, scheduler and conductor work, but a server cannot be
   booted yet. Horizon's Project dashboard should now find a compute service in the catalog.
-- Open: the WSGI script name (`nova-api-wsgi`), `/etc/nova/api-paste.ini` and the noVNC web
-  directory inside the image follow the Kolla layout from memory and are the most likely things
-  to need a fix on the first run (the playbook checks the first two and says what it found).
+- The first run stopped on the RabbitMQ step: Orphera renders `{{...}}` in commands as a template,
+  so `podman ps --format '{{.Names}}'` arrived empty on tst10. The check now filters by name
+  (`--filter 'name=^rabbitmq$'`). No `{{ }}` belongs in a command unless a template is wanted.
+  After that fix the playbook, the WSGI script, `api-paste.ini` and the noVNC page all worked as
+  written, and the second run was idempotent.
 
 ## [0.1.184] - 2026-10-12
 
