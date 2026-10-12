@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed — master build script covers all of OpenStack (not yet run end to end)
+- `manifests/build_openstack_stack.sh`: new last step `boot` (downloads CirrOS if needed, boots an
+  instance through the compute helper, checks the console for the login prompt and a DHCP lease, and
+  deletes everything; `CIRROS_IMAGE=/path` avoids the download); the network create/delete check in
+  `smoke` is skipped, not failed, when a flat provider network already exists; the header no longer
+  says there is no compute node. Together with the earlier `compute` step the plan is now
+  `prep ceph galera keystone cinder glance placement nova neutron compute horizon clients smoke boot`.
+- `disable_unattended_upgrades.scala`: tst17 and tst18 added to the node list, so the `prep` step
+  covers the compute nodes too.
+
 ### Added — nova-compute on tst17 and tst18 (passed 24/24, 2026-10-12)
 - `manifests/nova_compute.scala`: nova-compute (Kolla image, podman/systemd) and the Neutron Open
   vSwitch agent on both compute VMs on gs2. libvirt and QEMU come from the host (apt); the

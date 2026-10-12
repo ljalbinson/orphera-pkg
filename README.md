@@ -1284,7 +1284,7 @@ result independently of the playbook's own health checks:
 
 To build the whole stack in one go from freshly provisioned VMs that only have the agent, run
 `manifests/build_openstack_stack.sh` (Ceph, Galera + VIP, Keystone, Cinder, Glance, Placement, Nova, Neutron, the compute nodes, Horizon, the clients
-on scala0, then a smoke test that creates and deletes a real volume and image). It only applies
+on scala0, then a smoke test that creates and deletes a real volume, image, flavor and network, and finally boots a CirrOS instance on KVM, checks its DHCP lease and deletes it). It only applies
 playbooks, never tears anything down, checks each step independently before the next, and on a
 failure prints the `--from STEP` command to resume. `--with-caches` builds the apt and Kolla
 caches first; `--list` shows the plan.

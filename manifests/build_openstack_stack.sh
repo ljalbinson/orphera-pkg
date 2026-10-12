@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 #
-# Master script: builds the whole OpenStack control-plane stack from freshly
-# provisioned VMs that only have the Orphera agent, in dependency order:
+# Master script: builds the whole OpenStack stack (control plane and compute nodes) from
+# freshly provisioned VMs that only have the Orphera agent, in dependency order, and ends
+# by booting a real instance:
 #
 #   prep                                turn off unattended-upgrades on the nodes
 #                                       (disable_unattended_upgrades.scala)
@@ -15,14 +16,17 @@
 #   glance   tst13       glance_single_node (pool `images`)
 #   placement tst13      placement_single_node (port 8780, shares tst13 with Glance)
 #   nova     tst14       nova_single_node (API, scheduler, conductor, noVNC proxy; RabbitMQ
-#                        vhost on tst10; no compute node yet)
+#                        vhost on tst10)
 #   neutron  tst19       neutron_single_node (server, Open vSwitch + DHCP agents, flat provider
 #                        network on tst19's second NIC; its address is removed)
 #   compute  tst17,tst18 nova_compute (nova-compute on KVM + Neutron Open vSwitch agent, config drive;
 #                        the second NIC becomes the provider port, its address is removed)
 #   horizon  tst13       horizon_single_node (the dashboard, http://tst13:8080/)
 #   clients  scala0      utils/openstack-client-setup.sh
-#   smoke                a real volume, image and resource provider created and deleted
+#   smoke                a real volume, image, resource provider, flavor and provider network
+#                        created and deleted
+#   boot     tst17,tst18 a CirrOS instance booted on KVM with a DHCP lease, then deleted
+#                        (needs internet on this machine for the image, or CIRROS_IMAGE=/path)
 #
 # It only APPLIES playbooks: nothing is torn down, so it is safe to re-run on
 # a half-built or fully built stack (every playbook is idempotent) and it will
@@ -39,7 +43,8 @@
 #   --with-caches   build the apt cache, point the Ubuntu nodes at it, and
 #                   build the Kolla image cache first (tst9, tst11 required)
 #   --from STEP     start at STEP (prep caches ceph galera keystone cinder glance
-#                   placement nova neutron compute horizon clients smoke) - for resuming after a failure
+#                   placement nova neutron compute horizon clients smoke boot) - for resuming
+#                   after a failure
 #   --only STEP     run just that one step
 #   --list          print the plan and exit
 #   -h, --help      this text
@@ -52,7 +57,7 @@ set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
 MANIFESTS="manifests"
 
-ALL_STEPS=(prep caches ceph galera keystone cinder glance placement nova neutron compute horizon clients smoke)
+ALL_STEPS=(prep caches ceph galera keystone cinder glance placement nova neutron compute horizon clients smoke boot)
 WITH_CACHES=""
 FROM=""
 ONLY=""
@@ -308,11 +313,37 @@ step_smoke() {
   fi
   out=$(run_on tst19 "sudo /usr/local/sbin/orphera-neutron-api net-create")
   id=$(printf '%s\n' "$out" | grep -Eo '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | tail -1)
-  if [ -n "$id" ]; then
+  if [ -z "$id" ] && contains "already exists" "$out"; then
+    log "SKIP: a flat network on the physical network provider already exists (only one is allowed): the network create/delete check is skipped"
+  elif [ -n "$id" ]; then
     out=$(run_on tst19 "sudo /usr/local/sbin/orphera-neutron-api net-delete $id")
     check "a Neutron provider network was created and deleted" contains "deleted $id" "$out"
   else
     log "FAIL: network create returned no id: $out"; FAIL=$((FAIL + 1))
+  fi
+}
+
+# End to end: a real instance. Uploads CirrOS to Glance, boots it on a temporary flat network
+# with DHCP (10.10.6.0/24, pool .200-.220), waits for the login prompt and a lease on the
+# console, and deletes everything again (the helper on tst17 does the work).
+step_boot() {
+  local img="${CIRROS_IMAGE:-/tmp/cirros-0.6.2-x86_64-disk.img}" out
+  if [ ! -s "$img" ]; then
+    log "downloading CirrOS to $img"
+    curl -fL -o "$img" "https://download.cirros-cloud.net/0.6.2/cirros-0.6.2-x86_64-disk.img" || { rm -f "$img"; die "could not download CirrOS (set CIRROS_IMAGE=/path/to/cirros.qcow2)"; }
+  fi
+  out=$(run_on tst19 "sudo /usr/local/sbin/orphera-neutron-api net-list")
+  if contains "orphera-boot-test" "$out"; then run_on tst17 "sudo /usr/local/sbin/orphera-compute-api boot-cleanup" >/dev/null; fi
+  if ! orphera copy "$img" /root/cirros-boot-test.qcow2 --owner root --group root --mode 0644 --nodes tst17 >/dev/null 2>&1; then
+    die "could not copy the CirrOS image to tst17"
+  fi
+  out=$(orphera run sh -c "sudo /usr/local/sbin/orphera-compute-api boot-test /root/cirros-boot-test.qcow2" --nodes tst17 --timeout 900 2>&1)
+  run_on tst17 "rm -f /root/cirros-boot-test.qcow2" >/dev/null
+  if contains "boot test passed" "$out"; then
+    log "PASS: an instance booted on KVM, got a DHCP lease and was deleted"; PASS=$((PASS + 1))
+  else
+    printf '%s\n' "$out" | tail -n 25 | sed 's/^/    /'
+    log "FAIL: the CirrOS boot test"; FAIL=$((FAIL + 1))
   fi
 }
 
@@ -334,6 +365,6 @@ done
 
 log "=== finished in $(( $(date +%s) - T0 ))s: passed=$PASS failed=$FAIL ==="
 if [ "$FAIL" -eq 0 ]; then
-  log "next: source ~/.config/openstack/admin-openrc.sh && openstack image create ... (see README)"
+  log "done. Dashboard: http://tst13.ljalbinson.com:8080/ (admin, domain Default). CLI: source ~/.config/openstack/admin-openrc.sh (see README)"
 fi
 [ "$FAIL" -eq 0 ]
