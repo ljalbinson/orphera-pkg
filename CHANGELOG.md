@@ -6,6 +6,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — nova-compute on tst17 and tst18 (passed 24/24, 2026-10-12)
+- `manifests/nova_compute.scala`: nova-compute (Kolla image, podman/systemd) and the Neutron Open
+  vSwitch agent on both compute VMs on gs2. libvirt and QEMU come from the host (apt); the
+  container reaches libvirtd through /run/libvirt and shares /var/lib/nova at the same path.
+  `virt_type = kvm` with `host-passthrough` (gs2 is AMD with nested KVM on); the playbook stops
+  with an explanation when a node has no /dev/kvm. The second NIC `enp2s0` is turned into an
+  address-less port of `br-provider`, as on tst19, with the same bridge mapping `provider`.
+  Config drive is forced (no metadata agent). Per-node host name and IP are filled in at install
+  time. A `nova-manage cell_v2 discover_hosts` stage on tst14 maps the new hosts, and a helper
+  `orphera-compute-api` (compute-up, ovs-up, hypervisors, boot-test) is installed on each node.
+- `manifests/nova_compute_teardown.scala`, `manifests/test_nova_compute.sh`: the test checks the
+  units, /dev/kvm, libvirt, the NIC and bridge, both services and agents through the APIs, both
+  hypervisors, and then boots a CirrOS instance (image upload, flat provider network with DHCP on
+  10.10.6.0/24 pool .200-.220, config drive, console login prompt and a DHCP lease), deleting
+  everything afterwards; `SKIP_BOOT=1` skips the boot.
+- `manifests/build_openstack_stack.sh`: new step `compute` between `neutron` and `horizon`.
+- `utils/trace-dhcp.sh`: captures DHCP on the provider NIC of tst17, tst18 and tst19 while a test
+  instance boots, to show where packets get lost.
+- `nova_single_node.scala`: `[glance] cafile` in nova.conf. Without it the Nova API cannot get a
+  token for the Glance call during a server create (Keystone's self-signed CA is not trusted by
+  that session) and returns HTTP 500 (DiscoveryFailure). Re-apply Nova once on tst14.
+
 ### Added — Neutron on tst19 (passed 18/18 on tst19, 2026-10-12)
 - `manifests/neutron_single_node.scala`: neutron-server, neutron-openvswitch-agent and
   neutron-dhcp-agent from the Kolla images under podman/systemd on tst19, for flat provider

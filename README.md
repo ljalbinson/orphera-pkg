@@ -1262,7 +1262,8 @@ Fleet layout used by these manifests (see `inventory.yaml`):
 | tst12 | rpm cache (nginx caching mirror of Rocky/EPEL) for the Rocky nodes |
 | tst13 | Glance (glance-api, images in Ceph pool `images`) Placement (port 8780) and Horizon (port 8080) |
 | tst19 | Neutron (server, Open vSwitch + DHCP agents) for flat provider networks on its second NIC (br-net106, no address) |
-| tst14 | Nova control plane (API on 8774, scheduler, conductor, noVNC proxy on 6080); RabbitMQ vhost `nova` on tst10; no compute node yet |
+| tst14 | Nova control plane (API on 8774, scheduler, conductor, noVNC proxy on 6080); RabbitMQ vhost `nova` on tst10 |
+| tst17, tst18 | Compute nodes (nova-compute on KVM, Neutron Open vSwitch agent; second NIC is the provider port); VMs on gs2 with nested KVM |
 
 Run order, each with its own teardown and an end-to-end test that checks the
 result independently of the playbook's own health checks:
@@ -1277,11 +1278,12 @@ result independently of the playbook's own health checks:
     manifests/test_placement.sh                                 # applies placement_single_node.scala
     manifests/test_nova.sh                                      # applies nova_single_node.scala
     manifests/test_neutron.sh                                   # applies neutron_single_node.scala
+    manifests/test_nova_compute.sh                              # applies nova_compute.scala, boots a CirrOS instance
     manifests/test_horizon.sh                                   # applies horizon_single_node.scala
     utils/openstack-client-setup.sh                             # CLI on the machine you run orphera from
 
 To build the whole stack in one go from freshly provisioned VMs that only have the agent, run
-`manifests/build_openstack_stack.sh` (Ceph, Galera + VIP, Keystone, Cinder, Glance, Placement, Nova, Neutron, Horizon, the clients
+`manifests/build_openstack_stack.sh` (Ceph, Galera + VIP, Keystone, Cinder, Glance, Placement, Nova, Neutron, the compute nodes, Horizon, the clients
 on scala0, then a smoke test that creates and deletes a real volume and image). It only applies
 playbooks, never tears anything down, checks each step independently before the next, and on a
 failure prints the `--from STEP` command to resume. `--with-caches` builds the apt and Kolla
@@ -1355,7 +1357,11 @@ Worth knowing:
   config drive. After applying it, re-apply `nova_single_node.scala` once so Nova's config gets the
   `[neutron]` section. A real network: `openstack network create --provider-network-type flat
   --provider-physical-network provider --share provider`, then a subnet on it.
-- **Not built yet:** nova-compute.
+- **Compute nodes** tst17 and tst18 (`manifests/test_nova_compute.sh`): nova-compute with
+  `virt_type = kvm` (needs nested virtualization on gs2 and `host_type: host-passthrough`),
+  libvirt/QEMU from apt, and the Neutron Open vSwitch agent; the second NIC becomes the provider
+  port as on tst19. Instances use a config drive (no metadata agent). The test boots a CirrOS
+  instance on a temporary flat network with DHCP (10.10.6.0/24, pool .200-.220) and removes it.
 
 ## Example: parallel network throughput test (iperf3)
 
