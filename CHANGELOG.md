@@ -31,7 +31,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   a real instance on the provider network (needs nova-compute), and the `[neutron]` section in
   nova.conf on a running tst14 (re-apply `nova_single_node.scala`).
 
-### Changed — Horizon lands on Project > Instances
+### Changed — Horizon opens on its default page again
+- Removed the `user_home` override: with Neutron registered the Project Overview and Network pages
+  load (checked in a browser), so Horizon's own default landing page works. Re-apply the playbook
+  (or run `test_horizon.sh`) to take effect.
+
+### Changed (superseded above) — Horizon lands on Project > Instances
 - With Nova registered the Project dashboard works (Project > Compute checked in a browser), but its
   Overview page, which Horizon opens by default, returns a 500 (`Invalid service catalogue:
   network`) until Neutron is registered. `horizon_single_node.scala` therefore sets `user_home` to

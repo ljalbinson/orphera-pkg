@@ -154,12 +154,6 @@ object horizon_single_node extends OrpheraClusterPlaybook:
        |}
        |COMPRESS_OFFLINE = True
        |
-       |# The Project Overview page (the default landing page) asks Neutron for network
-       |# quotas and returns a 500 ("Invalid service catalogue: network") until a
-       |# network service is registered; Instances works with Nova alone. Land there
-       |# (user_home is what "/" redirects to). Drop this once Neutron is registered.
-       |HORIZON_CONFIG['user_home'] = lambda user: '/project/instances/'
-       |
        |OPENSTACK_HOST = '$ksFqdn'
        |OPENSTACK_KEYSTONE_URL = '$ksUrl/v3'
        |OPENSTACK_SSL_CACERT = '/etc/openstack-dashboard/ca.crt'
