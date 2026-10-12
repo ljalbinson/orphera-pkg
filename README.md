@@ -1340,7 +1340,8 @@ Worth knowing:
   `manifests/test_horizon.sh`; sign in as `admin` (domain Default) with the Keystone admin
   password. It keeps no database; sessions are signed cookies. The test performs a real login.
   The Project dashboard needs a compute service in the Keystone catalog, so it works once Nova
-  (`test_nova.sh`) is registered.
+  (`test_nova.sh`) is registered; it lands on Project > Instances because the Overview page also
+  needs a network service (Neutron).
 - **Nova** (control plane only) is at `http://tst14.ljalbinson.com:8774` after
   `manifests/test_nova.sh`: API (Apache + mod_wsgi), scheduler, conductor and the noVNC proxy, with
   databases `nova_api`, `nova`, `nova_cell0` on Galera and its own vhost on the RabbitMQ on tst10.

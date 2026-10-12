@@ -439,8 +439,9 @@ signs in; http://tst13.ljalbinson.com:8080/auth/login/ answers 200 from
 scala0; Glance (9292) and Placement (8780) still answer; second run completes. Two things showed
 up on the way: the install was killed (exit 143) when unattended-upgrades finished and
 needrestart restarted the agent (see `disable_unattended_upgrades.scala`), and with no compute
-service in the catalog the default landing page /project/ is a 403 (worked around then with a
-`user_home` override, removed once Nova was registered: Project > Compute loads). Prerequisite:
+service in the catalog the default landing page /project/ is a 403; with Nova registered it is a
+500 instead (the Overview page needs a network service), so `user_home` is `/project/instances/`
+until Neutron exists. Prerequisite:
 Keystone, agent on tst13. Teardown:
 `orphera cluster-playbook manifests/horizon_teardown.scala`.
 
