@@ -289,7 +289,7 @@ def fetch(op, url, data=None):
         r = op.open(req, timeout=60)
         return r.status, r.geturl(), r.read().decode('utf-8', 'replace')
     except urllib.error.HTTPError as e:
-        return e.code, url, e.read().decode('utf-8', 'replace')
+        return e.code, e.geturl(), e.read().decode('utf-8', 'replace')
 
 
 def login_page():
@@ -316,11 +316,15 @@ def login():
     if s != 200:
         flags = ', '.join('%s%s' % (c.name, ' [Secure]' if c.secure else '') for c in sorted(JAR, key=lambda c: c.name)) or 'none'
         tail = ''
-        try:
-            with open('@@LOGDIR@@/horizon-error.log') as f:
-                tail = ' | error log: ' + ' / '.join(f.read().strip().splitlines()[-4:])[-600:]
-        except Exception:
-            pass
+        for name, pat, n in (('access', None, 6), ('error', r'Traceback|Error|Exception|Forbidden|Unauthorized|denied', 6)):
+            try:
+                with open('@@LOGDIR@@/horizon-%s.log' % name) as f:
+                    lines = [l.strip() for l in f.read().splitlines() if l.strip()]
+                if pat:
+                    lines = [l for l in lines if re.search(pat, l) and 'UserWarning' not in l]
+                tail += ' | %s log: %s' % (name, ' // '.join(l[-220:] for l in lines[-n:]))
+            except Exception:
+                pass
         die('login post: HTTP %s at %s - %s (cookies held: %s)%s' % (s, url, why(body), flags, tail))
     if 'auth/logout' not in body:
         m = re.search(r'alert[^>]*>\s*([^<]{3,200})', body)
