@@ -6,21 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-### Added — extra layer-2 NICs for new VMs (branch `extra-nic`, DRAFT, not yet run)
-- `--config` files may now list additional NICs under `nics:`, e.g. a provider network for
-  Neutron on tst19:
-      nics:
-      - bridge: br-provider      # OVS bridge on the hypervisor (required)
-        nic: enp2s0              # name inside the guest (optional, default enp2s0, enp3s0, ...)
-        mtu: 1500                # optional
-  `kvm_native_vm_provision.scala` and `kvm_zfs_vm_provision.scala` add one `--network` argument
-  per entry to `virt-install` (virtio, openvswitch virtualport, fixed MAC) and a cloud-init
-  `network-config` entry matched by that MAC, so the interface gets its name regardless of PCI
-  slot. The interface is brought up with no address (Neutron owns it). The MAC is derived from
-  hostname and position, so a re-provisioned VM keeps it.
-- `ConfigYaml.scala` (orchestrator): `ExtraNic` and `VmParams.extraNics`. Needs a recompile.
-- Existing VMs are untouched; adding a NIC to an already-defined VM means re-provisioning it
-  (these scripts destroy and recreate) or `virsh attach-interface` by hand.
+### Added — extra NICs for new VMs (branch `extra-nic`, DRAFT, not yet run)
+- `--config` files may list additional NICs under `nics:`, in the same shape as `nic0`
+  (`config/tst19.yaml` is the specimen: `br-net106`, `10.10.6.31/24`, gateway, `table: 2`,
+  `priority: 100`, `mtu: 9000`). `bridge` is required; `nic` (default enp2s0, enp3s0, ...), `mtu`,
+  `ipaddress` + `cidr`/`netmask`, `gateway`, `table`, `priority` are optional. Without an
+  `ipaddress` the interface is brought up with no address (layer 2 only).
+- `kvm_native_vm_provision.scala` and `kvm_zfs_vm_provision.scala`: one extra `--network` argument
+  per entry to `virt-install` (virtio, openvswitch virtualport, a fixed MAC derived from hostname
+  and position, so it survives re-provisioning), and, when a VM has extra NICs, the cloud-init
+  `network-config` switches to the netplan v2 form: nic0 as before, each extra NIC matched by
+  its MAC and renamed. With `table` > 0 the subnet route and the gateway go into that table and a
+  `from <address>` rule at `priority` is added, so there is no second default route in the main
+  table. VMs without extra NICs get exactly the original v1 `network-config`.
+- `ConfigYaml.scala` (orchestrator): `ExtraNic`, `VmParams.extraNics`. Needs a recompile.
+- The hypervisor side of `mtu` is not set: a 9000 MTU only works if `br-net106` and its uplink
+  already carry it.
+- Existing VMs are untouched; adding a NIC to a defined VM means re-provisioning it (these scripts
+  destroy and recreate) or `virsh attach-interface` by hand.
 
 ## [0.1.184] - 2026-10-12
 

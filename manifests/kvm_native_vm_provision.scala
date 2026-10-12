@@ -647,16 +647,8 @@ object NetworkConfigTemplate {
       vlan: Option[Vlan] = None,
       extraNics: List[ExtraNic] = Nil
   ): String =
-    // Layer-2 only: matched by MAC, renamed, brought up, no address.
-    val extraNicLines = extraNics.map { n =>
-      s"""   - type: physical
-         |     name: ${n.nic}
-         |     mac_address: "${n.mac}"
-         |     mtu: ${n.mtu}
-         |     subnets:
-         |        - type: manual
-         |""".stripMargin
-    }.mkString
+    if extraNics.nonEmpty && vlan.isEmpty then
+      return renderWithExtraNics(nic, ipAddress, ipMask, gateway, dns1, dns2, domainname, extraNics)
     vlan match {
       case Some(v) =>
         s"""network:
@@ -694,7 +686,7 @@ object NetworkConfigTemplate {
            |          address: $ipAddress
            |          netmask: $netmask
            |          gateway: $gateway
-           |$extraNicLines   - type: nameserver
+           |   - type: nameserver
            |     address:
            |        - $dns1
            |        - $dns2
@@ -702,6 +694,59 @@ object NetworkConfigTemplate {
            |        - $domainname
            |""".stripMargin
     }
+
+  /** netplan v2 form, used only when the VM has extra NICs (a VM without them
+    * keeps the original v1 form byte for byte). nic0 is matched by name as
+    * before; each extra NIC is matched by its fixed MAC and renamed.
+    */
+  /** Network address of a dotted-quad address for a prefix length (10.10.6.31, 24 -> 10.10.6.0). */
+  private def networkOf(addr: String, prefix: Int): String =
+    val ip = addr.split("\\.").map(_.trim.toLong).foldLeft(0L)((acc, o) => acc * 256 + o)
+    val mask = if prefix <= 0 then 0L else (0xffffffffL << (32 - prefix)) & 0xffffffffL
+    val n = ip & mask
+    List(24, 16, 8, 0).map(sh => ((n >> sh) & 255).toString).mkString(".")
+
+  private def renderWithExtraNics(
+      nic: String,
+      ipAddress: String,
+      ipMask: Int,
+      gateway: String,
+      dns1: String,
+      dns2: String,
+      domainname: String,
+      extras: List[ExtraNic]
+  ): String =
+    val extraBlocks = extras.map { n =>
+      val addr = n.address.map(a => s"      addresses:\n      - $a/${n.prefix}\n").getOrElse("")
+      val routing =
+        if n.address.isDefined && n.table > 0 then
+          val subnetRoute =
+            s"      - to: ${networkOf(n.address.get, n.prefix)}/${n.prefix}\n        scope: link\n        table: ${n.table}\n"
+          val gw = n.gateway.map(g =>
+            s"      - to: default\n        via: $g\n        table: ${n.table}\n").getOrElse("")
+          s"      routes:\n$subnetRoute$gw" +
+            s"      routing-policy:\n      - from: ${n.address.get}\n        table: ${n.table}\n        priority: ${n.priority}\n"
+        else ""
+      s"    ${n.nic}:\n      match:\n        macaddress: \"${n.mac}\"\n      set-name: ${n.nic}\n" +
+        s"      dhcp4: false\n      mtu: ${n.mtu}\n$addr$routing"
+    }.mkString
+    s"""network:
+       |  version: 2
+       |  ethernets:
+       |    $nic:
+       |      dhcp4: false
+       |      addresses:
+       |      - $ipAddress/$ipMask
+       |      routes:
+       |      - to: default
+       |        via: $gateway
+       |      nameservers:
+       |        addresses:
+       |        - $dns1
+       |        - $dns2
+       |        search:
+       |        - $domainname
+       |""".stripMargin + extraBlocks
 }
 
 object MetaConfigTemplate {
