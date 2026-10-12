@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-### Added — extra NICs for new VMs (branch `extra-nic`, DRAFT, not yet run)
+### Added — extra NICs for new VMs (passed on tst19 with the ZFS script, 2026-10-12)
 - `--config` files may list additional NICs under `nics:`, in the same shape as `nic0`
   (`config/tst19.yaml` is the specimen: `br-net106`, `10.10.6.31/24`, gateway, `table: 2`,
   `priority: 100`, `mtu: 9000`). `bridge` is required; `nic` (default enp2s0, enp3s0, ...), `mtu`,
@@ -25,6 +25,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `ConfigYaml.scala` (orchestrator): `ExtraNic`, `VmParams.extraNics`. Needs a recompile.
 - The hypervisor side of `mtu` is not set: a 9000 MTU only works if `br-net106` and its uplink
   already carry it.
+- Checked on tst19 (`kvm_zfs_vm_provision.scala`): `enp1s0` 10.10.5.31/24, `enp2s0` 10.10.6.31/24
+  with MTU 9000 on the fixed MAC, `from 10.10.6.31 lookup 2` rule, table 2 with the default via
+  10.10.6.1. `kvm_native_vm_provision.scala` has the same code but has not been run.
 - Existing VMs are untouched; adding a NIC to a defined VM means re-provisioning it (these scripts
   destroy and recreate) or `virsh attach-interface` by hand.
 
