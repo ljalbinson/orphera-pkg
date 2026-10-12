@@ -330,6 +330,7 @@ object nova_compute extends OrpheraClusterPlaybook:
        |
        |[glance]
        |valid_interfaces = internal
+       |cafile = /etc/nova/ssl/ca.crt
        |
        |[neutron]
        |auth_url = $ksUrl

@@ -22,6 +22,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   10.10.6.0/24 pool .200-.220, config drive, console login prompt and a DHCP lease), deleting
   everything afterwards; `SKIP_BOOT=1` skips the boot.
 - `manifests/build_openstack_stack.sh`: new step `compute` between `neutron` and `horizon`.
+- `nova_single_node.scala`: `[glance] cafile` in nova.conf. Without it the Nova API cannot get a
+  token for the Glance call during a server create (Keystone's self-signed CA is not trusted by
+  that session) and returns HTTP 500 (DiscoveryFailure). Re-apply Nova once on tst14.
 
 ### Added — Neutron on tst19 (passed 18/18 on tst19, 2026-10-12)
 - `manifests/neutron_single_node.scala`: neutron-server, neutron-openvswitch-agent and
