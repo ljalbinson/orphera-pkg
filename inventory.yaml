@@ -122,7 +122,7 @@ nodes:
 
   # Glance (glance-api, Ceph RBD store): manifests/glance_single_node.scala,
   # Placement (port 8780): manifests/placement_single_node.scala,
-  and Horizon (port 8080): manifests/horizon_single_node.scala.
+  # and Horizon (port 8080): manifests/horizon_single_node.scala.
   # Provisioned with manifests/kvm_native_vm_provision.scala.
   - name: tst13
     host: tst13.ljalbinson.com
