@@ -443,6 +443,17 @@ service in the catalog the default landing page /project/ is a 403, so `user_hom
 /identity/. In a browser the menu shows Project, Admin, Identity and Settings; Identity loads. Prerequisite: Keystone, agent on tst13. Teardown:
 `orphera cluster-playbook manifests/horizon_teardown.scala`.
 
+### K10. Nova control plane on tst14 - NOT YET RUN (branch `nova`)
+    manifests/test_nova.sh 2>&1 | tee /tmp/nova.log
+Expect: the four orphera-nova-* units active; the version document on 8774; 401 without a token;
+nova-scheduler and nova-conductor listed up by the API (RabbitMQ vhost `nova` on tst10 and the
+Galera databases both work); a flavor created, read back and deleted; cell0 and cell1 mapped; the
+catalog lists `compute`; the noVNC page answers on 6080; Placement (8780) and Glance (9292) on
+tst13 answer from tst14; second run completes. Then reload Horizon: the Project dashboard should no
+longer be a 403 (it needs a compute service in the catalog; other panels may still need Neutron).
+Prerequisites: Galera + VIP, Keystone, RabbitMQ on tst10 (Cinder), Placement, agent on tst14.
+Teardown: `orphera cluster-playbook manifests/nova_teardown.scala`.
+
 ## L. Node reassignment (2026-10-10) - steps 1-3 and 5 done; step 4: run-log test passed, Prometheus/Grafana stack on tst7 NOT YET RUN
 New roles: tst0-tst2 Ceph; tst3-tst5 Galera + haproxy + keepalived (VIP
 10.10.5.100); tst6 Keystone; tst7 WordPress and Prometheus/Grafana; tst8 Rocky;

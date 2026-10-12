@@ -55,6 +55,9 @@ nodes:
   #   tst9        Kolla image cache
   #   tst10       Cinder + RabbitMQ
   #   tst13       Glance, Placement, Horizon
+  #   tst14       Nova control plane (API, scheduler, conductor, noVNC proxy)
+  #   tst17-tst19 second NIC on br-net106 (provider network): intended for Neutron / compute
+  #   tst15, tst16  not assigned yet
   #   tst11       apt cache (apt-cacher-ng)
   #   tst12       rpm cache (nginx caching mirror of Rocky/EPEL)
   # No osd_disks/zap_disks on tst3 and up: no Ceph role there (see the

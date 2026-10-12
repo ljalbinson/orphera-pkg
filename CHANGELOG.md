@@ -31,6 +31,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Existing VMs are untouched; adding a NIC to a defined VM means re-provisioning it (these scripts
   destroy and recreate) or `virsh attach-interface` by hand.
 
+## [Unreleased]
+
+### Added — Nova control plane on tst14 (branch `nova`, DRAFT, not yet run)
+- `manifests/nova_single_node.scala`: nova-api (Apache + mod_wsgi, 8774), nova-scheduler,
+  nova-conductor and nova-novncproxy (6080) from the Kolla images under podman/systemd on tst14.
+  Databases `nova_api`, `nova` and `nova_cell0` on Galera; its own RabbitMQ vhost `nova` and user
+  `nova` on the broker Cinder runs on tst10; registered in Keystone (user `nova` in project
+  `service`, service type `compute`, three endpoints). `nova-manage` runs `api_db sync`, maps cell0,
+  creates cell1 and runs `db sync`, each step skipped when already done. Waits for apt to be idle
+  first (see `disable_unattended_upgrades.scala`). A helper `orphera-nova-api` provides
+  register/unregister/catalog/services/services-up/flavor-list/flavor-create/flavor-delete.
+- `manifests/nova_teardown.scala`: Keystone cleanup, containers/units/config/state, the three
+  databases and user, and the RabbitMQ vhost and user (the broker and Cinder are untouched).
+- `manifests/test_nova.sh`: four units active, version document, 401 without a token, scheduler and
+  conductor "up" through the API, flavor create/read/delete, cell0 and cell1 mapped, catalog,
+  noVNC page, Placement and Glance reachable from tst14, idempotent re-apply; `NO_APPLY=1`.
+- `build_openstack_stack.sh`: new `nova` step between `placement` and `horizon`; tst14 added to the
+  preflight; the smoke test also creates and deletes a flavor. `disable_unattended_upgrades.scala`
+  now includes tst14.
+- No nova-compute and no Neutron: the API, scheduler and conductor work, but a server cannot be
+  booted yet. Horizon's Project dashboard should now find a compute service in the catalog.
+- Open: the WSGI script name (`nova-api-wsgi`), `/etc/nova/api-paste.ini` and the noVNC web
+  directory inside the image follow the Kolla layout from memory and are the most likely things
+  to need a fix on the first run (the playbook checks the first two and says what it found).
+
 ## [0.1.184] - 2026-10-12
 
 ### Added — Horizon on tst13 (passed 7/7 on tst13, 2026-10-12)

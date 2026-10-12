@@ -14,6 +14,8 @@
 #   cinder   tst10       cinder_single_node (pool `volumes`)
 #   glance   tst13       glance_single_node (pool `images`)
 #   placement tst13      placement_single_node (port 8780, shares tst13 with Glance)
+#   nova     tst14       nova_single_node (API, scheduler, conductor, noVNC proxy; RabbitMQ
+#                        vhost on tst10; no compute node yet)
 #   horizon  tst13       horizon_single_node (the dashboard, http://tst13:8080/)
 #   clients  scala0      utils/openstack-client-setup.sh
 #   smoke                a real volume, image and resource provider created and deleted
@@ -33,7 +35,7 @@
 #   --with-caches   build the apt cache, point the Ubuntu nodes at it, and
 #                   build the Kolla image cache first (tst9, tst11 required)
 #   --from STEP     start at STEP (prep caches ceph galera keystone cinder glance
-#                   placement horizon clients smoke) - for resuming after a failure
+#                   placement nova horizon clients smoke) - for resuming after a failure
 #   --only STEP     run just that one step
 #   --list          print the plan and exit
 #   -h, --help      this text
@@ -46,7 +48,7 @@ set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
 MANIFESTS="manifests"
 
-ALL_STEPS=(prep caches ceph galera keystone cinder glance placement horizon clients smoke)
+ALL_STEPS=(prep caches ceph galera keystone cinder glance placement nova horizon clients smoke)
 WITH_CACHES=""
 FROM=""
 ONLY=""
@@ -140,7 +142,7 @@ playbook() {
 # ---- preflight ------------------------------------------------------------
 
 preflight() {
-  local nodes="tst0 tst1 tst2 tst3 tst4 tst5 tst6 tst10 tst13" n out bad=""
+  local nodes="tst0 tst1 tst2 tst3 tst4 tst5 tst6 tst10 tst13 tst14" n out bad=""
   if [ -n "$WITH_CACHES" ]; then nodes="$nodes tst9 tst11"; fi
   log "preflight: every node must answer through its agent"
   for n in $nodes; do
@@ -225,6 +227,15 @@ step_placement() {
   check "Placement lists resource providers with an admin token" contains "resource providers:" "$out"
 }
 
+step_nova() {
+  playbook nova_single_node.scala
+  local out
+  out=$(run_on tst14 "curl -s -o /dev/null -w 'http=%{http_code}' http://localhost:8774/")
+  check "the Nova API answers its version document" contains "http=" "$out"
+  out=$(run_on tst14 "sudo /usr/local/sbin/orphera-nova-api services-up")
+  check "nova-scheduler and nova-conductor are up" contains "are up" "$out"
+}
+
 step_horizon() {
   playbook horizon_single_node.scala
   local out
@@ -264,6 +275,14 @@ step_smoke() {
     check "a Placement resource provider was created and deleted" contains "deleted $id" "$out"
   else
     log "FAIL: resource provider create returned no id"; FAIL=$((FAIL + 1))
+  fi
+  out=$(run_on tst14 "sudo /usr/local/sbin/orphera-nova-api flavor-create")
+  id=$(printf '%s\n' "$out" | grep -Eo '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|^[0-9]+$' | tail -1)
+  if [ -n "$id" ]; then
+    out=$(run_on tst14 "sudo /usr/local/sbin/orphera-nova-api flavor-delete $id")
+    check "a Nova flavor was created and deleted" contains "deleted $id" "$out"
+  else
+    log "FAIL: flavor create returned no id"; FAIL=$((FAIL + 1))
   fi
 }
 
