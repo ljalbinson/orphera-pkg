@@ -31,8 +31,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Existing VMs are untouched; adding a NIC to a defined VM means re-provisioning it (these scripts
   destroy and recreate) or `virsh attach-interface` by hand.
 
-## [Unreleased]
-
 ### Added — Nova control plane on tst14 (passed 19/19 on tst14, 2026-10-12)
 - `manifests/nova_single_node.scala`: nova-api (Apache + mod_wsgi, 8774), nova-scheduler,
   nova-conductor and nova-novncproxy (6080) from the Kolla images under podman/systemd on tst14.
