@@ -6,6 +6,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — Neutron on tst19 (branch `neutron`, DRAFT, not yet run)
+- `manifests/neutron_single_node.scala`: neutron-server, neutron-openvswitch-agent and
+  neutron-dhcp-agent from the Kolla images under podman/systemd on tst19, for flat provider
+  networks only (ML2 with the openvswitch mechanism driver, no tenant networks, no L3, no
+  metadata agent). Database `neutron` on Galera; its own RabbitMQ vhost/user on tst10; registered
+  in Keystone (user `neutron`, service type `network`, 3 endpoints). The host runs Open vSwitch
+  (apt): bridge `br-provider` with tst19's second NIC `enp2s0` as its port, mapped to the physical
+  network `provider`. The playbook first removes the address, the table-2 route and the policy rule
+  that provisioning had put on `enp2s0` (netplan edited, cloud-init network config disabled), so
+  the VM does not need re-provisioning; tst19 stays reachable on 10.10.5.31. Agents run privileged
+  with the OVS socket directory, /run/netns (shared mount) and /lib/modules.
+- `manifests/neutron_teardown.scala`, `manifests/test_neutron.sh` (units, NIC has no address and is
+  on br-provider, API and 401, agents alive, flat network + subnet create/delete, catalog, Nova and
+  Glance still fine, idempotent re-apply).
+- `nova_single_node.scala`: `[neutron]` section (service user `neutron`) in nova.conf. Re-apply
+  Nova once after Neutron so a running Nova gets it.
+- `config/tst19.yaml`: the second NIC is now layer 2 only (no address, gateway, table or priority),
+  so a re-provisioned tst19 matches what the Neutron playbook leaves behind. `build_openstack_stack.sh`:
+  new `neutron` step after `nova`; `tst19` added to the preflight and to
+  `disable_unattended_upgrades.scala`; the smoke test also creates and deletes a provider network.
+- Open: the `neutron-server` command and `/etc/neutron/rootwrap.conf` inside the image, and the
+  privileges the agents need in their containers, follow the Kolla layout from memory.
+
 ### Changed — Horizon lands on Project > Instances
 - With Nova registered the Project dashboard works (Project > Compute checked in a browser), but its
   Overview page, which Horizon opens by default, returns a 500 (`Invalid service catalogue:
