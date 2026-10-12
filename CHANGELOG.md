@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-### Added — Horizon on tst13 (branch `horizon`, DRAFT, not yet run)
+### Added — Horizon on tst13 (passed 7/7 on tst13, 2026-10-12)
 - `manifests/horizon_single_node.scala`: the Horizon dashboard from the Kolla image under
   podman/systemd on tst13 (shared with Glance and Placement), Apache + mod_wsgi on 8080, plain
   HTTP, `http://tst13.ljalbinson.com:8080/`. No database (signed-cookie sessions), nothing to
@@ -18,8 +18,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   served, a real admin login succeeds, the dashboard answers from scala0, Glance and Placement
   still answer, idempotent re-apply; `NO_APPLY=1`.
 - `build_openstack_stack.sh`: new `horizon` step after `placement`.
-- Open: the Apache vhost, the site-packages path and the static-file Alias follow the Kolla
-  layout from memory and are the most likely things to need a fix on the first run.
+- Found on the first runs: with no compute service in the Keystone catalog the Project dashboard's
+  Overview panel is hidden, so Horizon's default landing page `/project/` is a 403 right after a
+  successful login. `local_settings.py` therefore sets `user_home` to `/settings/` (always
+  available). The Identity panels (`/identity/projects/`) returned 404 for the admin token and
+  are not yet understood; revisit when Nova is registered, then drop the override.
+- The `csrftoken`/`sessionid` cookies are explicitly non-Secure (plain HTTP), with
+  `CSRF_TRUSTED_ORIGINS` set. On a login failure `orphera-horizon-check` prints the final URL, the
+  cookie flags and the tail of Horizon's access and error logs.
 
 ### Added — turn off unattended upgrades (branch `no-auto-upgrades`, DRAFT, not yet run)
 - Cause: on a freshly provisioned VM `unattended-upgrades` holds the dpkg lock for minutes and,
