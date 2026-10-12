@@ -129,6 +129,11 @@ nodes:
     vars:
       cluster_ip: "10.10.5.25"
 
+  - name: tst19
+    host: tst19.ljalbinson.com
+    vars:
+      cluster_ip: "10.10.5.31"
+
   - name: gs1
     host: gs1.ljalbinson.com
     vars:
