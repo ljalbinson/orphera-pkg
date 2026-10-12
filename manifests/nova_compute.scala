@@ -424,7 +424,8 @@ object nova_compute extends OrpheraClusterPlaybook:
 
   // nova-compute runs privileged on the host PID and network namespaces with the
   // libvirt and Open vSwitch sockets and the kernel modules directory; it needs
-  // privileged mode for privsep (os-vif, qemu-img, mounts). The OVS agent is set up
+  // privileged mode for privsep (os-vif, qemu-img, mounts), and /dev from the host:
+  // the guest consoles are ptys (/dev/pts/N) that Nova must see to read the console. The OVS agent is set up
   // exactly like the one on tst19.
   private val unitsScript =
     s"""set -e
@@ -436,7 +437,7 @@ object nova_compute extends OrpheraClusterPlaybook:
        |
        |[Service]
        |ExecStartPre=-/usr/bin/podman rm -f nova-compute
-       |ExecStart=/usr/bin/podman run --rm --name nova-compute --network host --privileged --pid host -e KOLLA_CONFIG_STRATEGY=COPY_ALWAYS -v $confRoot/nova-compute:/var/lib/kolla/config_files:ro,z -v $novaLogDir:/var/log/kolla/nova:z -v $novaStateDir:/var/lib/nova -v /run/libvirt:/run/libvirt -v /run/openvswitch:/run/openvswitch -v /lib/modules:/lib/modules:ro $computeImage
+       |ExecStart=/usr/bin/podman run --rm --name nova-compute --network host --privileged --pid host -e KOLLA_CONFIG_STRATEGY=COPY_ALWAYS -v $confRoot/nova-compute:/var/lib/kolla/config_files:ro,z -v $novaLogDir:/var/log/kolla/nova:z -v $novaStateDir:/var/lib/nova -v /run/libvirt:/run/libvirt -v /run/openvswitch:/run/openvswitch -v /lib/modules:/lib/modules:ro -v /dev:/dev $computeImage
        |ExecStop=/usr/bin/podman stop -t 60 nova-compute
        |Restart=on-failure
        |RestartSec=5
@@ -487,6 +488,7 @@ object nova_compute extends OrpheraClusterPlaybook:
   //   compute-up <host> ...   every named host has an enabled nova-compute service that is up
   //   hypervisors             one line per hypervisor (state, vCPUs, memory)
   //   ovs-up <host> ...       every named host has an alive neutron-openvswitch-agent
+  //   boot-cleanup           delete what an earlier boot-test --keep left behind
   //   boot-test <qcow2-file> [--keep]  upload an image, create a flavor and a flat provider
   //                           network with DHCP, boot an instance with a config drive,
   //                           wait for the console to show the login prompt and a DHCP
@@ -594,6 +596,27 @@ def wait_for(fn, what, tries, delay):
     die('%s: gave up (last: %s)' % (what, last[1]))
 
 
+def boot_cleanup():
+    token = admin_token()
+    for s in call('GET', NOVA + '/servers?name=orphera-boot-test', None, token)[1].get('servers', []):
+        call('DELETE', NOVA + '/servers/' + s['id'], None, token)
+        for _ in range(30):
+            if call('GET', NOVA + '/servers/' + s['id'], None, token)[0] == 404:
+                break
+            time.sleep(2)
+        time.sleep(3)
+    for n in call('GET', NEUTRON + '/v2.0/networks?name=orphera-boot-test', None, token)[1].get('networks', []):
+        for sub in call('GET', NEUTRON + '/v2.0/subnets?network_id=' + n['id'], None, token)[1].get('subnets', []):
+            call('DELETE', NEUTRON + '/v2.0/subnets/' + sub['id'], None, token)
+        call('DELETE', NEUTRON + '/v2.0/networks/' + n['id'], None, token)
+    for f in call('GET', NOVA + '/flavors', None, token)[1].get('flavors', []):
+        if f.get('name', '').startswith('orphera-boot-'):
+            call('DELETE', NOVA + '/flavors/' + f['id'], None, token)
+    for i in call('GET', GLANCE + '/v2/images?name=orphera-boot-test', None, token)[1].get('images', []):
+        call('DELETE', GLANCE + '/v2/images/' + i['id'], None, token)
+    print('boot-test leftovers removed')
+
+
 def boot_test(path, keep=False):
     token = admin_token()
     made = []
@@ -688,10 +711,12 @@ if __name__ == '__main__':
         hypervisors()
     elif cmd == 'ovs-up' and len(sys.argv) > 2:
         ovs_up(sys.argv[2:])
+    elif cmd == 'boot-cleanup':
+        boot_cleanup()
     elif cmd == 'boot-test' and len(sys.argv) > 2:
         boot_test(sys.argv[2], '--keep' in sys.argv[3:])
     else:
-        die('usage: orphera-compute-api compute-up <host>... | hypervisors | ovs-up <host>... | boot-test <qcow2-file>')
+        die('usage: orphera-compute-api compute-up <host>... | hypervisors | ovs-up <host>... | boot-cleanup | boot-test <qcow2-file> [--keep]')
 """
 
   private val helperScript =

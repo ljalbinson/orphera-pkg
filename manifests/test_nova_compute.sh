@@ -108,6 +108,7 @@ if [ -z "${SKIP_BOOT:-}" ]; then
   fi
   if [ -s "$CIRROS_LOCAL" ]; then
     if orphera copy "$CIRROS_LOCAL" /root/cirros-boot-test.qcow2 --owner root --group root --mode 0644 --nodes tst17 >/dev/null 2>&1; then
+      run_on tst17 "sudo $HELPER boot-cleanup" >/dev/null
       log "booting a CirrOS instance (can take a few minutes)"
       OUT=$(orphera run sh -c "sudo $HELPER boot-test /root/cirros-boot-test.qcow2${KEEP_BOOT:+ --keep}" --nodes tst17 --timeout 900 2>&1)
       assert_contains "an instance boots on KVM, gets a DHCP lease and is cleaned up" "boot test passed" "$OUT"
