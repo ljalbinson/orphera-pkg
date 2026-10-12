@@ -1348,7 +1348,9 @@ Worth knowing:
 - **Nova** (control plane only) is at `http://tst14.ljalbinson.com:8774` after
   `manifests/test_nova.sh`: API (Apache + mod_wsgi), scheduler, conductor and the noVNC proxy, with
   databases `nova_api`, `nova`, `nova_cell0` on Galera and its own vhost on the RabbitMQ on tst10.
-  There is no nova-compute yet, so no server can be booted; the test creates and deletes a flavor.
+  Servers are booted on the compute nodes below; the Nova test itself only creates and deletes a
+  flavor. nova.conf carries `[glance] cafile` (Keystone's CA), so after upgrading from an older
+  copy re-apply `nova_single_node.scala` once, or server creates fail with HTTP 500.
 - **Neutron** (provider networks only) is at `http://tst19.ljalbinson.com:9696` after
   `manifests/test_neutron.sh`: neutron-server, the Open vSwitch agent and the DHCP agent on one
   node, with ML2 flat networks on the physical network `provider` (OVS bridge `br-provider`,
@@ -1362,6 +1364,12 @@ Worth knowing:
   libvirt/QEMU from apt, and the Neutron Open vSwitch agent; the second NIC becomes the provider
   port as on tst19. Instances use a config drive (no metadata agent). The test boots a CirrOS
   instance on a temporary flat network with DHCP (10.10.6.0/24, pool .200-.220) and removes it.
+  The node helper `orphera-compute-api` (`compute-up`, `ovs-up`, `hypervisors`, `boot-test`,
+  `boot-cleanup`) is installed on both nodes; `KEEP_BOOT=1` leaves the test instance behind for
+  inspection. Teardown: `nova_compute_teardown.scala`.
+- **Utilities** in `utils/`: `list-vms.sh [hv...]` lists every VM on each hypervisor with state,
+  vCPUs and memory; `trace-dhcp.sh` captures DHCP on the provider NICs of tst17, tst18 and tst19
+  while a test instance boots, to show where packets are lost.
 
 ## Example: parallel network throughput test (iperf3)
 
