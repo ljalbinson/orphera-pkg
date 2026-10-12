@@ -58,7 +58,7 @@ nodes:
   #   tst14       Nova control plane (API, scheduler, conductor, noVNC proxy)
   #   tst19       Neutron (server, Open vSwitch + DHCP agents); its second NIC (br-net106) is the
   #               flat provider network, no address on it
-  #   tst17, tst18  second NIC on br-net106 (provider network): intended for nova-compute
+  #   tst17, tst18  second NIC on br-net106 (provider network): nova-compute (nova_compute.scala)
   #   tst15, tst16  not assigned yet
   #   tst11       apt cache (apt-cacher-ng)
   #   tst12       rpm cache (nginx caching mirror of Rocky/EPEL)

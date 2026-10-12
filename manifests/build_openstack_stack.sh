@@ -18,6 +18,8 @@
 #                        vhost on tst10; no compute node yet)
 #   neutron  tst19       neutron_single_node (server, Open vSwitch + DHCP agents, flat provider
 #                        network on tst19's second NIC; its address is removed)
+#   compute  tst17,tst18 nova_compute (nova-compute on KVM + Neutron Open vSwitch agent, config drive;
+#                        the second NIC becomes the provider port, its address is removed)
 #   horizon  tst13       horizon_single_node (the dashboard, http://tst13:8080/)
 #   clients  scala0      utils/openstack-client-setup.sh
 #   smoke                a real volume, image and resource provider created and deleted
@@ -37,7 +39,7 @@
 #   --with-caches   build the apt cache, point the Ubuntu nodes at it, and
 #                   build the Kolla image cache first (tst9, tst11 required)
 #   --from STEP     start at STEP (prep caches ceph galera keystone cinder glance
-#                   placement nova neutron horizon clients smoke) - for resuming after a failure
+#                   placement nova neutron compute horizon clients smoke) - for resuming after a failure
 #   --only STEP     run just that one step
 #   --list          print the plan and exit
 #   -h, --help      this text
@@ -50,7 +52,7 @@ set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
 MANIFESTS="manifests"
 
-ALL_STEPS=(prep caches ceph galera keystone cinder glance placement nova neutron horizon clients smoke)
+ALL_STEPS=(prep caches ceph galera keystone cinder glance placement nova neutron compute horizon clients smoke)
 WITH_CACHES=""
 FROM=""
 ONLY=""
@@ -144,7 +146,7 @@ playbook() {
 # ---- preflight ------------------------------------------------------------
 
 preflight() {
-  local nodes="tst0 tst1 tst2 tst3 tst4 tst5 tst6 tst10 tst13 tst14 tst19" n out bad=""
+  local nodes="tst0 tst1 tst2 tst3 tst4 tst5 tst6 tst10 tst13 tst14 tst17 tst18 tst19" n out bad=""
   if [ -n "$WITH_CACHES" ]; then nodes="$nodes tst9 tst11"; fi
   log "preflight: every node must answer through its agent"
   for n in $nodes; do
@@ -245,6 +247,15 @@ step_neutron() {
   check "the Neutron API answers its version document" contains "http=" "$out"
   out=$(run_on tst19 "sudo /usr/local/sbin/orphera-neutron-api agents-up")
   check "the Open vSwitch and DHCP agents are alive" contains "are alive" "$out"
+}
+
+step_compute() {
+  playbook nova_compute.scala
+  local out
+  out=$(run_on tst17 "sudo /usr/local/sbin/orphera-compute-api compute-up tst17 tst18")
+  check "nova-compute is up on tst17 and tst18" contains "nova-compute is up on tst17, tst18" "$out"
+  out=$(run_on tst17 "sudo /usr/local/sbin/orphera-compute-api ovs-up tst17 tst18")
+  check "the Open vSwitch agents on tst17 and tst18 are alive" contains "alive on tst17, tst18" "$out"
 }
 
 step_horizon() {

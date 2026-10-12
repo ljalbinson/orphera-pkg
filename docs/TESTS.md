@@ -472,6 +472,19 @@ Nova re-apply and the Horizon check above.
 Teardown: `orphera cluster-playbook manifests/neutron_teardown.scala` (not run; does not restore
 the address enp2s0 had).
 
+### K12. nova-compute on tst17 and tst18 - NOT YET RUN (branch `nova-compute`)
+    manifests/test_nova_compute.sh 2>&1 | tee /tmp/nova-compute.log
+Expect: on each node orphera-nova-compute, orphera-neutron-openvswitch-agent and libvirtd active,
+/dev/kvm present, libvirt answers, enp2s0 has no IPv4 address and is a port of br-provider while
+enp1s0 keeps its address; both nova-compute services up and both OVS agents alive through the APIs;
+tst17 and tst18 listed as hypervisors; Nova and Neutron still healthy; a CirrOS instance boots
+(image uploaded to Glance, flat provider network with DHCP, config drive), its console shows the
+login prompt and a lease from 10.10.6.200-220, and everything is deleted again; second run
+completes. `SKIP_BOOT=1` skips the boot, `CIRROS_IMAGE=/path` avoids the download.
+Prerequisites: Nova (tst14) and Neutron (tst19) healthy, no flat network left on `provider`, agents
+on tst17 and tst18, nested KVM on gs2 and host-passthrough on the VMs.
+Teardown: `orphera cluster-playbook manifests/nova_compute_teardown.scala` (not run).
+
 ## L. Node reassignment (2026-10-10) - steps 1-3 and 5 done; step 4: run-log test passed, Prometheus/Grafana stack on tst7 NOT YET RUN
 New roles: tst0-tst2 Ceph; tst3-tst5 Galera + haproxy + keepalived (VIP
 10.10.5.100); tst6 Keystone; tst7 WordPress and Prometheus/Grafana; tst8 Rocky;
