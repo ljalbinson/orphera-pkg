@@ -36,7 +36,7 @@ object disable_unattended_upgrades extends OrpheraClusterPlaybook:
 
   private val nodes = List(
     "tst0", "tst1", "tst2", "tst3", "tst4", "tst5", "tst6", "tst7", "tst9",
-    "tst10", "tst11", "tst12", "tst13", "tst14"
+    "tst10", "tst11", "tst12", "tst13", "tst14", "tst19"
   )
 
   private val disableScript =

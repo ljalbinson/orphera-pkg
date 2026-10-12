@@ -77,6 +77,8 @@ object nova_single_node extends OrpheraClusterPlaybook:
   private val dbUser = "nova"
   private val dbPassword = "orphera-test-nova-db-password"
   private val novaPassword = "orphera-test-nova-service-password"
+  // Nova calls Neutron as the `neutron` service user (created by neutron_single_node.scala).
+  private val neutronPassword = "orphera-test-neutron-service-password"
 
   private val confRoot = "/etc/kolla"
   private val srcDir = "/etc/kolla/nova"
@@ -235,6 +237,18 @@ object nova_single_node extends OrpheraClusterPlaybook:
        |
        |[glance]
        |valid_interfaces = internal
+       |
+       |[neutron]
+       |auth_url = $ksUrl
+       |auth_type = password
+       |project_domain_name = Default
+       |user_domain_name = Default
+       |region_name = RegionOne
+       |project_name = service
+       |username = neutron
+       |password = $neutronPassword
+       |valid_interfaces = internal
+       |cafile = /etc/nova/ssl/ca.crt
        |
        |[oslo_concurrency]
        |lock_path = /var/lib/nova/tmp

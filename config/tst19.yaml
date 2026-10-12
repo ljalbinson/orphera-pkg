@@ -27,14 +27,11 @@ params:
   memory: '4096'
   os: noble-server-cloudimg-amd64.img
   nics:
+  # Provider network for Neutron (neutron_single_node.scala): a plain layer-2 NIC,
+  # deliberately no address. A VM provisioned from this file has none; the one that
+  # was provisioned earlier had 10.10.6.31 and neutron_single_node.scala removes it.
   - nic: enp2s0
-    ipaddress: "10.10.6.31"
-    gateway: "10.10.6.1"
     bridge: br-net106
-    netmask: "255.255.255.0"
-    table: 2
-    priority: 100
-    cidr: "10.10.6.0/24"
     mtu: 9000
   domainname: ljalbinson.com
   host_type: host-passthrough
