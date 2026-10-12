@@ -218,6 +218,9 @@ object nova_compute extends OrpheraClusterPlaybook:
        |systemctl enable --now openvswitch-switch
        |ovs-vsctl --may-exist add-br $providerBridge
        |ovs-vsctl --may-exist add-port $providerBridge $providerNic
+       |# nova-compute (uid 42436 in its container) cannot open the root-only unix socket;
+       |# it talks to ovsdb over loopback TCP instead (os-vif's default). Stored in the OVS DB.
+       |if ! ovs-vsctl get-manager | grep -qx 'ptcp:6640:127.0.0.1'; then ovs-vsctl set-manager ptcp:6640:127.0.0.1; fi
        |ip link set $providerBridge up
        |ovs-vsctl show
        |echo "$providerBridge has $providerNic"""".stripMargin
@@ -358,7 +361,7 @@ object nova_compute extends OrpheraClusterPlaybook:
        |server_proxyclient_address = @@IP@@
        |
        |[os_vif_ovs]
-       |ovsdb_connection = unix:/run/openvswitch/db.sock
+       |ovsdb_connection = tcp:127.0.0.1:6640
        |CONF
        |cat > $neutronSrcDir/neutron.conf <<'CONF'
        |[DEFAULT]
