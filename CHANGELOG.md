@@ -4,7 +4,7 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [0.1.184] - 2026-10-12
 
 ### Added — Horizon on tst13 (passed 7/7 on tst13, 2026-10-12)
 - `manifests/horizon_single_node.scala`: the Horizon dashboard from the Kolla image under
