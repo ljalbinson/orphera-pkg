@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-### Added — Neutron on tst19 (branch `neutron`, DRAFT, not yet run)
+### Added — Neutron on tst19 (passed 18/18 on tst19, 2026-10-12)
 - `manifests/neutron_single_node.scala`: neutron-server, neutron-openvswitch-agent and
   neutron-dhcp-agent from the Kolla images under podman/systemd on tst19, for flat provider
   networks only (ML2 with the openvswitch mechanism driver, no tenant networks, no L3, no
@@ -26,8 +26,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   so a re-provisioned tst19 matches what the Neutron playbook leaves behind. `build_openstack_stack.sh`:
   new `neutron` step after `nova`; `tst19` added to the preflight and to
   `disable_unattended_upgrades.scala`; the smoke test also creates and deletes a provider network.
-- Open: the `neutron-server` command and `/etc/neutron/rootwrap.conf` inside the image, and the
-  privileges the agents need in their containers, follow the Kolla layout from memory.
+- Worked as written on the first run, including the idempotent re-apply: the `neutron-server`
+  command, `rootwrap.conf` and the privileged agent containers needed no change. Not yet checked:
+  a real instance on the provider network (needs nova-compute), and the `[neutron]` section in
+  nova.conf on a running tst14 (re-apply `nova_single_node.scala`).
 
 ### Changed — Horizon lands on Project > Instances
 - With Nova registered the Project dashboard works (Project > Compute checked in a browser), but its

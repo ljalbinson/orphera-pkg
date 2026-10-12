@@ -457,7 +457,7 @@ Horizon's Project dashboard stops returning a 403 now that the catalog has `comp
 Prerequisites: Galera + VIP, Keystone, RabbitMQ on tst10 (Cinder), Placement, agent on tst14.
 Teardown: `orphera cluster-playbook manifests/nova_teardown.scala` (not yet run).
 
-### K11. Neutron on tst19 - NOT YET RUN (branch `neutron`)
+### K11. Neutron on tst19 - PASSED (2026-10-12), 18/18, first run (branch `neutron`)
     manifests/test_neutron.sh 2>&1 | tee /tmp/neutron.log
 Expect: the three orphera-neutron-* units active; enp2s0 has no IPv4 address and is a port of
 br-provider while enp1s0 keeps 10.10.5.31; the version document on 9696; 401 without a token; the
@@ -466,7 +466,8 @@ flat provider network plus a subnet created, read back and deleted; the catalog 
 Nova (tst14) and Glance (tst13) still fine; second run completes. Afterwards re-apply
 `nova_single_node.scala` (adds `[neutron]` to nova.conf) and reload Horizon: Project > Overview and
 Network should stop returning errors; then the `user_home` override can be dropped.
-Prerequisites: Galera + VIP, Keystone, RabbitMQ on tst10, Nova, agent on tst19.
+Prerequisites: Galera + VIP, Keystone, RabbitMQ on tst10, Nova, agent on tst19. Still to do: the
+Nova re-apply and the Horizon check above.
 Teardown: `orphera cluster-playbook manifests/neutron_teardown.scala` (not run; does not restore
 the address enp2s0 had).
 
