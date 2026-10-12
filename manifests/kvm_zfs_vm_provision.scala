@@ -185,6 +185,15 @@ object kvm_zfs_vm_provision extends OrpheraClusterPlaybook:
   private val vcpus = config.map(_.cpu.toInt).getOrElse(4)
   private val nicName = config.map(_.nic0.nic).getOrElse("enp1s0")
   private val nicBridge = config.map(_.nic0.bridge).getOrElse("br-net1")
+  // Additional layer-2-only NICs from `nics:` (e.g. a provider network): one
+  // more --network argument each, with a fixed MAC, and a network-config entry
+  // matched by that MAC. No address is configured on them.
+  private val extraNics: List[ExtraNic] =
+    config.map(_.extraNics).getOrElse(Nil)
+  private val extraNicVirtInstallArgs: String =
+    extraNics.map { n =>
+      s" --network bridge=${n.bridge},model=virtio,mac=${n.mac},virtualport_type=openvswitch"
+    }.mkString
   private val cpuMode = config.map(_.hostType).getOrElse("host-passthrough")
   private val domainname =
     config.map(_.domainname).getOrElse("ljalbinson.com")
@@ -255,6 +264,17 @@ object kvm_zfs_vm_provision extends OrpheraClusterPlaybook:
        |  fi
        |  virsh --quiet destroy $vmName 2>/dev/null || true
        |  virsh --quiet undefine $vmName || true
+       |fi
+       |# Open vSwitch ports left behind by VMs that no longer exist (a tap device
+       |# gone but its port record still in the OVS database) make a later
+       |# virt-install fail with "vnetN is actually attached to bridge ...", because
+       |# libvirt reuses the free name. Drop vnet* ports that have no device.
+       |if command -v ovs-vsctl >/dev/null 2>&1; then
+       |  for b in $$(ovs-vsctl list-br); do
+       |    for p in $$(ovs-vsctl list-ports "$$b" | grep '^vnet' || true); do
+       |      ip link show "$$p" >/dev/null 2>&1 || ovs-vsctl --if-exists del-port "$$b" "$$p" || true
+       |    done
+       |  done
        |fi
        |zfs destroy -r '$workingFs' 2>/dev/null || true
        |echo "'$vmName' destroyed/undefined if it existed; '$workingFs' removed if present"""".stripMargin
@@ -358,7 +378,7 @@ object kvm_zfs_vm_provision extends OrpheraClusterPlaybook:
        |want=$osVariantWanted
        |if virt-install --osinfo list 2>/dev/null | grep -qw -- "$$want"; then variant=$$want; else variant=generic; fi
        |echo "using --os-variant $$variant"
-       |virt-install --connect qemu:///system --name $vmName --memory $memoryMB --vcpus $vcpus --cpu $cpuMode --disk $workingDir/$vmName.qcow2,format=qcow2,bus=scsi,serial=$vmName-root --disk $workingDir/$vmName-swap.qcow2,format=qcow2,bus=scsi,serial=$vmName-swap$extraDiskVirtInstallArgs --disk $workingDir/$vmName-cidata.iso,device=cdrom --network bridge=$nicBridge,model=virtio,virtualport_type=openvswitch --machine q35 --controller type=scsi,model=virtio-scsi --channel unix,target_type=virtio,name=org.qemu.guest_agent.0 --os-variant $$variant --import --noautoconsole
+       |virt-install --connect qemu:///system --name $vmName --memory $memoryMB --vcpus $vcpus --cpu $cpuMode --disk $workingDir/$vmName.qcow2,format=qcow2,bus=scsi,serial=$vmName-root --disk $workingDir/$vmName-swap.qcow2,format=qcow2,bus=scsi,serial=$vmName-swap$extraDiskVirtInstallArgs --disk $workingDir/$vmName-cidata.iso,device=cdrom --network bridge=$nicBridge,model=virtio,virtualport_type=openvswitch$extraNicVirtInstallArgs --machine q35 --controller type=scsi,model=virtio-scsi --channel unix,target_type=virtio,name=org.qemu.guest_agent.0 --os-variant $$variant --import --noautoconsole
        |virsh --connect qemu:///system autostart $vmName
        |echo "$vmName defined, started, and set to autostart with the hypervisor"""".stripMargin
 
@@ -432,7 +452,8 @@ object kvm_zfs_vm_provision extends OrpheraClusterPlaybook:
               gateway,
               dns1,
               dns2,
-              domainname
+              domainname,
+              extraNics = extraNics
             ),
             dest = s"$workingDir/network-config",
             owner = "localadmin",
@@ -622,8 +643,11 @@ object NetworkConfigTemplate {
       dns1: String,
       dns2: String,
       domainname: String,
-      vlan: Option[Vlan] = None
+      vlan: Option[Vlan] = None,
+      extraNics: List[ExtraNic] = Nil
   ): String =
+    if extraNics.nonEmpty && vlan.isEmpty then
+      return renderWithExtraNics(nic, ipAddress, ipMask, gateway, dns1, dns2, domainname, extraNics)
     vlan match {
       case Some(v) =>
         s"""network:
@@ -669,6 +693,59 @@ object NetworkConfigTemplate {
            |        - $domainname
            |""".stripMargin
     }
+
+  /** netplan v2 form, used only when the VM has extra NICs (a VM without them
+    * keeps the original v1 form byte for byte). nic0 is matched by name as
+    * before; each extra NIC is matched by its fixed MAC and renamed.
+    */
+  /** Network address of a dotted-quad address for a prefix length (10.10.6.31, 24 -> 10.10.6.0). */
+  private def networkOf(addr: String, prefix: Int): String =
+    val ip = addr.split("\\.").map(_.trim.toLong).foldLeft(0L)((acc, o) => acc * 256 + o)
+    val mask = if prefix <= 0 then 0L else (0xffffffffL << (32 - prefix)) & 0xffffffffL
+    val n = ip & mask
+    List(24, 16, 8, 0).map(sh => ((n >> sh) & 255).toString).mkString(".")
+
+  private def renderWithExtraNics(
+      nic: String,
+      ipAddress: String,
+      ipMask: Int,
+      gateway: String,
+      dns1: String,
+      dns2: String,
+      domainname: String,
+      extras: List[ExtraNic]
+  ): String =
+    val extraBlocks = extras.map { n =>
+      val addr = n.address.map(a => s"      addresses:\n      - $a/${n.prefix}\n").getOrElse("")
+      val routing =
+        if n.address.isDefined && n.table > 0 then
+          val subnetRoute =
+            s"      - to: ${networkOf(n.address.get, n.prefix)}/${n.prefix}\n        scope: link\n        table: ${n.table}\n"
+          val gw = n.gateway.map(g =>
+            s"      - to: default\n        via: $g\n        table: ${n.table}\n").getOrElse("")
+          s"      routes:\n$subnetRoute$gw" +
+            s"      routing-policy:\n      - from: ${n.address.get}\n        table: ${n.table}\n        priority: ${n.priority}\n"
+        else ""
+      s"    ${n.nic}:\n      match:\n        macaddress: \"${n.mac}\"\n      set-name: ${n.nic}\n" +
+        s"      dhcp4: false\n      mtu: ${n.mtu}\n$addr$routing"
+    }.mkString
+    s"""network:
+       |  version: 2
+       |  ethernets:
+       |    $nic:
+       |      dhcp4: false
+       |      addresses:
+       |      - $ipAddress/$ipMask
+       |      routes:
+       |      - to: default
+       |        via: $gateway
+       |      nameservers:
+       |        addresses:
+       |        - $dns1
+       |        - $dns2
+       |        search:
+       |        - $domainname
+       |""".stripMargin + extraBlocks
 }
 
 object MetaConfigTemplate {

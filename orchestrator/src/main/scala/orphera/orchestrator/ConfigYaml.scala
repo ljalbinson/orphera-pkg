@@ -34,6 +34,30 @@ case class Nic0(
     mtu: Int = 1500
 )
 
+/** One additional NIC from the `nics:` list, in the same shape as nic0:
+  * `bridge` is required; `nic` (guest name, default enp2s0, enp3s0, ...), `mtu`
+  * (default 1500), and optionally `ipaddress` + `netmask` or `cidr` (a static
+  * address; without one the interface is brought up layer-2 only, e.g. for a
+  * Neutron provider network), `gateway`, `table` and `priority`. With `table` >
+  * 0 the gateway and subnet route go into that routing table and a policy rule
+  * "from <ipaddress> lookup <table> priority <priority>" is added, so replies
+  * leave through this NIC without a second default route in the main table.
+  * The MAC is derived from the hostname and the index, so it is stable across
+  * re-provisioning and the guest can match the interface by MAC instead of
+  * guessing its PCI slot.
+  */
+case class ExtraNic(
+    nic: String,
+    bridge: String,
+    mtu: Int,
+    mac: String,
+    address: Option[String],
+    prefix: Int,
+    gateway: Option[String],
+    table: Int,
+    priority: Int
+)
+
 case class VmParams(
     hypervisor: String,
     hostname: String,
@@ -55,7 +79,46 @@ case class VmParams(
     nics: List[Json] = Nil,
     preBasicPackages: List[String] = Nil,
     basicPackages: List[String] = Nil
-)
+):
+  /** The `nics:` entries as layer-2-only NICs, in order (index 0 is the second
+    * NIC of the VM; nic0 is the first). An entry without `bridge` is an error,
+    * not silently skipped.
+    */
+  def extraNics: List[ExtraNic] =
+    nics.zipWithIndex.map { case (j, i) =>
+      val c = j.hcursor
+      val bridge = c.get[String]("bridge").getOrElse(
+        throw new RuntimeException(
+          s"nics: entry ${i + 1} has no 'bridge:' (expected '- bridge: <ovs bridge>')"
+        )
+      )
+      val h = java.security.MessageDigest
+        .getInstance("SHA-256")
+        .digest(s"$hostname/nic${i + 1}".getBytes("UTF-8"))
+      val mac = "52:54:00:" + h.take(3).map(b => f"${b & 0xff}%02x").mkString(":")
+      def str(k: String): Option[String] =
+        c.get[String](k).toOption.map(_.trim).filter(_.nonEmpty)
+      val address = str("ipaddress")
+      val fromCidr = str("cidr").flatMap(_.split("/").lastOption).flatMap(_.toIntOption)
+      val fromMask = str("netmask").map(
+        _.split("\\.").map(o => Integer.bitCount(o.trim.toInt)).sum
+      )
+      if address.isDefined && fromCidr.orElse(fromMask).isEmpty then
+        throw new RuntimeException(
+          s"nics: entry ${i + 1} has an ipaddress but neither 'cidr' nor 'netmask'"
+        )
+      ExtraNic(
+        nic = str("nic").getOrElse(s"enp${i + 2}s0"),
+        bridge = bridge,
+        mtu = c.getOrElse[Int]("mtu")(1500).getOrElse(1500),
+        mac = mac,
+        address = address,
+        prefix = fromCidr.orElse(fromMask).getOrElse(24),
+        gateway = str("gateway"),
+        table = c.getOrElse[Int]("table")(0).getOrElse(0),
+        priority = c.getOrElse[Int]("priority")(0).getOrElse(0)
+      )
+    }
 
 object ConfigYaml:
 
