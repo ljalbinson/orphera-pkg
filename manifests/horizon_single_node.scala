@@ -243,9 +243,18 @@ def die(msg):
     sys.exit(1)
 
 
+JAR = http.cookiejar.CookieJar()
+
+
 def opener():
-    jar = http.cookiejar.CookieJar()
-    return urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
+    return urllib.request.build_opener(urllib.request.HTTPCookieProcessor(JAR))
+
+
+def why(body):
+    text = re.sub(r'<[^>]+>', ' ', body)
+    text = re.sub(r'\s+', ' ', text)
+    m = re.search(r'(Reason given for failure:.{0,160}|CSRF verification failed.{0,160}|Forbidden.{0,160})', text)
+    return m.group(1) if m else text[:200]
 
 
 def fetch(op, url, data=None):
@@ -280,7 +289,7 @@ def login():
     fields['password'] = PASSWORD
     s, url, body = fetch(op, BASE + '/auth/login/', urllib.parse.urlencode(fields).encode())
     if s != 200:
-        die('login post: HTTP %s at %s' % (s, url))
+        die('login post: HTTP %s at %s - %s (cookies held: %s)' % (s, url, why(body), ', '.join(sorted(c.name for c in JAR)) or 'none'))
     if 'auth/logout' not in body:
         m = re.search(r'alert[^>]*>\s*([^<]{3,200})', body)
         die('login did not reach a signed-in page (at %s)%s' % (url, ': ' + m.group(1).strip() if m else ''))
