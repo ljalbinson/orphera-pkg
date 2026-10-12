@@ -495,7 +495,7 @@ object nova_compute extends OrpheraClusterPlaybook:
   //                           lease, then delete everything it created
   private val apiHelperPython =
     """#!/usr/bin/python3
-import json, ssl, sys, time, urllib.request, urllib.error
+import json, re, ssl, sys, time, urllib.request, urllib.error
 
 KS = 'https://@@KS@@:5000/v3'
 NOVA = '@@NOVA@@'
@@ -692,9 +692,13 @@ def boot_test(path, keep=False):
             return ('login:' in out, out)
         out = wait_for(console, 'login prompt on the console', 48, 5)
         print('console shows the login prompt')
-        lease = [l for l in out.splitlines() if 'Lease of' in l or 'obtained' in l]
-        if not any('10.10.6.' in l for l in lease):
-            sys.stderr.write('no DHCP lease from %s in the console output:\n%s\n' % (CIDR, out[-1500:]))
+        # CirrOS 0.6 logs the lease as "eth0: leased 10.10.6.x for N seconds" (dhcpcd);
+        # older images say "Lease of x obtained". Any console line carrying an address
+        # from the test subnet can only have come from DHCP.
+        lease = [l for l in out.splitlines() if re.search(r'10\.10\.6\.\d+', l)]
+        if not lease:
+            net = [l for l in out.splitlines() if re.search(r'dhcp|lease|carrier|eth0|udhcp', l, re.I)]
+            sys.stderr.write('no address from %s on the console; network lines:\n%s\n' % (CIDR, '\n'.join(net[-25:])))
             die('instance booted but did not get an address by DHCP')
         print(lease[0].strip())
         print('boot test passed')
