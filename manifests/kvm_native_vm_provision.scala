@@ -277,6 +277,17 @@ object kvm_native_vm_provision extends OrpheraClusterPlaybook:
        |  virsh --quiet destroy $vmName 2>/dev/null || true
        |  virsh --quiet undefine $vmName || true
        |fi
+       |# Open vSwitch ports left behind by VMs that no longer exist (a tap device
+       |# gone but its port record still in the OVS database) make a later
+       |# virt-install fail with "vnetN is actually attached to bridge ...", because
+       |# libvirt reuses the free name. Drop vnet* ports that have no device.
+       |if command -v ovs-vsctl >/dev/null 2>&1; then
+       |  for b in $$(ovs-vsctl list-br); do
+       |    for p in $$(ovs-vsctl list-ports "$$b" | grep '^vnet' || true); do
+       |      ip link show "$$p" >/dev/null 2>&1 || ovs-vsctl --if-exists del-port "$$b" "$$p" || true
+       |    done
+       |  done
+       |fi
        |rm -rf '$workingDir'
        |echo "'$vmName' destroyed/undefined if it existed; '$workingDir' removed if present"""".stripMargin
 

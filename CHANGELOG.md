@@ -19,6 +19,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   its MAC and renamed. With `table` > 0 the subnet route and the gateway go into that table and a
   `from <address>` rule at `priority` is added, so there is no second default route in the main
   table. VMs without extra NICs get exactly the original v1 `network-config`.
+- The destroy stage of both scripts now also removes Open vSwitch `vnet*` ports that have no
+  device behind them. A leftover port record on another bridge made virt-install fail with
+  "vnet8 is actually attached to bridge br-net105" (seen on st0 provisioning tst19).
 - `ConfigYaml.scala` (orchestrator): `ExtraNic`, `VmParams.extraNics`. Needs a recompile.
 - The hypervisor side of `mtu` is not set: a 9000 MTU only works if `br-net106` and its uplink
   already carry it.
