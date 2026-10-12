@@ -158,6 +158,9 @@ object horizon_single_node extends OrpheraClusterPlaybook:
        |# in the catalog, so until Nova is registered "/" -> /project/ is a 403.
        |# Land on the Identity dashboard, which needs only Keystone.
        |HORIZON_CONFIG['default_dashboard'] = 'identity'
+       |# "/" sends users to wherever user_home points (it ignores default_dashboard),
+       |# so name a concrete Identity panel.
+       |HORIZON_CONFIG['user_home'] = lambda user: '/identity/projects/'
        |
        |OPENSTACK_HOST = '$ksFqdn'
        |OPENSTACK_KEYSTONE_URL = '$ksUrl/v3'
