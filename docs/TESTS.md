@@ -472,7 +472,7 @@ Nova re-apply and the Horizon check above.
 Teardown: `orphera cluster-playbook manifests/neutron_teardown.scala` (not run; does not restore
 the address enp2s0 had).
 
-### K12. nova-compute on tst17 and tst18 - NOT YET RUN (branch `nova-compute`)
+### K12. nova-compute on tst17 and tst18 - PASSED (2026-10-12), 24/24 (branch `nova-compute`)
     manifests/test_nova_compute.sh 2>&1 | tee /tmp/nova-compute.log
 Expect: on each node orphera-nova-compute, orphera-neutron-openvswitch-agent and libvirtd active,
 /dev/kvm present, libvirt answers, enp2s0 has no IPv4 address and is a port of br-provider while
@@ -483,6 +483,11 @@ login prompt and a lease from 10.10.6.200-220, and everything is deleted again; 
 completes. `SKIP_BOOT=1` skips the boot, `CIRROS_IMAGE=/path` avoids the download.
 Prerequisites: Nova (tst14) and Neutron (tst19) healthy, no flat network left on `provider`, agents
 on tst17 and tst18, nested KVM on gs2 and host-passthrough on the VMs.
+Needed several fixes on the way, all in the playbook now: the libvirt socket (mode 0777, polkit off, a
+host user with the container nova uid 42436 so libvirtd can resolve the caller), `[glance] cafile` in
+nova.conf (the server create returned 500 DiscoveryFailure without it; re-apply Nova), os-vif over the
+OVS loopback manager `ptcp:6640` (the unix socket is root-only), `/dev` mounted into the container
+(console ptys). `utils/trace-dhcp.sh` captures DHCP on the three provider NICs when a lease is missing.
 Teardown: `orphera cluster-playbook manifests/nova_compute_teardown.scala` (not run).
 
 ## L. Node reassignment (2026-10-10) - steps 1-3 and 5 done; step 4: run-log test passed, Prometheus/Grafana stack on tst7 NOT YET RUN

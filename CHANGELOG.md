@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-### Added — nova-compute on tst17 and tst18 (DRAFT, not yet run)
+### Added — nova-compute on tst17 and tst18 (passed 24/24, 2026-10-12)
 - `manifests/nova_compute.scala`: nova-compute (Kolla image, podman/systemd) and the Neutron Open
   vSwitch agent on both compute VMs on gs2. libvirt and QEMU come from the host (apt); the
   container reaches libvirtd through /run/libvirt and shares /var/lib/nova at the same path.
@@ -22,6 +22,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   10.10.6.0/24 pool .200-.220, config drive, console login prompt and a DHCP lease), deleting
   everything afterwards; `SKIP_BOOT=1` skips the boot.
 - `manifests/build_openstack_stack.sh`: new step `compute` between `neutron` and `horizon`.
+- `utils/trace-dhcp.sh`: captures DHCP on the provider NIC of tst17, tst18 and tst19 while a test
+  instance boots, to show where packets get lost.
 - `nova_single_node.scala`: `[glance] cafile` in nova.conf. Without it the Nova API cannot get a
   token for the Glance call during a server create (Keystone's self-signed CA is not trusted by
   that session) and returns HTTP 500 (DiscoveryFailure). Re-apply Nova once on tst14.
