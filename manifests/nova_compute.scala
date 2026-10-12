@@ -694,12 +694,21 @@ def boot_test(path, keep=False):
         print('console shows the login prompt')
         # CirrOS 0.6 logs the lease as "eth0: leased 10.10.6.x for N seconds" (dhcpcd);
         # older images say "Lease of x obtained". Any console line carrying an address
-        # from the test subnet can only have come from DHCP.
+        # from the test subnet can only have come from DHCP. The login prompt appears
+        # a few seconds after boot, usually before dhcpcd has finished, so wait for it.
+        def leased():
+            s, p, _ = call('POST', NOVA + '/servers/%s/action' % server, {'os-getConsoleOutput': {'length': 300}}, token)
+            o = p.get('output', '') if s == 200 else ''
+            return (bool(re.search(r'10\.10\.6\.\d+', o)), o)
+        try:
+            out = wait_for(leased, 'DHCP lease on the console', 18, 5)
+        except SystemExit:
+            s, p, _ = call('POST', NOVA + '/servers/%s/action' % server, {'os-getConsoleOutput': {'length': 300}}, token)
+            o = p.get('output', '') if s == 200 else ''
+            net = [l for l in o.splitlines() if re.search(r'dhcp|lease|carrier|eth0|udhcp|offer', l, re.I)]
+            sys.stderr.write('no address from %s on the console after 90 s; network lines:\n%s\n' % (CIDR, '\n'.join(net[-25:])))
+            raise
         lease = [l for l in out.splitlines() if re.search(r'10\.10\.6\.\d+', l)]
-        if not lease:
-            net = [l for l in out.splitlines() if re.search(r'dhcp|lease|carrier|eth0|udhcp', l, re.I)]
-            sys.stderr.write('no address from %s on the console; network lines:\n%s\n' % (CIDR, '\n'.join(net[-25:])))
-            die('instance booted but did not get an address by DHCP')
         print(lease[0].strip())
         print('boot test passed')
     finally:
