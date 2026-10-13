@@ -39,6 +39,18 @@ run_on() { orphera run sh -c "$2" --nodes "$1" --timeout "${3:-120}" 2>&1; }
 # One line per node: none | up size=N | down seqno=N safe=0|1 uuid=U
 read -r -d '' STATE_SCRIPT <<'EOF'
 if [ ! -f /etc/mysql/mariadb.conf.d/60-galera.cnf ] || ! command -v mariadbd >/dev/null 2>&1; then echo "GALERA-STATE none"; exit 0; fi
+# Stop mariadb without waiting for it: a unit that is still looking for its peers ignores SIGTERM
+# and mariadb.service allows 900 s to stop. Ask, give it 10 s, then kill the main process; it is
+# only trying to start, serves nothing, and this is no worse than the crash that put it there.
+gone() { s=$(systemctl is-active mariadb); [ "$s" = "inactive" ] || [ "$s" = "failed" ]; }
+stop_bounded() {
+  systemctl stop --no-block mariadb 2>/dev/null
+  for i in 1 2 3 4 5 6 7 8 9 10; do gone && break; sleep 1; done
+  if ! gone; then systemctl kill --kill-whom=main -s KILL mariadb 2>/dev/null; fi
+  for i in 1 2 3 4 5 6 7 8 9 10; do gone && break; sleep 1; done
+  systemctl reset-failed mariadb 2>/dev/null
+  gone
+}
 st=$(systemctl is-active mariadb)
 if [ "$st" = "active" ]; then
   size=$(mariadb -N -e "SHOW STATUS LIKE 'wsrep_cluster_size'" 2>/dev/null | awk '{print $2}')
@@ -47,7 +59,7 @@ if [ "$st" = "active" ]; then
   if [ "${size:-0}" = "0" ] && [ "$wsrep_on" = "1" ] && { [ "$comment" = "Initialized" ] || [ "$comment" = "Disconnected" ]; }; then
     # A failed join (for example an IST error after the SST) leaves mariadbd running with the
     # Galera layer closed: active, but in no cluster. It needs a restart, so treat it as down.
-    if [ "$STOP_LOOPS" = "1" ]; then systemctl stop mariadb 2>/dev/null; st=stopped
+    if [ "$STOP_LOOPS" = "1" ]; then stop_bounded || { echo "could not stop mariadb" >&2; exit 1; }; st=stopped
     else echo "GALERA-STATE down seqno=-1 safe=0 uuid=none stuck=$comment"; exit 0; fi
   else
     echo "GALERA-STATE up size=${size:-0}"; exit 0
@@ -56,7 +68,7 @@ fi
 if [ "$st" = "activating" ] || [ "$st" = "deactivating" ] || [ "$st" = "failed" ]; then
   # A node that cannot find its peers is started by systemd over and over (Restart=on-abort).
   # Reading its position or bootstrapping while that goes on races with the restarts.
-  if [ "$STOP_LOOPS" = "1" ]; then systemctl stop mariadb 2>/dev/null; systemctl reset-failed mariadb 2>/dev/null
+  if [ "$STOP_LOOPS" = "1" ]; then stop_bounded || { echo "could not stop mariadb" >&2; exit 1; }
   else echo "GALERA-STATE down seqno=-1 safe=0 uuid=none restarting=$st"; exit 0; fi
 fi
 f=/var/lib/mysql/grastate.dat
@@ -82,9 +94,14 @@ EOF
 declare -A KIND SIZE SEQ SAFE UUID
 STOP_LOOPS=1; [ -n "$CHECK" ] && STOP_LOOPS=0
 for n in "${NODES[@]}"; do
-  line=$(run_on "$n" "STOP_LOOPS=$STOP_LOOPS
-$STATE_SCRIPT" | grep -E "^\[$n\] GALERA-STATE " | tail -n 1 | sed "s/^\[$n\] GALERA-STATE //")
-  [ -n "$line" ] || { log "no answer from $n (is its agent running?)"; exit 1; }
+  out=$(run_on "$n" "STOP_LOOPS=$STOP_LOOPS
+$STATE_SCRIPT")
+  line=$(grep -E "^\[$n\] GALERA-STATE " <<<"$out" | tail -n 1 | sed "s/^\[$n\] GALERA-STATE //")
+  if [ -z "$line" ]; then
+    log "no state from $n (agent not answering, or MariaDB could not be stopped). Last output:"
+    grep -v '^\[.*\] Running:' <<<"$out" | tail -n 6 | sed 's/^/    /'
+    exit 1
+  fi
   KIND[$n]=${line%% *}
   SIZE[$n]=$(sed -n 's/.*size=\([0-9]*\).*/\1/p' <<<"$line")
   SEQ[$n]=$(sed -n 's/.*seqno=\(-\{0,1\}[0-9]*\).*/\1/p' <<<"$line")
