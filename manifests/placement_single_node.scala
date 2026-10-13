@@ -2,6 +2,7 @@
 
 import orphera.orchestrator.*
 import orphera.orchestrator.ClusterPlaybookDsl.*
+import orphera.orchestrator.kolla.*
 
 // DRAFT. OpenStack Placement (resource inventory and allocation service, which
 // Nova needs), one container, Kolla image under podman. Modelled on
@@ -45,10 +46,7 @@ object placement_single_node extends OrpheraClusterPlaybook:
 
   // Keep in step with keystone_single_node.scala / kolla_cache.scala.
   private val registry = "quay.io/openstack.kolla"
-  private val release = "2025.1"
-  private val baseTag = "ubuntu-noble"
   private val cacheHostPort = "tst9.ljalbinson.com:5000"
-  private val apiImage = s"$registry/placement-api:$release-$baseTag"
 
   private val adminPassword = "orphera-test-keystone-admin-password"
   private val dbName = "placement"
@@ -60,6 +58,21 @@ object placement_single_node extends OrpheraClusterPlaybook:
   private val srcDir = "/etc/kolla/placement"
   private val logDir = "/var/log/kolla/placement"
   private val stateDir = "/var/lib/orphera/placement"
+
+  // The container as data: the unit file text and the start task come from it
+  // (orchestrator/.../kolla/Container.scala), and are checked by ContainerCheck.
+  // Defined after confRoot and logDir, which it reads; a val used before its
+  // definition is null in an object.
+  private val placementApi = Container(
+    name = "placement-api",
+    image = Image("placement-api", Release.R2025_1, Base.UbuntuNoble, registry),
+    mounts = List(
+      Mount(s"$confRoot/placement-api", "/var/lib/kolla/config_files"),
+      Mount(logDir, "/var/log/kolla/placement", Access.ReadWrite)
+    ),
+    env = List("KOLLA_CONFIG_STRATEGY" -> "COPY_ALWAYS")
+  )
+  private val apiImage = placementApi.image.ref
   private val caDir = "/etc/kolla/placement-ca"
   private val ksUrl = s"https://$ksFqdn:5000"
 
@@ -87,7 +100,7 @@ object placement_single_node extends OrpheraClusterPlaybook:
        |echo "podman will try $cacheHostPort before quay.io"""".stripMargin
 
   private val pullScript =
-    s"""podman pull $apiImage || { echo "could not pull $apiImage - check registry/release/baseTag at the top of placement_single_node.scala" >&2; exit 1; }
+    s"""podman pull $apiImage || { echo "could not pull $apiImage - check the Image(...) in placementApi in placement_single_node.scala" >&2; exit 1; }
        |echo "image ready"""".stripMargin
 
   // Same method as cinder_single_node.scala / glance_single_node.scala: the last
@@ -190,35 +203,6 @@ object placement_single_node extends OrpheraClusterPlaybook:
     s"""set -e
        |podman run --rm --network host --user root --entrypoint placement-manage -v $srcDir/placement.conf:/etc/placement/placement.conf:ro,z -v $logDir:/var/log/kolla/placement:z $apiImage db sync
        |echo "placement database synced"""".stripMargin
-
-  private val unitScript =
-    s"""set -e
-       |cat > /etc/systemd/system/orphera-placement-api.service <<'UNIT'
-       |[Unit]
-       |Description=placement-api (Kolla container) managed by Orphera
-       |After=network-online.target
-       |Wants=network-online.target
-       |
-       |[Service]
-       |ExecStartPre=-/usr/bin/podman rm -f placement-api
-       |ExecStart=/usr/bin/podman run --rm --name placement-api --network host -e KOLLA_CONFIG_STRATEGY=COPY_ALWAYS -v $confRoot/placement-api:/var/lib/kolla/config_files:ro,z -v $logDir:/var/log/kolla/placement:z $apiImage
-       |ExecStop=/usr/bin/podman stop -t 30 placement-api
-       |Restart=on-failure
-       |RestartSec=5
-       |TimeoutStartSec=300
-       |
-       |[Install]
-       |WantedBy=multi-user.target
-       |UNIT
-       |systemctl daemon-reload
-       |systemctl enable orphera-placement-api
-       |systemctl restart orphera-placement-api
-       |sleep 8
-       |if ! systemctl is-active --quiet orphera-placement-api; then
-       |  echo "orphera-placement-api failed to start - see 'journalctl -xeu orphera-placement-api' and $logDir" >&2
-       |  exit 1
-       |fi
-       |echo "placement-api running"""".stripMargin
 
   // Standard-library Python, as in the other service playbooks. Plain string
   // filled in with replace(). Subcommands:
@@ -436,9 +420,8 @@ if __name__ == '__main__':
         .task("write the Placement API helper")(
           Task.RunCommand(List("sh", "-c", helperScript))
         )
-        .task("start placement-api")(
-          Task.RunCommand(List("sh", "-c", unitScript), timeoutSeconds = 300)
-        )
+        .task(s"write ${placementApi.unitName}")(placementApi.writeUnit)
+        .task(s"start ${placementApi.unitName}")(placementApi.start)
         .task("register Placement in Keystone")(
           Task.RunCommand(
             List("sh", "-c", "/usr/local/sbin/orphera-placement-api register"),
