@@ -118,6 +118,17 @@ if [ "$up" -eq 3 ] && [ "${SIZE[tst3]}" = 3 ] && [ "${SIZE[tst4]}" = 3 ] && [ "$
   log "all three nodes are in the cluster (size 3); nothing to do"; exit 0
 fi
 
+if [ "$up" -ge 2 ] && [ "$(for n in "${NODES[@]}"; do [ "${KIND[$n]}" = up ] && echo "${SIZE[$n]}"; done | sort -u | wc -l)" -gt 1 ]; then
+  log "SPLIT BRAIN: the running nodes disagree about the cluster size, so they are in separate components:"
+  for n in "${NODES[@]}"; do [ "${KIND[$n]}" = up ] && log "  $n sees $(printf '%s' "${SIZE[$n]}") member(s)"; done
+  log "Not touching it. Compare 'SHOW STATUS LIKE wsrep_last_committed' on each side, keep the side with the newer data,"
+  log "then on each node of the other side: systemctl stop mariadb; rm /var/lib/mysql/grastate.dat; systemctl start mariadb"
+  exit 1
+fi
+if [ "$up" -eq 3 ]; then
+  log "all three nodes are running but report different sizes; check 'SHOW STATUS LIKE wsrep_%'"; exit 1
+fi
+
 if [ "$up" -gt 0 ]; then
   log "$up node(s) are in a running cluster; starting MariaDB on the others so they rejoin"
   [ -n "$CHECK" ] && exit 0
