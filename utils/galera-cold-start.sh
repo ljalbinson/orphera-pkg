@@ -39,9 +39,16 @@ run_on() { orphera run sh -c "$2" --nodes "$1" --timeout "${3:-120}" 2>&1; }
 # One line per node: none | up size=N | down seqno=N safe=0|1 uuid=U
 read -r -d '' STATE_SCRIPT <<'EOF'
 if [ ! -f /etc/mysql/mariadb.conf.d/60-galera.cnf ] || ! command -v mariadbd >/dev/null 2>&1; then echo "GALERA-STATE none"; exit 0; fi
-if systemctl is-active --quiet mariadb; then
+st=$(systemctl is-active mariadb)
+if [ "$st" = "active" ]; then
   size=$(mariadb -N -e "SHOW STATUS LIKE 'wsrep_cluster_size'" 2>/dev/null | awk '{print $2}')
   echo "GALERA-STATE up size=${size:-0}"; exit 0
+fi
+if [ "$st" = "activating" ] || [ "$st" = "deactivating" ] || [ "$st" = "failed" ]; then
+  # A node that cannot find its peers is started by systemd over and over (Restart=on-abort).
+  # Reading its position or bootstrapping while that goes on races with the restarts.
+  if [ "$STOP_LOOPS" = "1" ]; then systemctl stop mariadb 2>/dev/null; systemctl reset-failed mariadb 2>/dev/null
+  else echo "GALERA-STATE down seqno=-1 safe=0 uuid=none restarting=$st"; exit 0; fi
 fi
 f=/var/lib/mysql/grastate.dat
 uuid=none; seq=-1; safe=0
@@ -64,8 +71,10 @@ if [ "$(q wsrep_cluster_size)" = "3" ] && [ "$(q wsrep_cluster_status)" = "Prima
 EOF
 
 declare -A KIND SIZE SEQ SAFE UUID
+STOP_LOOPS=1; [ -n "$CHECK" ] && STOP_LOOPS=0
 for n in "${NODES[@]}"; do
-  line=$(run_on "$n" "$STATE_SCRIPT" | grep -E "^\[$n\] GALERA-STATE " | tail -n 1 | sed "s/^\[$n\] GALERA-STATE //")
+  line=$(run_on "$n" "STOP_LOOPS=$STOP_LOOPS
+$STATE_SCRIPT" | grep -E "^\[$n\] GALERA-STATE " | tail -n 1 | sed "s/^\[$n\] GALERA-STATE //")
   [ -n "$line" ] || { log "no answer from $n (is its agent running?)"; exit 1; }
   KIND[$n]=${line%% *}
   SIZE[$n]=$(sed -n 's/.*size=\([0-9]*\).*/\1/p' <<<"$line")
@@ -77,11 +86,18 @@ done
 
 healthy() { run_on "$1" "$HEALTH_SCRIPT" | grep -q "^\[$1\] GALERA-HEALTH ok"; }
 wait_healthy() {
-  local i n ok
+  local i n ok bad
+  log "waiting for size 3, Primary, ready on every node (up to 3 minutes)"
   for i in $(seq 1 36); do
-    ok=1; for n in "${NODES[@]}"; do healthy "$n" || { ok=0; break; }; done
+    ok=1; bad=""
+    for n in "${NODES[@]}"; do healthy "$n" || { ok=0; bad="$bad $n"; }; done
     [ "$ok" = 1 ] && return 0
+    [ $((i % 6)) -eq 0 ] && log "  still waiting ($((i * 5))s): not yet healthy:$bad"
     sleep 5
+  done
+  log "not healthy after 3 minutes; wsrep state per node:"
+  for n in "${NODES[@]}"; do
+    run_on "$n" "echo \"unit: \$(systemctl is-active mariadb)\"; mariadb -N -e \"SHOW STATUS WHERE Variable_name IN ('wsrep_cluster_size','wsrep_cluster_status','wsrep_ready','wsrep_local_state_comment')\" 2>&1 | tr '\\t' '='" | sed 's/^/    /'
   done
   return 1
 }
