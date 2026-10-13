@@ -502,15 +502,17 @@ yet. Passed: compute, horizon, clients, smoke (network create/delete skipped bec
 already exists) and boot (CirrOS took 10.10.6.214 and was deleted). Not yet run: the other steps in
 one go, and a from-scratch rebuild.
 
-### K14. Galera cold start - NOT YET RUN
+### K14. Galera cold start - clean-stop path PASSED (2026-10-13); crash and partial paths not yet run
     utils/galera-cold-start.sh --check      # reports what it would do
     utils/galera-cold-start.sh              # does it
-Test: stop MariaDB on tst3, tst4 and tst5 (`orphera run sh -c "systemctl stop mariadb" --nodes
-tst3,tst4,tst5`, or `orphera shutdown` the three VMs and start them again). Expect: it prints each
-node's position, picks the highest seqno, bootstraps there, starts the other two and ends with
-"cluster healthy: size 3". Also try it with one node stopped (the other two keep running: it should
-only restart that node) and with the cluster healthy (it should do nothing). The decision logic has
-been run against a fake `orphera` only.
+Run: healthy cluster (`--check`: "nothing to do"); `systemctl stop mariadb` on tst3, tst4, tst5;
+`--check` (all three at seqno 19388, "would bootstrap from tst3"); the real run bootstrapped tst3,
+joined tst4 and tst5 and reported size 3, Primary, ready in 17 s.
+Not yet run: (1) an unclean stop, where `grastate.dat` says `seqno: -1` and the position comes from
+`mariadbd --wsrep-recover` (try `orphera run sh -c "systemctl kill -s KILL mariadb" --nodes tst3,tst4,tst5`
+or `virsh destroy` the three VMs, then start them); (2) one node stopped while two run (it should only
+start that node); (3) the preflight call from `build_openstack_stack.sh` after a full power-off.
+The refusal cases (no position, differing UUIDs) and `--bootstrap` were run against a fake `orphera` only.
 
 ## L. Node reassignment (2026-10-10) - steps 1-3 and 5 done; step 4: run-log test passed, Prometheus/Grafana stack on tst7 NOT YET RUN
 New roles: tst0-tst2 Ceph; tst3-tst5 Galera + haproxy + keepalived (VIP

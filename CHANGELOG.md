@@ -15,8 +15,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   node reports a position or the cluster UUIDs differ (`--bootstrap <node>` overrides, `--check`
   reports only). `build_openstack_stack.sh` runs it in its preflight. A shell script, not a playbook,
   because a playbook cannot pass one node's output to a decision about another (no capture of
-  command output; `Task.SetFact` takes literals). Decision logic tested against a fake `orphera`;
-  not yet run on the fleet.
+  command output; `Task.SetFact` takes literals). Clean-stop path passed on the fleet (2026-10-13);
+  the unclean-stop (`--wsrep-recover`) and partial paths are not yet run.
 
 ### Fixed — the CirrOS boot test no longer relies on the guest console for the DHCP lease
 - The console cannot show the lease: CirrOS prints its network debug a second after dhcpcd starts and
