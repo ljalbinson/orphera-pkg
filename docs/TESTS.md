@@ -479,8 +479,9 @@ Expect: on each node orphera-nova-compute, orphera-neutron-openvswitch-agent and
 enp1s0 keeps its address; both nova-compute services up and both OVS agents alive through the APIs;
 tst17 and tst18 listed as hypervisors; Nova and Neutron still healthy; a CirrOS instance boots
 (image uploaded to Glance, flat provider network with DHCP, config drive), its console shows the
-login prompt and a lease from 10.10.6.200-220, and everything is deleted again; second run
-completes. `SKIP_BOOT=1` skips the boot, `CIRROS_IMAGE=/path` avoids the download.
+login prompt, its Neutron port goes ACTIVE and it answers ARP from the DHCP namespace on tst19
+for an address in 10.10.6.200-220 (`utils/check-guest-dhcp.sh`; the console cannot show the lease),
+and everything is deleted again; second run completes. `SKIP_BOOT=1` skips the boot, `CIRROS_IMAGE=/path` avoids the download.
 Prerequisites: Nova (tst14) and Neutron (tst19) healthy, no flat network left on `provider`, agents
 on tst17 and tst18, nested KVM on gs2 and host-passthrough on the VMs.
 Needed several fixes on the way, all in the playbook now: the libvirt socket (mode 0777, polkit off, a
@@ -489,6 +490,17 @@ nova.conf (the server create returned 500 DiscoveryFailure without it; re-apply 
 OVS loopback manager `ptcp:6640` (the unix socket is root-only), `/dev` mounted into the container
 (console ptys). `utils/trace-dhcp.sh` captures DHCP on the three provider NICs when a lease is missing.
 Teardown: `orphera cluster-playbook manifests/nova_compute_teardown.scala` (not run).
+The lease check was changed on 2026-10-13: after a cold start of the fleet the console-based check
+failed although the guest held its address (DHCP counters and ARP showed it). Not re-run as a whole;
+see K13 for the run that proved the new check.
+
+### K13. Master script on the existing stack, steps compute to boot - PASSED (2026-10-13), 9/9
+    manifests/build_openstack_stack.sh --from compute
+After a full power-off of the fleet. Cold-start notes: Galera had to be bootstrapped by hand
+(`safe_to_bootstrap`, `galera_new_cluster` on one node, then start the others); no playbook does this
+yet. Passed: compute, horizon, clients, smoke (network create/delete skipped because a flat network
+already exists) and boot (CirrOS took 10.10.6.214 and was deleted). Not yet run: the other steps in
+one go, and a from-scratch rebuild.
 
 ## L. Node reassignment (2026-10-10) - steps 1-3 and 5 done; step 4: run-log test passed, Prometheus/Grafana stack on tst7 NOT YET RUN
 New roles: tst0-tst2 Ceph; tst3-tst5 Galera + haproxy + keepalived (VIP

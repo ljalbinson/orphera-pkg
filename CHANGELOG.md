@@ -16,7 +16,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the DHCP namespace). `test_nova_compute.sh` and `build_openstack_stack.sh` boot with `--keep`, run
   that check, then `boot-cleanup`. Needs `nova_compute.scala` re-applied to redeploy the helper.
 
-### Changed — master build script covers all of OpenStack (not yet run end to end)
+### Changed — master build script covers all of OpenStack (steps compute to boot passed on the existing stack, 2026-10-13)
 - `manifests/build_openstack_stack.sh`: new last step `boot` (downloads CirrOS if needed, boots an
   instance through the compute helper, checks the guest took its DHCP address, and
   deletes everything; `CIRROS_IMAGE=/path` avoids the download); the network create/delete check in
