@@ -42,7 +42,16 @@ if [ ! -f /etc/mysql/mariadb.conf.d/60-galera.cnf ] || ! command -v mariadbd >/d
 st=$(systemctl is-active mariadb)
 if [ "$st" = "active" ]; then
   size=$(mariadb -N -e "SHOW STATUS LIKE 'wsrep_cluster_size'" 2>/dev/null | awk '{print $2}')
-  echo "GALERA-STATE up size=${size:-0}"; exit 0
+  comment=$(mariadb -N -e "SHOW STATUS LIKE 'wsrep_local_state_comment'" 2>/dev/null | awk '{print $2}')
+  wsrep_on=$(mariadb -N -e "SELECT @@global.wsrep_on" 2>/dev/null)
+  if [ "${size:-0}" = "0" ] && [ "$wsrep_on" = "1" ] && { [ "$comment" = "Initialized" ] || [ "$comment" = "Disconnected" ]; }; then
+    # A failed join (for example an IST error after the SST) leaves mariadbd running with the
+    # Galera layer closed: active, but in no cluster. It needs a restart, so treat it as down.
+    if [ "$STOP_LOOPS" = "1" ]; then systemctl stop mariadb 2>/dev/null; st=stopped
+    else echo "GALERA-STATE down seqno=-1 safe=0 uuid=none stuck=$comment"; exit 0; fi
+  else
+    echo "GALERA-STATE up size=${size:-0}"; exit 0
+  fi
 fi
 if [ "$st" = "activating" ] || [ "$st" = "deactivating" ] || [ "$st" = "failed" ]; then
   # A node that cannot find its peers is started by systemd over and over (Restart=on-abort).
