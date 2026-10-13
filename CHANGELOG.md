@@ -6,9 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed — the CirrOS boot test no longer relies on the guest console for the DHCP lease
+- The console cannot show the lease: CirrOS prints its network debug a second after dhcpcd starts and
+  syslog never reaches the console, so a lease granted a moment later is missing. A cold-started stack
+  failed the test although the guest had its address (the instance answered ARP for it and the OVS
+  counters showed the DHCP exchange). `orphera-compute-api boot-test` now waits for the login prompt
+  and for the Neutron port to go ACTIVE and prints `instance ready: ip=.. mac=.. network=..`;
+  new `utils/check-guest-dhcp.sh` proves the lease from tst19 (the guest answers ARP for its address in
+  the DHCP namespace). `test_nova_compute.sh` and `build_openstack_stack.sh` boot with `--keep`, run
+  that check, then `boot-cleanup`. Needs `nova_compute.scala` re-applied to redeploy the helper.
+
 ### Changed — master build script covers all of OpenStack (not yet run end to end)
 - `manifests/build_openstack_stack.sh`: new last step `boot` (downloads CirrOS if needed, boots an
-  instance through the compute helper, checks the console for the login prompt and a DHCP lease, and
+  instance through the compute helper, checks the guest took its DHCP address, and
   deletes everything; `CIRROS_IMAGE=/path` avoids the download); the network create/delete check in
   `smoke` is skipped, not failed, when a flat provider network already exists; the header no longer
   says there is no compute node. Together with the earlier `compute` step the plan is now

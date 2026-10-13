@@ -491,8 +491,10 @@ object nova_compute extends OrpheraClusterPlaybook:
   //   boot-cleanup           delete what an earlier boot-test --keep left behind
   //   boot-test <qcow2-file> [--keep]  upload an image, create a flavor and a flat provider
   //                           network with DHCP, boot an instance with a config drive,
-  //                           wait for the console to show the login prompt and a DHCP
-  //                           lease, then delete everything it created
+  //                           wait for the console to show the login prompt and for the
+  //                           Neutron port to go ACTIVE, print "instance ready: ip=.. mac=..
+  //                           network=..", then delete everything it created unless --keep.
+  //                           The callers prove the lease with utils/check-guest-dhcp.sh
   private val apiHelperPython =
     """#!/usr/bin/python3
 import json, re, ssl, sys, time, urllib.request, urllib.error
@@ -692,25 +694,17 @@ def boot_test(path, keep=False):
             return ('login:' in out, out)
         out = wait_for(console, 'login prompt on the console', 48, 5)
         print('console shows the login prompt')
-        # CirrOS 0.6 logs the lease as "eth0: leased 10.10.6.x for N seconds" (dhcpcd);
-        # older images say "Lease of x obtained". Any console line carrying an address
-        # from the test subnet can only have come from DHCP. The login prompt appears
-        # a few seconds after boot, usually before dhcpcd has finished, so wait for it.
-        def leased():
-            s, p, _ = call('POST', NOVA + '/servers/%s/action' % server, {'os-getConsoleOutput': {'length': 5000}}, token)
-            o = p.get('output', '') if s == 200 else ''
-            return (bool(re.search(r'10\.10\.6\.\d+', o)), o)
-        try:
-            out = wait_for(leased, 'DHCP lease on the console', 18, 5)
-        except SystemExit:
-            s, p, _ = call('POST', NOVA + '/servers/%s/action' % server, {'os-getConsoleOutput': {'length': 5000}}, token)
-            o = p.get('output', '') if s == 200 else ''
-            net = [l for l in o.splitlines() if re.search(r'dhcp|lease|carrier|eth0|udhcp|offer', l, re.I)]
-            sys.stderr.write('no address from %s on the console after 90 s; network lines:\n%s\n' % (CIDR, '\n'.join(net[-25:])))
-            raise
-        lease = [l for l in out.splitlines() if re.search(r'10\.10\.6\.\d+', l)]
-        print(lease[0].strip())
-        print('boot test passed')
+        # The console cannot prove DHCP: CirrOS prints its network debug within a second of
+        # starting dhcpcd and syslog never reaches the console, so a lease granted a moment
+        # later is not shown there. Report what Neutron knows (the port is ACTIVE, which
+        # address it holds) and let the caller prove the guest took the address: it answers
+        # ARP for it from the DHCP namespace (utils/check-guest-dhcp.sh).
+        def port_active():
+            s, p, _ = call('GET', NEUTRON + '/v2.0/ports?device_id=' + server, None, token)
+            ports = p.get('ports', []) if s == 200 else []
+            return (bool(ports) and all(x.get('status') == 'ACTIVE' for x in ports), ports)
+        ports = wait_for(port_active, 'Neutron port ACTIVE', 24, 5)
+        print('instance ready: ip=%s mac=%s network=%s' % (ports[0]['fixed_ips'][0]['ip_address'], ports[0]['mac_address'], net))
     finally:
         cleanup()
         sys.stdout.flush()

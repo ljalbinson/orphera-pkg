@@ -110,9 +110,20 @@ if [ -z "${SKIP_BOOT:-}" ]; then
     if orphera copy "$CIRROS_LOCAL" /root/cirros-boot-test.qcow2 --owner root --group root --mode 0644 --nodes tst17 >/dev/null 2>&1; then
       run_on tst17 "sudo $HELPER boot-cleanup" >/dev/null
       log "booting a CirrOS instance (can take a few minutes)"
-      OUT=$(orphera run sh -c "sudo $HELPER boot-test /root/cirros-boot-test.qcow2${KEEP_BOOT:+ --keep}" --nodes tst17 --timeout 900 2>&1)
-      assert_contains "an instance boots on KVM, gets a DHCP lease and is cleaned up" "boot test passed" "$OUT"
-      case "$OUT" in *"boot test passed"*) ;; *) printf '%s\n' "$OUT" | sed 's/^/    /' ;; esac
+      OUT=$(orphera run sh -c "sudo $HELPER boot-test /root/cirros-boot-test.qcow2 --keep" --nodes tst17 --timeout 900 2>&1)
+      assert_contains "an instance boots on KVM and its Neutron port goes ACTIVE" "instance ready:" "$OUT"
+      case "$OUT" in
+        *"instance ready:"*)
+          READY=$(printf '%s\n' "$OUT" | grep -o 'instance ready: .*' | head -n 1)
+          G_IP=$(printf '%s' "$READY" | sed -n 's/.*ip=\([^ ]*\).*/\1/p')
+          G_MAC=$(printf '%s' "$READY" | sed -n 's/.*mac=\([^ ]*\).*/\1/p')
+          G_NET=$(printf '%s' "$READY" | sed -n 's/.*network=\([^ ]*\).*/\1/p')
+          CHK=$(utils/check-guest-dhcp.sh "$G_IP" "$G_MAC" "$G_NET")
+          assert_contains "the guest took its DHCP address ($G_IP) and answers ARP" "answers ARP" "$CHK"
+          case "$CHK" in *"answers ARP"*) ;; *) printf '%s\n' "$CHK" | sed 's/^/    /' ;; esac ;;
+        *) printf '%s\n' "$OUT" | sed 's/^/    /' ;;
+      esac
+      if [ -z "${KEEP_BOOT:-}" ]; then run_on tst17 "sudo $HELPER boot-cleanup" >/dev/null; fi
       run_on tst17 "rm -f /root/cirros-boot-test.qcow2" >/dev/null
     else
       log "FAIL: could not copy the CirrOS image to tst17"; FAIL=$((FAIL + 1))

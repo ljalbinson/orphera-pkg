@@ -327,7 +327,7 @@ step_smoke() {
 # with DHCP (10.10.6.0/24, pool .200-.220), waits for the login prompt and a lease on the
 # console, and deletes everything again (the helper on tst17 does the work).
 step_boot() {
-  local img="${CIRROS_IMAGE:-/tmp/cirros-0.6.2-x86_64-disk.img}" out
+  local img="${CIRROS_IMAGE:-/tmp/cirros-0.6.2-x86_64-disk.img}" out ready g_ip g_mac g_net chk
   if [ ! -s "$img" ]; then
     log "downloading CirrOS to $img"
     curl -fL -o "$img" "https://download.cirros-cloud.net/0.6.2/cirros-0.6.2-x86_64-disk.img" || { rm -f "$img"; die "could not download CirrOS (set CIRROS_IMAGE=/path/to/cirros.qcow2)"; }
@@ -337,13 +337,24 @@ step_boot() {
   if ! orphera copy "$img" /root/cirros-boot-test.qcow2 --owner root --group root --mode 0644 --nodes tst17 >/dev/null 2>&1; then
     die "could not copy the CirrOS image to tst17"
   fi
-  out=$(orphera run sh -c "sudo /usr/local/sbin/orphera-compute-api boot-test /root/cirros-boot-test.qcow2" --nodes tst17 --timeout 900 2>&1)
+  out=$(orphera run sh -c "sudo /usr/local/sbin/orphera-compute-api boot-test /root/cirros-boot-test.qcow2 --keep" --nodes tst17 --timeout 900 2>&1)
   run_on tst17 "rm -f /root/cirros-boot-test.qcow2" >/dev/null
-  if contains "boot test passed" "$out"; then
-    log "PASS: an instance booted on KVM, got a DHCP lease and was deleted"; PASS=$((PASS + 1))
-  else
+  if ! contains "instance ready:" "$out"; then
     printf '%s\n' "$out" | tail -n 25 | sed 's/^/    /'
-    log "FAIL: the CirrOS boot test"; FAIL=$((FAIL + 1))
+    run_on tst17 "sudo /usr/local/sbin/orphera-compute-api boot-cleanup" >/dev/null
+    log "FAIL: the CirrOS boot test (the instance did not boot or its port did not go ACTIVE)"; FAIL=$((FAIL + 1)); return 0
+  fi
+  ready=$(printf '%s\n' "$out" | grep -o 'instance ready: .*' | head -n 1)
+  g_ip=$(printf '%s' "$ready" | sed -n 's/.*ip=\([^ ]*\).*/\1/p')
+  g_mac=$(printf '%s' "$ready" | sed -n 's/.*mac=\([^ ]*\).*/\1/p')
+  g_net=$(printf '%s' "$ready" | sed -n 's/.*network=\([^ ]*\).*/\1/p')
+  chk=$(utils/check-guest-dhcp.sh "$g_ip" "$g_mac" "$g_net")
+  run_on tst17 "sudo /usr/local/sbin/orphera-compute-api boot-cleanup" >/dev/null
+  if contains "answers ARP" "$chk"; then
+    log "PASS: an instance booted on KVM, took DHCP address $g_ip and was deleted"; PASS=$((PASS + 1))
+  else
+    printf '%s\n' "$chk" | sed 's/^/    /'
+    log "FAIL: the CirrOS guest did not take its DHCP address"; FAIL=$((FAIL + 1))
   fi
 }
 
