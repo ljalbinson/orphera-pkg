@@ -525,6 +525,17 @@ Not yet run: one node stopped while two run (it should only start that one); the
 `build_openstack_stack.sh` after a full power-off. The refusal cases (no position, differing UUIDs) and
 `--bootstrap` were run against a fake `orphera` only.
 
+### K15. OpenStack from scratch - NOT YET RUN
+    manifests/rebuild_openstack_from_scratch.sh --dry-run     # the plan, changes nothing
+    manifests/rebuild_openstack_from_scratch.sh --tests --wordpress 2>&1 | tee /tmp/rebuild.log
+Destroys tst0-tst6, tst10, tst13, tst14 and tst17-tst19 and rebuilds OpenStack on fresh VMs. Needs: an
+`orphera-agent_*_amd64.deb` in the repository root, the caches (tst9, tst11, tst12) running, the agents on
+gs1, gs2, gs3 and st0 answering. Expect: step 1 builds the 13 VMs in parallel (bootstrap, DNS,
+dist-upgrade, packages), step 2 is `build_openstack_stack.sh` end to end and finishes with the CirrOS
+boot, `--tests` passes every test script. Never run: neither the parallel VM script since the provisioning
+playbook was renamed (fixed in the same change), nor the master script from its first step. The dry run
+and the per-hypervisor detection were run against a fake `orphera` only.
+
 ## L. Node reassignment (2026-10-10) - steps 1-3 and 5 done; step 4: run-log test passed, Prometheus/Grafana stack on tst7 NOT YET RUN
 New roles: tst0-tst2 Ceph; tst3-tst5 Galera + haproxy + keepalived (VIP
 10.10.5.100); tst6 Keystone; tst7 WordPress and Prometheus/Grafana; tst8 Rocky;
