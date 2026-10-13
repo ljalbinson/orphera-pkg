@@ -159,6 +159,11 @@ preflight() {
     if contains "$n" "$out"; then log "  $n ok"; else log "  $n NOT answering: $out"; bad="$bad $n"; fi
   done
   [ -z "$bad" ] || die "no agent answer from:$bad (inventory entry, VM up, agent running?)"
+  # After a power-off of the whole fleet MariaDB is down on all three Galera nodes and every
+  # OpenStack service fails with 500s. This restarts the cluster from the node with the newest
+  # data; it does nothing when Galera is healthy or not built yet.
+  log "preflight: the Galera cluster must be up (recovered here after a full stop)"
+  utils/galera-cold-start.sh || die "the Galera cluster is down and could not be recovered automatically (see above; utils/galera-cold-start.sh --help)"
 }
 
 # ---- steps ----------------------------------------------------------------

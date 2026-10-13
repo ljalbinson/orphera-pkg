@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — Galera cold start: `utils/galera-cold-start.sh`
+- After a power-off of the whole fleet MariaDB is down on tst3-tst5 and every OpenStack service
+  returns 500. The script reads each node's last committed position (`grastate.dat`, or
+  `mariadbd --wsrep-recover` after an unclean stop), bootstraps from the node with the highest
+  seqno, starts the others and waits for size 3. It restarts only the stopped nodes when part of the
+  cluster is up, does nothing when Galera is healthy or not built yet, and refuses to guess when no
+  node reports a position or the cluster UUIDs differ (`--bootstrap <node>` overrides, `--check`
+  reports only). `build_openstack_stack.sh` runs it in its preflight. A shell script, not a playbook,
+  because a playbook cannot pass one node's output to a decision about another (no capture of
+  command output; `Task.SetFact` takes literals). Decision logic tested against a fake `orphera`;
+  not yet run on the fleet.
+
 ### Fixed — the CirrOS boot test no longer relies on the guest console for the DHCP lease
 - The console cannot show the lease: CirrOS prints its network debug a second after dhcpcd starts and
   syslog never reaches the console, so a lease granted a moment later is missing. A cold-started stack

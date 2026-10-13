@@ -1369,7 +1369,12 @@ Worth knowing:
   inspection. Teardown: `nova_compute_teardown.scala`.
 - **Utilities** in `utils/`: `list-vms.sh [hv...]` lists every VM on each hypervisor with state,
   vCPUs and memory; `trace-dhcp.sh` captures DHCP on the provider NICs of tst17, tst18 and tst19
-  while a test instance boots, to show where packets are lost.
+  while a test instance boots, to show where packets are lost; `check-guest-dhcp.sh <ip> <mac>
+  <network-id>` proves a guest took its address (it answers ARP from the DHCP namespace on tst19;
+  the guest console cannot show a late lease); `galera-cold-start.sh` brings the Galera cluster back
+  after every node was stopped, bootstrapping from the node with the highest committed seqno
+  (`--check` to see what it would do, `--bootstrap <node>` to override). The master build script
+  runs it in its preflight.
 
 ## Example: parallel network throughput test (iperf3)
 
