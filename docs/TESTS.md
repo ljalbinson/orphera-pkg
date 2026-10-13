@@ -502,17 +502,28 @@ yet. Passed: compute, horizon, clients, smoke (network create/delete skipped bec
 already exists) and boot (CirrOS took 10.10.6.214 and was deleted). Not yet run: the other steps in
 one go, and a from-scratch rebuild.
 
-### K14. Galera cold start - clean-stop path PASSED (2026-10-13); crash and partial paths not yet run
+### K14. Galera cold start - PASSED (2026-10-13): clean stop and crash (SIGKILL) paths
     utils/galera-cold-start.sh --check      # reports what it would do
     utils/galera-cold-start.sh              # does it
-Run: healthy cluster (`--check`: "nothing to do"); `systemctl stop mariadb` on tst3, tst4, tst5;
-`--check` (all three at seqno 19388, "would bootstrap from tst3"); the real run bootstrapped tst3,
-joined tst4 and tst5 and reported size 3, Primary, ready in 17 s.
-Not yet run: (1) an unclean stop, where `grastate.dat` says `seqno: -1` and the position comes from
-`mariadbd --wsrep-recover` (try `orphera run sh -c "systemctl kill -s KILL mariadb" --nodes tst3,tst4,tst5`
-or `virsh destroy` the three VMs, then start them); (2) one node stopped while two run (it should only
-start that node); (3) the preflight call from `build_openstack_stack.sh` after a full power-off.
-The refusal cases (no position, differing UUIDs) and `--bootstrap` were run against a fake `orphera` only.
+Run 1, clean stop: `systemctl stop mariadb` on tst3-tst5, then the script: all three at seqno 19388,
+bootstrapped tst3, joined tst4 and tst5, size 3 in 17 s.
+Run 2, crash: `systemctl kill --kill-whom=main -s KILL mariadb` on the three nodes (systemd restarts
+a killed mariadb after 5 s: `Restart=on-abort`). The first version of the script raced with those
+restarts and ended in a split brain (tst3 alone, size 1; tst4 and tst5 together, size 2) because
+`systemctl start` on a unit that is already running joins nothing, yet printed "joined". Found and
+fixed: units that are starting, stopping or failed are stopped first (bounded: `--no-block`, 10 s,
+then SIGKILL of the main process, since mariadb.service allows 900 s and a node looking for peers
+ignores SIGTERM); a node left running with no cluster after a failed join (state Initialized, size 0)
+is treated as down; running nodes that disagree about the cluster size are reported as a split brain
+and left alone. Final run after the crash: three real positions (19732, recovered from the InnoDB log
+by `mariadbd --wsrep-recover`), bootstrap, size 3 in 21 s.
+Recovering the split by hand (tst3 was ahead by about 230 transactions, discarded): on the node of the
+losing side `systemctl stop mariadb; rm /var/lib/mysql/grastate.dat; systemctl start mariadb`. The
+first attempt failed with an IST protocol error after the SST (node stays active in state Initialized);
+`systemctl restart mariadb` then joined it.
+Not yet run: one node stopped while two run (it should only start that one); the preflight call from
+`build_openstack_stack.sh` after a full power-off. The refusal cases (no position, differing UUIDs) and
+`--bootstrap` were run against a fake `orphera` only.
 
 ## L. Node reassignment (2026-10-10) - steps 1-3 and 5 done; step 4: run-log test passed, Prometheus/Grafana stack on tst7 NOT YET RUN
 New roles: tst0-tst2 Ceph; tst3-tst5 Galera + haproxy + keepalived (VIP
