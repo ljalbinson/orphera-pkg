@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed — checked names and ports in `Container`
+- `ContainerName` and `TcpPort` are opaque types (`kolla/Ids.scala`): a container name must be lowercase letters, digits and
+  dashes, a port 1 to 65535, and neither can be built otherwise. `Container(name = ContainerName("nova-compute"), ...)`;
+  `Port(8080, 80)` still takes plain numbers and checks them.
+
 ## [0.1.191] - 2026-10-14
 
 ### Added — typed Kolla containers (`orchestrator/.../kolla/Container.scala`)

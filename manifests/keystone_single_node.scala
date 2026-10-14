@@ -93,7 +93,7 @@ object keystone_single_node extends OrpheraClusterPlaybook:
   // confDir, dataDir and logDir, which it reads; a val used before its definition is
   // null in an object.
   private val keystoneContainer = Container(
-    name = "keystone",
+    name = ContainerName("keystone"),
     image = Image("keystone", Release.R2025_1, Base.UbuntuNoble, registry),
     mounts = List(
       Mount(confDir, "/var/lib/kolla/config_files"),

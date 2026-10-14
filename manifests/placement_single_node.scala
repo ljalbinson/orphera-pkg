@@ -64,7 +64,7 @@ object placement_single_node extends OrpheraClusterPlaybook:
   // Defined after confRoot and logDir, which it reads; a val used before its
   // definition is null in an object.
   private val placementApi = Container(
-    name = "placement-api",
+    name = ContainerName("placement-api"),
     image = Image("placement-api", Release.R2025_1, Base.UbuntuNoble, registry),
     mounts = List(
       Mount(s"$confRoot/placement-api", "/var/lib/kolla/config_files"),

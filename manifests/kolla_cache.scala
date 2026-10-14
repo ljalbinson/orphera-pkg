@@ -40,7 +40,7 @@ object kolla_cache extends OrpheraClusterPlaybook:
   // (orchestrator/.../kolla/Container.scala), checked by ContainerCheck. It is the stock
   // registry:2 image, not a Kolla image, and publishes a port instead of using the host network.
   private val cacheContainer = Container(
-    name = "kolla-cache",
+    name = ContainerName("kolla-cache"),
     image = ExternalImage("docker.io/library/registry:2"),
     mounts = List(Mount(dataDir, "/var/lib/registry", Access.ReadWrite)),
     env = List("REGISTRY_PROXY_REMOTEURL" -> remote, "REGISTRY_PROXY_TTL" -> "8760h"),
