@@ -551,7 +551,8 @@ after the services started (Nova and Neutron now register first). The last pass 
 check from a `Container` value (`Release`, `Base`, `Image`, `Mount` with `Access`) instead of strings.
 The branch compiled under `-Werror` on scala0, and the placement playbook ran twice against tst13:
 unit written, service started, registered in Keystone, resource providers listed (tst17 and tst18).
-Only placement is converted so far; glance, Nova, Neutron, Cinder and Keystone still use their own
+Glance was converted next (branch `typed-glance`, 2026-10-14): `manifests/test_glance.sh` passed=11
+failed=0 with the second run completing. Nova, Neutron, Cinder and Keystone still use their own
 strings.
 
 ## L. Node reassignment (2026-10-10) - steps 1-3 and 5 done; step 4: run-log test passed, Prometheus/Grafana stack on tst7 NOT YET RUN
