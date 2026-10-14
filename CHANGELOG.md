@@ -14,7 +14,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the rendering. Converted so far: `placement_single_node.scala`, `glance_single_node.scala`,
   `nova_single_node.scala` (four containers), `neutron_single_node.scala` (server plus the two
   privileged agents), `keystone_single_node.scala` and `cinder_single_node.scala` (three services plus
-  RabbitMQ) and `horizon_single_node.scala`. To cover them `Container` gained `privileged`, `hostPid`, `capabilities`, `after`,
+  RabbitMQ) `horizon_single_node.scala` and `kolla_cache.scala` (a published-port registry, via the new `Network.Published` and `Port`). To cover them `Container` gained `privileged`, `hostPid`, `capabilities`, `after`,
   `preStart`, an optional unit `description`, three more mount modes and `ExternalImage` for images
   that are not Kolla images. A failed start now also prints the last 40 journal lines.
 

@@ -196,6 +196,20 @@ object ContainerCheck:
     )
     check("the horizon unit mounts horizon-web as its config", horizon.render.contains("-v /etc/kolla/horizon-web:/var/lib/kolla/config_files:ro,z -v /var/log/kolla/horizon:/var/log/kolla/horizon:z quay.io/openstack.kolla/horizon:2025.1-ubuntu-noble"), horizon.render)
 
+    // kolla_cache.scala: a plain registry that publishes a port instead of using the host network.
+    val cache = Container(
+      name = "kolla-cache",
+      image = ExternalImage("docker.io/library/registry:2"),
+      mounts = List(Mount("/var/lib/orphera/kolla-cache", "/var/lib/registry", Access.ReadWrite)),
+      env = List("REGISTRY_PROXY_REMOTEURL" -> "https://quay.io", "REGISTRY_PROXY_TTL" -> "8760h"),
+      network = Network.Published,
+      ports = List(Port(5000, 5000)),
+      description = Some("Kolla image pull-through cache (registry proxying quay.io) managed by Orphera")
+    )
+    check("the cache unit publishes its port and does not use the host network", cache.render.linesIterator.contains("ExecStart=/usr/bin/podman run --rm --name kolla-cache -p 5000:5000 -e REGISTRY_PROXY_REMOTEURL=https://quay.io -e REGISTRY_PROXY_TTL=8760h -v /var/lib/orphera/kolla-cache:/var/lib/registry:z docker.io/library/registry:2"), cache.render)
+    check("published ports without Network.Published are rejected", scala.util.Try(placement.copy(ports = List(Port(1, 2)))).isFailure)
+    check("Network.Published without a port is rejected", scala.util.Try(placement.copy(network = Network.Published)).isFailure)
+
     if failures > 0 then
       println(s"$failures check(s) failed")
       sys.exit(1)

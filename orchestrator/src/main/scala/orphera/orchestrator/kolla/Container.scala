@@ -69,6 +69,17 @@ final case class Mount(
     if access.suffix.isEmpty then s"-v $host:$inside"
     else s"-v $host:$inside:${access.suffix}"
 
+/** How the container is attached to the network. Every OpenStack service uses the
+  * host's network; a plain registry or similar publishes ports instead.
+  */
+enum Network:
+  case Host
+  case Published
+
+/** A published port, `-p host:container`. */
+final case class Port(host: Int, container: Int):
+  def flag: String = s"-p $host:$container"
+
 final case class Container(
     name: String,
     image: ImageRef,
@@ -81,6 +92,9 @@ final case class Container(
     hostPid: Boolean = false,
     // Linux capabilities to add, e.g. "SYS_ADMIN"; a narrower alternative to `privileged`.
     capabilities: List[String] = Nil,
+    // Host network by default; `Published` needs at least one port.
+    network: Network = Network.Host,
+    ports: List[Port] = Nil,
     // Unit description; the default says it is a Kolla container.
     description: Option[String] = None,
     // Extra units to start after, besides network-online.target.
@@ -97,12 +111,19 @@ final case class Container(
     s"container name must be lowercase letters, digits and dashes: $name"
   )
 
+  require(
+    (network == Network.Host && ports.isEmpty) ||
+      (network == Network.Published && ports.nonEmpty),
+    "ports go with Network.Published; the host network publishes nothing"
+  )
+
   def unitName: String = s"orphera-$name.service"
   def unitPath: String = s"/etc/systemd/system/$unitName"
 
-  /** Everything after `podman run --rm --name <name> --network host`. */
+  /** Everything after `podman run --rm --name <name>` (and `--network host`, when on the host network). */
   def runArguments: String =
-    (List("--privileged").filter(_ => privileged) ++
+    (ports.map(_.flag) ++
+      List("--privileged").filter(_ => privileged) ++
       List("--pid host").filter(_ => hostPid) ++
       capabilities.map(c => s"--cap-add=$c") ++
       env.map((k, v) => s"-e $k=$v") ++ mounts.map(_.flag) :+ image.ref)
@@ -112,6 +133,10 @@ final case class Container(
     * compared with what a node has, or asserted in a test, with no machine.
     */
   def render: String =
+    // "--network host" for the host network; published ports are part of runArguments.
+    val runLine = network match
+      case Network.Host => s"--network host $runArguments"
+      case Network.Published => runArguments
     val unitDescription =
       description.getOrElse(s"$name (Kolla container) managed by Orphera")
     val afterUnits = ("network-online.target" :: after).mkString(" ")
@@ -123,7 +148,7 @@ final case class Container(
        |
        |[Service]
        |${preLines}ExecStartPre=-/usr/bin/podman rm -f $name
-       |ExecStart=/usr/bin/podman run --rm --name $name --network host $runArguments
+       |ExecStart=/usr/bin/podman run --rm --name $name $runLine
        |ExecStop=/usr/bin/podman stop -t $stopGraceSeconds $name
        |Restart=on-failure
        |RestartSec=$restartSeconds

@@ -2,6 +2,7 @@
 
 import orphera.orchestrator.*
 import orphera.orchestrator.ClusterPlaybookDsl.*
+import orphera.orchestrator.kolla.*
 
 // Kolla image cache on tst9 (10.10.5.21): a pull-through registry mirror of
 // quay.io, run as a podman container under systemd. Nodes configured to use it
@@ -33,8 +34,22 @@ object kolla_cache extends OrpheraClusterPlaybook:
   private val node = "tst9"
   private val port = 5000
   private val remote = "https://quay.io"
-  private val registryImage = "docker.io/library/registry:2"
   private val dataDir = "/var/lib/orphera/kolla-cache"
+
+  // The registry as data: the unit file text and the start task come from it
+  // (orchestrator/.../kolla/Container.scala), checked by ContainerCheck. It is the stock
+  // registry:2 image, not a Kolla image, and publishes a port instead of using the host network.
+  private val cacheContainer = Container(
+    name = "kolla-cache",
+    image = ExternalImage("docker.io/library/registry:2"),
+    mounts = List(Mount(dataDir, "/var/lib/registry", Access.ReadWrite)),
+    env = List("REGISTRY_PROXY_REMOTEURL" -> remote, "REGISTRY_PROXY_TTL" -> "8760h"),
+    network = Network.Published,
+    ports = List(Port(port, 5000)),
+    description = Some("Kolla image pull-through cache (registry proxying quay.io) managed by Orphera"),
+    settleSeconds = 5
+  )
+  private val registryImage = cacheContainer.image.ref
 
   // Repository paths under quay.io/openstack.kolla and the tag to warm.
   // Keep the tag in step with keystone_single_node.scala.
@@ -49,35 +64,6 @@ object kolla_cache extends OrpheraClusterPlaybook:
        |  exit 1
        |}
        |echo "registry image ready"""".stripMargin
-
-  private val unitScript =
-    s"""mkdir -p $dataDir
-       |cat > /etc/systemd/system/orphera-kolla-cache.service <<'UNIT'
-       |[Unit]
-       |Description=Kolla image pull-through cache (registry proxying quay.io) managed by Orphera
-       |After=network-online.target
-       |Wants=network-online.target
-       |
-       |[Service]
-       |ExecStartPre=-/usr/bin/podman rm -f kolla-cache
-       |ExecStart=/usr/bin/podman run --rm --name kolla-cache -p $port:5000 -e REGISTRY_PROXY_REMOTEURL=$remote -e REGISTRY_PROXY_TTL=8760h -v $dataDir:/var/lib/registry:z $registryImage
-       |ExecStop=/usr/bin/podman stop -t 30 kolla-cache
-       |Restart=on-failure
-       |RestartSec=5
-       |TimeoutStartSec=300
-       |
-       |[Install]
-       |WantedBy=multi-user.target
-       |UNIT
-       |systemctl daemon-reload
-       |systemctl enable orphera-kolla-cache
-       |systemctl restart orphera-kolla-cache
-       |sleep 5
-       |if ! systemctl is-active --quiet orphera-kolla-cache; then
-       |  echo "orphera-kolla-cache failed to start - see 'journalctl -xeu orphera-kolla-cache'" >&2
-       |  exit 1
-       |fi
-       |echo "orphera-kolla-cache running on port $port"""".stripMargin
 
   private val healthScript =
     s"""CODE=$$(curl -s -o /dev/null -w '%{http_code}' http://localhost:$port/v2/)
@@ -111,9 +97,11 @@ object kolla_cache extends OrpheraClusterPlaybook:
             timeoutSeconds = 600
           )
         )
-        .task("run the pull-through cache as a systemd-managed container")(
-          Task.RunCommand(List("sh", "-c", unitScript), timeoutSeconds = 120)
+        .task("create the cache data directory")(
+          Task.RunCommand(List("mkdir", "-p", dataDir))
         )
+        .task(s"write ${cacheContainer.unitName}")(cacheContainer.writeUnit)
+        .task(s"start ${cacheContainer.unitName}")(cacheContainer.start)
         .build,
 
       stage("confirm-kolla-cache-healthy", node)
