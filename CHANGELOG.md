@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed — Nova and Neutron register their Keystone user before the services start
+- On a freshly built Keystone, `nova-conductor` (and the scheduler) authenticate as `nova` at
+  startup and exited with HTTP 401 because the user was only created in the task after the start,
+  so "start the Nova services" failed. `nova_single_node.scala` and `neutron_single_node.scala` now
+  register in Keystone first and start the units after.
+
 ### Added — Galera cold start: `utils/galera-cold-start.sh`
 - After a power-off of the whole fleet MariaDB is down on tst3-tst5 and every OpenStack service
   returns 500. The script reads each node's last committed position (`grastate.dat`, or

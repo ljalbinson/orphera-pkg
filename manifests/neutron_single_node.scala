@@ -676,14 +676,14 @@ if __name__ == '__main__':
         .task("write the Neutron API helper")(
           Task.RunCommand(List("sh", "-c", helperScript))
         )
-        .task("start the Neutron services")(
-          Task.RunCommand(List("sh", "-c", unitsScript), timeoutSeconds = 300)
-        )
         .task("register Neutron in Keystone")(
           Task.RunCommand(
             List("sh", "-c", "/usr/local/sbin/orphera-neutron-api register"),
             timeoutSeconds = 120
           )
+        )
+        .task("start the Neutron services")(
+          Task.RunCommand(List("sh", "-c", unitsScript), timeoutSeconds = 300)
         )
         .build,
 
