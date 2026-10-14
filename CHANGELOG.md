@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed — `build_openstack_stack.sh` preflight checks every node the `prep` step touches
+- `prep` (`disable_unattended_upgrades.scala`) runs on all Ubuntu test VMs including tst7, tst9,
+  tst11 and tst12, but preflight only checked the 13 OpenStack nodes, so a build with those VMs
+  powered off failed half way through `prep`. Preflight now includes them whenever `prep` is in the
+  plan (use `--from ceph` to skip `prep`), and prints the `virsh start` command for each node that
+  does not answer.
+
 ### Added — Galera cold start: `utils/galera-cold-start.sh`
 - After a power-off of the whole fleet MariaDB is down on tst3-tst5 and every OpenStack service
   returns 500. The script reads each node's last committed position (`grastate.dat`, or

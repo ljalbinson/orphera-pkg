@@ -151,14 +151,25 @@ playbook() {
 # ---- preflight ------------------------------------------------------------
 
 preflight() {
-  local nodes="tst0 tst1 tst2 tst3 tst4 tst5 tst6 tst10 tst13 tst14 tst17 tst18 tst19" n out bad=""
+  local nodes="tst0 tst1 tst2 tst3 tst4 tst5 tst6 tst10 tst13 tst14 tst17 tst18 tst19" n out bad="" hv
   if [ -n "$WITH_CACHES" ]; then nodes="$nodes tst9 tst11"; fi
+  # prep (disable_unattended_upgrades.scala) touches every Ubuntu test VM, not only the OpenStack
+  # ones, so those must answer too or the step fails half way. Leave prep out (--from ceph) to
+  # build OpenStack without them; VMs made by the provisioning scripts already have it switched off.
+  case " ${STEPS[*]} " in *" prep "*) nodes="$nodes tst7 tst9 tst11 tst12" ;; esac
+  nodes=$(printf '%s\n' $nodes | awk '!seen[$0]++' | tr '\n' ' ')
   log "preflight: every node must answer through its agent"
   for n in $nodes; do
     out=$(orphera run hostname --nodes "$n" --quiet 2>&1)
     if contains "$n" "$out"; then log "  $n ok"; else log "  $n NOT answering: $out"; bad="$bad $n"; fi
   done
-  [ -z "$bad" ] || die "no agent answer from:$bad (inventory entry, VM up, agent running?)"
+  if [ -n "$bad" ]; then
+    for n in $bad; do
+      hv=$(awk -F: '/^[[:space:]]*hypervisor:/ {gsub(/[[:space:]"'"'"']/, "", $2); print $2; exit}' "config/$n.yaml" 2>/dev/null)
+      [ -n "$hv" ] && log "  start $n:  orphera run sh -c \"virsh start $n\" --nodes $hv"
+    done
+    die "no agent answer from:$bad (inventory entry, VM up, agent running?)"
+  fi
   # After a power-off of the whole fleet MariaDB is down on all three Galera nodes and every
   # OpenStack service fails with 500s. This restarts the cluster from the node with the newest
   # data; it does nothing when Galera is healthy or not built yet.
