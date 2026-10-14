@@ -560,8 +560,11 @@ and fernet keys still present after the second run; a failed start now also prin
 three capabilities, and RabbitMQ as an `ExternalImage`; `manifests/test_cinder.sh` passed=12 failed=0, scheduler and
 volume up after the second run. The first attempt failed to compile because my conversion deleted values the
 playbook uses; redone from `main`. Horizon followed (branch `typed-horizon`): `manifests/test_horizon.sh` passed=7 failed=0 with the admin
-sign-in working. Its first run failed only because `test_keystone.sh` had wiped Keystone (see K18). Left on
-strings: nova_compute.scala and kolla_cache.scala.
+sign-in working. Its first run failed only because `test_keystone.sh` had wiped Keystone (see K18). The Kolla cache followed (branch
+`typed-kolla-cache`): the registry as an `ExternalImage` publishing port 5000 (`Network.Published`), run on a new tst9
+(moved to gs3; tst7, tst9, tst11 and tst12 did not exist on any hypervisor). `orphera cluster-playbook
+manifests/kolla_cache.scala` completed all stages, the keystone image was pulled through the cache and the
+catalog listed `openstack.kolla/keystone`. Left on strings: nova_compute.scala.
 
 ### K18. `test_keystone.sh` tears Keystone down first (lesson from 2026-10-14)
 Of the per-service test scripts only `test_keystone.sh` starts with a teardown playbook; the others run
