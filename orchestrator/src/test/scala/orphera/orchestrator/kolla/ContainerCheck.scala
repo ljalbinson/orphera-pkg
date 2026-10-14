@@ -240,6 +240,21 @@ object ContainerCheck:
     check("the compute unit starts after and wants libvirtd", computeUnit.linesIterator.contains("After=network-online.target openvswitch-switch.service libvirtd.service") && computeUnit.linesIterator.contains("Wants=network-online.target libvirtd.service"), computeUnit)
     check("the compute unit stops with a 60 second grace", computeUnit.linesIterator.contains("ExecStop=/usr/bin/podman stop -t 60 nova-compute"), computeUnit)
     check("the compute mounts keep their flags, /dev included", computeUnit.contains("-v /var/lib/nova:/var/lib/nova -v /run/libvirt:/run/libvirt -v /run/openvswitch:/run/openvswitch -v /lib/modules:/lib/modules:ro -v /dev:/dev quay.io/openstack.kolla/nova-compute:2025.1-ubuntu-noble"), computeUnit)
+    {
+      import orphera.orchestrator.{Drift, Resource, Task}
+      import orphera.orchestrator.Resource.*
+      val written = placement.write
+      check("Container is a Resource: write is its writeUnit", written == placement.writeUnit)
+      val checked = placement.check match
+        case Task.RunCommand(List("sh", "-c", script), _) => script
+        case other => other.toString
+      check("the check command diffs the unit path against the rendered unit", checked.contains(s"diff -u ${placement.unitPath} -") && checked.contains(placement.render))
+      check("the check does not write or restart anything", !checked.contains("systemctl") && !checked.contains("cat >") && !checked.contains("> /etc"))
+      check("the check says MISSING with exit 2 and DRIFT with exit 1", checked.contains("exit 2") && checked.contains("exit 1"))
+      check("Drift: same text is in sync, no file is missing", Drift.compare("a\nb\n", Some("a\nb\n")) == Drift.InSync && Drift.compare("a", None) == Drift.Missing)
+      check("Drift: names the first differing line", Drift.compare("a\nb\nc\n", Some("a\nX\nc\n")) == Drift.Differs("line 2: expected `b`, found `X`"))
+      check("a resource containing the here-document marker is rejected", scala.util.Try(Resource.checkTask("x", "/p", "ORPHERA_EXPECTED_EOF")).isFailure)
+    }
     check("a container with no wants has only network-online.target", placement.render.linesIterator.contains("Wants=network-online.target"))
 
     if failures > 0 then
