@@ -139,6 +139,25 @@ object ContainerCheck:
     check("the agent mounts have the right flags", ovsUnit.contains("-v /run/openvswitch:/run/openvswitch -v /run/netns:/run/netns:rshared -v /lib/modules:/lib/modules:ro quay.io/openstack.kolla/neutron-openvswitch-agent:2025.1-ubuntu-noble"), ovsUnit)
     check("a plain container has no privilege flags and no extra pre-start line", !placement.render.contains("--privileged") && !placement.render.contains("--pid") && placement.render.linesIterator.count(_.startsWith("ExecStartPre=")) == 1)
 
+    // keystone_single_node.scala: one container whose state is two key directories.
+    val keystone = Container(
+      name = "keystone",
+      image = Image("keystone", Release.R2025_1, Base.UbuntuNoble),
+      mounts = List(
+        Mount("/etc/kolla/keystone", "/var/lib/kolla/config_files"),
+        Mount("/var/lib/orphera/keystone/fernet-keys", "/etc/keystone/fernet-keys", Access.ReadWrite),
+        Mount("/var/lib/orphera/keystone/credential-keys", "/etc/keystone/credential-keys", Access.ReadWrite),
+        Mount("/var/log/kolla/keystone", "/var/log/kolla/keystone", Access.ReadWrite)
+      ),
+      env = List("KOLLA_CONFIG_STRATEGY" -> "COPY_ALWAYS"),
+      settleSeconds = 5
+    )
+    check("the keystone unit mounts the config read-only and both key directories read-write", keystone.render.linesIterator.contains("ExecStart=/usr/bin/podman run --rm --name keystone --network host -e KOLLA_CONFIG_STRATEGY=COPY_ALWAYS -v /etc/kolla/keystone:/var/lib/kolla/config_files:ro,z -v /var/lib/orphera/keystone/fernet-keys:/etc/keystone/fernet-keys:z -v /var/lib/orphera/keystone/credential-keys:/etc/keystone/credential-keys:z -v /var/log/kolla/keystone:/var/log/kolla/keystone:z quay.io/openstack.kolla/keystone:2025.1-ubuntu-noble"), keystone.render)
+    keystone.start match
+      case Task.RunCommand(List(_, _, script), _) =>
+        check("a failed start prints the last journal lines before the hint", script.contains("journalctl -u orphera-keystone -n 40 --no-pager >&2") && script.contains("sleep 5"), script)
+      case other => check("keystone start is a RunCommand", false, other.toString)
+
     if failures > 0 then
       println(s"$failures check(s) failed")
       sys.exit(1)

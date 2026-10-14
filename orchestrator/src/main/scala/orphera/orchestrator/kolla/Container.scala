@@ -148,6 +148,7 @@ final case class Container(
            |systemctl restart $unit
            |sleep $settleSeconds
            |if ! systemctl is-active --quiet $unit; then
+           |  journalctl -u $unit -n 40 --no-pager >&2 || true
            |  echo "$unit failed to start - see 'journalctl -xeu $unit'$logHint" >&2
            |  exit 1
            |fi

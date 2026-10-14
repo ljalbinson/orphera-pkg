@@ -2,6 +2,7 @@
 
 import orphera.orchestrator.*
 import orphera.orchestrator.ClusterPlaybookDsl.*
+import orphera.orchestrator.kolla.*
 
 // OpenStack Keystone (identity service), one node, TLS from the start, run
 // from the Kolla container image rather than distro packages.
@@ -62,15 +63,13 @@ object keystone_single_node extends OrpheraClusterPlaybook:
   private val fqdn = "tst6.ljalbinson.com"
   private val nodeIp = "10.10.5.18"
 
-  // Kolla image: <registry>/keystone:<release>-<distro>-<version>. Confirm the
-  // tag exists (`podman pull`) before changing it; the pull task prints a hint
-  // if it does not. baseTag must match the node's distro family so the image
-  // and host agree on Ubuntu/Rocky conventions (the config files are detected
-  // from the image itself, so the host can be either).
+  // Kolla image: <registry>/keystone:<release>-<distro>-<version>, built from the
+  // Container below (kolla/Container.scala). Confirm the tag exists (`podman pull`)
+  // before changing the Release or Base; the pull task prints a hint if it does not.
+  // The base must match the node's distro family so the image and host agree on
+  // Ubuntu/Rocky conventions (the config files are detected from the image itself,
+  // so the host can be either).
   private val registry = "quay.io/openstack.kolla"
-  private val release = "2025.1"
-  private val baseTag = "ubuntu-noble"
-  private val image = s"$registry/keystone:$release-$baseTag"
 
   private val dbName = "keystone"
   private val dbUser = "keystone"
@@ -88,6 +87,24 @@ object keystone_single_node extends OrpheraClusterPlaybook:
   private val dataDir = "/var/lib/orphera/keystone"
   private val logDir = "/var/log/kolla/keystone"
   private val caCert = s"$caDir/ca.crt"
+
+  // The container as data: the unit file text and the start task come from it
+  // (orchestrator/.../kolla/Container.scala), checked by ContainerCheck. Defined after
+  // confDir, dataDir and logDir, which it reads; a val used before its definition is
+  // null in an object.
+  private val keystoneContainer = Container(
+    name = "keystone",
+    image = Image("keystone", Release.R2025_1, Base.UbuntuNoble, registry),
+    mounts = List(
+      Mount(confDir, "/var/lib/kolla/config_files"),
+      Mount(s"$dataDir/fernet-keys", "/etc/keystone/fernet-keys", Access.ReadWrite),
+      Mount(s"$dataDir/credential-keys", "/etc/keystone/credential-keys", Access.ReadWrite),
+      Mount(logDir, "/var/log/kolla/keystone", Access.ReadWrite)
+    ),
+    env = List("KOLLA_CONFIG_STRATEGY" -> "COPY_ALWAYS"),
+    settleSeconds = 5
+  )
+  private val image = keystoneContainer.image.ref
 
   private val hostPackages =
     List("podman", "openssl", "curl", "ca-certificates")
@@ -118,7 +135,7 @@ object keystone_single_node extends OrpheraClusterPlaybook:
 
   private val pullScript =
     s"""podman pull $image || {
-       |  echo "could not pull $image - check the registry path and tag (registry/release/baseTag at the top of keystone_single_node.scala)" >&2
+       |  echo "could not pull $image - check the registry path and tag (the Image(...) in keystoneContainer in keystone_single_node.scala)" >&2
        |  exit 1
        |}
        |echo "image ready: $image"""".stripMargin
@@ -266,39 +283,6 @@ object keystone_single_node extends OrpheraClusterPlaybook:
        |ks bootstrap --bootstrap-password '$adminPassword' --bootstrap-admin-url $endpoint --bootstrap-internal-url $endpoint --bootstrap-public-url $endpoint --bootstrap-region-id RegionOne
        |echo "keystone database, keys and bootstrap done"""".stripMargin
 
-  // The long-lived container, run by systemd so it restarts and survives a
-  // reboot. `--rm` plus ExecStartPre cleanup keeps the name free. The unit is
-  // written on one ExecStart line on purpose (no line continuations).
-  private val unitScript =
-    s"""cat > /etc/systemd/system/orphera-keystone.service <<'UNIT'
-       |[Unit]
-       |Description=Keystone (Kolla container) managed by Orphera
-       |After=network-online.target
-       |Wants=network-online.target
-       |
-       |[Service]
-       |ExecStartPre=-/usr/bin/podman rm -f keystone
-       |ExecStart=/usr/bin/podman run --rm --name keystone --network host -e KOLLA_CONFIG_STRATEGY=COPY_ALWAYS -v $confDir:/var/lib/kolla/config_files:ro,z -v $dataDir/fernet-keys:/etc/keystone/fernet-keys:z -v $dataDir/credential-keys:/etc/keystone/credential-keys:z -v $logDir:/var/log/kolla/keystone:z $image
-       |ExecStop=/usr/bin/podman stop -t 30 keystone
-       |Restart=on-failure
-       |RestartSec=5
-       |TimeoutStartSec=300
-       |
-       |[Install]
-       |WantedBy=multi-user.target
-       |UNIT
-       |systemctl daemon-reload
-       |systemctl enable orphera-keystone
-       |systemctl restart orphera-keystone
-       |sleep 5
-       |if ! systemctl is-active --quiet orphera-keystone; then
-       |  journalctl -u orphera-keystone -n 40 --no-pager >&2 || true
-       |  tail -n 20 $logDir/*.log >&2 2>/dev/null || true
-       |  echo "orphera-keystone failed to start - see above and $logDir" >&2
-       |  exit 1
-       |fi
-       |echo "orphera-keystone running"""".stripMargin
-
   // Prints a scoped admin token on stdout. Used by the confirm stage and by
   // test_keystone.sh; root only, since it embeds the admin password.
   private val tokenHelperScript =
@@ -362,9 +346,8 @@ object keystone_single_node extends OrpheraClusterPlaybook:
         .task("db_sync, fernet and credential keys, bootstrap")(
           Task.RunCommand(List("sh", "-c", initScript), timeoutSeconds = 600)
         )
-        .task("run keystone as a systemd-managed container")(
-          Task.RunCommand(List("sh", "-c", unitScript), timeoutSeconds = 120)
-        )
+        .task(s"write ${keystoneContainer.unitName}")(keystoneContainer.writeUnit)
+        .task(s"start ${keystoneContainer.unitName}")(keystoneContainer.start)
         .task("write the admin token helper")(
           Task.RunCommand(List("sh", "-c", tokenHelperScript))
         )
