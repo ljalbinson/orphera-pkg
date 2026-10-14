@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.1.191] - 2026-10-14
+
 ### Added — typed Kolla containers (`orchestrator/.../kolla/Container.scala`)
 - A `Container` value (name, `Image` of service, `Release`, `Base` and registry, `Mount`s with
   `ReadOnly`/`ReadWrite` access, environment, stop and start timings) renders the podman arguments,
