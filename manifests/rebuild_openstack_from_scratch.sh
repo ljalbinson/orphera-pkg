@@ -23,8 +23,9 @@
 #   2. build_openstack_stack.sh: Ceph, Galera, Keystone, Cinder, Glance, Placement, Nova, Neutron,
 #      compute nodes, Horizon, clients, smoke checks and a CirrOS boot
 #   3. optional: the test scripts, WordPress
-# Run from the repository root, on the machine that runs `orphera`. Needs the caches (tst9, tst11,
-# tst12) running; the build uses them. A failed step stops the run and says how to resume.
+# Run from the repository root, on the machine that runs `orphera`. Does not need the caches
+# (tst9, tst11, tst12) or tst7: the build skips the cache steps unless run with --with-caches, and those
+# VMs may not exist. A failed step stops the run and says how to resume.
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
 
