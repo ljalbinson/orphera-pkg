@@ -2,6 +2,7 @@
 
 import orphera.orchestrator.*
 import orphera.orchestrator.ClusterPlaybookDsl.*
+import orphera.orchestrator.kolla.*
 
 // DRAFT. OpenStack Nova control plane (compute API, scheduler, conductor and the
 // noVNC console proxy), Kolla images under podman. Modelled on
@@ -67,13 +68,7 @@ object nova_single_node extends OrpheraClusterPlaybook:
 
   // Keep in step with keystone_single_node.scala / kolla_cache.scala.
   private val registry = "quay.io/openstack.kolla"
-  private val release = "2025.1"
-  private val baseTag = "ubuntu-noble"
   private val cacheHostPort = "tst9.ljalbinson.com:5000"
-  private val apiImage = s"$registry/nova-api:$release-$baseTag"
-  private val schedulerImage = s"$registry/nova-scheduler:$release-$baseTag"
-  private val conductorImage = s"$registry/nova-conductor:$release-$baseTag"
-  private val novncImage = s"$registry/nova-novncproxy:$release-$baseTag"
 
   private val adminPassword = "orphera-test-keystone-admin-password"
   private val dbUser = "nova"
@@ -88,6 +83,31 @@ object nova_single_node extends OrpheraClusterPlaybook:
   private val stateDir = "/var/lib/orphera/nova"
   private val caDir = "/etc/kolla/nova-ca"
   private val ksUrl = s"https://$ksFqdn:5000"
+
+  // The four Nova containers as data: the unit file text and the start task come from
+  // Container (orchestrator/.../kolla/Container.scala), checked by ContainerCheck. They
+  // share one set of mounts apart from their own config directory. Defined after confRoot,
+  // logDir and stateDir, which they read; a val used before its definition is null in an
+  // object.
+  private def novaContainer(service: String): Container =
+    Container(
+      name = service,
+      image = Image(service, Release.R2025_1, Base.UbuntuNoble, registry),
+      mounts = List(
+        Mount(s"$confRoot/$service", "/var/lib/kolla/config_files"),
+        Mount(logDir, "/var/log/kolla/nova", Access.ReadWrite),
+        Mount(stateDir, "/var/lib/nova", Access.ReadWrite)
+      ),
+      env = List("KOLLA_CONFIG_STRATEGY" -> "COPY_ALWAYS")
+    )
+  private val novaServices: List[Container] =
+    List("nova-api", "nova-scheduler", "nova-conductor", "nova-novncproxy").map(novaContainer)
+  private val apiImage = novaServices.head.image.ref
+
+  // Adds one "write the unit" task per container, then one "start" task per container.
+  private def withServices(b: StageBuilder): StageBuilder =
+    val written = novaServices.foldLeft(b)((acc, c) => acc.task(s"write ${c.unitName}")(c.writeUnit))
+    novaServices.foldLeft(written)((acc, c) => acc.task(s"start ${c.unitName}")(c.start))
 
   private val hostPackages =
     List("podman", "openssl", "curl", "ca-certificates", "python3")
@@ -149,8 +169,8 @@ object nova_single_node extends OrpheraClusterPlaybook:
        |echo "podman will try $cacheHostPort before quay.io"""".stripMargin
 
   private val pullScript =
-    s"""for img in $apiImage $schedulerImage $conductorImage $novncImage; do
-       |  podman pull $$img || { echo "could not pull $$img - check registry/release/baseTag at the top of nova_single_node.scala" >&2; exit 1; }
+    s"""for img in ${novaServices.map(_.image.ref).mkString(" ")}; do
+       |  podman pull $$img || { echo "could not pull $$img - check the Image(...) in novaContainer in nova_single_node.scala" >&2; exit 1; }
        |done
        |echo "images ready"""".stripMargin
 
@@ -345,47 +365,6 @@ object nova_single_node extends OrpheraClusterPlaybook:
        |$$NM db sync
        |$$NM cell_v2 list_cells
        |echo "nova databases synced; cell0 and cell1 mapped"""".stripMargin
-
-  private val unitsScript =
-    s"""set -e
-       |mkunit() {
-       |  name=$$1
-       |  image=$$2
-       |  cat > /etc/systemd/system/orphera-$$name.service <<UNIT
-       |[Unit]
-       |Description=$$name (Kolla container) managed by Orphera
-       |After=network-online.target
-       |Wants=network-online.target
-       |
-       |[Service]
-       |ExecStartPre=-/usr/bin/podman rm -f $$name
-       |ExecStart=/usr/bin/podman run --rm --name $$name --network host -e KOLLA_CONFIG_STRATEGY=COPY_ALWAYS -v $confRoot/$$name:/var/lib/kolla/config_files:ro,z -v $logDir:/var/log/kolla/nova:z -v $stateDir:/var/lib/nova:z $$image
-       |ExecStop=/usr/bin/podman stop -t 30 $$name
-       |Restart=on-failure
-       |RestartSec=5
-       |TimeoutStartSec=300
-       |
-       |[Install]
-       |WantedBy=multi-user.target
-       |UNIT
-       |}
-       |mkunit nova-api $apiImage
-       |mkunit nova-scheduler $schedulerImage
-       |mkunit nova-conductor $conductorImage
-       |mkunit nova-novncproxy $novncImage
-       |systemctl daemon-reload
-       |for u in nova-api nova-scheduler nova-conductor nova-novncproxy; do
-       |  systemctl enable orphera-$$u
-       |  systemctl restart orphera-$$u
-       |done
-       |sleep 10
-       |for u in nova-api nova-scheduler nova-conductor nova-novncproxy; do
-       |  if ! systemctl is-active --quiet orphera-$$u; then
-       |    echo "orphera-$$u failed to start - see 'journalctl -xeu orphera-$$u' and $logDir" >&2
-       |    exit 1
-       |  fi
-       |done
-       |echo "nova-api, nova-scheduler, nova-conductor and nova-novncproxy running"""".stripMargin
 
   // Standard-library Python, as in the other service playbooks. Plain string
   // filled in with replace(). Subcommands:
@@ -607,7 +586,8 @@ if __name__ == '__main__':
         )
         .build,
 
-      stage("install-nova", node)
+      withServices(
+        stage("install-nova", node)
         .task("wait for apt and dpkg to be idle")(
           Task.RunCommand(List("sh", "-c", waitAptIdleScript), timeoutSeconds = 960)
         )
@@ -644,10 +624,7 @@ if __name__ == '__main__':
             timeoutSeconds = 120
           )
         )
-        .task("start the Nova services")(
-          Task.RunCommand(List("sh", "-c", unitsScript), timeoutSeconds = 300)
-        )
-        .build,
+      ).build,
 
       stage("confirm-nova-healthy", node)
         .waitFor(

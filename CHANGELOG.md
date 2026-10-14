@@ -11,7 +11,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `ReadOnly`/`ReadWrite` access, environment, stop and start timings) renders the podman arguments,
   the systemd unit and the start-and-check task, so a wrong release, mount flag or unit name is a
   compile or construction error instead of a broken string found on a node. `ContainerCheck` covers
-  the rendering. `placement_single_node.scala` is the first playbook converted, `glance_single_node.scala` the second; the others follow.
+  the rendering. `placement_single_node.scala` is the first playbook converted, `glance_single_node.scala` and `nova_single_node.scala` (four containers) follow; Neutron, Cinder and Keystone are next.
 
 ### Added — `manifests/rebuild_openstack_from_scratch.sh` (not yet run)
 - Destroys and re-creates the 13 OpenStack VMs (tst0-tst6, tst10, tst13, tst14, tst17-tst19), then runs

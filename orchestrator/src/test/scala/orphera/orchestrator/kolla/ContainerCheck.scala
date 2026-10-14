@@ -95,6 +95,22 @@ object ContainerCheck:
     check("the glance unit has the three mounts in order and the image last", glance.render.linesIterator.contains(glanceExecStart), glance.render)
     check("glance unit name", glance.unitName == "orphera-glance-api.service")
 
+    // nova_single_node.scala: four containers that differ only in name and config directory.
+    def nova(service: String) = Container(
+      name = service,
+      image = Image(service, Release.R2025_1, Base.UbuntuNoble),
+      mounts = List(
+        Mount(s"/etc/kolla/$service", "/var/lib/kolla/config_files"),
+        Mount("/var/log/kolla/nova", "/var/log/kolla/nova", Access.ReadWrite),
+        Mount("/var/lib/orphera/nova", "/var/lib/nova", Access.ReadWrite)
+      ),
+      env = List("KOLLA_CONFIG_STRATEGY" -> "COPY_ALWAYS")
+    )
+    val novaConductorExecStart =
+      "ExecStart=/usr/bin/podman run --rm --name nova-conductor --network host -e KOLLA_CONFIG_STRATEGY=COPY_ALWAYS -v /etc/kolla/nova-conductor:/var/lib/kolla/config_files:ro,z -v /var/log/kolla/nova:/var/log/kolla/nova:z -v /var/lib/orphera/nova:/var/lib/nova:z quay.io/openstack.kolla/nova-conductor:2025.1-ubuntu-noble"
+    check("the nova-conductor unit has its own config directory and the shared log and state mounts", nova("nova-conductor").render.linesIterator.contains(novaConductorExecStart), nova("nova-conductor").render)
+    check("the four nova units have distinct names", List("nova-api", "nova-scheduler", "nova-conductor", "nova-novncproxy").map(nova(_).unitName).distinct.size == 4)
+
     if failures > 0 then
       println(s"$failures check(s) failed")
       sys.exit(1)
