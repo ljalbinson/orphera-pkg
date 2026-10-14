@@ -8,6 +8,12 @@
 # with independent checks run on the Keystone node over `orphera run` rather
 # than trusting the playbook's own health check.
 #
+# DESTRUCTIVE to the rest of the stack: the teardown drops the keystone database (every user,
+# service and endpoint, so every other OpenStack service is unregistered), deletes the test CA and the
+# fernet keys. The new CA is not trusted by the other services or by the CLI on scala0. To recover,
+# rebuild from Keystone up:   manifests/build_openstack_stack.sh --from keystone
+# Run it on a stack you are happy to rebuild, not in the middle of other work.
+#
 # Prerequisites: the Galera cluster and its VIP (mariadb_galera_cluster.scala,
 # mariadb_haproxy_keepalived.scala) are healthy, and the agent is on NODE.
 #
