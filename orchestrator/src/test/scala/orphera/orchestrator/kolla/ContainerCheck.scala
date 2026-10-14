@@ -158,6 +158,31 @@ object ContainerCheck:
         check("a failed start prints the last journal lines before the hint", script.contains("journalctl -u orphera-keystone -n 40 --no-pager >&2") && script.contains("sleep 5"), script)
       case other => check("keystone start is a RunCommand", false, other.toString)
 
+    // cinder_single_node.scala: the volume service adds three capabilities; RabbitMQ is not a Kolla image.
+    val cinderVolume = Container(
+      name = "cinder-volume",
+      image = Image("cinder-volume", Release.R2025_1, Base.UbuntuNoble),
+      mounts = List(
+        Mount("/etc/kolla/cinder-volume", "/var/lib/kolla/config_files"),
+        Mount("/var/log/kolla/cinder", "/var/log/kolla/cinder", Access.ReadWrite),
+        Mount("/var/lib/orphera/cinder", "/var/lib/cinder", Access.ReadWrite)
+      ),
+      env = List("KOLLA_CONFIG_STRATEGY" -> "COPY_ALWAYS"),
+      capabilities = List("SYS_ADMIN", "NET_ADMIN", "DAC_READ_SEARCH"),
+      after = List("orphera-rabbitmq.service")
+    )
+    check("the volume service adds its three capabilities before the environment", cinderVolume.render.contains("--network host --cap-add=SYS_ADMIN --cap-add=NET_ADMIN --cap-add=DAC_READ_SEARCH -e KOLLA_CONFIG_STRATEGY=COPY_ALWAYS"), cinderVolume.render)
+    check("the cinder units start after RabbitMQ", cinderVolume.render.linesIterator.contains("After=network-online.target orphera-rabbitmq.service"))
+    val rabbit = Container(
+      name = "rabbitmq",
+      image = ExternalImage("docker.io/library/rabbitmq:3.13"),
+      mounts = List(Mount("/var/lib/orphera/rabbitmq", "/var/lib/rabbitmq", Access.ReadWrite)),
+      env = List("RABBITMQ_DEFAULT_USER" -> "openstack", "RABBITMQ_DEFAULT_PASS" -> "pw"),
+      description = Some("RabbitMQ for OpenStack managed by Orphera")
+    )
+    check("rabbitmq runs a plain image with its own description", rabbit.render.contains("Description=RabbitMQ for OpenStack managed by Orphera") && rabbit.render.contains("-e RABBITMQ_DEFAULT_USER=openstack -e RABBITMQ_DEFAULT_PASS=pw -v /var/lib/orphera/rabbitmq:/var/lib/rabbitmq:z docker.io/library/rabbitmq:3.13"), rabbit.render)
+    check("a container with no capabilities has no --cap-add", !placement.render.contains("--cap-add"))
+
     if failures > 0 then
       println(s"$failures check(s) failed")
       sys.exit(1)

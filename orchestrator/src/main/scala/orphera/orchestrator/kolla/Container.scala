@@ -26,16 +26,24 @@ enum Release(val tag: String):
 enum Base(val tag: String):
   case UbuntuNoble extends Base("ubuntu-noble")
 
+/** Anything podman can be given to run. */
+sealed trait ImageRef:
+  def ref: String
+
+/** A Kolla image. */
 final case class Image(
     service: String,
     release: Release,
     base: Base,
     registry: String = Image.DefaultRegistry
-):
+) extends ImageRef:
   /** The reference podman is given, e.g.
     * `quay.io/openstack.kolla/placement-api:2025.1-ubuntu-noble`.
     */
   def ref: String = s"$registry/$service:${release.tag}-${base.tag}"
+
+/** An image that is not a Kolla image, e.g. `docker.io/library/rabbitmq:3.13`. */
+final case class ExternalImage(ref: String) extends ImageRef
 
 object Image:
   val DefaultRegistry = "quay.io/openstack.kolla"
@@ -63,7 +71,7 @@ final case class Mount(
 
 final case class Container(
     name: String,
-    image: Image,
+    image: ImageRef,
     mounts: List[Mount] = Nil,
     // A List, not a Map: the order is part of the text that gets written.
     env: List[(String, String)] = Nil,
@@ -71,6 +79,10 @@ final case class Container(
     // every capability; the API servers do not.
     privileged: Boolean = false,
     hostPid: Boolean = false,
+    // Linux capabilities to add, e.g. "SYS_ADMIN"; a narrower alternative to `privileged`.
+    capabilities: List[String] = Nil,
+    // Unit description; the default says it is a Kolla container.
+    description: Option[String] = None,
     // Extra units to start after, besides network-online.target.
     after: List[String] = Nil,
     // Commands run (as ExecStartPre) before the old container is removed.
@@ -92,6 +104,7 @@ final case class Container(
   def runArguments: String =
     (List("--privileged").filter(_ => privileged) ++
       List("--pid host").filter(_ => hostPid) ++
+      capabilities.map(c => s"--cap-add=$c") ++
       env.map((k, v) => s"-e $k=$v") ++ mounts.map(_.flag) :+ image.ref)
       .mkString(" ")
 
@@ -99,10 +112,12 @@ final case class Container(
     * compared with what a node has, or asserted in a test, with no machine.
     */
   def render: String =
+    val unitDescription =
+      description.getOrElse(s"$name (Kolla container) managed by Orphera")
     val afterUnits = ("network-online.target" :: after).mkString(" ")
     val preLines = preStart.map(c => s"ExecStartPre=$c\n").mkString
     s"""[Unit]
-       |Description=$name (Kolla container) managed by Orphera
+       |Description=$unitDescription
        |After=$afterUnits
        |Wants=network-online.target
        |
