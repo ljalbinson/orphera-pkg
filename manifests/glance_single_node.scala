@@ -2,6 +2,7 @@
 
 import orphera.orchestrator.*
 import orphera.orchestrator.ClusterPlaybookDsl.*
+import orphera.orchestrator.kolla.*
 
 // DRAFT. OpenStack Glance (image service), one node (tst13), Kolla image under
 // podman, images stored in the existing Ceph cluster as RBD images.
@@ -48,10 +49,7 @@ object glance_single_node extends OrpheraClusterPlaybook:
 
   // Keep in step with keystone_single_node.scala / kolla_cache.scala.
   private val registry = "quay.io/openstack.kolla"
-  private val release = "2025.1"
-  private val baseTag = "ubuntu-noble"
   private val cacheHostPort = "tst9.ljalbinson.com:5000"
-  private val apiImage = s"$registry/glance-api:$release-$baseTag"
 
   private val adminPassword = "orphera-test-keystone-admin-password"
   private val dbName = "glance"
@@ -68,6 +66,22 @@ object glance_single_node extends OrpheraClusterPlaybook:
   private val srcDir = "/etc/kolla/glance"
   private val logDir = "/var/log/kolla/glance"
   private val stateDir = "/var/lib/orphera/glance"
+
+  // The container as data: the unit file text and the start task come from it
+  // (orchestrator/.../kolla/Container.scala), and are checked by ContainerCheck.
+  // Defined after confRoot, logDir and stateDir, which it reads; a val used
+  // before its definition is null in an object.
+  private val glanceApi = Container(
+    name = "glance-api",
+    image = Image("glance-api", Release.R2025_1, Base.UbuntuNoble, registry),
+    mounts = List(
+      Mount(s"$confRoot/glance-api", "/var/lib/kolla/config_files"),
+      Mount(logDir, "/var/log/kolla/glance", Access.ReadWrite),
+      Mount(stateDir, "/var/lib/glance", Access.ReadWrite)
+    ),
+    env = List("KOLLA_CONFIG_STRATEGY" -> "COPY_ALWAYS")
+  )
+  private val apiImage = glanceApi.image.ref
   private val caDir = "/etc/kolla/glance-ca"
   private val ksUrl = s"https://$ksFqdn:5000"
 
@@ -112,7 +126,7 @@ object glance_single_node extends OrpheraClusterPlaybook:
        |echo "podman will try $cacheHostPort before quay.io"""".stripMargin
 
   private val pullScript =
-    s"""podman pull $apiImage || { echo "could not pull $apiImage - check registry/release/baseTag at the top of glance_single_node.scala" >&2; exit 1; }
+    s"""podman pull $apiImage || { echo "could not pull $apiImage - check the Image(...) in glanceApi in glance_single_node.scala" >&2; exit 1; }
        |echo "image ready"""".stripMargin
 
   // Identical in method to cinder_single_node.scala: the last certificate
@@ -215,35 +229,6 @@ object glance_single_node extends OrpheraClusterPlaybook:
     s"""set -e
        |podman run --rm --network host --user root --entrypoint glance-manage -v $srcDir/glance-api.conf:/etc/glance/glance-api.conf:ro,z -v $logDir:/var/log/kolla/glance:z -v $stateDir:/var/lib/glance:z $apiImage db_sync
        |echo "glance database synced"""".stripMargin
-
-  private val unitScript =
-    s"""set -e
-       |cat > /etc/systemd/system/orphera-glance-api.service <<'UNIT'
-       |[Unit]
-       |Description=glance-api (Kolla container) managed by Orphera
-       |After=network-online.target
-       |Wants=network-online.target
-       |
-       |[Service]
-       |ExecStartPre=-/usr/bin/podman rm -f glance-api
-       |ExecStart=/usr/bin/podman run --rm --name glance-api --network host -e KOLLA_CONFIG_STRATEGY=COPY_ALWAYS -v $confRoot/glance-api:/var/lib/kolla/config_files:ro,z -v $logDir:/var/log/kolla/glance:z -v $stateDir:/var/lib/glance:z $apiImage
-       |ExecStop=/usr/bin/podman stop -t 30 glance-api
-       |Restart=on-failure
-       |RestartSec=5
-       |TimeoutStartSec=300
-       |
-       |[Install]
-       |WantedBy=multi-user.target
-       |UNIT
-       |systemctl daemon-reload
-       |systemctl enable orphera-glance-api
-       |systemctl restart orphera-glance-api
-       |sleep 8
-       |if ! systemctl is-active --quiet orphera-glance-api; then
-       |  echo "orphera-glance-api failed to start - see 'journalctl -xeu orphera-glance-api' and $logDir" >&2
-       |  exit 1
-       |fi
-       |echo "glance-api running"""".stripMargin
 
   // Standard-library Python, as in cinder_single_node.scala. Plain string filled
   // in with replace(). Subcommands:
@@ -486,9 +471,8 @@ if __name__ == '__main__':
         .task("write the Glance API helper")(
           Task.RunCommand(List("sh", "-c", helperScript))
         )
-        .task("start glance-api")(
-          Task.RunCommand(List("sh", "-c", unitScript), timeoutSeconds = 300)
-        )
+        .task(s"write ${glanceApi.unitName}")(glanceApi.writeUnit)
+        .task(s"start ${glanceApi.unitName}")(glanceApi.start)
         .task("register Glance in Keystone")(
           Task.RunCommand(
             List("sh", "-c", "/usr/local/sbin/orphera-glance-api register"),

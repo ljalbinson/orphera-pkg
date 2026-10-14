@@ -78,6 +78,23 @@ object ContainerCheck:
     check("a name with a space or capital is rejected", scala.util.Try(placement.copy(name = "Bad Name")).isFailure)
     check("a container without a read-write mount gives no log hint", scala.util.Try(placement.copy(mounts = Nil).start).toOption.exists { case Task.RunCommand(List(_, _, s), _) => !s.contains(" and /"); case _ => false })
 
+    // glance_single_node.scala: three mounts, the last two read-write. The expected text is the unit
+    // the manifest wrote before it used Container.
+    val glance = Container(
+      name = "glance-api",
+      image = Image("glance-api", Release.R2025_1, Base.UbuntuNoble),
+      mounts = List(
+        Mount("/etc/kolla/glance-api", "/var/lib/kolla/config_files"),
+        Mount("/var/log/kolla/glance", "/var/log/kolla/glance", Access.ReadWrite),
+        Mount("/var/lib/orphera/glance", "/var/lib/glance", Access.ReadWrite)
+      ),
+      env = List("KOLLA_CONFIG_STRATEGY" -> "COPY_ALWAYS")
+    )
+    val glanceExecStart =
+      "ExecStart=/usr/bin/podman run --rm --name glance-api --network host -e KOLLA_CONFIG_STRATEGY=COPY_ALWAYS -v /etc/kolla/glance-api:/var/lib/kolla/config_files:ro,z -v /var/log/kolla/glance:/var/log/kolla/glance:z -v /var/lib/orphera/glance:/var/lib/glance:z quay.io/openstack.kolla/glance-api:2025.1-ubuntu-noble"
+    check("the glance unit has the three mounts in order and the image last", glance.render.linesIterator.contains(glanceExecStart), glance.render)
+    check("glance unit name", glance.unitName == "orphera-glance-api.service")
+
     if failures > 0 then
       println(s"$failures check(s) failed")
       sys.exit(1)
