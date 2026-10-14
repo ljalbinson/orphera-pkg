@@ -138,12 +138,13 @@ die() {
 playbook() {
   local f="$MANIFESTS/$1" out rc
   log "applying $1"
+  shift
   out=$(mktemp)
-  orphera cluster-playbook "$f" 2>&1 | tee "$out"
+  orphera cluster-playbook "$f" "$@" 2>&1 | tee "$out"
   rc=${PIPESTATUS[0]}
   if [ "$rc" -ne 0 ] || grep -qE "aborting remaining stages|Cluster playbook .* failed" "$out"; then
     rm -f "$out"
-    die "$1 did not complete"
+    die "$(basename "$f") did not complete"
   fi
   rm -f "$out"
 }
@@ -151,14 +152,20 @@ playbook() {
 # ---- preflight ------------------------------------------------------------
 
 preflight() {
-  local nodes="tst0 tst1 tst2 tst3 tst4 tst5 tst6 tst10 tst13 tst14 tst17 tst18 tst19" n out bad=""
+  local nodes="tst0 tst1 tst2 tst3 tst4 tst5 tst6 tst10 tst13 tst14 tst17 tst18 tst19" n out bad="" hv
   if [ -n "$WITH_CACHES" ]; then nodes="$nodes tst9 tst11"; fi
   log "preflight: every node must answer through its agent"
   for n in $nodes; do
     out=$(orphera run hostname --nodes "$n" --quiet 2>&1)
     if contains "$n" "$out"; then log "  $n ok"; else log "  $n NOT answering: $out"; bad="$bad $n"; fi
   done
-  [ -z "$bad" ] || die "no agent answer from:$bad (inventory entry, VM up, agent running?)"
+  if [ -n "$bad" ]; then
+    for n in $bad; do
+      hv=$(awk -F: '/^[[:space:]]*hypervisor:/ {gsub(/[[:space:]"'"'"']/, "", $2); print $2; exit}' "config/$n.yaml" 2>/dev/null)
+      [ -n "$hv" ] && log "  start $n:  orphera run sh -c \"virsh start $n\" --nodes $hv"
+    done
+    die "no agent answer from:$bad (inventory entry, VM up, agent running?)"
+  fi
   # After a power-off of the whole fleet MariaDB is down on all three Galera nodes and every
   # OpenStack service fails with 500s. This restarts the cluster from the node with the newest
   # data; it does nothing when Galera is healthy or not built yet.
@@ -168,8 +175,15 @@ preflight() {
 
 # ---- steps ----------------------------------------------------------------
 
+# prep covers only the nodes this build uses, the same list the preflight checks (tst7, tst9,
+# tst11 and tst12 are not part of the stack; tst9 and tst11 count only with --with-caches).
 step_prep() {
-  playbook disable_unattended_upgrades.scala
+  local nodes="tst0 tst1 tst2 tst3 tst4 tst5 tst6 tst10 tst13 tst14 tst17 tst18 tst19" cfg
+  if [ -n "$WITH_CACHES" ]; then nodes="$nodes tst9 tst11"; fi
+  cfg=$(mktemp --suffix=.yaml)
+  echo "nodes: [$(echo $nodes | sed 's/ /, /g')]" > "$cfg"
+  playbook disable_unattended_upgrades.scala --config "$cfg"
+  rm -f "$cfg"
 }
 
 step_caches() {

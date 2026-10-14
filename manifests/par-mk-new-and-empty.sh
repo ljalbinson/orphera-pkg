@@ -1,7 +1,8 @@
 #!/bin/bash
 #
 # Create new, empty virtual machines, then bring each one up to a usable base:
-#   1. provision the VM on its hypervisor     (kvm_vm_provision.scala)
+#   1. provision the VM on its hypervisor     (kvm_zfs_vm_provision.scala or
+#                                              kvm_native_vm_provision.scala, chosen per hypervisor)
 #   2. install the orphera agent over SSH     (orphera bootstrap)
 #   3. set DNS                                (gen_set_dns.scala)
 #   4. dist-upgrade                           (orphera dist-upgrade)
@@ -133,16 +134,34 @@ hypervisor_of() {
     echo "${hv:-unknown-$1}"
 }
 
+# Which provisioning playbook fits a hypervisor: the ZFS variant when the dataset
+# tank/kvm/<hypervisor> exists there, otherwise the native (plain directory) one.
+# PROVISION=zfs|native overrides the detection for every node. Refuses to guess when
+# the hypervisor does not answer.
+provision_playbook() {
+    local hv=$1 out
+    case "${PROVISION:-}" in
+        zfs) echo manifests/kvm_zfs_vm_provision.scala; return 0 ;;
+        native) echo manifests/kvm_native_vm_provision.scala; return 0 ;;
+    esac
+    out=$(orphera run sh -c "zfs list -H -o name tank/kvm/$hv >/dev/null 2>&1 && echo ORPHERA-ZFS || echo ORPHERA-NATIVE" --nodes "$hv" 2>&1)
+    if grep -q "^\[$hv\] ORPHERA-ZFS" <<<"$out"; then echo manifests/kvm_zfs_vm_provision.scala
+    elif grep -q "^\[$hv\] ORPHERA-NATIVE" <<<"$out"; then echo manifests/kvm_native_vm_provision.scala
+    else echo "cannot tell how $hv stores VMs (is its agent answering?): $out" >&2; return 1
+    fi
+}
+
 build_node() {
-    local node=$1 cfg="config/$1.yaml" hv
+    local node=$1 cfg="config/$1.yaml" hv prov
     hv=$(hypervisor_of "$node")
     step() { echo; banner "=== $(date '+%F %T') $node: $* ==="; }
 
-    step "provision VM (hypervisor $hv)"
+    prov=$(provision_playbook "$hv") || return 1
+    step "provision VM (hypervisor $hv, $(basename "$prov"))"
     if [ "$hv_lock" -eq 1 ]; then
-        with_lock "hv-$hv" orphera cluster-playbook manifests/kvm_vm_provision.scala --config "$cfg" || return 1
+        with_lock "hv-$hv" orphera cluster-playbook "$prov" --config "$cfg" || return 1
     else
-        orphera cluster-playbook manifests/kvm_vm_provision.scala --config "$cfg" || return 1
+        orphera cluster-playbook "$prov" --config "$cfg" || return 1
     fi
 
     # A rebuilt VM has a new SSH host key under the same name, so the old one is

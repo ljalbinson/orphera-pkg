@@ -6,6 +6,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — `manifests/rebuild_openstack_from_scratch.sh` (not yet run)
+- Destroys and re-creates the 13 OpenStack VMs (tst0-tst6, tst10, tst13, tst14, tst17-tst19), then runs
+  the master build script; optional `--tests` and `--wordpress`. `--dry-run` prints the plan; the
+  destructive run asks you to type `rebuild` unless `--yes`. Caches, tst7, tst8 and the hypervisors are
+  not touched.
+- Fixed: `mk-new-and-empty.sh` and `par-mk-new-and-empty.sh` still called `kvm_vm_provision.scala`, which
+  was renamed to `kvm_zfs_vm_provision.scala` when the native variant was added, so they stopped at the
+  first step. They now pick the ZFS or native playbook per hypervisor (dataset `tank/kvm/<hypervisor>`
+  present or not; `PROVISION=zfs|native` overrides; no guess when the hypervisor does not answer).
+### Fixed — Nova and Neutron register their Keystone user before the services start
+- On a freshly built Keystone, `nova-conductor` (and the scheduler) authenticate as `nova` at
+  startup and exited with HTTP 401 because the user was only created in the task after the start,
+  so "start the Nova services" failed. `nova_single_node.scala` and `neutron_single_node.scala` now
+  register in Keystone first and start the units after.
+### Fixed — the `prep` step of `build_openstack_stack.sh` only touches the stack's own nodes
+- `prep` ran `disable_unattended_upgrades.scala` on all 17 Ubuntu test VMs, including tst7, tst9,
+  tst11 and tst12, which the stack does not create, so it failed when they were off or absent.
+  The playbook now accepts `--config FILE` with an optional `nodes:` list (default unchanged when
+  run on its own), and the master script passes the nodes it builds on (plus tst9 and tst11 with
+  `--with-caches`).
+- Preflight prints the `virsh start` command for each node that does not answer.
+
 ### Added — Galera cold start: `utils/galera-cold-start.sh`
 - After a power-off of the whole fleet MariaDB is down on tst3-tst5 and every OpenStack service
   returns 500. The script reads each node's last committed position (`grastate.dat`, or
