@@ -525,6 +525,14 @@ Not yet run: one node stopped while two run (it should only start that one); the
 `build_openstack_stack.sh` after a full power-off. The refusal cases (no position, differing UUIDs) and
 `--bootstrap` were run against a fake `orphera` only.
 
+### K17. Master script, `prep` then `ceph` to `nova` to `boot` on a rebuilt stack - PASSED (2026-10-14), 14/14
+    manifests/build_openstack_stack.sh --from prep   (resumed with --from ceph, then --from nova)
+Run in pieces because of three faults, all fixed on main: `prep` hit tst7, tst9, tst11 and tst12, which
+the stack does not create (now only the stack's own nodes, via `--config` `nodes:`); `playbook()` used
+`$1` after `shift`; Nova's conductor exited with HTTP 401 because the `nova` Keystone user was created
+after the services started (Nova and Neutron now register first). The last pass (nova to boot) took
+734 s, ended passed=14 failed=0, and CirrOS booted on KVM, took 10.10.6.216 and was deleted.
+
 ## L. Node reassignment (2026-10-10) - steps 1-3 and 5 done; step 4: run-log test passed, Prometheus/Grafana stack on tst7 NOT YET RUN
 New roles: tst0-tst2 Ceph; tst3-tst5 Galera + haproxy + keepalived (VIP
 10.10.5.100); tst6 Keystone; tst7 WordPress and Prometheus/Grafana; tst8 Rocky;
