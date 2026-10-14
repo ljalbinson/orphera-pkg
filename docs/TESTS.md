@@ -525,16 +525,17 @@ Not yet run: one node stopped while two run (it should only start that one); the
 `build_openstack_stack.sh` after a full power-off. The refusal cases (no position, differing UUIDs) and
 `--bootstrap` were run against a fake `orphera` only.
 
-### K15. OpenStack from scratch - NOT YET RUN
-    manifests/rebuild_openstack_from_scratch.sh --dry-run     # the plan, changes nothing
-    manifests/rebuild_openstack_from_scratch.sh --tests --wordpress 2>&1 | tee /tmp/rebuild.log
-Destroys tst0-tst6, tst10, tst13, tst14 and tst17-tst19 and rebuilds OpenStack on fresh VMs. Needs: an
-`orphera-agent_*_amd64.deb` in the repository root, the caches (tst9, tst11, tst12) running, the agents on
-gs1, gs2, gs3 and st0 answering. Expect: step 1 builds the 13 VMs in parallel (bootstrap, DNS,
-dist-upgrade, packages), step 2 is `build_openstack_stack.sh` end to end and finishes with the CirrOS
-boot, `--tests` passes every test script. Never run: neither the parallel VM script since the provisioning
-playbook was renamed (fixed in the same change), nor the master script from its first step. The dry run
-and the per-hypervisor detection were run against a fake `orphera` only.
+### K15. OpenStack from scratch - PASSED (2026-10-14), 27/27 on the resumed build
+    manifests/rebuild_openstack_from_scratch.sh        # step 1: the 13 VMs destroyed and recreated
+    manifests/build_openstack_stack.sh --from prep     # resumed; finished in 1744 s, passed=27 failed=0
+Step 1 (parallel VM rebuild: bootstrap, DNS, dist-upgrade, packages) completed on the 13 nodes. Step 2
+stopped in `prep` the first time because the checkout in use still had the old
+`disable_unattended_upgrades.scala` (it hit tst7, tst9, tst11 and tst12); after `git checkout main &&
+git pull` and an orphera rebuild, the master script was resumed from `prep` and ran end to end: Ceph,
+Galera, Keystone, Cinder, Glance, Placement, Nova, Neutron, compute, Horizon, clients, smoke checks and
+the CirrOS boot (10.10.6.205, deleted). Not run in this pass: `--tests`, `--wordpress`, and the master
+script with `--with-caches`. The rebuild script itself was therefore only run to the end of step 1; its
+own step 2 call has not been seen to finish.
 ### K17. Master script, `prep` then `ceph` to `nova` to `boot` on a rebuilt stack - PASSED (2026-10-14), 14/14
     manifests/build_openstack_stack.sh --from prep   (resumed with --from ceph, then --from nova)
 Run in pieces because of three faults, all fixed on main: `prep` hit tst7, tst9, tst11 and tst12, which
