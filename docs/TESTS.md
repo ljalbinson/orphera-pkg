@@ -544,6 +544,16 @@ the stack does not create (now only the stack's own nodes, via `--config` `nodes
 after the services started (Nova and Neutron now register first). The last pass (nova to boot) took
 734 s, ended passed=14 failed=0, and CirrOS booted on KVM, took 10.10.6.216 and was deleted.
 
+### K16. Typed Kolla container (`kolla/Container.scala`), placement on tst13 - PASSED (2026-10-14)
+    sbt "orchestrator/Test/runMain orphera.orchestrator.kolla.ContainerCheck"
+    manifests/test_placement.sh                        # passed=10 failed=0, second run included
+`placement_single_node.scala` now builds its image reference, podman arguments, systemd unit and start
+check from a `Container` value (`Release`, `Base`, `Image`, `Mount` with `Access`) instead of strings.
+The branch compiled under `-Werror` on scala0, and the placement playbook ran twice against tst13:
+unit written, service started, registered in Keystone, resource providers listed (tst17 and tst18).
+Only placement is converted so far; glance, Nova, Neutron, Cinder and Keystone still use their own
+strings.
+
 ## L. Node reassignment (2026-10-10) - steps 1-3 and 5 done; step 4: run-log test passed, Prometheus/Grafana stack on tst7 NOT YET RUN
 New roles: tst0-tst2 Ceph; tst3-tst5 Galera + haproxy + keepalived (VIP
 10.10.5.100); tst6 Keystone; tst7 WordPress and Prometheus/Grafana; tst8 Rocky;
