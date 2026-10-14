@@ -15,9 +15,14 @@ import orphera.orchestrator.Task
   */
 object ContainerCheck:
   private var failures = 0
+  private var passes = 0
+  // PASS lines only with CHECK_VERBOSE=1, so `make release` output stays short.
+  private val verbose = sys.env.contains("CHECK_VERBOSE")
 
   private def check(name: String, ok: Boolean, detail: => String = ""): Unit =
-    if ok then println(s"PASS: $name")
+    if ok then
+      passes += 1
+      if verbose then println(s"PASS: $name")
     else
       failures += 1
       println(s"FAIL: $name $detail")
@@ -240,4 +245,4 @@ object ContainerCheck:
     if failures > 0 then
       println(s"$failures check(s) failed")
       sys.exit(1)
-    else println("all checks passed")
+    else println(s"ContainerCheck: all $passes checks passed")
