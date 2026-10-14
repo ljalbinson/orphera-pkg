@@ -183,6 +183,19 @@ object ContainerCheck:
     check("rabbitmq runs a plain image with its own description", rabbit.render.contains("Description=RabbitMQ for OpenStack managed by Orphera") && rabbit.render.contains("-e RABBITMQ_DEFAULT_USER=openstack -e RABBITMQ_DEFAULT_PASS=pw -v /var/lib/orphera/rabbitmq:/var/lib/rabbitmq:z docker.io/library/rabbitmq:3.13"), rabbit.render)
     check("a container with no capabilities has no --cap-add", !placement.render.contains("--cap-add"))
 
+    // horizon_single_node.scala: its config directory is horizon-web, not horizon.
+    val horizon = Container(
+      name = "horizon",
+      image = Image("horizon", Release.R2025_1, Base.UbuntuNoble),
+      mounts = List(
+        Mount("/etc/kolla/horizon-web", "/var/lib/kolla/config_files"),
+        Mount("/var/log/kolla/horizon", "/var/log/kolla/horizon", Access.ReadWrite)
+      ),
+      env = List("KOLLA_CONFIG_STRATEGY" -> "COPY_ALWAYS"),
+      settleSeconds = 10
+    )
+    check("the horizon unit mounts horizon-web as its config", horizon.render.contains("-v /etc/kolla/horizon-web:/var/lib/kolla/config_files:ro,z -v /var/log/kolla/horizon:/var/log/kolla/horizon:z quay.io/openstack.kolla/horizon:2025.1-ubuntu-noble"), horizon.render)
+
     if failures > 0 then
       println(s"$failures check(s) failed")
       sys.exit(1)

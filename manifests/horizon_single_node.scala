@@ -2,6 +2,7 @@
 
 import orphera.orchestrator.*
 import orphera.orchestrator.ClusterPlaybookDsl.*
+import orphera.orchestrator.kolla.*
 
 // DRAFT. OpenStack Horizon (the web dashboard), Kolla image under podman,
 // Apache + mod_wsgi, plain HTTP. Modelled on the other *_single_node.scala
@@ -42,10 +43,7 @@ object horizon_single_node extends OrpheraClusterPlaybook:
 
   // Keep in step with keystone_single_node.scala / kolla_cache.scala.
   private val registry = "quay.io/openstack.kolla"
-  private val release = "2025.1"
-  private val baseTag = "ubuntu-noble"
   private val cacheHostPort = "tst9.ljalbinson.com:5000"
-  private val webImage = s"$registry/horizon:$release-$baseTag"
 
   private val adminPassword = "orphera-test-keystone-admin-password"
   // Signs the session cookies; a fixed test value like the other secrets.
@@ -56,6 +54,21 @@ object horizon_single_node extends OrpheraClusterPlaybook:
   private val logDir = "/var/log/kolla/horizon"
   private val caDir = "/etc/kolla/horizon-ca"
   private val ksUrl = s"https://$ksFqdn:5000"
+
+  // The container as data: the unit file text and the start task come from it
+  // (orchestrator/.../kolla/Container.scala), checked by ContainerCheck. Defined after
+  // confRoot and logDir, which it reads; a val used before its definition is null in an object.
+  private val horizonWeb = Container(
+    name = "horizon",
+    image = Image("horizon", Release.R2025_1, Base.UbuntuNoble, registry),
+    mounts = List(
+      Mount(s"$confRoot/horizon-web", "/var/lib/kolla/config_files"),
+      Mount(logDir, "/var/log/kolla/horizon", Access.ReadWrite)
+    ),
+    env = List("KOLLA_CONFIG_STRATEGY" -> "COPY_ALWAYS"),
+    settleSeconds = 10
+  )
+  private val webImage = horizonWeb.image.ref
 
   private val hostPackages =
     List("podman", "openssl", "curl", "ca-certificates", "python3")
@@ -94,7 +107,7 @@ object horizon_single_node extends OrpheraClusterPlaybook:
        |echo "podman will try $cacheHostPort before quay.io"""".stripMargin
 
   private val pullScript =
-    s"""podman pull $webImage || { echo "could not pull $webImage - check registry/release/baseTag at the top of horizon_single_node.scala" >&2; exit 1; }
+    s"""podman pull $webImage || { echo "could not pull $webImage - check the Image(...) in horizonWeb in horizon_single_node.scala" >&2; exit 1; }
        |echo "image ready"""".stripMargin
 
   // Same method as the other service playbooks: the last certificate Keystone
@@ -219,35 +232,6 @@ object horizon_single_node extends OrpheraClusterPlaybook:
        |{"command": "$$APACHE_CMD", "config_files": [{"source": "/var/lib/kolla/config_files/local_settings.py", "dest": "/etc/openstack-dashboard/local_settings.py", "owner": "horizon", "perm": "0600"}, {"source": "/var/lib/kolla/config_files/ca.crt", "dest": "/etc/openstack-dashboard/ca.crt", "owner": "horizon", "perm": "0644"}, {"source": "/var/lib/kolla/config_files/horizon.conf", "dest": "$$APACHE_CONF", "owner": "horizon", "perm": "0600"}], "permissions": [{"path": "/var/log/kolla/horizon", "owner": "horizon:kolla", "recurse": true}]}
        |JSON
        |echo "kolla config written under $confRoot/horizon-web"""".stripMargin
-
-  private val unitScript =
-    s"""set -e
-       |cat > /etc/systemd/system/orphera-horizon.service <<'UNIT'
-       |[Unit]
-       |Description=horizon (Kolla container) managed by Orphera
-       |After=network-online.target
-       |Wants=network-online.target
-       |
-       |[Service]
-       |ExecStartPre=-/usr/bin/podman rm -f horizon
-       |ExecStart=/usr/bin/podman run --rm --name horizon --network host -e KOLLA_CONFIG_STRATEGY=COPY_ALWAYS -v $confRoot/horizon-web:/var/lib/kolla/config_files:ro,z -v $logDir:/var/log/kolla/horizon:z $webImage
-       |ExecStop=/usr/bin/podman stop -t 30 horizon
-       |Restart=on-failure
-       |RestartSec=5
-       |TimeoutStartSec=300
-       |
-       |[Install]
-       |WantedBy=multi-user.target
-       |UNIT
-       |systemctl daemon-reload
-       |systemctl enable orphera-horizon
-       |systemctl restart orphera-horizon
-       |sleep 10
-       |if ! systemctl is-active --quiet orphera-horizon; then
-       |  echo "orphera-horizon failed to start - see 'journalctl -xeu orphera-horizon' and $logDir" >&2
-       |  exit 1
-       |fi
-       |echo "horizon running"""".stripMargin
 
   // Standard-library Python. Plain string filled in with replace(). Subcommands:
   //   login-page | login | static
@@ -396,9 +380,8 @@ if __name__ == '__main__':
         .task("write the Horizon check helper")(
           Task.RunCommand(List("sh", "-c", helperScript))
         )
-        .task("start horizon")(
-          Task.RunCommand(List("sh", "-c", unitScript), timeoutSeconds = 300)
-        )
+        .task(s"write ${horizonWeb.unitName}")(horizonWeb.writeUnit)
+        .task(s"start ${horizonWeb.unitName}")(horizonWeb.start)
         .build,
 
       stage("confirm-horizon-healthy", node)
