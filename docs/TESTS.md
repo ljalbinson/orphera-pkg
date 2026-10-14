@@ -568,7 +568,8 @@ their playbook twice. The Keystone teardown drops the keystone database and the 
 every other OpenStack service and leaves the other services and the CLI on scala0 with a CA that no longer
 matches (CLI: "self-signed certificate in certificate chain"; Horizon: 403 Unauthorized after login).
 Running it on the typed-keystone branch broke the stack this way; recovery is
-`manifests/build_openstack_stack.sh --from keystone`. Run it on a stack you can rebuild.
+`manifests/build_openstack_stack.sh --from keystone` (run 2026-10-14: passed=19 failed=0 in 820 s, CirrOS
+booted on 10.10.6.213). Run it on a stack you can rebuild.
 
 ## L. Node reassignment (2026-10-10) - steps 1-3 and 5 done; step 4: run-log test passed, Prometheus/Grafana stack on tst7 NOT YET RUN
 New roles: tst0-tst2 Ceph; tst3-tst5 Galera + haproxy + keepalived (VIP
