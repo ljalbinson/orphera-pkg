@@ -136,14 +136,14 @@ die() {
 # runner's failure markers (older builds were seen exiting 0 after a failed
 # stage, so both are checked).
 playbook() {
-  local f="$MANIFESTS/$1" out rc
+  local f="$MANIFESTS/$1" out rc; shift
   log "applying $1"
   out=$(mktemp)
-  orphera cluster-playbook "$f" 2>&1 | tee "$out"
+  orphera cluster-playbook "$f" "$@" 2>&1 | tee "$out"
   rc=${PIPESTATUS[0]}
   if [ "$rc" -ne 0 ] || grep -qE "aborting remaining stages|Cluster playbook .* failed" "$out"; then
     rm -f "$out"
-    die "$1 did not complete"
+    die "$(basename "$f") did not complete"
   fi
   rm -f "$out"
 }
@@ -153,11 +153,6 @@ playbook() {
 preflight() {
   local nodes="tst0 tst1 tst2 tst3 tst4 tst5 tst6 tst10 tst13 tst14 tst17 tst18 tst19" n out bad="" hv
   if [ -n "$WITH_CACHES" ]; then nodes="$nodes tst9 tst11"; fi
-  # prep (disable_unattended_upgrades.scala) touches every Ubuntu test VM, not only the OpenStack
-  # ones, so those must answer too or the step fails half way. Leave prep out (--from ceph) to
-  # build OpenStack without them; VMs made by the provisioning scripts already have it switched off.
-  case " ${STEPS[*]} " in *" prep "*) nodes="$nodes tst7 tst9 tst11 tst12" ;; esac
-  nodes=$(printf '%s\n' $nodes | awk '!seen[$0]++' | tr '\n' ' ')
   log "preflight: every node must answer through its agent"
   for n in $nodes; do
     out=$(orphera run hostname --nodes "$n" --quiet 2>&1)
@@ -179,8 +174,15 @@ preflight() {
 
 # ---- steps ----------------------------------------------------------------
 
+# prep covers only the nodes this build uses, the same list the preflight checks (tst7, tst9,
+# tst11 and tst12 are not part of the stack; tst9 and tst11 count only with --with-caches).
 step_prep() {
-  playbook disable_unattended_upgrades.scala
+  local nodes="tst0 tst1 tst2 tst3 tst4 tst5 tst6 tst10 tst13 tst14 tst17 tst18 tst19" cfg
+  if [ -n "$WITH_CACHES" ]; then nodes="$nodes tst9 tst11"; fi
+  cfg=$(mktemp --suffix=.yaml)
+  echo "nodes: [$(echo $nodes | sed 's/ /, /g')]" > "$cfg"
+  playbook disable_unattended_upgrades.scala --config "$cfg"
+  rm -f "$cfg"
 }
 
 step_caches() {

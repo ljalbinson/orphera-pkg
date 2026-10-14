@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import io.circe.yaml.parser
+import java.nio.file.{Files, Paths}
 import orphera.orchestrator.*
 import orphera.orchestrator.ClusterPlaybookDsl.*
 
@@ -26,7 +28,9 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 // provisioning scripts (kvm_native_vm_provision.scala, kvm_zfs_vm_provision.scala)
 // write the same setting at first boot, so new VMs never start an upgrade.
 //
-// Nodes: the Ubuntu test VMs. tst8 (Rocky) and the hypervisors gs1-gs3 and st0
+// Nodes: by default the Ubuntu test VMs; `--config FILE` with a `nodes: [tst3, tst4]` list
+// narrows it to those (build_openstack_stack.sh passes the nodes of the stack it builds).
+// Default list: the Ubuntu test VMs. tst8 (Rocky) and the hypervisors gs1-gs3 and st0
 // are left alone; add them to `nodes` if wanted. To undo on a node:
 //   rm /etc/apt/apt.conf.d/20auto-upgrades
 //   systemctl unmask apt-daily.timer apt-daily-upgrade.timer unattended-upgrades.service
@@ -34,10 +38,29 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 // Safe to re-run.
 object disable_unattended_upgrades extends OrpheraClusterPlaybook:
 
-  private val nodes = List(
+  private val defaultNodes = List(
     "tst0", "tst1", "tst2", "tst3", "tst4", "tst5", "tst6", "tst7", "tst9",
     "tst10", "tst11", "tst12", "tst13", "tst14", "tst17", "tst18", "tst19"
   )
+
+  // Optional `nodes:` list from --config; a missing --config means the default list, but a
+  // config that cannot be read or has an empty or bad list fails before any node is touched.
+  private val nodes: List[String] =
+    sys.env.get("ORPHERA_CONFIG") match
+      case None => defaultNodes
+      case Some(path) =>
+        val listed =
+          for
+            text <- scala.util.Try(Files.readString(Paths.get(path))).toEither.left.map(e => s"cannot read $path: ${e.getMessage}")
+            json <- parser.parse(text).left.map(e => s"$path is not valid YAML: ${e.getMessage}")
+            found <- json.hcursor.get[Option[List[String]]]("nodes").left.map(e => s"$path: ${e.getMessage}")
+          yield found
+        listed match
+          case Left(message) => throw new IllegalArgumentException(message)
+          case Right(None) => defaultNodes
+          case Right(Some(list)) if list.isEmpty || list.exists(!_.matches("^[A-Za-z0-9.-]+$")) =>
+            throw new IllegalArgumentException(s"$path: `nodes` must be a non-empty list of host names")
+          case Right(Some(list)) => list
 
   private val disableScript =
     """set -e
