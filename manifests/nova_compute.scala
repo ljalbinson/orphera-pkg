@@ -2,6 +2,7 @@
 
 import orphera.orchestrator.*
 import orphera.orchestrator.ClusterPlaybookDsl.*
+import orphera.orchestrator.kolla.*
 
 // DRAFT. OpenStack compute nodes: nova-compute plus the Neutron Open vSwitch agent
 // on tst17 and tst18, Kolla images under podman. Modelled on nova_single_node.scala
@@ -77,12 +78,7 @@ object nova_compute extends OrpheraClusterPlaybook:
 
   // Keep in step with the other Kolla playbooks.
   private val registry = "quay.io/openstack.kolla"
-  private val release = "2025.1"
-  private val baseTag = "ubuntu-noble"
   private val cacheHostPort = "tst9.ljalbinson.com:5000"
-  private val computeImage = s"$registry/nova-compute:$release-$baseTag"
-  private val ovsAgentImage = s"$registry/neutron-openvswitch-agent:$release-$baseTag"
-  private val novaApiImage = s"$registry/nova-api:$release-$baseTag"
 
   private val adminPassword = "orphera-test-keystone-admin-password"
   private val novaPassword = "orphera-test-nova-service-password"
@@ -96,6 +92,59 @@ object nova_compute extends OrpheraClusterPlaybook:
   private val novaStateDir = "/var/lib/nova"
   private val neutronStateDir = "/var/lib/orphera/neutron"
   private val caDir = "/etc/kolla/nova-compute-ca"
+
+  // The containers as data (orchestrator/.../kolla/Container.scala, checked by ContainerCheck).
+  // Defined after the directory vals they read; a val used before its definition is null in an
+  // object.
+  //
+  // nova-compute runs privileged on the host PID and network namespaces with the libvirt and
+  // Open vSwitch sockets and the kernel modules directory; it needs privileged mode for privsep
+  // (os-vif, qemu-img, mounts), and /dev from the host: the guest consoles are ptys (/dev/pts/N)
+  // that Nova must see to read the console. It wants libvirtd, which it talks to.
+  private val novaCompute = Container(
+    name = "nova-compute",
+    image = Image("nova-compute", Release.R2025_1, Base.UbuntuNoble, registry),
+    mounts = List(
+      Mount(s"$confRoot/nova-compute", "/var/lib/kolla/config_files"),
+      Mount(novaLogDir, "/var/log/kolla/nova", Access.ReadWrite),
+      Mount(novaStateDir, "/var/lib/nova", Access.Unlabelled),
+      Mount("/run/libvirt", "/run/libvirt", Access.Unlabelled),
+      Mount("/run/openvswitch", "/run/openvswitch", Access.Unlabelled),
+      Mount("/lib/modules", "/lib/modules", Access.ReadOnlyUnlabelled),
+      Mount("/dev", "/dev", Access.Unlabelled)
+    ),
+    env = List("KOLLA_CONFIG_STRATEGY" -> "COPY_ALWAYS"),
+    privileged = true,
+    hostPid = true,
+    after = List("openvswitch-switch.service", "libvirtd.service"),
+    wants = List("libvirtd.service"),
+    stopGraceSeconds = 60,
+    settleSeconds = 15
+  )
+  // The Open vSwitch agent is set up exactly like the one on tst19 (neutron_single_node.scala).
+  private val ovsAgent = Container(
+    name = "neutron-openvswitch-agent",
+    image = Image("neutron-openvswitch-agent", Release.R2025_1, Base.UbuntuNoble, registry),
+    mounts = List(
+      Mount(s"$confRoot/neutron-openvswitch-agent", "/var/lib/kolla/config_files"),
+      Mount(neutronLogDir, "/var/log/kolla/neutron", Access.ReadWrite),
+      Mount(neutronStateDir, "/var/lib/neutron", Access.ReadWrite),
+      Mount("/run/openvswitch", "/run/openvswitch", Access.Unlabelled),
+      Mount("/run/netns", "/run/netns", Access.Shared),
+      Mount("/lib/modules", "/lib/modules", Access.ReadOnlyUnlabelled)
+    ),
+    env = List("KOLLA_CONFIG_STRATEGY" -> "COPY_ALWAYS"),
+    privileged = true,
+    hostPid = true,
+    after = List("openvswitch-switch.service"),
+    preStart = List(
+      "/bin/sh -c 'mkdir -p /run/netns && (mountpoint -q /run/netns || mount --bind /run/netns /run/netns) && mount --make-rshared /run/netns'"
+    ),
+    settleSeconds = 15
+  )
+  private val computeImage = novaCompute.image.ref
+  private val ovsAgentImage = ovsAgent.image.ref
+  private val novaApiImage = Image("nova-api", Release.R2025_1, Base.UbuntuNoble, registry).ref
 
   private val hostPackages =
     List(
@@ -240,7 +289,7 @@ object nova_compute extends OrpheraClusterPlaybook:
 
   private val pullScript =
     s"""for img in $computeImage $ovsAgentImage; do
-       |  podman pull $$img || { echo "could not pull $$img - check registry/release/baseTag at the top of nova_compute.scala" >&2; exit 1; }
+       |  podman pull $$img || { echo "could not pull $$img - check the Image(...) values in novaCompute and ovsAgent in nova_compute.scala" >&2; exit 1; }
        |done
        |echo "images ready"""".stripMargin
 
@@ -421,62 +470,6 @@ object nova_compute extends OrpheraClusterPlaybook:
        |{"command": "neutron-openvswitch-agent --config-file /etc/neutron/neutron.conf --config-file /etc/neutron/plugins/ml2/openvswitch_agent.ini", "config_files": [{"source": "/var/lib/kolla/config_files/neutron.conf", "dest": "/etc/neutron/neutron.conf", "owner": "neutron", "perm": "0600"}, {"source": "/var/lib/kolla/config_files/ca.crt", "dest": "/etc/neutron/ssl/ca.crt", "owner": "neutron", "perm": "0644"}, {"source": "/var/lib/kolla/config_files/openvswitch_agent.ini", "dest": "/etc/neutron/plugins/ml2/openvswitch_agent.ini", "owner": "neutron", "perm": "0600"}], "permissions": [{"path": "/var/log/kolla/neutron", "owner": "neutron:kolla", "recurse": true}, {"path": "/var/lib/neutron", "owner": "neutron:neutron", "recurse": true}]}
        |JSON
        |echo "kolla config written under $confRoot"""".stripMargin
-
-  // nova-compute runs privileged on the host PID and network namespaces with the
-  // libvirt and Open vSwitch sockets and the kernel modules directory; it needs
-  // privileged mode for privsep (os-vif, qemu-img, mounts), and /dev from the host:
-  // the guest consoles are ptys (/dev/pts/N) that Nova must see to read the console. The OVS agent is set up
-  // exactly like the one on tst19.
-  private val unitsScript =
-    s"""set -e
-       |cat > /etc/systemd/system/orphera-nova-compute.service <<UNIT
-       |[Unit]
-       |Description=nova-compute (Kolla container) managed by Orphera
-       |After=network-online.target openvswitch-switch.service libvirtd.service
-       |Wants=network-online.target libvirtd.service
-       |
-       |[Service]
-       |ExecStartPre=-/usr/bin/podman rm -f nova-compute
-       |ExecStart=/usr/bin/podman run --rm --name nova-compute --network host --privileged --pid host -e KOLLA_CONFIG_STRATEGY=COPY_ALWAYS -v $confRoot/nova-compute:/var/lib/kolla/config_files:ro,z -v $novaLogDir:/var/log/kolla/nova:z -v $novaStateDir:/var/lib/nova -v /run/libvirt:/run/libvirt -v /run/openvswitch:/run/openvswitch -v /lib/modules:/lib/modules:ro -v /dev:/dev $computeImage
-       |ExecStop=/usr/bin/podman stop -t 60 nova-compute
-       |Restart=on-failure
-       |RestartSec=5
-       |TimeoutStartSec=300
-       |
-       |[Install]
-       |WantedBy=multi-user.target
-       |UNIT
-       |cat > /etc/systemd/system/orphera-neutron-openvswitch-agent.service <<UNIT
-       |[Unit]
-       |Description=neutron-openvswitch-agent (Kolla container) managed by Orphera
-       |After=network-online.target openvswitch-switch.service
-       |Wants=network-online.target
-       |
-       |[Service]
-       |ExecStartPre=/bin/sh -c 'mkdir -p /run/netns && (mountpoint -q /run/netns || mount --bind /run/netns /run/netns) && mount --make-rshared /run/netns'
-       |ExecStartPre=-/usr/bin/podman rm -f neutron-openvswitch-agent
-       |ExecStart=/usr/bin/podman run --rm --name neutron-openvswitch-agent --network host --privileged --pid host -v /run/openvswitch:/run/openvswitch -v /run/netns:/run/netns:rshared -v /lib/modules:/lib/modules:ro -e KOLLA_CONFIG_STRATEGY=COPY_ALWAYS -v $confRoot/neutron-openvswitch-agent:/var/lib/kolla/config_files:ro,z -v $neutronLogDir:/var/log/kolla/neutron:z -v $neutronStateDir:/var/lib/neutron:z $ovsAgentImage
-       |ExecStop=/usr/bin/podman stop -t 30 neutron-openvswitch-agent
-       |Restart=on-failure
-       |RestartSec=5
-       |TimeoutStartSec=300
-       |
-       |[Install]
-       |WantedBy=multi-user.target
-       |UNIT
-       |systemctl daemon-reload
-       |for u in neutron-openvswitch-agent nova-compute; do
-       |  systemctl enable orphera-$$u
-       |  systemctl restart orphera-$$u
-       |done
-       |sleep 15
-       |for u in neutron-openvswitch-agent nova-compute; do
-       |  if ! systemctl is-active --quiet orphera-$$u; then
-       |    echo "orphera-$$u failed to start - see 'journalctl -xeu orphera-$$u' and $novaLogDir / $neutronLogDir" >&2
-       |    exit 1
-       |  fi
-       |done
-       |echo "nova-compute and neutron-openvswitch-agent running"""".stripMargin
 
   // Run on the control node: map the new compute hosts into cell1.
   private val discoverScript =
@@ -794,9 +787,10 @@ if __name__ == '__main__':
         .task("write the compute API helper")(
           Task.RunCommand(List("sh", "-c", helperScript))
         )
-        .task("start nova-compute and the Open vSwitch agent")(
-          Task.RunCommand(List("sh", "-c", unitsScript), timeoutSeconds = 300)
-        )
+        .task(s"write ${ovsAgent.unitName}")(ovsAgent.writeUnit)
+        .task(s"write ${novaCompute.unitName}")(novaCompute.writeUnit)
+        .task(s"start ${ovsAgent.unitName}")(ovsAgent.start)
+        .task(s"start ${novaCompute.unitName}")(novaCompute.start)
         .build,
 
       stage("discover-compute-hosts", controlNode)

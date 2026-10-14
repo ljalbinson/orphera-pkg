@@ -99,6 +99,8 @@ final case class Container(
     description: Option[String] = None,
     // Extra units to start after, besides network-online.target.
     after: List[String] = Nil,
+    // Extra units the service wants (pulls in), besides network-online.target.
+    wants: List[String] = Nil,
     // Commands run (as ExecStartPre) before the old container is removed.
     preStart: List[String] = Nil,
     stopGraceSeconds: Int = 30,
@@ -139,12 +141,13 @@ final case class Container(
       case Network.Published => runArguments
     val unitDescription =
       description.getOrElse(s"$name (Kolla container) managed by Orphera")
+    val wantedUnits = ("network-online.target" :: wants).mkString(" ")
     val afterUnits = ("network-online.target" :: after).mkString(" ")
     val preLines = preStart.map(c => s"ExecStartPre=$c\n").mkString
     s"""[Unit]
        |Description=$unitDescription
        |After=$afterUnits
-       |Wants=network-online.target
+       |Wants=$wantedUnits
        |
        |[Service]
        |${preLines}ExecStartPre=-/usr/bin/podman rm -f $name

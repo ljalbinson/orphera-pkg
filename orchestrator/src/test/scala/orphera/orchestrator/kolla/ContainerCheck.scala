@@ -210,6 +210,33 @@ object ContainerCheck:
     check("published ports without Network.Published are rejected", scala.util.Try(placement.copy(ports = List(Port(1, 2)))).isFailure)
     check("Network.Published without a port is rejected", scala.util.Try(placement.copy(network = Network.Published)).isFailure)
 
+    // nova_compute.scala: privileged, wants libvirtd, the host's /dev and the libvirt and OVS sockets.
+    val compute = Container(
+      name = "nova-compute",
+      image = Image("nova-compute", Release.R2025_1, Base.UbuntuNoble),
+      mounts = List(
+        Mount("/etc/kolla/nova-compute", "/var/lib/kolla/config_files"),
+        Mount("/var/log/kolla/nova", "/var/log/kolla/nova", Access.ReadWrite),
+        Mount("/var/lib/nova", "/var/lib/nova", Access.Unlabelled),
+        Mount("/run/libvirt", "/run/libvirt", Access.Unlabelled),
+        Mount("/run/openvswitch", "/run/openvswitch", Access.Unlabelled),
+        Mount("/lib/modules", "/lib/modules", Access.ReadOnlyUnlabelled),
+        Mount("/dev", "/dev", Access.Unlabelled)
+      ),
+      env = List("KOLLA_CONFIG_STRATEGY" -> "COPY_ALWAYS"),
+      privileged = true,
+      hostPid = true,
+      after = List("openvswitch-switch.service", "libvirtd.service"),
+      wants = List("libvirtd.service"),
+      stopGraceSeconds = 60,
+      settleSeconds = 15
+    )
+    val computeUnit = compute.render
+    check("the compute unit starts after and wants libvirtd", computeUnit.linesIterator.contains("After=network-online.target openvswitch-switch.service libvirtd.service") && computeUnit.linesIterator.contains("Wants=network-online.target libvirtd.service"), computeUnit)
+    check("the compute unit stops with a 60 second grace", computeUnit.linesIterator.contains("ExecStop=/usr/bin/podman stop -t 60 nova-compute"), computeUnit)
+    check("the compute mounts keep their flags, /dev included", computeUnit.contains("-v /var/lib/nova:/var/lib/nova -v /run/libvirt:/run/libvirt -v /run/openvswitch:/run/openvswitch -v /lib/modules:/lib/modules:ro -v /dev:/dev quay.io/openstack.kolla/nova-compute:2025.1-ubuntu-noble"), computeUnit)
+    check("a container with no wants has only network-online.target", placement.render.linesIterator.contains("Wants=network-online.target"))
+
     if failures > 0 then
       println(s"$failures check(s) failed")
       sys.exit(1)
