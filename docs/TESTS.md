@@ -562,14 +562,13 @@ volume up after the second run. The first attempt failed to compile because my c
 playbook uses; redone from `main`. Left on strings: the Horizon container and the cache, WordPress and
 monitoring playbooks.
 
-### K18. The service test scripts tear their service down first (lesson from 2026-10-14)
-Every `manifests/test_<service>.sh` begins with the service's teardown playbook, so it is a rebuild of that
-service, not a rerun. `test_keystone.sh` drops the keystone database and the test CA, which unregisters every
-other OpenStack service and leaves the other services and the CLI on scala0 with a CA that no longer matches
-(CLI: "self-signed certificate in certificate chain"; Horizon: 403 Unauthorized after login). Running it
-on the typed-keystone branch broke the stack this way; recovery was `manifests/build_openstack_stack.sh
---from keystone`. The other test scripts drop only their own service's database (flavors, images, volumes and
-registrations of that service are lost). Run the per-service tests on a stack you can rebuild.
+### K18. `test_keystone.sh` tears Keystone down first (lesson from 2026-10-14)
+Of the per-service test scripts only `test_keystone.sh` starts with a teardown playbook; the others run
+their playbook twice. The Keystone teardown drops the keystone database and the test CA, which unregisters
+every other OpenStack service and leaves the other services and the CLI on scala0 with a CA that no longer
+matches (CLI: "self-signed certificate in certificate chain"; Horizon: 403 Unauthorized after login).
+Running it on the typed-keystone branch broke the stack this way; recovery is
+`manifests/build_openstack_stack.sh --from keystone`. Run it on a stack you can rebuild.
 
 ## L. Node reassignment (2026-10-10) - steps 1-3 and 5 done; step 4: run-log test passed, Prometheus/Grafana stack on tst7 NOT YET RUN
 New roles: tst0-tst2 Ceph; tst3-tst5 Galera + haproxy + keepalived (VIP
