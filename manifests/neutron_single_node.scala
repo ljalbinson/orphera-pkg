@@ -2,6 +2,7 @@
 
 import orphera.orchestrator.*
 import orphera.orchestrator.ClusterPlaybookDsl.*
+import orphera.orchestrator.kolla.*
 
 // DRAFT. OpenStack Neutron for provider (flat) networks: neutron-server, the Open
 // vSwitch agent and the DHCP agent on one node, Kolla images under podman. Modelled
@@ -69,12 +70,7 @@ object neutron_single_node extends OrpheraClusterPlaybook:
 
   // Keep in step with keystone_single_node.scala / kolla_cache.scala.
   private val registry = "quay.io/openstack.kolla"
-  private val release = "2025.1"
-  private val baseTag = "ubuntu-noble"
   private val cacheHostPort = "tst9.ljalbinson.com:5000"
-  private val serverImage = s"$registry/neutron-server:$release-$baseTag"
-  private val ovsAgentImage = s"$registry/neutron-openvswitch-agent:$release-$baseTag"
-  private val dhcpImage = s"$registry/neutron-dhcp-agent:$release-$baseTag"
 
   private val adminPassword = "orphera-test-keystone-admin-password"
   private val dbName = "neutron"
@@ -90,6 +86,53 @@ object neutron_single_node extends OrpheraClusterPlaybook:
   private val stateDir = "/var/lib/orphera/neutron"
   private val caDir = "/etc/kolla/neutron-ca"
   private val ksUrl = s"https://$ksFqdn:5000"
+
+  // The three Neutron containers as data (orchestrator/.../kolla/Container.scala, checked by
+  // ContainerCheck). All share the config/log/state mounts; the two agents also run privileged
+  // in the host's process table with the Open vSwitch socket directory, the network-namespace
+  // directory (shared both ways, so namespaces made in the container are visible on the host
+  // and the other way round) and the kernel modules. The server needs none of that. Defined
+  // after confRoot, logDir and stateDir, which they read; a val used before its definition is
+  // null in an object.
+  private def neutronContainer(service: String, agent: Boolean): Container =
+    val common = List(
+      Mount(s"$confRoot/$service", "/var/lib/kolla/config_files"),
+      Mount(logDir, "/var/log/kolla/neutron", Access.ReadWrite),
+      Mount(stateDir, "/var/lib/neutron", Access.ReadWrite)
+    )
+    val agentMounts = List(
+      Mount("/run/openvswitch", "/run/openvswitch", Access.Unlabelled),
+      Mount("/run/netns", "/run/netns", Access.Shared),
+      Mount("/lib/modules", "/lib/modules", Access.ReadOnlyUnlabelled)
+    )
+    Container(
+      name = service,
+      image = Image(service, Release.R2025_1, Base.UbuntuNoble, registry),
+      mounts = if agent then common ++ agentMounts else common,
+      env = List("KOLLA_CONFIG_STRATEGY" -> "COPY_ALWAYS"),
+      privileged = agent,
+      hostPid = agent,
+      after = List("openvswitch-switch.service"),
+      preStart =
+        if agent then
+          List("/bin/sh -c 'mkdir -p /run/netns && (mountpoint -q /run/netns || mount --bind /run/netns /run/netns) && mount --make-rshared /run/netns'")
+        else Nil,
+      settleSeconds = 12
+    )
+  private val neutronServer = neutronContainer("neutron-server", agent = false)
+  private val neutronServices: List[Container] =
+    List(
+      neutronServer,
+      neutronContainer("neutron-openvswitch-agent", agent = true),
+      neutronContainer("neutron-dhcp-agent", agent = true)
+    )
+  private val serverImage = neutronServer.image.ref
+  private val ovsAgentImage = neutronServices(1).image.ref
+
+  // Adds one "write the unit" task per container, then one "start" task per container.
+  private def withServices(b: StageBuilder): StageBuilder =
+    val written = neutronServices.foldLeft(b)((acc, c) => acc.task(s"write ${c.unitName}")(c.writeUnit))
+    neutronServices.foldLeft(written)((acc, c) => acc.task(s"start ${c.unitName}")(c.start))
 
   private val hostPackages =
     List("podman", "openssl", "curl", "ca-certificates", "python3", "openvswitch-switch")
@@ -203,8 +246,8 @@ object neutron_single_node extends OrpheraClusterPlaybook:
        |echo "podman will try $cacheHostPort before quay.io"""".stripMargin
 
   private val pullScript =
-    s"""for img in $serverImage $ovsAgentImage $dhcpImage; do
-       |  podman pull $$img || { echo "could not pull $$img - check registry/release/baseTag at the top of neutron_single_node.scala" >&2; exit 1; }
+    s"""for img in ${neutronServices.map(_.image.ref).mkString(" ")}; do
+       |  podman pull $$img || { echo "could not pull $$img - check the Image(...) in neutronContainer in neutron_single_node.scala" >&2; exit 1; }
        |done
        |echo "images ready"""".stripMargin
 
@@ -359,56 +402,6 @@ object neutron_single_node extends OrpheraClusterPlaybook:
     s"""set -e
        |podman run --rm --network host --user root --entrypoint neutron-db-manage -v $srcDir/neutron.conf:/etc/neutron/neutron.conf:ro,z -v $srcDir/ml2_conf.ini:/etc/neutron/plugins/ml2/ml2_conf.ini:ro,z -v $logDir:/var/log/kolla/neutron:z $serverImage --config-file /etc/neutron/neutron.conf --config-file /etc/neutron/plugins/ml2/ml2_conf.ini upgrade heads
        |echo "neutron database synced"""".stripMargin
-
-  // The two agents manage Open vSwitch, network namespaces and dnsmasq, so they run
-  // privileged on the host network and PID namespace, with the OVS socket
-  // directory, /run/netns (mount-propagated both ways, so namespaces created in the
-  // container are visible on the host and the other way round) and the kernel
-  // modules directory. The server needs none of that.
-  private val unitsScript =
-    s"""set -e
-       |mkunit() {
-       |  name=$$1
-       |  image=$$2
-       |  extra=$$3
-       |  pre=$$4
-       |  cat > /etc/systemd/system/orphera-$$name.service <<UNIT
-       |[Unit]
-       |Description=$$name (Kolla container) managed by Orphera
-       |After=network-online.target openvswitch-switch.service
-       |Wants=network-online.target
-       |
-       |[Service]
-       |$$pre
-       |ExecStartPre=-/usr/bin/podman rm -f $$name
-       |ExecStart=/usr/bin/podman run --rm --name $$name --network host $$extra -e KOLLA_CONFIG_STRATEGY=COPY_ALWAYS -v $confRoot/$$name:/var/lib/kolla/config_files:ro,z -v $logDir:/var/log/kolla/neutron:z -v $stateDir:/var/lib/neutron:z $$image
-       |ExecStop=/usr/bin/podman stop -t 30 $$name
-       |Restart=on-failure
-       |RestartSec=5
-       |TimeoutStartSec=300
-       |
-       |[Install]
-       |WantedBy=multi-user.target
-       |UNIT
-       |}
-       |AGENT_ARGS="--privileged --pid host -v /run/openvswitch:/run/openvswitch -v /run/netns:/run/netns:rshared -v /lib/modules:/lib/modules:ro"
-       |NETNS_PRE="ExecStartPre=/bin/sh -c 'mkdir -p /run/netns && (mountpoint -q /run/netns || mount --bind /run/netns /run/netns) && mount --make-rshared /run/netns'"
-       |mkunit neutron-server $serverImage "" ""
-       |mkunit neutron-openvswitch-agent $ovsAgentImage "$$AGENT_ARGS" "$$NETNS_PRE"
-       |mkunit neutron-dhcp-agent $dhcpImage "$$AGENT_ARGS" "$$NETNS_PRE"
-       |systemctl daemon-reload
-       |for u in neutron-server neutron-openvswitch-agent neutron-dhcp-agent; do
-       |  systemctl enable orphera-$$u
-       |  systemctl restart orphera-$$u
-       |done
-       |sleep 12
-       |for u in neutron-server neutron-openvswitch-agent neutron-dhcp-agent; do
-       |  if ! systemctl is-active --quiet orphera-$$u; then
-       |    echo "orphera-$$u failed to start - see 'journalctl -xeu orphera-$$u' and $logDir" >&2
-       |    exit 1
-       |  fi
-       |done
-       |echo "neutron-server, neutron-openvswitch-agent and neutron-dhcp-agent running"""".stripMargin
 
   // Standard-library Python, as in the other service playbooks. Plain string filled
   // in with replace(). Subcommands:
@@ -642,7 +635,8 @@ if __name__ == '__main__':
         )
         .build,
 
-      stage("install-neutron", node)
+      withServices(
+        stage("install-neutron", node)
         .task("wait for apt and dpkg to be idle")(
           Task.RunCommand(List("sh", "-c", waitAptIdleScript), timeoutSeconds = 960)
         )
@@ -682,10 +676,7 @@ if __name__ == '__main__':
             timeoutSeconds = 120
           )
         )
-        .task("start the Neutron services")(
-          Task.RunCommand(List("sh", "-c", unitsScript), timeoutSeconds = 300)
-        )
-        .build,
+      ).build,
 
       stage("confirm-neutron-healthy", node)
         .waitFor(

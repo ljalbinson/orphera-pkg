@@ -41,18 +41,25 @@ object Image:
   val DefaultRegistry = "quay.io/openstack.kolla"
 
 /** How a host path is mounted into the container. `:z` relabels for SELinux
-  * and is harmless where SELinux is off.
+  * and is harmless where SELinux is off. The last three are for host paths that
+  * must stay as they are: an Open vSwitch socket directory, a network-namespace
+  * directory that has to propagate both ways (`rshared`), the kernel modules.
   */
 enum Access(val suffix: String):
   case ReadOnly extends Access("ro,z")
   case ReadWrite extends Access("z")
+  case Unlabelled extends Access("")
+  case ReadOnlyUnlabelled extends Access("ro")
+  case Shared extends Access("rshared")
 
 final case class Mount(
     host: String,
     inside: String,
     access: Access = Access.ReadOnly
 ):
-  def flag: String = s"-v $host:$inside:${access.suffix}"
+  def flag: String =
+    if access.suffix.isEmpty then s"-v $host:$inside"
+    else s"-v $host:$inside:${access.suffix}"
 
 final case class Container(
     name: String,
@@ -60,6 +67,14 @@ final case class Container(
     mounts: List[Mount] = Nil,
     // A List, not a Map: the order is part of the text that gets written.
     env: List[(String, String)] = Nil,
+    // Agents that manage the host's networking need the host's process table and
+    // every capability; the API servers do not.
+    privileged: Boolean = false,
+    hostPid: Boolean = false,
+    // Extra units to start after, besides network-online.target.
+    after: List[String] = Nil,
+    // Commands run (as ExecStartPre) before the old container is removed.
+    preStart: List[String] = Nil,
     stopGraceSeconds: Int = 30,
     restartSeconds: Int = 5,
     startTimeoutSeconds: Int = 300,
@@ -75,20 +90,24 @@ final case class Container(
 
   /** Everything after `podman run --rm --name <name> --network host`. */
   def runArguments: String =
-    (env.map((k, v) => s"-e $k=$v") ++ mounts.map(_.flag) :+ image.ref)
+    (List("--privileged").filter(_ => privileged) ++
+      List("--pid host").filter(_ => hostPid) ++
+      env.map((k, v) => s"-e $k=$v") ++ mounts.map(_.flag) :+ image.ref)
       .mkString(" ")
 
   /** The systemd unit, exactly as it is written to the node. Pure: it can be
     * compared with what a node has, or asserted in a test, with no machine.
     */
   def render: String =
+    val afterUnits = ("network-online.target" :: after).mkString(" ")
+    val preLines = preStart.map(c => s"ExecStartPre=$c\n").mkString
     s"""[Unit]
        |Description=$name (Kolla container) managed by Orphera
-       |After=network-online.target
+       |After=$afterUnits
        |Wants=network-online.target
        |
        |[Service]
-       |ExecStartPre=-/usr/bin/podman rm -f $name
+       |${preLines}ExecStartPre=-/usr/bin/podman rm -f $name
        |ExecStart=/usr/bin/podman run --rm --name $name --network host $runArguments
        |ExecStop=/usr/bin/podman stop -t $stopGraceSeconds $name
        |Restart=on-failure

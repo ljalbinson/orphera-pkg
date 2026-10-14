@@ -111,6 +111,34 @@ object ContainerCheck:
     check("the nova-conductor unit has its own config directory and the shared log and state mounts", nova("nova-conductor").render.linesIterator.contains(novaConductorExecStart), nova("nova-conductor").render)
     check("the four nova units have distinct names", List("nova-api", "nova-scheduler", "nova-conductor", "nova-novncproxy").map(nova(_).unitName).distinct.size == 4)
 
+    // neutron_single_node.scala: the agents are privileged, share the host's process table and
+    // mount the OVS socket directory, /run/netns (shared both ways) and the kernel modules.
+    val netnsPre = "/bin/sh -c 'mkdir -p /run/netns && (mountpoint -q /run/netns || mount --bind /run/netns /run/netns) && mount --make-rshared /run/netns'"
+    val ovsAgent = Container(
+      name = "neutron-openvswitch-agent",
+      image = Image("neutron-openvswitch-agent", Release.R2025_1, Base.UbuntuNoble),
+      mounts = List(
+        Mount("/etc/kolla/neutron-openvswitch-agent", "/var/lib/kolla/config_files"),
+        Mount("/var/log/kolla/neutron", "/var/log/kolla/neutron", Access.ReadWrite),
+        Mount("/var/lib/orphera/neutron", "/var/lib/neutron", Access.ReadWrite),
+        Mount("/run/openvswitch", "/run/openvswitch", Access.Unlabelled),
+        Mount("/run/netns", "/run/netns", Access.Shared),
+        Mount("/lib/modules", "/lib/modules", Access.ReadOnlyUnlabelled)
+      ),
+      env = List("KOLLA_CONFIG_STRATEGY" -> "COPY_ALWAYS"),
+      privileged = true,
+      hostPid = true,
+      after = List("openvswitch-switch.service"),
+      preStart = List(netnsPre),
+      settleSeconds = 12
+    )
+    val ovsUnit = ovsAgent.render
+    check("the agent unit waits for Open vSwitch as well as the network", ovsUnit.linesIterator.contains("After=network-online.target openvswitch-switch.service"), ovsUnit)
+    check("the namespace setup runs before the old container is removed", ovsUnit.indexOf("ExecStartPre=" + netnsPre) >= 0 && ovsUnit.indexOf("ExecStartPre=" + netnsPre) < ovsUnit.indexOf("ExecStartPre=-/usr/bin/podman rm -f"), ovsUnit)
+    check("the agent runs privileged in the host's process table", ovsUnit.contains("--network host --privileged --pid host -e KOLLA_CONFIG_STRATEGY=COPY_ALWAYS"), ovsUnit)
+    check("the agent mounts have the right flags", ovsUnit.contains("-v /run/openvswitch:/run/openvswitch -v /run/netns:/run/netns:rshared -v /lib/modules:/lib/modules:ro quay.io/openstack.kolla/neutron-openvswitch-agent:2025.1-ubuntu-noble"), ovsUnit)
+    check("a plain container has no privilege flags and no extra pre-start line", !placement.render.contains("--privileged") && !placement.render.contains("--pid") && placement.render.linesIterator.count(_.startsWith("ExecStartPre=")) == 1)
+
     if failures > 0 then
       println(s"$failures check(s) failed")
       sys.exit(1)
