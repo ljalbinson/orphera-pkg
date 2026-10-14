@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — typed configuration files, spike (`orchestrator/.../conf/Conf.scala`)
+- `Catalogue` (the options a service declares: section, name, type, default, allowed values, old names) and `ConfFile`
+  (values checked against it). Unknown sections and keys, deprecated names, wrong types, out-of-range ports and values
+  outside an allowed list are refused with a suggestion. A `ConfFile` is a `Resource`, so it has `write` and `check`.
+  `manifests/dump_oslo_options.sh` dumps a Kolla image's options as JSON to build the real catalogue from. Not yet used by
+  any manifest; `make test` runs `ConfCheck`.
+
 ## [0.1.191] - 2026-10-14
 
 ### Added — typed Kolla containers (`orchestrator/.../kolla/Container.scala`)
