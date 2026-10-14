@@ -559,8 +559,9 @@ failed=0 with the second run completing and both agents alive. Keystone followed
 and fernet keys still present after the second run; a failed start now also prints the journal. Cinder followed (branch `typed-cinder`): the API, scheduler and volume services with their
 three capabilities, and RabbitMQ as an `ExternalImage`; `manifests/test_cinder.sh` passed=12 failed=0, scheduler and
 volume up after the second run. The first attempt failed to compile because my conversion deleted values the
-playbook uses; redone from `main`. Left on strings: the Horizon container and the cache, WordPress and
-monitoring playbooks.
+playbook uses; redone from `main`. Horizon followed (branch `typed-horizon`): `manifests/test_horizon.sh` passed=7 failed=0 with the admin
+sign-in working. Its first run failed only because `test_keystone.sh` had wiped Keystone (see K18). Left on
+strings: nova_compute.scala and kolla_cache.scala.
 
 ### K18. `test_keystone.sh` tears Keystone down first (lesson from 2026-10-14)
 Of the per-service test scripts only `test_keystone.sh` starts with a teardown playbook; the others run
