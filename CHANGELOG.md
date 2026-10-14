@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed — Nova and Neutron register their Keystone user before the services start
+- On a freshly built Keystone, `nova-conductor` (and the scheduler) authenticate as `nova` at
+  startup and exited with HTTP 401 because the user was only created in the task after the start,
+  so "start the Nova services" failed. `nova_single_node.scala` and `neutron_single_node.scala` now
+  register in Keystone first and start the units after.
 ### Fixed — the `prep` step of `build_openstack_stack.sh` only touches the stack's own nodes
 - `prep` ran `disable_unattended_upgrades.scala` on all 17 Ubuntu test VMs, including tst7, tst9,
   tst11 and tst12, which the stack does not create, so it failed when they were off or absent.

@@ -35,9 +35,11 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 //   - install-nova (tst14): wait for apt, packages, cache mirror, image pulls,
 //     Keystone's CA from its TLS handshake, nova.conf, Kolla config for the four
 //     services (the API behind Apache + mod_wsgi), `nova-manage api_db sync`,
-//     cell0 and cell1 mapping, `nova-manage db sync`, the units, then
-//     registration in Keystone (user `nova` in project `service`, service type
-//     `compute`, three endpoints).
+//     cell0 and cell1 mapping, `nova-manage db sync`, registration in Keystone
+//     (user `nova` in project `service`, service type `compute`, three
+//     endpoints), then the units. Registration comes first because the
+//     scheduler and conductor authenticate as `nova` when they start; on a fresh
+//     Keystone they exited with HTTP 401 and the start check failed.
 //   - confirm-nova-healthy (tst14): the API answers, and the scheduler and
 //     conductor report in as "up" through the API.
 //
@@ -636,14 +638,14 @@ if __name__ == '__main__':
         .task("write the Nova API helper")(
           Task.RunCommand(List("sh", "-c", helperScript))
         )
-        .task("start the Nova services")(
-          Task.RunCommand(List("sh", "-c", unitsScript), timeoutSeconds = 300)
-        )
         .task("register Nova in Keystone")(
           Task.RunCommand(
             List("sh", "-c", "/usr/local/sbin/orphera-nova-api register"),
             timeoutSeconds = 120
           )
+        )
+        .task("start the Nova services")(
+          Task.RunCommand(List("sh", "-c", unitsScript), timeoutSeconds = 300)
         )
         .build,
 
