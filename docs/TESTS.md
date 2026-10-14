@@ -564,7 +564,9 @@ sign-in working. Its first run failed only because `test_keystone.sh` had wiped 
 `typed-kolla-cache`): the registry as an `ExternalImage` publishing port 5000 (`Network.Published`), run on a new tst9
 (moved to gs3; tst7, tst9, tst11 and tst12 did not exist on any hypervisor). `orphera cluster-playbook
 manifests/kolla_cache.scala` completed all stages, the keystone image was pulled through the cache and the
-catalog listed `openstack.kolla/keystone`. Left on strings: nova_compute.scala.
+catalog listed `openstack.kolla/keystone`. Finally `nova_compute.scala` (branch `typed-compute`; `Container` gained `wants`):
+`manifests/test_nova_compute.sh` passed=25 failed=0, nova-compute and the OVS agent up on tst17 and tst18, 2 hypervisors.
+Every Kolla playbook now uses the typed `Container`.
 
 ### K18. `test_keystone.sh` tears Keystone down first (lesson from 2026-10-14)
 Of the per-service test scripts only `test_keystone.sh` starts with a teardown playbook; the others run
