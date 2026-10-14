@@ -553,8 +553,10 @@ The branch compiled under `-Werror` on scala0, and the placement playbook ran tw
 unit written, service started, registered in Keystone, resource providers listed (tst17 and tst18).
 Glance was converted next (branch `typed-glance`, 2026-10-14): `manifests/test_glance.sh` passed=11
 failed=0 with the second run completing. Nova followed (branch `typed-nova`): four containers from one helper, `manifests/test_nova.sh` passed=19
-failed=0 with the second run completing; the scheduler and conductor reported in. Neutron, Cinder and
-Keystone still use their own strings.
+failed=0 with the second run completing; the scheduler and conductor reported in. Neutron followed (branch `typed-neutron`): the server and the two privileged agents, with `Container` gaining
+`privileged`, `hostPid`, `after`, `preStart` and three mount modes; `manifests/test_neutron.sh` passed=18
+failed=0 with the second run completing and both agents alive. Cinder and Keystone still use their own
+strings.
 
 ## L. Node reassignment (2026-10-10) - steps 1-3 and 5 done; step 4: run-log test passed, Prometheus/Grafana stack on tst7 NOT YET RUN
 New roles: tst0-tst2 Ceph; tst3-tst5 Galera + haproxy + keepalived (VIP
