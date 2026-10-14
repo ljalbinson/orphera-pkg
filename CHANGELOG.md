@@ -13,6 +13,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `manifests/dump_oslo_options.sh` dumps a Kolla image's options as JSON to build the real catalogue from. Not yet used by
   any manifest; `make test` runs `ConfCheck`.
 
+### Added — `Resource` type class, prototype (`orchestrator/.../Resource.scala`)
+- `Resource[A]` describes a file the playbook writes (path and exact content). `x.write` and `x.check` come from the one
+  description; `check` changes nothing and fails with a diff if the node's file differs, or with MISSING if absent.
+  `Container` has an instance for its systemd unit. Prototype: not yet used by any manifest.
+
 ## [0.1.191] - 2026-10-14
 
 ### Added — typed Kolla containers (`orchestrator/.../kolla/Container.scala`)

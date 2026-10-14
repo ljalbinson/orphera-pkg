@@ -2,7 +2,7 @@
 
 package orphera.orchestrator.kolla
 
-import orphera.orchestrator.Task
+import orphera.orchestrator.{Resource, Task}
 
 // A Kolla service run as a rootful podman container under a systemd unit.
 //
@@ -199,3 +199,13 @@ final case class Container(
       ),
       timeoutSeconds = startTimeoutSeconds
     )
+
+object Container:
+  /** A container's unit is a file the playbook writes, so it can be written and
+    * checked from the one description: `container.write`, `container.check`
+    * (with `import orphera.orchestrator.Resource.*`).
+    */
+  given Resource[Container] with
+    def label(c: Container): String = c.unitName
+    def path(c: Container): String = c.unitPath
+    def content(c: Container): String = c.render
