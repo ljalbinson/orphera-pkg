@@ -87,6 +87,271 @@ object cinder_single_node extends OrpheraClusterPlaybook:
   // Defined after confRoot, logDir and stateDir, which they read; a val used before its
   // definition is null in an object.
   //
+  // cinder-volume gets three extra capabilities: its privsep helper (used when a volume is
+  // created from an image that has to be downloaded and inspected or converted, e.g. a qcow2
+  // image) must be able to set CAP_SYS_ADMIN, CAP_NET_ADMIN and CAP_DAC_READ_SEARCH, which
+  // podman drops by default; without them it fails with "FailedToDropPrivileges: Privsep
+  // daemon failed to start". (kolla-ansible runs this container privileged; these three are
+  // the narrower equivalent.) Plain volumes and raw-image clones do not need them.
+  private def cinderContainer(service: String, capabilities: List[String] = Nil): Container =
+    Container(
+      name = service,
+      image = Image(service, Release.R2025_1, Base.UbuntuNoble, registry),
+      mounts = List(
+        Mount(s"$confRoot/$service", "/var/lib/kolla/config_files"),
+        Mount(logDir, "/var/log/kolla/cinder", Access.ReadWrite),
+        Mount(stateDir, "/var/lib/cinder", Access.ReadWrite)
+      ),
+      env = List("KOLLA_CONFIG_STRATEGY" -> "COPY_ALWAYS"),
+      capabilities = capabilities,
+      after = List("orphera-rabbitmq.service")
+    )
+  private val cinderServices: List[Container] =
+    List(
+      cinderContainer("cinder-api"),
+      cinderContainer("cinder-scheduler"),
+      cinderContainer("cinder-volume", List("SYS_ADMIN", "NET_ADMIN", "DAC_READ_SEARCH"))
+    )
+  private val rabbitContainer = Container(
+    name = "rabbitmq",
+    image = ExternalImage("docker.io/library/rabbitmq:3.13"),
+    mounts = List(Mount("/var/lib/orphera/rabbitmq", "/var/lib/rabbitmq", Access.ReadWrite)),
+    env = List("RABBITMQ_DEFAULT_USER" -> rabbitUser, "RABBITMQ_DEFAULT_PASS" -> rabbitPassword),
+    description = Some("RabbitMQ for OpenStack managed by Orphera"),
+    settleSeconds = 3
+  )
+  private val apiImage = cinderServices.head.image.ref
+  private val rabbitImage = rabbitContainer.image.ref
+
+  // RabbitMQ first (the services start after it), then the three Cinder services.
+  private def withServices(b: StageBuilder): StageBuilder =
+    val rabbit = b
+      .task("create the RabbitMQ data directory")(
+        Task.RunCommand(List("mkdir", "-p", "/var/lib/orphera/rabbitmq"))
+      )
+      .task(s"write ${rabbitContainer.unitName}")(rabbitContainer.writeUnit)
+      .task(s"start ${rabbitContainer.unitName}")(rabbitContainer.start)
+      .task("wait for RabbitMQ to answer")(
+        Task.RunCommand(List("sh", "-c", rabbitWaitScript), timeoutSeconds = 150)
+      )
+    val written = cinderServices.foldLeft(rabbit)((acc, c) => acc.task(s"write ${c.unitName}")(c.writeUnit))
+    cinderServices.foldLeft(written)((acc, c) => acc.task(s"start ${c.unitName}")(c.start))
+
+  private val hostPackages =
+    List("podman", "openssl", "curl", "ca-certificates", "python3")
+
+  // ---- tst3 (Galera) and tst0 (Ceph) ----------------------------------
+
+  private val createDatabaseScript =
+    s"""mariadb -N -e "CREATE DATABASE IF NOT EXISTS $dbName; CREATE USER IF NOT EXISTS '$dbUser'@'%' IDENTIFIED BY '$dbPassword'; GRANT ALL PRIVILEGES ON $dbName.* TO '$dbUser'@'%'; FLUSH PRIVILEGES;""""
+
+  // The pool create is idempotent; `auth import` replaces the entity, so a
+  // re-run just re-asserts the same key and caps. `cephadm shell --mount FILE`
+  // makes FILE visible at /mnt/<name> inside the shell container.
+  private val cephScript =
+    s"""set -e
+       |# Ceph 19.2.6+ (CVE-2025-30156) defaults to the aes256k cephx cipher. The
+       |# Kolla images carry Ubuntu's Ceph 19.2.3 client libraries, which only
+       |# understand the older `aes` cipher (and the monitors refuse an `aes` key
+       |# unless `aes` is still allowed). TEST CLUSTER COMPROMISE: allow both
+       |# until the Kolla images ship a newer client, then enforce aes256k only
+       |# with `ceph mon set auth_allowed_ciphers aes256k` and rotate this key.
+       |cephadm shell -- ceph mon set auth_allowed_ciphers aes,aes256k
+       |cephadm shell -- ceph osd pool create $cephPool
+       |cephadm shell -- rbd pool init $cephPool
+       |cat > /tmp/cinder.keyring <<'KEYRING'
+       |[client.cinder]
+       |    key = $cephKey
+       |    caps mon = "profile rbd"
+       |    caps osd = "profile rbd pool=$cephPool"
+       |KEYRING
+       |cephadm shell --mount /tmp/cinder.keyring -- ceph auth import -i /mnt/cinder.keyring
+       |rm -f /tmp/cinder.keyring
+       |cephadm shell -- ceph auth get client.cinder >/dev/null
+       |echo "pool $cephPool and client.cinder ready"""".stripMargin
+
+  // ---- tst10 ----------------------------------------------------------
+
+  private val useCacheScript =
+    s"""mkdir -p /etc/containers/registries.conf.d
+       |cat > /etc/containers/registries.conf.d/orphera-kolla-cache.conf <<'REG'
+       |[[registry]]
+       |prefix = "quay.io"
+       |location = "quay.io"
+       |
+       |[[registry.mirror]]
+       |location = "$cacheHostPort"
+       |insecure = true
+       |REG
+       |echo "podman will try $cacheHostPort before quay.io"""".stripMargin
+
+  private val pullScript =
+    s"""set -e
+       |for img in ${(cinderServices.map(_.image.ref) :+ rabbitImage).mkString(" ")}; do
+       |  podman pull $$img || { echo "could not pull $$img - check the Image(...) in cinderContainer in cinder_single_node.scala" >&2; exit 1; }
+       |done
+       |echo "images ready"""".stripMargin
+
+  // Takes the last certificate Keystone presents (its CA, because
+  // keystone_single_node.scala serves leaf + CA) and checks that it is
+  // self-signed and signs the leaf. Trust on first use.
+  private val fetchCaScript =
+    s"""set -e
+       |mkdir -p $caDir
+       |rm -f /tmp/ks-chain-*.pem
+       |openssl s_client -connect $ksFqdn:5000 -servername $ksFqdn -showcerts </dev/null 2>/dev/null | awk '/-----BEGIN CERTIFICATE-----/{n++} n>0{print > ("/tmp/ks-chain-" n ".pem")}'
+       |COUNT=$$(ls /tmp/ks-chain-*.pem 2>/dev/null | wc -l)
+       |if [ "$$COUNT" -lt 2 ]; then
+       |  echo "keystone at $ksFqdn:5000 presented $$COUNT certificate(s); expected leaf + CA - re-run keystone_single_node.scala (it must serve server-chain.crt)" >&2
+       |  exit 1
+       |fi
+       |cp /tmp/ks-chain-$$COUNT.pem $caDir/ca.crt
+       |openssl verify -CAfile $caDir/ca.crt /tmp/ks-chain-1.pem
+       |SUBJ=$$(openssl x509 -in $caDir/ca.crt -noout -subject | sed 's/^subject=//')
+       |ISS=$$(openssl x509 -in $caDir/ca.crt -noout -issuer | sed 's/^issuer=//')
+       |if [ "$$SUBJ" != "$$ISS" ]; then echo "last certificate is not self-signed: $$SUBJ / $$ISS" >&2; exit 1; fi
+       |rm -f /tmp/ks-chain-*.pem
+       |if command -v update-ca-certificates >/dev/null 2>&1; then
+       |  cp $caDir/ca.crt /usr/local/share/ca-certificates/orphera-test-ca.crt
+       |  update-ca-certificates
+       |else
+       |  cp $caDir/ca.crt /etc/pki/ca-trust/source/anchors/orphera-test-ca.crt
+       |  update-ca-trust
+       |fi
+       |echo "Keystone CA installed: $$SUBJ"""".stripMargin
+
+  // ceph.conf needs only the monitors for a client. The only task whose script
+  // contains template expressions, kept separate on purpose so the runner's
+  // template pass does not touch the large scripts elsewhere.
+  private val cephClientScript =
+    s"""mkdir -p $srcDir
+       |cat > $srcDir/ceph.conf <<'CEPHCONF'
+       |[global]
+       |mon_host = {{nodes.tst0.cluster_ip}},{{nodes.tst1.cluster_ip}},{{nodes.tst2.cluster_ip}}
+       |CEPHCONF
+       |cat > $srcDir/ceph.client.cinder.keyring <<'KEYRING'
+       |[client.cinder]
+       |    key = $cephKey
+       |KEYRING
+       |chmod 640 $srcDir/ceph.client.cinder.keyring
+       |echo "ceph client config written"""".stripMargin
+
+  private val rabbitWaitScript =
+    s"""for i in $$(seq 1 30); do
+       |  if podman exec rabbitmq rabbitmq-diagnostics -q ping >/dev/null 2>&1; then
+       |    echo "rabbitmq up"
+       |    exit 0
+       |  fi
+       |  sleep 3
+       |done
+       |echo "rabbitmq did not come up - see 'journalctl -xeu orphera-rabbitmq'" >&2
+       |exit 1""".stripMargin
+
+  // cinder.conf is shared by the three services. Quoted heredoc: nothing for
+  // the shell to expand.
+  private val cinderConfScript =
+    s"""mkdir -p $srcDir $logDir $stateDir
+       |cat > $srcDir/cinder.conf <<'CONF'
+       |[DEFAULT]
+       |log_dir = /var/log/kolla/cinder
+       |state_path = /var/lib/cinder
+       |my_ip = $nodeIp
+       |auth_strategy = keystone
+       |transport_url = rabbit://$rabbitUser:$rabbitPassword@$nodeIp:5672/
+       |enabled_backends = ceph
+       |
+       |[database]
+       |connection = mysql+pymysql://$dbUser:$dbPassword@$vip:3306/$dbName
+       |
+       |[keystone_authtoken]
+       |www_authenticate_uri = $ksUrl
+       |auth_url = $ksUrl
+       |auth_type = password
+       |project_domain_name = Default
+       |user_domain_name = Default
+       |project_name = service
+       |username = cinder
+       |password = $cinderPassword
+       |cafile = /etc/cinder/ssl/ca.crt
+       |
+       |[oslo_concurrency]
+       |lock_path = /var/lib/cinder/tmp
+       |
+       |[ceph]
+       |volume_driver = cinder.volume.drivers.rbd.RBDDriver
+       |volume_backend_name = ceph
+       |rbd_pool = $cephPool
+       |rbd_ceph_conf = /etc/ceph/ceph.conf
+       |rbd_user = cinder
+       |rbd_flatten_volume_from_snapshot = false
+       |rbd_max_clone_depth = 5
+       |rados_connect_timeout = -1
+       |CONF
+       |chmod 640 $srcDir/cinder.conf
+       |echo "cinder.conf written"""".stripMargin
+
+  // One config directory per service (Kolla mounts it at
+  // /var/lib/kolla/config_files). The WSGI script path and the Apache flavour
+  // are read from the image, as in keystone_single_node.scala.
+  private val kollaConfigScript =
+    s"""set -e
+       |mkdir -p $confRoot/cinder-api $confRoot/cinder-scheduler $confRoot/cinder-volume
+       |for svc in api scheduler volume; do
+       |  cp $srcDir/cinder.conf $confRoot/cinder-$$svc/cinder.conf
+       |  cp $caDir/ca.crt $confRoot/cinder-$$svc/ca.crt
+       |done
+       |cp $srcDir/ceph.conf $srcDir/ceph.client.cinder.keyring $confRoot/cinder-volume/
+       |WSGI=$$(podman run --rm --entrypoint sh $apiImage -c 'command -v cinder-wsgi')
+       |if [ -z "$$WSGI" ]; then echo "cinder-wsgi not found in $apiImage" >&2; exit 1; fi
+       |if podman run --rm --entrypoint sh $apiImage -c 'test -d /etc/apache2/conf-enabled'; then
+       |  APACHE_CONF=/etc/apache2/conf-enabled/wsgi-cinder.conf
+       |  APACHE_CMD="apache2 -DFOREGROUND"
+       |else
+       |  APACHE_CONF=/etc/httpd/conf.d/wsgi-cinder.conf
+       |  APACHE_CMD="/usr/sbin/httpd -DFOREGROUND"
+       |fi
+       |echo "wsgi script: $$WSGI; apache config: $$APACHE_CONF"
+       |cat > $confRoot/cinder-api/wsgi-cinder.conf <<WSGICONF
+       |Listen 0.0.0.0:8776
+       |ServerSignature Off
+       |ServerTokens Prod
+       |TraceEnable off
+       |
+       |<VirtualHost *:8776>
+       |    ErrorLog "$logDir/cinder-apache-error.log"
+       |    CustomLog "$logDir/cinder-apache-access.log" combined
+       |    WSGIApplicationGroup %{GLOBAL}
+       |    WSGIDaemonProcess cinder-api group=cinder processes=2 threads=1 user=cinder
+       |    WSGIProcessGroup cinder-api
+       |    WSGIScriptAlias / "$$WSGI"
+       |    WSGIPassAuthorization On
+       |
+       |    <Directory "$$(dirname "$$WSGI")">
+       |        Require all granted
+       |    </Directory>
+       |</VirtualHost>
+       |WSGICONF
+       |COMMON='{"source": "/var/lib/kolla/config_files/cinder.conf", "dest": "/etc/cinder/cinder.conf", "owner": "cinder", "perm": "0600"}, {"source": "/var/lib/kolla/config_files/ca.crt", "dest": "/etc/cinder/ssl/ca.crt", "owner": "cinder", "perm": "0644"}'
+       |PERMS='"permissions": [{"path": "/var/log/kolla/cinder", "owner": "cinder:kolla", "recurse": true}, {"path": "/var/lib/cinder", "owner": "cinder:cinder", "recurse": true}]'
+       |cat > $confRoot/cinder-api/config.json <<JSON
+       |{"command": "$$APACHE_CMD", "config_files": [$$COMMON, {"source": "/var/lib/kolla/config_files/wsgi-cinder.conf", "dest": "$$APACHE_CONF", "owner": "cinder", "perm": "0600"}], $$PERMS}
+       |JSON
+       |cat > $confRoot/cinder-scheduler/config.json <<JSON
+       |{"command": "cinder-scheduler --config-file /etc/cinder/cinder.conf", "config_files": [$$COMMON], $$PERMS}
+       |JSON
+       |cat > $confRoot/cinder-volume/config.json <<JSON
+       |{"command": "cinder-volume --config-file /etc/cinder/cinder.conf", "config_files": [$$COMMON, {"source": "/var/lib/kolla/config_files/ceph.conf", "dest": "/etc/ceph/ceph.conf", "owner": "cinder", "perm": "0644"}, {"source": "/var/lib/kolla/config_files/ceph.client.cinder.keyring", "dest": "/etc/ceph/ceph.client.cinder.keyring", "owner": "cinder", "perm": "0600"}], $$PERMS}
+       |JSON
+       |echo "kolla config written under $confRoot"""".stripMargin
+
+  // cinder-manage runs in a one-off container with cinder.conf bind-mounted
+  // (entrypoint overridden, so kolla_set_configs does not run). `:z` relabels
+  // for SELinux hosts and is ignored elsewhere.
+  private val dbSyncScript =
+    s"""set -e
+       |podman run --rm --network host --user root --entrypoint cinder-manage -v $srcDir/cinder.conf:/etc/cinder/cinder.conf:ro,z -v $logDir:/var/log/kolla/cinder:z -v $stateDir:/var/lib/cinder:z $apiImage db sync
+       |echo "cinder database synced"""".stripMargin
+
   // Standard-library Python so nothing has to be installed on the node. Kept
   // as a plain (non-interpolated) string and filled in with replace(), so its
   // braces, percent signs and backslashes reach the file untouched. Subcommands:
