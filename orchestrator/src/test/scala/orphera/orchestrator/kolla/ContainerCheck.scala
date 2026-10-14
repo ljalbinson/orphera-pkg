@@ -242,10 +242,11 @@ object ContainerCheck:
     check("the compute mounts keep their flags, /dev included", computeUnit.contains("-v /var/lib/nova:/var/lib/nova -v /run/libvirt:/run/libvirt -v /run/openvswitch:/run/openvswitch -v /lib/modules:/lib/modules:ro -v /dev:/dev quay.io/openstack.kolla/nova-compute:2025.1-ubuntu-noble"), computeUnit)
     {
       import orphera.orchestrator.{Drift, Resource, Task}
-      import orphera.orchestrator.Resource.*
-      val written = placement.write
+      // Not `import Resource.*`: its `check` extension would clash with this object's own `check`.
+      val r = summon[Resource[Container]]
+      val written = r.write(placement)
       check("Container is a Resource: write is its writeUnit", written == placement.writeUnit)
-      val checked = placement.check match
+      val checked = r.check(placement) match
         case Task.RunCommand(List("sh", "-c", script), _) => script
         case other => other.toString
       check("the check command diffs the unit path against the rendered unit", checked.contains(s"diff -u ${placement.unitPath} -") && checked.contains(placement.render))
