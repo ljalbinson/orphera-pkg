@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — `manifests/rebuild_openstack_from_scratch.sh` (not yet run)
+- Destroys and re-creates the 13 OpenStack VMs (tst0-tst6, tst10, tst13, tst14, tst17-tst19), then runs
+  the master build script; optional `--tests` and `--wordpress`. `--dry-run` prints the plan; the
+  destructive run asks you to type `rebuild` unless `--yes`. Caches, tst7, tst8 and the hypervisors are
+  not touched.
+- Fixed: `mk-new-and-empty.sh` and `par-mk-new-and-empty.sh` still called `kvm_vm_provision.scala`, which
+  was renamed to `kvm_zfs_vm_provision.scala` when the native variant was added, so they stopped at the
+  first step. They now pick the ZFS or native playbook per hypervisor (dataset `tank/kvm/<hypervisor>`
+  present or not; `PROVISION=zfs|native` overrides; no guess when the hypervisor does not answer).
 ### Fixed — Nova and Neutron register their Keystone user before the services start
 - On a freshly built Keystone, `nova-conductor` (and the scheduler) authenticate as `nova` at
   startup and exited with HTTP 401 because the user was only created in the task after the start,
