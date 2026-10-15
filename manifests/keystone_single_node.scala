@@ -3,6 +3,7 @@
 import orphera.orchestrator.*
 import orphera.orchestrator.ClusterPlaybookDsl.*
 import orphera.orchestrator.kolla.*
+import orphera.orchestrator.conf.*
 
 // OpenStack Keystone (identity service), one node, TLS from the start, run
 // from the Kolla container image rather than distro packages.
@@ -184,23 +185,25 @@ object keystone_single_node extends OrpheraClusterPlaybook:
        |fi
        |echo "TLS material ready in $sslDir"""".stripMargin
 
-  // keystone.conf as the container sees it (copied to /etc/keystone by
-  // kolla_set_configs). Quoted heredoc: nothing for the shell to expand.
-  private val writeConfigScript =
+  // The directories keystone.conf and the logs go in. keystone.conf itself is
+  // written below from a typed value; the container sees it at /etc/keystone
+  // (copied by kolla_set_configs).
+  private val keystoneDirsScript =
     s"""mkdir -p $confDir $logDir
-       |cat > $confDir/keystone.conf <<'CONF'
-       |[DEFAULT]
-       |log_dir = /var/log/kolla/keystone
-       |use_stderr = true
-       |
-       |[database]
-       |connection = mysql+pymysql://$dbUser:$dbPassword@$vip:3306/$dbName
-       |
-       |[token]
-       |provider = fernet
-       |CONF
-       |chmod 640 $confDir/keystone.conf
-       |echo "keystone.conf written, database at $vip:3306"""".stripMargin
+       |echo "directories ready"""".stripMargin
+
+  // The option lists of the image (keystone), from catalogues/. Every section and key of the
+  // files below is checked against them when this manifest is built.
+  private val keystoneCatalogue: Catalogue = Catalogues.load("keystone", Set.empty[String])
+  private val confResource = summon[Resource[ConfFile]]
+
+  private val keystoneConf: ConfFile =
+    ConfFile.text(s"$confDir/keystone.conf", keystoneCatalogue)(
+      ("DEFAULT", "log_dir", "/var/log/kolla/keystone"),
+      ("DEFAULT", "use_stderr", "true"),
+      ("database", "connection", s"mysql+pymysql://$dbUser:$dbPassword@$vip:3306/$dbName"),
+      ("token", "provider", "fernet")
+    )
 
   // Inspects the image for the two things that differ between builds: where
   // keystone-wsgi-public lives (a venv under /var/lib/kolla in recent images),
@@ -321,6 +324,9 @@ object keystone_single_node extends OrpheraClusterPlaybook:
       |fi
       |echo "admin token issued (${#T} characters)"""".stripMargin
 
+  // Hidden from the console and the run log wherever a task echoes them.
+  Secrets.registerAll(List(dbPassword, adminPassword))
+
   val playbook: ClusterPlaybook =
     clusterPlaybook("keystone-single-node")(
       stage("create-keystone-database", "tst3")
@@ -342,9 +348,10 @@ object keystone_single_node extends OrpheraClusterPlaybook:
         .task("create the test CA and server certificate")(
           Task.RunCommand(List("sh", "-c", tlsScript), timeoutSeconds = 120)
         )
-        .task("write keystone.conf")(
-          Task.RunCommand(List("sh", "-c", writeConfigScript))
+        .task("create the Keystone directories")(
+          Task.RunCommand(List("sh", "-c", keystoneDirsScript))
         )
+        .task("write keystone.conf")(confResource.write(keystoneConf))
         .task("write the Apache vhost and Kolla config.json")(
           Task.RunCommand(
             List("sh", "-c", kollaConfigScript),
