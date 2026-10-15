@@ -79,20 +79,37 @@ final case class OptionSpec(
     secret: Boolean = false
 )
 
-/** The options of a service (one or more oslo.config namespaces) at a release. */
-final case class Catalogue(service: String, options: List[OptionSpec]):
+/** The options of a service (one or more oslo.config namespaces) at a release.
+  *
+  * oslo.config accepts `-` and `_` as the same character in an option name
+  * (`log-dir` is written `log_dir` in files), so lookups ignore the difference.
+  *
+  * `openSections` are sections whose options are not all declared in the image:
+  * keystonemiddleware's `[keystone_authtoken]` takes the options of the auth
+  * plugin named by `auth_type` (`auth_url`, `username`, `password` ...), which
+  * are loaded at run time and so are not in the generator's output. In an open
+  * section a name the catalogue does not know is accepted, as a string; a name it
+  * does know is still checked.
+  */
+final case class Catalogue(
+    service: String,
+    options: List[OptionSpec],
+    openSections: Set[String] = Set.empty
+):
+  private def norm(name: String): String = name.replace('-', '_')
+
   private val byName: Map[(String, String), OptionSpec] =
-    options.map(o => (o.section, o.name) -> o).toMap
+    options.map(o => (o.section, norm(o.name)) -> o).toMap
   private val byOldName: Map[(String, String), OptionSpec] =
-    options.flatMap(o => o.deprecated.map(d => (o.section, d) -> o)).toMap
+    options.flatMap(o => o.deprecated.map(d => (o.section, norm(d)) -> o)).toMap
 
   val sections: Set[String] = options.map(_.section).toSet
 
   def find(section: String, name: String): Option[OptionSpec] =
-    byName.get((section, name))
+    byName.get((section, norm(name)))
 
   def findDeprecated(section: String, name: String): Option[OptionSpec] =
-    byOldName.get((section, name))
+    byOldName.get((section, norm(name)))
 
   def optionsIn(section: String): List[String] =
     options.filter(_.section == section).map(_.name)
@@ -182,6 +199,8 @@ object ConfFile:
         case None =>
           c.findDeprecated(section, name) match
             case Some(spec) => Left(ConfError.Deprecated(section, name, spec.name))
+            case None if c.openSections.contains(section) =>
+              Right(OptionSpec(section, name, OptType.Other("a plugin option")))
             case None =>
               Left(ConfError.UnknownOption(section, name, close(name, c.optionsIn(section))))
 

@@ -152,7 +152,10 @@ object placement_single_node extends OrpheraClusterPlaybook:
         s"$file not found: run manifests/dump_oslo_options.sh placement-api on a node and copy the JSON there (or set ORPHERA_CATALOGUES)"
       )
     OsloJson
-      .load("placement", java.nio.file.Files.readString(file))
+      // [keystone_authtoken] also takes the options of the auth plugin chosen by
+      // auth_type (auth_url, username, password ...), loaded at run time and so
+      // not in the image's option list.
+      .load("placement", java.nio.file.Files.readString(file), openSections = Set("keystone_authtoken"))
       .fold(e => throw new RuntimeException(s"$file: $e"), identity)
 
   private val placementConf: ConfFile =

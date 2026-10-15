@@ -17,7 +17,7 @@ import io.circe.yaml.parser
 // circe-parser), so the YAML parser reads it.
 object OsloJson:
 
-  def load(service: String, text: String): Either[String, Catalogue] =
+  def load(service: String, text: String, openSections: Set[String] = Set.empty): Either[String, Catalogue] =
     for
       doc <- parser.parse(text).left.map(e => s"not valid JSON: ${e.getMessage}")
       sections <- doc.hcursor
@@ -25,7 +25,12 @@ object OsloJson:
         .as[JsonObject]
         .left
         .map(_ => "no \"options\" object: is this oslo-config-generator --format json output?")
-    yield Catalogue(service, sections.toList.flatMap(options))
+    yield Catalogue(
+      service,
+      // The same option can come from two namespaces; the first is kept.
+      sections.toList.flatMap(options).distinctBy(o => (o.section, o.name)),
+      openSections
+    )
 
   private def options(section: (String, Json)): List[OptionSpec] =
     val (group, body) = section

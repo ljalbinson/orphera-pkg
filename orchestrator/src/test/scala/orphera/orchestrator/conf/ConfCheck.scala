@@ -42,6 +42,9 @@ object ConfCheck:
   // placement-api image (two sections, trimmed).
   private val osloSample =
     """{"deprecated_options": {}, "generator_options": {}, "options": {
+      |"DEFAULT": {"help": "", "opts": [
+      |  {"name": "log-dir", "dest": "log_dir", "type": "string value", "default": null, "secret": false, "choices": [], "deprecated_opts": [{"group": "DEFAULT", "name": "logdir"}]},
+      |  {"name": "log-dir", "dest": "log_dir", "type": "string value", "default": null, "secret": false, "choices": [], "deprecated_opts": [{"group": "DEFAULT", "name": "logdir"}]}]},
       |"api": {"help": "", "opts": [
       |  {"name": "auth_strategy", "type": "string value", "default": "keystone", "secret": false,
       |   "choices": [["keystone", null], ["noauth2", null]], "deprecated_opts": [{"group": "DEFAULT", "name": "auth_strategy"}]}]},
@@ -126,7 +129,7 @@ object ConfCheck:
     val loaded = OsloJson.load("placement", osloSample)
     check("an oslo JSON dump loads", loaded.isRight, loaded.toString)
     loaded.foreach { cat =>
-      check("sections and options are read", cat.sections == Set("api", "placement_database", "keystone_authtoken") && cat.options.size == 7, cat.options.size.toString)
+      check("sections and options are read", cat.sections == Set("DEFAULT", "api", "placement_database", "keystone_authtoken") && cat.options.size == 8, cat.options.size.toString)
       check("choices make a Choice type", cat.find("api", "auth_strategy").map(_.tpe) == Some(OptType.Choice(List("keystone", "noauth2"))))
       check(
         "oslo type words map to ours",
@@ -139,6 +142,13 @@ object ConfCheck:
       check("an old name in the same section is recorded, one from another section is not",
         cat.find("placement_database", "slave_connection").map(_.deprecated) == Some(List("slave")) && cat.find("api", "auth_strategy").map(_.deprecated) == Some(Nil))
       val f = ConfFile.empty("/etc/placement/placement.conf", cat)
+      check("a name written with _ matches an option declared with -", f.set("DEFAULT", "log_dir", "/var/log/x").isRight && f.set("DEFAULT", "log-dir", "/x").isRight)
+      check("the same option from two namespaces is listed once", cat.optionsIn("DEFAULT") == List("log-dir"), cat.optionsIn("DEFAULT").toString)
+      val open = cat.copy(openSections = Set("keystone_authtoken"))
+      val fo = ConfFile.empty("/p", open)
+      check("an open section accepts a plugin option, a closed one does not",
+        fo.set("keystone_authtoken", "username", "placement").isRight && f.set("keystone_authtoken", "username", "placement").isLeft)
+      check("an open section still checks the options it knows", fo.set("keystone_authtoken", "timeout", "slow").isLeft)
       check("a loaded catalogue refuses a wrong type", f.set("placement_database", "max_retries", "many").isLeft)
       check("a loaded catalogue refuses an unknown key with a suggestion",
         f.set("placement_database", "conection", "x").left.toOption.exists(_.message.contains("connection")))
