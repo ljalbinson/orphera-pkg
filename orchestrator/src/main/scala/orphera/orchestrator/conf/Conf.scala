@@ -159,6 +159,19 @@ final case class ConfFile private (
   def set(section: String, name: String, value: Boolean): Either[ConfError, ConfFile] =
     set(section, name, Value.Bool(value))
 
+  /** Options whose values must not be shown: declared secret in the catalogue, or,
+    * for names the catalogue does not list (auth plugin options), a name that says
+    * so. Over-masking is the safe side: a harmless value hidden costs a diff line.
+    */
+  private def isSecret(section: String, name: String): Boolean =
+    catalogue.find(section, name).exists(_.secret) || ConfFile.looksSecret(name)
+
+  def secretKeys: List[String] =
+    entries.collect { case (s, n, _) if isSecret(s, n) => n }.distinct.toList
+
+  def secretValues: List[String] =
+    entries.collect { case (s, n, v) if isSecret(s, n) => v.render }.toList
+
   /** The file as written: `[section]` blocks in order of first use. */
   def render: String =
     val sections = entries.map(_._1).distinct
@@ -170,6 +183,12 @@ final case class ConfFile private (
       .mkString("", "\n\n", "\n")
 
 object ConfFile:
+  private val SecretWords = List("password", "passwd", "secret", "token", "passphrase", "credential", "private_key", "private-key")
+
+  def looksSecret(name: String): Boolean =
+    val n = name.toLowerCase
+    SecretWords.exists(n.contains)
+
   def empty(path: String, catalogue: Catalogue): ConfFile =
     ConfFile(path, catalogue, Vector.empty)
 
@@ -262,3 +281,5 @@ object ConfFile:
     def path(f: ConfFile): String = f.path
     def content(f: ConfFile): String = f.render
     override def mode(f: ConfFile): Int = 416 // 0640
+    override def secretKeys(f: ConfFile): List[String] = f.secretKeys
+    override def secretValues(f: ConfFile): List[String] = f.secretValues

@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed — secrets no longer appear in check output or the run log
+- A file check (`Resource.check`) no longer puts the expected text, passwords included, into the command it logs. It sends a
+  SHA-256 of the whole file; only when that differs does it show a diff, with the values of secret keys replaced by
+  `<redacted>` on both sides, and it says so when only a secret value differs. A `ConfFile` takes its secret keys from the
+  catalogue (21 options in the Placement image) and from names such as `password`, `secret`, `token`.
+- `Secrets.register` marks a value to hide. Everything received from a node passes through `Secrets.mask`, so a registered
+  value echoed in a `Running: ...` line or in command output shows as `<redacted>` on the console and in the run log.
+  `Resource.write` and `check` register their secret values; `placement_single_node.scala` registers its three passwords.
+  Still visible: the node's own agent log (it logs every command it runs) and the arguments of a running command on the node.
+
 ### Added — check mode in `placement_single_node.scala`
 - `ORPHERA_CHECK=1 orphera cluster-playbook manifests/placement_single_node.scala` changes nothing and fails with a diff if the
   `orphera-placement-api` unit on tst13 differs from what the playbook writes. Uses `Resource[Container]`.

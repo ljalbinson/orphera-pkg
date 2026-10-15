@@ -39,7 +39,7 @@ object NodeClient:
       .use { stub =>
         stub
           .install(InstallPackages(packages, updateCache), authMetadata())
-          .evalMap(onEvent)
+          .evalMap(e => onEvent(Secrets.mask(e)))
           .compile
           .drain
       }
@@ -56,7 +56,7 @@ object NodeClient:
       .use { stub =>
         stub
           .remove(RemovePackages(packages, purge), authMetadata())
-          .evalMap(onEvent)
+          .evalMap(e => onEvent(Secrets.mask(e)))
           .compile
           .drain
       }
@@ -72,7 +72,7 @@ object NodeClient:
       .use { stub =>
         stub
           .runAutoRemove(AutoRemove(purge), authMetadata())
-          .evalMap(onEvent)
+          .evalMap(e => onEvent(Secrets.mask(e)))
           .compile
           .drain
       }
@@ -88,7 +88,7 @@ object NodeClient:
       .use { stub =>
         stub
           .runDistUpgrade(DistUpgrade(updateCache), authMetadata())
-          .evalMap(onEvent)
+          .evalMap(e => onEvent(Secrets.mask(e)))
           .compile
           .drain
       }
@@ -158,7 +158,7 @@ object NodeClient:
 
               stub
                 .copyFile(requestStream, metadata)
-                .evalMap(onEvent)
+                .evalMap(e => onEvent(Secrets.mask(e)))
                 .compile
                 .drain
         yield ()
@@ -195,7 +195,7 @@ object NodeClient:
 
         stub
           .copyFile(requestStream, metadata)
-          .evalMap(onEvent)
+          .evalMap(e => onEvent(Secrets.mask(e)))
           .compile
           .drain
       }
@@ -302,7 +302,7 @@ object NodeClient:
       .use { stub =>
         stub
           .installDebPackage(InstallDeb(remotePath), authMetadata())
-          .evalMap(onEvent)
+          .evalMap(e => onEvent(Secrets.mask(e)))
           .compile
           .drain
           .handleErrorWith { err =>
@@ -534,7 +534,7 @@ object NodeClient:
             RunCommandRequest(command, timeoutSeconds),
             authMetadata()
           )
-          .evalMap(onEvent)
+          .evalMap(e => onEvent(Secrets.mask(e)))
           .compile
           .drain
       }

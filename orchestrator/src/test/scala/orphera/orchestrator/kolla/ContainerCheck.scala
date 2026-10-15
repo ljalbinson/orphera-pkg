@@ -249,8 +249,8 @@ object ContainerCheck:
       val checked = r.check(placement) match
         case Task.RunCommand(List("sh", "-c", script), _) => script
         case other => other.toString
-      check("the check command diffs the unit path against the rendered unit", checked.contains(s"diff -u ${placement.unitPath} -") && checked.contains(placement.render))
-      check("the check does not write or restart anything", !checked.contains("systemctl") && !checked.contains("cat >") && !checked.contains("> /etc"))
+      check("the check command diffs the unit path against the rendered unit", checked.contains(s"diff -u --label \"node: ${placement.unitPath}\"") && checked.contains(placement.render))
+      check("the check does not write or restart anything", !checked.contains("systemctl") && !checked.contains(s"> ${placement.unitPath}") && !checked.contains(s"tee ${placement.unitPath}"))
       check("the check says MISSING with exit 2 and DRIFT with exit 1", checked.contains("exit 2") && checked.contains("exit 1"))
       check("Drift: same text is in sync, no file is missing", Drift.compare("a\nb\n", Some("a\nb\n")) == Drift.InSync && Drift.compare("a", None) == Drift.Missing)
       check("Drift: names the first differing line", Drift.compare("a\nb\nc\n", Some("a\nX\nc\n")) == Drift.Differs("line 2: expected `b`, found `X`"))

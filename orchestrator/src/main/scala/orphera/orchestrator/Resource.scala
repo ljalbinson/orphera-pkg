@@ -30,14 +30,27 @@ trait Resource[A]:
   def group(a: A): String = "root"
   def mode(a: A): Int = 420 // 0644
 
+  /** Keys, in `key = value` lines, whose values are secret. The check never
+    * sends them to the node and never prints them; see `Resource.checkTask`.
+    */
+  def secretKeys(a: A): List[String] = Nil
+
+  /** The secret values themselves, to be hidden from the orchestrator's output
+    * wherever a command or its output echoes them (see `Secrets`).
+    */
+  def secretValues(a: A): List[String] = Nil
+
   /** The task that writes the file. */
   def write(a: A): Task =
+    Secrets.registerAll(secretValues(a))
     Task.WriteFile(content(a), path(a), owner(a), group(a), mode(a))
 
   /** The task that compares the file on the node with `content`. Exit 0 in
     * sync, 1 differs (diff on stderr), 2 missing. Does not write anything.
     */
-  def check(a: A): Task = Resource.checkTask(label(a), path(a), content(a))
+  def check(a: A): Task =
+    Secrets.registerAll(secretValues(a))
+    Resource.checkTask(label(a), path(a), content(a), secretKeys(a))
 
 object Resource:
   extension [A](a: A)(using r: Resource[A])
@@ -46,25 +59,78 @@ object Resource:
 
   private val Marker = "ORPHERA_EXPECTED_EOF"
 
-  /** The comparison, as a command for the node. The expected text is a quoted
+  private val KeyChars = "[A-Za-z0-9_.-]+".r
+
+  /** `text` with the value of every `key = value` line for the given keys
+    * replaced by `<redacted>`. The node does the same to its own file with sed,
+    * so the two can be diffed without either side showing a secret.
+    */
+  def redact(text: String, secretKeys: List[String]): String =
+    if secretKeys.isEmpty then text
+    else
+      val patterns = secretKeys.map { k =>
+        require(KeyChars.matches(k), s"secret key $k has characters other than letters, digits, _ . -")
+        java.util.regex.Pattern.compile("^(" + java.util.regex.Pattern.quote(k) + "[ \\t]*=[ \\t]*).*$")
+      }
+      text.linesWithSeparators.map { line =>
+        val body = line.stripSuffix("\n")
+        val nl = line.substring(body.length)
+        patterns.find(_.matcher(body).matches()) match
+          case Some(p) => p.matcher(body).replaceFirst("$1" + Secrets.Placeholder) + nl
+          case None    => line
+      }.mkString
+
+  private def sedFor(secretKeys: List[String]): String =
+    if secretKeys.isEmpty then "cat"
+    else
+      "sed -E " + secretKeys
+        .map { k =>
+          require(KeyChars.matches(k), s"secret key $k has characters other than letters, digits, _ . -")
+          val escaped = k.replace(".", "\\.")
+          s"-e 's/^($escaped[[:space:]]*=[[:space:]]*).*$$/\\1${Secrets.Placeholder}/'"
+        }
+        .mkString(" ")
+
+  def sha256(text: String): String =
+    java.security.MessageDigest
+      .getInstance("SHA-256")
+      .digest(text.getBytes(java.nio.charset.StandardCharsets.UTF_8))
+      .map(b => f"${b & 0xff}%02x")
+      .mkString
+
+  /** The comparison, as a command for the node.
+    *
+    * It first compares a SHA-256 of the whole file with the expected one, so the
+    * secret values are never in the command. Only when they differ does it show a
+    * diff, and then both sides have the values of `secretKeys` replaced by
+    * `<redacted>`: the expected text is redacted here, the node's file by sed. If
+    * the redacted texts agree but the hashes do not, a secret value differs and
+    * the message says so without showing it. The expected text is a quoted
     * here-document, so nothing in it is expanded by the shell.
     */
-  def checkTask(label: String, path: String, expected: String): Task =
+  def checkTask(label: String, path: String, expected: String, secretKeys: List[String] = Nil): Task =
     require(!expected.contains(Marker), s"content of $label contains $Marker")
-    val body = if expected.endsWith("\n") then expected else expected + "\n"
+    val shown = redact(expected, secretKeys)
+    val body = if shown.endsWith("\n") then shown else shown + "\n"
     val script =
       s"""if [ ! -f $path ]; then
          |  echo "MISSING $label: $path does not exist" >&2
          |  exit 2
          |fi
-         |if diff -u $path - <<'$Marker'
-         |$body$Marker
-         |then
+         |if [ "$$(sha256sum < $path | cut -d' ' -f1)" = "${sha256(expected)}" ]; then
          |  echo "in sync: $label"
+         |  exit 0
+         |fi
+         |T=$$(mktemp)
+         |trap 'rm -f "$$T"' EXIT
+         |cat > "$$T" <<'$Marker'
+         |$body$Marker
+         |if ${sedFor(secretKeys)} $path | diff -u --label "node: $path" --label "playbook" - "$$T"; then
+         |  echo "DRIFT $label: a secret value in $path differs from what the playbook writes (values are not shown)" >&2
          |else
          |  echo "DRIFT $label: $path differs from what the playbook writes (diff above, - is the node, + is the playbook)" >&2
-         |  exit 1
-         |fi""".stripMargin
+         |fi
+         |exit 1""".stripMargin
     Task.RunCommand(List("sh", "-c", script), timeoutSeconds = 30)
 
 /** The result of comparing expected content with what a node has. Pure, for
