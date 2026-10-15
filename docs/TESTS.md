@@ -680,3 +680,14 @@ so it is an open section, which refuses near misses of known options but accepts
 than two edits from any known name is not caught); and the plugin key `auth_url` is one edit from the old name `auth_uri`,
 so old names are not compared. Not done: dumping the keystoneauth1 plugin options, other services' catalogues, secrets
 hidden in the logged check script and drift diff (the task log prints the whole script, password included).
+
+### K24. Secrets kept out of check output and the run log (`Resource.checkTask`, `Secrets`) - PASSED on a node (2026-10-15)
+A file check sends a SHA-256 of the expected file, not its text; on a mismatch it diffs with secret values replaced by
+`<redacted>` on both sides, and says when only a secret value differs. On tst13, `ORPHERA_CHECK=1` with the Placement service
+password changed on the node failed with "a secret value differs (values are not shown)", and neither password appeared in
+the logged command or the output. `manifests/test_placement.sh` passed=10 with masking on; its log held none of the three
+passwords or the changed one, and six `<redacted>` lines where they were echoed before (database creation, the helper,
+registration). A search for the loose pattern `orphera-test` finds six harmless lines (the CA file name, the helper's
+provider name, in two runs). Unit checks (`ConfCheck`, `ContainerCheck`) were not reported at the time of the merge.
+Not covered: the node's agent logs every command it runs (`[DEBUG-CMD]` in `CommandRunner.scala`), and a running command's
+arguments are visible on the node while it runs; commands that embed a password are still in both.
