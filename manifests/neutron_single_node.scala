@@ -3,6 +3,7 @@
 import orphera.orchestrator.*
 import orphera.orchestrator.ClusterPlaybookDsl.*
 import orphera.orchestrator.kolla.*
+import orphera.orchestrator.conf.*
 
 // DRAFT. OpenStack Neutron for provider (flat) networks: neutron-server, the Open
 // vSwitch agent and the DHCP agent on one node, Kolla images under podman. Modelled
@@ -296,87 +297,77 @@ object neutron_single_node extends OrpheraClusterPlaybook:
 
   // Four small files. The heredocs are quoted so the shell expands nothing; Scala
   // has already filled in the values.
-  private val neutronConfScript =
+  private val neutronDirsScript =
     s"""mkdir -p $srcDir $logDir $stateDir
-       |cat > $srcDir/neutron.conf <<'CONF'
-       |[DEFAULT]
-       |log_dir = /var/log/kolla/neutron
-       |state_path = /var/lib/neutron
-       |use_stderr = true
-       |core_plugin = ml2
-       |service_plugins =
-       |auth_strategy = keystone
-       |transport_url = rabbit://$rabbitUser:$rabbitPassword@$rabbitIp:5672/$rabbitVhost
-       |notify_nova_on_port_status_changes = true
-       |notify_nova_on_port_data_changes = true
-       |api_workers = 2
-       |rpc_workers = 2
-       |
-       |[database]
-       |connection = mysql+pymysql://$dbUser:$dbPassword@$vip:3306/$dbName
-       |
-       |[keystone_authtoken]
-       |www_authenticate_uri = $ksUrl
-       |auth_url = $ksUrl
-       |auth_type = password
-       |project_domain_name = Default
-       |user_domain_name = Default
-       |project_name = service
-       |username = neutron
-       |password = $neutronPassword
-       |cafile = /etc/neutron/ssl/ca.crt
-       |
-       |[nova]
-       |auth_url = $ksUrl
-       |auth_type = password
-       |project_domain_name = Default
-       |user_domain_name = Default
-       |region_name = RegionOne
-       |project_name = service
-       |username = nova
-       |password = $novaPassword
-       |endpoint_type = internal
-       |cafile = /etc/neutron/ssl/ca.crt
-       |
-       |[oslo_concurrency]
-       |lock_path = /var/lib/neutron/tmp
-       |
-       |[agent]
-       |root_helper = sudo neutron-rootwrap /etc/neutron/rootwrap.conf
-       |root_helper_daemon = sudo neutron-rootwrap-daemon /etc/neutron/rootwrap.conf
-       |CONF
-       |cat > $srcDir/ml2_conf.ini <<'CONF'
-       |[ml2]
-       |type_drivers = flat
-       |tenant_network_types =
-       |mechanism_drivers = openvswitch
-       |extension_drivers = port_security
-       |
-       |[ml2_type_flat]
-       |flat_networks = $physnet
-       |
-       |[securitygroup]
-       |enable_security_group = true
-       |CONF
-       |cat > $srcDir/openvswitch_agent.ini <<'CONF'
-       |[ovs]
-       |bridge_mappings = $physnet:$providerBridge
-       |
-       |[securitygroup]
-       |firewall_driver = openvswitch
-       |enable_security_group = true
-       |
-       |[agent]
-       |tunnel_types =
-       |CONF
-       |cat > $srcDir/dhcp_agent.ini <<'CONF'
-       |[DEFAULT]
-       |interface_driver = openvswitch
-       |dhcp_driver = neutron.agent.linux.dhcp.Dnsmasq
-       |enable_isolated_metadata = false
-       |CONF
-       |chmod 640 $srcDir/neutron.conf $srcDir/ml2_conf.ini $srcDir/openvswitch_agent.ini $srcDir/dhcp_agent.ini
-       |echo "neutron config files written"""".stripMargin
+       |echo "directories ready"""".stripMargin
+
+  // The option lists of the image (neutron), from catalogues/. Every section and key of the
+  // files below is checked against them when this manifest is built.
+  private val neutronCatalogue: Catalogue = Catalogues.load("neutron", Set.empty[String])
+  private val confResource = summon[Resource[ConfFile]]
+
+  private val neutronConf: ConfFile =
+    ConfFile.text(s"$srcDir/neutron.conf", neutronCatalogue)(
+      ("DEFAULT", "log_dir", "/var/log/kolla/neutron"),
+      ("DEFAULT", "state_path", "/var/lib/neutron"),
+      ("DEFAULT", "use_stderr", "true"),
+      ("DEFAULT", "core_plugin", "ml2"),
+      ("DEFAULT", "service_plugins", ""),
+      ("DEFAULT", "auth_strategy", "keystone"),
+      ("DEFAULT", "transport_url", s"rabbit://$rabbitUser:$rabbitPassword@$rabbitIp:5672/$rabbitVhost"),
+      ("DEFAULT", "notify_nova_on_port_status_changes", "true"),
+      ("DEFAULT", "notify_nova_on_port_data_changes", "true"),
+      ("DEFAULT", "api_workers", "2"),
+      ("DEFAULT", "rpc_workers", "2"),
+      ("database", "connection", s"mysql+pymysql://$dbUser:$dbPassword@$vip:3306/$dbName"),
+      ("keystone_authtoken", "www_authenticate_uri", s"$ksUrl"),
+      ("keystone_authtoken", "auth_url", s"$ksUrl"),
+      ("keystone_authtoken", "auth_type", "password"),
+      ("keystone_authtoken", "project_domain_name", "Default"),
+      ("keystone_authtoken", "user_domain_name", "Default"),
+      ("keystone_authtoken", "project_name", "service"),
+      ("keystone_authtoken", "username", "neutron"),
+      ("keystone_authtoken", "password", s"$neutronPassword"),
+      ("keystone_authtoken", "cafile", "/etc/neutron/ssl/ca.crt"),
+      ("nova", "auth_url", s"$ksUrl"),
+      ("nova", "auth_type", "password"),
+      ("nova", "project_domain_name", "Default"),
+      ("nova", "user_domain_name", "Default"),
+      ("nova", "region_name", "RegionOne"),
+      ("nova", "project_name", "service"),
+      ("nova", "username", "nova"),
+      ("nova", "password", s"$novaPassword"),
+      ("nova", "endpoint_type", "internal"),
+      ("nova", "cafile", "/etc/neutron/ssl/ca.crt"),
+      ("oslo_concurrency", "lock_path", "/var/lib/neutron/tmp"),
+      ("agent", "root_helper", "sudo neutron-rootwrap /etc/neutron/rootwrap.conf"),
+      ("agent", "root_helper_daemon", "sudo neutron-rootwrap-daemon /etc/neutron/rootwrap.conf")
+    )
+
+  private val ml2ConfIni: ConfFile =
+    ConfFile.text(s"$srcDir/ml2_conf.ini", neutronCatalogue)(
+      ("ml2", "type_drivers", "flat"),
+      ("ml2", "tenant_network_types", ""),
+      ("ml2", "mechanism_drivers", "openvswitch"),
+      ("ml2", "extension_drivers", "port_security"),
+      ("ml2_type_flat", "flat_networks", s"$physnet"),
+      ("securitygroup", "enable_security_group", "true")
+    )
+
+  private val openvswitchAgentIni: ConfFile =
+    ConfFile.text(s"$srcDir/openvswitch_agent.ini", neutronCatalogue)(
+      ("ovs", "bridge_mappings", s"$physnet:$providerBridge"),
+      ("securitygroup", "firewall_driver", "openvswitch"),
+      ("securitygroup", "enable_security_group", "true"),
+      ("agent", "tunnel_types", "")
+    )
+
+  private val dhcpAgentIni: ConfFile =
+    ConfFile.text(s"$srcDir/dhcp_agent.ini", neutronCatalogue)(
+      ("DEFAULT", "interface_driver", "openvswitch"),
+      ("DEFAULT", "dhcp_driver", "neutron.agent.linux.dhcp.Dnsmasq"),
+      ("DEFAULT", "enable_isolated_metadata", "false")
+    )
 
   // One config directory per service (Kolla mounts it at
   // /var/lib/kolla/config_files). The command for the server is checked in the
@@ -637,6 +628,9 @@ if __name__ == '__main__':
     s"""CODE=$$(curl -s -o /dev/null -w '%{http_code}' http://localhost:$apiPort/)
        |[ "$$CODE" = "200" ] || [ "$$CODE" = "300" ]""".stripMargin
 
+  // Hidden from the console and the run log wherever a task echoes them.
+  Secrets.registerAll(List(rabbitPassword, adminPassword, dbPassword, neutronPassword, novaPassword))
+
   val playbook: ClusterPlaybook =
     clusterPlaybook("neutron-single-node")(
       stage("neutron-database", "tst3")
@@ -685,9 +679,13 @@ if __name__ == '__main__':
               timeoutSeconds = 60
             )
           )
-          .task("write the Neutron config files")(
-            Task.RunCommand(List("sh", "-c", neutronConfScript))
+          .task("create the Neutron directories")(
+            Task.RunCommand(List("sh", "-c", neutronDirsScript))
           )
+          .task("write neutron.conf")(confResource.write(neutronConf))
+          .task("write ml2_conf.ini")(confResource.write(ml2ConfIni))
+          .task("write openvswitch_agent.ini")(confResource.write(openvswitchAgentIni))
+          .task("write dhcp_agent.ini")(confResource.write(dhcpAgentIni))
           .task("write the Kolla config for the three services")(
             Task.RunCommand(
               List("sh", "-c", kollaConfigScript),
