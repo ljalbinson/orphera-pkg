@@ -2,6 +2,8 @@
 
 package orphera.orchestrator.kolla
 
+import scala.annotation.targetName
+
 import orphera.orchestrator.Task
 
 // A Kolla service run as a rootful podman container under a systemd unit.
@@ -82,6 +84,7 @@ final case class Port(host: TcpPort, container: TcpPort):
 
 object Port:
   /** From plain numbers; each is checked (1 to 65535). */
+  @targetName("fromNumbers")
   def apply(host: Int, container: Int): Port = Port(TcpPort(host), TcpPort(container))
 
 final case class Container(
