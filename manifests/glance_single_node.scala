@@ -72,7 +72,7 @@ object glance_single_node extends OrpheraClusterPlaybook:
   // Defined after confRoot, logDir and stateDir, which it reads; a val used
   // before its definition is null in an object.
   private val glanceApi = Container(
-    name = "glance-api",
+    name = ContainerName("glance-api"),
     image = Image("glance-api", Release.R2025_1, Base.UbuntuNoble, registry),
     mounts = List(
       Mount(s"$confRoot/glance-api", "/var/lib/kolla/config_files"),
@@ -126,7 +126,8 @@ object glance_single_node extends OrpheraClusterPlaybook:
        |echo "podman will try $cacheHostPort before quay.io"""".stripMargin
 
   private val pullScript =
-    s"""podman pull $apiImage || { echo "could not pull $apiImage - check the Image(...) in glanceApi in glance_single_node.scala" >&2; exit 1; }
+    s"""${Pull.shellFunction("the Image(...) in glanceApi in glance_single_node.scala")}
+       |pull_retry $apiImage || exit 1
        |echo "image ready"""".stripMargin
 
   // Identical in method to cinder_single_node.scala: the last certificate

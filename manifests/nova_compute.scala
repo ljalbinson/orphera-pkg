@@ -102,7 +102,7 @@ object nova_compute extends OrpheraClusterPlaybook:
   // (os-vif, qemu-img, mounts), and /dev from the host: the guest consoles are ptys (/dev/pts/N)
   // that Nova must see to read the console. It wants libvirtd, which it talks to.
   private val novaCompute = Container(
-    name = "nova-compute",
+    name = ContainerName("nova-compute"),
     image = Image("nova-compute", Release.R2025_1, Base.UbuntuNoble, registry),
     mounts = List(
       Mount(s"$confRoot/nova-compute", "/var/lib/kolla/config_files"),
@@ -123,7 +123,7 @@ object nova_compute extends OrpheraClusterPlaybook:
   )
   // The Open vSwitch agent is set up exactly like the one on tst19 (neutron_single_node.scala).
   private val ovsAgent = Container(
-    name = "neutron-openvswitch-agent",
+    name = ContainerName("neutron-openvswitch-agent"),
     image = Image("neutron-openvswitch-agent", Release.R2025_1, Base.UbuntuNoble, registry),
     mounts = List(
       Mount(s"$confRoot/neutron-openvswitch-agent", "/var/lib/kolla/config_files"),
@@ -288,8 +288,9 @@ object nova_compute extends OrpheraClusterPlaybook:
        |echo "podman will try $cacheHostPort before quay.io"""".stripMargin
 
   private val pullScript =
-    s"""for img in $computeImage $ovsAgentImage; do
-       |  podman pull $$img || { echo "could not pull $$img - check the Image(...) values in novaCompute and ovsAgent in nova_compute.scala" >&2; exit 1; }
+    s"""${Pull.shellFunction("the Image(...) values in novaCompute and ovsAgent in nova_compute.scala")}
+       |for img in $computeImage $ovsAgentImage; do
+       |  pull_retry $$img || exit 1
        |done
        |echo "images ready"""".stripMargin
 

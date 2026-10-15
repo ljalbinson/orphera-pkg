@@ -64,7 +64,7 @@ object placement_single_node extends OrpheraClusterPlaybook:
   // Defined after confRoot and logDir, which it reads; a val used before its
   // definition is null in an object.
   private val placementApi = Container(
-    name = "placement-api",
+    name = ContainerName("placement-api"),
     image = Image("placement-api", Release.R2025_1, Base.UbuntuNoble, registry),
     mounts = List(
       Mount(s"$confRoot/placement-api", "/var/lib/kolla/config_files"),
@@ -100,7 +100,8 @@ object placement_single_node extends OrpheraClusterPlaybook:
        |echo "podman will try $cacheHostPort before quay.io"""".stripMargin
 
   private val pullScript =
-    s"""podman pull $apiImage || { echo "could not pull $apiImage - check the Image(...) in placementApi in placement_single_node.scala" >&2; exit 1; }
+    s"""${Pull.shellFunction("the Image(...) in placementApi in placement_single_node.scala")}
+       |pull_retry $apiImage || exit 1
        |echo "image ready"""".stripMargin
 
   // Same method as cinder_single_node.scala / glance_single_node.scala: the last
