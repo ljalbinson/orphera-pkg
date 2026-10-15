@@ -20,10 +20,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   images, and the error message now quotes podman's error instead of only pointing at the `Image(...)` values. A single
   HTTP 500 on one blob had stopped a full rebuild at the compute stage.
 
+### Added — typed configuration files, spike (`orchestrator/.../conf/Conf.scala`)
+- `Catalogue` (the options a service declares: section, name, type, default, allowed values, old names) and `ConfFile`
+  (values checked against it). Unknown sections and keys, deprecated names, wrong types, out-of-range ports and values
+  outside an allowed list are refused with a suggestion. A `ConfFile` is a `Resource`, so it has `write` and `check`.
+  `manifests/dump_oslo_options.sh` dumps a Kolla image's options as JSON to build the real catalogue from. Not yet used by
+  any manifest; `make test` runs `ConfCheck`.
+- `OsloJson.load` turns that JSON into a `Catalogue` (types, defaults, allowed values, secrets, old names). `CatalogueReport`
+  prints what a real dump contains.
+
+### Changed — `placement_single_node.scala` builds placement.conf from the image's own option list
+- Every section and key of `placement.conf` is checked against `catalogues/placement-api-2025.1-ubuntu-noble.json` (the
+  image's `oslo-config-generator` output) when the manifest is built; an unknown key, a wrong type or a value outside an
+  allowed list stops the run before any node is touched. `ORPHERA_CHECK=1` now also checks the file on the node.
+
 ### Added — `Resource` type class, prototype (`orchestrator/.../Resource.scala`)
 - `Resource[A]` describes a file the playbook writes (path and exact content). `x.write` and `x.check` come from the one
   description; `check` changes nothing and fails with a diff if the node's file differs, or with MISSING if absent.
-  `Container` has an instance for its systemd unit. Prototype: not yet used by any manifest.
+  `Container` has an instance for its systemd unit. Used by `placement_single_node.scala` check mode.
 
 ## [0.1.191] - 2026-10-14
 
