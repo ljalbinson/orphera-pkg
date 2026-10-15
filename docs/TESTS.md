@@ -668,3 +668,15 @@ cluster-playbook manifests/placement_single_node.scala` printed `in sync` for th
 it failed with a unified diff and exit 1; with the unit moved away it failed with `MISSING` and exit 2. The normal run
 then restored the unit and Placement came back healthy (2 resource providers). Only the placement-api unit is checked so
 far.
+
+### K23. Typed configuration files from the image's option list (`conf/`) - PASSED (2026-10-15)
+`placement.conf` is a `ConfFile` checked against `catalogues/placement-api-2025.1-ubuntu-noble.json`, the output of
+`oslo-config-generator --format json` run in the image (`manifests/dump_oslo_options.sh`; 447 options in 33 sections).
+`ConfCheck` 33/33. `manifests/test_placement.sh` passed=10 with the typed file, and the re-apply passed. `ORPHERA_CHECK=1`
+reported the unit and `placement.conf` in sync. A misspelt `www_authenticate_url` stopped the build with a suggestion before
+any task ran. Found by running it: oslo accepts `-` and `_` alike (`log-dir`); one option can come from two namespaces;
+`[keystone_authtoken]` also takes auth-plugin options (`auth_url`, `username`, `password`) that the dump does not contain,
+so it is an open section, which refuses near misses of known options but accepts other names (a typo in a plugin key more
+than two edits from any known name is not caught); and the plugin key `auth_url` is one edit from the old name `auth_uri`,
+so old names are not compared. Not done: dumping the keystoneauth1 plugin options, other services' catalogues, secrets
+hidden in the logged check script and drift diff (the task log prints the whole script, password included).
