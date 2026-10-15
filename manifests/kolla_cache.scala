@@ -59,10 +59,8 @@ object kolla_cache extends OrpheraClusterPlaybook:
   private val hostPackages = List("podman", "curl")
 
   private val pullRegistryScript =
-    s"""podman pull $registryImage || {
-       |  echo "could not pull $registryImage from Docker Hub" >&2
-       |  exit 1
-       |}
+    s"""${Pull.shellFunction("the registry image name in kolla_cache.scala; the pull is from Docker Hub")}
+       |pull_retry $registryImage || exit 1
        |echo "registry image ready"""".stripMargin
 
   private val healthScript =
@@ -75,8 +73,9 @@ object kolla_cache extends OrpheraClusterPlaybook:
   // since a stage task takes a single Task.
   private val warmScript =
     s"""set -e
+       |${Pull.shellFunction("warmImages in kolla_cache.scala")}
        |for name in ${warmImages.mkString(" ")}; do
-       |  podman pull --tls-verify=false localhost:$port/openstack.kolla/$$name:$tag
+       |  pull_retry --tls-verify=false localhost:$port/openstack.kolla/$$name:$tag
        |  podman rmi -f localhost:$port/openstack.kolla/$$name:$tag
        |  echo "cached openstack.kolla/$$name:$tag"
        |done""".stripMargin

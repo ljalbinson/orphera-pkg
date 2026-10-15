@@ -107,7 +107,8 @@ object horizon_single_node extends OrpheraClusterPlaybook:
        |echo "podman will try $cacheHostPort before quay.io"""".stripMargin
 
   private val pullScript =
-    s"""podman pull $webImage || { echo "could not pull $webImage - check the Image(...) in horizonWeb in horizon_single_node.scala" >&2; exit 1; }
+    s"""${Pull.shellFunction("the Image(...) in horizonWeb in horizon_single_node.scala")}
+       |pull_retry $webImage || exit 1
        |echo "image ready"""".stripMargin
 
   // Same method as the other service playbooks: the last certificate Keystone
