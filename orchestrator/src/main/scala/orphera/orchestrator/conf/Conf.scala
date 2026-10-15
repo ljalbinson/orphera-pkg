@@ -88,8 +88,9 @@ final case class OptionSpec(
   * keystonemiddleware's `[keystone_authtoken]` takes the options of the auth
   * plugin named by `auth_type` (`auth_url`, `username`, `password` ...), which
   * are loaded at run time and so are not in the generator's output. In an open
-  * section a name the catalogue does not know is accepted, as a string; a name it
-  * does know is still checked.
+  * section a name the catalogue does not know is accepted, unless it is within
+  * two edits of one it does know (then it is refused as a typo); a name it does
+  * know is still checked.
   */
 final case class Catalogue(
     service: String,
@@ -200,7 +201,11 @@ object ConfFile:
           c.findDeprecated(section, name) match
             case Some(spec) => Left(ConfError.Deprecated(section, name, spec.name))
             case None if c.openSections.contains(section) =>
-              Right(OptionSpec(section, name, OptType.Other("a plugin option")))
+              // Accepted as a plugin option, unless it is a near miss of an option
+              // the catalogue does know: that is a typo, not a plugin key.
+              val near = c.optionsIn(section).filter(k => distance(name, k) <= 2).take(3)
+              if near.isEmpty then Right(OptionSpec(section, name, OptType.Other("a plugin option")))
+              else Left(ConfError.UnknownOption(section, name, near))
             case None =>
               Left(ConfError.UnknownOption(section, name, close(name, c.optionsIn(section))))
 

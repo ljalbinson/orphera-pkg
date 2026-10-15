@@ -148,6 +148,8 @@ object ConfCheck:
       val fo = ConfFile.empty("/p", open)
       check("an open section accepts a plugin option, a closed one does not",
         fo.set("keystone_authtoken", "username", "placement").isRight && f.set("keystone_authtoken", "username", "placement").isLeft)
+      check("an open section refuses a near miss of a known option, with a suggestion",
+        fo.set("keystone_authtoken", "timeot", "1").left.toOption.exists(_.message.contains("timeout")))
       check("an open section still checks the options it knows", fo.set("keystone_authtoken", "timeout", "slow").isLeft)
       check("a loaded catalogue refuses a wrong type", f.set("placement_database", "max_retries", "many").isLeft)
       check("a loaded catalogue refuses an unknown key with a suggestion",
