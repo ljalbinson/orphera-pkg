@@ -59,7 +59,7 @@ object horizon_single_node extends OrpheraClusterPlaybook:
   // (orchestrator/.../kolla/Container.scala), checked by ContainerCheck. Defined after
   // confRoot and logDir, which it reads; a val used before its definition is null in an object.
   private val horizonWeb = Container(
-    name = "horizon",
+    name = ContainerName("horizon"),
     image = Image("horizon", Release.R2025_1, Base.UbuntuNoble, registry),
     mounts = List(
       Mount(s"$confRoot/horizon-web", "/var/lib/kolla/config_files"),
@@ -107,7 +107,8 @@ object horizon_single_node extends OrpheraClusterPlaybook:
        |echo "podman will try $cacheHostPort before quay.io"""".stripMargin
 
   private val pullScript =
-    s"""podman pull $webImage || { echo "could not pull $webImage - check the Image(...) in horizonWeb in horizon_single_node.scala" >&2; exit 1; }
+    s"""${Pull.shellFunction("the Image(...) in horizonWeb in horizon_single_node.scala")}
+       |pull_retry $webImage || exit 1
        |echo "image ready"""".stripMargin
 
   // Same method as the other service playbooks: the last certificate Keystone

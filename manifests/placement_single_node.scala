@@ -31,6 +31,10 @@ import orphera.orchestrator.kolla.*
 //   - confirm-placement-healthy (the node): the API answers, and the resource
 //     provider list is readable with an admin token (empty until Nova exists).
 //
+// Check mode: `ORPHERA_CHECK=1 orphera cluster-playbook manifests/placement_single_node.scala`
+// changes nothing and reports whether the placement-api unit on the node matches
+// what this playbook writes (non-zero exit with a diff if not).
+//
 // Test-only hardcoded credentials, same convention and caveat as the other
 // manifests. Not compiled where this was written; the first run on scala0 is
 // the first compile.
@@ -64,7 +68,7 @@ object placement_single_node extends OrpheraClusterPlaybook:
   // Defined after confRoot and logDir, which it reads; a val used before its
   // definition is null in an object.
   private val placementApi = Container(
-    name = "placement-api",
+    name = ContainerName("placement-api"),
     image = Image("placement-api", Release.R2025_1, Base.UbuntuNoble, registry),
     mounts = List(
       Mount(s"$confRoot/placement-api", "/var/lib/kolla/config_files"),
@@ -100,7 +104,8 @@ object placement_single_node extends OrpheraClusterPlaybook:
        |echo "podman will try $cacheHostPort before quay.io"""".stripMargin
 
   private val pullScript =
-    s"""podman pull $apiImage || { echo "could not pull $apiImage - check the Image(...) in placementApi in placement_single_node.scala" >&2; exit 1; }
+    s"""${Pull.shellFunction("the Image(...) in placementApi in placement_single_node.scala")}
+       |pull_retry $apiImage || exit 1
        |echo "image ready"""".stripMargin
 
   // Same method as cinder_single_node.scala / glance_single_node.scala: the last
@@ -384,7 +389,26 @@ if __name__ == '__main__':
     s"""CODE=$$(curl -s -o /dev/null -w '%{http_code}' http://localhost:$port/)
        |[ "$$CODE" = "200" ]""".stripMargin
 
+  // ORPHERA_CHECK=1 turns the run into a check: it changes nothing on the node
+  // and fails, with a diff, if the placement-api unit differs from what this
+  // playbook would write. The check task comes from the same Container value
+  // as the write task (see Resource.scala).
+  private val checkMode = sys.env.get("ORPHERA_CHECK").contains("1")
+
+  private val unitResource = summon[Resource[Container]]
+
   val playbook: ClusterPlaybook =
+    if checkMode then
+      clusterPlaybook("placement-single-node-check")(
+        stage("check-placement", node)
+          .task(s"check ${placementApi.unitName}")(
+            unitResource.check(placementApi)
+          )
+          .build
+      )
+    else applyPlaybook
+
+  private def applyPlaybook: ClusterPlaybook =
     clusterPlaybook("placement-single-node")(
       stage("placement-database", "tst3")
         .task(s"create $dbName database and $dbUser on the Galera cluster")(

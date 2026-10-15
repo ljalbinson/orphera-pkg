@@ -93,7 +93,7 @@ object keystone_single_node extends OrpheraClusterPlaybook:
   // confDir, dataDir and logDir, which it reads; a val used before its definition is
   // null in an object.
   private val keystoneContainer = Container(
-    name = "keystone",
+    name = ContainerName("keystone"),
     image = Image("keystone", Release.R2025_1, Base.UbuntuNoble, registry),
     mounts = List(
       Mount(confDir, "/var/lib/kolla/config_files"),
@@ -134,10 +134,8 @@ object keystone_single_node extends OrpheraClusterPlaybook:
     s"""mariadb -N -e "CREATE DATABASE IF NOT EXISTS $dbName; CREATE USER IF NOT EXISTS '$dbUser'@'%' IDENTIFIED BY '$dbPassword'; GRANT ALL PRIVILEGES ON $dbName.* TO '$dbUser'@'%'; FLUSH PRIVILEGES;""""
 
   private val pullScript =
-    s"""podman pull $image || {
-       |  echo "could not pull $image - check the registry path and tag (the Image(...) in keystoneContainer in keystone_single_node.scala)" >&2
-       |  exit 1
-       |}
+    s"""${Pull.shellFunction("the registry path and tag, the Image(...) in keystoneContainer in keystone_single_node.scala")}
+       |pull_retry $image || exit 1
        |echo "image ready: $image"""".stripMargin
 
   // CA and server certificate are created once and then reused, so the CA
