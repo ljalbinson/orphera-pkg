@@ -29,6 +29,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `OsloJson.load` turns that JSON into a `Catalogue` (types, defaults, allowed values, secrets, old names). `CatalogueReport`
   prints what a real dump contains.
 
+### Changed — `placement_single_node.scala` builds placement.conf from the image's own option list
+- Every section and key of `placement.conf` is checked against `catalogues/placement-api-2025.1-ubuntu-noble.json` (the
+  image's `oslo-config-generator` output) when the manifest is built; an unknown key, a wrong type or a value outside an
+  allowed list stops the run before any node is touched. `ORPHERA_CHECK=1` now also checks the file on the node.
+
 ### Added — `Resource` type class, prototype (`orchestrator/.../Resource.scala`)
 - `Resource[A]` describes a file the playbook writes (path and exact content). `x.write` and `x.check` come from the one
   description; `check` changes nothing and fails with a diff if the node's file differs, or with MISSING if absent.

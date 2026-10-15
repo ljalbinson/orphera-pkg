@@ -3,6 +3,7 @@
 import orphera.orchestrator.*
 import orphera.orchestrator.ClusterPlaybookDsl.*
 import orphera.orchestrator.kolla.*
+import orphera.orchestrator.conf.*
 
 // DRAFT. OpenStack Placement (resource inventory and allocation service, which
 // Nova needs), one container, Kolla image under podman. Modelled on
@@ -135,32 +136,46 @@ object placement_single_node extends OrpheraClusterPlaybook:
        |fi
        |echo "Keystone CA installed: $$SUBJ"""".stripMargin
 
-  private val placementConfScript =
+  private val dirsScript =
     s"""mkdir -p $srcDir $logDir $stateDir
-       |cat > $srcDir/placement.conf <<'CONF'
-       |[DEFAULT]
-       |log_dir = /var/log/kolla/placement
-       |use_stderr = true
-       |
-       |[api]
-       |auth_strategy = keystone
-       |
-       |[placement_database]
-       |connection = mysql+pymysql://$dbUser:$dbPassword@$vip:3306/$dbName
-       |
-       |[keystone_authtoken]
-       |www_authenticate_uri = $ksUrl
-       |auth_url = $ksUrl
-       |auth_type = password
-       |project_domain_name = Default
-       |user_domain_name = Default
-       |project_name = service
-       |username = placement
-       |password = $placementPassword
-       |cafile = /etc/placement/ssl/ca.crt
-       |CONF
-       |chmod 640 $srcDir/placement.conf
-       |echo "placement.conf written"""".stripMargin
+       |echo "directories ready"""".stripMargin
+
+  // placement.conf as a typed value: every section and key is checked against the
+  // options the image declares (catalogues/placement-api-<tag>.json, made by
+  // manifests/dump_oslo_options.sh), when this manifest is built. A mistyped key
+  // or a wrong type stops the run before anything is written to a node.
+  private val catalogueDir = sys.env.getOrElse("ORPHERA_CATALOGUES", "catalogues")
+  private val placementCatalogue: Catalogue =
+    val file = java.nio.file.Paths.get(catalogueDir, "placement-api-2025.1-ubuntu-noble.json")
+    if !java.nio.file.Files.exists(file) then
+      throw new RuntimeException(
+        s"$file not found: run manifests/dump_oslo_options.sh placement-api on a node and copy the JSON there (or set ORPHERA_CATALOGUES)"
+      )
+    OsloJson
+      .load("placement", java.nio.file.Files.readString(file))
+      .fold(e => throw new RuntimeException(s"$file: $e"), identity)
+
+  private val placementConf: ConfFile =
+    ConfFile
+      .of(s"$srcDir/placement.conf", placementCatalogue)(
+        ("DEFAULT", "log_dir", Value.Str("/var/log/kolla/placement")),
+        ("DEFAULT", "use_stderr", Value.Bool(true)),
+        ("api", "auth_strategy", Value.Str("keystone")),
+        ("placement_database", "connection", Value.Str(s"mysql+pymysql://$dbUser:$dbPassword@$vip:3306/$dbName")),
+        ("keystone_authtoken", "www_authenticate_uri", Value.Str(ksUrl)),
+        ("keystone_authtoken", "auth_url", Value.Str(ksUrl)),
+        ("keystone_authtoken", "auth_type", Value.Str("password")),
+        ("keystone_authtoken", "project_domain_name", Value.Str("Default")),
+        ("keystone_authtoken", "user_domain_name", Value.Str("Default")),
+        ("keystone_authtoken", "project_name", Value.Str("service")),
+        ("keystone_authtoken", "username", Value.Str("placement")),
+        ("keystone_authtoken", "password", Value.Str(placementPassword)),
+        ("keystone_authtoken", "cafile", Value.Str("/etc/placement/ssl/ca.crt"))
+      )
+      .fold(
+        errs => throw new RuntimeException("placement.conf: " + errs.map(_.message).mkString("; ")),
+        identity
+      )
 
   // The WSGI script path and the Apache flavour are read from the image, as in
   // cinder_single_node.scala.
@@ -396,6 +411,7 @@ if __name__ == '__main__':
   private val checkMode = sys.env.get("ORPHERA_CHECK").contains("1")
 
   private val unitResource = summon[Resource[Container]]
+  private val confResource = summon[Resource[ConfFile]]
 
   val playbook: ClusterPlaybook =
     if checkMode then
@@ -404,6 +420,7 @@ if __name__ == '__main__':
           .task(s"check ${placementApi.unitName}")(
             unitResource.check(placementApi)
           )
+          .task("check placement.conf")(confResource.check(placementConf))
           .build
       )
     else applyPlaybook
@@ -429,9 +446,10 @@ if __name__ == '__main__':
         .task("fetch Keystone's CA from its TLS handshake")(
           Task.RunCommand(List("sh", "-c", fetchCaScript), timeoutSeconds = 60)
         )
-        .task("write placement.conf")(
-          Task.RunCommand(List("sh", "-c", placementConfScript))
+        .task("create the Placement directories")(
+          Task.RunCommand(List("sh", "-c", dirsScript))
         )
+        .task("write placement.conf")(confResource.write(placementConf))
         .task("write the Kolla config and the Apache vhost")(
           Task.RunCommand(
             List("sh", "-c", kollaConfigScript),

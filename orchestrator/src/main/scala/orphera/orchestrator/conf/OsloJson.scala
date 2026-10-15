@@ -63,7 +63,7 @@ object OsloJson:
     val t = oslo.toLowerCase
     if t.startsWith("list") then OptType.Items
     else if t.startsWith("dict") then OptType.Dict
-    else if t.startsWith("string") then OptType.Text
+    else if t.startsWith("string") || t.startsWith("uri") then OptType.Text
     else if t.startsWith("integer") then OptType.Integer
     else if t.startsWith("boolean") then OptType.Flag
     else if t.startsWith("floating") then OptType.Real
