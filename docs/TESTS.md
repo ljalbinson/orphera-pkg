@@ -589,6 +589,14 @@ Earlier the same day a first attempt stopped at the compute stage when tst18's p
 `build_openstack_stack.sh --from compute` passed 10/10 (267 s). Image pulls have no retry, and the failure message
 points at the `Image(...)` values; both worth fixing.
 
+### K20. Image pull retry (`kolla/Pull.scala`) - PASSED (2026-10-15)
+Every playbook that pulls images now uses `pull_retry` (three tries, 15 s apart, podman's error shown, then a message
+naming the `Image(...)` to check). `ContainerCheck` 40/40, including four checks that run the generated shell function
+against a fake `podman` (works first time; fails twice then works; always fails, gives up after three with the message;
+unsafe hint text rejected). On nodes: `manifests/test_placement.sh` passed=10 (single image) and
+`manifests/test_cinder.sh` passed=12 (loop of four images, RabbitMQ from Docker Hub), each pull succeeding on the first
+try. The retry path itself has not been exercised on a node because no pull failed during the runs.
+
 ## L. Node reassignment (2026-10-10) - steps 1-3 and 5 done; step 4: run-log test passed, Prometheus/Grafana stack on tst7 NOT YET RUN
 New roles: tst0-tst2 Ceph; tst3-tst5 Galera + haproxy + keepalived (VIP
 10.10.5.100); tst6 Keystone; tst7 WordPress and Prometheus/Grafana; tst8 Rocky;
