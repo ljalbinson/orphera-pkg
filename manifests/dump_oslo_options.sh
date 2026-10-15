@@ -32,7 +32,9 @@ for e in sorted(m.entry_points(group="oslo.config.opts"), key=lambda e: e.name):
 args=()
 while read -r ns; do args+=(--namespace "$ns"); done < "$out/${service}-namespaces.txt"
 
-podman run --rm -v "$out:/out:z" --entrypoint oslo-config-generator "$image" \
+# As root inside the container: a Kolla image runs as its service user by default,
+# which cannot write to the root-owned output directory.
+podman run --rm --user root -v "$out:/out:z" --entrypoint oslo-config-generator "$image" \
     "${args[@]}" --format json --output-file "/out/${service}.json"
 
 echo "wrote $out/${service}.json ($(wc -c < "$out/${service}.json") bytes)"
