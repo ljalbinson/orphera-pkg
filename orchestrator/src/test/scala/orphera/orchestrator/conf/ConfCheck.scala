@@ -155,6 +155,17 @@ object ConfCheck:
       check("a loaded catalogue refuses an unknown key with a suggestion",
         f.set("placement_database", "conection", "x").left.toOption.exists(_.message.contains("connection")))
     }
+    val withOld = Catalogue(
+      "x",
+      List(
+        OptionSpec("keystone_authtoken", "www_authenticate_uri", OptType.Text, deprecated = List("auth_uri")),
+        OptionSpec("keystone_authtoken", "auth_uri", OptType.Text)
+      ),
+      Set("keystone_authtoken")
+    )
+    val fw = ConfFile.empty("/p", withOld)
+    check("an open section accepts a plugin key that is one edit from an old name (auth_url vs auth_uri)", fw.set("keystone_authtoken", "auth_url", "https://x").isRight)
+    check("an open section still refuses a near miss of a current name", fw.set("keystone_authtoken", "www_authenticate_url", "x").isLeft)
     check("text that is not oslo output is refused", OsloJson.load("x", "{\"a\": 1}").isLeft && OsloJson.load("x", "][").isLeft)
 
     val r = summon[Resource[ConfFile]]

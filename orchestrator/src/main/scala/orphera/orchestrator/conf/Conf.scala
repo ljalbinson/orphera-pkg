@@ -203,7 +203,12 @@ object ConfFile:
             case None if c.openSections.contains(section) =>
               // Accepted as a plugin option, unless it is a near miss of an option
               // the catalogue does know: that is a typo, not a plugin key.
-              val near = c.optionsIn(section).filter(k => distance(name, k) <= 2).take(3)
+              // Old names (auth_uri) are not compared: they are still declared as
+              // options of their own, and a plugin key (auth_url) is one edit from one.
+              val near = c
+                .optionsIn(section)
+                .filter(k => c.findDeprecated(section, k).isEmpty && distance(name, k) <= 2)
+                .take(3)
               if near.isEmpty then Right(OptionSpec(section, name, OptType.Other("a plugin option")))
               else Left(ConfError.UnknownOption(section, name, near))
             case None =>
