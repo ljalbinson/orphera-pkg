@@ -597,6 +597,15 @@ unsafe hint text rejected). On nodes: `manifests/test_placement.sh` passed=10 (s
 `manifests/test_cinder.sh` passed=12 (loop of four images, RabbitMQ from Docker Hub), each pull succeeding on the first
 try. The retry path itself has not been exercised on a node because no pull failed during the runs.
 
+### K21. `ContainerName` and `TcpPort` as opaque types (`kolla/Ids.scala`) - PASSED (2026-10-15)
+Container names and port numbers are checked when built: a name must be lowercase letters, digits and dashes, a port
+1 to 65535. `ContainerCheck` 42/42. The first compile failed: the `Port.apply` taking plain numbers had the same erasure
+as the one taking `TcpPort` (an opaque `Int` is an `Int` at run time); fixed with `@targetName("fromNumbers")`. On nodes:
+`manifests/test_placement.sh` passed=10 (literal name) and `manifests/test_nova.sh` passed=19 (name from a variable,
+four containers in one playbook). The other manifests (cinder, glance, horizon, keystone, neutron, compute, Kolla
+cache) were converted by script and checked by a search for every `Container(` construction; they are compiled by their
+next run.
+
 ## L. Node reassignment (2026-10-10) - steps 1-3 and 5 done; step 4: run-log test passed, Prometheus/Grafana stack on tst7 NOT YET RUN
 New roles: tst0-tst2 Ceph; tst3-tst5 Galera + haproxy + keepalived (VIP
 10.10.5.100); tst6 Keystone; tst7 WordPress and Prometheus/Grafana; tst8 Rocky;
