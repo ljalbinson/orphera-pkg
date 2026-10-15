@@ -124,9 +124,17 @@ object nova_compute extends OrpheraClusterPlaybook:
   // The Open vSwitch agent is set up exactly like the one on tst19 (neutron_single_node.scala).
   private val ovsAgent = Container(
     name = ContainerName("neutron-openvswitch-agent"),
-    image = Image("neutron-openvswitch-agent", Release.R2025_1, Base.UbuntuNoble, registry),
+    image = Image(
+      "neutron-openvswitch-agent",
+      Release.R2025_1,
+      Base.UbuntuNoble,
+      registry
+    ),
     mounts = List(
-      Mount(s"$confRoot/neutron-openvswitch-agent", "/var/lib/kolla/config_files"),
+      Mount(
+        s"$confRoot/neutron-openvswitch-agent",
+        "/var/lib/kolla/config_files"
+      ),
       Mount(neutronLogDir, "/var/log/kolla/neutron", Access.ReadWrite),
       Mount(neutronStateDir, "/var/lib/neutron", Access.ReadWrite),
       Mount("/run/openvswitch", "/run/openvswitch", Access.Unlabelled),
@@ -144,12 +152,21 @@ object nova_compute extends OrpheraClusterPlaybook:
   )
   private val computeImage = novaCompute.image.ref
   private val ovsAgentImage = ovsAgent.image.ref
-  private val novaApiImage = Image("nova-api", Release.R2025_1, Base.UbuntuNoble, registry).ref
+  private val novaApiImage =
+    Image("nova-api", Release.R2025_1, Base.UbuntuNoble, registry).ref
 
   private val hostPackages =
     List(
-      "podman", "openssl", "curl", "ca-certificates", "python3", "openvswitch-switch",
-      "libvirt-daemon-system", "libvirt-clients", "qemu-system-x86", "qemu-utils"
+      "podman",
+      "openssl",
+      "curl",
+      "ca-certificates",
+      "python3",
+      "openvswitch-switch",
+      "libvirt-daemon-system",
+      "libvirt-clients",
+      "qemu-system-x86",
+      "qemu-utils"
     )
 
   private val waitAptIdleScript =
@@ -288,7 +305,9 @@ object nova_compute extends OrpheraClusterPlaybook:
        |echo "podman will try $cacheHostPort before quay.io"""".stripMargin
 
   private val pullScript =
-    s"""${Pull.shellFunction("the Image(...) values in novaCompute and ovsAgent in nova_compute.scala")}
+    s"""${Pull.shellFunction(
+        "the Image(...) values in novaCompute and ovsAgent in nova_compute.scala"
+      )}
        |for img in $computeImage $ovsAgentImage; do
        |  pull_retry $$img || exit 1
        |done
@@ -753,7 +772,10 @@ if __name__ == '__main__':
     clusterPlaybook("nova-compute")(
       stage("install-compute", nodes*)
         .task("wait for apt and dpkg to be idle")(
-          Task.RunCommand(List("sh", "-c", waitAptIdleScript), timeoutSeconds = 960)
+          Task.RunCommand(
+            List("sh", "-c", waitAptIdleScript),
+            timeoutSeconds = 960
+          )
         )
         .task("check that the VM has hardware virtualization")(
           Task.RunCommand(List("sh", "-c", kvmCheckScript))
@@ -765,7 +787,10 @@ if __name__ == '__main__':
           Task.RunCommand(List("sh", "-c", libvirtScript), timeoutSeconds = 120)
         )
         .task(s"make $providerNic an address-less layer-2 port")(
-          Task.RunCommand(List("sh", "-c", dropAddressScript), timeoutSeconds = 120)
+          Task.RunCommand(
+            List("sh", "-c", dropAddressScript),
+            timeoutSeconds = 120
+          )
         )
         .task(s"create $providerBridge with $providerNic as its port")(
           Task.RunCommand(List("sh", "-c", bridgeScript), timeoutSeconds = 60)
@@ -783,7 +808,10 @@ if __name__ == '__main__':
           Task.RunCommand(List("sh", "-c", confScript))
         )
         .task("write the Kolla config")(
-          Task.RunCommand(List("sh", "-c", kollaConfigScript), timeoutSeconds = 180)
+          Task.RunCommand(
+            List("sh", "-c", kollaConfigScript),
+            timeoutSeconds = 180
+          )
         )
         .task("write the compute API helper")(
           Task.RunCommand(List("sh", "-c", helperScript))
@@ -796,12 +824,17 @@ if __name__ == '__main__':
 
       stage("discover-compute-hosts", controlNode)
         .task("nova-manage cell_v2 discover_hosts")(
-          Task.RunCommand(List("sh", "-c", s"sleep 20; $discoverScript"), timeoutSeconds = 180)
+          Task.RunCommand(
+            List("sh", "-c", s"sleep 20; $discoverScript"),
+            timeoutSeconds = 180
+          )
         )
         .build,
 
       stage("confirm-compute-healthy", nodes*)
-        .task("nova-compute and the OVS agent report in; the node is a hypervisor")(
+        .task(
+          "nova-compute and the OVS agent report in; the node is a hypervisor"
+        )(
           Task.RunCommand(List("sh", "-c", confirmScript), timeoutSeconds = 240)
         )
         .task("compute confirmed")(

@@ -66,9 +66,9 @@ enum Value:
     case Bool(_)  => "true or false"
     case Many(_)  => "a list"
 
-/** One declared option. `deprecated` are old names still accepted by the service
-  * but which a new file should not use; `secret` options are never printed in
-  * messages.
+/** One declared option. `deprecated` are old names still accepted by the
+  * service but which a new file should not use; `secret` options are never
+  * printed in messages.
   */
 final case class OptionSpec(
     section: String,
@@ -135,7 +135,8 @@ enum ConfError:
       s"$n in [$s] must be one of ${allowed.mkString(", ")}"
 
   private def hint(suggestions: List[String]): String =
-    if suggestions.isEmpty then "" else s" (did you mean ${suggestions.mkString(" or ")}?)"
+    if suggestions.isEmpty then ""
+    else s" (did you mean ${suggestions.mkString(" or ")}?)"
 
 /** A configuration file: values checked against a catalogue, kept in the order
   * they were first set. Setting a key again replaces its value in place.
@@ -145,23 +146,40 @@ final case class ConfFile private (
     catalogue: Catalogue,
     entries: Vector[(String, String, Value)]
 ):
-  def set(section: String, name: String, value: Value): Either[ConfError, ConfFile] =
+  def set(
+      section: String,
+      name: String,
+      value: Value
+  ): Either[ConfError, ConfFile] =
     ConfFile.check(catalogue, section, name, value).map { _ =>
       val i = entries.indexWhere((s, n, _) => s == section && n == name)
       val e = (section, name, value)
       copy(entries = if i >= 0 then entries.updated(i, e) else entries :+ e)
     }
 
-  def set(section: String, name: String, value: String): Either[ConfError, ConfFile] =
+  def set(
+      section: String,
+      name: String,
+      value: String
+  ): Either[ConfError, ConfFile] =
     set(section, name, Value.Str(value))
-  def set(section: String, name: String, value: Int): Either[ConfError, ConfFile] =
+  def set(
+      section: String,
+      name: String,
+      value: Int
+  ): Either[ConfError, ConfFile] =
     set(section, name, Value.Whole(value.toLong))
-  def set(section: String, name: String, value: Boolean): Either[ConfError, ConfFile] =
+  def set(
+      section: String,
+      name: String,
+      value: Boolean
+  ): Either[ConfError, ConfFile] =
     set(section, name, Value.Bool(value))
 
-  /** Options whose values must not be shown: declared secret in the catalogue, or,
-    * for names the catalogue does not list (auth plugin options), a name that says
-    * so. Over-masking is the safe side: a harmless value hidden costs a diff line.
+  /** Options whose values must not be shown: declared secret in the catalogue,
+    * or, for names the catalogue does not list (auth plugin options), a name
+    * that says so. Over-masking is the safe side: a harmless value hidden costs
+    * a diff line.
     */
   private def isSecret(section: String, name: String): Boolean =
     catalogue.find(section, name).exists(_.secret) || ConfFile.looksSecret(name)
@@ -183,7 +201,16 @@ final case class ConfFile private (
       .mkString("", "\n\n", "\n")
 
 object ConfFile:
-  private val SecretWords = List("password", "passwd", "secret", "token", "passphrase", "credential", "private_key", "private-key")
+  private val SecretWords = List(
+    "password",
+    "passwd",
+    "secret",
+    "token",
+    "passphrase",
+    "credential",
+    "private_key",
+    "private-key"
+  )
 
   def looksSecret(name: String): Boolean =
     val n = name.toLowerCase
@@ -216,9 +243,10 @@ object ConfFile:
     else
       c.find(section, name) match
         case Some(spec) => typed(spec, value).map(_ => spec)
-        case None =>
+        case None       =>
           c.findDeprecated(section, name) match
-            case Some(spec) => Left(ConfError.Deprecated(section, name, spec.name))
+            case Some(spec) =>
+              Left(ConfError.Deprecated(section, name, spec.name))
             case None if c.openSections.contains(section) =>
               // Accepted as a plugin option, unless it is a near miss of an option
               // the catalogue does know: that is a typo, not a plugin key.
@@ -226,26 +254,40 @@ object ConfFile:
               // options of their own, and a plugin key (auth_url) is one edit from one.
               val near = c
                 .optionsIn(section)
-                .filter(k => c.findDeprecated(section, k).isEmpty && distance(name, k) <= 2)
+                .filter(k =>
+                  c.findDeprecated(section, k).isEmpty && distance(name, k) <= 2
+                )
                 .take(3)
-              if near.isEmpty then Right(OptionSpec(section, name, OptType.Other("a plugin option")))
+              if near.isEmpty then
+                Right(
+                  OptionSpec(section, name, OptType.Other("a plugin option"))
+                )
               else Left(ConfError.UnknownOption(section, name, near))
             case None =>
-              Left(ConfError.UnknownOption(section, name, close(name, c.optionsIn(section))))
+              Left(
+                ConfError.UnknownOption(
+                  section,
+                  name,
+                  close(name, c.optionsIn(section))
+                )
+              )
 
   private def typed(spec: OptionSpec, v: Value): Either[ConfError, Unit] =
-    def wrong = Left(ConfError.WrongType(spec.section, spec.name, spec.tpe.describe, v.kind))
+    def wrong = Left(
+      ConfError.WrongType(spec.section, spec.name, spec.tpe.describe, v.kind)
+    )
     (spec.tpe, v) match
-      case (OptType.Text, Value.Str(_) | Value.Whole(_) | Value.Dec(_)) => Right(())
-      case (OptType.Integer, Value.Whole(_))                             => Right(())
-      case (OptType.Flag, Value.Bool(_))                                 => Right(())
-      case (OptType.Real, Value.Whole(_) | Value.Dec(_))                 => Right(())
-      case (OptType.PortNumber, Value.Whole(n)) =>
+      case (OptType.Text, Value.Str(_) | Value.Whole(_) | Value.Dec(_)) =>
+        Right(())
+      case (OptType.Integer, Value.Whole(_))             => Right(())
+      case (OptType.Flag, Value.Bool(_))                 => Right(())
+      case (OptType.Real, Value.Whole(_) | Value.Dec(_)) => Right(())
+      case (OptType.PortNumber, Value.Whole(n))          =>
         if n >= 0 && n <= 65535 then Right(()) else wrong
       case (OptType.Items, Value.Many(_)) => Right(())
       case (OptType.Dict, Value.Str(_))   => Right(())
       case (OptType.Other(_), _)          => Right(())
-      case (OptType.Choice(allowed), _) =>
+      case (OptType.Choice(allowed), _)   =>
         if allowed.contains(v.render) then Right(())
         else Left(ConfError.NotAllowed(spec.section, spec.name, allowed))
       case _ => wrong
@@ -273,8 +315,8 @@ object ConfFile:
         diag = tmp
     prev(b.length)
 
-  /** A configuration file is a Resource: `file.write` and `file.check`. Mode 0640:
-    * these files hold passwords.
+  /** A configuration file is a Resource: `file.write` and `file.check`. Mode
+    * 0640: these files hold passwords.
     */
   given Resource[ConfFile] with
     def label(f: ConfFile): String = f.path

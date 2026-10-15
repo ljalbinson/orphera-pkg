@@ -93,7 +93,10 @@ object cinder_single_node extends OrpheraClusterPlaybook:
   // podman drops by default; without them it fails with "FailedToDropPrivileges: Privsep
   // daemon failed to start". (kolla-ansible runs this container privileged; these three are
   // the narrower equivalent.) Plain volumes and raw-image clones do not need them.
-  private def cinderContainer(service: String, capabilities: List[String] = Nil): Container =
+  private def cinderContainer(
+      service: String,
+      capabilities: List[String] = Nil
+  ): Container =
     Container(
       name = ContainerName(service),
       image = Image(service, Release.R2025_1, Base.UbuntuNoble, registry),
@@ -110,13 +113,21 @@ object cinder_single_node extends OrpheraClusterPlaybook:
     List(
       cinderContainer("cinder-api"),
       cinderContainer("cinder-scheduler"),
-      cinderContainer("cinder-volume", List("SYS_ADMIN", "NET_ADMIN", "DAC_READ_SEARCH"))
+      cinderContainer(
+        "cinder-volume",
+        List("SYS_ADMIN", "NET_ADMIN", "DAC_READ_SEARCH")
+      )
     )
   private val rabbitContainer = Container(
     name = ContainerName("rabbitmq"),
     image = ExternalImage("docker.io/library/rabbitmq:3.13"),
-    mounts = List(Mount("/var/lib/orphera/rabbitmq", "/var/lib/rabbitmq", Access.ReadWrite)),
-    env = List("RABBITMQ_DEFAULT_USER" -> rabbitUser, "RABBITMQ_DEFAULT_PASS" -> rabbitPassword),
+    mounts = List(
+      Mount("/var/lib/orphera/rabbitmq", "/var/lib/rabbitmq", Access.ReadWrite)
+    ),
+    env = List(
+      "RABBITMQ_DEFAULT_USER" -> rabbitUser,
+      "RABBITMQ_DEFAULT_PASS" -> rabbitPassword
+    ),
     description = Some("RabbitMQ for OpenStack managed by Orphera"),
     settleSeconds = 3
   )
@@ -132,10 +143,15 @@ object cinder_single_node extends OrpheraClusterPlaybook:
       .task(s"write ${rabbitContainer.unitName}")(rabbitContainer.writeUnit)
       .task(s"start ${rabbitContainer.unitName}")(rabbitContainer.start)
       .task("wait for RabbitMQ to answer")(
-        Task.RunCommand(List("sh", "-c", rabbitWaitScript), timeoutSeconds = 150)
+        Task
+          .RunCommand(List("sh", "-c", rabbitWaitScript), timeoutSeconds = 150)
       )
-    val written = cinderServices.foldLeft(rabbit)((acc, c) => acc.task(s"write ${c.unitName}")(c.writeUnit))
-    cinderServices.foldLeft(written)((acc, c) => acc.task(s"start ${c.unitName}")(c.start))
+    val written = cinderServices.foldLeft(rabbit)((acc, c) =>
+      acc.task(s"write ${c.unitName}")(c.writeUnit)
+    )
+    cinderServices.foldLeft(written)((acc, c) =>
+      acc.task(s"start ${c.unitName}")(c.start)
+    )
 
   private val hostPackages =
     List("podman", "openssl", "curl", "ca-certificates", "python3")
@@ -186,8 +202,11 @@ object cinder_single_node extends OrpheraClusterPlaybook:
        |echo "podman will try $cacheHostPort before quay.io"""".stripMargin
 
   private val pullScript =
-    s"""${Pull.shellFunction("the Image(...) in cinderContainer in cinder_single_node.scala")}
-       |for img in ${(cinderServices.map(_.image.ref) :+ rabbitImage).mkString(" ")}; do
+    s"""${Pull.shellFunction(
+        "the Image(...) in cinderContainer in cinder_single_node.scala"
+      )}
+       |for img in ${(cinderServices.map(_.image.ref) :+ rabbitImage)
+        .mkString(" ")}; do
        |  pull_retry $$img || exit 1
        |done
        |echo "images ready"""".stripMargin
@@ -547,36 +566,40 @@ if __name__ == '__main__':
 
       withServices(
         stage("install-cinder", node)
-        .task("install podman and tools")(
-          Task.Install(packages = hostPackages, updateCache = true)
-        )
-        .task("use the Kolla cache as a mirror for quay.io")(
-          Task.RunCommand(List("sh", "-c", useCacheScript))
-        )
-        .task("pull the Cinder and RabbitMQ images")(
-          Task.RunCommand(List("sh", "-c", pullScript), timeoutSeconds = 2400)
-        )
-        .task("fetch Keystone's CA from its TLS handshake")(
-          Task.RunCommand(List("sh", "-c", fetchCaScript), timeoutSeconds = 60)
-        )
-        .task("write the ceph client config")(
-          Task.RunCommand(List("sh", "-c", cephClientScript))
-        )
-        .task("write cinder.conf")(
-          Task.RunCommand(List("sh", "-c", cinderConfScript))
-        )
-        .task("write the Kolla config for the three services")(
-          Task.RunCommand(
-            List("sh", "-c", kollaConfigScript),
-            timeoutSeconds = 120
+          .task("install podman and tools")(
+            Task.Install(packages = hostPackages, updateCache = true)
           )
-        )
-        .task("cinder-manage db sync")(
-          Task.RunCommand(List("sh", "-c", dbSyncScript), timeoutSeconds = 600)
-        )
-        .task("write the OpenStack API helper")(
-          Task.RunCommand(List("sh", "-c", helperScript))
-        )
+          .task("use the Kolla cache as a mirror for quay.io")(
+            Task.RunCommand(List("sh", "-c", useCacheScript))
+          )
+          .task("pull the Cinder and RabbitMQ images")(
+            Task.RunCommand(List("sh", "-c", pullScript), timeoutSeconds = 2400)
+          )
+          .task("fetch Keystone's CA from its TLS handshake")(
+            Task.RunCommand(
+              List("sh", "-c", fetchCaScript),
+              timeoutSeconds = 60
+            )
+          )
+          .task("write the ceph client config")(
+            Task.RunCommand(List("sh", "-c", cephClientScript))
+          )
+          .task("write cinder.conf")(
+            Task.RunCommand(List("sh", "-c", cinderConfScript))
+          )
+          .task("write the Kolla config for the three services")(
+            Task.RunCommand(
+              List("sh", "-c", kollaConfigScript),
+              timeoutSeconds = 120
+            )
+          )
+          .task("cinder-manage db sync")(
+            Task
+              .RunCommand(List("sh", "-c", dbSyncScript), timeoutSeconds = 600)
+          )
+          .task("write the OpenStack API helper")(
+            Task.RunCommand(List("sh", "-c", helperScript))
+          )
       )
         .task("register Cinder in Keystone")(
           Task.RunCommand(

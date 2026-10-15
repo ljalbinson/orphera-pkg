@@ -41,8 +41,8 @@ case class Nic0(
   * Neutron provider network), `gateway`, `table` and `priority`. With `table` >
   * 0 the gateway and subnet route go into that routing table and a policy rule
   * "from <ipaddress> lookup <table> priority <priority>" is added, so replies
-  * leave through this NIC without a second default route in the main table.
-  * The MAC is derived from the hostname and the index, so it is stable across
+  * leave through this NIC without a second default route in the main table. The
+  * MAC is derived from the hostname and the index, so it is stable across
   * re-provisioning and the guest can match the interface by MAC instead of
   * guessing its PCI slot.
   */
@@ -87,19 +87,23 @@ case class VmParams(
   def extraNics: List[ExtraNic] =
     nics.zipWithIndex.map { case (j, i) =>
       val c = j.hcursor
-      val bridge = c.get[String]("bridge").getOrElse(
-        throw new RuntimeException(
-          s"nics: entry ${i + 1} has no 'bridge:' (expected '- bridge: <ovs bridge>')"
+      val bridge = c
+        .get[String]("bridge")
+        .getOrElse(
+          throw new RuntimeException(
+            s"nics: entry ${i + 1} has no 'bridge:' (expected '- bridge: <ovs bridge>')"
+          )
         )
-      )
       val h = java.security.MessageDigest
         .getInstance("SHA-256")
         .digest(s"$hostname/nic${i + 1}".getBytes("UTF-8"))
-      val mac = "52:54:00:" + h.take(3).map(b => f"${b & 0xff}%02x").mkString(":")
+      val mac =
+        "52:54:00:" + h.take(3).map(b => f"${b & 0xff}%02x").mkString(":")
       def str(k: String): Option[String] =
         c.get[String](k).toOption.map(_.trim).filter(_.nonEmpty)
       val address = str("ipaddress")
-      val fromCidr = str("cidr").flatMap(_.split("/").lastOption).flatMap(_.toIntOption)
+      val fromCidr =
+        str("cidr").flatMap(_.split("/").lastOption).flatMap(_.toIntOption)
       val fromMask = str("netmask").map(
         _.split("\\.").map(o => Integer.bitCount(o.trim.toInt)).sum
       )

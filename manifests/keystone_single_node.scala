@@ -97,8 +97,16 @@ object keystone_single_node extends OrpheraClusterPlaybook:
     image = Image("keystone", Release.R2025_1, Base.UbuntuNoble, registry),
     mounts = List(
       Mount(confDir, "/var/lib/kolla/config_files"),
-      Mount(s"$dataDir/fernet-keys", "/etc/keystone/fernet-keys", Access.ReadWrite),
-      Mount(s"$dataDir/credential-keys", "/etc/keystone/credential-keys", Access.ReadWrite),
+      Mount(
+        s"$dataDir/fernet-keys",
+        "/etc/keystone/fernet-keys",
+        Access.ReadWrite
+      ),
+      Mount(
+        s"$dataDir/credential-keys",
+        "/etc/keystone/credential-keys",
+        Access.ReadWrite
+      ),
       Mount(logDir, "/var/log/kolla/keystone", Access.ReadWrite)
     ),
     env = List("KOLLA_CONFIG_STRATEGY" -> "COPY_ALWAYS"),
@@ -134,7 +142,9 @@ object keystone_single_node extends OrpheraClusterPlaybook:
     s"""mariadb -N -e "CREATE DATABASE IF NOT EXISTS $dbName; CREATE USER IF NOT EXISTS '$dbUser'@'%' IDENTIFIED BY '$dbPassword'; GRANT ALL PRIVILEGES ON $dbName.* TO '$dbUser'@'%'; FLUSH PRIVILEGES;""""
 
   private val pullScript =
-    s"""${Pull.shellFunction("the registry path and tag, the Image(...) in keystoneContainer in keystone_single_node.scala")}
+    s"""${Pull.shellFunction(
+        "the registry path and tag, the Image(...) in keystoneContainer in keystone_single_node.scala"
+      )}
        |pull_retry $image || exit 1
        |echo "image ready: $image"""".stripMargin
 
@@ -344,7 +354,9 @@ object keystone_single_node extends OrpheraClusterPlaybook:
         .task("db_sync, fernet and credential keys, bootstrap")(
           Task.RunCommand(List("sh", "-c", initScript), timeoutSeconds = 600)
         )
-        .task(s"write ${keystoneContainer.unitName}")(keystoneContainer.writeUnit)
+        .task(s"write ${keystoneContainer.unitName}")(
+          keystoneContainer.writeUnit
+        )
         .task(s"start ${keystoneContainer.unitName}")(keystoneContainer.start)
         .task("write the admin token helper")(
           Task.RunCommand(List("sh", "-c", tokenHelperScript))

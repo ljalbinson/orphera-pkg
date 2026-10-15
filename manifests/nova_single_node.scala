@@ -101,13 +101,19 @@ object nova_single_node extends OrpheraClusterPlaybook:
       env = List("KOLLA_CONFIG_STRATEGY" -> "COPY_ALWAYS")
     )
   private val novaServices: List[Container] =
-    List("nova-api", "nova-scheduler", "nova-conductor", "nova-novncproxy").map(novaContainer)
+    List("nova-api", "nova-scheduler", "nova-conductor", "nova-novncproxy").map(
+      novaContainer
+    )
   private val apiImage = novaServices.head.image.ref
 
   // Adds one "write the unit" task per container, then one "start" task per container.
   private def withServices(b: StageBuilder): StageBuilder =
-    val written = novaServices.foldLeft(b)((acc, c) => acc.task(s"write ${c.unitName}")(c.writeUnit))
-    novaServices.foldLeft(written)((acc, c) => acc.task(s"start ${c.unitName}")(c.start))
+    val written = novaServices.foldLeft(b)((acc, c) =>
+      acc.task(s"write ${c.unitName}")(c.writeUnit)
+    )
+    novaServices.foldLeft(written)((acc, c) =>
+      acc.task(s"start ${c.unitName}")(c.start)
+    )
 
   private val hostPackages =
     List("podman", "openssl", "curl", "ca-certificates", "python3")
@@ -169,7 +175,9 @@ object nova_single_node extends OrpheraClusterPlaybook:
        |echo "podman will try $cacheHostPort before quay.io"""".stripMargin
 
   private val pullScript =
-    s"""${Pull.shellFunction("the Image(...) in novaContainer in nova_single_node.scala")}
+    s"""${Pull.shellFunction(
+        "the Image(...) in novaContainer in nova_single_node.scala"
+      )}
        |for img in ${novaServices.map(_.image.ref).mkString(" ")}; do
        |  pull_retry $$img || exit 1
        |done
@@ -576,55 +584,66 @@ if __name__ == '__main__':
   val playbook: ClusterPlaybook =
     clusterPlaybook("nova-single-node")(
       stage("nova-databases", "tst3")
-        .task("create nova_api, nova and nova_cell0 and the nova user on the Galera cluster")(
+        .task(
+          "create nova_api, nova and nova_cell0 and the nova user on the Galera cluster"
+        )(
           Task.RunCommand(List("sh", "-c", createDatabasesScript))
         )
         .build,
 
       stage("nova-rabbitmq", rabbitNode)
-        .task(s"create the $rabbitVhost vhost and the $rabbitUser user on RabbitMQ")(
+        .task(
+          s"create the $rabbitVhost vhost and the $rabbitUser user on RabbitMQ"
+        )(
           Task.RunCommand(List("sh", "-c", rabbitScript), timeoutSeconds = 120)
         )
         .build,
 
       withServices(
         stage("install-nova", node)
-        .task("wait for apt and dpkg to be idle")(
-          Task.RunCommand(List("sh", "-c", waitAptIdleScript), timeoutSeconds = 960)
-        )
-        .task("install podman and tools")(
-          Task.Install(packages = hostPackages, updateCache = true)
-        )
-        .task("use the Kolla cache as a mirror for quay.io")(
-          Task.RunCommand(List("sh", "-c", useCacheScript))
-        )
-        .task("pull the Nova images")(
-          Task.RunCommand(List("sh", "-c", pullScript), timeoutSeconds = 2400)
-        )
-        .task("fetch Keystone's CA from its TLS handshake")(
-          Task.RunCommand(List("sh", "-c", fetchCaScript), timeoutSeconds = 60)
-        )
-        .task("write nova.conf")(
-          Task.RunCommand(List("sh", "-c", novaConfScript))
-        )
-        .task("write the Kolla config and the Apache vhost")(
-          Task.RunCommand(
-            List("sh", "-c", kollaConfigScript),
-            timeoutSeconds = 180
+          .task("wait for apt and dpkg to be idle")(
+            Task.RunCommand(
+              List("sh", "-c", waitAptIdleScript),
+              timeoutSeconds = 960
+            )
           )
-        )
-        .task("nova-manage: api_db sync, map cell0, create cell1, db sync")(
-          Task.RunCommand(List("sh", "-c", dbSyncScript), timeoutSeconds = 900)
-        )
-        .task("write the Nova API helper")(
-          Task.RunCommand(List("sh", "-c", helperScript))
-        )
-        .task("register Nova in Keystone")(
-          Task.RunCommand(
-            List("sh", "-c", "/usr/local/sbin/orphera-nova-api register"),
-            timeoutSeconds = 120
+          .task("install podman and tools")(
+            Task.Install(packages = hostPackages, updateCache = true)
           )
-        )
+          .task("use the Kolla cache as a mirror for quay.io")(
+            Task.RunCommand(List("sh", "-c", useCacheScript))
+          )
+          .task("pull the Nova images")(
+            Task.RunCommand(List("sh", "-c", pullScript), timeoutSeconds = 2400)
+          )
+          .task("fetch Keystone's CA from its TLS handshake")(
+            Task.RunCommand(
+              List("sh", "-c", fetchCaScript),
+              timeoutSeconds = 60
+            )
+          )
+          .task("write nova.conf")(
+            Task.RunCommand(List("sh", "-c", novaConfScript))
+          )
+          .task("write the Kolla config and the Apache vhost")(
+            Task.RunCommand(
+              List("sh", "-c", kollaConfigScript),
+              timeoutSeconds = 180
+            )
+          )
+          .task("nova-manage: api_db sync, map cell0, create cell1, db sync")(
+            Task
+              .RunCommand(List("sh", "-c", dbSyncScript), timeoutSeconds = 900)
+          )
+          .task("write the Nova API helper")(
+            Task.RunCommand(List("sh", "-c", helperScript))
+          )
+          .task("register Nova in Keystone")(
+            Task.RunCommand(
+              List("sh", "-c", "/usr/local/sbin/orphera-nova-api register"),
+              timeoutSeconds = 120
+            )
+          )
       ).build,
 
       stage("confirm-nova-healthy", node)

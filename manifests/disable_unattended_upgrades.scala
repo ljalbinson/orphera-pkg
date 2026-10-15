@@ -39,27 +39,55 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 object disable_unattended_upgrades extends OrpheraClusterPlaybook:
 
   private val defaultNodes = List(
-    "tst0", "tst1", "tst2", "tst3", "tst4", "tst5", "tst6", "tst7", "tst9",
-    "tst10", "tst11", "tst12", "tst13", "tst14", "tst17", "tst18", "tst19"
+    "tst0",
+    "tst1",
+    "tst2",
+    "tst3",
+    "tst4",
+    "tst5",
+    "tst6",
+    "tst7",
+    "tst9",
+    "tst10",
+    "tst11",
+    "tst12",
+    "tst13",
+    "tst14",
+    "tst17",
+    "tst18",
+    "tst19"
   )
 
   // Optional `nodes:` list from --config; a missing --config means the default list, but a
   // config that cannot be read or has an empty or bad list fails before any node is touched.
   private val nodes: List[String] =
     sys.env.get("ORPHERA_CONFIG") match
-      case None => defaultNodes
+      case None       => defaultNodes
       case Some(path) =>
         val listed =
           for
-            text <- scala.util.Try(Files.readString(Paths.get(path))).toEither.left.map(e => s"cannot read $path: ${e.getMessage}")
-            json <- parser.parse(text).left.map(e => s"$path is not valid YAML: ${e.getMessage}")
-            found <- json.hcursor.get[Option[List[String]]]("nodes").left.map(e => s"$path: ${e.getMessage}")
+            text <- scala.util
+              .Try(Files.readString(Paths.get(path)))
+              .toEither
+              .left
+              .map(e => s"cannot read $path: ${e.getMessage}")
+            json <- parser
+              .parse(text)
+              .left
+              .map(e => s"$path is not valid YAML: ${e.getMessage}")
+            found <- json.hcursor
+              .get[Option[List[String]]]("nodes")
+              .left
+              .map(e => s"$path: ${e.getMessage}")
           yield found
         listed match
           case Left(message) => throw new IllegalArgumentException(message)
-          case Right(None) => defaultNodes
-          case Right(Some(list)) if list.isEmpty || list.exists(!_.matches("^[A-Za-z0-9.-]+$")) =>
-            throw new IllegalArgumentException(s"$path: `nodes` must be a non-empty list of host names")
+          case Right(None)   => defaultNodes
+          case Right(Some(list))
+              if list.isEmpty || list.exists(!_.matches("^[A-Za-z0-9.-]+$")) =>
+            throw new IllegalArgumentException(
+              s"$path: `nodes` must be a non-empty list of host names"
+            )
           case Right(Some(list)) => list
 
   private val disableScript =

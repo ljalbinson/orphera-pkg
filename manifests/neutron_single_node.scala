@@ -115,7 +115,9 @@ object neutron_single_node extends OrpheraClusterPlaybook:
       after = List("openvswitch-switch.service"),
       preStart =
         if agent then
-          List("/bin/sh -c 'mkdir -p /run/netns && (mountpoint -q /run/netns || mount --bind /run/netns /run/netns) && mount --make-rshared /run/netns'")
+          List(
+            "/bin/sh -c 'mkdir -p /run/netns && (mountpoint -q /run/netns || mount --bind /run/netns /run/netns) && mount --make-rshared /run/netns'"
+          )
         else Nil,
       settleSeconds = 12
     )
@@ -131,11 +133,22 @@ object neutron_single_node extends OrpheraClusterPlaybook:
 
   // Adds one "write the unit" task per container, then one "start" task per container.
   private def withServices(b: StageBuilder): StageBuilder =
-    val written = neutronServices.foldLeft(b)((acc, c) => acc.task(s"write ${c.unitName}")(c.writeUnit))
-    neutronServices.foldLeft(written)((acc, c) => acc.task(s"start ${c.unitName}")(c.start))
+    val written = neutronServices.foldLeft(b)((acc, c) =>
+      acc.task(s"write ${c.unitName}")(c.writeUnit)
+    )
+    neutronServices.foldLeft(written)((acc, c) =>
+      acc.task(s"start ${c.unitName}")(c.start)
+    )
 
   private val hostPackages =
-    List("podman", "openssl", "curl", "ca-certificates", "python3", "openvswitch-switch")
+    List(
+      "podman",
+      "openssl",
+      "curl",
+      "ca-certificates",
+      "python3",
+      "openvswitch-switch"
+    )
 
   // ---- tst3 (Galera) ---------------------------------------------------
 
@@ -246,7 +259,9 @@ object neutron_single_node extends OrpheraClusterPlaybook:
        |echo "podman will try $cacheHostPort before quay.io"""".stripMargin
 
   private val pullScript =
-    s"""${Pull.shellFunction("the Image(...) in neutronContainer in neutron_single_node.scala")}
+    s"""${Pull.shellFunction(
+        "the Image(...) in neutronContainer in neutron_single_node.scala"
+      )}
        |for img in ${neutronServices.map(_.image.ref).mkString(" ")}; do
        |  pull_retry $$img || exit 1
        |done
@@ -631,52 +646,67 @@ if __name__ == '__main__':
         .build,
 
       stage("neutron-rabbitmq", rabbitNode)
-        .task(s"create the $rabbitVhost vhost and the $rabbitUser user on RabbitMQ")(
+        .task(
+          s"create the $rabbitVhost vhost and the $rabbitUser user on RabbitMQ"
+        )(
           Task.RunCommand(List("sh", "-c", rabbitScript), timeoutSeconds = 120)
         )
         .build,
 
       withServices(
         stage("install-neutron", node)
-        .task("wait for apt and dpkg to be idle")(
-          Task.RunCommand(List("sh", "-c", waitAptIdleScript), timeoutSeconds = 960)
-        )
-        .task("install podman, Open vSwitch and tools")(
-          Task.Install(packages = hostPackages, updateCache = true)
-        )
-        .task(s"make $providerNic an address-less layer-2 port")(
-          Task.RunCommand(List("sh", "-c", dropAddressScript), timeoutSeconds = 120)
-        )
-        .task(s"create $providerBridge with $providerNic as its port")(
-          Task.RunCommand(List("sh", "-c", bridgeScript), timeoutSeconds = 60)
-        )
-        .task("use the Kolla cache as a mirror for quay.io")(
-          Task.RunCommand(List("sh", "-c", useCacheScript))
-        )
-        .task("pull the Neutron images")(
-          Task.RunCommand(List("sh", "-c", pullScript), timeoutSeconds = 2400)
-        )
-        .task("fetch Keystone's CA from its TLS handshake")(
-          Task.RunCommand(List("sh", "-c", fetchCaScript), timeoutSeconds = 60)
-        )
-        .task("write the Neutron config files")(
-          Task.RunCommand(List("sh", "-c", neutronConfScript))
-        )
-        .task("write the Kolla config for the three services")(
-          Task.RunCommand(List("sh", "-c", kollaConfigScript), timeoutSeconds = 180)
-        )
-        .task("neutron-db-manage upgrade heads")(
-          Task.RunCommand(List("sh", "-c", dbSyncScript), timeoutSeconds = 900)
-        )
-        .task("write the Neutron API helper")(
-          Task.RunCommand(List("sh", "-c", helperScript))
-        )
-        .task("register Neutron in Keystone")(
-          Task.RunCommand(
-            List("sh", "-c", "/usr/local/sbin/orphera-neutron-api register"),
-            timeoutSeconds = 120
+          .task("wait for apt and dpkg to be idle")(
+            Task.RunCommand(
+              List("sh", "-c", waitAptIdleScript),
+              timeoutSeconds = 960
+            )
           )
-        )
+          .task("install podman, Open vSwitch and tools")(
+            Task.Install(packages = hostPackages, updateCache = true)
+          )
+          .task(s"make $providerNic an address-less layer-2 port")(
+            Task.RunCommand(
+              List("sh", "-c", dropAddressScript),
+              timeoutSeconds = 120
+            )
+          )
+          .task(s"create $providerBridge with $providerNic as its port")(
+            Task.RunCommand(List("sh", "-c", bridgeScript), timeoutSeconds = 60)
+          )
+          .task("use the Kolla cache as a mirror for quay.io")(
+            Task.RunCommand(List("sh", "-c", useCacheScript))
+          )
+          .task("pull the Neutron images")(
+            Task.RunCommand(List("sh", "-c", pullScript), timeoutSeconds = 2400)
+          )
+          .task("fetch Keystone's CA from its TLS handshake")(
+            Task.RunCommand(
+              List("sh", "-c", fetchCaScript),
+              timeoutSeconds = 60
+            )
+          )
+          .task("write the Neutron config files")(
+            Task.RunCommand(List("sh", "-c", neutronConfScript))
+          )
+          .task("write the Kolla config for the three services")(
+            Task.RunCommand(
+              List("sh", "-c", kollaConfigScript),
+              timeoutSeconds = 180
+            )
+          )
+          .task("neutron-db-manage upgrade heads")(
+            Task
+              .RunCommand(List("sh", "-c", dbSyncScript), timeoutSeconds = 900)
+          )
+          .task("write the Neutron API helper")(
+            Task.RunCommand(List("sh", "-c", helperScript))
+          )
+          .task("register Neutron in Keystone")(
+            Task.RunCommand(
+              List("sh", "-c", "/usr/local/sbin/orphera-neutron-api register"),
+              timeoutSeconds = 120
+            )
+          )
       ).build,
 
       stage("confirm-neutron-healthy", node)

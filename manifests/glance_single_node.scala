@@ -126,7 +126,9 @@ object glance_single_node extends OrpheraClusterPlaybook:
        |echo "podman will try $cacheHostPort before quay.io"""".stripMargin
 
   private val pullScript =
-    s"""${Pull.shellFunction("the Image(...) in glanceApi in glance_single_node.scala")}
+    s"""${Pull.shellFunction(
+        "the Image(...) in glanceApi in glance_single_node.scala"
+      )}
        |pull_retry $apiImage || exit 1
        |echo "image ready"""".stripMargin
 

@@ -15,10 +15,11 @@ object Pull:
   val PauseSeconds = 15
 
   /** Defines `pull_retry`, which takes the arguments of `podman pull`. It tries
-    * `Attempts` times, `pauseSeconds` apart, and returns non-zero if the last try
-    * fails, after saying what failed. podman's own error is printed on each try,
-    * above this message. `where` names the place to look if the image reference
-    * itself is wrong; it must not contain a double quote, a backtick or a `$`.
+    * `Attempts` times, `pauseSeconds` apart, and returns non-zero if the last
+    * try fails, after saying what failed. podman's own error is printed on each
+    * try, above this message. `where` names the place to look if the image
+    * reference itself is wrong; it must not contain a double quote, a backtick
+    * or a `$`.
     */
   def shellFunction(where: String, pauseSeconds: Int = PauseSeconds): String =
     require(

@@ -53,7 +53,9 @@ object neutron_teardown extends OrpheraClusterPlaybook:
   val playbook: ClusterPlaybook =
     clusterPlaybook("neutron-teardown")(
       stage("teardown-neutron-node", node)
-        .task("unregister from Keystone, remove the containers, units, bridges and state")(
+        .task(
+          "unregister from Keystone, remove the containers, units, bridges and state"
+        )(
           Task.RunCommand(List("sh", "-c", nodeScript), timeoutSeconds = 240)
         )
         .build,

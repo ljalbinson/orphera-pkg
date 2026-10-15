@@ -23,7 +23,9 @@ trait Resource[A]:
   /** Where the file lives on the node. */
   def path(a: A): String
 
-  /** Exactly what the file should contain. Pure, so it can be tested with no node. */
+  /** Exactly what the file should contain. Pure, so it can be tested with no
+    * node.
+    */
   def content(a: A): String
 
   def owner(a: A): String = "root"
@@ -69,15 +71,21 @@ object Resource:
     if secretKeys.isEmpty then text
     else
       val patterns = secretKeys.map { k =>
-        require(KeyChars.matches(k), s"secret key $k has characters other than letters, digits, _ . -")
-        java.util.regex.Pattern.compile("^(" + java.util.regex.Pattern.quote(k) + "[ \\t]*=[ \\t]*).*$")
+        require(
+          KeyChars.matches(k),
+          s"secret key $k has characters other than letters, digits, _ . -"
+        )
+        java.util.regex.Pattern.compile(
+          "^(" + java.util.regex.Pattern.quote(k) + "[ \\t]*=[ \\t]*).*$"
+        )
       }
       text.linesWithSeparators.map { line =>
         val body = line.stripSuffix("\n")
         val nl = line.substring(body.length)
         patterns.find(_.matcher(body).matches()) match
-          case Some(p) => p.matcher(body).replaceFirst("$1" + Secrets.Placeholder) + nl
-          case None    => line
+          case Some(p) =>
+            p.matcher(body).replaceFirst("$1" + Secrets.Placeholder) + nl
+          case None => line
       }.mkString
 
   private def sedFor(secretKeys: List[String]): String =
@@ -85,7 +93,10 @@ object Resource:
     else
       "sed -E " + secretKeys
         .map { k =>
-          require(KeyChars.matches(k), s"secret key $k has characters other than letters, digits, _ . -")
+          require(
+            KeyChars.matches(k),
+            s"secret key $k has characters other than letters, digits, _ . -"
+          )
           val escaped = k.replace(".", "\\.")
           s"-e 's/^($escaped[[:space:]]*=[[:space:]]*).*$$/\\1${Secrets.Placeholder}/'"
         }
@@ -100,15 +111,20 @@ object Resource:
 
   /** The comparison, as a command for the node.
     *
-    * It first compares a SHA-256 of the whole file with the expected one, so the
-    * secret values are never in the command. Only when they differ does it show a
-    * diff, and then both sides have the values of `secretKeys` replaced by
-    * `<redacted>`: the expected text is redacted here, the node's file by sed. If
-    * the redacted texts agree but the hashes do not, a secret value differs and
-    * the message says so without showing it. The expected text is a quoted
-    * here-document, so nothing in it is expanded by the shell.
+    * It first compares a SHA-256 of the whole file with the expected one, so
+    * the secret values are never in the command. Only when they differ does it
+    * show a diff, and then both sides have the values of `secretKeys` replaced
+    * by `<redacted>`: the expected text is redacted here, the node's file by
+    * sed. If the redacted texts agree but the hashes do not, a secret value
+    * differs and the message says so without showing it. The expected text is a
+    * quoted here-document, so nothing in it is expanded by the shell.
     */
-  def checkTask(label: String, path: String, expected: String, secretKeys: List[String] = Nil): Task =
+  def checkTask(
+      label: String,
+      path: String,
+      expected: String,
+      secretKeys: List[String] = Nil
+  ): Task =
     require(!expected.contains(Marker), s"content of $label contains $Marker")
     val shown = redact(expected, secretKeys)
     val body = if shown.endsWith("\n") then shown else shown + "\n"
@@ -117,7 +133,9 @@ object Resource:
          |  echo "MISSING $label: $path does not exist" >&2
          |  exit 2
          |fi
-         |if [ "$$(sha256sum < $path | cut -d' ' -f1)" = "${sha256(expected)}" ]; then
+         |if [ "$$(sha256sum < $path | cut -d' ' -f1)" = "${sha256(
+          expected
+        )}" ]; then
          |  echo "in sync: $label"
          |  exit 0
          |fi
@@ -125,7 +143,9 @@ object Resource:
          |trap 'rm -f "$$T"' EXIT
          |cat > "$$T" <<'$Marker'
          |$body$Marker
-         |if ${sedFor(secretKeys)} $path | diff -u --label "node: $path" --label "playbook" - "$$T"; then
+         |if ${sedFor(
+          secretKeys
+        )} $path | diff -u --label "node: $path" --label "playbook" - "$$T"; then
          |  echo "DRIFT $label: a secret value in $path differs from what the playbook writes (values are not shown)" >&2
          |else
          |  echo "DRIFT $label: $path differs from what the playbook writes (diff above, - is the node, + is the playbook)" >&2
@@ -144,9 +164,9 @@ enum Drift:
 object Drift:
   def compare(expected: String, actual: Option[String]): Drift =
     actual match
-      case None => Missing
+      case None                     => Missing
       case Some(a) if a == expected => InSync
-      case Some(a) =>
+      case Some(a)                  =>
         val e = expected.linesIterator.toList
         val l = a.linesIterator.toList
         val i = e.zipAll(l, "<end>", "<end>").indexWhere((x, y) => x != y)

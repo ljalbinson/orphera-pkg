@@ -18,7 +18,8 @@ object ContainerName:
 
   def parse(s: String): Either[String, ContainerName] =
     if s.matches(Valid) then Right(s)
-    else Left(s"container name must be lowercase letters, digits and dashes: $s")
+    else
+      Left(s"container name must be lowercase letters, digits and dashes: $s")
 
   /** Throws `IllegalArgumentException` for an invalid name. */
   def apply(s: String): ContainerName =

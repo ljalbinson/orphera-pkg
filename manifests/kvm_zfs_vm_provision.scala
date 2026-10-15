@@ -647,7 +647,16 @@ object NetworkConfigTemplate {
       extraNics: List[ExtraNic] = Nil
   ): String =
     if extraNics.nonEmpty && vlan.isEmpty then
-      return renderWithExtraNics(nic, ipAddress, ipMask, gateway, dns1, dns2, domainname, extraNics)
+      return renderWithExtraNics(
+        nic,
+        ipAddress,
+        ipMask,
+        gateway,
+        dns1,
+        dns2,
+        domainname,
+        extraNics
+      )
     vlan match {
       case Some(v) =>
         s"""network:
@@ -698,10 +707,16 @@ object NetworkConfigTemplate {
     * keeps the original v1 form byte for byte). nic0 is matched by name as
     * before; each extra NIC is matched by its fixed MAC and renamed.
     */
-  /** Network address of a dotted-quad address for a prefix length (10.10.6.31, 24 -> 10.10.6.0). */
+  /** Network address of a dotted-quad address for a prefix length (10.10.6.31,
+    * 24 -> 10.10.6.0).
+    */
   private def networkOf(addr: String, prefix: Int): String =
-    val ip = addr.split("\\.").map(_.trim.toLong).foldLeft(0L)((acc, o) => acc * 256 + o)
-    val mask = if prefix <= 0 then 0L else (0xffffffffL << (32 - prefix)) & 0xffffffffL
+    val ip = addr
+      .split("\\.")
+      .map(_.trim.toLong)
+      .foldLeft(0L)((acc, o) => acc * 256 + o)
+    val mask =
+      if prefix <= 0 then 0L else (0xffffffffL << (32 - prefix)) & 0xffffffffL
     val n = ip & mask
     List(24, 16, 8, 0).map(sh => ((n >> sh) & 255).toString).mkString(".")
 
@@ -716,13 +731,18 @@ object NetworkConfigTemplate {
       extras: List[ExtraNic]
   ): String =
     val extraBlocks = extras.map { n =>
-      val addr = n.address.map(a => s"      addresses:\n      - $a/${n.prefix}\n").getOrElse("")
+      val addr = n.address
+        .map(a => s"      addresses:\n      - $a/${n.prefix}\n")
+        .getOrElse("")
       val routing =
         if n.address.isDefined && n.table > 0 then
           val subnetRoute =
             s"      - to: ${networkOf(n.address.get, n.prefix)}/${n.prefix}\n        scope: link\n        table: ${n.table}\n"
-          val gw = n.gateway.map(g =>
-            s"      - to: default\n        via: $g\n        table: ${n.table}\n").getOrElse("")
+          val gw = n.gateway
+            .map(g =>
+              s"      - to: default\n        via: $g\n        table: ${n.table}\n"
+            )
+            .getOrElse("")
           s"      routes:\n$subnetRoute$gw" +
             s"      routing-policy:\n      - from: ${n.address.get}\n        table: ${n.table}\n        priority: ${n.priority}\n"
         else ""

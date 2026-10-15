@@ -107,7 +107,9 @@ object horizon_single_node extends OrpheraClusterPlaybook:
        |echo "podman will try $cacheHostPort before quay.io"""".stripMargin
 
   private val pullScript =
-    s"""${Pull.shellFunction("the Image(...) in horizonWeb in horizon_single_node.scala")}
+    s"""${Pull.shellFunction(
+        "the Image(...) in horizonWeb in horizon_single_node.scala"
+      )}
        |pull_retry $webImage || exit 1
        |echo "image ready"""".stripMargin
 
@@ -358,7 +360,10 @@ if __name__ == '__main__':
     clusterPlaybook("horizon-single-node")(
       stage("install-horizon", node)
         .task("wait until apt and dpkg are idle")(
-          Task.RunCommand(List("sh", "-c", waitAptIdleScript), timeoutSeconds = 960)
+          Task.RunCommand(
+            List("sh", "-c", waitAptIdleScript),
+            timeoutSeconds = 960
+          )
         )
         .task("install podman and tools")(
           Task.Install(packages = hostPackages, updateCache = true)
@@ -376,7 +381,10 @@ if __name__ == '__main__':
           Task.RunCommand(List("sh", "-c", settingsScript))
         )
         .task("write the Kolla config and the Apache vhost")(
-          Task.RunCommand(List("sh", "-c", kollaConfigScript), timeoutSeconds = 120)
+          Task.RunCommand(
+            List("sh", "-c", kollaConfigScript),
+            timeoutSeconds = 120
+          )
         )
         .task("write the Horizon check helper")(
           Task.RunCommand(List("sh", "-c", helperScript))

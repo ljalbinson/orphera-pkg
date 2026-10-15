@@ -44,14 +44,15 @@ final case class Image(
     */
   def ref: String = s"$registry/$service:${release.tag}-${base.tag}"
 
-/** An image that is not a Kolla image, e.g. `docker.io/library/rabbitmq:3.13`. */
+/** An image that is not a Kolla image, e.g. `docker.io/library/rabbitmq:3.13`.
+  */
 final case class ExternalImage(ref: String) extends ImageRef
 
 object Image:
   val DefaultRegistry = "quay.io/openstack.kolla"
 
-/** How a host path is mounted into the container. `:z` relabels for SELinux
-  * and is harmless where SELinux is off. The last three are for host paths that
+/** How a host path is mounted into the container. `:z` relabels for SELinux and
+  * is harmless where SELinux is off. The last three are for host paths that
   * must stay as they are: an Open vSwitch socket directory, a network-namespace
   * directory that has to propagate both ways (`rshared`), the kernel modules.
   */
@@ -71,8 +72,8 @@ final case class Mount(
     if access.suffix.isEmpty then s"-v $host:$inside"
     else s"-v $host:$inside:${access.suffix}"
 
-/** How the container is attached to the network. Every OpenStack service uses the
-  * host's network; a plain registry or similar publishes ports instead.
+/** How the container is attached to the network. Every OpenStack service uses
+  * the host's network; a plain registry or similar publishes ports instead.
   */
 enum Network:
   case Host
@@ -85,7 +86,8 @@ final case class Port(host: TcpPort, container: TcpPort):
 object Port:
   /** From plain numbers; each is checked (1 to 65535). */
   @targetName("fromNumbers")
-  def apply(host: Int, container: Int): Port = Port(TcpPort(host), TcpPort(container))
+  def apply(host: Int, container: Int): Port =
+    Port(TcpPort(host), TcpPort(container))
 
 final case class Container(
     name: ContainerName,
@@ -124,7 +126,9 @@ final case class Container(
   def unitName: String = s"orphera-${name.value}.service"
   def unitPath: String = s"/etc/systemd/system/$unitName"
 
-  /** Everything after `podman run --rm --name <name>` (and `--network host`, when on the host network). */
+  /** Everything after `podman run --rm --name <name>` (and `--network host`,
+    * when on the host network).
+    */
   def runArguments: String =
     (ports.map(_.flag) ++
       List("--privileged").filter(_ => privileged) ++
@@ -139,10 +143,12 @@ final case class Container(
   def render: String =
     // "--network host" for the host network; published ports are part of runArguments.
     val runLine = network match
-      case Network.Host => s"--network host $runArguments"
+      case Network.Host      => s"--network host $runArguments"
       case Network.Published => runArguments
     val unitDescription =
-      description.getOrElse(s"${name.value} (Kolla container) managed by Orphera")
+      description.getOrElse(
+        s"${name.value} (Kolla container) managed by Orphera"
+      )
     val wantedUnits = ("network-online.target" :: wants).mkString(" ")
     val afterUnits = ("network-online.target" :: after).mkString(" ")
     val preLines = preStart.map(c => s"ExecStartPre=$c\n").mkString

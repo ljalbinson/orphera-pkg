@@ -105,7 +105,9 @@ object placement_single_node extends OrpheraClusterPlaybook:
        |echo "podman will try $cacheHostPort before quay.io"""".stripMargin
 
   private val pullScript =
-    s"""${Pull.shellFunction("the Image(...) in placementApi in placement_single_node.scala")}
+    s"""${Pull.shellFunction(
+        "the Image(...) in placementApi in placement_single_node.scala"
+      )}
        |pull_retry $apiImage || exit 1
        |echo "image ready"""".stripMargin
 
@@ -144,9 +146,11 @@ object placement_single_node extends OrpheraClusterPlaybook:
   // options the image declares (catalogues/placement-api-<tag>.json, made by
   // manifests/dump_oslo_options.sh), when this manifest is built. A mistyped key
   // or a wrong type stops the run before anything is written to a node.
-  private val catalogueDir = sys.env.getOrElse("ORPHERA_CATALOGUES", "catalogues")
+  private val catalogueDir =
+    sys.env.getOrElse("ORPHERA_CATALOGUES", "catalogues")
   private val placementCatalogue: Catalogue =
-    val file = java.nio.file.Paths.get(catalogueDir, "placement-api-2025.1-ubuntu-noble.json")
+    val file = java.nio.file.Paths
+      .get(catalogueDir, "placement-api-2025.1-ubuntu-noble.json")
     if !java.nio.file.Files.exists(file) then
       throw new RuntimeException(
         s"$file not found: run manifests/dump_oslo_options.sh placement-api on a node and copy the JSON there (or set ORPHERA_CATALOGUES)"
@@ -155,7 +159,11 @@ object placement_single_node extends OrpheraClusterPlaybook:
       // [keystone_authtoken] also takes the options of the auth plugin chosen by
       // auth_type (auth_url, username, password ...), loaded at run time and so
       // not in the image's option list.
-      .load("placement", java.nio.file.Files.readString(file), openSections = Set("keystone_authtoken"))
+      .load(
+        "placement",
+        java.nio.file.Files.readString(file),
+        openSections = Set("keystone_authtoken")
+      )
       .fold(e => throw new RuntimeException(s"$file: $e"), identity)
 
   private val placementConf: ConfFile =
@@ -164,7 +172,11 @@ object placement_single_node extends OrpheraClusterPlaybook:
         ("DEFAULT", "log_dir", Value.Str("/var/log/kolla/placement")),
         ("DEFAULT", "use_stderr", Value.Bool(true)),
         ("api", "auth_strategy", Value.Str("keystone")),
-        ("placement_database", "connection", Value.Str(s"mysql+pymysql://$dbUser:$dbPassword@$vip:3306/$dbName")),
+        (
+          "placement_database",
+          "connection",
+          Value.Str(s"mysql+pymysql://$dbUser:$dbPassword@$vip:3306/$dbName")
+        ),
         ("keystone_authtoken", "www_authenticate_uri", Value.Str(ksUrl)),
         ("keystone_authtoken", "auth_url", Value.Str(ksUrl)),
         ("keystone_authtoken", "auth_type", Value.Str("password")),
@@ -176,7 +188,10 @@ object placement_single_node extends OrpheraClusterPlaybook:
         ("keystone_authtoken", "cafile", Value.Str("/etc/placement/ssl/ca.crt"))
       )
       .fold(
-        errs => throw new RuntimeException("placement.conf: " + errs.map(_.message).mkString("; ")),
+        errs =>
+          throw new RuntimeException(
+            "placement.conf: " + errs.map(_.message).mkString("; ")
+          ),
         identity
       )
 

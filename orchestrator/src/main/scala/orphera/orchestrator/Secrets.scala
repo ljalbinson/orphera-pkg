@@ -5,15 +5,17 @@ package orphera.orchestrator
 import orphera.common.Event
 import java.util.concurrent.ConcurrentHashMap
 
-/** Values that must not appear in what the orchestrator prints or logs: passwords,
-  * tokens, connection strings with credentials. A playbook (or a `Resource` that
-  * holds secrets) registers them; every event received from a node passes through
-  * `mask` first, so the console and the run log show `<redacted>` where a value
-  * was echoed, in a "Running: ..." line or in command output.
+/** Values that must not appear in what the orchestrator prints or logs:
+  * passwords, tokens, connection strings with credentials. A playbook (or a
+  * `Resource` that holds secrets) registers them; every event received from a
+  * node passes through `mask` first, so the console and the run log show
+  * `<redacted>` where a value was echoed, in a "Running: ..." line or in
+  * command output.
   *
-  * This hides a value from the orchestrator's own output. It does not hide it from
-  * the node: a command that contains a password still has it in its arguments
-  * there (see `Resource.checkTask`, which avoids that for file checks).
+  * This hides a value from the orchestrator's own output. It does not hide it
+  * from the node: a command that contains a password still has it in its
+  * arguments there (see `Resource.checkTask`, which avoids that for file
+  * checks).
   */
 object Secrets:
   /** Values shorter than this are not registered: masking "yes" or "1" would

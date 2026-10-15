@@ -17,14 +17,23 @@ import io.circe.yaml.parser
 // circe-parser), so the YAML parser reads it.
 object OsloJson:
 
-  def load(service: String, text: String, openSections: Set[String] = Set.empty): Either[String, Catalogue] =
+  def load(
+      service: String,
+      text: String,
+      openSections: Set[String] = Set.empty
+  ): Either[String, Catalogue] =
     for
-      doc <- parser.parse(text).left.map(e => s"not valid JSON: ${e.getMessage}")
+      doc <- parser
+        .parse(text)
+        .left
+        .map(e => s"not valid JSON: ${e.getMessage}")
       sections <- doc.hcursor
         .downField("options")
         .as[JsonObject]
         .left
-        .map(_ => "no \"options\" object: is this oslo-config-generator --format json output?")
+        .map(_ =>
+          "no \"options\" object: is this oslo-config-generator --format json output?"
+        )
     yield Catalogue(
       service,
       // The same option can come from two namespaces; the first is kept.
@@ -34,7 +43,11 @@ object OsloJson:
 
   private def options(section: (String, Json)): List[OptionSpec] =
     val (group, body) = section
-    body.hcursor.downField("opts").as[List[Json]].getOrElse(Nil).flatMap(option(group, _))
+    body.hcursor
+      .downField("opts")
+      .as[List[Json]]
+      .getOrElse(Nil)
+      .flatMap(option(group, _))
 
   private def option(section: String, j: Json): Option[OptionSpec] =
     val c = j.hcursor
@@ -43,12 +56,15 @@ object OsloJson:
         .downField("choices")
         .as[List[Json]]
         .getOrElse(Nil)
-        .flatMap(x => x.asArray.flatMap(_.headOption).orElse(Some(x)).flatMap(scalar))
+        .flatMap(x =>
+          x.asArray.flatMap(_.headOption).orElse(Some(x)).flatMap(scalar)
+        )
       val tpe = c.get[String]("type").getOrElse("")
       OptionSpec(
         section = section,
         name = name,
-        tpe = if choices.nonEmpty then OptType.Choice(choices) else optType(tpe),
+        tpe =
+          if choices.nonEmpty then OptType.Choice(choices) else optType(tpe),
         default = c.downField("default").focus.flatMap(scalar),
         // Only names in the same section: the catalogue finds an old name by
         // (section, name). A move to another section is not looked up.
@@ -56,13 +72,20 @@ object OsloJson:
           .downField("deprecated_opts")
           .as[List[Json]]
           .getOrElse(Nil)
-          .flatMap(d => d.hcursor.get[String]("name").toOption.filter(_ => d.hcursor.get[String]("group").toOption.contains(section))),
+          .flatMap(d =>
+            d.hcursor
+              .get[String]("name")
+              .toOption
+              .filter(_ =>
+                d.hcursor.get[String]("group").toOption.contains(section)
+              )
+          ),
         secret = c.get[Boolean]("secret").getOrElse(false)
       )
     }
 
-  /** oslo's description of a type to ours. The word "list" or "dict" comes first
-    * in oslo's text for those, so it is tested before the scalar words.
+  /** oslo's description of a type to ours. The word "list" or "dict" comes
+    * first in oslo's text for those, so it is tested before the scalar words.
     */
   def optType(oslo: String): OptType =
     val t = oslo.toLowerCase

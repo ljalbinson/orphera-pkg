@@ -43,10 +43,15 @@ object kolla_cache extends OrpheraClusterPlaybook:
     name = ContainerName("kolla-cache"),
     image = ExternalImage("docker.io/library/registry:2"),
     mounts = List(Mount(dataDir, "/var/lib/registry", Access.ReadWrite)),
-    env = List("REGISTRY_PROXY_REMOTEURL" -> remote, "REGISTRY_PROXY_TTL" -> "8760h"),
+    env = List(
+      "REGISTRY_PROXY_REMOTEURL" -> remote,
+      "REGISTRY_PROXY_TTL" -> "8760h"
+    ),
     network = Network.Published,
     ports = List(Port(port, 5000)),
-    description = Some("Kolla image pull-through cache (registry proxying quay.io) managed by Orphera"),
+    description = Some(
+      "Kolla image pull-through cache (registry proxying quay.io) managed by Orphera"
+    ),
     settleSeconds = 5
   )
   private val registryImage = cacheContainer.image.ref
@@ -59,7 +64,9 @@ object kolla_cache extends OrpheraClusterPlaybook:
   private val hostPackages = List("podman", "curl")
 
   private val pullRegistryScript =
-    s"""${Pull.shellFunction("the registry image name in kolla_cache.scala; the pull is from Docker Hub")}
+    s"""${Pull.shellFunction(
+        "the registry image name in kolla_cache.scala; the pull is from Docker Hub"
+      )}
        |pull_retry $registryImage || exit 1
        |echo "registry image ready"""".stripMargin
 

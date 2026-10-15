@@ -45,7 +45,9 @@ object nova_teardown extends OrpheraClusterPlaybook:
   val playbook: ClusterPlaybook =
     clusterPlaybook("nova-teardown")(
       stage("teardown-nova-node", node)
-        .task("unregister from Keystone, remove the containers, units and state")(
+        .task(
+          "unregister from Keystone, remove the containers, units and state"
+        )(
           Task.RunCommand(List("sh", "-c", nodeScript), timeoutSeconds = 240)
         )
         .build,
@@ -57,7 +59,9 @@ object nova_teardown extends OrpheraClusterPlaybook:
         .build,
 
       stage("drop-nova-databases", "tst3")
-        .task("drop nova_api, nova, nova_cell0 and the nova user on the Galera cluster")(
+        .task(
+          "drop nova_api, nova, nova_cell0 and the nova user on the Galera cluster"
+        )(
           Task.RunCommand(List("sh", "-c", dropDatabasesScript))
         )
         .build
