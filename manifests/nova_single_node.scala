@@ -3,6 +3,7 @@
 import orphera.orchestrator.*
 import orphera.orchestrator.ClusterPlaybookDsl.*
 import orphera.orchestrator.kolla.*
+import orphera.orchestrator.conf.*
 
 // DRAFT. OpenStack Nova control plane (compute API, scheduler, conductor and the
 // noVNC console proxy), Kolla images under podman. Modelled on
@@ -213,89 +214,72 @@ object nova_single_node extends OrpheraClusterPlaybook:
   // The same file serves the API, scheduler, conductor and the proxy. The
   // heredoc is quoted so the shell expands nothing; Scala has already filled in
   // the values.
-  private val novaConfScript =
+  private val novaDirsScript =
     s"""mkdir -p $srcDir $logDir $stateDir
-       |cat > $srcDir/nova.conf <<'CONF'
-       |[DEFAULT]
-       |log_dir = /var/log/kolla/nova
-       |state_path = /var/lib/nova
-       |use_stderr = true
-       |my_ip = $nodeIp
-       |transport_url = rabbit://$rabbitUser:$rabbitPassword@$rabbitIp:5672/$rabbitVhost
-       |
-       |[api]
-       |auth_strategy = keystone
-       |
-       |[api_database]
-       |connection = mysql+pymysql://$dbUser:$dbPassword@$vip:3306/nova_api
-       |
-       |[database]
-       |connection = mysql+pymysql://$dbUser:$dbPassword@$vip:3306/nova
-       |
-       |[keystone_authtoken]
-       |www_authenticate_uri = $ksUrl
-       |auth_url = $ksUrl
-       |auth_type = password
-       |project_domain_name = Default
-       |user_domain_name = Default
-       |project_name = service
-       |username = nova
-       |password = $novaPassword
-       |cafile = /etc/nova/ssl/ca.crt
-       |
-       |[service_user]
-       |send_service_user_token = true
-       |auth_url = $ksUrl
-       |auth_type = password
-       |project_domain_name = Default
-       |user_domain_name = Default
-       |project_name = service
-       |username = nova
-       |password = $novaPassword
-       |cafile = /etc/nova/ssl/ca.crt
-       |
-       |[placement]
-       |auth_url = $ksUrl
-       |auth_type = password
-       |project_domain_name = Default
-       |user_domain_name = Default
-       |project_name = service
-       |username = nova
-       |password = $novaPassword
-       |region_name = RegionOne
-       |valid_interfaces = internal
-       |cafile = /etc/nova/ssl/ca.crt
-       |
-       |[glance]
-       |valid_interfaces = internal
-       |cafile = /etc/nova/ssl/ca.crt
-       |
-       |[neutron]
-       |auth_url = $ksUrl
-       |auth_type = password
-       |project_domain_name = Default
-       |user_domain_name = Default
-       |region_name = RegionOne
-       |project_name = service
-       |username = neutron
-       |password = $neutronPassword
-       |valid_interfaces = internal
-       |cafile = /etc/nova/ssl/ca.crt
-       |
-       |[oslo_concurrency]
-       |lock_path = /var/lib/nova/tmp
-       |
-       |[scheduler]
-       |discover_hosts_in_cells_interval = 60
-       |
-       |[vnc]
-       |enabled = true
-       |novncproxy_host = 0.0.0.0
-       |novncproxy_port = $vncPort
-       |novncproxy_base_url = http://$fqdn:$vncPort/vnc_auto.html
-       |CONF
-       |chmod 640 $srcDir/nova.conf
-       |echo "nova.conf written"""".stripMargin
+       |echo "directories ready"""".stripMargin
+
+  // The option lists of the image (nova), from catalogues/. Every section and key of the
+  // files below is checked against them when this manifest is built.
+  private val novaCatalogue: Catalogue = Catalogues.load("nova", Set("service_user"))
+  private val confResource = summon[Resource[ConfFile]]
+
+  private val novaConf: ConfFile =
+    ConfFile.text(s"$srcDir/nova.conf", novaCatalogue)(
+      ("DEFAULT", "log_dir", "/var/log/kolla/nova"),
+      ("DEFAULT", "state_path", "/var/lib/nova"),
+      ("DEFAULT", "use_stderr", "true"),
+      ("DEFAULT", "my_ip", s"$nodeIp"),
+      ("DEFAULT", "transport_url", s"rabbit://$rabbitUser:$rabbitPassword@$rabbitIp:5672/$rabbitVhost"),
+      ("api", "auth_strategy", "keystone"),
+      ("api_database", "connection", s"mysql+pymysql://$dbUser:$dbPassword@$vip:3306/nova_api"),
+      ("database", "connection", s"mysql+pymysql://$dbUser:$dbPassword@$vip:3306/nova"),
+      ("keystone_authtoken", "www_authenticate_uri", s"$ksUrl"),
+      ("keystone_authtoken", "auth_url", s"$ksUrl"),
+      ("keystone_authtoken", "auth_type", "password"),
+      ("keystone_authtoken", "project_domain_name", "Default"),
+      ("keystone_authtoken", "user_domain_name", "Default"),
+      ("keystone_authtoken", "project_name", "service"),
+      ("keystone_authtoken", "username", "nova"),
+      ("keystone_authtoken", "password", s"$novaPassword"),
+      ("keystone_authtoken", "cafile", "/etc/nova/ssl/ca.crt"),
+      ("service_user", "send_service_user_token", "true"),
+      ("service_user", "auth_url", s"$ksUrl"),
+      ("service_user", "auth_type", "password"),
+      ("service_user", "project_domain_name", "Default"),
+      ("service_user", "user_domain_name", "Default"),
+      ("service_user", "project_name", "service"),
+      ("service_user", "username", "nova"),
+      ("service_user", "password", s"$novaPassword"),
+      ("service_user", "cafile", "/etc/nova/ssl/ca.crt"),
+      ("placement", "auth_url", s"$ksUrl"),
+      ("placement", "auth_type", "password"),
+      ("placement", "project_domain_name", "Default"),
+      ("placement", "user_domain_name", "Default"),
+      ("placement", "project_name", "service"),
+      ("placement", "username", "nova"),
+      ("placement", "password", s"$novaPassword"),
+      ("placement", "region_name", "RegionOne"),
+      ("placement", "valid_interfaces", "internal"),
+      ("placement", "cafile", "/etc/nova/ssl/ca.crt"),
+      ("glance", "valid_interfaces", "internal"),
+      ("glance", "cafile", "/etc/nova/ssl/ca.crt"),
+      ("neutron", "auth_url", s"$ksUrl"),
+      ("neutron", "auth_type", "password"),
+      ("neutron", "project_domain_name", "Default"),
+      ("neutron", "user_domain_name", "Default"),
+      ("neutron", "region_name", "RegionOne"),
+      ("neutron", "project_name", "service"),
+      ("neutron", "username", "neutron"),
+      ("neutron", "password", s"$neutronPassword"),
+      ("neutron", "valid_interfaces", "internal"),
+      ("neutron", "cafile", "/etc/nova/ssl/ca.crt"),
+      ("oslo_concurrency", "lock_path", "/var/lib/nova/tmp"),
+      ("scheduler", "discover_hosts_in_cells_interval", "60"),
+      ("vnc", "enabled", "true"),
+      ("vnc", "novncproxy_host", "0.0.0.0"),
+      ("vnc", "novncproxy_port", s"$vncPort"),
+      ("vnc", "novncproxy_base_url", s"http://$fqdn:$vncPort/vnc_auto.html")
+    )
 
   // One config directory per service (Kolla mounts it at
   // /var/lib/kolla/config_files). The API runs behind Apache + mod_wsgi like
@@ -581,6 +565,9 @@ if __name__ == '__main__':
     s"""CODE=$$(curl -s -o /dev/null -w '%{http_code}' http://localhost:$apiPort/)
        |[ "$$CODE" = "200" ] || [ "$$CODE" = "300" ]""".stripMargin
 
+  // Hidden from the console and the run log wherever a task echoes them.
+  Secrets.registerAll(List(rabbitPassword, adminPassword, dbPassword, novaPassword, neutronPassword))
+
   val playbook: ClusterPlaybook =
     clusterPlaybook("nova-single-node")(
       stage("nova-databases", "tst3")
@@ -622,9 +609,10 @@ if __name__ == '__main__':
               timeoutSeconds = 60
             )
           )
-          .task("write nova.conf")(
-            Task.RunCommand(List("sh", "-c", novaConfScript))
+          .task("create the Nova directories")(
+            Task.RunCommand(List("sh", "-c", novaDirsScript))
           )
+          .task("write nova.conf")(confResource.write(novaConf))
           .task("write the Kolla config and the Apache vhost")(
             Task.RunCommand(
               List("sh", "-c", kollaConfigScript),
