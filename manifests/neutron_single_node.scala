@@ -246,8 +246,9 @@ object neutron_single_node extends OrpheraClusterPlaybook:
        |echo "podman will try $cacheHostPort before quay.io"""".stripMargin
 
   private val pullScript =
-    s"""for img in ${neutronServices.map(_.image.ref).mkString(" ")}; do
-       |  podman pull $$img || { echo "could not pull $$img - check the Image(...) in neutronContainer in neutron_single_node.scala" >&2; exit 1; }
+    s"""${Pull.shellFunction("the Image(...) in neutronContainer in neutron_single_node.scala")}
+       |for img in ${neutronServices.map(_.image.ref).mkString(" ")}; do
+       |  pull_retry $$img || exit 1
        |done
        |echo "images ready"""".stripMargin
 
