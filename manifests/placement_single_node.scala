@@ -411,6 +411,9 @@ if __name__ == '__main__':
   // and fails, with a diff, if the placement-api unit differs from what this
   // playbook would write. The check task comes from the same Container value
   // as the write task (see Resource.scala).
+  // Hidden from the console and the run log wherever a task echoes them.
+  Secrets.registerAll(List(adminPassword, dbPassword, placementPassword))
+
   private val checkMode = sys.env.get("ORPHERA_CHECK").contains("1")
 
   private val unitResource = summon[Resource[Container]]

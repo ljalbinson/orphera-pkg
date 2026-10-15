@@ -2,7 +2,7 @@
 
 package orphera.orchestrator.conf
 
-import orphera.orchestrator.{Resource, Task}
+import orphera.orchestrator.{Resource, Secrets, Task}
 
 /** Checks for the typed configuration spike. Run with
   * `sbt "orchestrator/Test/runMain orphera.orchestrator.conf.ConfCheck"`.
@@ -174,9 +174,41 @@ object ConfCheck:
     check(
       "a ConfFile is checked against its path",
       r.check(file) match
-        case Task.RunCommand(List("sh", "-c", script), _) => script.contains("diff -u /etc/placement/placement.conf -")
+        case Task.RunCommand(List("sh", "-c", script), _) => script.contains("""diff -u --label "node: /etc/placement/placement.conf"""")
         case _                                            => false
     )
+
+    // Secrets: nothing secret goes to the node in a check, and nothing is printed.
+    {
+      val secretPw = "hunter2-hunter2"
+      val dbUrl = "mysql+pymysql://u:dbsecretpw@10.0.0.1/db"
+      val memKey = "memkey-memkey"
+      val file2 = ConfFile.empty("/p/x.conf", fixture.copy(openSections = Set("keystone_authtoken")))
+      val withPw = for
+        a <- file2.set("DEFAULT", "debug", true)
+        b <- a.set("keystone_authtoken", "password", secretPw)
+        c <- b.set("placement_database", "connection", dbUrl)
+        d <- c.set("keystone_authtoken", "memcache_secret_key", memKey)
+      yield d
+      val wf = withPw.toOption.get
+      check("secret keys are the catalogue's secret options and names that say so", wf.secretKeys.toSet == Set("password", "connection", "memcache_secret_key"), wf.secretKeys.toString)
+      check("secret values are listed for masking", wf.secretValues.toSet == Set(secretPw, dbUrl, memKey))
+      val chk = r.check(wf) match
+        case Task.RunCommand(List("sh", "-c", script), _) => script
+        case other                                       => other.toString
+      check("the check command contains no secret value", !chk.contains(secretPw) && !chk.contains("dbsecretpw") && !chk.contains(dbUrl) && !chk.contains(memKey), chk)
+      check("the check command shows the secret lines as <redacted> and still shows the others", chk.contains("password = <redacted>") && chk.contains("connection = <redacted>") && chk.contains("debug = true"), chk)
+      check("the check command compares a hash of the whole file", chk.contains(Resource.sha256(wf.render)) && chk.contains("sha256sum"))
+      check("redact leaves other lines and the line endings alone", Resource.redact("a = 1\npassword =  x y\nb = 2\n", List("password")) == "a = 1\npassword =  <redacted>\nb = 2\n")
+      check("redact keys are matched whole, not as a suffix", Resource.redact("xpassword = 1\n", List("password")) == "xpassword = 1\n")
+      check("a secret key with odd characters is refused", scala.util.Try(Resource.redact("a", List("a;b"))).isFailure)
+      Secrets.clear()
+      r.write(wf)
+      check("writing a secret file registers its values for masking", Secrets.mask(s"x $secretPw y $dbUrl") == "x <redacted> y <redacted>")
+      check("short values are not registered", { Secrets.clear(); Secrets.register("yes"); Secrets.mask("yes yes") == "yes yes" })
+      check("a value that contains another is masked whole", { Secrets.clear(); Secrets.register("abcdef"); Secrets.register("abcdefghij"); Secrets.mask("abcdefghij") == "<redacted>" })
+      Secrets.clear()
+    }
 
     if failures > 0 then
       println(s"$failures check(s) failed")
