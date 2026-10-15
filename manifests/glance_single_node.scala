@@ -3,6 +3,7 @@
 import orphera.orchestrator.*
 import orphera.orchestrator.ClusterPlaybookDsl.*
 import orphera.orchestrator.kolla.*
+import orphera.orchestrator.conf.*
 
 // DRAFT. OpenStack Glance (image service), one node (tst13), Kolla image under
 // podman, images stored in the existing Ceph cluster as RBD images.
@@ -176,46 +177,41 @@ object glance_single_node extends OrpheraClusterPlaybook:
 
   // Multi-store layout (enabled_backends), the form current Glance expects;
   // the store is called `ceph` and is the default.
-  private val glanceConfScript =
+  private val glanceDirsScript =
     s"""mkdir -p $srcDir $logDir $stateDir
-       |cat > $srcDir/glance-api.conf <<'CONF'
-       |[DEFAULT]
-       |log_dir = /var/log/kolla/glance
-       |use_stderr = true
-       |bind_host = 0.0.0.0
-       |bind_port = 9292
-       |show_image_direct_url = true
-       |enabled_backends = ceph:rbd
-       |
-       |[database]
-       |connection = mysql+pymysql://$dbUser:$dbPassword@$vip:3306/$dbName
-       |
-       |[keystone_authtoken]
-       |www_authenticate_uri = $ksUrl
-       |auth_url = $ksUrl
-       |auth_type = password
-       |project_domain_name = Default
-       |user_domain_name = Default
-       |project_name = service
-       |username = glance
-       |password = $glancePassword
-       |cafile = /etc/glance/ssl/ca.crt
-       |
-       |[paste_deploy]
-       |flavor = keystone
-       |
-       |[glance_store]
-       |default_backend = ceph
-       |
-       |[ceph]
-       |rbd_store_pool = $cephPool
-       |rbd_store_user = glance
-       |rbd_store_ceph_conf = /etc/ceph/ceph.conf
-       |rbd_store_chunk_size = 8
-       |store_description = Ceph RBD images
-       |CONF
-       |chmod 640 $srcDir/glance-api.conf
-       |echo "glance-api.conf written"""".stripMargin
+       |echo "directories ready"""".stripMargin
+
+  // The option lists of the image (glance), from catalogues/. Every section and key of the
+  // files below is checked against them when this manifest is built.
+  private val glanceCatalogue: Catalogue = Catalogues.load("glance", Set("ceph"))
+  private val confResource = summon[Resource[ConfFile]]
+
+  private val glanceApiConf: ConfFile =
+    ConfFile.text(s"$srcDir/glance-api.conf", glanceCatalogue)(
+      ("DEFAULT", "log_dir", "/var/log/kolla/glance"),
+      ("DEFAULT", "use_stderr", "true"),
+      ("DEFAULT", "bind_host", "0.0.0.0"),
+      ("DEFAULT", "bind_port", "9292"),
+      ("DEFAULT", "show_image_direct_url", "true"),
+      ("DEFAULT", "enabled_backends", "ceph:rbd"),
+      ("database", "connection", s"mysql+pymysql://$dbUser:$dbPassword@$vip:3306/$dbName"),
+      ("keystone_authtoken", "www_authenticate_uri", s"$ksUrl"),
+      ("keystone_authtoken", "auth_url", s"$ksUrl"),
+      ("keystone_authtoken", "auth_type", "password"),
+      ("keystone_authtoken", "project_domain_name", "Default"),
+      ("keystone_authtoken", "user_domain_name", "Default"),
+      ("keystone_authtoken", "project_name", "service"),
+      ("keystone_authtoken", "username", "glance"),
+      ("keystone_authtoken", "password", s"$glancePassword"),
+      ("keystone_authtoken", "cafile", "/etc/glance/ssl/ca.crt"),
+      ("paste_deploy", "flavor", "keystone"),
+      ("glance_store", "default_backend", "ceph"),
+      ("ceph", "rbd_store_pool", s"$cephPool"),
+      ("ceph", "rbd_store_user", "glance"),
+      ("ceph", "rbd_store_ceph_conf", "/etc/ceph/ceph.conf"),
+      ("ceph", "rbd_store_chunk_size", "8"),
+      ("ceph", "store_description", "Ceph RBD images")
+    )
 
   private val kollaConfigScript =
     s"""set -e
@@ -429,6 +425,9 @@ if __name__ == '__main__':
     """CODE=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:9292/)
       |[ "$CODE" = "200" ] || [ "$CODE" = "300" ]""".stripMargin
 
+  // Hidden from the console and the run log wherever a task echoes them.
+  Secrets.registerAll(List(cephKey, adminPassword, dbPassword, glancePassword))
+
   val playbook: ClusterPlaybook =
     clusterPlaybook("glance-single-node")(
       stage("glance-database", "tst3")
@@ -459,9 +458,10 @@ if __name__ == '__main__':
         .task("write the ceph client config")(
           Task.RunCommand(List("sh", "-c", cephClientScript))
         )
-        .task("write glance-api.conf")(
-          Task.RunCommand(List("sh", "-c", glanceConfScript))
+        .task("create the Glance directories")(
+          Task.RunCommand(List("sh", "-c", glanceDirsScript))
         )
+        .task("write glance-api.conf")(confResource.write(glanceApiConf))
         .task("write the Kolla config")(
           Task.RunCommand(
             List("sh", "-c", kollaConfigScript),
