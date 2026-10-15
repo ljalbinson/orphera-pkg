@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed — typed configuration files in the Keystone, Glance, Cinder, Nova and Neutron playbooks
+- The config files these playbooks write (`keystone.conf`, `glance-api.conf`, `cinder.conf`, `nova.conf`, and Neutron's
+  `neutron.conf`, `ml2_conf.ini`, `openvswitch_agent.ini`, `dhcp_agent.ini`) are `ConfFile` values checked against
+  `catalogues/<project>-2025.1-ubuntu-noble.json`, the image's own option list, when the manifest is built, and written (or
+  checked with `ORPHERA_CHECK`-style `Resource.check`) from that one value. Their passwords are hidden from the output.
+  `[keystone_authtoken]` and the backend groups `[ceph]` (Cinder, Glance) and `[service_user]` (Nova) are open sections.
+  Not converted: Nova compute's `nova.conf` and `neutron.conf`, which take the host's name and address at run time.
+- `Catalogues.load`, `ConfFile.text` (values as text, checked as the option's type reads it), and
+  `manifests/slim_catalogue.py` (drops the help text from a dump: 11 MB down to 1.3 MB for six projects).
+
 ### Fixed — secrets no longer appear in check output or the run log
 - A file check (`Resource.check`) no longer puts the expected text, passwords included, into the command it logs. It sends a
   SHA-256 of the whole file; only when that differs does it show a diff, with the values of secret keys replaced by

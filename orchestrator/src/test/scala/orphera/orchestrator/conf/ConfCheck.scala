@@ -178,6 +178,22 @@ object ConfCheck:
         case _                                            => false
     )
 
+    // Text values, as a script gives them, and the catalogue loader's errors.
+    {
+      val cat = loaded.toOption.get
+      def ok(section: String, key: String, v: String) = scala.util.Try(ConfFile.text("/p", cat)((section, key, v))).isSuccess
+      check("text for an integer, a switch and a list reads as its type", ok("placement_database", "max_retries", "60") && ok("placement_database", "use_db_reconnect", "true") && ok("keystone_authtoken", "memcached_servers", "a:1,b:2"))
+      check("text that does not read as the type is refused", !ok("placement_database", "max_retries", "many") && !ok("placement_database", "use_db_reconnect", "yes please") && !ok("keystone_authtoken", "timeout", "slow"))
+      check(
+        "ConfFile.text names the path and lists every error",
+        scala.util.Try(ConfFile.text("/etc/x.conf", cat)(("api", "auth_strategi", "keystone"), ("nowhere", "k", "v"))).failed.toOption.exists(e => e.getMessage.startsWith("/etc/x.conf: ") && e.getMessage.contains("auth_strategy") && e.getMessage.contains("[nowhere]"))
+      )
+      check(
+        "a missing catalogue file says where to get one",
+        scala.util.Try(Catalogues.load("nova", from = java.nio.file.Paths.get("/nonexistent-dir"))).failed.toOption.exists(_.getMessage.contains("dump_oslo_options.sh"))
+      )
+    }
+
     // Secrets: nothing secret goes to the node in a check, and nothing is printed.
     {
       val secretPw = "hunter2-hunter2"
