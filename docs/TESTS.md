@@ -577,6 +577,15 @@ Running it on the typed-keystone branch broke the stack this way; recovery is
 `manifests/build_openstack_stack.sh --from keystone` (run 2026-10-14: passed=19 failed=0 in 820 s, CirrOS
 booted on 10.10.6.213). Run it on a stack you can rebuild.
 
+### K19. Rebuild from scratch on `main` with every playbook on the typed container - build PASSED (2026-10-15), tests and WordPress not yet run
+`manifests/rebuild_openstack_from_scratch.sh` on `main` (0.1.191 plus the tst13/tst16 config change). The build
+stopped at the compute stage: tst18's pull of the `nova-compute` image got HTTP 500 from the Kolla cache on tst9,
+which had failed to fetch one blob from `cdn01.quay.io` (cache log, 13:53:59); tst17 had pulled the same image
+without trouble. Nothing in the playbooks was at fault. Resumed with `manifests/build_openstack_stack.sh --from
+compute`: compute, Horizon, clients, smoke checks and a CirrOS boot (DHCP address 10.10.6.217) passed, finished in
+267 s, passed=10 failed=0. Not run in this pass: the `--tests` scripts and `--wordpress` (the resume used the build
+script directly). Lesson: an image pull has no retry, and its error message points at the `Image(...)` values.
+
 ## L. Node reassignment (2026-10-10) - steps 1-3 and 5 done; step 4: run-log test passed, Prometheus/Grafana stack on tst7 NOT YET RUN
 New roles: tst0-tst2 Ceph; tst3-tst5 Galera + haproxy + keepalived (VIP
 10.10.5.100); tst6 Keystone; tst7 WordPress and Prometheus/Grafana; tst8 Rocky;
