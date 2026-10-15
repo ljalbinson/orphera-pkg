@@ -660,3 +660,11 @@ Expect: each of the tests above passes as before.  Not changed: the Ceph
 manifests (tst0-tst2).  `etcd_grow_cluster.scala` still names tst3/tst4 as the
 members it adds; those are Galera nodes now, so that test is retired until it is
 pointed at other nodes.
+
+### K22. `Resource` type class and check mode (`Resource.scala`) - PASSED (2026-10-15)
+One description of a file on a node gives both the task that writes it and the task that checks it. `ContainerCheck` 49/49
+(42 plus 7 for `Resource`); compiled first time after the merge with `main`. On tst13, `ORPHERA_CHECK=1 orphera
+cluster-playbook manifests/placement_single_node.scala` printed `in sync` for the unit as written; with `# drift` appended
+it failed with a unified diff and exit 1; with the unit moved away it failed with `MISSING` and exit 2. The normal run
+then restored the unit and Placement came back healthy (2 resource providers). Only the placement-api unit is checked so
+far.
