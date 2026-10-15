@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — encrypted secret store (`SecretStore.scala`, `orphera secrets ...`)
+- A playbook asks for a password by name, `Secrets.get("placement/db")`. The value is made at random on first use, kept in one
+  file encrypted with age (`~/.config/orphera/secrets.age`, identity in `~/.config/orphera/age.key`; `$ORPHERA_SECRETS` and
+  `$ORPHERA_AGE_KEY` override), and hidden from the console and run log. `orphera secrets init|list|generate|set|get|rm`.
+  Needs the `age` package on the machine that runs `orphera`. `placement_single_node.scala` is the first user; the lab's
+  existing passwords are loaded with `manifests/seed_test_secrets.sh`. Phase 2 will make a secret a type that cannot be printed.
+
 ### Fixed — secrets no longer appear in check output or the run log
 - A file check (`Resource.check`) no longer puts the expected text, passwords included, into the command it logs. It sends a
   SHA-256 of the whole file; only when that differs does it show a diff, with the values of secret keys replaced by
