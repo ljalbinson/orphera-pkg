@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — check mode in `placement_single_node.scala`
+- `ORPHERA_CHECK=1 orphera cluster-playbook manifests/placement_single_node.scala` changes nothing and fails with a diff if the
+  `orphera-placement-api` unit on tst13 differs from what the playbook writes. Uses `Resource[Container]`.
+
 ### Changed — checked names and ports in `Container`
 - `ContainerName` and `TcpPort` are opaque types (`kolla/Ids.scala`): a container name must be lowercase letters, digits and
   dashes, a port 1 to 65535, and neither can be built otherwise. `Container(name = ContainerName("nova-compute"), ...)`;
