@@ -242,6 +242,38 @@ object ContainerCheck:
     check("the compute mounts keep their flags, /dev included", computeUnit.contains("-v /var/lib/nova:/var/lib/nova -v /run/libvirt:/run/libvirt -v /run/openvswitch:/run/openvswitch -v /lib/modules:/lib/modules:ro -v /dev:/dev quay.io/openstack.kolla/nova-compute:2025.1-ubuntu-noble"), computeUnit)
     check("ports outside 1 to 65535 are rejected", List(0, 65536, -1).forall(n => scala.util.Try(TcpPort(n)).isFailure) && scala.util.Try(Port(70000, 1)).isFailure && TcpPort.parse(65535).isRight)
     check("Port renders from checked numbers", Port(8080, 80).flag == "-p 8080:80" && Port(TcpPort(8080), TcpPort(80)).flag == "-p 8080:80")
+    {
+      // Run the generated function against a fake podman that fails a set number of times.
+      import java.nio.file.{Files, Path}
+      import scala.sys.process.*
+      val dir: Path = Files.createTempDirectory("pullcheck")
+      val podman = dir.resolve("podman")
+      Files.writeString(
+        podman,
+        "#!/bin/sh\nc=$(cat \"$COUNT\" 2>/dev/null || echo 0); c=$((c+1)); echo $c > \"$COUNT\"\n[ \"$c\" -ge \"$FAIL_UNTIL\" ]\n"
+      )
+      podman.toFile.setExecutable(true)
+      def run(failUntil: Int): (Int, String, Int) =
+        val count = dir.resolve(s"count-$failUntil").toString
+        val out = new StringBuilder
+        val script = Pull.shellFunction("the Image in x.scala", 0) + "\npull_retry --tls-verify=false img || exit 1\n"
+        val code = Process(
+          List("sh", "-c", script),
+          None,
+          "PATH" -> s"${dir.toString}:${sys.env.getOrElse("PATH", "/usr/bin:/bin")}",
+          "COUNT" -> count,
+          "FAIL_UNTIL" -> failUntil.toString
+        ) ! ProcessLogger(l => out.append(l).append('\n'), l => out.append(l).append('\n'))
+        val calls = scala.util.Try(Files.readString(dir.resolve(s"count-$failUntil")).trim.toInt).getOrElse(0)
+        (code, out.toString, calls)
+      val (okCode, _, okCalls) = run(1)
+      check("a pull that works first time is tried once", okCode == 0 && okCalls == 1)
+      val (retryCode, _, retryCalls) = run(3)
+      check("a pull that fails twice is tried a third time and succeeds", retryCode == 0 && retryCalls == 3)
+      val (failCode, failOut, failCalls) = run(99)
+      check("a pull that always fails gives up after three tries with a message", failCode == 1 && failCalls == 3 && failOut.contains("could not pull --tls-verify=false img after 3 attempts") && failOut.contains("the Image in x.scala"), failOut)
+      check("a hint containing a quote, backtick or dollar is rejected", List("a\"b", "a`b", "a$b").forall(h => scala.util.Try(Pull.shellFunction(h)).isFailure))
+    }
     check("a container with no wants has only network-online.target", placement.render.linesIterator.contains("Wants=network-online.target"))
 
     if failures > 0 then

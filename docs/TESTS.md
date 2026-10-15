@@ -577,6 +577,26 @@ Running it on the typed-keystone branch broke the stack this way; recovery is
 `manifests/build_openstack_stack.sh --from keystone` (run 2026-10-14: passed=19 failed=0 in 820 s, CirrOS
 booted on 10.10.6.213). Run it on a stack you can rebuild.
 
+### K19. Rebuild from scratch on `main`, build and all eight test scripts - PASSED (2026-10-15)
+`manifests/rebuild_openstack_from_scratch.sh --tests` on `main`, every playbook on the typed container, in one run
+with no manual resume: the build finished in 1404 s, passed=27 failed=0 (smoke checks, CirrOS booted on KVM and took
+DHCP address 10.10.6.216), then the test scripts, all PASS: keystone (118 s), cinder (164 s), glance (91 s), placement
+(70 s), nova (198 s), neutron (225 s), nova_compute (297 s), horizon (76 s). Whole run 4010 s (about 67 minutes).
+`--wordpress` was not used (tst7 not rebuilt). `test_keystone.sh` ran first, as the script orders it, and the later
+scripts recovered: each re-runs its own playbook, which refetches Keystone's CA and re-registers its service (see K18).
+Earlier the same day a first attempt stopped at the compute stage when tst18's pull of the `nova-compute` image got HTTP
+500 from the Kolla cache on tst9, which had failed to fetch one blob from `cdn01.quay.io`; the resume with
+`build_openstack_stack.sh --from compute` passed 10/10 (267 s). Image pulls have no retry, and the failure message
+points at the `Image(...)` values; both worth fixing.
+
+### K20. Image pull retry (`kolla/Pull.scala`) - PASSED (2026-10-15)
+Every playbook that pulls images now uses `pull_retry` (three tries, 15 s apart, podman's error shown, then a message
+naming the `Image(...)` to check). `ContainerCheck` 40/40, including four checks that run the generated shell function
+against a fake `podman` (works first time; fails twice then works; always fails, gives up after three with the message;
+unsafe hint text rejected). On nodes: `manifests/test_placement.sh` passed=10 (single image) and
+`manifests/test_cinder.sh` passed=12 (loop of four images, RabbitMQ from Docker Hub), each pull succeeding on the first
+try. The retry path itself has not been exercised on a node because no pull failed during the runs.
+
 ## L. Node reassignment (2026-10-10) - steps 1-3 and 5 done; step 4: run-log test passed, Prometheus/Grafana stack on tst7 NOT YET RUN
 New roles: tst0-tst2 Ceph; tst3-tst5 Galera + haproxy + keepalived (VIP
 10.10.5.100); tst6 Keystone; tst7 WordPress and Prometheus/Grafana; tst8 Rocky;

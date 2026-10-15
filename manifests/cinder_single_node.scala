@@ -186,9 +186,9 @@ object cinder_single_node extends OrpheraClusterPlaybook:
        |echo "podman will try $cacheHostPort before quay.io"""".stripMargin
 
   private val pullScript =
-    s"""set -e
+    s"""${Pull.shellFunction("the Image(...) in cinderContainer in cinder_single_node.scala")}
        |for img in ${(cinderServices.map(_.image.ref) :+ rabbitImage).mkString(" ")}; do
-       |  podman pull $$img || { echo "could not pull $$img - check the Image(...) in cinderContainer in cinder_single_node.scala" >&2; exit 1; }
+       |  pull_retry $$img || exit 1
        |done
        |echo "images ready"""".stripMargin
 

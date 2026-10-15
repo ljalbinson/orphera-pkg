@@ -134,10 +134,8 @@ object keystone_single_node extends OrpheraClusterPlaybook:
     s"""mariadb -N -e "CREATE DATABASE IF NOT EXISTS $dbName; CREATE USER IF NOT EXISTS '$dbUser'@'%' IDENTIFIED BY '$dbPassword'; GRANT ALL PRIVILEGES ON $dbName.* TO '$dbUser'@'%'; FLUSH PRIVILEGES;""""
 
   private val pullScript =
-    s"""podman pull $image || {
-       |  echo "could not pull $image - check the registry path and tag (the Image(...) in keystoneContainer in keystone_single_node.scala)" >&2
-       |  exit 1
-       |}
+    s"""${Pull.shellFunction("the registry path and tag, the Image(...) in keystoneContainer in keystone_single_node.scala")}
+       |pull_retry $image || exit 1
        |echo "image ready: $image"""".stripMargin
 
   // CA and server certificate are created once and then reused, so the CA

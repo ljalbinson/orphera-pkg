@@ -288,8 +288,9 @@ object nova_compute extends OrpheraClusterPlaybook:
        |echo "podman will try $cacheHostPort before quay.io"""".stripMargin
 
   private val pullScript =
-    s"""for img in $computeImage $ovsAgentImage; do
-       |  podman pull $$img || { echo "could not pull $$img - check the Image(...) values in novaCompute and ovsAgent in nova_compute.scala" >&2; exit 1; }
+    s"""${Pull.shellFunction("the Image(...) values in novaCompute and ovsAgent in nova_compute.scala")}
+       |for img in $computeImage $ovsAgentImage; do
+       |  pull_retry $$img || exit 1
        |done
        |echo "images ready"""".stripMargin
 

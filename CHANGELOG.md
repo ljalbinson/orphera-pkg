@@ -11,6 +11,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   dashes, a port 1 to 65535, and neither can be built otherwise. `Container(name = ContainerName("nova-compute"), ...)`;
   `Port(8080, 80)` still takes plain numbers and checks them.
 
+### Fixed — image pulls retry
+- A pull from the Kolla cache or quay.io is tried three times, 15 s apart (`kolla/Pull.scala`), in every playbook that pulls
+  images, and the error message now quotes podman's error instead of only pointing at the `Image(...)` values. A single
+  HTTP 500 on one blob had stopped a full rebuild at the compute stage.
+
 ## [0.1.191] - 2026-10-14
 
 ### Added — typed Kolla containers (`orchestrator/.../kolla/Container.scala`)
