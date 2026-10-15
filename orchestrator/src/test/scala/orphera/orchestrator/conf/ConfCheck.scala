@@ -37,6 +37,25 @@ object ConfCheck:
     )
   )
 
+
+  // Shaped like the real `oslo-config-generator --format json` output from the
+  // placement-api image (two sections, trimmed).
+  private val osloSample =
+    """{"deprecated_options": {}, "generator_options": {}, "options": {
+      |"api": {"help": "", "opts": [
+      |  {"name": "auth_strategy", "type": "string value", "default": "keystone", "secret": false,
+      |   "choices": [["keystone", null], ["noauth2", null]], "deprecated_opts": [{"group": "DEFAULT", "name": "auth_strategy"}]}]},
+      |"placement_database": {"help": "", "opts": [
+      |  {"name": "connection", "type": "string value", "default": null, "secret": true, "choices": [], "deprecated_opts": []},
+      |  {"name": "max_retries", "type": "integer value", "default": 10, "secret": false, "choices": [], "deprecated_opts": []},
+      |  {"name": "use_db_reconnect", "type": "boolean value", "default": false, "secret": false, "choices": [], "deprecated_opts": []},
+      |  {"name": "slave_connection", "type": "string value", "default": null, "secret": true, "choices": [],
+      |   "deprecated_opts": [{"group": "placement_database", "name": "slave"}]}]},
+      |"keystone_authtoken": {"help": "", "opts": [
+      |  {"name": "memcached_servers", "type": "list of string values", "default": null, "secret": false, "choices": [], "deprecated_opts": []},
+      |  {"name": "timeout", "type": "floating point value", "default": 1.5, "secret": false, "choices": [], "deprecated_opts": []}]}
+      |}}""".stripMargin
+
   private def err(r: Either[ConfError, ConfFile]): Option[ConfError] = r.left.toOption
 
   def main(args: Array[String]): Unit =
@@ -102,6 +121,29 @@ object ConfCheck:
       "an error message reads as a sentence",
       ConfError.UnknownOption("DEFAULT", "debgu", List("debug")).message == "no option debgu in [DEFAULT] (did you mean debug?)"
     )
+
+
+    val loaded = OsloJson.load("placement", osloSample)
+    check("an oslo JSON dump loads", loaded.isRight, loaded.toString)
+    loaded.foreach { cat =>
+      check("sections and options are read", cat.sections == Set("api", "placement_database", "keystone_authtoken") && cat.options.size == 7, cat.options.size.toString)
+      check("choices make a Choice type", cat.find("api", "auth_strategy").map(_.tpe) == Some(OptType.Choice(List("keystone", "noauth2"))))
+      check(
+        "oslo type words map to ours",
+        List("max_retries" -> OptType.Integer, "use_db_reconnect" -> OptType.Flag, "connection" -> OptType.Text)
+          .forall((n, t) => cat.find("placement_database", n).map(_.tpe).contains(t)) &&
+          cat.find("keystone_authtoken", "memcached_servers").map(_.tpe) == Some(OptType.Items) &&
+          cat.find("keystone_authtoken", "timeout").map(_.tpe) == Some(OptType.Real)
+      )
+      check("defaults and secrets are kept", cat.find("placement_database", "max_retries").flatMap(_.default) == Some("10") && cat.find("placement_database", "connection").exists(_.secret))
+      check("an old name in the same section is recorded, one from another section is not",
+        cat.find("placement_database", "slave_connection").map(_.deprecated) == Some(List("slave")) && cat.find("api", "auth_strategy").map(_.deprecated) == Some(Nil))
+      val f = ConfFile.empty("/etc/placement/placement.conf", cat)
+      check("a loaded catalogue refuses a wrong type", f.set("placement_database", "max_retries", "many").isLeft)
+      check("a loaded catalogue refuses an unknown key with a suggestion",
+        f.set("placement_database", "conection", "x").left.toOption.exists(_.message.contains("connection")))
+    }
+    check("text that is not oslo output is refused", OsloJson.load("x", "{\"a\": 1}").isLeft && OsloJson.load("x", "][").isLeft)
 
     val r = summon[Resource[ConfFile]]
     val file = ok.toOption.get

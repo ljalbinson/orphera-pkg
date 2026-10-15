@@ -26,6 +26,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   outside an allowed list are refused with a suggestion. A `ConfFile` is a `Resource`, so it has `write` and `check`.
   `manifests/dump_oslo_options.sh` dumps a Kolla image's options as JSON to build the real catalogue from. Not yet used by
   any manifest; `make test` runs `ConfCheck`.
+- `OsloJson.load` turns that JSON into a `Catalogue` (types, defaults, allowed values, secrets, old names). `CatalogueReport`
+  prints what a real dump contains.
 
 ### Added — `Resource` type class, prototype (`orchestrator/.../Resource.scala`)
 - `Resource[A]` describes a file the playbook writes (path and exact content). `x.write` and `x.check` come from the one
