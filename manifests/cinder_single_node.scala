@@ -3,6 +3,7 @@
 import orphera.orchestrator.*
 import orphera.orchestrator.ClusterPlaybookDsl.*
 import orphera.orchestrator.kolla.*
+import orphera.orchestrator.conf.*
 
 // DRAFT. OpenStack Cinder (block storage), one node (tst10), Kolla images under
 // podman, volumes stored in the existing Ceph cluster as RBD images.
@@ -266,48 +267,45 @@ object cinder_single_node extends OrpheraClusterPlaybook:
        |echo "rabbitmq did not come up - see 'journalctl -xeu orphera-rabbitmq'" >&2
        |exit 1""".stripMargin
 
-  // cinder.conf is shared by the three services. Quoted heredoc: nothing for
-  // the shell to expand.
-  private val cinderConfScript =
+  // cinder.conf is shared by the three services; it is written below from a typed
+  // value. This creates the directories it and the logs go in.
+  private val cinderDirsScript =
     s"""mkdir -p $srcDir $logDir $stateDir
-       |cat > $srcDir/cinder.conf <<'CONF'
-       |[DEFAULT]
-       |log_dir = /var/log/kolla/cinder
-       |state_path = /var/lib/cinder
-       |my_ip = $nodeIp
-       |auth_strategy = keystone
-       |transport_url = rabbit://$rabbitUser:$rabbitPassword@$nodeIp:5672/
-       |enabled_backends = ceph
-       |
-       |[database]
-       |connection = mysql+pymysql://$dbUser:$dbPassword@$vip:3306/$dbName
-       |
-       |[keystone_authtoken]
-       |www_authenticate_uri = $ksUrl
-       |auth_url = $ksUrl
-       |auth_type = password
-       |project_domain_name = Default
-       |user_domain_name = Default
-       |project_name = service
-       |username = cinder
-       |password = $cinderPassword
-       |cafile = /etc/cinder/ssl/ca.crt
-       |
-       |[oslo_concurrency]
-       |lock_path = /var/lib/cinder/tmp
-       |
-       |[ceph]
-       |volume_driver = cinder.volume.drivers.rbd.RBDDriver
-       |volume_backend_name = ceph
-       |rbd_pool = $cephPool
-       |rbd_ceph_conf = /etc/ceph/ceph.conf
-       |rbd_user = cinder
-       |rbd_flatten_volume_from_snapshot = false
-       |rbd_max_clone_depth = 5
-       |rados_connect_timeout = -1
-       |CONF
-       |chmod 640 $srcDir/cinder.conf
-       |echo "cinder.conf written"""".stripMargin
+       |echo "directories ready"""".stripMargin
+
+  // The option lists of the image (cinder), from catalogues/. Every section and key of the
+  // files below is checked against them when this manifest is built.
+  private val cinderCatalogue: Catalogue = Catalogues.load("cinder", Set("ceph"))
+  private val confResource = summon[Resource[ConfFile]]
+
+  private val cinderConf: ConfFile =
+    ConfFile.text(s"$srcDir/cinder.conf", cinderCatalogue)(
+      ("DEFAULT", "log_dir", "/var/log/kolla/cinder"),
+      ("DEFAULT", "state_path", "/var/lib/cinder"),
+      ("DEFAULT", "my_ip", s"$nodeIp"),
+      ("DEFAULT", "auth_strategy", "keystone"),
+      ("DEFAULT", "transport_url", s"rabbit://$rabbitUser:$rabbitPassword@$nodeIp:5672/"),
+      ("DEFAULT", "enabled_backends", "ceph"),
+      ("database", "connection", s"mysql+pymysql://$dbUser:$dbPassword@$vip:3306/$dbName"),
+      ("keystone_authtoken", "www_authenticate_uri", s"$ksUrl"),
+      ("keystone_authtoken", "auth_url", s"$ksUrl"),
+      ("keystone_authtoken", "auth_type", "password"),
+      ("keystone_authtoken", "project_domain_name", "Default"),
+      ("keystone_authtoken", "user_domain_name", "Default"),
+      ("keystone_authtoken", "project_name", "service"),
+      ("keystone_authtoken", "username", "cinder"),
+      ("keystone_authtoken", "password", s"$cinderPassword"),
+      ("keystone_authtoken", "cafile", "/etc/cinder/ssl/ca.crt"),
+      ("oslo_concurrency", "lock_path", "/var/lib/cinder/tmp"),
+      ("ceph", "volume_driver", "cinder.volume.drivers.rbd.RBDDriver"),
+      ("ceph", "volume_backend_name", "ceph"),
+      ("ceph", "rbd_pool", s"$cephPool"),
+      ("ceph", "rbd_ceph_conf", "/etc/ceph/ceph.conf"),
+      ("ceph", "rbd_user", "cinder"),
+      ("ceph", "rbd_flatten_volume_from_snapshot", "false"),
+      ("ceph", "rbd_max_clone_depth", "5"),
+      ("ceph", "rados_connect_timeout", "-1")
+    )
 
   // One config directory per service (Kolla mounts it at
   // /var/lib/kolla/config_files). The WSGI script path and the Apache flavour
@@ -550,6 +548,9 @@ if __name__ == '__main__':
       |echo "cinder-scheduler / cinder-volume never reported up - see 'journalctl -xeu orphera-cinder-volume' (RBD/ceph errors show there)" >&2
       |exit 1""".stripMargin
 
+  // Hidden from the console and the run log wherever a task echoes them.
+  Secrets.registerAll(List(cephKey, adminPassword, dbPassword, cinderPassword, rabbitPassword))
+
   val playbook: ClusterPlaybook =
     clusterPlaybook("cinder-single-node")(
       stage("cinder-database", "tst3")
@@ -584,9 +585,10 @@ if __name__ == '__main__':
           .task("write the ceph client config")(
             Task.RunCommand(List("sh", "-c", cephClientScript))
           )
-          .task("write cinder.conf")(
-            Task.RunCommand(List("sh", "-c", cinderConfScript))
+          .task("create the Cinder directories")(
+            Task.RunCommand(List("sh", "-c", cinderDirsScript))
           )
+          .task("write cinder.conf")(confResource.write(cinderConf))
           .task("write the Kolla config for the three services")(
             Task.RunCommand(
               List("sh", "-c", kollaConfigScript),
