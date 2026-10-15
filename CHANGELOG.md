@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — check mode in `placement_single_node.scala`
+- `ORPHERA_CHECK=1 orphera cluster-playbook manifests/placement_single_node.scala` changes nothing and fails with a diff if the
+  `orphera-placement-api` unit on tst13 differs from what the playbook writes. Uses `Resource[Container]`.
+
 ### Changed — checked names and ports in `Container`
 - `ContainerName` and `TcpPort` are opaque types (`kolla/Ids.scala`): a container name must be lowercase letters, digits and
   dashes, a port 1 to 65535, and neither can be built otherwise. `Container(name = ContainerName("nova-compute"), ...)`;
@@ -15,6 +19,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - A pull from the Kolla cache or quay.io is tried three times, 15 s apart (`kolla/Pull.scala`), in every playbook that pulls
   images, and the error message now quotes podman's error instead of only pointing at the `Image(...)` values. A single
   HTTP 500 on one blob had stopped a full rebuild at the compute stage.
+
+### Added — `Resource` type class, prototype (`orchestrator/.../Resource.scala`)
+- `Resource[A]` describes a file the playbook writes (path and exact content). `x.write` and `x.check` come from the one
+  description; `check` changes nothing and fails with a diff if the node's file differs, or with MISSING if absent.
+  `Container` has an instance for its systemd unit. Prototype: not yet used by any manifest.
 
 ## [0.1.191] - 2026-10-14
 
