@@ -106,7 +106,7 @@ object neutron_single_node extends OrpheraClusterPlaybook:
       Mount("/lib/modules", "/lib/modules", Access.ReadOnlyUnlabelled)
     )
     Container(
-      name = service,
+      name = ContainerName(service),
       image = Image(service, Release.R2025_1, Base.UbuntuNoble, registry),
       mounts = if agent then common ++ agentMounts else common,
       env = List("KOLLA_CONFIG_STRATEGY" -> "COPY_ALWAYS"),

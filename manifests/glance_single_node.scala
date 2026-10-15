@@ -72,7 +72,7 @@ object glance_single_node extends OrpheraClusterPlaybook:
   // Defined after confRoot, logDir and stateDir, which it reads; a val used
   // before its definition is null in an object.
   private val glanceApi = Container(
-    name = "glance-api",
+    name = ContainerName("glance-api"),
     image = Image("glance-api", Release.R2025_1, Base.UbuntuNoble, registry),
     mounts = List(
       Mount(s"$confRoot/glance-api", "/var/lib/kolla/config_files"),

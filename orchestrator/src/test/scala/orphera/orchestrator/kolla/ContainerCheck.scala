@@ -28,7 +28,7 @@ object ContainerCheck:
       println(s"FAIL: $name $detail")
 
   private val placement = Container(
-    name = "placement-api",
+    name = ContainerName("placement-api"),
     image = Image("placement-api", Release.R2025_1, Base.UbuntuNoble),
     mounts = List(
       Mount("/etc/kolla/placement-api", "/var/lib/kolla/config_files"),
@@ -80,13 +80,13 @@ object ContainerCheck:
         check("start prints the service name on success", script.endsWith("echo \"placement-api running\""), script.takeRight(60))
       case other => check("start is a RunCommand through sh -c", false, other.toString)
 
-    check("a name with a space or capital is rejected", scala.util.Try(placement.copy(name = "Bad Name")).isFailure)
+    check("a name with a space or capital is rejected", scala.util.Try(ContainerName("Bad Name")).isFailure && ContainerName.parse("ok-name-1").isRight && ContainerName.parse("-x").isLeft)
     check("a container without a read-write mount gives no log hint", scala.util.Try(placement.copy(mounts = Nil).start).toOption.exists { case Task.RunCommand(List(_, _, s), _) => !s.contains(" and /"); case _ => false })
 
     // glance_single_node.scala: three mounts, the last two read-write. The expected text is the unit
     // the manifest wrote before it used Container.
     val glance = Container(
-      name = "glance-api",
+      name = ContainerName("glance-api"),
       image = Image("glance-api", Release.R2025_1, Base.UbuntuNoble),
       mounts = List(
         Mount("/etc/kolla/glance-api", "/var/lib/kolla/config_files"),
@@ -102,7 +102,7 @@ object ContainerCheck:
 
     // nova_single_node.scala: four containers that differ only in name and config directory.
     def nova(service: String) = Container(
-      name = service,
+      name = ContainerName(service),
       image = Image(service, Release.R2025_1, Base.UbuntuNoble),
       mounts = List(
         Mount(s"/etc/kolla/$service", "/var/lib/kolla/config_files"),
@@ -120,7 +120,7 @@ object ContainerCheck:
     // mount the OVS socket directory, /run/netns (shared both ways) and the kernel modules.
     val netnsPre = "/bin/sh -c 'mkdir -p /run/netns && (mountpoint -q /run/netns || mount --bind /run/netns /run/netns) && mount --make-rshared /run/netns'"
     val ovsAgent = Container(
-      name = "neutron-openvswitch-agent",
+      name = ContainerName("neutron-openvswitch-agent"),
       image = Image("neutron-openvswitch-agent", Release.R2025_1, Base.UbuntuNoble),
       mounts = List(
         Mount("/etc/kolla/neutron-openvswitch-agent", "/var/lib/kolla/config_files"),
@@ -146,7 +146,7 @@ object ContainerCheck:
 
     // keystone_single_node.scala: one container whose state is two key directories.
     val keystone = Container(
-      name = "keystone",
+      name = ContainerName("keystone"),
       image = Image("keystone", Release.R2025_1, Base.UbuntuNoble),
       mounts = List(
         Mount("/etc/kolla/keystone", "/var/lib/kolla/config_files"),
@@ -165,7 +165,7 @@ object ContainerCheck:
 
     // cinder_single_node.scala: the volume service adds three capabilities; RabbitMQ is not a Kolla image.
     val cinderVolume = Container(
-      name = "cinder-volume",
+      name = ContainerName("cinder-volume"),
       image = Image("cinder-volume", Release.R2025_1, Base.UbuntuNoble),
       mounts = List(
         Mount("/etc/kolla/cinder-volume", "/var/lib/kolla/config_files"),
@@ -179,7 +179,7 @@ object ContainerCheck:
     check("the volume service adds its three capabilities before the environment", cinderVolume.render.contains("--network host --cap-add=SYS_ADMIN --cap-add=NET_ADMIN --cap-add=DAC_READ_SEARCH -e KOLLA_CONFIG_STRATEGY=COPY_ALWAYS"), cinderVolume.render)
     check("the cinder units start after RabbitMQ", cinderVolume.render.linesIterator.contains("After=network-online.target orphera-rabbitmq.service"))
     val rabbit = Container(
-      name = "rabbitmq",
+      name = ContainerName("rabbitmq"),
       image = ExternalImage("docker.io/library/rabbitmq:3.13"),
       mounts = List(Mount("/var/lib/orphera/rabbitmq", "/var/lib/rabbitmq", Access.ReadWrite)),
       env = List("RABBITMQ_DEFAULT_USER" -> "openstack", "RABBITMQ_DEFAULT_PASS" -> "pw"),
@@ -190,7 +190,7 @@ object ContainerCheck:
 
     // horizon_single_node.scala: its config directory is horizon-web, not horizon.
     val horizon = Container(
-      name = "horizon",
+      name = ContainerName("horizon"),
       image = Image("horizon", Release.R2025_1, Base.UbuntuNoble),
       mounts = List(
         Mount("/etc/kolla/horizon-web", "/var/lib/kolla/config_files"),
@@ -203,7 +203,7 @@ object ContainerCheck:
 
     // kolla_cache.scala: a plain registry that publishes a port instead of using the host network.
     val cache = Container(
-      name = "kolla-cache",
+      name = ContainerName("kolla-cache"),
       image = ExternalImage("docker.io/library/registry:2"),
       mounts = List(Mount("/var/lib/orphera/kolla-cache", "/var/lib/registry", Access.ReadWrite)),
       env = List("REGISTRY_PROXY_REMOTEURL" -> "https://quay.io", "REGISTRY_PROXY_TTL" -> "8760h"),
@@ -217,7 +217,7 @@ object ContainerCheck:
 
     // nova_compute.scala: privileged, wants libvirtd, the host's /dev and the libvirt and OVS sockets.
     val compute = Container(
-      name = "nova-compute",
+      name = ContainerName("nova-compute"),
       image = Image("nova-compute", Release.R2025_1, Base.UbuntuNoble),
       mounts = List(
         Mount("/etc/kolla/nova-compute", "/var/lib/kolla/config_files"),
@@ -240,6 +240,8 @@ object ContainerCheck:
     check("the compute unit starts after and wants libvirtd", computeUnit.linesIterator.contains("After=network-online.target openvswitch-switch.service libvirtd.service") && computeUnit.linesIterator.contains("Wants=network-online.target libvirtd.service"), computeUnit)
     check("the compute unit stops with a 60 second grace", computeUnit.linesIterator.contains("ExecStop=/usr/bin/podman stop -t 60 nova-compute"), computeUnit)
     check("the compute mounts keep their flags, /dev included", computeUnit.contains("-v /var/lib/nova:/var/lib/nova -v /run/libvirt:/run/libvirt -v /run/openvswitch:/run/openvswitch -v /lib/modules:/lib/modules:ro -v /dev:/dev quay.io/openstack.kolla/nova-compute:2025.1-ubuntu-noble"), computeUnit)
+    check("ports outside 1 to 65535 are rejected", List(0, 65536, -1).forall(n => scala.util.Try(TcpPort(n)).isFailure) && scala.util.Try(Port(70000, 1)).isFailure && TcpPort.parse(65535).isRight)
+    check("Port renders from checked numbers", Port(8080, 80).flag == "-p 8080:80" && Port(TcpPort(8080), TcpPort(80)).flag == "-p 8080:80")
     {
       // Run the generated function against a fake podman that fails a set number of times.
       import java.nio.file.{Files, Path}

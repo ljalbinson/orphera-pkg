@@ -91,7 +91,7 @@ object nova_single_node extends OrpheraClusterPlaybook:
   // object.
   private def novaContainer(service: String): Container =
     Container(
-      name = service,
+      name = ContainerName(service),
       image = Image(service, Release.R2025_1, Base.UbuntuNoble, registry),
       mounts = List(
         Mount(s"$confRoot/$service", "/var/lib/kolla/config_files"),

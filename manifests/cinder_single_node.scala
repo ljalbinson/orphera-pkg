@@ -95,7 +95,7 @@ object cinder_single_node extends OrpheraClusterPlaybook:
   // the narrower equivalent.) Plain volumes and raw-image clones do not need them.
   private def cinderContainer(service: String, capabilities: List[String] = Nil): Container =
     Container(
-      name = service,
+      name = ContainerName(service),
       image = Image(service, Release.R2025_1, Base.UbuntuNoble, registry),
       mounts = List(
         Mount(s"$confRoot/$service", "/var/lib/kolla/config_files"),
@@ -113,7 +113,7 @@ object cinder_single_node extends OrpheraClusterPlaybook:
       cinderContainer("cinder-volume", List("SYS_ADMIN", "NET_ADMIN", "DAC_READ_SEARCH"))
     )
   private val rabbitContainer = Container(
-    name = "rabbitmq",
+    name = ContainerName("rabbitmq"),
     image = ExternalImage("docker.io/library/rabbitmq:3.13"),
     mounts = List(Mount("/var/lib/orphera/rabbitmq", "/var/lib/rabbitmq", Access.ReadWrite)),
     env = List("RABBITMQ_DEFAULT_USER" -> rabbitUser, "RABBITMQ_DEFAULT_PASS" -> rabbitPassword),

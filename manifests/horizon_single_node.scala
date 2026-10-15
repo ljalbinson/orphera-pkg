@@ -59,7 +59,7 @@ object horizon_single_node extends OrpheraClusterPlaybook:
   // (orchestrator/.../kolla/Container.scala), checked by ContainerCheck. Defined after
   // confRoot and logDir, which it reads; a val used before its definition is null in an object.
   private val horizonWeb = Container(
-    name = "horizon",
+    name = ContainerName("horizon"),
     image = Image("horizon", Release.R2025_1, Base.UbuntuNoble, registry),
     mounts = List(
       Mount(s"$confRoot/horizon-web", "/var/lib/kolla/config_files"),

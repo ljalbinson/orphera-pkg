@@ -2,6 +2,8 @@
 
 package orphera.orchestrator.kolla
 
+import scala.annotation.targetName
+
 import orphera.orchestrator.Task
 
 // A Kolla service run as a rootful podman container under a systemd unit.
@@ -77,11 +79,16 @@ enum Network:
   case Published
 
 /** A published port, `-p host:container`. */
-final case class Port(host: Int, container: Int):
-  def flag: String = s"-p $host:$container"
+final case class Port(host: TcpPort, container: TcpPort):
+  def flag: String = s"-p ${host.value}:${container.value}"
+
+object Port:
+  /** From plain numbers; each is checked (1 to 65535). */
+  @targetName("fromNumbers")
+  def apply(host: Int, container: Int): Port = Port(TcpPort(host), TcpPort(container))
 
 final case class Container(
-    name: String,
+    name: ContainerName,
     image: ImageRef,
     mounts: List[Mount] = Nil,
     // A List, not a Map: the order is part of the text that gets written.
@@ -109,17 +116,12 @@ final case class Container(
     settleSeconds: Int = 8
 ):
   require(
-    name.matches("[a-z0-9][a-z0-9-]*"),
-    s"container name must be lowercase letters, digits and dashes: $name"
-  )
-
-  require(
     (network == Network.Host && ports.isEmpty) ||
       (network == Network.Published && ports.nonEmpty),
     "ports go with Network.Published; the host network publishes nothing"
   )
 
-  def unitName: String = s"orphera-$name.service"
+  def unitName: String = s"orphera-${name.value}.service"
   def unitPath: String = s"/etc/systemd/system/$unitName"
 
   /** Everything after `podman run --rm --name <name>` (and `--network host`, when on the host network). */
@@ -140,7 +142,7 @@ final case class Container(
       case Network.Host => s"--network host $runArguments"
       case Network.Published => runArguments
     val unitDescription =
-      description.getOrElse(s"$name (Kolla container) managed by Orphera")
+      description.getOrElse(s"${name.value} (Kolla container) managed by Orphera")
     val wantedUnits = ("network-online.target" :: wants).mkString(" ")
     val afterUnits = ("network-online.target" :: after).mkString(" ")
     val preLines = preStart.map(c => s"ExecStartPre=$c\n").mkString
@@ -150,9 +152,9 @@ final case class Container(
        |Wants=$wantedUnits
        |
        |[Service]
-       |${preLines}ExecStartPre=-/usr/bin/podman rm -f $name
-       |ExecStart=/usr/bin/podman run --rm --name $name $runLine
-       |ExecStop=/usr/bin/podman stop -t $stopGraceSeconds $name
+       |${preLines}ExecStartPre=-/usr/bin/podman rm -f ${name.value}
+       |ExecStart=/usr/bin/podman run --rm --name ${name.value} $runLine
+       |ExecStop=/usr/bin/podman stop -t $stopGraceSeconds ${name.value}
        |Restart=on-failure
        |RestartSec=$restartSeconds
        |TimeoutStartSec=$startTimeoutSeconds
@@ -180,7 +182,7 @@ final case class Container(
       .find(_.access == Access.ReadWrite)
       .map(m => s" and ${m.host}")
       .getOrElse("")
-    val unit = s"orphera-$name"
+    val unit = s"orphera-${name.value}"
     Task.RunCommand(
       List(
         "sh",
@@ -195,7 +197,7 @@ final case class Container(
            |  echo "$unit failed to start - see 'journalctl -xeu $unit'$logHint" >&2
            |  exit 1
            |fi
-           |echo "$name running"""".stripMargin
+           |echo "${name.value} running"""".stripMargin
       ),
       timeoutSeconds = startTimeoutSeconds
     )
