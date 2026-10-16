@@ -55,11 +55,11 @@ object placement_single_node extends OrpheraClusterPlaybook:
 
   // From the encrypted secret store (`orphera secrets ...`), made on first use and
   // hidden from the output. No password is in this file.
-  private val adminPassword = Secrets.get("keystone/admin")
+  private val adminPassword = Secrets.secret("keystone/admin")
   private val dbName = "placement"
   private val dbUser = "placement"
-  private val dbPassword = Secrets.get("placement/db")
-  private val placementPassword = Secrets.get("placement/service")
+  private val dbPassword = Secrets.secret("placement/db")
+  private val placementPassword = Secrets.secret("placement/service")
 
   private val confRoot = "/etc/kolla"
   private val srcDir = "/etc/kolla/placement"
@@ -89,7 +89,7 @@ object placement_single_node extends OrpheraClusterPlaybook:
   // ---- tst3 (Galera) ---------------------------------------------------
 
   private val createDatabaseScript =
-    s"""mariadb -N -e "CREATE DATABASE IF NOT EXISTS $dbName; CREATE USER IF NOT EXISTS '$dbUser'@'%' IDENTIFIED BY '$dbPassword'; GRANT ALL PRIVILEGES ON $dbName.* TO '$dbUser'@'%'; FLUSH PRIVILEGES;""""
+    s"""mariadb -N -e "CREATE DATABASE IF NOT EXISTS $dbName; CREATE USER IF NOT EXISTS '$dbUser'@'%' IDENTIFIED BY '${dbPassword.reveal}'; GRANT ALL PRIVILEGES ON $dbName.* TO '$dbUser'@'%'; FLUSH PRIVILEGES;""""
 
   // ---- the node --------------------------------------------------------
 
@@ -177,7 +177,7 @@ object placement_single_node extends OrpheraClusterPlaybook:
         (
           "placement_database",
           "connection",
-          Value.Str(s"mysql+pymysql://$dbUser:$dbPassword@$vip:3306/$dbName")
+          Value.Str(s"mysql+pymysql://$dbUser:${dbPassword.reveal}@$vip:3306/$dbName")
         ),
         ("keystone_authtoken", "www_authenticate_uri", Value.Str(ksUrl)),
         ("keystone_authtoken", "auth_url", Value.Str(ksUrl)),
@@ -186,7 +186,7 @@ object placement_single_node extends OrpheraClusterPlaybook:
         ("keystone_authtoken", "user_domain_name", Value.Str("Default")),
         ("keystone_authtoken", "project_name", Value.Str("service")),
         ("keystone_authtoken", "username", Value.Str("placement")),
-        ("keystone_authtoken", "password", Value.Str(placementPassword)),
+        ("keystone_authtoken", "password", Value.Str(placementPassword.reveal)),
         ("keystone_authtoken", "cafile", Value.Str("/etc/placement/ssl/ca.crt"))
       )
       .fold(
@@ -414,8 +414,8 @@ if __name__ == '__main__':
       apiHelperPython
         .replace("@@KS@@", ksFqdn)
         .replace("@@PLACEMENT@@", s"http://$fqdn:$port")
-        .replace("@@ADMINPW@@", adminPassword)
-        .replace("@@PLACEMENTPW@@", placementPassword)
+        .replace("@@ADMINPW@@", adminPassword.reveal)
+        .replace("@@PLACEMENTPW@@", placementPassword.reveal)
         .replace("@@CA@@", s"$caDir/ca.crt") +
       "\nPYEOF\nchmod 700 /usr/local/sbin/orphera-placement-api\necho wrote /usr/local/sbin/orphera-placement-api\n"
 

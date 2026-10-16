@@ -74,6 +74,16 @@ object SecretsCheck:
     check("Secrets.get names the secret in an error", scala.util.Try(Secrets.get("bad name")).failed.toOption.exists(_.getMessage.contains("bad name")))
     Secrets.clear()
 
+    // Secret: does not print; the text only through reveal.
+    val sec = Secrets.secret("svc/pw")
+    check("a Secret prints as <redacted>", sec.toString == "<redacted>" && s"password $sec x" == "password <redacted> x")
+    check("a Secret gives its text through reveal", sec.reveal == "abcdefghijkl")
+    check("a Secret is not in its own hash or in a collection's text", sec.hashCode == 0 && List(sec).toString == "List(<redacted>)" && Map("k" -> sec).toString == "Map(k -> <redacted>)")
+    check("two Secrets with the same text are equal, others are not", sec == Secret("abcdefghijkl") && sec != Secret("another-value"))
+    check("Secrets.secret registers the value for masking", { Secrets.clear(); Secrets.secret("svc/pw"); Secrets.mask(s"x ${sec.reveal} y") == "x <redacted> y" })
+    check("Secret and Some(Secret) print redacted too", Some(sec).toString == "Some(<redacted>)" && (sec, 1).toString == "(<redacted>,1)")
+    Secrets.clear()
+
     // The real thing, when age is installed.
     if haveAge then
       val id = dir.resolve("age.key")
