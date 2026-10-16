@@ -23,6 +23,8 @@ seed() {
   fi
 }
 
+seed galera/sst            orphera-test-sst-password
+seed galera/clustercheck    orphera-test-clustercheck-password
 seed keystone/admin        orphera-test-keystone-admin-password
 seed keystone/db           orphera-test-keystone-db-password
 seed placement/db          orphera-test-placement-db-password

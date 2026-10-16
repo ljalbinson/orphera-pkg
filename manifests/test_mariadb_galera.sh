@@ -2,6 +2,12 @@
 #
 # End-to-end regression test for the Orphera MariaDB Galera playbooks.
 #
+# DESTRUCTIVE: it tears the Galera cluster down first, so every database on it
+# (Keystone's, Glance's, Cinder's, Nova's, Neutron's, Placement's) is lost, and
+# haproxy and keepalived are purged. Afterwards run
+#   manifests/build_openstack_stack.sh --from galera
+# to rebuild the stack. It refuses to run unless ORPHERA_ALLOW_DESTRUCTIVE=1.
+#
 # Runs the full lifecycle (mariadb_galera_teardown -> mariadb_galera_cluster)
 # through `orphera cluster-playbook`, then independently verifies the final
 # cluster state over SSH — deliberately NOT by trusting Orphera's own
@@ -30,6 +36,12 @@
 # diagnostic printed before exiting).
 
 set -uo pipefail
+
+if [ "${ORPHERA_ALLOW_DESTRUCTIVE:-}" != "1" ]; then
+  echo "test_mariadb_galera.sh tears down the Galera cluster and every database on it." >&2
+  echo "Run it with ORPHERA_ALLOW_DESTRUCTIVE=1 if that is what you want." >&2
+  exit 2
+fi
 
 # ---- Configuration -----------------------------------------------------
 NODES=(tst3 tst4 tst5)
