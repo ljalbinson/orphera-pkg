@@ -64,10 +64,10 @@ object nova_compute extends OrpheraClusterPlaybook:
 
   private val rabbitIp = "10.10.5.22"
   private val novaRabbitUser = "nova"
-  private val novaRabbitPassword = "orphera-test-nova-rabbit-password"
+  private val novaRabbitPassword = Secrets.get("nova/rabbit")
   private val novaRabbitVhost = "nova"
   private val neutronRabbitUser = "neutron"
-  private val neutronRabbitPassword = "orphera-test-neutron-rabbit-password"
+  private val neutronRabbitPassword = Secrets.get("neutron/rabbit")
   private val neutronRabbitVhost = "neutron"
 
   private val ksFqdn = "tst6.ljalbinson.com"
@@ -80,9 +80,9 @@ object nova_compute extends OrpheraClusterPlaybook:
   private val registry = "quay.io/openstack.kolla"
   private val cacheHostPort = "tst9.ljalbinson.com:5000"
 
-  private val adminPassword = "orphera-test-keystone-admin-password"
-  private val novaPassword = "orphera-test-nova-service-password"
-  private val neutronPassword = "orphera-test-neutron-service-password"
+  private val adminPassword = Secrets.get("keystone/admin")
+  private val novaPassword = Secrets.get("nova/service")
+  private val neutronPassword = Secrets.get("neutron/service")
 
   private val confRoot = "/etc/kolla"
   private val novaSrcDir = "/etc/kolla/nova-compute-src"

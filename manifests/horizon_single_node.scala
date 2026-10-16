@@ -45,9 +45,9 @@ object horizon_single_node extends OrpheraClusterPlaybook:
   private val registry = "quay.io/openstack.kolla"
   private val cacheHostPort = "tst9.ljalbinson.com:5000"
 
-  private val adminPassword = "orphera-test-keystone-admin-password"
+  private val adminPassword = Secrets.get("keystone/admin")
   // Signs the session cookies; a fixed test value like the other secrets.
-  private val secretKey = "orphera-test-horizon-secret-key-not-for-real-use"
+  private val secretKey = Secrets.get("horizon/secret-key")
 
   private val confRoot = "/etc/kolla"
   private val srcDir = "/etc/kolla/horizon"
