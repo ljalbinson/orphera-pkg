@@ -52,15 +52,15 @@ object glance_single_node extends OrpheraClusterPlaybook:
   private val registry = "quay.io/openstack.kolla"
   private val cacheHostPort = "tst9.ljalbinson.com:5000"
 
-  private val adminPassword = Secrets.get("keystone/admin")
+  private val adminPassword = Secrets.secret("keystone/admin")
   private val dbName = "glance"
   private val dbUser = "glance"
-  private val dbPassword = Secrets.get("glance/db")
-  private val glancePassword = Secrets.get("glance/service")
+  private val dbPassword = Secrets.secret("glance/db")
+  private val glancePassword = Secrets.secret("glance/service")
 
   // A valid cephx key (base64 of a type/timestamp/length header plus 16 random
   // bytes), generated once and committed on purpose: test infrastructure only.
-  private val cephKey = Secrets.get("glance/ceph-key")
+  private val cephKey = Secrets.secret("glance/ceph-key")
   private val cephPool = "images"
 
   private val confRoot = "/etc/kolla"
@@ -92,7 +92,7 @@ object glance_single_node extends OrpheraClusterPlaybook:
   // ---- tst3 (Galera) and tst0 (Ceph) ----------------------------------
 
   private val createDatabaseScript =
-    s"""mariadb -N -e "CREATE DATABASE IF NOT EXISTS $dbName; CREATE USER IF NOT EXISTS '$dbUser'@'%' IDENTIFIED BY '$dbPassword'; GRANT ALL PRIVILEGES ON $dbName.* TO '$dbUser'@'%'; FLUSH PRIVILEGES;""""
+    s"""mariadb -N -e "CREATE DATABASE IF NOT EXISTS $dbName; CREATE USER IF NOT EXISTS '$dbUser'@'%' IDENTIFIED BY '${dbPassword.reveal}'; GRANT ALL PRIVILEGES ON $dbName.* TO '$dbUser'@'%'; FLUSH PRIVILEGES;""""
 
   // Same cipher compromise as cinder_single_node.scala (idempotent; see there).
   private val cephScript =
@@ -102,7 +102,7 @@ object glance_single_node extends OrpheraClusterPlaybook:
        |cephadm shell -- rbd pool init $cephPool
        |cat > /tmp/glance.keyring <<'KEYRING'
        |[client.glance]
-       |    key = $cephKey
+       |    key = ${cephKey.reveal}
        |    caps mon = "profile rbd"
        |    caps osd = "profile rbd pool=$cephPool"
        |KEYRING
@@ -170,7 +170,7 @@ object glance_single_node extends OrpheraClusterPlaybook:
        |CEPHCONF
        |cat > $srcDir/ceph.client.glance.keyring <<'KEYRING'
        |[client.glance]
-       |    key = $cephKey
+       |    key = ${cephKey.reveal}
        |KEYRING
        |chmod 640 $srcDir/ceph.client.glance.keyring
        |echo "ceph client config written"""".stripMargin
@@ -194,7 +194,7 @@ object glance_single_node extends OrpheraClusterPlaybook:
       ("DEFAULT", "bind_port", "9292"),
       ("DEFAULT", "show_image_direct_url", "true"),
       ("DEFAULT", "enabled_backends", "ceph:rbd"),
-      ("database", "connection", s"mysql+pymysql://$dbUser:$dbPassword@$vip:3306/$dbName"),
+      ("database", "connection", s"mysql+pymysql://$dbUser:${dbPassword.reveal}@$vip:3306/$dbName"),
       ("keystone_authtoken", "www_authenticate_uri", s"$ksUrl"),
       ("keystone_authtoken", "auth_url", s"$ksUrl"),
       ("keystone_authtoken", "auth_type", "password"),
@@ -202,7 +202,7 @@ object glance_single_node extends OrpheraClusterPlaybook:
       ("keystone_authtoken", "user_domain_name", "Default"),
       ("keystone_authtoken", "project_name", "service"),
       ("keystone_authtoken", "username", "glance"),
-      ("keystone_authtoken", "password", s"$glancePassword"),
+      ("keystone_authtoken", "password", s"${glancePassword.reveal}"),
       ("keystone_authtoken", "cafile", "/etc/glance/ssl/ca.crt"),
       ("paste_deploy", "flavor", "keystone"),
       ("glance_store", "default_backend", "ceph"),
@@ -415,8 +415,8 @@ if __name__ == '__main__':
       apiHelperPython
         .replace("@@KS@@", ksFqdn)
         .replace("@@GLANCE@@", s"http://$fqdn:9292")
-        .replace("@@ADMINPW@@", adminPassword)
-        .replace("@@GLANCEPW@@", glancePassword)
+        .replace("@@ADMINPW@@", adminPassword.reveal)
+        .replace("@@GLANCEPW@@", glancePassword.reveal)
         .replace("@@CA@@", s"$caDir/ca.crt") +
       "\nPYEOF\nchmod 700 /usr/local/sbin/orphera-glance-api\necho wrote /usr/local/sbin/orphera-glance-api\n"
 

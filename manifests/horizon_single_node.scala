@@ -45,9 +45,9 @@ object horizon_single_node extends OrpheraClusterPlaybook:
   private val registry = "quay.io/openstack.kolla"
   private val cacheHostPort = "tst9.ljalbinson.com:5000"
 
-  private val adminPassword = Secrets.get("keystone/admin")
+  private val adminPassword = Secrets.secret("keystone/admin")
   // Signs the session cookies; a fixed test value like the other secrets.
-  private val secretKey = Secrets.get("horizon/secret-key")
+  private val secretKey = Secrets.secret("horizon/secret-key")
 
   private val confRoot = "/etc/kolla"
   private val srcDir = "/etc/kolla/horizon"
@@ -153,7 +153,7 @@ object horizon_single_node extends OrpheraClusterPlaybook:
        |DEBUG = False
        |WEBROOT = '/'
        |ALLOWED_HOSTS = ['*']
-       |SECRET_KEY = '$secretKey'
+       |SECRET_KEY = '${secretKey.reveal}'
        |TIME_ZONE = 'UTC'
        |
        |SESSION_ENGINE = 'django.contrib.sessions.backends.signed_cookies'
@@ -348,7 +348,7 @@ if __name__ == '__main__':
       checkHelperPython
         .replace("@@BASE@@", s"http://localhost:$port")
         .replace("@@LOGDIR@@", logDir)
-        .replace("@@ADMINPW@@", adminPassword) +
+        .replace("@@ADMINPW@@", adminPassword.reveal) +
       "\nPYEOF\nchmod 700 /usr/local/sbin/orphera-horizon-check\necho wrote /usr/local/sbin/orphera-horizon-check\n"
 
   // The root redirects to the login page; the login page itself answers 200.

@@ -62,19 +62,19 @@ object cinder_single_node extends OrpheraClusterPlaybook:
   private val registry = "quay.io/openstack.kolla"
   private val cacheHostPort = "tst9.ljalbinson.com:5000"
 
-  private val adminPassword = Secrets.get("keystone/admin")
+  private val adminPassword = Secrets.secret("keystone/admin")
   private val dbName = "cinder"
   private val dbUser = "cinder"
-  private val dbPassword = Secrets.get("cinder/db")
-  private val cinderPassword = Secrets.get("cinder/service")
+  private val dbPassword = Secrets.secret("cinder/db")
+  private val cinderPassword = Secrets.secret("cinder/service")
   private val rabbitUser = "openstack"
-  private val rabbitPassword = Secrets.get("cinder/rabbit")
+  private val rabbitPassword = Secrets.secret("cinder/rabbit")
 
   // A valid cephx key (base64 of a type/timestamp/length header plus 16 random
   // bytes), generated once and committed on purpose: test infrastructure only.
   // Rotate it with `ceph auth import` / `ceph auth del client.cinder` if this
   // repository is ever used for anything real.
-  private val cephKey = Secrets.get("cinder/ceph-key")
+  private val cephKey = Secrets.secret("cinder/ceph-key")
   private val cephPool = "volumes"
 
   private val confRoot = "/etc/kolla"
@@ -127,7 +127,7 @@ object cinder_single_node extends OrpheraClusterPlaybook:
     ),
     env = List(
       "RABBITMQ_DEFAULT_USER" -> rabbitUser,
-      "RABBITMQ_DEFAULT_PASS" -> rabbitPassword
+      "RABBITMQ_DEFAULT_PASS" -> rabbitPassword.reveal
     ),
     description = Some("RabbitMQ for OpenStack managed by Orphera"),
     settleSeconds = 3
@@ -160,7 +160,7 @@ object cinder_single_node extends OrpheraClusterPlaybook:
   // ---- tst3 (Galera) and tst0 (Ceph) ----------------------------------
 
   private val createDatabaseScript =
-    s"""mariadb -N -e "CREATE DATABASE IF NOT EXISTS $dbName; CREATE USER IF NOT EXISTS '$dbUser'@'%' IDENTIFIED BY '$dbPassword'; GRANT ALL PRIVILEGES ON $dbName.* TO '$dbUser'@'%'; FLUSH PRIVILEGES;""""
+    s"""mariadb -N -e "CREATE DATABASE IF NOT EXISTS $dbName; CREATE USER IF NOT EXISTS '$dbUser'@'%' IDENTIFIED BY '${dbPassword.reveal}'; GRANT ALL PRIVILEGES ON $dbName.* TO '$dbUser'@'%'; FLUSH PRIVILEGES;""""
 
   // The pool create is idempotent; `auth import` replaces the entity, so a
   // re-run just re-asserts the same key and caps. `cephadm shell --mount FILE`
@@ -178,7 +178,7 @@ object cinder_single_node extends OrpheraClusterPlaybook:
        |cephadm shell -- rbd pool init $cephPool
        |cat > /tmp/cinder.keyring <<'KEYRING'
        |[client.cinder]
-       |    key = $cephKey
+       |    key = ${cephKey.reveal}
        |    caps mon = "profile rbd"
        |    caps osd = "profile rbd pool=$cephPool"
        |KEYRING
@@ -251,7 +251,7 @@ object cinder_single_node extends OrpheraClusterPlaybook:
        |CEPHCONF
        |cat > $srcDir/ceph.client.cinder.keyring <<'KEYRING'
        |[client.cinder]
-       |    key = $cephKey
+       |    key = ${cephKey.reveal}
        |KEYRING
        |chmod 640 $srcDir/ceph.client.cinder.keyring
        |echo "ceph client config written"""".stripMargin
@@ -284,9 +284,9 @@ object cinder_single_node extends OrpheraClusterPlaybook:
       ("DEFAULT", "state_path", "/var/lib/cinder"),
       ("DEFAULT", "my_ip", s"$nodeIp"),
       ("DEFAULT", "auth_strategy", "keystone"),
-      ("DEFAULT", "transport_url", s"rabbit://$rabbitUser:$rabbitPassword@$nodeIp:5672/"),
+      ("DEFAULT", "transport_url", s"rabbit://$rabbitUser:${rabbitPassword.reveal}@$nodeIp:5672/"),
       ("DEFAULT", "enabled_backends", "ceph"),
-      ("database", "connection", s"mysql+pymysql://$dbUser:$dbPassword@$vip:3306/$dbName"),
+      ("database", "connection", s"mysql+pymysql://$dbUser:${dbPassword.reveal}@$vip:3306/$dbName"),
       ("keystone_authtoken", "www_authenticate_uri", s"$ksUrl"),
       ("keystone_authtoken", "auth_url", s"$ksUrl"),
       ("keystone_authtoken", "auth_type", "password"),
@@ -294,7 +294,7 @@ object cinder_single_node extends OrpheraClusterPlaybook:
       ("keystone_authtoken", "user_domain_name", "Default"),
       ("keystone_authtoken", "project_name", "service"),
       ("keystone_authtoken", "username", "cinder"),
-      ("keystone_authtoken", "password", s"$cinderPassword"),
+      ("keystone_authtoken", "password", s"${cinderPassword.reveal}"),
       ("keystone_authtoken", "cafile", "/etc/cinder/ssl/ca.crt"),
       ("oslo_concurrency", "lock_path", "/var/lib/cinder/tmp"),
       ("ceph", "volume_driver", "cinder.volume.drivers.rbd.RBDDriver"),
@@ -526,8 +526,8 @@ if __name__ == '__main__':
       apiHelperPython
         .replace("@@KS@@", ksFqdn)
         .replace("@@CINDER@@", s"http://$fqdn:8776")
-        .replace("@@ADMINPW@@", adminPassword)
-        .replace("@@CINDERPW@@", cinderPassword)
+        .replace("@@ADMINPW@@", adminPassword.reveal)
+        .replace("@@CINDERPW@@", cinderPassword.reveal)
         .replace("@@CA@@", s"$caDir/ca.crt") +
       "\nPYEOF\nchmod 700 /usr/local/sbin/orphera-openstack-api\necho wrote /usr/local/sbin/orphera-openstack-api\n"
 

@@ -63,7 +63,7 @@ object neutron_single_node extends OrpheraClusterPlaybook:
   private val rabbitNode = "tst10"
   private val rabbitIp = "10.10.5.22"
   private val rabbitUser = "neutron"
-  private val rabbitPassword = Secrets.get("neutron/rabbit")
+  private val rabbitPassword = Secrets.secret("neutron/rabbit")
   private val rabbitVhost = "neutron"
 
   private val ksFqdn = "tst6.ljalbinson.com"
@@ -73,13 +73,13 @@ object neutron_single_node extends OrpheraClusterPlaybook:
   private val registry = "quay.io/openstack.kolla"
   private val cacheHostPort = "tst9.ljalbinson.com:5000"
 
-  private val adminPassword = Secrets.get("keystone/admin")
+  private val adminPassword = Secrets.secret("keystone/admin")
   private val dbName = "neutron"
   private val dbUser = "neutron"
-  private val dbPassword = Secrets.get("neutron/db")
-  private val neutronPassword = Secrets.get("neutron/service")
+  private val dbPassword = Secrets.secret("neutron/db")
+  private val neutronPassword = Secrets.secret("neutron/service")
   // Neutron notifies Nova as the nova service user (created by nova_single_node.scala).
-  private val novaPassword = Secrets.get("nova/service")
+  private val novaPassword = Secrets.secret("nova/service")
 
   private val confRoot = "/etc/kolla"
   private val srcDir = "/etc/kolla/neutron"
@@ -154,7 +154,7 @@ object neutron_single_node extends OrpheraClusterPlaybook:
   // ---- tst3 (Galera) ---------------------------------------------------
 
   private val createDatabaseScript =
-    s"""mariadb -N -e "CREATE DATABASE IF NOT EXISTS $dbName; CREATE USER IF NOT EXISTS '$dbUser'@'%' IDENTIFIED BY '$dbPassword'; GRANT ALL PRIVILEGES ON $dbName.* TO '$dbUser'@'%'; FLUSH PRIVILEGES;""""
+    s"""mariadb -N -e "CREATE DATABASE IF NOT EXISTS $dbName; CREATE USER IF NOT EXISTS '$dbUser'@'%' IDENTIFIED BY '${dbPassword.reveal}'; GRANT ALL PRIVILEGES ON $dbName.* TO '$dbUser'@'%'; FLUSH PRIVILEGES;""""
 
   // ---- tst10 (RabbitMQ) ------------------------------------------------
 
@@ -170,9 +170,9 @@ object neutron_single_node extends OrpheraClusterPlaybook:
        |  podman exec rabbitmq rabbitmqctl add_vhost '$rabbitVhost'
        |fi
        |if podman exec rabbitmq rabbitmqctl list_users -q | awk '{print $$1}' | grep -qx '$rabbitUser'; then
-       |  podman exec rabbitmq rabbitmqctl change_password '$rabbitUser' '$rabbitPassword'
+       |  podman exec rabbitmq rabbitmqctl change_password '$rabbitUser' '${rabbitPassword.reveal}'
        |else
-       |  podman exec rabbitmq rabbitmqctl add_user '$rabbitUser' '$rabbitPassword'
+       |  podman exec rabbitmq rabbitmqctl add_user '$rabbitUser' '${rabbitPassword.reveal}'
        |fi
        |podman exec rabbitmq rabbitmqctl set_permissions -p '$rabbitVhost' '$rabbitUser' '.*' '.*' '.*'
        |echo "rabbitmq vhost $rabbitVhost and user $rabbitUser ready"""".stripMargin
@@ -314,12 +314,12 @@ object neutron_single_node extends OrpheraClusterPlaybook:
       ("DEFAULT", "core_plugin", "ml2"),
       ("DEFAULT", "service_plugins", ""),
       ("DEFAULT", "auth_strategy", "keystone"),
-      ("DEFAULT", "transport_url", s"rabbit://$rabbitUser:$rabbitPassword@$rabbitIp:5672/$rabbitVhost"),
+      ("DEFAULT", "transport_url", s"rabbit://$rabbitUser:${rabbitPassword.reveal}@$rabbitIp:5672/$rabbitVhost"),
       ("DEFAULT", "notify_nova_on_port_status_changes", "true"),
       ("DEFAULT", "notify_nova_on_port_data_changes", "true"),
       ("DEFAULT", "api_workers", "2"),
       ("DEFAULT", "rpc_workers", "2"),
-      ("database", "connection", s"mysql+pymysql://$dbUser:$dbPassword@$vip:3306/$dbName"),
+      ("database", "connection", s"mysql+pymysql://$dbUser:${dbPassword.reveal}@$vip:3306/$dbName"),
       ("keystone_authtoken", "www_authenticate_uri", s"$ksUrl"),
       ("keystone_authtoken", "auth_url", s"$ksUrl"),
       ("keystone_authtoken", "auth_type", "password"),
@@ -327,7 +327,7 @@ object neutron_single_node extends OrpheraClusterPlaybook:
       ("keystone_authtoken", "user_domain_name", "Default"),
       ("keystone_authtoken", "project_name", "service"),
       ("keystone_authtoken", "username", "neutron"),
-      ("keystone_authtoken", "password", s"$neutronPassword"),
+      ("keystone_authtoken", "password", s"${neutronPassword.reveal}"),
       ("keystone_authtoken", "cafile", "/etc/neutron/ssl/ca.crt"),
       ("nova", "auth_url", s"$ksUrl"),
       ("nova", "auth_type", "password"),
@@ -336,7 +336,7 @@ object neutron_single_node extends OrpheraClusterPlaybook:
       ("nova", "region_name", "RegionOne"),
       ("nova", "project_name", "service"),
       ("nova", "username", "nova"),
-      ("nova", "password", s"$novaPassword"),
+      ("nova", "password", s"${novaPassword.reveal}"),
       ("nova", "endpoint_type", "internal"),
       ("nova", "cafile", "/etc/neutron/ssl/ca.crt"),
       ("oslo_concurrency", "lock_path", "/var/lib/neutron/tmp"),
@@ -617,8 +617,8 @@ if __name__ == '__main__':
       apiHelperPython
         .replace("@@KS@@", ksFqdn)
         .replace("@@NEUTRON@@", s"http://$fqdn:$apiPort")
-        .replace("@@ADMINPW@@", adminPassword)
-        .replace("@@NEUTRONPW@@", neutronPassword)
+        .replace("@@ADMINPW@@", adminPassword.reveal)
+        .replace("@@NEUTRONPW@@", neutronPassword.reveal)
         .replace("@@PHYSNET@@", physnet)
         .replace("@@CA@@", s"$caDir/ca.crt") +
       "\nPYEOF\nchmod 700 /usr/local/sbin/orphera-neutron-api\necho wrote /usr/local/sbin/orphera-neutron-api\n"
