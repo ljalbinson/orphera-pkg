@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — `Secret`, a value that does not print (`Secret.scala`, `Secrets.secret`)
+- `Secrets.secret("placement/db")` is like `Secrets.get` but returns a `Secret`: its `toString`, string interpolation and any log
+  line give `<redacted>`, and the text is available only as `.reveal`, so each place a playbook puts a password into a command or a
+  file is visible in the source. Forgetting `.reveal` writes `<redacted>` where the password goes, and the service refuses it,
+  rather than leaking it. `placement_single_node.scala` is the pilot; the other manifests still use `Secrets.get` (a `String`).
+
 ### Changed — the WordPress and extended observability playbooks read their passwords from the secret store
 - The WordPress database password (`wordpress/db`) and the MySQL exporter password (`observability/mysqld-exporter`) are
   `Secrets.get(...)` and hidden from the output. `manifests/seed_test_secrets.sh` seeds the lab's current values.

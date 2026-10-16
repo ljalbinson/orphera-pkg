@@ -58,6 +58,11 @@ object Secrets:
     register(value)
     value
 
+  /** Like `get`, but as a `Secret`, which does not print. Prefer this one: the text
+    * is only available through `.reveal`, where a playbook needs it.
+    */
+  def secret(name: String): Secret = Secret(get(name))
+
   /** Forgets everything registered. For tests. */
   def clear(): Unit = registered.clear()
 
