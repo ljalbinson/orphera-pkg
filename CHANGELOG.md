@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed — the Horizon and Nova compute playbooks read their passwords from the secret store
+- Horizon's admin password and `SECRET_KEY`, and Nova compute's admin, service and RabbitMQ passwords, are
+  `Secrets.get(...)`, the same names the control-plane playbooks use. These two did not hide their passwords from the
+  output before; they now do.
+
 ### Changed — the Keystone, Glance, Cinder, Nova and Neutron playbooks read their passwords from the secret store
 - Database, service, admin, RabbitMQ and Ceph key values are `Secrets.get("<service>/<name>")` (for example `glance/db`,
   `keystone/admin`, `cinder/ceph-key`), not literals in the manifest. A name with no value is made at random on first use,
