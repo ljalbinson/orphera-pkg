@@ -194,14 +194,19 @@ object keystone_single_node extends OrpheraClusterPlaybook:
 
   // The option lists of the image (keystone), from catalogues/. Every section and key of the
   // files below is checked against them when this manifest is built.
-  private val keystoneCatalogue: Catalogue = Catalogues.load("keystone", Set.empty[String])
+  private val keystoneCatalogue: Catalogue =
+    Catalogues.load("keystone", Set.empty[String])
   private val confResource = summon[Resource[ConfFile]]
 
   private val keystoneConf: ConfFile =
     ConfFile.text(s"$confDir/keystone.conf", keystoneCatalogue)(
       ("DEFAULT", "log_dir", "/var/log/kolla/keystone"),
       ("DEFAULT", "use_stderr", "true"),
-      ("database", "connection", s"mysql+pymysql://$dbUser:${dbPassword.reveal}@$vip:3306/$dbName"),
+      (
+        "database",
+        "connection",
+        s"mysql+pymysql://$dbUser:${dbPassword.reveal}@$vip:3306/$dbName"
+      ),
       ("token", "provider", "fernet")
     )
 

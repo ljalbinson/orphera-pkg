@@ -275,7 +275,8 @@ object cinder_single_node extends OrpheraClusterPlaybook:
 
   // The option lists of the image (cinder), from catalogues/. Every section and key of the
   // files below is checked against them when this manifest is built.
-  private val cinderCatalogue: Catalogue = Catalogues.load("cinder", Set("ceph"))
+  private val cinderCatalogue: Catalogue =
+    Catalogues.load("cinder", Set("ceph"))
   private val confResource = summon[Resource[ConfFile]]
 
   private val cinderConf: ConfFile =
@@ -284,9 +285,17 @@ object cinder_single_node extends OrpheraClusterPlaybook:
       ("DEFAULT", "state_path", "/var/lib/cinder"),
       ("DEFAULT", "my_ip", s"$nodeIp"),
       ("DEFAULT", "auth_strategy", "keystone"),
-      ("DEFAULT", "transport_url", s"rabbit://$rabbitUser:${rabbitPassword.reveal}@$nodeIp:5672/"),
+      (
+        "DEFAULT",
+        "transport_url",
+        s"rabbit://$rabbitUser:${rabbitPassword.reveal}@$nodeIp:5672/"
+      ),
       ("DEFAULT", "enabled_backends", "ceph"),
-      ("database", "connection", s"mysql+pymysql://$dbUser:${dbPassword.reveal}@$vip:3306/$dbName"),
+      (
+        "database",
+        "connection",
+        s"mysql+pymysql://$dbUser:${dbPassword.reveal}@$vip:3306/$dbName"
+      ),
       ("keystone_authtoken", "www_authenticate_uri", s"$ksUrl"),
       ("keystone_authtoken", "auth_url", s"$ksUrl"),
       ("keystone_authtoken", "auth_type", "password"),

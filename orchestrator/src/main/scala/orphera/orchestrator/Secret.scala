@@ -10,9 +10,9 @@ import java.security.MessageDigest
   * `toString`, string interpolation (`s"$password"`) and a log line all give
   * `<redacted>`; the text is only available through `reveal`, so every place a
   * playbook puts a secret into a command or a file shows up as `.reveal` in the
-  * source and can be found with a search. Forgetting it does not leak the value:
-  * it writes `<redacted>` where the password should be, and the service then
-  * refuses it.
+  * source and can be found with a search. Forgetting it does not leak the
+  * value: it writes `<redacted>` where the password should be, and the service
+  * then refuses it.
   *
   * Make one with `Secrets.secret("service/name")`, which reads the encrypted
   * store and also registers the value so that anything echoed back from a node
@@ -26,10 +26,12 @@ final class Secret(private val text: String):
 
   /** Compared without stopping at the first difference. */
   override def equals(other: Any): Boolean = other match
-    case s: Secret => MessageDigest.isEqual(text.getBytes(UTF_8), s.reveal.getBytes(UTF_8))
-    case _         => false
+    case s: Secret =>
+      MessageDigest.isEqual(text.getBytes(UTF_8), s.reveal.getBytes(UTF_8))
+    case _ => false
 
-  /** The same for every secret, so a hash never says anything about the value. */
+  /** The same for every secret, so a hash never says anything about the value.
+    */
   override def hashCode: Int = 0
 
 object Secret:

@@ -232,16 +232,20 @@ object ConfFile:
       }
     if errors.isEmpty then Right(file) else Left(errors)
 
-  /** A file from `(section, key, text)` settings, for values that are written as
-    * text (and may contain a script's interpolated values). The text is checked
-    * as the option's type reads it: "60" for an integer, "true" for a switch.
-    * Throws, listing every error, so a manifest fails when it is built.
+  /** A file from `(section, key, text)` settings, for values that are written
+    * as text (and may contain a script's interpolated values). The text is
+    * checked as the option's type reads it: "60" for an integer, "true" for a
+    * switch. Throws, listing every error, so a manifest fails when it is built.
     */
-  def text(path: String, catalogue: Catalogue)(settings: (String, String, String)*): ConfFile =
+  def text(path: String, catalogue: Catalogue)(
+      settings: (String, String, String)*
+  ): ConfFile =
     of(path, catalogue)(settings.map((s, n, v) => (s, n, Value.Str(v)))*) match
-      case Right(f) => f
+      case Right(f)   => f
       case Left(errs) =>
-        throw new IllegalArgumentException(s"$path: " + errs.map(_.message).mkString("; "))
+        throw new IllegalArgumentException(
+          s"$path: " + errs.map(_.message).mkString("; ")
+        )
 
   private[conf] def check(
       c: Catalogue,
@@ -296,11 +300,17 @@ object ConfFile:
       case (OptType.PortNumber, Value.Whole(n))          =>
         if n >= 0 && n <= 65535 then Right(()) else wrong
       // Text from a file or a script: accepted when it reads as the declared type.
-      case (OptType.Integer, Value.Str(t)) if t.trim.toLongOption.isDefined => Right(())
-      case (OptType.Flag, Value.Str(t)) if Set("true", "false").contains(t.trim.toLowerCase) => Right(())
-      case (OptType.Real, Value.Str(t)) if t.trim.toDoubleOption.isDefined => Right(())
-      case (OptType.PortNumber, Value.Str(t)) if t.trim.toLongOption.exists(n => n >= 0 && n <= 65535) => Right(())
-      case (OptType.Items, Value.Str(_)) => Right(())
+      case (OptType.Integer, Value.Str(t)) if t.trim.toLongOption.isDefined =>
+        Right(())
+      case (OptType.Flag, Value.Str(t))
+          if Set("true", "false").contains(t.trim.toLowerCase) =>
+        Right(())
+      case (OptType.Real, Value.Str(t)) if t.trim.toDoubleOption.isDefined =>
+        Right(())
+      case (OptType.PortNumber, Value.Str(t))
+          if t.trim.toLongOption.exists(n => n >= 0 && n <= 65535) =>
+        Right(())
+      case (OptType.Items, Value.Str(_))  => Right(())
       case (OptType.Items, Value.Many(_)) => Right(())
       case (OptType.Dict, Value.Str(_))   => Right(())
       case (OptType.Other(_), _)          => Right(())

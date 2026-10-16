@@ -177,7 +177,9 @@ object placement_single_node extends OrpheraClusterPlaybook:
         (
           "placement_database",
           "connection",
-          Value.Str(s"mysql+pymysql://$dbUser:${dbPassword.reveal}@$vip:3306/$dbName")
+          Value.Str(
+            s"mysql+pymysql://$dbUser:${dbPassword.reveal}@$vip:3306/$dbName"
+          )
         ),
         ("keystone_authtoken", "www_authenticate_uri", Value.Str(ksUrl)),
         ("keystone_authtoken", "auth_url", Value.Str(ksUrl)),

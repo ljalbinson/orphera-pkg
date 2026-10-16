@@ -183,7 +183,8 @@ object glance_single_node extends OrpheraClusterPlaybook:
 
   // The option lists of the image (glance), from catalogues/. Every section and key of the
   // files below is checked against them when this manifest is built.
-  private val glanceCatalogue: Catalogue = Catalogues.load("glance", Set("ceph"))
+  private val glanceCatalogue: Catalogue =
+    Catalogues.load("glance", Set("ceph"))
   private val confResource = summon[Resource[ConfFile]]
 
   private val glanceApiConf: ConfFile =
@@ -194,7 +195,11 @@ object glance_single_node extends OrpheraClusterPlaybook:
       ("DEFAULT", "bind_port", "9292"),
       ("DEFAULT", "show_image_direct_url", "true"),
       ("DEFAULT", "enabled_backends", "ceph:rbd"),
-      ("database", "connection", s"mysql+pymysql://$dbUser:${dbPassword.reveal}@$vip:3306/$dbName"),
+      (
+        "database",
+        "connection",
+        s"mysql+pymysql://$dbUser:${dbPassword.reveal}@$vip:3306/$dbName"
+      ),
       ("keystone_authtoken", "www_authenticate_uri", s"$ksUrl"),
       ("keystone_authtoken", "auth_url", s"$ksUrl"),
       ("keystone_authtoken", "auth_type", "password"),
