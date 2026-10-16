@@ -88,7 +88,7 @@ object SecretsCheck:
       check("another identity cannot decrypt it", enc.flatMap(new AgeCipher(other).decrypt).isLeft)
       val real = new SecretStore(dir.resolve("real.age"), cipher)
       val pw = real.getOrCreate("db/pw")
-      check("a store with age makes, keeps and reads a secret", pw.exists(_.length == 24) && real.get("db/pw") == pw, pw.toString)
+      check("a store with age makes, keeps and reads a secret", pw.exists(_.length == 24) && real.get("db/pw") == pw.map(Some(_)), pw.toString)
       check("the age file is armoured text without the secret in it", pw.exists(p => { val t = Files.readString(dir.resolve("real.age")); t.startsWith("-----BEGIN AGE ENCRYPTED FILE-----") && !t.contains(p) }))
       check("a store cannot read a file made for another identity", new SecretStore(dir.resolve("real.age"), new AgeCipher(other)).get("db/pw").isLeft)
     else println("age is not installed: the age checks were skipped")
