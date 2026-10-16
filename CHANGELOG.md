@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed — the Keystone, Glance, Cinder, Nova and Neutron playbooks read their passwords from the secret store
+- Database, service, admin, RabbitMQ and Ceph key values are `Secrets.get("<service>/<name>")` (for example `glance/db`,
+  `keystone/admin`, `cinder/ceph-key`), not literals in the manifest. A name with no value is made at random on first use,
+  so a new deployment needs no setup; the lab's existing values come from `manifests/seed_test_secrets.sh`. Values are
+  hidden from the output as soon as they are read.
+
 ### Added — encrypted secret store (`SecretStore.scala`, `orphera secrets ...`)
 - A playbook asks for a password by name, `Secrets.get("placement/db")`. The value is made at random on first use, kept in one
   file encrypted with age (`~/.config/orphera/secrets.age`, identity in `~/.config/orphera/age.key`; `$ORPHERA_SECRETS` and

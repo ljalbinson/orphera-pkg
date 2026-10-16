@@ -62,19 +62,19 @@ object cinder_single_node extends OrpheraClusterPlaybook:
   private val registry = "quay.io/openstack.kolla"
   private val cacheHostPort = "tst9.ljalbinson.com:5000"
 
-  private val adminPassword = "orphera-test-keystone-admin-password"
+  private val adminPassword = Secrets.get("keystone/admin")
   private val dbName = "cinder"
   private val dbUser = "cinder"
-  private val dbPassword = "orphera-test-cinder-db-password"
-  private val cinderPassword = "orphera-test-cinder-service-password"
+  private val dbPassword = Secrets.get("cinder/db")
+  private val cinderPassword = Secrets.get("cinder/service")
   private val rabbitUser = "openstack"
-  private val rabbitPassword = "orphera-test-rabbit-password"
+  private val rabbitPassword = Secrets.get("cinder/rabbit")
 
   // A valid cephx key (base64 of a type/timestamp/length header plus 16 random
   // bytes), generated once and committed on purpose: test infrastructure only.
   // Rotate it with `ceph auth import` / `ceph auth del client.cinder` if this
   // repository is ever used for anything real.
-  private val cephKey = "AQAAeOdoAAAAABAAZtOwIBqwSdv7t+vxPfUfpQ=="
+  private val cephKey = Secrets.get("cinder/ceph-key")
   private val cephPool = "volumes"
 
   private val confRoot = "/etc/kolla"
@@ -547,9 +547,6 @@ if __name__ == '__main__':
       |done
       |echo "cinder-scheduler / cinder-volume never reported up - see 'journalctl -xeu orphera-cinder-volume' (RBD/ceph errors show there)" >&2
       |exit 1""".stripMargin
-
-  // Hidden from the console and the run log wherever a task echoes them.
-  Secrets.registerAll(List(cephKey, adminPassword, dbPassword, cinderPassword, rabbitPassword))
 
   val playbook: ClusterPlaybook =
     clusterPlaybook("cinder-single-node")(

@@ -52,15 +52,15 @@ object glance_single_node extends OrpheraClusterPlaybook:
   private val registry = "quay.io/openstack.kolla"
   private val cacheHostPort = "tst9.ljalbinson.com:5000"
 
-  private val adminPassword = "orphera-test-keystone-admin-password"
+  private val adminPassword = Secrets.get("keystone/admin")
   private val dbName = "glance"
   private val dbUser = "glance"
-  private val dbPassword = "orphera-test-glance-db-password"
-  private val glancePassword = "orphera-test-glance-service-password"
+  private val dbPassword = Secrets.get("glance/db")
+  private val glancePassword = Secrets.get("glance/service")
 
   // A valid cephx key (base64 of a type/timestamp/length header plus 16 random
   // bytes), generated once and committed on purpose: test infrastructure only.
-  private val cephKey = "AQDNtctqAAAAABAA2XKzaceaWSLHtjaNxQ4qeg=="
+  private val cephKey = Secrets.get("glance/ceph-key")
   private val cephPool = "images"
 
   private val confRoot = "/etc/kolla"
@@ -424,9 +424,6 @@ if __name__ == '__main__':
   private val apiHealthScript =
     """CODE=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:9292/)
       |[ "$CODE" = "200" ] || [ "$CODE" = "300" ]""".stripMargin
-
-  // Hidden from the console and the run log wherever a task echoes them.
-  Secrets.registerAll(List(cephKey, adminPassword, dbPassword, glancePassword))
 
   val playbook: ClusterPlaybook =
     clusterPlaybook("glance-single-node")(

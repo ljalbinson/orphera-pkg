@@ -63,7 +63,7 @@ object neutron_single_node extends OrpheraClusterPlaybook:
   private val rabbitNode = "tst10"
   private val rabbitIp = "10.10.5.22"
   private val rabbitUser = "neutron"
-  private val rabbitPassword = "orphera-test-neutron-rabbit-password"
+  private val rabbitPassword = Secrets.get("neutron/rabbit")
   private val rabbitVhost = "neutron"
 
   private val ksFqdn = "tst6.ljalbinson.com"
@@ -73,13 +73,13 @@ object neutron_single_node extends OrpheraClusterPlaybook:
   private val registry = "quay.io/openstack.kolla"
   private val cacheHostPort = "tst9.ljalbinson.com:5000"
 
-  private val adminPassword = "orphera-test-keystone-admin-password"
+  private val adminPassword = Secrets.get("keystone/admin")
   private val dbName = "neutron"
   private val dbUser = "neutron"
-  private val dbPassword = "orphera-test-neutron-db-password"
-  private val neutronPassword = "orphera-test-neutron-service-password"
+  private val dbPassword = Secrets.get("neutron/db")
+  private val neutronPassword = Secrets.get("neutron/service")
   // Neutron notifies Nova as the nova service user (created by nova_single_node.scala).
-  private val novaPassword = "orphera-test-nova-service-password"
+  private val novaPassword = Secrets.get("nova/service")
 
   private val confRoot = "/etc/kolla"
   private val srcDir = "/etc/kolla/neutron"
@@ -627,9 +627,6 @@ if __name__ == '__main__':
   private val apiHealthScript =
     s"""CODE=$$(curl -s -o /dev/null -w '%{http_code}' http://localhost:$apiPort/)
        |[ "$$CODE" = "200" ] || [ "$$CODE" = "300" ]""".stripMargin
-
-  // Hidden from the console and the run log wherever a task echoes them.
-  Secrets.registerAll(List(rabbitPassword, adminPassword, dbPassword, neutronPassword, novaPassword))
 
   val playbook: ClusterPlaybook =
     clusterPlaybook("neutron-single-node")(

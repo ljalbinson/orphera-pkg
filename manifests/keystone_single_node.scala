@@ -74,8 +74,8 @@ object keystone_single_node extends OrpheraClusterPlaybook:
 
   private val dbName = "keystone"
   private val dbUser = "keystone"
-  private val dbPassword = "orphera-test-keystone-db-password"
-  private val adminPassword = "orphera-test-keystone-admin-password"
+  private val dbPassword = Secrets.get("keystone/db")
+  private val adminPassword = Secrets.get("keystone/admin")
 
   // Floating IP held by keepalived on whichever of tst3-tst5 is current.
   private val vip = "10.10.5.100"
@@ -323,9 +323,6 @@ object keystone_single_node extends OrpheraClusterPlaybook:
       |  exit 1
       |fi
       |echo "admin token issued (${#T} characters)"""".stripMargin
-
-  // Hidden from the console and the run log wherever a task echoes them.
-  Secrets.registerAll(List(dbPassword, adminPassword))
 
   val playbook: ClusterPlaybook =
     clusterPlaybook("keystone-single-node")(
