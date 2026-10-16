@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed — the WordPress and extended observability playbooks read their passwords from the secret store
+- The WordPress database password (`wordpress/db`) and the MySQL exporter password (`observability/mysqld-exporter`) are
+  `Secrets.get(...)` and hidden from the output. `manifests/seed_test_secrets.sh` seeds the lab's current values.
+
 ### Changed — the Galera and haproxy playbooks read their passwords from the secret store
 - The Galera SST password (`galera/sst`) and the clustercheck password (`galera/clustercheck`) are `Secrets.get(...)`, hidden from
   the output, and `test_vip_failover.sh` reads the clustercheck password from the store. A cluster built earlier keeps the
