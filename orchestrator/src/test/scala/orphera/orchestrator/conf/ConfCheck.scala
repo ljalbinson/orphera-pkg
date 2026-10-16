@@ -151,6 +151,8 @@ object ConfCheck:
       check("an open section refuses a near miss of a known option, with a suggestion",
         fo.set("keystone_authtoken", "timeot", "1").left.toOption.exists(_.message.contains("timeout")))
       check("an open section still checks the options it knows", fo.set("keystone_authtoken", "timeout", "slow").isLeft)
+      val fc = ConfFile.empty("/p", cat.copy(openSections = Set("ceph")))
+      check("an open section that the image does not declare at all takes its options", fc.set("ceph", "rbd_pool", "volumes").isRight && f.set("ceph", "rbd_pool", "volumes").isLeft)
       check("a loaded catalogue refuses a wrong type", f.set("placement_database", "max_retries", "many").isLeft)
       check("a loaded catalogue refuses an unknown key with a suggestion",
         f.set("placement_database", "conection", "x").left.toOption.exists(_.message.contains("connection")))
@@ -177,6 +179,22 @@ object ConfCheck:
         case Task.RunCommand(List("sh", "-c", script), _) => script.contains("""diff -u --label "node: /etc/placement/placement.conf"""")
         case _                                            => false
     )
+
+    // Text values, as a script gives them, and the catalogue loader's errors.
+    {
+      val cat = loaded.toOption.get
+      def ok(section: String, key: String, v: String) = scala.util.Try(ConfFile.text("/p", cat)((section, key, v))).isSuccess
+      check("text for an integer, a switch and a list reads as its type", ok("placement_database", "max_retries", "60") && ok("placement_database", "use_db_reconnect", "true") && ok("keystone_authtoken", "memcached_servers", "a:1,b:2"))
+      check("text that does not read as the type is refused", !ok("placement_database", "max_retries", "many") && !ok("placement_database", "use_db_reconnect", "yes please") && !ok("keystone_authtoken", "timeout", "slow"))
+      check(
+        "ConfFile.text names the path and lists every error",
+        scala.util.Try(ConfFile.text("/etc/x.conf", cat)(("api", "auth_strategi", "keystone"), ("nowhere", "k", "v"))).failed.toOption.exists(e => e.getMessage.startsWith("/etc/x.conf: ") && e.getMessage.contains("auth_strategy") && e.getMessage.contains("[nowhere]"))
+      )
+      check(
+        "a missing catalogue file says where to get one",
+        scala.util.Try(Catalogues.load("nova", from = java.nio.file.Paths.get("/nonexistent-dir"))).failed.toOption.exists(_.getMessage.contains("dump_oslo_options.sh"))
+      )
+    }
 
     // Secrets: nothing secret goes to the node in a check, and nothing is printed.
     {
