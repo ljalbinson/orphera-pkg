@@ -303,7 +303,8 @@ object neutron_single_node extends OrpheraClusterPlaybook:
 
   // The option lists of the image (neutron), from catalogues/. Every section and key of the
   // files below is checked against them when this manifest is built.
-  private val neutronCatalogue: Catalogue = Catalogues.load("neutron", Set.empty[String])
+  private val neutronCatalogue: Catalogue =
+    Catalogues.load("neutron", Set.empty[String])
   private val confResource = summon[Resource[ConfFile]]
 
   private val neutronConf: ConfFile =
@@ -314,12 +315,20 @@ object neutron_single_node extends OrpheraClusterPlaybook:
       ("DEFAULT", "core_plugin", "ml2"),
       ("DEFAULT", "service_plugins", ""),
       ("DEFAULT", "auth_strategy", "keystone"),
-      ("DEFAULT", "transport_url", s"rabbit://$rabbitUser:${rabbitPassword.reveal}@$rabbitIp:5672/$rabbitVhost"),
+      (
+        "DEFAULT",
+        "transport_url",
+        s"rabbit://$rabbitUser:${rabbitPassword.reveal}@$rabbitIp:5672/$rabbitVhost"
+      ),
       ("DEFAULT", "notify_nova_on_port_status_changes", "true"),
       ("DEFAULT", "notify_nova_on_port_data_changes", "true"),
       ("DEFAULT", "api_workers", "2"),
       ("DEFAULT", "rpc_workers", "2"),
-      ("database", "connection", s"mysql+pymysql://$dbUser:${dbPassword.reveal}@$vip:3306/$dbName"),
+      (
+        "database",
+        "connection",
+        s"mysql+pymysql://$dbUser:${dbPassword.reveal}@$vip:3306/$dbName"
+      ),
       ("keystone_authtoken", "www_authenticate_uri", s"$ksUrl"),
       ("keystone_authtoken", "auth_url", s"$ksUrl"),
       ("keystone_authtoken", "auth_type", "password"),
@@ -340,8 +349,16 @@ object neutron_single_node extends OrpheraClusterPlaybook:
       ("nova", "endpoint_type", "internal"),
       ("nova", "cafile", "/etc/neutron/ssl/ca.crt"),
       ("oslo_concurrency", "lock_path", "/var/lib/neutron/tmp"),
-      ("agent", "root_helper", "sudo neutron-rootwrap /etc/neutron/rootwrap.conf"),
-      ("agent", "root_helper_daemon", "sudo neutron-rootwrap-daemon /etc/neutron/rootwrap.conf")
+      (
+        "agent",
+        "root_helper",
+        "sudo neutron-rootwrap /etc/neutron/rootwrap.conf"
+      ),
+      (
+        "agent",
+        "root_helper_daemon",
+        "sudo neutron-rootwrap-daemon /etc/neutron/rootwrap.conf"
+      )
     )
 
   private val ml2ConfIni: ConfFile =
@@ -681,7 +698,9 @@ if __name__ == '__main__':
           )
           .task("write neutron.conf")(confResource.write(neutronConf))
           .task("write ml2_conf.ini")(confResource.write(ml2ConfIni))
-          .task("write openvswitch_agent.ini")(confResource.write(openvswitchAgentIni))
+          .task("write openvswitch_agent.ini")(
+            confResource.write(openvswitchAgentIni)
+          )
           .task("write dhcp_agent.ini")(confResource.write(dhcpAgentIni))
           .task("write the Kolla config for the three services")(
             Task.RunCommand(

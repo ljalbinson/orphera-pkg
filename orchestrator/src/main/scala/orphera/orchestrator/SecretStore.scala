@@ -20,8 +20,8 @@ import java.security.SecureRandom
 // identity file. Lose the identity file and the secrets are gone: back it up
 // somewhere other than the machine the secrets file is on.
 
-/** Encrypts and decrypts the store's bytes. `AgeCipher` is the real one; tests use
-  * a trivial one so the store's own logic can be checked without age.
+/** Encrypts and decrypts the store's bytes. `AgeCipher` is the real one; tests
+  * use a trivial one so the store's own logic can be checked without age.
   */
 trait Cipher:
   def encrypt(plain: String): Either[String, Array[Byte]]
@@ -36,29 +36,50 @@ final class AgeCipher(identityFile: Path) extends Cipher:
       .map(b => String(b, UTF_8).trim)
 
   def encrypt(plain: String): Either[String, Array[Byte]] =
-    recipient.flatMap(r => run(List("age", "-a", "-r", r), plain.getBytes(UTF_8)))
+    recipient.flatMap(r =>
+      run(List("age", "-a", "-r", r), plain.getBytes(UTF_8))
+    )
 
   def decrypt(data: Array[Byte]): Either[String, String] =
-    run(List("age", "-d", "-i", identityFile.toString), data).map(String(_, UTF_8))
+    run(List("age", "-d", "-i", identityFile.toString), data)
+      .map(String(_, UTF_8))
 
 object AgeCipher:
   /** Makes an identity file (mode 0600) and returns its public key. */
   def createIdentity(identityFile: Path): Either[String, String] =
-    scala.util.Try(Files.createDirectories(identityFile.getParent)).toEither.left.map(_.getMessage).flatMap { _ =>
-      for
-        _ <- run(List("age-keygen", "-o", identityFile.toString), Array.emptyByteArray)
-        pub <- run(List("age-keygen", "-y", identityFile.toString), Array.emptyByteArray)
-      yield String(pub, UTF_8).trim
-    }
+    scala.util
+      .Try(Files.createDirectories(identityFile.getParent))
+      .toEither
+      .left
+      .map(_.getMessage)
+      .flatMap { _ =>
+        for
+          _ <- run(
+            List("age-keygen", "-o", identityFile.toString),
+            Array.emptyByteArray
+          )
+          pub <- run(
+            List("age-keygen", "-y", identityFile.toString),
+            Array.emptyByteArray
+          )
+        yield String(pub, UTF_8).trim
+      }
 
-  private def run(command: List[String], stdin: Array[Byte]): Either[String, Array[Byte]] =
+  private def run(
+      command: List[String],
+      stdin: Array[Byte]
+  ): Either[String, Array[Byte]] =
     val errFile = Files.createTempFile("orphera-age", ".err")
     try
       val pb = new ProcessBuilder(command*)
       pb.redirectError(errFile.toFile)
       val p: Either[String, Process] =
         try Right(pb.start())
-        catch case e: java.io.IOException => Left(s"cannot run ${command.head}: ${e.getMessage}; is the age package installed?")
+        catch
+          case e: java.io.IOException =>
+            Left(
+              s"cannot run ${command.head}: ${e.getMessage}; is the age package installed?"
+            )
       p.flatMap { proc =>
         val writer = new Thread(() =>
           try
@@ -71,14 +92,21 @@ object AgeCipher:
         val code = proc.waitFor()
         writer.join()
         if code == 0 then Right(out)
-        else Left(s"${command.head} failed (exit $code): ${Files.readString(errFile).trim}")
+        else
+          Left(
+            s"${command.head} failed (exit $code): ${Files.readString(errFile).trim}"
+          )
       }
     finally Files.deleteIfExists(errFile)
 
-/** A name-to-value store in one encrypted file. Every change re-encrypts the whole
-  * file and replaces it atomically, mode 0600.
+/** A name-to-value store in one encrypted file. Every change re-encrypts the
+  * whole file and replaces it atomically, mode 0600.
   */
-final class SecretStore(file: Path, cipher: Cipher, generate: () => String = SecretStore.randomPassword):
+final class SecretStore(
+    file: Path,
+    cipher: Cipher,
+    generate: () => String = SecretStore.randomPassword
+):
   import SecretStore.*
 
   private def load(): Either[String, Map[String, String]] =
@@ -86,19 +114,36 @@ final class SecretStore(file: Path, cipher: Cipher, generate: () => String = Sec
     else
       for
         text <- cipher.decrypt(Files.readAllBytes(file))
-        json <- parser.parse(text).left.map(e => s"$file does not decrypt to a secrets table: ${e.getMessage}")
+        json <- parser
+          .parse(text)
+          .left
+          .map(e =>
+            s"$file does not decrypt to a secrets table: ${e.getMessage}"
+          )
         obj <- json.asObject.toRight(s"$file does not hold a secrets table")
-      yield obj.toMap.collect { case (k, v) if v.isString => k -> v.asString.get }
+      yield obj.toMap.collect {
+        case (k, v) if v.isString => k -> v.asString.get
+      }
 
   private def save(all: Map[String, String]): Either[String, Unit] =
-    val json = Json.obj(all.toList.sortBy(_._1).map((k, v) => k -> Json.fromString(v))*).spaces2
+    val json = Json
+      .obj(all.toList.sortBy(_._1).map((k, v) => k -> Json.fromString(v))*)
+      .spaces2
     cipher.encrypt(json).map { bytes =>
       val dir = file.toAbsolutePath.getParent
       Files.createDirectories(dir)
       val tmp = Files.createTempFile(dir, ".secrets-", ".tmp")
-      Files.setPosixFilePermissions(tmp, PosixFilePermissions.fromString("rw-------"))
+      Files.setPosixFilePermissions(
+        tmp,
+        PosixFilePermissions.fromString("rw-------")
+      )
       Files.write(tmp, bytes)
-      Files.move(tmp, file, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+      Files.move(
+        tmp,
+        file,
+        StandardCopyOption.ATOMIC_MOVE,
+        StandardCopyOption.REPLACE_EXISTING
+      )
       ()
     }
 
@@ -114,7 +159,7 @@ final class SecretStore(file: Path, cipher: Cipher, generate: () => String = Sec
       all <- load()
       value <- all.get(name) match
         case Some(v) => Right(v)
-        case None =>
+        case None    =>
           val v = generate()
           save(all + (name -> v)).map(_ => v)
     yield value
@@ -139,25 +184,36 @@ object SecretStore:
   private val NamePattern = "[A-Za-z0-9][A-Za-z0-9_./-]*".r
 
   def validName(name: String): Either[String, Unit] =
-    Either.cond(NamePattern.matches(name), (), s"`$name` is not a secret name: use letters, digits and _ . / -, like placement/db")
+    Either.cond(
+      NamePattern.matches(name),
+      (),
+      s"`$name` is not a secret name: use letters, digits and _ . / -, like placement/db"
+    )
 
   private val alphabet = (('a' to 'z') ++ ('A' to 'Z') ++ ('0' to '9')).toArray
   private val random = new SecureRandom()
 
-  /** 24 letters and digits: about 143 bits, and safe in a URL or a shell word. */
+  /** 24 letters and digits: about 143 bits, and safe in a URL or a shell word.
+    */
   def randomPassword(): String =
     String.valueOf(Array.fill(24)(alphabet(random.nextInt(alphabet.length))))
 
   def home: Path = Paths.get(sys.props.getOrElse("user.home", "."))
 
   def secretsFile: Path =
-    sys.env.get("ORPHERA_SECRETS").map(Paths.get(_)).getOrElse(home.resolve(".config/orphera/secrets.age"))
+    sys.env
+      .get("ORPHERA_SECRETS")
+      .map(Paths.get(_))
+      .getOrElse(home.resolve(".config/orphera/secrets.age"))
 
   def identityFile: Path =
-    sys.env.get("ORPHERA_AGE_KEY").map(Paths.get(_)).getOrElse(home.resolve(".config/orphera/age.key"))
+    sys.env
+      .get("ORPHERA_AGE_KEY")
+      .map(Paths.get(_))
+      .getOrElse(home.resolve(".config/orphera/age.key"))
 
-  /** The store a playbook uses: the default files, age. Fails with what to do when
-    * there is no identity yet.
+  /** The store a playbook uses: the default files, age. Fails with what to do
+    * when there is no identity yet.
     */
   def default(): Either[String, SecretStore] =
     Either.cond(

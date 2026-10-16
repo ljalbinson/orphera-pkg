@@ -4,8 +4,8 @@ package orphera.orchestrator
 
 import java.nio.file.Files
 
-/** `orphera secrets ...`: look after the store from the command line. The values
-  * are shown only by `get`.
+/** `orphera secrets ...`: look after the store from the command line. The
+  * values are shown only by `get`.
   */
 object SecretsTool:
   val usage: String =
@@ -28,11 +28,12 @@ object SecretsTool:
         withStore { s =>
           s.get(name).flatMap {
             case Some(_) => println(s"$name exists"); Right(())
-            case None    => s.getOrCreate(name).map(_ => println(s"$name created"))
+            case None => s.getOrCreate(name).map(_ => println(s"$name created"))
           }
         }
       case "set" :: name :: Nil =>
-        val value = Option(scala.io.StdIn.readLine()).map(_.stripLineEnd).getOrElse("")
+        val value =
+          Option(scala.io.StdIn.readLine()).map(_.stripLineEnd).getOrElse("")
         withStore(_.set(name, value).map(_ => println(s"$name stored")))
       case "get" :: name :: Nil =>
         withStore(_.get(name).flatMap {
@@ -40,7 +41,11 @@ object SecretsTool:
           case None    => Left(s"no secret called $name")
         })
       case "rm" :: name :: Nil =>
-        withStore(_.remove(name).map(r => println(if r then s"$name removed" else s"$name was not there")))
+        withStore(
+          _.remove(name).map(r =>
+            println(if r then s"$name removed" else s"$name was not there")
+          )
+        )
       case _ =>
         println(usage)
         1
@@ -61,7 +66,11 @@ object SecretsTool:
         case Right(pub) =>
           println(s"identity made:   $id")
           println(s"public key:      $pub")
-          println(s"secrets file:    ${SecretStore.secretsFile} (made on first use)")
-          println("Back the identity file up somewhere else. Without it the secrets cannot be read.")
+          println(
+            s"secrets file:    ${SecretStore.secretsFile} (made on first use)"
+          )
+          println(
+            "Back the identity file up somewhere else. Without it the secrets cannot be read."
+          )
           0
         case Left(msg) => System.err.println(s"Error: $msg"); 1

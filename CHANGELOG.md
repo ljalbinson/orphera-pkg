@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Security — private keys out of the repository, and no command lines in the agent's log
+- `certs/ca.key`, `certs/server.key`, `certs/ca.srl` and `certs/server.csr` were committed (the README said they were ignored).
+  They are no longer tracked and `certs/*.key`, `*.srl` and `*.csr` are in `.gitignore`. They remain in earlier commits, so
+  any CA or server key made before this change must be replaced: `make certs`, rebuild the agent package, `orphera deploy-agent`.
+- The agent no longer writes `[DEBUG-CMD]` lines: they put every command's arguments, passwords included, in the node's journal.
+  Needs an agent rebuild and redeploy to take effect.
+
 ### Changed — every playbook holds its passwords as `Secret`, not `String`
 - Keystone, Glance, Cinder, Nova, Neutron, Nova compute, Horizon, Galera, haproxy, WordPress and extended observability use
   `Secrets.secret(...)` and write `.reveal` where a password goes into a command or a file. No password prints by accident any more.

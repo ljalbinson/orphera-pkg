@@ -220,7 +220,8 @@ object nova_single_node extends OrpheraClusterPlaybook:
 
   // The option lists of the image (nova), from catalogues/. Every section and key of the
   // files below is checked against them when this manifest is built.
-  private val novaCatalogue: Catalogue = Catalogues.load("nova", Set("service_user"))
+  private val novaCatalogue: Catalogue =
+    Catalogues.load("nova", Set("service_user"))
   private val confResource = summon[Resource[ConfFile]]
 
   private val novaConf: ConfFile =
@@ -229,10 +230,22 @@ object nova_single_node extends OrpheraClusterPlaybook:
       ("DEFAULT", "state_path", "/var/lib/nova"),
       ("DEFAULT", "use_stderr", "true"),
       ("DEFAULT", "my_ip", s"$nodeIp"),
-      ("DEFAULT", "transport_url", s"rabbit://$rabbitUser:${rabbitPassword.reveal}@$rabbitIp:5672/$rabbitVhost"),
+      (
+        "DEFAULT",
+        "transport_url",
+        s"rabbit://$rabbitUser:${rabbitPassword.reveal}@$rabbitIp:5672/$rabbitVhost"
+      ),
       ("api", "auth_strategy", "keystone"),
-      ("api_database", "connection", s"mysql+pymysql://$dbUser:${dbPassword.reveal}@$vip:3306/nova_api"),
-      ("database", "connection", s"mysql+pymysql://$dbUser:${dbPassword.reveal}@$vip:3306/nova"),
+      (
+        "api_database",
+        "connection",
+        s"mysql+pymysql://$dbUser:${dbPassword.reveal}@$vip:3306/nova_api"
+      ),
+      (
+        "database",
+        "connection",
+        s"mysql+pymysql://$dbUser:${dbPassword.reveal}@$vip:3306/nova"
+      ),
       ("keystone_authtoken", "www_authenticate_uri", s"$ksUrl"),
       ("keystone_authtoken", "auth_url", s"$ksUrl"),
       ("keystone_authtoken", "auth_type", "password"),

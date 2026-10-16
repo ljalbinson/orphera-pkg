@@ -5,8 +5,8 @@ package orphera.orchestrator
 import orphera.common.Event
 import java.util.concurrent.ConcurrentHashMap
 
-/** Secrets: `get` returns a named secret from the encrypted store (SecretStore.scala);
-  * the rest keeps secret values out of the output.
+/** Secrets: `get` returns a named secret from the encrypted store
+  * (SecretStore.scala); the rest keeps secret values out of the output.
   *
   * Values that must not appear in what the orchestrator prints or logs:
   * passwords, tokens, connection strings with credentials. A playbook (or a
@@ -43,23 +43,27 @@ object Secrets:
   private def theStore: SecretStore = this.synchronized {
     store match
       case Some(s) => s
-      case None =>
-        val s = SecretStore.default().fold(msg => throw new RuntimeException(msg), identity)
+      case None    =>
+        val s = SecretStore
+          .default()
+          .fold(msg => throw new RuntimeException(msg), identity)
         store = Some(s)
         s
   }
 
-  /** The secret called `name` (like `placement/db`), made and stored on first use,
-    * and registered so that it is hidden from the output. Throws, saying what to
-    * do, when there is no store yet.
+  /** The secret called `name` (like `placement/db`), made and stored on first
+    * use, and registered so that it is hidden from the output. Throws, saying
+    * what to do, when there is no store yet.
     */
   def get(name: String): String =
-    val value = theStore.getOrCreate(name).fold(msg => throw new RuntimeException(s"secret $name: $msg"), identity)
+    val value = theStore
+      .getOrCreate(name)
+      .fold(msg => throw new RuntimeException(s"secret $name: $msg"), identity)
     register(value)
     value
 
-  /** Like `get`, but as a `Secret`, which does not print. Prefer this one: the text
-    * is only available through `.reveal`, where a playbook needs it.
+  /** Like `get`, but as a `Secret`, which does not print. Prefer this one: the
+    * text is only available through `.reveal`, where a playbook needs it.
     */
   def secret(name: String): Secret = Secret(get(name))
 
