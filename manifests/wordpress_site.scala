@@ -63,7 +63,7 @@ object wordpress_site extends OrpheraClusterPlaybook:
   // anywhere real credentials matter.
   private val dbName = "wordpress"
   private val dbUser = "wordpress_user"
-  private val dbPassword = Secrets.get("wordpress/db")
+  private val dbPassword = Secrets.secret("wordpress/db")
 
   // The floating IP mariadb_haproxy_keepalived.scala adds to whichever of
   // tst3/tst4/tst5 currently holds it — WordPress never needs to know
@@ -80,7 +80,7 @@ object wordpress_site extends OrpheraClusterPlaybook:
   // reason mariadb_haproxy_keepalived.scala's own clustercheck user needed
   // `@'%'` rather than a specific host).
   private val createDatabaseScript =
-    s"""mariadb -N -e "CREATE DATABASE IF NOT EXISTS $dbName; CREATE USER IF NOT EXISTS '$dbUser'@'%' IDENTIFIED BY '$dbPassword'; GRANT ALL PRIVILEGES ON $dbName.* TO '$dbUser'@'%'; FLUSH PRIVILEGES;""""
+    s"""mariadb -N -e "CREATE DATABASE IF NOT EXISTS $dbName; CREATE USER IF NOT EXISTS '$dbUser'@'%' IDENTIFIED BY '${dbPassword.reveal}'; GRANT ALL PRIVILEGES ON $dbName.* TO '$dbUser'@'%'; FLUSH PRIVILEGES;""""
 
   // tst7 only. Ubuntu 24.04's default PHP is 8.3; the packages below are
   // the minimum WordPress core actually needs (mysqli driver, image
@@ -143,7 +143,7 @@ object wordpress_site extends OrpheraClusterPlaybook:
          |<?php
          |define( 'DB_NAME', '$dbName' );
          |define( 'DB_USER', '$dbUser' );
-         |define( 'DB_PASSWORD', '$dbPassword' );
+         |define( 'DB_PASSWORD', '${dbPassword.reveal}' );
          |define( 'DB_HOST', '$vip:3306' );
          |define( 'DB_CHARSET', 'utf8mb4' );
          |define( 'DB_COLLATE', '' );

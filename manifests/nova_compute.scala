@@ -64,10 +64,10 @@ object nova_compute extends OrpheraClusterPlaybook:
 
   private val rabbitIp = "10.10.5.22"
   private val novaRabbitUser = "nova"
-  private val novaRabbitPassword = Secrets.get("nova/rabbit")
+  private val novaRabbitPassword = Secrets.secret("nova/rabbit")
   private val novaRabbitVhost = "nova"
   private val neutronRabbitUser = "neutron"
-  private val neutronRabbitPassword = Secrets.get("neutron/rabbit")
+  private val neutronRabbitPassword = Secrets.secret("neutron/rabbit")
   private val neutronRabbitVhost = "neutron"
 
   private val ksFqdn = "tst6.ljalbinson.com"
@@ -80,9 +80,9 @@ object nova_compute extends OrpheraClusterPlaybook:
   private val registry = "quay.io/openstack.kolla"
   private val cacheHostPort = "tst9.ljalbinson.com:5000"
 
-  private val adminPassword = Secrets.get("keystone/admin")
-  private val novaPassword = Secrets.get("nova/service")
-  private val neutronPassword = Secrets.get("neutron/service")
+  private val adminPassword = Secrets.secret("keystone/admin")
+  private val novaPassword = Secrets.secret("nova/service")
+  private val neutronPassword = Secrets.secret("neutron/service")
 
   private val confRoot = "/etc/kolla"
   private val novaSrcDir = "/etc/kolla/nova-compute-src"
@@ -358,7 +358,7 @@ object nova_compute extends OrpheraClusterPlaybook:
        |instances_path = /var/lib/nova/instances
        |use_stderr = true
        |compute_driver = libvirt.LibvirtDriver
-       |transport_url = rabbit://$novaRabbitUser:$novaRabbitPassword@$rabbitIp:5672/$novaRabbitVhost
+       |transport_url = rabbit://$novaRabbitUser:${novaRabbitPassword.reveal}@$rabbitIp:5672/$novaRabbitVhost
        |force_config_drive = true
        |vif_plugging_is_fatal = true
        |vif_plugging_timeout = 120
@@ -374,7 +374,7 @@ object nova_compute extends OrpheraClusterPlaybook:
        |user_domain_name = Default
        |project_name = service
        |username = nova
-       |password = $novaPassword
+       |password = ${novaPassword.reveal}
        |cafile = /etc/nova/ssl/ca.crt
        |
        |[service_user]
@@ -385,7 +385,7 @@ object nova_compute extends OrpheraClusterPlaybook:
        |user_domain_name = Default
        |project_name = service
        |username = nova
-       |password = $novaPassword
+       |password = ${novaPassword.reveal}
        |cafile = /etc/nova/ssl/ca.crt
        |
        |[placement]
@@ -395,7 +395,7 @@ object nova_compute extends OrpheraClusterPlaybook:
        |user_domain_name = Default
        |project_name = service
        |username = nova
-       |password = $novaPassword
+       |password = ${novaPassword.reveal}
        |region_name = RegionOne
        |valid_interfaces = internal
        |cafile = /etc/nova/ssl/ca.crt
@@ -412,7 +412,7 @@ object nova_compute extends OrpheraClusterPlaybook:
        |region_name = RegionOne
        |project_name = service
        |username = neutron
-       |password = $neutronPassword
+       |password = ${neutronPassword.reveal}
        |valid_interfaces = internal
        |cafile = /etc/nova/ssl/ca.crt
        |
@@ -440,7 +440,7 @@ object nova_compute extends OrpheraClusterPlaybook:
        |use_stderr = true
        |core_plugin = ml2
        |auth_strategy = keystone
-       |transport_url = rabbit://$neutronRabbitUser:$neutronRabbitPassword@$rabbitIp:5672/$neutronRabbitVhost
+       |transport_url = rabbit://$neutronRabbitUser:${neutronRabbitPassword.reveal}@$rabbitIp:5672/$neutronRabbitVhost
        |
        |[oslo_concurrency]
        |lock_path = /var/lib/neutron/tmp
@@ -746,7 +746,7 @@ if __name__ == '__main__':
         .replace("@@NOVA@@", novaApi)
         .replace("@@NEUTRON@@", neutronApi)
         .replace("@@GLANCE@@", glanceApi)
-        .replace("@@ADMINPW@@", adminPassword)
+        .replace("@@ADMINPW@@", adminPassword.reveal)
         .replace("@@PHYSNET@@", physnet)
         .replace("@@CA@@", s"$caDir/ca.crt") +
       "\nPYEOF\nchmod 700 /usr/local/sbin/orphera-compute-api\necho wrote /usr/local/sbin/orphera-compute-api\n"

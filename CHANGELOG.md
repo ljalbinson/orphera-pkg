@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed — every playbook holds its passwords as `Secret`, not `String`
+- Keystone, Glance, Cinder, Nova, Neutron, Nova compute, Horizon, Galera, haproxy, WordPress and extended observability use
+  `Secrets.secret(...)` and write `.reveal` where a password goes into a command or a file. No password prints by accident any more.
+  `Secrets.get` (a `String`) remains for code that needs one.
+
 ### Added — `Secret`, a value that does not print (`Secret.scala`, `Secrets.secret`)
 - `Secrets.secret("placement/db")` is like `Secrets.get` but returns a `Secret`: its `toString`, string interpolation and any log
   line give `<redacted>`, and the text is available only as `.reveal`, so each place a playbook puts a password into a command or a

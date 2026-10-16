@@ -80,7 +80,7 @@ object observability_extended extends OrpheraClusterPlaybook:
   // Test-only credential, same disclaimer as every other hardcoded
   // password in this project.
   private val exporterUser = "exporter"
-  private val exporterPassword = Secrets.get("observability/mysqld-exporter")
+  private val exporterPassword = Secrets.secret("observability/mysqld-exporter")
 
   // tst3/tst4/tst5 only. Appends (idempotently) a small Prometheus-format
   // stats frontend to the haproxy.cfg that mariadb_haproxy_keepalived.scala
@@ -115,7 +115,7 @@ object observability_extended extends OrpheraClusterPlaybook:
   // tst3 only — see header comment for why '@localhost' (not '@%') is
   // sufficient here, unlike clustercheckUser.
   private val createExporterUserScript =
-    s"""mariadb -N -e "CREATE USER IF NOT EXISTS '$exporterUser'@'localhost' IDENTIFIED BY '$exporterPassword'; GRANT PROCESS, REPLICATION CLIENT, SELECT ON *.* TO '$exporterUser'@'localhost'; FLUSH PRIVILEGES;""""
+    s"""mariadb -N -e "CREATE USER IF NOT EXISTS '$exporterUser'@'localhost' IDENTIFIED BY '${exporterPassword.reveal}'; GRANT PROCESS, REPLICATION CLIENT, SELECT ON *.* TO '$exporterUser'@'localhost'; FLUSH PRIVILEGES;""""
 
   // tst3/tst4/tst5 only.
   //
@@ -187,7 +187,7 @@ object observability_extended extends OrpheraClusterPlaybook:
     s"""cat > /etc/prometheus-mysqld-exporter.cnf <<EOF
        |[client]
        |user = $exporterUser
-       |password = $exporterPassword
+       |password = ${exporterPassword.reveal}
        |socket = /run/mysqld/mysqld.sock
        |EOF
        |chown root:prometheus /etc/prometheus-mysqld-exporter.cnf

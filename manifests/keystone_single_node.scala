@@ -74,8 +74,8 @@ object keystone_single_node extends OrpheraClusterPlaybook:
 
   private val dbName = "keystone"
   private val dbUser = "keystone"
-  private val dbPassword = Secrets.get("keystone/db")
-  private val adminPassword = Secrets.get("keystone/admin")
+  private val dbPassword = Secrets.secret("keystone/db")
+  private val adminPassword = Secrets.secret("keystone/admin")
 
   // Floating IP held by keepalived on whichever of tst3-tst5 is current.
   private val vip = "10.10.5.100"
@@ -140,7 +140,7 @@ object keystone_single_node extends OrpheraClusterPlaybook:
   // same reason as wordpress_site.scala: haproxy's tcp mode hides the real
   // client address.
   private val createDatabaseScript =
-    s"""mariadb -N -e "CREATE DATABASE IF NOT EXISTS $dbName; CREATE USER IF NOT EXISTS '$dbUser'@'%' IDENTIFIED BY '$dbPassword'; GRANT ALL PRIVILEGES ON $dbName.* TO '$dbUser'@'%'; FLUSH PRIVILEGES;""""
+    s"""mariadb -N -e "CREATE DATABASE IF NOT EXISTS $dbName; CREATE USER IF NOT EXISTS '$dbUser'@'%' IDENTIFIED BY '${dbPassword.reveal}'; GRANT ALL PRIVILEGES ON $dbName.* TO '$dbUser'@'%'; FLUSH PRIVILEGES;""""
 
   private val pullScript =
     s"""${Pull.shellFunction(
@@ -201,7 +201,7 @@ object keystone_single_node extends OrpheraClusterPlaybook:
     ConfFile.text(s"$confDir/keystone.conf", keystoneCatalogue)(
       ("DEFAULT", "log_dir", "/var/log/kolla/keystone"),
       ("DEFAULT", "use_stderr", "true"),
-      ("database", "connection", s"mysql+pymysql://$dbUser:$dbPassword@$vip:3306/$dbName"),
+      ("database", "connection", s"mysql+pymysql://$dbUser:${dbPassword.reveal}@$vip:3306/$dbName"),
       ("token", "provider", "fernet")
     )
 
@@ -291,7 +291,7 @@ object keystone_single_node extends OrpheraClusterPlaybook:
        |ks db_sync
        |[ -f $dataDir/fernet-keys/0 ] || ks fernet_setup --keystone-user keystone --keystone-group keystone
        |[ -f $dataDir/credential-keys/0 ] || ks credential_setup --keystone-user keystone --keystone-group keystone
-       |ks bootstrap --bootstrap-password '$adminPassword' --bootstrap-admin-url $endpoint --bootstrap-internal-url $endpoint --bootstrap-public-url $endpoint --bootstrap-region-id RegionOne
+       |ks bootstrap --bootstrap-password '${adminPassword.reveal}' --bootstrap-admin-url $endpoint --bootstrap-internal-url $endpoint --bootstrap-public-url $endpoint --bootstrap-region-id RegionOne
        |echo "keystone database, keys and bootstrap done"""".stripMargin
 
   // Prints a scoped admin token on stdout. Used by the confirm stage and by
@@ -299,7 +299,7 @@ object keystone_single_node extends OrpheraClusterPlaybook:
   private val tokenHelperScript =
     s"""cat > /usr/local/sbin/keystone-admin-token <<'HELPER'
        |#!/bin/sh
-       |curl -s --cacert $caCert -D - -o /dev/null -H 'Content-Type: application/json' -d '{"auth":{"identity":{"methods":["password"],"password":{"user":{"name":"admin","domain":{"name":"Default"},"password":"$adminPassword"}}},"scope":{"project":{"name":"admin","domain":{"name":"Default"}}}}}' https://$fqdn:5000/v3/auth/tokens | tr -d '\\r' | awk -F': ' 'tolower($$1)=="x-subject-token"{print $$2}'
+       |curl -s --cacert $caCert -D - -o /dev/null -H 'Content-Type: application/json' -d '{"auth":{"identity":{"methods":["password"],"password":{"user":{"name":"admin","domain":{"name":"Default"},"password":"${adminPassword.reveal}"}}},"scope":{"project":{"name":"admin","domain":{"name":"Default"}}}}}' https://$fqdn:5000/v3/auth/tokens | tr -d '\\r' | awk -F': ' 'tolower($$1)=="x-subject-token"{print $$2}'
        |HELPER
        |chmod 700 /usr/local/sbin/keystone-admin-token
        |echo "wrote /usr/local/sbin/keystone-admin-token"""".stripMargin

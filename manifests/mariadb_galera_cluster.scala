@@ -67,7 +67,7 @@ object mariadb_galera_cluster extends OrpheraClusterPlaybook:
   // Confirm this assumption on first real run — if it's wrong, every
   // `mariadb -N -e` call below will fail to connect at all, which is an
   // easy, loud failure to spot, not a silent wrong result.
-  private val sstPassword = Secrets.get("galera/sst")
+  private val sstPassword = Secrets.secret("galera/sst")
 
   private val clusterName = "orphera-galera-test"
 
@@ -118,7 +118,7 @@ object mariadb_galera_cluster extends OrpheraClusterPlaybook:
        |wsrep_node_address="{{cluster_ip}}"
        |wsrep_node_name="$$NAME"
        |wsrep_sst_method=mariabackup
-       |wsrep_sst_auth="sst_user:$sstPassword"
+       |wsrep_sst_auth="sst_user:${sstPassword.reveal}"
        |binlog_format=ROW
        |default_storage_engine=InnoDB
        |innodb_autoinc_lock_mode=2
@@ -196,7 +196,7 @@ object mariadb_galera_cluster extends OrpheraClusterPlaybook:
        |fi
        |# Idempotent regardless of the branch above: IF NOT EXISTS/re-GRANTing
        |# an existing user and privileges is a no-op, not an error.
-       |mariadb -N -e "CREATE USER IF NOT EXISTS 'sst_user'@'%' IDENTIFIED BY '$sstPassword'; GRANT RELOAD, LOCK TABLES, PROCESS, REPLICATION CLIENT ON *.* TO 'sst_user'@'%'; FLUSH PRIVILEGES;"""".stripMargin
+       |mariadb -N -e "CREATE USER IF NOT EXISTS 'sst_user'@'%' IDENTIFIED BY '${sstPassword.reveal}'; GRANT RELOAD, LOCK TABLES, PROCESS, REPLICATION CLIENT ON *.* TO 'sst_user'@'%'; FLUSH PRIVILEGES;"""".stripMargin
 
   // tst4/tst5 only. A normal `systemctl start mariadb` — no bootstrap
   // flag — which makes this node try to connect to the peers already

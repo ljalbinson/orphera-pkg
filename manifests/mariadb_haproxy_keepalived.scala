@@ -68,7 +68,7 @@ object mariadb_haproxy_keepalived extends OrpheraClusterPlaybook:
   // real. clustercheck gets USAGE only (just enough to connect and run
   // SHOW STATUS) — it never touches any actual data.
   private val clustercheckUser = "clustercheck"
-  private val clustercheckPassword = Secrets.get("galera/clustercheck")
+  private val clustercheckPassword = Secrets.secret("galera/clustercheck")
   private val vrrpAuthPass = "orphera-test-vrrp-pass"
 
   // Created once, on tst3 only — like sst_user in mariadb_galera_cluster.scala,
@@ -92,7 +92,7 @@ object mariadb_haproxy_keepalived extends OrpheraClusterPlaybook:
   // connection paths (local socket for health checks, proxied TCP for
   // everything else), not a redundant belt-and-suspenders pair.
   private val createClustercheckUserScript =
-    s"""mariadb -N -e "CREATE USER IF NOT EXISTS '$clustercheckUser'@'localhost' IDENTIFIED BY '$clustercheckPassword'; GRANT USAGE ON *.* TO '$clustercheckUser'@'localhost'; CREATE USER IF NOT EXISTS '$clustercheckUser'@'%' IDENTIFIED BY '$clustercheckPassword'; GRANT USAGE ON *.* TO '$clustercheckUser'@'%'; FLUSH PRIVILEGES;""""
+    s"""mariadb -N -e "CREATE USER IF NOT EXISTS '$clustercheckUser'@'localhost' IDENTIFIED BY '${clustercheckPassword.reveal}'; GRANT USAGE ON *.* TO '$clustercheckUser'@'localhost'; CREATE USER IF NOT EXISTS '$clustercheckUser'@'%' IDENTIFIED BY '${clustercheckPassword.reveal}'; GRANT USAGE ON *.* TO '$clustercheckUser'@'%'; FLUSH PRIVILEGES;""""
 
   // Plain HTTP-over-a-raw-socket responder (no framework/HTTP server
   // needed for one canned response) — reads and discards the request
@@ -107,7 +107,7 @@ object mariadb_haproxy_keepalived extends OrpheraClusterPlaybook:
     raw"""#!/bin/bash
          |# HTTP 200 when this node is Synced (wsrep_local_state = 4), 503 otherwise.
          |while read -t 1 -r line; do line=$${line%$$'\r'}; [ -z "$$line" ] && break; done
-         |STATE=$$(mariadb --connect-timeout=2 -u$clustercheckUser -p$clustercheckPassword -sN \
+         |STATE=$$(mariadb --connect-timeout=2 -u$clustercheckUser -p${clustercheckPassword.reveal} -sN \
          |  -e "SHOW GLOBAL STATUS LIKE 'wsrep_local_state'" 2>/dev/null | awk '{print $$2}')
          |if [ "$$STATE" = "4" ]; then
          |  printf 'HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\nGalera node is synced.\n'
@@ -335,7 +335,7 @@ object mariadb_haproxy_keepalived extends OrpheraClusterPlaybook:
   // isolation. Reuses the clustercheck user (password auth, already
   // created) rather than adding a second test-only credential.
   private val vipConnectivityScript =
-    s"""mariadb -h $vip -P 3306 -u$clustercheckUser -p$clustercheckPassword -N -e "SELECT CONCAT('served by ', @@hostname)""""
+    s"""mariadb -h $vip -P 3306 -u$clustercheckUser -p${clustercheckPassword.reveal} -N -e "SELECT CONCAT('served by ', @@hostname)""""
 
   val playbook: ClusterPlaybook =
     clusterPlaybook("mariadb-haproxy-keepalived")(
