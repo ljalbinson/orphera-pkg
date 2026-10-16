@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — `make certs DOMAIN=...` and `make certs-clean` (`utils/gen-certs.sh`)
+- The README described these targets, but the Makefile did not have them and the CA had been made by hand. `utils/gen-certs.sh`
+  makes the CA and the wildcard server certificate (mode 600 keys, SAN `*.DOMAIN`, localhost and 127.0.0.1, server-auth usage)
+  and refuses to replace an existing CA. Replacing a CA means reinstalling every agent: `orphera bootstrap --file <deb> --nodes ...`
+  (over SSH, so the old certificate need not be trusted).
+
 ### Security — private keys out of the repository, and no command lines in the agent's log
 - `certs/ca.key`, `certs/server.key`, `certs/ca.srl` and `certs/server.csr` were committed (the README said they were ignored).
   They are no longer tracked and `certs/*.key`, `*.srl` and `*.csr` are in `.gitignore`. They remain in earlier commits, so
