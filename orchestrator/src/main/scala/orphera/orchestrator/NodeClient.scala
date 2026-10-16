@@ -24,7 +24,7 @@ object NodeClient:
 
   private def authMetadata(): Metadata =
     val metadata = new Metadata()
-    metadata.put(Auth.TokenKey, Auth.SharedToken)
+    metadata.put(Auth.TokenKey, AgentToken.current)
     metadata
 
   def installPackages(

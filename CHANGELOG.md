@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Security — the agent token comes from the secret store (`AgentToken.scala`, `utils/set-agent-token.sh`)
+- The orchestrator sent, and the agents accepted, the built-in `dev-only-insecure-token` whenever `ORPHERA_TOKEN` was not set, and
+  the packaged `agent.env` leaves it unset. The orchestrator now takes the token from `ORPHERA_TOKEN`, else from the secret store
+  (`orphera secrets generate orphera/agent-token`), and warns on stderr when it has to use the built-in one.
+  `utils/set-agent-token.sh <node>...` writes the stored token to each agent's `agent.env` (over ssh stdin, mode 600) and restarts
+  the agent.
+
 ### Security — private keys out of the repository, and no command lines in the agent's log
 - `certs/ca.key`, `certs/server.key`, `certs/ca.srl` and `certs/server.csr` were committed (the README said they were ignored).
   They are no longer tracked and `certs/*.key`, `*.srl` and `*.csr` are in `.gitignore`. They remain in earlier commits, so
