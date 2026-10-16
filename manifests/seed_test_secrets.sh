@@ -42,4 +42,6 @@ seed nova/rabbit           orphera-test-nova-rabbit-password
 seed neutron/db            orphera-test-neutron-db-password
 seed neutron/service       orphera-test-neutron-service-password
 seed neutron/rabbit        orphera-test-neutron-rabbit-password
+seed wordpress/db           orphera-test-wordpress-password
+seed observability/mysqld-exporter orphera-test-mysqld-exporter-password
 seed horizon/secret-key    orphera-test-horizon-secret-key-not-for-real-use

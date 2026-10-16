@@ -63,7 +63,7 @@ object wordpress_site extends OrpheraClusterPlaybook:
   // anywhere real credentials matter.
   private val dbName = "wordpress"
   private val dbUser = "wordpress_user"
-  private val dbPassword = "orphera-test-wordpress-password"
+  private val dbPassword = Secrets.get("wordpress/db")
 
   // The floating IP mariadb_haproxy_keepalived.scala adds to whichever of
   // tst3/tst4/tst5 currently holds it — WordPress never needs to know

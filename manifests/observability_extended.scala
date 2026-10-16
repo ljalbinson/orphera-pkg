@@ -80,7 +80,7 @@ object observability_extended extends OrpheraClusterPlaybook:
   // Test-only credential, same disclaimer as every other hardcoded
   // password in this project.
   private val exporterUser = "exporter"
-  private val exporterPassword = "orphera-test-mysqld-exporter-password"
+  private val exporterPassword = Secrets.get("observability/mysqld-exporter")
 
   // tst3/tst4/tst5 only. Appends (idempotently) a small Prometheus-format
   // stats frontend to the haproxy.cfg that mariadb_haproxy_keepalived.scala
