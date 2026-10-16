@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed — the Galera and haproxy playbooks read their passwords from the secret store
+- The Galera SST password (`galera/sst`) and the clustercheck password (`galera/clustercheck`) are `Secrets.get(...)`, hidden from
+  the output, and `test_vip_failover.sh` reads the clustercheck password from the store. A cluster built earlier keeps the
+  old values in its database users: run `manifests/seed_test_secrets.sh` (lab) or `orphera secrets set` with the values in use
+  before applying these playbooks to it. `mariadb_galera_cluster.yaml` is unchanged: it shows the YAML-only form.
+
 ### Changed — the Horizon and Nova compute playbooks read their passwords from the secret store
 - Horizon's admin password and `SECRET_KEY`, and Nova compute's admin, service and RabbitMQ passwords, are
   `Secrets.get(...)`, the same names the control-plane playbooks use. These two did not hide their passwords from the

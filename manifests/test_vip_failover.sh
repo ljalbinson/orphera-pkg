@@ -61,8 +61,7 @@ SSH_USER="localadmin"       # the real login on these nodes — confirmed
                              # mistake; fixed there too).
 VIP="10.10.5.100"
 CLUSTERCHECK_USER="clustercheck"
-CLUSTERCHECK_PASSWORD="orphera-test-clustercheck-password"   # must match
-                             # mariadb_haproxy_keepalived.scala's own val.
+CLUSTERCHECK_PASSWORD=$(orphera secrets get galera/clustercheck)   # the value the playbook uses
 
 PASS=0
 FAIL=0

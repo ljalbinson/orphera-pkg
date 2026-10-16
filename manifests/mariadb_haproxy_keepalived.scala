@@ -68,7 +68,7 @@ object mariadb_haproxy_keepalived extends OrpheraClusterPlaybook:
   // real. clustercheck gets USAGE only (just enough to connect and run
   // SHOW STATUS) — it never touches any actual data.
   private val clustercheckUser = "clustercheck"
-  private val clustercheckPassword = "orphera-test-clustercheck-password"
+  private val clustercheckPassword = Secrets.get("galera/clustercheck")
   private val vrrpAuthPass = "orphera-test-vrrp-pass"
 
   // Created once, on tst3 only — like sst_user in mariadb_galera_cluster.scala,

@@ -67,7 +67,7 @@ object mariadb_galera_cluster extends OrpheraClusterPlaybook:
   // Confirm this assumption on first real run — if it's wrong, every
   // `mariadb -N -e` call below will fail to connect at all, which is an
   // easy, loud failure to spot, not a silent wrong result.
-  private val sstPassword = "orphera-test-sst-password"
+  private val sstPassword = Secrets.get("galera/sst")
 
   private val clusterName = "orphera-galera-test"
 
