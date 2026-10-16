@@ -99,6 +99,15 @@ clean:
 test:
 	sbt test "orchestrator/Test/runMain orphera.orchestrator.kolla.ContainerCheck" "orchestrator/Test/runMain orphera.orchestrator.conf.ConfCheck" "orchestrator/Test/runMain orphera.orchestrator.SecretsCheck"
 
+# A new CA and wildcard server certificate (see utils/gen-certs.sh). Refuses to replace an existing CA.
+certs:
+	@test -n "$(DOMAIN)" || (echo "usage: make certs DOMAIN=yourdomain.com" && exit 1)
+	utils/gen-certs.sh $(DOMAIN)
+
+# Deletes certs/ after confirmation. Every agent that has the old certificate must be reinstalled afterwards.
+certs-clean:
+	@printf 'Delete $(CERTS_DIR)/ (CA and server keys)? Type yes: ' && read a && test "$$a" = yes && rm -rf $(CERTS_DIR)
+
 assembly:
 	sbt agent/assembly
 	@test -f $(JAR_SRC) || (echo "ERROR: expected jar not found at $(JAR_SRC)" && exit 1)
