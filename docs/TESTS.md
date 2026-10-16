@@ -724,7 +724,7 @@ CirrOS instance booted on KVM with a DHCP lease. The script now says it is destr
 `ORPHERA_ALLOW_DESTRUCTIVE=1`. Lesson: read a test's header before running it on the lab.
 
 ### K30. tst7 rebuilt; WordPress and Prometheus/Grafana - PASSED (2026-10-16)
-tst7 was not in the fleet. `manifests/mk-new-and-empty.sh 7` recreated it (most of the time went on `dist-upgrade`).
+tst7 was not in the fleet. `manifests/mk-new-and-empty.sh 7` recreated it.
 `test_wordpress.sh` passed=11 and `test_observability_stack.sh` passed=13, with no password pattern in either log. This ran
 the `wordpress/db` and `observability/mysqld-exporter` conversions.
 
