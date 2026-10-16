@@ -68,7 +68,8 @@ fi
 OUT=$(run_on "curl -s --cacert $CA -o /dev/null -w 'http=%{http_code}' https://$FQDN:5000/v3/")
 assert_contains "GET /v3/ over TLS returns 200" "http=200" "$OUT"
 
-BODY='{"auth":{"identity":{"methods":["password"],"password":{"user":{"name":"admin","domain":{"name":"Default"},"password":"orphera-test-keystone-admin-password"}}},"scope":{"project":{"name":"admin","domain":{"name":"Default"}}}}}'
+ADMIN_PW=$(orphera secrets get keystone/admin)   # the playbook's value, from the secret store
+BODY='{"auth":{"identity":{"methods":["password"],"password":{"user":{"name":"admin","domain":{"name":"Default"},"password":"'"$ADMIN_PW"'"}}},"scope":{"project":{"name":"admin","domain":{"name":"Default"}}}}}'
 OUT=$(run_on "curl -s --cacert $CA -o /dev/null -w 'http=%{http_code}' -H 'Content-Type: application/json' -d '$BODY' https://$FQDN:5000/v3/auth/tokens")
 assert_contains "password auth returns 201 with a scoped token" "http=201" "$OUT"
 
