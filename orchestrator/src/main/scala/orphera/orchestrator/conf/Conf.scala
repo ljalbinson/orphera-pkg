@@ -249,7 +249,7 @@ object ConfFile:
       name: String,
       value: Value
   ): Either[ConfError, OptionSpec] =
-    if !c.sections.contains(section) then
+    if !c.sections.contains(section) && !c.openSections.contains(section) then
       Left(ConfError.UnknownSection(section, close(section, c.sections.toList)))
     else
       c.find(section, name) match

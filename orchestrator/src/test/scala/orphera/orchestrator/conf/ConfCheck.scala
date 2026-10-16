@@ -151,6 +151,8 @@ object ConfCheck:
       check("an open section refuses a near miss of a known option, with a suggestion",
         fo.set("keystone_authtoken", "timeot", "1").left.toOption.exists(_.message.contains("timeout")))
       check("an open section still checks the options it knows", fo.set("keystone_authtoken", "timeout", "slow").isLeft)
+      val fc = ConfFile.empty("/p", cat.copy(openSections = Set("ceph")))
+      check("an open section that the image does not declare at all takes its options", fc.set("ceph", "rbd_pool", "volumes").isRight && f.set("ceph", "rbd_pool", "volumes").isLeft)
       check("a loaded catalogue refuses a wrong type", f.set("placement_database", "max_retries", "many").isLeft)
       check("a loaded catalogue refuses an unknown key with a suggestion",
         f.set("placement_database", "conection", "x").left.toOption.exists(_.message.contains("connection")))
