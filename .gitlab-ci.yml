@@ -22,4 +22,4 @@ before_script:
 compile_and_test:
   stage: build
   script:
-    - sbt clean compile test
+    - sbt clean compile "scalafixAll --check" test

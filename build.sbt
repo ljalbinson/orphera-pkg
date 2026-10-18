@@ -6,10 +6,39 @@ ThisBuild / scalaVersion := "3.8.4"
 ThisBuild / version := IO.read(file("VERSION")).trim
 ThisBuild / scalacOptions ++= Seq(
   "-Werror",
-  "-Wconf:src=src_managed/.*:silent"
+  "-Wconf:src=src_managed/.*:silent",
+  // Needed by scalafix RemoveUnused / OrganizeImports. With -Werror, any
+  // unused import or parameter fails the build: `sbt scalafixAll` clears most.
+  "-Wunused:all"
+)
+
+// scalafix: Scala 3 writes semanticdb itself, so no semanticdbVersion.
+ThisBuild / semanticdbEnabled := true
+
+// wartremover: errors for main code only (tests may use .get/.head). Var,
+// Null, Throw, Any and NonUnitStatements are left off: the code has many
+// legitimate uses (Java/Netty interop, Cats Effect).
+lazy val wartSettings = Seq(
+  Compile / compile / wartremoverErrors ++= Seq(
+    Wart.AsInstanceOf,
+    Wart.IsInstanceOf,
+    Wart.Return,
+    Wart.OptionPartial,
+    Wart.TryPartial,
+    Wart.EitherProjectionPartial,
+    Wart.IterableOps,
+    Wart.ArrayEquals,
+    Wart.Enumeration,
+    Wart.JavaConversions,
+    Wart.StringPlusAny,
+    Wart.FinalCaseClass
+  ),
+  // ScalaPB / fs2-grpc output and the generated BuildInfo
+  wartremoverExcluded += (Compile / sourceManaged).value
 )
 
 lazy val common = project
+  .settings(wartSettings)
   .enablePlugins(Fs2Grpc)
   .settings(
     scalapbCodeGeneratorOptions += CodeGeneratorOption.FlatPackage,
@@ -20,6 +49,7 @@ lazy val common = project
   )
 
 lazy val agent = project
+  .settings(wartSettings)
   .dependsOn(common)
   .settings(
     Compile / run / fork := true,
@@ -43,6 +73,7 @@ lazy val agent = project
   )
 
 lazy val orchestrator = project
+  .settings(wartSettings)
   .dependsOn(common)
   .settings(
     Compile / run / fork := true,
@@ -57,6 +88,7 @@ lazy val orchestrator = project
   )
 
 lazy val scripting = project
+  .settings(wartSettings)
   .dependsOn(orchestrator)
   .settings(
     assembly / mainClass := Some("orphera.scripting.Main"),

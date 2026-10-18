@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — scalafix and wartremover in the build
+- `sbt-scalafix` 0.14.9 with `.scalafix.conf` (OrganizeImports, RemoveUnused, DisableSyntax, LeakingImplicitClassVal,
+  NoValInForComprehension, RedundantSyntax). `make lint` checks, `make fix` applies them and then runs `make fmt`.
+  CI runs `scalafixAll --check` between compile and test.
+- `sbt-wartremover` 3.6.1: casts, `return`, partial `Option`/`Try`/`Either`/collection calls and a few others are compile
+  errors in main code (not tests). Generated gRPC and BuildInfo sources are excluded.
+- `-Wunused:all` is on, so with `-Werror` an unused import or parameter fails the build; `sbt scalafixAll` removes most.
+- `FactPrinter` and `AgeCipher` no longer use `asInstanceOf` or `List.head`, which the new checks reject.
+
 ### Security — private keys out of the repository, and no command lines in the agent's log
 - `certs/ca.key`, `certs/server.key`, `certs/ca.srl` and `certs/server.csr` were committed (the README said they were ignored).
   They are no longer tracked and `certs/*.key`, `*.srl` and `*.csr` are in `.gitignore`. They remain in earlier commits, so

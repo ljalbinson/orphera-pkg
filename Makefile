@@ -1,4 +1,4 @@
-.PHONY: all release rpm-if-available bump-patch _build_all clean test assembly pkg-stage deb rpm verify certs certs-clean fmt fmt-manifests scripting
+.PHONY: all release rpm-if-available bump-patch _build_all clean test assembly pkg-stage deb rpm verify certs certs-clean fmt fmt-manifests scripting lint fix
 
 VERSION_FILE := VERSION
 VERSION      := $(shell cat $(VERSION_FILE))
@@ -23,6 +23,14 @@ bump-patch:
 	@awk -F. '{printf "%d.%d.%d", $$1, $$2, $$3+1}' $(VERSION_FILE) > $(VERSION_FILE).tmp
 	@mv $(VERSION_FILE).tmp $(VERSION_FILE)
 	@echo "Version bumped: $$(cat $(VERSION_FILE))"
+
+lint:
+	sbt "scalafixAll --check"
+
+# scalafix first: OrganizeImports rewrites import blocks, scalafmt has the last word.
+fix:
+	sbt scalafixAll
+	$(MAKE) fmt
 
 fmt:
 	sbt scalafmt

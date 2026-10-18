@@ -69,6 +69,7 @@ object AgeCipher:
       command: List[String],
       stdin: Array[Byte]
   ): Either[String, Array[Byte]] =
+    val program = command.headOption.getOrElse("<no command>")
     val errFile = Files.createTempFile("orphera-age", ".err")
     try
       val pb = new ProcessBuilder(command*)
@@ -78,7 +79,7 @@ object AgeCipher:
         catch
           case e: java.io.IOException =>
             Left(
-              s"cannot run ${command.head}: ${e.getMessage}; is the age package installed?"
+              s"cannot run $program: ${e.getMessage}; is the age package installed?"
             )
       p.flatMap { proc =>
         val writer = new Thread(() =>
@@ -94,7 +95,7 @@ object AgeCipher:
         if code == 0 then Right(out)
         else
           Left(
-            s"${command.head} failed (exit $code): ${Files.readString(errFile).trim}"
+            s"$program failed (exit $code): ${Files.readString(errFile).trim}"
           )
       }
     finally Files.deleteIfExists(errFile)

@@ -20,11 +20,7 @@ object FactPrinter:
       vars(key) match
         case nested: java.util.Map[?, ?] =>
           sb.append(s"$key:\n")
-          appendNested(
-            sb,
-            nested.asInstanceOf[java.util.Map[String, Any]],
-            indent = 2
-          )
+          appendNested(sb, nested, indent = 2)
         case value =>
           sb.append(s"$key: $value\n")
 
@@ -32,20 +28,17 @@ object FactPrinter:
 
   private def appendNested(
       sb: StringBuilder,
-      m: java.util.Map[String, Any],
+      m: java.util.Map[?, ?],
       indent: Int
   ): Unit =
     val pad = " " * indent
-    val sortedKeys = m.keySet().asScala.toList.sorted
+    val sortedEntries =
+      m.asScala.toList.map((k, v) => (String.valueOf(k), v)).sortBy(_._1)
 
-    for key <- sortedKeys do
-      m.get(key) match
+    for (key, entry) <- sortedEntries do
+      entry match
         case nested: java.util.Map[?, ?] =>
           sb.append(s"$pad$key:\n")
-          appendNested(
-            sb,
-            nested.asInstanceOf[java.util.Map[String, Any]],
-            indent + 2
-          )
+          appendNested(sb, nested, indent + 2)
         case value =>
           sb.append(s"$pad$key: $value\n")
