@@ -2,6 +2,7 @@
 
 package orphera.agent
 
+import scala.annotation.unused
 import cats.effect.*
 import cats.effect.std.Queue
 import orphera.common.*
@@ -60,7 +61,8 @@ object DnfInstaller:
       queue
     )
 
-  def autoRemove(cmd: AutoRemove, queue: Queue[IO, Event]): IO[Unit] =
+  // dnf autoremove takes no options; the parameter keeps the Apt signature.
+  def autoRemove(@unused cmd: AutoRemove, queue: Queue[IO, Event]): IO[Unit] =
     PackageSteps.run(dnf ++ List("autoremove"), "Auto-removing packages", queue)
 
   /** `dnf upgrade` (Red Hat has no separate dist-upgrade: it applies all

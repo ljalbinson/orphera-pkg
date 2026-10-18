@@ -5,7 +5,6 @@ package orphera.agent
 import cats.effect.*
 import java.nio.file.*
 import scala.jdk.CollectionConverters.*
-import scala.util.Using
 import orphera.common.*
 
 object FactGatherer:

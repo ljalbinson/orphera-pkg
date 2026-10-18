@@ -122,9 +122,7 @@ final class SecretStore(
             s"$file does not decrypt to a secrets table: ${e.getMessage}"
           )
         obj <- json.asObject.toRight(s"$file does not hold a secrets table")
-      yield obj.toMap.collect {
-        case (k, v) if v.isString => k -> v.asString.get
-      }
+      yield obj.toMap.flatMap((k, v) => v.asString.map(k -> _))
 
   private def save(all: Map[String, String]): Either[String, Unit] =
     val json = Json

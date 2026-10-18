@@ -4,7 +4,6 @@ package orphera.agent
 
 import cats.effect.*
 import cats.effect.std.Queue
-import java.io.*
 import orphera.common.*
 
 object DebInstaller:
