@@ -11,7 +11,7 @@ import orphera.common.*
 object NetworkReloader:
 
   /** Where a network backend keeps its configuration and how it re-reads it. */
-  private case class Backend(
+  private final case class Backend(
       dir: Path,
       extensions: Set[String],
       reload: IO[Unit]

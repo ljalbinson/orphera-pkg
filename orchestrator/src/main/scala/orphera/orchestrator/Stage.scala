@@ -70,11 +70,11 @@ enum HealthCheck:
       timeoutSeconds: Int = 120
   )
 
-case class Stage(
+final case class Stage(
     name: String,
     nodeNames: List[String],
     tasks: List[NamedTask],
     waitFor: Option[HealthCheck] = None
 )
 
-case class ClusterPlaybook(name: String, stages: List[Stage])
+final case class ClusterPlaybook(name: String, stages: List[Stage])

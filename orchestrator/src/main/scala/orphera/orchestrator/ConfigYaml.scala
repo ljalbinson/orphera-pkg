@@ -22,7 +22,7 @@ import java.nio.file.{Files, Paths}
   * cluster-playbook YAML), because that's how the real kttb-virt-ansible files
   * are actually shaped, not a convention chosen here.
   */
-case class Nic0(
+final case class Nic0(
     nic: String,
     ipaddress: String,
     gateway: String,
@@ -46,7 +46,7 @@ case class Nic0(
   * re-provisioning and the guest can match the interface by MAC instead of
   * guessing its PCI slot.
   */
-case class ExtraNic(
+final case class ExtraNic(
     nic: String,
     bridge: String,
     mtu: Int,
@@ -58,7 +58,7 @@ case class ExtraNic(
     priority: Int
 )
 
-case class VmParams(
+final case class VmParams(
     hypervisor: String,
     hostname: String,
     domainname: String,

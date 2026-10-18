@@ -9,4 +9,4 @@ import orphera.common.Facts
   * another node's facts (e.g. a mgr host's config needing every mon host's IP
   * address), which per-node-only fact gathering can't express at all.
   */
-case class ClusterContext(factsByNode: Map[String, Facts])
+final case class ClusterContext(factsByNode: Map[String, Facts])

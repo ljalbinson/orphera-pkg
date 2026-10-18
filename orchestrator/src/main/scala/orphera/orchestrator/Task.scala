@@ -63,7 +63,7 @@ enum Task:
   )
   case Debug(message: String)
 
-case class FactCondition(
+final case class FactCondition(
     key: String,
     expected: String,
     negate: Boolean = false
@@ -92,13 +92,13 @@ case class FactCondition(
       case "hostname"   => Some(facts.hostname)
       case _            => None
 
-case class NamedTask(
+final case class NamedTask(
     name: String,
     task: Task,
     when: Option[FactCondition] = None
 )
 
-case class Playbook(
+final case class Playbook(
     name: String,
     nodeNames: List[String],
     tasks: List[NamedTask]

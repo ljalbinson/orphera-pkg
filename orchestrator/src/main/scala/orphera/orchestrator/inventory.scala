@@ -2,14 +2,14 @@
 
 package orphera.orchestrator
 
-case class Node(
+final case class Node(
     name: String,
     host: String,
     port: Int = 50051,
     vars: Map[String, String] = Map.empty
 )
 
-case class Group(
+final case class Group(
     name: String,
     members: List[String],
     vars: Map[String, String] = Map.empty

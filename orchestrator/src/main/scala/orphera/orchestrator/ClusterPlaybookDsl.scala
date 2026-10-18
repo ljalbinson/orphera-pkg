@@ -26,7 +26,7 @@ object ClusterPlaybookDsl:
           new StageBuilder(
             name,
             nodes,
-            tasks.init :+ last.copy(when = Some(condition)),
+            tasks.dropRight(1) :+ last.copy(when = Some(condition)),
             waitForCheck
           )
         case None =>

@@ -20,7 +20,7 @@ object PlaybookDsl:
           new PlaybookBuilder(
             name,
             nodes,
-            tasks.init :+ last.copy(when = Some(condition))
+            tasks.dropRight(1) :+ last.copy(when = Some(condition))
           )
         case None =>
           this

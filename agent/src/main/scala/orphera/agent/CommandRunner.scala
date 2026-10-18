@@ -62,8 +62,8 @@ object CommandRunner:
           )
           .map(finished => if finished then Some(process.exitValue()) else None)
 
-        _ <-
-          if exitOpt.isEmpty then
+        _ <- exitOpt match
+          case None =>
             IO.blocking(process.destroyForcibly()) >>
               out.cancel >> err.cancel >>
               queue.offer(
@@ -74,14 +74,14 @@ object CommandRunner:
                   success = false
                 )
               )
-          else
+          case Some(exit) =>
             out.joinWithNever >> err.joinWithNever >>
               queue.offer(
                 Event(
                   kind = Event.Kind.RESULT,
-                  message = if exitOpt.get == 0 then "OK" else "FAILED",
-                  exitCode = exitOpt.get,
-                  success = exitOpt.get == 0
+                  message = if exit == 0 then "OK" else "FAILED",
+                  exitCode = exit,
+                  success = exit == 0
                 )
               )
       yield ()

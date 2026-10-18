@@ -101,12 +101,13 @@ object LogSummary:
           ) + "-\\d{8}-\\d{6}(-[A-Za-z0-9._-]+)?\\.jsonl$").r
         val matches = Option(dir.toFile.listFiles()).toList.flatten
           .filter(f => f.isFile && pattern.matches(f.getName))
-        if matches.isEmpty then
-          Left(
+        matches
+          .maxByOption(_.lastModified())
+          .map(_.toPath())
+          .toRight(
             s"No log files found for '$target' under .orphera-logs/ " +
               s"(looked for playbook-$sanitized-*.jsonl / cluster-$sanitized-*.jsonl)"
           )
-        else Right(matches.maxBy(_.lastModified()).toPath())
 
   // Mirrors RunLog.sanitize exactly, so a playbook name resolves to the
   // same filename RunLog itself would have written.
@@ -172,7 +173,7 @@ object LogSummary:
     // follows for that (node, task) — normally every task_start is
     // paired, so in practice this only surfaces a task that was still
     // running when the log ends (an interrupted run).
-    case class Row(
+    final case class Row(
         stage: String,
         node: String,
         task: String,
@@ -230,7 +231,7 @@ object LogSummary:
       }
 
       val widths = headers.indices.map { i =>
-        (headers(i).length :: dataRows.map(_(i).length)).max
+        dataRows.map(_(i).length).foldLeft(headers(i).length)(math.max)
       }
 
       def formatRow(cells: List[String]): String =
@@ -303,7 +304,7 @@ object LogSummary:
     val current = if Files.exists(auditFile) then List(auditFile) else Nil
     rotated ++ current
 
-  private case class Invocation(
+  private final case class Invocation(
       invocationId: String,
       command: String,
       nodes: String,
@@ -433,7 +434,7 @@ object LogSummary:
       }
 
       val widths = headers.indices.map { i =>
-        (headers(i).length :: dataRows.map(_(i).length)).max
+        dataRows.map(_(i).length).foldLeft(headers(i).length)(math.max)
       }
 
       def formatRow(cells: List[String]): String =
