@@ -12,4 +12,11 @@ jobs:
           distribution: temurin
           java-version: '21'
       - uses: sbt/setup-sbt@v1
-      - run: sbt clean compile "scalafixAll --check" test
+      - run: sbt -Dsbt.color=false clean compile "scalafixAll --check" test 2>&1 | tee sbt.log; exit ${PIPESTATUS[0]}
+        shell: bash
+      # TEMPORARY (dev/scalafix-wartremover): surface sbt errors as an annotation
+      - if: failure()
+        shell: bash
+        run: |
+          msg=$(grep -E '^\[(error|warn)\]' sbt.log | head -300 | sed -e 's/%/%25/g' | awk 'BEGIN{ORS="%0A"}{print}')
+          echo "::error title=sbt-log::${msg}"
