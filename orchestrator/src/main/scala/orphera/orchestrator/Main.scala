@@ -896,7 +896,7 @@ object Main extends IOApp:
   private def runScalaPlaybookScript(
       scriptPath: String,
       resume: Boolean,
-      config: Option[String] = None
+      config: Option[String]
   ): IO[ExitCode] =
     IO.blocking {
       findLatestJar("scripting/target", "scripting-assembly", ".jar") match

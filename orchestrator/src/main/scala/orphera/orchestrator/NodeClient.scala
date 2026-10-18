@@ -412,7 +412,7 @@ object NodeClient:
       getVersion(node).attempt.flatMap {
         case Right(v) if v == expectedVersion =>
           onLine(s"Confirmed running $v after ~${elapsed}s").as(true)
-        case Right(other) =>
+        case Right(_) =>
           // Reachable but not yet on the new version — still mid
           // install/restart, not a failure yet.
           IO.sleep(5.seconds) >>
