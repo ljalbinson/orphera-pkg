@@ -55,8 +55,8 @@ _orphera_completions() {
   _init_completion || return
 
   local verbs="install remove autoremove dist-upgrade copy write-file network-apply reboot shutdown uptime run
-    playbook cluster-playbook deploy-agent bootstrap teardown fetch facts
-    version log-summary audit-log pipeline help"
+    playbook cluster-playbook deploy-agent bootstrap issue-certs teardown fetch facts
+    version cert-info log-summary audit-log pipeline help"
 
   # Flags common to most verbs that take --nodes
   local nodes_flag="--nodes"
@@ -203,7 +203,7 @@ _orphera_completions() {
       case "$prev" in
         --resume|--quiet|--forget-host-key) COMPREPLY=() ;;
         --parallel|--ssh-user|--ssh-key) COMPREPLY=() ;;
-        --file) COMPREPLY=($(compgen -f -X '!*.deb' -- "$cur")) ;;
+        --file) COMPREPLY=($(compgen -f -X '!*.@(deb|rpm)' -- "$cur")) ;;
         *)
           if [[ "$cur" == --* ]]; then
             if [[ "$verb" == cluster-playbook ]]; then
@@ -224,7 +224,7 @@ _orphera_completions() {
       # No positional args — the .deb is --file (auto-discovered if
       # omitted), not a bare path like playbook/bootstrap take.
       case "$prev" in
-        --file) COMPREPLY=($(compgen -f -X '!*.deb' -- "$cur")) ;;
+        --file) COMPREPLY=($(compgen -f -X '!*.@(deb|rpm)' -- "$cur")) ;;
         --remote-path) COMPREPLY=() ;;
         --nodes) COMPREPLY=() ;;
         --node-groups) COMPREPLY=($(compgen -W "$(_orphera_groups)" -- "$cur")) ;;
@@ -234,15 +234,25 @@ _orphera_completions() {
 
     bootstrap)
       # No positional args here either — same as deploy-agent, the
-      # .deb is --file (auto-discovered if omitted).
+      # package is --file (.deb or .rpm; auto-discovered if omitted).
       case "$prev" in
-        --file) COMPREPLY=($(compgen -f -X '!*.deb' -- "$cur")) ;;
+        --file) COMPREPLY=($(compgen -f -X '!*.@(deb|rpm)' -- "$cur")) ;;
         --nodes) COMPREPLY=() ;;
         --node-groups) COMPREPLY=($(compgen -W "$(_orphera_groups)" -- "$cur")) ;;
         --ssh-user) COMPREPLY=() ;;
         --ssh-key) COMPREPLY=($(compgen -f -- "$cur")) ;;
         --remote-path) COMPREPLY=() ;;
         *) COMPREPLY=($(compgen -W "--file --nodes --node-groups --ssh-user --ssh-key --remote-path --forget-host-key" -- "$cur")) ;;
+      esac
+      ;;
+
+    issue-certs)
+      case "$prev" in
+        --nodes) COMPREPLY=() ;;
+        --node-groups) COMPREPLY=($(compgen -W "$(_orphera_groups)" -- "$cur")) ;;
+        --ssh-user) COMPREPLY=() ;;
+        --ssh-key) COMPREPLY=($(compgen -f -- "$cur")) ;;
+        *) COMPREPLY=($(compgen -W "--nodes --node-groups --ssh-user --ssh-key" -- "$cur")) ;;
       esac
       ;;
 
@@ -265,7 +275,7 @@ _orphera_completions() {
       esac
       ;;
 
-    facts|version)
+    facts|version|cert-info)
       case "$prev" in
         --nodes) COMPREPLY=() ;;
         --node-groups) COMPREPLY=($(compgen -W "$(_orphera_groups)" -- "$cur")) ;;
