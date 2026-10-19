@@ -447,15 +447,19 @@ object Orchestrator:
       waitForReturn: Boolean = false,
       waitTimeoutSeconds: Int = 300
   ): IO[Unit] =
-    nodes.parTraverse_ { node =>
-      NodeClient.reboot(
-        node,
-        delaySeconds,
-        waitForReturn,
-        waitTimeoutSeconds,
-        line => IO.println(s"[${node.name}] $line")
-      )
-    }
+    val (protectedNodes, rebootable) = nodes.partition(Inventory.neverReboot)
+    protectedNodes.traverse_(n =>
+      IO.println(s"[${n.name}] skipped: never-reboot is set in the inventory")
+    ) >>
+      rebootable.parTraverse_ { node =>
+        NodeClient.reboot(
+          node,
+          delaySeconds,
+          waitForReturn,
+          waitTimeoutSeconds,
+          line => IO.println(s"[${node.name}] $line")
+        )
+      }
 
   def shutdown(nodes: List[Node], delaySeconds: Int = 5): IO[Unit] =
     nodes.parTraverse_ { node =>

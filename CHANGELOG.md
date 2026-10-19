@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — `never-reboot`
+- `never-reboot: true` on an inventory node or group. `orphera reboot` (and `make reboot-all`) skips such nodes, and a
+  `reboot` task fails on them, so a hypervisor can be protected from any reboot Orphera would start. New check program
+  `InventoryCheck` (10), run by `make test`.
+
 ### Changed
 - `make reboot-all` refuses to run unless `ORPHERA_ALLOW_DESTRUCTIVE=1` is set, as the destructive test scripts already do.
 

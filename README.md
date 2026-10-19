@@ -335,6 +335,24 @@ groups:
       ceph_role: mon
 ```
 
+**`never-reboot: true`** on a node, or on a group (which covers its members), marks a host that must not be
+rebooted, such as a hypervisor:
+
+```yaml
+nodes:
+  - name: gs1
+    host: gs1.yourdomain.com
+    never-reboot: true
+groups:
+  - name: hypervisors
+    members: [gs2, gs3]
+    never-reboot: true
+```
+
+`orphera reboot` skips such nodes and says so, and still reboots the others. A `reboot` task in a playbook, or a
+`reboot` pipeline step, fails on such a node with a message naming the property. Only the value `true` or `false` is
+accepted. It guards Orphera's own reboot paths: it does not stop a command that reboots the host itself (run with `orphera run`), nor `shutdown`.
+
 A missing or malformed `inventory.yaml` fails loudly — a clear stderr
 warning at startup, then an empty inventory (so every subsequent "no
 matching nodes" error traces back to it) — rather than failing
@@ -1407,7 +1425,7 @@ auto-updated; remove the entry manually.
 |---|---|
 | `make` / `make all` | clean → test → assembly → deb |
 | `make clean` | `sbt clean`, removes `pkg/` and any built `.deb` / `.rpm` |
-| `make test` | `sbt test`, then the check programs `ContainerCheck`, `ConfCheck`, `SecretsCheck` and `ThreadInfoCheck` (set `CHECK_VERBOSE=1` to print every passing check) |
+| `make test` | `sbt test`, then the check programs `ContainerCheck`, `ConfCheck`, `SecretsCheck`, `ThreadInfoCheck` and `InventoryCheck` (set `CHECK_VERBOSE=1` to print every passing check) |
 | `make assembly` | `sbt agent/assembly` |
 | `make deb` | stages package contents, runs `dpkg-deb --build` |
 | `make rpm` | stages the same contents, runs `rpmbuild` to produce `orphera-agent-<version>-1.noarch.rpm` for Rocky/Red Hat hosts. Needs `rpmbuild` |
@@ -1453,7 +1471,7 @@ that need no cluster: `ContainerCheck` (49 checks: typed containers and
 token and when an agent will start, how a failed call is labelled; the
 checks that use real `age` are skipped when it is not installed) and
 `ThreadInfoCheck` (16: `thread-info`'s counting, report and command
-line). Each exits non-zero on a failure.
+line) and `InventoryCheck` (10: reading `never-reboot` and which nodes it protects). Each exits non-zero on a failure.
 
 The scripts `manifests/test_*.sh` apply a playbook to the lab and check the
 result independently of the playbook's own health check. They print a

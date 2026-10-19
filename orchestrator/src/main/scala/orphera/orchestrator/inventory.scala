@@ -6,13 +6,15 @@ final case class Node(
     name: String,
     host: String,
     port: Int = 50051,
-    vars: Map[String, String] = Map.empty
+    vars: Map[String, String] = Map.empty,
+    neverReboot: Boolean = false
 )
 
 final case class Group(
     name: String,
     members: List[String],
-    vars: Map[String, String] = Map.empty
+    vars: Map[String, String] = Map.empty,
+    neverReboot: Boolean = false
 )
 
 object Inventory:
@@ -34,6 +36,15 @@ object Inventory:
 
   val all: List[Node] = loaded._1
   val groups: List[Group] = loaded._2
+
+  /** Whether this node must never be rebooted: `never-reboot: true` on the node
+    * itself or on any group it belongs to.
+    */
+  def neverReboot(node: Node): Boolean = neverReboot(node, groups)
+
+  def neverReboot(node: Node, ofGroups: List[Group]): Boolean =
+    node.neverReboot ||
+      ofGroups.exists(g => g.neverReboot && g.members.contains(node.name))
 
   def groupVarsFor(nodeName: String): Map[String, String] =
     groups

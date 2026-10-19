@@ -17,14 +17,16 @@ object InventoryYaml:
       host <- c.get[String]("host")
       port <- c.getOrElse[Int]("port")(50051)
       vars <- c.getOrElse[Map[String, String]]("vars")(Map.empty)
-    yield Node(name, host, port, vars)
+      neverReboot <- c.getOrElse[Boolean]("never-reboot")(false)
+    yield Node(name, host, port, vars, neverReboot)
 
   private def decodeGroup(c: HCursor): Either[DecodingFailure, Group] =
     for
       name <- c.get[String]("name")
       members <- c.get[List[String]]("members")
       vars <- c.getOrElse[Map[String, String]]("vars")(Map.empty)
-    yield Group(name, members, vars)
+      neverReboot <- c.getOrElse[Boolean]("never-reboot")(false)
+    yield Group(name, members, vars, neverReboot)
 
   private def decodeInventory(
       c: HCursor

@@ -329,6 +329,21 @@ object NodeClient:
       waitTimeoutSeconds: Int,
       onLine: String => IO[Unit]
   ): IO[Unit] =
+    if Inventory.neverReboot(node) then
+      IO.raiseError(
+        new IllegalStateException(
+          s"${node.name} has never-reboot set in the inventory, so it is not rebooted"
+        )
+      )
+    else rebootAllowed(node, delaySeconds, waitForReturn, waitTimeoutSeconds, onLine)
+
+  private def rebootAllowed(
+      node: Node,
+      delaySeconds: Int,
+      waitForReturn: Boolean,
+      waitTimeoutSeconds: Int,
+      onLine: String => IO[Unit]
+  ): IO[Unit] =
     for
       ack <- channelBuilder(node)
         .resource[IO]
