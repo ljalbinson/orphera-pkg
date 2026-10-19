@@ -7,7 +7,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
-- `utils/start-vm.sh <vm>...`: starts a VM on the hypervisor named in its `config/<vm>.yaml`.
+- `utils/start-vm.sh`, `utils/stop-vm.sh` and `utils/hard-reboot-vm.sh`: start, shut down, or reboot from the hypervisor
+  (`virsh reboot`, or `virsh reset` with `--reset`) a VM, finding the hypervisor in its `config/<vm>.yaml`. They share
+  `utils/vm-common.sh`.
 
 ### Added — `never-reboot`
 - `never-reboot: true` on an inventory node or group. `orphera reboot` (and `make reboot-all`) skips such nodes, and a

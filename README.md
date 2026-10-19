@@ -1676,7 +1676,11 @@ Worth knowing:
 - **Utilities** in `utils/`: `list-vms.sh [hv...]` lists every VM on each hypervisor with state,
   vCPUs and memory; `start-vm.sh <vm>...` starts VMs, finding each one's hypervisor and domain name in
   its `config/<vm>.yaml` (a shut-off VM is started, a paused one resumed, a running one left alone; it
-  does not wait for the guest, `manifests/kvm_vm_start.scala` does); `trace-dhcp.sh` captures DHCP on the provider NICs of tst17, tst18 and tst19
+  does not wait for the guest, `manifests/kvm_vm_start.scala` does); `stop-vm.sh [--wait s] [--force] <vm>...`
+  shuts a VM down with `virsh shutdown` and waits until it is off (`--force` powers it off if it has not
+  shut down in time); `hard-reboot-vm.sh [--reset] <vm>...` reboots a VM from the hypervisor with
+  `virsh reboot` (`--reset` for `virsh reset`), for a guest whose agent or SSH is not answering;
+  `trace-dhcp.sh` captures DHCP on the provider NICs of tst17, tst18 and tst19
   while a test instance boots, to show where packets are lost; `check-guest-dhcp.sh <ip> <mac>
   <network-id>` proves a guest took its address (it answers ARP from the DHCP namespace on tst19;
   the guest console cannot show a late lease); `galera-cold-start.sh` brings the Galera cluster back
