@@ -93,6 +93,7 @@ object AuditLog:
       case Command.Fetch(_, _, _)                       => false
       case Command.Facts(_)                             => false
       case Command.Version(_)                           => false
+      case Command.CertInfo(_)                          => false
       case Command.Uptime(_)                            => false
       case Command.LogSummary(_)                        => false
       case Command.ShowAuditLog(_)                      => false

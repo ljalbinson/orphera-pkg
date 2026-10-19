@@ -103,6 +103,7 @@ enum Command:
       confirmed: Boolean
   )
   case Version(nodes: Option[List[String]])
+  case CertInfo(nodes: Option[List[String]])
   case Uptime(nodes: Option[List[String]])
   // `paths` is one or more — `cluster-playbook a.scala b.scala c.scala`
   // runs each in turn, in the order given, stopping at the first one that
@@ -257,6 +258,7 @@ object Cli:
           case (resume, config) => Command.RunPlaybook(path, resume, config)
         }
       case "version" :: rest  => parseVersion(rest, None)
+      case "cert-info" :: rest => parseCertInfo(rest, None)
       case "uptime" :: rest   => parseUptime(rest, None)
       case "shutdown" :: rest =>
         parseShutdown(rest, None, 5, confirmed = false)
@@ -1038,6 +1040,17 @@ object Cli:
       case other :: _ =>
         Left(s"Unknown argument to version: $other")
 
+  private def parseCertInfo(
+      args: List[String],
+      nodes: Option[List[String]]
+  ): Either[String, Command] =
+    args match
+      case Nil                        => Right(Command.CertInfo(nodes))
+      case "--nodes" :: value :: rest =>
+        parseCertInfo(rest, Some(value.split(",").toList.map(_.trim)))
+      case other :: _ =>
+        Left(s"Unknown argument to cert-info: $other")
+
   private def parseUptime(
       args: List[String],
       nodes: Option[List[String]]
@@ -1162,6 +1175,10 @@ object Cli:
       |                      --yes, and there is no remote way to power it back on
       |  version           [--nodes host1,host2]
       |  uptime            [--nodes host1,host2]
+      |  cert-info         [--nodes host1,host2]
+      |                    — the TLS certificate each agent presents: per-node or
+      |                      wildcard, the names it covers, whether it names the host
+      |                      and is signed by certs/ca.crt, expiry, serial, fingerprint
       |  log-summary       <playbook-name | file.jsonl>
       |                    — summarizes a run's .orphera-logs/*.jsonl output as a
       |                      table (latest run for that playbook, if a name is given)

@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — `orphera cert-info`
+- Shows the certificate each agent presents, read from the TLS handshake: per-node or wildcard, the names it covers,
+  expiry and days left, serial and SHA-256 fingerprint. Flags a certificate that does not name the node's host, is not
+  signed by `certs/ca.crt`, has expired or expires within 30 days, and exits non-zero if any node has a problem.
+
 ### Added — a certificate of its own for each agent (`orphera issue-certs`)
 - Every agent package carried the same wildcard key, so one node's key would open them all. `orphera issue-certs --nodes ...`
   has each node generate its own key in `/etc/orphera-agent/tls/` (it never leaves the node), signs the node's request with

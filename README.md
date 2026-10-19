@@ -234,9 +234,18 @@ The agent uses `tls/server.{crt,key}` when both exist and otherwise falls
 back to the wildcard the package ships, so nodes can move over one at a
 time. No package owns `tls/`, so installing or upgrading the agent never
 removes it. The wildcard stays in the package until every node has its own
-certificate; a later release will drop it. The journal line
-`Orphera Agent listening on 50051 (TLS, tls/server.crt)` shows which
-certificate an agent is using.
+certificate; a later release will drop it. `orphera cert-info [--nodes ...]` shows which certificate each agent
+actually presents, read from the TLS handshake (no SSH or token needed):
+
+```
+[tst8] per-node tst8.ljalbinson.com  expires 2029-01-21 (825d)  serial 5f3a9c001122  sha256 AB:CD:...
+[tst9] wildcard *.ljalbinson.com,localhost,127.0.0.1  expires 2036-10-17 (3650d)  serial ...
+```
+
+A line ending `!! ...` names a problem: the certificate does not name the
+node's host, is not signed by `certs/ca.crt`, has expired, or expires
+within 30 days. The command exits non-zero if any node has a problem or
+cannot be reached.
 
 `certs/*.key` is git-ignored; never commit private keys.
 

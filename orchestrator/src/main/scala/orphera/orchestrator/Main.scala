@@ -319,6 +319,33 @@ object Main extends IOApp:
             Orchestrator.shutdown(targets, delaySeconds)
           }
 
+      case Right(Command.CertInfo(nodeNames)) =>
+        val targets = nodeNames match
+          case Some(names) => Inventory.all.filter(n => names.contains(n.name))
+          case None        => Inventory.all
+        if targets.isEmpty then
+          IO.println("No matching nodes found in inventory.") >> IO.pure(
+            ExitCode.Error
+          )
+        else
+          IO.realTimeInstant.flatMap { now =>
+            targets
+              .parTraverse(node => CertInfo.inspect(node).attempt.map(node -> _))
+              .flatMap { results =>
+                results.traverse_ {
+                  case (node, Right(report)) =>
+                    IO.println(CertInfo.render(node.name, report, now))
+                  case (node, Left(e)) =>
+                    IO.println(
+                      s"[${node.name}] unreachable: ${Option(e.getMessage).getOrElse(e.toString)}"
+                    )
+                } >> IO.pure(
+                  if results.forall(_._2.exists(_.ok(now))) then ExitCode.Success
+                  else ExitCode.Error
+                )
+              }
+          }
+
       case Right(Command.Uptime(nodeNames)) =>
         withTargets(nodeNames) { targets =>
           Orchestrator.getUptimes(targets).flatMap { uptimes =>
