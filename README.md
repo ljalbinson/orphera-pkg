@@ -1674,7 +1674,9 @@ Worth knowing:
   `boot-cleanup`) is installed on both nodes; `KEEP_BOOT=1` leaves the test instance behind for
   inspection. Teardown: `nova_compute_teardown.scala`.
 - **Utilities** in `utils/`: `list-vms.sh [hv...]` lists every VM on each hypervisor with state,
-  vCPUs and memory; `trace-dhcp.sh` captures DHCP on the provider NICs of tst17, tst18 and tst19
+  vCPUs and memory; `start-vm.sh <vm>...` starts VMs, finding each one's hypervisor and domain name in
+  its `config/<vm>.yaml` (a shut-off VM is started, a paused one resumed, a running one left alone; it
+  does not wait for the guest, `manifests/kvm_vm_start.scala` does); `trace-dhcp.sh` captures DHCP on the provider NICs of tst17, tst18 and tst19
   while a test instance boots, to show where packets are lost; `check-guest-dhcp.sh <ip> <mac>
   <network-id>` proves a guest took its address (it answers ARP from the DHCP namespace on tst19;
   the guest console cannot show a late lease); `galera-cold-start.sh` brings the Galera cluster back
