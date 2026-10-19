@@ -3,8 +3,8 @@
 #
 # Gives the agents on the named nodes the shared token kept in the secret store
 # (`orphera/agent-token`), and restarts them. The orchestrator sends the same token
-# (see AgentToken.scala). Until this is done an agent accepts the built-in development
-# token, which is in the source code.
+# (see AgentToken.scala). An agent without a token of its own will not start; before
+# that change it accepted the built-in development token, which is in the source code.
 #
 #   orphera secrets generate orphera/agent-token     # once
 #   utils/set-agent-token.sh tst0 tst1 tst2 ...      # SSH_USER defaults to localadmin
