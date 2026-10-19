@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Security — an agent refuses to start without a real token
+- With `ORPHERA_TOKEN` unset (the packaged `agent.env` leaves it commented out) an agent accepted the built-in
+  `dev-only-insecure-token`, which is in the source. It now logs why and exits, both when the token is unset or empty and
+  when it is the built-in one (`Auth.requireToken`). The README's development example (`ORPHERA_TOKEN="dev-secret"`) still works.
+  systemd retries every five seconds, as it does for a missing certificate. Before upgrading a node, make sure it has a token
+  (`grep -c '^ORPHERA_TOKEN=' /etc/orphera-agent/agent.env` prints 1). `packaging/agent.env` is deliberately unchanged: it is a
+  conffile, and changing its text would make `dpkg` ask about a conflict on every node that has a token.
+- `bootstrap` and `deploy-agent` stop before touching any node when the orchestrator has only the built-in token
+  (`AgentToken.requireConfigured`), since the node would be left unable to start.
+- The agent compares the token without stopping at the first difference (`Auth.accepts`). `Auth.SharedToken` is gone; a
+  `ORPHERA_TOKEN` set to the empty string no longer makes the orchestrator send an empty token.
+
+### Changed — `version` and `uptime` say `unauthenticated` for a rejected token
+- A node that answered and rejected the token now shows `unauthenticated: the node rejected this orchestrator's token`,
+  and one that did not answer shows `unreachable: <gRPC status>`, as before. `uptime` used to print a bare `unreachable` and
+  hide the reason. The gRPC status code decides (`NodeError`), not the message text.
+
 ### Removed — the shared wildcard key is no longer in the agent package
 - The `.deb` and `.rpm` carry only `certs/ca.crt`. Upgrading removes the old `certs/server.{crt,key}` from each node;
   agents use their own certificate in `/etc/orphera-agent/tls/` (`orphera cert-info` shows which certificate each presents).

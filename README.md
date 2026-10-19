@@ -1168,12 +1168,16 @@ node isn't confirmed within the timeout, and it prints which ones.
   interceptor on every call. Every agent and every orchestrator
   invocation must hold the same token. The agent reads it from
   `ORPHERA_TOKEN` (in `/etc/orphera-agent/agent.env`, which the package
-  ships with the line commented out). The orchestrator takes it from
-  `ORPHERA_TOKEN`, else from the secret store entry `orphera/agent-token`
-  (`AgentToken.scala`). **When none is set, both sides fall back to a
-  built-in development token that is in the source code, which
-  protects nothing**; the orchestrator prints a warning on stderr when
-  it does this, the agent does not. Set a real one:
+  ships with the line commented out). **An agent will not start without
+  a token of its own, or with the built-in development token** (which is
+  in the source code and protects nothing): it logs why and exits, and
+  systemd retries every five seconds until the token is set. The
+  orchestrator takes its token from `ORPHERA_TOKEN`, else from the
+  secret store entry `orphera/agent-token` (`AgentToken.scala`); with
+  neither it still falls back to the built-in token, with a warning on
+  stderr, so that it can reach an agent that has not been fixed yet, but
+  `bootstrap` and `deploy-agent` refuse to run in that state, because
+  they would leave a node that cannot start. Set a real one:
 
   ```bash
   orphera secrets generate orphera/agent-token     # once
@@ -1186,8 +1190,12 @@ node isn't confirmed within the timeout, and it prints which ones.
   changed `agent.env` when it is upgraded. `bootstrap` writes the same
   token to a node it installs; the script is for nodes that are already
   installed.
-- **What a failed call looks like:** the CLI prints `unreachable` for any
-  failed call to a node, a rejected token included.
+- **What a failed call looks like:** `version` and `uptime` print
+  `unauthenticated` when the node answered and rejected this
+  orchestrator's token (fix it with `utils/set-agent-token.sh`), and
+  `unreachable: <status>` when nothing usable came back (no route, no
+  listener, a certificate the orchestrator does not trust). Other
+  commands still show the raw gRPC error.
 - **Agent logs:** the agent no longer writes the arguments of the
   commands it runs to its journal. A command's arguments are still
   visible in the process list on the node while it runs, so a command
@@ -1197,8 +1205,8 @@ node isn't confirmed within the timeout, and it prints which ones.
 - **Not implemented:** mutual TLS (agent doesn't verify orchestrator
   identity beyond the shared token), per-destination-path
   restrictions on `copy` (an authenticated orchestrator can currently
-  write to any path the agent's root user can reach), per-node tokens,
-  and refusing to start an agent that has no token.
+  write to any path the agent's root user can reach) and per-node
+  tokens.
 
 ## Secrets
 
@@ -1663,10 +1671,10 @@ Two things worth knowing if adapting this to a different target:
   reach
 - Secrets: one encrypted file on the orchestrator machine, no rotation,
   and values are visible in a command's arguments on the node while it
-  runs (see [Secrets](#secrets)). The agent token falls back to a
-  built-in development token when none is set, `bootstrap` and
-  `mk-new-and-empty.sh` do not set one, and the CLI reports a rejected
-  token as `unreachable`
+  runs (see [Secrets](#secrets)). The orchestrator still falls back to
+  the built-in development token (with a warning) when none is
+  configured; agents refuse to run with it. All commands other than
+  `version` and `uptime` show a rejected token as a raw gRPC error
 - Typed configuration (see [Typed configuration files and check
   mode](#typed-configuration-files-and-check-mode)) covers the OpenStack
   control plane only; check mode covers Placement only; the

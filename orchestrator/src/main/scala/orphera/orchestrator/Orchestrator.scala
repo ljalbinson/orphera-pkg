@@ -128,6 +128,7 @@ object Orchestrator:
       confirmTimeoutSeconds: Int = 60
   ): IO[Map[String, Boolean]] =
     for
+      _ <- AgentToken.requireConfigured
       expectedVersion <- requireOrpheraAgentPackage(localDebPath.toString)
       results <- nodes.parTraverse { node =>
         for
@@ -159,6 +160,7 @@ object Orchestrator:
       onLine: (Node, String) => IO[Unit] = (node, line) =>
         IO.println(s"[${node.name}] $line")
   ): IO[Unit] =
+    AgentToken.requireConfigured >>
     IO.raiseUnless(NodeCerts.caAvailable)(
       new RuntimeException(
         "bootstrap needs certs/ca.crt and certs/ca.key to issue each node its certificate (run: make certs)"
@@ -428,17 +430,6 @@ object Orchestrator:
       }
       .map(_.toMap)
 
-  /** One line saying why a call to an agent failed: the gRPC status (e.g.
-    * `UNAUTHENTICATED: missing or invalid token`, `UNAVAILABLE: io exception`)
-    * plus the underlying cause when there is one.
-    */
-  private def describe(e: Throwable): String =
-    val top = Option(e.getMessage).getOrElse(e.getClass.getSimpleName)
-    Option(e.getCause)
-      .flatMap(c => Option(c.getMessage))
-      .filterNot(top.contains)
-      .fold(top)(c => s"$top ($c)")
-
   def getVersions(nodes: List[Node]): IO[Map[String, String]] =
     nodes
       .parTraverse { node =>
@@ -446,7 +437,7 @@ object Orchestrator:
       }
       .map(_.collect {
         case (name, Right(v)) => name -> v
-        case (name, Left(e))  => name -> s"unreachable: ${describe(e)}"
+        case (name, Left(e))  => name -> NodeError.line(e)
       }.toMap)
 
   def reboot(
@@ -474,14 +465,14 @@ object Orchestrator:
       )
     }
 
-  def getUptimes(nodes: List[Node]): IO[Map[String, UptimeInfo]] =
+  def getUptimes(
+      nodes: List[Node]
+  ): IO[Map[String, Either[Throwable, UptimeInfo]]] =
     nodes
       .parTraverse { node =>
         NodeClient.getUptime(node).attempt.map(result => node.name -> result)
       }
-      .map(_.collect { case (name, Right(info)) =>
-        name -> info
-      }.toMap)
+      .map(_.toMap)
 
   def executeCommand(
       nodes: List[Node],

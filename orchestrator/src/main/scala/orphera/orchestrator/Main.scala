@@ -351,10 +351,12 @@ object Main extends IOApp:
           Orchestrator.getUptimes(targets).flatMap { uptimes =>
             targets.traverse_ { node =>
               uptimes.get(node.name) match
-                case Some(info) =>
+                case Some(Right(info)) =>
                   IO.println(
                     s"[${node.name}] up ${formatUptime(info.uptimeSeconds)}, load avg (1m) ${info.loadAverage1M}"
                   )
+                case Some(Left(e)) =>
+                  IO.println(s"[${node.name}] ${NodeError.line(e)}")
                 case None =>
                   IO.println(s"[${node.name}] unreachable")
             }

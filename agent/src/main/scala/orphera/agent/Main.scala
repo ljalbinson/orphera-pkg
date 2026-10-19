@@ -9,18 +9,27 @@ import fs2.grpc.syntax.all.*
 import io.grpc.ServerInterceptors
 import io.grpc.netty.shaded.io.grpc.netty.{GrpcSslContexts, NettyServerBuilder}
 
-import orphera.common.AgentFs2Grpc
+import orphera.common.{AgentFs2Grpc, Auth}
 
 object Main extends IOApp.Simple:
 
   def run: IO[Unit] =
-    TlsFiles.choose match
-      case None =>
-        IO.println(TlsFiles.Missing) >>
-          IO.raiseError(new RuntimeException("no TLS certificate"))
-      case Some((certFile, keyFile)) => serve(certFile, keyFile)
+    Auth.requireToken(sys.env.get("ORPHERA_TOKEN")) match
+      case Left(why) =>
+        IO.println(why) >>
+          IO.raiseError(new RuntimeException("no usable ORPHERA_TOKEN"))
+      case Right(token) =>
+        TlsFiles.choose match
+          case None =>
+            IO.println(TlsFiles.Missing) >>
+              IO.raiseError(new RuntimeException("no TLS certificate"))
+          case Some((certFile, keyFile)) => serve(token, certFile, keyFile)
 
-  private def serve(certFile: java.io.File, keyFile: java.io.File): IO[Unit] =
+  private def serve(
+      token: String,
+      certFile: java.io.File,
+      keyFile: java.io.File
+  ): IO[Unit] =
     val sslContext = GrpcSslContexts
       .forServer(certFile, keyFile)
       .build()
@@ -37,7 +46,7 @@ object Main extends IOApp.Simple:
             .forPort(50051)
             .sslContext(sslContext)
             .addService(
-              ServerInterceptors.intercept(bound, new AuthInterceptor)
+              ServerInterceptors.intercept(bound, new AuthInterceptor(token))
             )
             .resource[IO]
         }

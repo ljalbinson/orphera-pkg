@@ -6,6 +6,10 @@ import java.nio.charset.StandardCharsets.UTF_8
 import java.nio.file.Files
 import java.nio.file.attribute.PosixFilePermission.{OWNER_READ, OWNER_WRITE}
 
+import io.grpc.{Status, StatusRuntimeException}
+
+import orphera.common.Auth
+
 /** Checks for the secret store. Run with
   * `sbt "orchestrator/Test/runMain orphera.orchestrator.SecretsCheck"`.
   *
@@ -193,6 +197,27 @@ object SecretsCheck:
     check("AgentToken falls back to the store", AgentToken.resolve(None, Some("from-store")) == Some("from-store") && AgentToken.resolve(Some(""), Some("from-store")) == Some("from-store"))
     check("AgentToken has nothing when neither is set", AgentToken.resolve(None, None).isEmpty && AgentToken.resolve(Some(""), Some("")).isEmpty)
     check("AgentToken does not read the store when the environment has a value", { var read = false; AgentToken.resolve(Some("x"), { read = true; Some("y") }); !read })
+
+    // An agent will not run without a token of its own, nor with the built-in one.
+    check("an agent refuses to start with no token, or an empty one", Auth.requireToken(None).isLeft && Auth.requireToken(Some("")).isLeft)
+    check("an agent refuses the built-in token and says so", Auth.requireToken(Some(Auth.DevToken)).swap.exists(_.contains("built-in")))
+    check("an agent starts with a token of its own", Auth.requireToken(Some("a-real-token")) == Right("a-real-token"))
+    check("the agent accepts the token it holds", Auth.accepts("a-real-token", Some("a-real-token")))
+    check(
+      "the agent rejects a wrong, missing, shorter or longer token",
+      !Auth.accepts("a-real-token", Some("another-token")) && !Auth.accepts("a-real-token", None) &&
+        !Auth.accepts("a-real-token", Some("a-real")) && !Auth.accepts("a-real-token", Some("a-real-token-2"))
+    )
+
+    // The CLI tells a rejected token apart from a node that did not answer.
+    val rejected = new StatusRuntimeException(Status.UNAUTHENTICATED.withDescription("missing or invalid token"))
+    check("a rejected token is reported as unauthenticated", NodeError.line(rejected).startsWith("unauthenticated"))
+    check("a rejected token is found under another exception", NodeError.line(new RuntimeException("call failed", rejected)).startsWith("unauthenticated"))
+    check(
+      "an unavailable node is reported as unreachable with its status",
+      { val l = NodeError.line(new StatusRuntimeException(Status.UNAVAILABLE.withDescription("io exception"))); l.startsWith("unreachable") && l.contains("UNAVAILABLE") }
+    )
+    check("any other failure is reported as unreachable", NodeError.line(new java.io.IOException("no route to host")).startsWith("unreachable"))
 
     // The real thing, when age is installed.
     if haveAge then

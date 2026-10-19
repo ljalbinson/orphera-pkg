@@ -2,6 +2,8 @@
 
 package orphera.orchestrator
 
+import cats.effect.IO
+
 import orphera.common.Auth
 
 /** The shared token the orchestrator sends to every agent (`ORPHERA_TOKEN` on the
@@ -32,6 +34,20 @@ object AgentToken:
     else if fromStore().exists(_.nonEmpty) then s"the secret store ($StoreName)"
     else "the built-in development token (no agent token is configured here)"
 
+  /** Fails when only the built-in token is available. An agent refuses to run
+    * with it, so a node installed or upgraded with it would not start, and the
+    * call that did it would be the only way in.
+    */
+  def requireConfigured: IO[Unit] =
+    IO.delay(current).flatMap { token =>
+      IO.raiseWhen(token == Auth.DevToken)(
+        new RuntimeException(
+          "no agent token is configured here, and an agent now refuses to start without one: " +
+            s"run `orphera secrets generate $StoreName` (or set ORPHERA_TOKEN), then try again"
+        )
+      )
+    }
+
   lazy val current: String =
     resolve(sys.env.get("ORPHERA_TOKEN"), fromStore()) match
       case Some(token) =>
@@ -43,4 +59,4 @@ object AgentToken:
             s"which anyone who has the source can use. Run `orphera secrets generate $StoreName`, " +
             "then `utils/set-agent-token.sh <node>...`."
         )
-        Auth.SharedToken
+        Auth.DevToken
