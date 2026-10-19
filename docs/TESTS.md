@@ -754,3 +754,24 @@ before `deployDeb`, where the check was; fixed (9e8733f) by checking at the top 
 agent token is configured here, and an agent now refuses to start without one`, and sent nothing to tst7. Fleet: after
 `deploy-agent` of the 0.1.197 package, `orphera version` reports 0.1.197 on all 24 nodes (tst0-tst19, gs1-gs3, st0); each
 upgraded agent started, which it only does with a token of its own.
+
+### K33. `orphera thread-info`; agent thread counts across the fleet - PASSED (2026-10-19)
+`make test`: ContainerCheck 49, ConfCheck 49, SecretsCheck 44, ThreadInfoCheck 16. On tst7 the new agent (0.1.198) answered
+`thread-info --detail`; tst0, still on 0.1.197, answered `unsupported: this agent is older than the orchestrator and does not
+know the command (upgrade it with deploy-agent)`. `--reset-peak` printed the reading and `peak reset`. After
+`deploy-agent` of 0.1.198 to the fleet, `orphera thread-info` on all 24 nodes, a few minutes after the agents restarted
+(idle, so the peak equals the current count):
+
+| nodes | cpus | threads (java) | rss | heap used / limit |
+|---|---|---|---|---|
+| tst9-tst19 (except tst8) | 2 | 26 (13) | 165-174 MB | 24-26 / 980 MB |
+| tst0-tst7 | 4 | 32 (17) | 185-197 MB | 20-22 / 4000 MB |
+| tst8 | 8 | 42 (22) | 209 MB | 15 / 3934 MB |
+| gs1-gs3 | 16 | 57 (31) | 217-229 MB | 56 / 30688 MB |
+| st0 | 32 | 86 (47) | 233 MB | 73 / 30688 MB |
+
+The count grows with the CPU count (Cats Effect compute pool, Netty event loops, G1 helper threads) and is about 26 at
+2 CPUs to 86 at 32; no node is above 100, and memory stays under 235 MB. The heap limit is the JVM default (a quarter of
+the host's memory), well above what is used. On tst7 the Java thread count rose from 15 to 17 over three calls as Netty
+added worker threads for new connections (bounded at twice the CPU count). Not yet measured: the peak during a heavy
+run, which `thread-info` now shows without sampling (the peak accumulates until the agent restarts).
