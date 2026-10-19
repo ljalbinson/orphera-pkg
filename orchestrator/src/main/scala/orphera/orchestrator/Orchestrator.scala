@@ -385,6 +385,17 @@ object Orchestrator:
       }
       .map(_.toMap)
 
+  /** One line saying why a call to an agent failed: the gRPC status (e.g.
+    * `UNAUTHENTICATED: missing or invalid token`, `UNAVAILABLE: io exception`)
+    * plus the underlying cause when there is one.
+    */
+  private def describe(e: Throwable): String =
+    val top = Option(e.getMessage).getOrElse(e.getClass.getSimpleName)
+    Option(e.getCause)
+      .flatMap(c => Option(c.getMessage))
+      .filterNot(top.contains)
+      .fold(top)(c => s"$top ($c)")
+
   def getVersions(nodes: List[Node]): IO[Map[String, String]] =
     nodes
       .parTraverse { node =>
@@ -392,7 +403,7 @@ object Orchestrator:
       }
       .map(_.collect {
         case (name, Right(v)) => name -> v
-        case (name, Left(_))  => name -> "unreachable"
+        case (name, Left(e))  => name -> s"unreachable: ${describe(e)}"
       }.toMap)
 
   def reboot(
