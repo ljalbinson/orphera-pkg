@@ -728,15 +728,16 @@ tst7 was not in the fleet. `manifests/mk-new-and-empty.sh 7` recreated it.
 `test_wordpress.sh` passed=11 and `test_observability_stack.sh` passed=13, with no password pattern in either log. This ran
 the `wordpress/db` and `observability/mysqld-exporter` conversions.
 
-### K31. Credentials: agent token and CA replaced - IN PROGRESS (2026-10-16)
+### K31. Credentials: agent token and CA replaced - PASSED (2026-10-19)
 Found: the agents accepted the built-in development token (no `ORPHERA_TOKEN` was set anywhere), and the CA and server
-private keys had been committed to a public repository. Done: `orphera/agent-token` generated; `utils/set-agent-token.sh`
-set it on 19 of 24 nodes (tst8, tst11, tst12, tst15 and tst16 were not running); `orphera version --nodes tst7` works with
-the stored token and fails with the built-in one. A new CA and server certificate were made with `make certs`
-(`openssl verify` OK) and 16 of the 19 reachable nodes (tst0-tst7, tst9, tst10, tst13, tst14, tst17-tst19, st0) report
-agent 0.1.195 with them. Not yet: gs1, gs2 and gs3 report `unreachable` (gs1's package system is broken by a failed dkms
-build of the Mellanox OFED module for kernel 6.8.0-147, which stops `apt-get install default-jre`; the agent can be
-installed there with `dpkg -i`); the old-CA rejection test, run with `ORPHERA_HOME` pointing at a directory that holds the
-old `certs/ca.crt`, which should print `unreachable` for a node with the new certificate; the five down nodes; deleting
-the old keys. A first attempt at that test used the current directory and proved nothing, because the `orphera` wrapper
-changes into `$ORPHERA_HOME` before it starts.
+private keys had been committed to a public repository. Done: `orphera/agent-token` generated and set on all 24 nodes with
+`utils/set-agent-token.sh` (19 on 2026-10-16; tst8, tst11, tst12, tst15 and tst16 after they were started: each has one
+`ORPHERA_TOKEN=` line in `/etc/orphera-agent/agent.env`). `orphera version --nodes tst7` works with the stored token and
+fails with the built-in one. A new CA and server certificate were made with `make certs` (`openssl verify` OK) and
+`orphera version` now reports 0.1.196 on all 24 nodes (tst0-tst19, gs1-gs3, st0). gs1-gs3 were unreachable for a time
+because of a failed dkms build of the Mellanox OFED module on gs1 (a host problem, not Orphera); that was fixed on the
+hosts. Old-CA rejection: with `ORPHERA_HOME=/tmp/catest` holding the old `certs/ca.crt` (SHA-256 fingerprint 0F:CF:C8:...
+against CC:11:B7:... for the new one), `orphera version --nodes tst0` prints `unreachable: UNAVAILABLE: io exception` from the
+TLS handler, so a client that trusts only the old CA cannot talk to a node. The `orphera` wrapper changes into `$ORPHERA_HOME`
+before it starts and needs `inventory.yaml` and `certs/ca.crt` there; a first attempt at this test run from the current
+directory proved nothing. Remaining by hand: delete `~/certs-old` and `~/certs-backup` on scala0.
