@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed — `orphera bootstrap` gives the agent this orchestrator's token
+- `agent.env` is a config file the package never overwrites, so a node kept whatever token it first had (often the built-in
+  default) and every call failed with `UNAUTHENTICATED` once `ORPHERA_TOKEN` was set on the orchestrator. Bootstrap now
+  writes `ORPHERA_TOKEN` into the node's `agent.env` (other lines kept, file mode 0600) and restarts the agent. The token is
+  sent over ssh's stdin, not on a command line.
+
+### Fixed — `orphera bootstrap` on dnf hosts redeploys a package of the same version
+- `dnf install` skipped an rpm whose version and release were already installed ("Nothing to do"), so a rebuilt package at
+  an unchanged `VERSION` (for example with new certificates) never reached Rocky nodes. Bootstrap now runs `dnf reinstall`
+  in that case. `dpkg -i` already reinstalled, so Ubuntu nodes were not affected.
+
 ### Added — `make certs`, `make certs-server`, `make certs-clean`
 - The README described `make certs` and `make certs-clean`, but the Makefile had no such targets. `make certs DOMAIN=...` makes
   a CA and a wildcard server certificate and refuses if a CA already exists; `make certs-server DOMAIN=...` reissues only the

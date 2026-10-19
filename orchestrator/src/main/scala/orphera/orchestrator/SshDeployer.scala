@@ -6,6 +6,8 @@ import java.io.*
 
 import cats.effect.*
 
+import orphera.common.Auth
+
 object SshDeployer:
 
   /** apt-get invocation shared by bootstrap's two prerequisite steps. Same
@@ -65,7 +67,39 @@ object SshDeployer:
                 AgentPackages.remotePathFor(true, remotePath),
                 onLine
               )
+      _ <- setAgentToken(node, sshUser, sshKeyPath, onLine)
     yield ()
+
+  /** Writes this orchestrator's token into the node's agent.env and restarts
+    * the agent, so a freshly bootstrapped agent accepts this orchestrator's
+    * calls. agent.env is a config file the package never overwrites once
+    * installed, so without this a node keeps whatever token it first had (or
+    * the built-in default) and every call fails with UNAUTHENTICATED. Other
+    * lines in agent.env are kept. The token goes over ssh's stdin, not the
+    * command line, so it is not visible in either host's process list.
+    */
+  private def setAgentToken(
+      node: Node,
+      sshUser: String,
+      sshKeyPath: Option[String],
+      onLine: String => IO[Unit]
+  ): IO[Unit] =
+    val script =
+      "sudo sh -c 'set -e; f=/etc/orphera-agent/agent.env; IFS= read -r t; touch \"$f\"; " +
+        "{ grep -Ev \"^#?[[:space:]]*ORPHERA_TOKEN=\" \"$f\" || true; printf \"ORPHERA_TOKEN=%s\\n\" \"$t\"; } > \"$f.new\"; " +
+        "chmod 600 \"$f.new\"; mv \"$f.new\" \"$f\"; systemctl restart orphera-agent'"
+    val source =
+      if sys.env.get("ORPHERA_TOKEN").exists(_.nonEmpty) then
+        "this orchestrator's ORPHERA_TOKEN"
+      else "the built-in development token (ORPHERA_TOKEN is not set here)"
+    sshRun(
+      node,
+      sshUser,
+      sshKeyPath,
+      script,
+      onLine,
+      stdin = Some(Auth.SharedToken + "\n")
+    ) >> onLine(s"agent token set to $source")
 
   private enum RemotePm:
     case Apt, Dnf
@@ -170,7 +204,12 @@ object SshDeployer:
         node,
         sshUser,
         sshKeyPath,
-        s"sudo dnf -y install $remotePath",
+        // dnf (unlike dpkg -i) skips a package whose name, version and release
+        // are already installed, so rebuilding at an unchanged VERSION (e.g.
+        // after replacing the certificates) would deploy nothing. Reinstall then.
+        s"""nvr=$$(rpm -qp --queryformat '%{NAME}-%{VERSION}-%{RELEASE}' $remotePath); """ +
+          s"""if rpm -q "$$nvr" >/dev/null 2>&1; then echo "$$nvr is already installed; reinstalling it"; """ +
+          s"""sudo dnf -y reinstall $remotePath; else sudo dnf -y install $remotePath; fi""",
         onLine
       )
     yield ()
@@ -338,24 +377,34 @@ object SshDeployer:
       sshKeyPath: Option[String],
       remoteCommand: String,
       onLine: String => IO[Unit],
-      persistHostKey: Boolean = true
+      persistHostKey: Boolean = true,
+      stdin: Option[String] = None
   ): IO[Unit] =
     runProcess(
       List("ssh") ++ sshBaseArgs(sshKeyPath, persistHostKey) ++ List(
         s"$sshUser@${node.host}",
         remoteCommand
       ),
-      onLine
+      onLine,
+      stdin
     )
 
   private def runProcess(
       command: List[String],
-      onLine: String => IO[Unit]
+      onLine: String => IO[Unit],
+      stdin: Option[String] = None
   ): IO[Unit] =
     for
       process <- IO.blocking {
         new ProcessBuilder(command*).redirectErrorStream(true).start()
       }
+      _ <- stdin.fold(IO.unit)(text =>
+        IO.blocking {
+          val in = process.getOutputStream
+          in.write(text.getBytes(java.nio.charset.StandardCharsets.UTF_8))
+          in.close()
+        }
+      )
       reader = new BufferedReader(new InputStreamReader(process.getInputStream))
       _ <- read(reader, onLine)
       exit <- IO.interruptible(process.waitFor())
