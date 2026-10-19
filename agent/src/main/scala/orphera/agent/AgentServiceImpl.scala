@@ -4,8 +4,11 @@ package orphera.agent
 
 import cats.effect.*
 import cats.effect.std.Queue
+
 import fs2.Stream
+
 import io.grpc.Metadata
+
 import orphera.common.*
 
 class AgentServiceImpl(

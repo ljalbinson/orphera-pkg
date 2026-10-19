@@ -2,9 +2,11 @@
 
 package orphera.orchestrator
 
-import com.github.mustachejava.DefaultMustacheFactory
 import java.io.{StringReader, StringWriter}
+
 import scala.jdk.CollectionConverters.*
+
+import com.github.mustachejava.DefaultMustacheFactory
 
 object Templating:
 

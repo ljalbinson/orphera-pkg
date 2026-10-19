@@ -2,9 +2,11 @@
 
 package orphera.agent
 
+import java.io.*
+
 import cats.effect.*
 import cats.effect.std.Queue
-import java.io.*
+
 import orphera.common.*
 
 /** Process-running steps shared by the package-manager backends (AptInstaller,

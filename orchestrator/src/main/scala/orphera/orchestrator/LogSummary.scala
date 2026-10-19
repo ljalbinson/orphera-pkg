@@ -2,9 +2,11 @@
 
 package orphera.orchestrator
 
-import cats.effect.IO
 import java.nio.file.{Files, Path, Paths}
+
 import scala.jdk.CollectionConverters.*
+
+import cats.effect.IO
 
 /** `orphera log-summary <target>` — renders one run's `.orphera-logs`
   * directory's `.jsonl` run-log file as a human-readable table: one row per

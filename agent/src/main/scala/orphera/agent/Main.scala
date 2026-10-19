@@ -2,11 +2,15 @@
 
 package orphera.agent
 
+import java.io.File
+
 import cats.effect.*
+
 import fs2.grpc.syntax.all.*
+
 import io.grpc.ServerInterceptors
 import io.grpc.netty.shaded.io.grpc.netty.{GrpcSslContexts, NettyServerBuilder}
-import java.io.File
+
 import orphera.common.AgentFs2Grpc
 
 object Main extends IOApp.Simple:

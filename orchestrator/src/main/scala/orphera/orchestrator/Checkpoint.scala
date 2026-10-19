@@ -2,10 +2,12 @@
 
 package orphera.orchestrator
 
+import java.nio.file.{Files, Path, Paths, StandardCopyOption}
+
+import scala.jdk.CollectionConverters.*
+
 import cats.effect.*
 import cats.effect.std.Semaphore
-import java.nio.file.{Files, Path, Paths, StandardCopyOption}
-import scala.jdk.CollectionConverters.*
 
 /** Per-task, per-node restart checkpointing for both PlaybookRunner and
   * ClusterPlaybookRunner.

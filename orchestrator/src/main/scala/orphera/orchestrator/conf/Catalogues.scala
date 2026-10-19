@@ -33,7 +33,7 @@ object Catalogues:
     if !Files.exists(file) then
       throw new RuntimeException(
         s"$file not found: run manifests/dump_oslo_options.sh <image> on a node, slim it with manifests/slim_catalogue.py, " +
-          s"and put it there (or set ORPHERA_CATALOGUES)"
+          "and put it there (or set ORPHERA_CATALOGUES)"
       )
     OsloJson
       .load(project, Files.readString(file), AlwaysOpen ++ openSections)

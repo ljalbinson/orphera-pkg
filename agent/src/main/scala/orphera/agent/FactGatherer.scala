@@ -2,9 +2,12 @@
 
 package orphera.agent
 
-import cats.effect.*
 import java.nio.file.*
+
 import scala.jdk.CollectionConverters.*
+
+import cats.effect.*
+
 import orphera.common.*
 
 object FactGatherer:
@@ -52,8 +55,8 @@ object FactGatherer:
           .asScala
           .filter(_.contains("="))
           .map { line =>
-            val Array(key, rawValue) = line.split("=", 2)
-            key -> rawValue.stripPrefix("\"").stripSuffix("\"")
+            val (key, rest) = line.span(_ != '=')
+            key -> rest.drop(1).stripPrefix("\"").stripSuffix("\"")
           }
           .toMap
     }.handleError(_ => Map.empty)

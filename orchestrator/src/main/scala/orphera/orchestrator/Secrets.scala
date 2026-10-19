@@ -2,8 +2,9 @@
 
 package orphera.orchestrator
 
-import orphera.common.Event
 import java.util.concurrent.ConcurrentHashMap
+
+import orphera.common.Event
 
 /** Secrets: `get` returns a named secret from the encrypted store
   * (SecretStore.scala); the rest keeps secret values out of the output.

@@ -2,10 +2,12 @@
 
 package orphera.orchestrator
 
+import java.nio.file.{Files, Paths}
+
 import cats.syntax.all.*
+
 import io.circe.*
 import io.circe.yaml.parser
-import java.nio.file.{Files, Paths}
 
 object PlaybookYaml:
 

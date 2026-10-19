@@ -2,9 +2,10 @@
 
 package orphera.orchestrator
 
+import java.nio.file.{Files, Paths}
+
 import io.circe.*
 import io.circe.yaml.parser
-import java.nio.file.{Files, Paths}
 
 /** One VM's sizing/network parameters, in the shape of the kayobe/
   * kttb-virt-ansible project's own per-VM config file — e.g.

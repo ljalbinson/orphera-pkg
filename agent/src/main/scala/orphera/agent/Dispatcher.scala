@@ -4,6 +4,7 @@ package orphera.agent
 
 import cats.effect.*
 import cats.effect.std.Queue
+
 import orphera.common.*
 
 object Dispatcher:

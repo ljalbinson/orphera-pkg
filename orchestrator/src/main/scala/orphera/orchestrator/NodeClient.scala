@@ -2,12 +2,17 @@
 
 package orphera.orchestrator
 
+import java.io.File
+
+import scala.concurrent.duration.*
+
 import cats.effect.*
+
 import fs2.grpc.syntax.all.*
+
 import io.grpc.Metadata
 import io.grpc.netty.shaded.io.grpc.netty.{GrpcSslContexts, NettyChannelBuilder}
-import java.io.File
-import scala.concurrent.duration.*
+
 import orphera.common.*
 
 object NodeClient:

@@ -2,8 +2,10 @@
 
 package orphera.agent
 
-import cats.effect.*
 import java.nio.file.{Files, Paths}
+
+import cats.effect.*
+
 import orphera.common.*
 
 object UptimeReader:

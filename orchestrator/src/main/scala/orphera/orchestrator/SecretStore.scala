@@ -2,12 +2,13 @@
 
 package orphera.orchestrator
 
+import java.nio.charset.StandardCharsets.UTF_8
+import java.nio.file.attribute.PosixFilePermissions
+import java.nio.file.{Files, Path, Paths, StandardCopyOption}
+import java.security.SecureRandom
+
 import io.circe.Json
 import io.circe.yaml.parser
-import java.nio.charset.StandardCharsets.UTF_8
-import java.nio.file.{Files, Path, Paths, StandardCopyOption}
-import java.nio.file.attribute.PosixFilePermissions
-import java.security.SecureRandom
 
 // The secrets a playbook needs (database and service passwords, keys), kept in
 // one file on the machine that runs `orphera`, encrypted with age

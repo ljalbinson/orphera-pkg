@@ -2,8 +2,8 @@
 
 package orphera.orchestrator.conf
 
-import io.circe.{Json, JsonObject}
 import io.circe.yaml.parser
+import io.circe.{Json, JsonObject}
 
 // SPIKE. Reads the output of `oslo-config-generator --format json`
 // (manifests/dump_oslo_options.sh) into a `Catalogue`.

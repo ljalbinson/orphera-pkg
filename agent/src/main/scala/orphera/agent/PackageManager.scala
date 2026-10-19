@@ -2,8 +2,9 @@
 
 package orphera.agent
 
-import cats.effect.*
 import java.nio.file.{Files, Paths}
+
+import cats.effect.*
 
 /** Which system package manager this host uses, decided by what is installed
   * rather than by distribution name, so derivatives (Rocky, Alma, CentOS

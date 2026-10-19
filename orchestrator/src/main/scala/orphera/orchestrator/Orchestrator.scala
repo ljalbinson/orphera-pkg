@@ -2,10 +2,12 @@
 
 package orphera.orchestrator
 
-import orphera.common.*
+import java.nio.file.{Files, Paths}
+
 import cats.effect.*
 import cats.syntax.all.*
-import java.nio.file.{Files, Paths}
+
+import orphera.common.*
 
 object Orchestrator:
 

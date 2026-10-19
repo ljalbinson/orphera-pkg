@@ -2,13 +2,17 @@
 
 package orphera.agent
 
-import cats.effect.*
-import cats.effect.std.Queue
-import fs2.Stream
 import java.nio.file.*
 import java.nio.file.attribute.*
+
 import scala.concurrent.duration.*
 import scala.jdk.CollectionConverters.*
+
+import cats.effect.*
+import cats.effect.std.Queue
+
+import fs2.Stream
+
 import orphera.common.*
 
 object FileTransfer:

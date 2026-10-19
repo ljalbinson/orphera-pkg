@@ -4,6 +4,7 @@ package orphera.agent
 
 import cats.effect.*
 import cats.effect.std.Queue
+
 import orphera.common.*
 
 /** The rpm counterpart of DebInstaller, for the `InstallDebPackage` RPC (the

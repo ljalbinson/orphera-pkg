@@ -2,10 +2,11 @@
 
 package orphera.orchestrator
 
-import cats.effect.*
-import cats.syntax.all.*
 import scala.concurrent.duration.*
 import scala.jdk.CollectionConverters.*
+
+import cats.effect.*
+import cats.syntax.all.*
 
 object ClusterPlaybookRunner:
 

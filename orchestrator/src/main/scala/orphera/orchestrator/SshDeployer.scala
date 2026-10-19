@@ -2,8 +2,9 @@
 
 package orphera.orchestrator
 
-import cats.effect.*
 import java.io.*
+
+import cats.effect.*
 
 object SshDeployer:
 

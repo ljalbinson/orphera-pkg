@@ -2,12 +2,14 @@
 
 package orphera.orchestrator
 
-import cats.effect.*
-import cats.effect.std.Semaphore
 import java.nio.file.{Files, Path, Paths, StandardOpenOption}
 import java.time.Instant
 import java.time.format.DateTimeFormatter
+
 import scala.jdk.CollectionConverters.*
+
+import cats.effect.*
+import cats.effect.std.Semaphore
 
 /** Structured, machine-parseable event log for both PlaybookRunner and
   * ClusterPlaybookRunner — the gap flagged alongside restartability: output has

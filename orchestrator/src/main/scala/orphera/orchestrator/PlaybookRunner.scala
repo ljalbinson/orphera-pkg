@@ -2,10 +2,12 @@
 
 package orphera.orchestrator
 
+import scala.jdk.CollectionConverters.*
+
 import cats.effect.*
 import cats.syntax.all.*
+
 import orphera.common.Facts
-import scala.jdk.CollectionConverters.*
 
 object PlaybookRunner:
 

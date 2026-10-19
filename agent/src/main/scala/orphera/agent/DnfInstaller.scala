@@ -3,8 +3,10 @@
 package orphera.agent
 
 import scala.annotation.unused
+
 import cats.effect.*
 import cats.effect.std.Queue
+
 import orphera.common.*
 
 /** The dnf (Rocky, Alma, RHEL, Fedora) counterpart of AptInstaller, speaking

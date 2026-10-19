@@ -2,10 +2,12 @@
 
 package orphera.orchestrator
 
-import cats.effect.IO
 import java.nio.file.{Files, Path, Paths, StandardOpenOption}
 import java.time.Instant
+
 import scala.jdk.CollectionConverters.*
+
+import cats.effect.IO
 
 /** A single, continuously-appended audit trail of every mutating CLI invocation
   * — `.orphera-audit/audit.jsonl`, one command_start / command_end pair per

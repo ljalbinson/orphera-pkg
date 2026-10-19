@@ -3,6 +3,7 @@
 package orphera.agent
 
 import cats.effect.*
+
 import orphera.common.*
 
 /** Powers the host off (not halt, not reboot) after a short delay. Detached via

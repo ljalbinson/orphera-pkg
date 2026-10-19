@@ -2,9 +2,10 @@
 
 package orphera.orchestrator
 
+import java.nio.file.Paths
+
 import cats.effect.*
 import cats.syntax.all.*
-import java.nio.file.Paths
 
 object Main extends IOApp:
 

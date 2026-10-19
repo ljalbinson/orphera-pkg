@@ -57,7 +57,8 @@ lazy val agent = project
     assembly / mainClass := Some("orphera.agent.Main"),
     libraryDependencies += "co.fs2" %% "fs2-io" % "3.11.0",
     Compile / sourceGenerators += Def.task {
-      val outFile = (Compile / sourceManaged).value / "orphera" / "agent" / "BuildInfo.scala"
+      val outFile =
+        (Compile / sourceManaged).value / "orphera" / "agent" / "BuildInfo.scala"
       val versionString = IO.read(file("VERSION")).trim
       IO.write(
         outFile,

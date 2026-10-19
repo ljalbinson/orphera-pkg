@@ -2,10 +2,13 @@
 
 package orphera.agent
 
-import cats.effect.*
 import java.nio.file.*
+
 import scala.concurrent.duration.*
 import scala.jdk.CollectionConverters.*
+
+import cats.effect.*
+
 import orphera.common.*
 
 object NetworkReloader:

@@ -2,8 +2,10 @@
 
 package orphera.orchestrator
 
-import cats.effect.*
 import java.util.concurrent.atomic.AtomicInteger
+
+import cats.effect.*
+
 import orphera.common.*
 
 object ConsoleRenderer:
