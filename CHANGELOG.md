@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — `orphera thread-info`
+- `orphera thread-info [--nodes ...] [--detail] [--reset-peak]` reports each agent process's threads: the OS thread count,
+  the Java threads, the highest Java thread count since the agent started (the JVM's own peak, so it needs no sampling),
+  CPUs, resident memory and heap. `--detail` adds the Java thread states and the threads grouped by name, from
+  `/proc/self/task/*/comm`, which includes the JVM's own GC and compiler threads. `--reset-peak` starts the peak again
+  after reading it. New gRPC call `GetThreadInfo`; an agent older than the orchestrator answers `unsupported` (the CLI
+  maps `UNIMPLEMENTED` for this) and is fixed by `deploy-agent`. Needs agent 0.1.198 or later. Allowed as a pipeline step,
+  not audited (read-only), added to the bash completion. New check program `ThreadInfoCheck` (16), run by `make test`.
+
 ### Security — an agent refuses to start without a real token
 - With `ORPHERA_TOKEN` unset (the packaged `agent.env` leaves it commented out) an agent accepted the built-in
   `dev-only-insecure-token`, which is in the source. It now logs why and exits, both when the token is unset or empty and

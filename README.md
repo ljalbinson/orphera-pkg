@@ -381,7 +381,8 @@ Verbs that act on nodes (`install`, `remove`, `dist-upgrade`, `run`, `copy`, `wr
 | `facts [--nodes ...]` | Gather and print basic host facts (OS, kernel, CPU/memory, disks, interfaces) from one or more agents |
 | `shutdown --nodes ... --yes [--delay 5]` | Power hosts **off** (`shutdown -P now`, detached via `systemd-run` like `reboot`). Refuses to run without `--yes` or without explicit `--nodes`/`--node-groups` (never defaults to everything), because nothing here can power a host back on. Returns once the agent acknowledges scheduling it — it does not confirm the host actually went down |
 | `uptime [--nodes ...]` | Report each agent's host uptime and 1-minute load average — the concrete way to confirm a `reboot` genuinely rebooted the host, not just that the agent came back |
-| `pipeline <step>... (--nodes ... \| --node-groups ...) [--parallel N] [--quiet]` | Run a chain of verbs on each node, the nodes in parallel. Each step is one quoted verb line, e.g. `orphera pipeline "install tree" "dist-upgrade" "reboot --wait" --node-groups mons`. Steps run in order per node and a failure stops that node only; output is prefixed `[node]`, logged to `.orphera-build-logs/<time>/<node>.log`, and followed by a summary table; exit 1 if any node failed. A step may be any node verb (`install`, `remove`, `autoremove`, `dist-upgrade`, `copy`, `write-file`, `network-apply`, `deploy-agent`, `run`, `fetch`, `facts`, `version`, `uptime`, `reboot`, `shutdown`) but may not give its own `--nodes` |
+| `thread-info [--nodes ...] [--detail] [--reset-peak]` | Report each agent process's thread count: all OS threads, the Java threads and the most there have been since the agent started, CPUs, resident memory and heap. `--detail` adds the Java thread states and the threads grouped by name (`ioapp-compute`, `grpc-default-ex`, `GC Thread`, ...); `--reset-peak` starts the peak again after reading it, so the next call shows the highest count for one piece of work. An agent older than the orchestrator answers `unsupported` |
+| `pipeline <step>... (--nodes ... \| --node-groups ...) [--parallel N] [--quiet]` | Run a chain of verbs on each node, the nodes in parallel. Each step is one quoted verb line, e.g. `orphera pipeline "install tree" "dist-upgrade" "reboot --wait" --node-groups mons`. Steps run in order per node and a failure stops that node only; output is prefixed `[node]`, logged to `.orphera-build-logs/<time>/<node>.log`, and followed by a summary table; exit 1 if any node failed. A step may be any node verb (`install`, `remove`, `autoremove`, `dist-upgrade`, `copy`, `write-file`, `network-apply`, `deploy-agent`, `run`, `fetch`, `facts`, `version`, `uptime`, `thread-info`, `reboot`, `shutdown`) but may not give its own `--nodes` |
 | `run <command...> [--nodes] [--timeout 60] [--quiet]` | Run an arbitrary command on one or more agents, streaming stdout/stderr and reporting the real exit code. `--quiet` prints only the command's output (still prefixed `[node]`); a failure still prints its exit line and sets the exit code. Use `--` before the command to separate it from `run`'s own flags, e.g. `orphera run --nodes tst0 -- systemctl status nginx` |
 | `playbook <file.yaml \| file.scala \| compiled-name> [--resume] [--config <path>]` | Run an ordered, multi-task playbook — from a YAML file, a run-time-compiled Scala script, or a compiled DSL playbook by registered name — see [Playbooks](#playbooks). `--resume` skips tasks already completed in a previous run — see [Restartability](#restartability). `--config` points a `.scala` script at a per-VM YAML config file (`ConfigYaml.fromEnv()`, see [Per-VM config files](#per-vm-config-files---config)); has no effect on a `.yaml`/compiled playbook, which has no code of its own to read it |
 | `cluster-playbook <file.yaml \| file.scala> [<file2> ...] [--resume] [--config <path>]` | Run a staged, cross-node-coordinated playbook — see [Cross-node coordination](#cross-node-coordination-and-staged-playbooks). Same `--resume`/`--config` support as `playbook`, applied independently to each file. One or more files run in the order given, stopping at the first one that fails — a shorthand for a fixed sequence (e.g. tear down, then rebuild) without a wrapper script |
@@ -1190,9 +1191,10 @@ node isn't confirmed within the timeout, and it prints which ones.
   changed `agent.env` when it is upgraded. `bootstrap` writes the same
   token to a node it installs; the script is for nodes that are already
   installed.
-- **What a failed call looks like:** `version` and `uptime` print
-  `unauthenticated` when the node answered and rejected this
-  orchestrator's token (fix it with `utils/set-agent-token.sh`), and
+- **What a failed call looks like:** `version`, `uptime` and `thread-info`
+  print `unauthenticated` when the node answered and rejected this
+  orchestrator's token (fix it with `utils/set-agent-token.sh`),
+  `unsupported` (thread-info) when the agent is too old to know the call, and
   `unreachable: <status>` when nothing usable came back (no route, no
   listener, a certificate the orchestrator does not trust). Other
   commands still show the raw gRPC error.
@@ -1384,7 +1386,7 @@ auto-updated; remove the entry manually.
 |---|---|
 | `make` / `make all` | clean → test → assembly → deb |
 | `make clean` | `sbt clean`, removes `pkg/` and any built `.deb` / `.rpm` |
-| `make test` | `sbt test`, then the check programs `ContainerCheck`, `ConfCheck` and `SecretsCheck` (set `CHECK_VERBOSE=1` to print every passing check) |
+| `make test` | `sbt test`, then the check programs `ContainerCheck`, `ConfCheck`, `SecretsCheck` and `ThreadInfoCheck` (set `CHECK_VERBOSE=1` to print every passing check) |
 | `make assembly` | `sbt agent/assembly` |
 | `make deb` | stages package contents, runs `dpkg-deb --build` |
 | `make rpm` | stages the same contents, runs `rpmbuild` to produce `orphera-agent-<version>-1.noarch.rpm` for Rocky/Red Hat hosts. Needs `rpmbuild` |
@@ -1413,12 +1415,14 @@ patch number.
 
 ## Testing
 
-**What runs today.** `make test` runs `sbt test` and three check programs
+**What runs today.** `make test` runs `sbt test` and four check programs
 that need no cluster: `ContainerCheck` (49 checks: typed containers and
-`Resource`), `ConfCheck` (49: typed configuration files and catalogues)
-and `SecretsCheck` (35: the secret store, `Secret`, masking, the agent
-token; the checks that use real `age` are skipped when it is not
-installed). Each exits non-zero on a failure.
+`Resource`), `ConfCheck` (49: typed configuration files and catalogues),
+`SecretsCheck` (44: the secret store, `Secret`, masking, the agent
+token and when an agent will start, how a failed call is labelled; the
+checks that use real `age` are skipped when it is not installed) and
+`ThreadInfoCheck` (16: `thread-info`'s counting, report and command
+line). Each exits non-zero on a failure.
 
 The scripts `manifests/test_*.sh` apply a playbook to the lab and check the
 result independently of the playbook's own health check. They print a

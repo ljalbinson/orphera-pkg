@@ -95,6 +95,7 @@ object AuditLog:
       case Command.Version(_)                           => false
       case Command.CertInfo(_)                          => false
       case Command.Uptime(_)                            => false
+      case Command.Threads(_, _, _)                     => false
       case Command.LogSummary(_)                        => false
       case Command.ShowAuditLog(_)                      => false
       case Command.Pipeline(_, _, _, _)                 =>

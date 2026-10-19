@@ -105,6 +105,11 @@ enum Command:
   case Version(nodes: Option[List[String]])
   case CertInfo(nodes: Option[List[String]])
   case Uptime(nodes: Option[List[String]])
+  case Threads(
+      nodes: Option[List[String]],
+      detail: Boolean,
+      resetPeak: Boolean
+  )
   // `paths` is one or more — `cluster-playbook a.scala b.scala c.scala`
   // runs each in turn, in the order given, stopping at the first one that
   // fails (same "don't press on past a failure" convention as a single
@@ -260,6 +265,8 @@ object Cli:
       case "version" :: rest  => parseVersion(rest, None)
       case "cert-info" :: rest => parseCertInfo(rest, None)
       case "uptime" :: rest   => parseUptime(rest, None)
+      case "thread-info" :: rest =>
+        parseThreads(rest, None, detail = false, resetPeak = false)
       case "shutdown" :: rest =>
         parseShutdown(rest, None, 5, confirmed = false)
       case "reboot" :: rest =>
@@ -357,6 +364,7 @@ object Cli:
     "facts",
     "version",
     "uptime",
+    "thread-info",
     "reboot",
     "shutdown"
   )
@@ -1062,6 +1070,26 @@ object Cli:
       case other :: _ =>
         Left(s"Unknown argument to uptime: $other")
 
+  private def parseThreads(
+      args: List[String],
+      nodes: Option[List[String]],
+      detail: Boolean,
+      resetPeak: Boolean
+  ): Either[String, Command] =
+    args match
+      case Nil => Right(Command.Threads(nodes, detail, resetPeak))
+      case "--nodes" :: value :: rest =>
+        parseThreads(
+          rest,
+          Some(value.split(",").toList.map(_.trim)),
+          detail,
+          resetPeak
+        )
+      case "--detail" :: rest     => parseThreads(rest, nodes, true, resetPeak)
+      case "--reset-peak" :: rest => parseThreads(rest, nodes, detail, true)
+      case other :: _ =>
+        Left(s"Unknown argument to thread-info: $other")
+
   private def parseRunCommand(
       args: List[String],
       command: List[String],
@@ -1175,6 +1203,11 @@ object Cli:
       |                      --yes, and there is no remote way to power it back on
       |  version           [--nodes host1,host2]
       |  uptime            [--nodes host1,host2]
+      |  thread-info       [--nodes host1,host2] [--detail] [--reset-peak]
+      |                    — how many threads each agent process has (java threads, the
+      |                      highest number since it started, cpus, memory); --detail adds
+      |                      the thread states and the threads by name; --reset-peak starts
+      |                      the peak again after reading it, to measure one piece of work
       |  cert-info         [--nodes host1,host2]
       |                    — the TLS certificate each agent presents: per-node or
       |                      wildcard, the names it covers, whether it names the host

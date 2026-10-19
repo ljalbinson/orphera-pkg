@@ -54,7 +54,7 @@ _orphera_completions() {
   local cur prev words cword
   _init_completion || return
 
-  local verbs="install remove autoremove dist-upgrade copy write-file network-apply reboot shutdown uptime run
+  local verbs="install remove autoremove dist-upgrade copy write-file network-apply reboot shutdown uptime thread-info run
     playbook cluster-playbook deploy-agent bootstrap issue-certs teardown fetch facts
     version cert-info log-summary audit-log pipeline help"
 
@@ -172,6 +172,14 @@ _orphera_completions() {
         --nodes) COMPREPLY=() ;;
         --node-groups) COMPREPLY=($(compgen -W "$(_orphera_groups)" -- "$cur")) ;;
         *) COMPREPLY=($(compgen -W "--nodes --node-groups" -- "$cur")) ;;
+      esac
+      ;;
+
+    thread-info)
+      case "$prev" in
+        --nodes) COMPREPLY=() ;;
+        --node-groups) COMPREPLY=($(compgen -W "$(_orphera_groups)" -- "$cur")) ;;
+        *) COMPREPLY=($(compgen -W "--nodes --node-groups --detail --reset-peak" -- "$cur")) ;;
       esac
       ;;
 

@@ -132,7 +132,7 @@ clean:
 	rm -f orphera-agent_*_amd64.deb orphera-agent-*.rpm
 
 test:
-	sbt test "orchestrator/Test/runMain orphera.orchestrator.kolla.ContainerCheck" "orchestrator/Test/runMain orphera.orchestrator.conf.ConfCheck" "orchestrator/Test/runMain orphera.orchestrator.SecretsCheck"
+	sbt test "orchestrator/Test/runMain orphera.orchestrator.kolla.ContainerCheck" "orchestrator/Test/runMain orphera.orchestrator.conf.ConfCheck" "orchestrator/Test/runMain orphera.orchestrator.SecretsCheck" "orchestrator/Test/runMain orphera.orchestrator.ThreadInfoCheck"
 
 assembly:
 	sbt agent/assembly
