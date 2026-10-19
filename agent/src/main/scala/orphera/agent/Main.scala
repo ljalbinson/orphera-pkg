@@ -16,8 +16,14 @@ import orphera.common.AgentFs2Grpc
 object Main extends IOApp.Simple:
 
   def run =
+    // A certificate of this node's own (tls/, issued by `orphera issue-certs`
+    // or bootstrap) when there is one, else the wildcard the package ships.
+    val perNode = (new File("tls/server.crt"), new File("tls/server.key"))
+    val (certFile, keyFile) =
+      if perNode._1.isFile && perNode._2.isFile then perNode
+      else (new File("certs/server.crt"), new File("certs/server.key"))
     val sslContext = GrpcSslContexts
-      .forServer(new File("certs/server.crt"), new File("certs/server.key"))
+      .forServer(certFile, keyFile)
       .build()
 
     for
@@ -37,7 +43,9 @@ object Main extends IOApp.Simple:
             .resource[IO]
         }
         .use { server =>
-          IO.println("Orphera Agent listening on 50051 (TLS)") >>
+          IO.println(
+            s"Orphera Agent listening on 50051 (TLS, ${certFile.getPath})"
+          ) >>
             IO.blocking(server.start()) >>
             IO.never
         }

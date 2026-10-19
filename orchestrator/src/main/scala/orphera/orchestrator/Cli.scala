@@ -70,6 +70,12 @@ enum Command:
       remotePath: String,
       forgetHostKey: Boolean = false
   )
+  // Issues each node a TLS certificate of its own over SSH (see NodeCerts).
+  case IssueCerts(
+      nodes: Option[List[String]],
+      sshUser: String,
+      sshKeyPath: Option[String]
+  )
   case Teardown(
       nodes: List[String],
       sshUser: String,
@@ -240,6 +246,8 @@ object Cli:
           None,
           "/tmp/orphera-agent.deb"
         )
+      case "issue-certs" :: rest =>
+        parseIssueCerts(rest, None, "root", None)
       case "teardown" :: rest =>
         parseTeardown(rest, Nil, "root", None, purge = false, confirmed = false)
       case "fetch" :: remote :: rest  => parseFetch(rest, remote, ".", None)
@@ -860,6 +868,28 @@ object Cli:
       case other :: _ =>
         Left(s"Unknown argument to bootstrap: $other")
 
+  private def parseIssueCerts(
+      args: List[String],
+      nodes: Option[List[String]],
+      sshUser: String,
+      sshKeyPath: Option[String]
+  ): Either[String, Command] =
+    args match
+      case Nil => Right(Command.IssueCerts(nodes, sshUser, sshKeyPath))
+      case "--nodes" :: value :: rest =>
+        parseIssueCerts(
+          rest,
+          Some(value.split(",").toList.map(_.trim)),
+          sshUser,
+          sshKeyPath
+        )
+      case "--ssh-user" :: value :: rest =>
+        parseIssueCerts(rest, nodes, value, sshKeyPath)
+      case "--ssh-key" :: value :: rest =>
+        parseIssueCerts(rest, nodes, sshUser, Some(value))
+      case other :: _ =>
+        Left(s"Unknown argument to issue-certs: $other")
+
   private def parseTeardown(
       args: List[String],
       nodes: List[String],
@@ -1085,7 +1115,13 @@ object Cli:
       |                      the freshly built orphera-agent_*.deb in the current
       |                      directory if --file is omitted
       |  bootstrap         [--file <local.deb|.rpm>] --nodes host1,host2 [--ssh-user root] [--ssh-key ~/.ssh/id_ed25519] [--remote-path /tmp/x.deb] [--forget-host-key]
-      |                    — same package check and auto-discovery as deploy-agent
+      |                    — same package check and auto-discovery as deploy-agent;
+      |                      also issues the node its own certificate (as issue-certs)
+      |                      and sets its ORPHERA_TOKEN
+      |  issue-certs       [--nodes host1,host2] [--ssh-user root] [--ssh-key ~/.ssh/id_ed25519]
+      |                    — gives each node a TLS certificate of its own, signed by
+      |                      certs/ca.key; the key is generated on the node and never
+      |                      leaves it. Restarts the agent; a failure changes nothing
       |  teardown          --nodes host1,host2 --yes [--purge] [--ssh-user root] [--ssh-key ~/.ssh/id_ed25519]
       |  playbook          <file.yaml | file.scala | compiled-name> [--resume] [--config <path>]
       |                    — .scala files are compiled at run time; --resume skips

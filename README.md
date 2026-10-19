@@ -216,6 +216,28 @@ and never match raw IP literals. Nodes must be addressed by a DNS name
 under the wildcard's domain in `Inventory.all` — an IP-addressed node
 will fail TLS hostname verification.
 
+### Per-node certificates
+
+`orphera issue-certs --nodes ... --ssh-user localadmin` gives each node a
+certificate of its own, so a node's key no longer opens every other node.
+Over SSH, each node generates a new key in `/etc/orphera-agent/tls/`
+(mode 0600; the key never leaves the node) and sends back a signing
+request; the orchestrator signs it with `certs/ca.key`, naming exactly
+the node's inventory `host` (an IP address works too, which the wildcard
+cannot cover), and sends the certificate back. The node checks that the
+certificate matches the new key before replacing anything and restarting
+the agent, so a failure leaves the current pair in place. Certificates
+are valid for 825 days; rerun `issue-certs` to renew. `bootstrap` does
+the same for each node it installs, whenever `certs/ca.key` is present.
+
+The agent uses `tls/server.{crt,key}` when both exist and otherwise falls
+back to the wildcard the package ships, so nodes can move over one at a
+time. No package owns `tls/`, so installing or upgrading the agent never
+removes it. The wildcard stays in the package until every node has its own
+certificate; a later release will drop it. The journal line
+`Orphera Agent listening on 50051 (TLS, tls/server.crt)` shows which
+certificate an agent is using.
+
 `certs/*.key` is git-ignored; never commit private keys.
 
 ## Running (development)
@@ -1176,6 +1198,7 @@ auto-updated; remove the entry manually.
 | `make verify` | builds, then prints `.deb` contents/metadata |
 | `make certs DOMAIN=...` | generates CA + wildcard server cert. Refuses to run if `certs/ca.crt` already exists |
 | `make certs-server DOMAIN=...` | issues a new server certificate and key from the existing CA (same as `./buildcert DOMAIN`). Refuses, changing nothing, if `ca.crt` and `ca.key` do not match. Agents need a new package |
+| `orphera issue-certs --nodes ...` | issues each node its own certificate over SSH (see *Per-node certificates*) |
 | `make certs-clean` | deletes the CA and server keys and certificates in `certs/` — you must type `delete` to confirm; invalidates every already-deployed agent's trust |
 | `make orpheracli` | builds the orchestrator and installs it as `/usr/local/lib/orphera-orchestrator.jar`, with the `orphera` launcher in `/usr/local/bin` |
 | `make release` | bumps the patch version in `VERSION`, then runs the full clean/test/assembly/deb chain (plus the `.rpm` when `rpmbuild` is installed) at the new version |

@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — a certificate of its own for each agent (`orphera issue-certs`)
+- Every agent package carried the same wildcard key, so one node's key would open them all. `orphera issue-certs --nodes ...`
+  has each node generate its own key in `/etc/orphera-agent/tls/` (it never leaves the node), signs the node's request with
+  `certs/ca.key` for exactly its inventory host, and installs the certificate once it is checked against the key. A failure
+  changes nothing. `bootstrap` now does this too when `certs/ca.key` is present.
+- The agent uses `tls/` when it holds a certificate and key and falls back to the packaged wildcard otherwise; its startup
+  line names the certificate in use. Needs the new agent package. The wildcard leaves the package in a later release.
+- `teardown --purge` on Ubuntu now also removes `/etc/orphera-agent/tls`.
+
 ### Fixed — `orphera bootstrap` gives the agent this orchestrator's token
 - `agent.env` is a config file the package never overwrites, so a node kept whatever token it first had (often the built-in
   default) and every call failed with `UNAUTHENTICATED` once `ORPHERA_TOKEN` was set on the orchestrator. Bootstrap now

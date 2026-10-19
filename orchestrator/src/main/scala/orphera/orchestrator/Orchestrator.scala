@@ -343,6 +343,44 @@ object Orchestrator:
       yield debResults ++ rpmResults
     }
 
+  /** `orphera issue-certs`: each node gets a certificate of its own (see
+    * NodeCerts). Nodes are done in parallel and independently, so one failure
+    * does not stop the others; returns whether every node succeeded.
+    */
+  def issueNodeCerts(
+      nodes: List[Node],
+      sshUser: String,
+      sshKeyPath: Option[String]
+  ): IO[Boolean] =
+    if !NodeCerts.caAvailable then
+      IO.println(
+        "certs/ca.crt and certs/ca.key are needed to sign node certificates (make certs DOMAIN=...)"
+      ).as(false)
+    else
+      nodes
+        .parTraverse { node =>
+          NodeCerts
+            .issue(
+              node,
+              sshUser,
+              sshKeyPath,
+              line => IO.println(s"[${node.name}] $line")
+            )
+            .attempt
+            .flatTap {
+              case Left(e) =>
+                IO.println(s"[${node.name}] FAILED: ${e.getMessage}")
+              case Right(_) => IO.unit
+            }
+        }
+        .flatMap { results =>
+          val failed = results.count(_.isLeft)
+          IO.println(
+            s"Issued ${results.size - failed} of ${results.size} node certificates" +
+              (if failed > 0 then s"; $failed failed (their current certificate is unchanged)" else "")
+          ).as(failed == 0)
+        }
+
   def teardownAgent(
       nodes: List[Node],
       sshUser: String,

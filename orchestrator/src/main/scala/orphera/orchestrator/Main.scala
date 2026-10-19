@@ -187,6 +187,19 @@ object Main extends IOApp:
               )
             }
 
+      case Right(Command.IssueCerts(nodeNames, sshUser, sshKeyPath)) =>
+        val targets = nodeNames match
+          case Some(names) => Inventory.all.filter(n => names.contains(n.name))
+          case None        => Inventory.all
+        if targets.isEmpty then
+          IO.println("No matching nodes found in inventory.") >> IO.pure(
+            ExitCode.Error
+          )
+        else
+          Orchestrator
+            .issueNodeCerts(targets, sshUser, sshKeyPath)
+            .map(allOk => if allOk then ExitCode.Success else ExitCode.Error)
+
       case Right(
             Command.Teardown(nodeNames, sshUser, sshKeyPath, purge, confirmed)
           ) =>

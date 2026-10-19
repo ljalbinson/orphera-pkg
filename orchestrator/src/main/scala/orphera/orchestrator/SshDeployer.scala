@@ -67,6 +67,13 @@ object SshDeployer:
                 AgentPackages.remotePathFor(true, remotePath),
                 onLine
               )
+      _ <-
+        if NodeCerts.caAvailable then
+          NodeCerts.issue(node, sshUser, sshKeyPath, onLine)
+        else
+          onLine(
+            "certs/ca.key not found here: no per-node certificate issued; the agent uses the packaged wildcard"
+          )
       _ <- setAgentToken(node, sshUser, sshKeyPath, onLine)
     yield ()
 
@@ -317,7 +324,9 @@ object SshDeployer:
           node,
           sshUser,
           sshKeyPath,
-          s"sudo dpkg --$purgeOrRemove orphera-agent",
+          // dpkg --purge leaves /etc/orphera-agent/tls (no package owns it).
+          s"sudo dpkg --$purgeOrRemove orphera-agent" +
+            (if purgeConfig then s" && sudo rm -rf ${NodeCerts.RemoteDir}" else ""),
           onLine
         )
       case RemotePm.Dnf =>
@@ -370,6 +379,45 @@ object SshDeployer:
       ),
       onLine
     )
+
+  /** Runs a remote command and returns its output lines; on failure the last
+    * lines go into the error, since nothing was printed.
+    */
+  private[orchestrator] def sshCollect(
+      node: Node,
+      sshUser: String,
+      sshKeyPath: Option[String],
+      remoteCommand: String
+  ): IO[List[String]] =
+    Ref.of[IO, List[String]](Nil).flatMap { seen =>
+      sshRun(
+        node,
+        sshUser,
+        sshKeyPath,
+        remoteCommand,
+        line => seen.update(line :: _)
+      ).handleErrorWith { err =>
+        seen.get.flatMap { lines =>
+          val tail = lines.reverse.takeRight(5).mkString("; ")
+          IO.raiseError(
+            new RuntimeException(
+              s"${node.name}: ${err.getMessage}" +
+                (if tail.isEmpty then "" else s" — output: $tail")
+            )
+          )
+        }
+      } >> seen.get.map(_.reverse)
+    }
+
+  private[orchestrator] def sshRunWithInput(
+      node: Node,
+      sshUser: String,
+      sshKeyPath: Option[String],
+      remoteCommand: String,
+      input: String,
+      onLine: String => IO[Unit]
+  ): IO[Unit] =
+    sshRun(node, sshUser, sshKeyPath, remoteCommand, onLine, stdin = Some(input))
 
   private def sshRun(
       node: Node,

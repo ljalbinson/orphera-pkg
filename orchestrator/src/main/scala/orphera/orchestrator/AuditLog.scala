@@ -84,6 +84,7 @@ object AuditLog:
       case Command.DeployAgent(_, _, _)                 => true
       case Command.Bootstrap(_, _, _, _, _, _)          => true
       case Command.Teardown(_, _, _, _, _)              => true
+      case Command.IssueCerts(_, _, _)                  => true
       case Command.RunPlaybook(_, _, _)                 => true
       case Command.Reboot(_, _, _, _)                   => true
       case Command.Shutdown(_, _, _)                    => true
@@ -200,6 +201,12 @@ object AuditLog:
           "command" -> "bootstrap",
           "forget_host_key" -> forgetHostKey.toString,
           "local_path" -> localPath.getOrElse("(auto-discovered)"),
+          "ssh_user" -> sshUser,
+          "nodes" -> nodesField(nodes)
+        )
+      case Command.IssueCerts(nodes, sshUser, _) =>
+        List(
+          "command" -> "issue-certs",
           "ssh_user" -> sshUser,
           "nodes" -> nodesField(nodes)
         )
