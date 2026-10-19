@@ -81,7 +81,7 @@ object NodeCerts:
   private def newKeyAndCsr(host: String): String =
     s"sudo sh -c 'set -e; umask 077; mkdir -p $RemoteDir; " +
       s"openssl req -new -newkey rsa:4096 -nodes -keyout $RemoteDir/server.key.new " +
-      s"-subj \"/CN=$host\" 2>/dev/null'"
+      s"""-subj "/CN=$host" 2>/dev/null'"""
 
   /** Reads the certificate from stdin, checks it carries the public half of
     * `server.key.new`, then replaces the live pair and restarts the agent.
