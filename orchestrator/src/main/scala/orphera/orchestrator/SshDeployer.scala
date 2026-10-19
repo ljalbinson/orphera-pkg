@@ -6,7 +6,6 @@ import java.io.*
 
 import cats.effect.*
 
-import orphera.common.Auth
 
 object SshDeployer:
 
@@ -91,18 +90,14 @@ object SshDeployer:
       "sudo sh -c 'set -e; f=/etc/orphera-agent/agent.env; IFS= read -r t; touch \"$f\"; " +
         "{ grep -Ev \"^#?[[:space:]]*ORPHERA_TOKEN=\" \"$f\" || true; printf \"ORPHERA_TOKEN=%s\\n\" \"$t\"; } > \"$f.new\"; " +
         "chmod 600 \"$f.new\"; mv \"$f.new\" \"$f\"; systemctl restart orphera-agent'"
-    val source =
-      if sys.env.get("ORPHERA_TOKEN").exists(_.nonEmpty) then
-        "this orchestrator's ORPHERA_TOKEN"
-      else "the built-in development token (ORPHERA_TOKEN is not set here)"
     sshRun(
       node,
       sshUser,
       sshKeyPath,
       script,
       onLine,
-      stdin = Some(Auth.SharedToken + "\n")
-    ) >> onLine(s"agent token set to $source")
+      stdin = Some(AgentToken.current + "\n")
+    ) >> onLine(s"agent token set to ${AgentToken.describe}")
 
   /** Removes a package left at `remotePath` by an earlier deploy-agent, which
     * writes it as root: in /tmp (sticky) scp as the ssh user cannot replace a

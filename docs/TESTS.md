@@ -691,3 +691,53 @@ registration). A search for the loose pattern `orphera-test` finds six harmless 
 provider name, in two runs). Unit checks (`ConfCheck`, `ContainerCheck`) were not reported at the time of the merge.
 Not covered: the node's agent logs every command it runs (`[DEBUG-CMD]` in `CommandRunner.scala`), and a running command's
 arguments are visible on the node while it runs; commands that embed a password are still in both.
+
+### K25. Encrypted secret store (`SecretStore.scala`, `orphera secrets`) - PASSED (2026-10-16)
+`age` installed on scala0, `orphera secrets init`, then `manifests/seed_test_secrets.sh` seeded 18 names. `SecretsCheck`
+25/25 after one compile fix (the test compared `Either[String, Option[String]]` with `Either[String, String]`).
+`manifests/test_placement.sh` passed=10 reading its three passwords from the store; `~/.config/orphera/age.key` and
+`secrets.age` are mode 600. The loose pattern `orphera-test` printed 6 in the log (harmless names, as in K24); the precise
+pattern `orphera-test-[a-z-]*-(password|key)` printed 0 and `<redacted>` appeared 6 times. Not covered: a generated
+password on an existing deployment (it does not match the database users that exist; seed first).
+
+### K26. Typed configuration for Keystone, Glance, Cinder, Nova and Neutron - PASSED (2026-10-16)
+`ConfCheck` 49/49, after one fix found by running the playbooks: glance and cinder write a `[ceph]` section that is not in
+their catalogues, and an open section had to be accepted even when the image does not declare it at all. Playbook tests:
+keystone 11, glance 11, cinder 12, placement 10, nova 19, neutron 18, all `failed=0`.
+
+### K27. Passwords from the store in every playbook - PASSED (2026-10-16)
+Keystone, Glance, Cinder, Nova, Neutron, Nova compute, Horizon, Galera, haproxy, WordPress and extended observability read
+their passwords with `Secrets.get`/`Secrets.secret`. After the OpenStack conversions: keystone 11, glance 11, cinder 12,
+placement 10, nova 19, neutron 18, nova_compute 25, horizon 7, all `failed=0`, no password pattern in any log.
+`build_openstack_stack.sh --only galera` passed=4 and `test_vip_failover.sh` 6/6 for the Galera and haproxy conversions.
+
+### K28. `Secret`, a value that does not print (`Secret.scala`) - PASSED (2026-10-16)
+`SecretsCheck` 31/31 (35 once the agent token checks were added); Placement passed=10 with the type, and the eight OpenStack
+playbooks above passed again after every manifest was converted (`.reveal` at each use). A site missed in the conversion
+would be a compile error; none was.
+
+### K29. `test_mariadb_galera.sh` wiped the Galera cluster - RECORDED (2026-10-16)
+The test runs `mariadb_galera_teardown` first (purges MariaDB, haproxy and keepalived, removes `/var/lib/mysql`). It was run as a
+check of the Galera password change on the belief that it only applied playbooks; every OpenStack database and the VIP
+were lost. `manifests/build_openstack_stack.sh --from galera` rebuilt everything: passed=23 failed=0 in 724 s, including a
+CirrOS instance booted on KVM with a DHCP lease. The script now says it is destructive and refuses to run without
+`ORPHERA_ALLOW_DESTRUCTIVE=1`. Lesson: read a test's header before running it on the lab.
+
+### K30. tst7 rebuilt; WordPress and Prometheus/Grafana - PASSED (2026-10-16)
+tst7 was not in the fleet. `manifests/mk-new-and-empty.sh 7` recreated it.
+`test_wordpress.sh` passed=11 and `test_observability_stack.sh` passed=13, with no password pattern in either log. This ran
+the `wordpress/db` and `observability/mysqld-exporter` conversions.
+
+### K31. Credentials: agent token and CA replaced - PASSED (2026-10-19)
+Found: the agents accepted the built-in development token (no `ORPHERA_TOKEN` was set anywhere), and the CA and server
+private keys had been committed to a public repository. Done: `orphera/agent-token` generated and set on all 24 nodes with
+`utils/set-agent-token.sh` (19 on 2026-10-16; tst8, tst11, tst12, tst15 and tst16 after they were started: each has one
+`ORPHERA_TOKEN=` line in `/etc/orphera-agent/agent.env`). `orphera version --nodes tst7` works with the stored token and
+fails with the built-in one. A new CA was made with `make certs`, and on 2026-10-19 `orphera version` reported 0.1.196
+on all 24 nodes (tst0-tst19, gs1-gs3, st0) with that CA trusted. gs1-gs3 were unreachable for a time
+because of a failed dkms build of the Mellanox OFED module on gs1 (a host problem, not Orphera); that was fixed on the
+hosts. Old-CA rejection: with `ORPHERA_HOME=/tmp/catest` holding the old `certs/ca.crt` (SHA-256 fingerprint 0F:CF:C8:...
+against CC:11:B7:... for the new one), `orphera version --nodes tst0` prints `unreachable: UNAVAILABLE: io exception` from the
+TLS handler, so a client that trusts only the old CA cannot talk to a node. The `orphera` wrapper changes into `$ORPHERA_HOME`
+before it starts and needs `inventory.yaml` and `certs/ca.crt` there; a first attempt at this test run from the current
+directory proved nothing. Remaining by hand: delete `~/certs-old` and `~/certs-backup` on scala0.

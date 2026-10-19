@@ -188,6 +188,12 @@ object SecretsCheck:
     )
     Secrets.clear()
 
+    // The agent token: environment first, then the store, nothing else.
+    check("AgentToken uses the environment first", AgentToken.resolve(Some("from-env"), Some("from-store")) == Some("from-env"))
+    check("AgentToken falls back to the store", AgentToken.resolve(None, Some("from-store")) == Some("from-store") && AgentToken.resolve(Some(""), Some("from-store")) == Some("from-store"))
+    check("AgentToken has nothing when neither is set", AgentToken.resolve(None, None).isEmpty && AgentToken.resolve(Some(""), Some("")).isEmpty)
+    check("AgentToken does not read the store when the environment has a value", { var read = false; AgentToken.resolve(Some("x"), { read = true; Some("y") }); !read })
+
     // The real thing, when age is installed.
     if haveAge then
       val id = dir.resolve("age.key")

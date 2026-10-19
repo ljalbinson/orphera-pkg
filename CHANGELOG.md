@@ -68,6 +68,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `-Wunused:all` is on, so with `-Werror` an unused import or parameter fails the build; `sbt scalafixAll` removes most.
 - `FactPrinter` and `AgeCipher` no longer use `asInstanceOf` or `List.head`, which the new checks reject.
 
+### Security — the agent token comes from the secret store (`AgentToken.scala`, `utils/set-agent-token.sh`)
+- The orchestrator sent, and the agents accepted, the built-in `dev-only-insecure-token` whenever `ORPHERA_TOKEN` was not set, and
+  the packaged `agent.env` leaves it unset. The orchestrator now takes the token from `ORPHERA_TOKEN`, else from the secret store
+  (`orphera secrets generate orphera/agent-token`), and warns on stderr when it has to use the built-in one.
+  `utils/set-agent-token.sh <node>...` writes the stored token to each agent's `agent.env` (over ssh stdin, mode 600) and restarts
+  the agent, for nodes that are already installed.
+- `orphera bootstrap` now writes the same token (`AgentToken.current`) into the node's `agent.env`. It had used only the
+  `ORPHERA_TOKEN` environment variable or the built-in default, so with the token in the secret store a bootstrapped node would
+  have been given a token the orchestrator does not send, and every call to it would have failed.
+
 ### Security — private keys out of the repository, and no command lines in the agent's log
 - `certs/ca.key`, `certs/server.key`, `certs/ca.srl` and `certs/server.csr` were committed (the README said they were ignored).
   They are no longer tracked and `certs/*.key`, `*.srl` and `*.csr` are in `.gitignore`. They remain in earlier commits, so

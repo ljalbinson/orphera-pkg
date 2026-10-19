@@ -43,6 +43,8 @@ untrusted networks or adversarial input.
 - [Observability](#observability)
 - [Versioning](#versioning)
 - [Authentication and security notes](#authentication-and-security-notes)
+- [Secrets](#secrets)
+- [Typed configuration files and check mode](#typed-configuration-files-and-check-mode)
 - [Provisioning a new host](#provisioning-a-new-host)
 - [Decommissioning a host](#decommissioning-a-host)
 - [Makefile targets](#makefile-targets)
@@ -236,7 +238,49 @@ node's host, is not signed by `certs/ca.crt`, has expired, or expires
 within 30 days. The command exits non-zero if any node has a problem or
 cannot be reached.
 
-`certs/*.key` is git-ignored; never commit private keys.
+`certs/*.key`, `certs/*.srl` and `certs/*.csr` are git-ignored; never
+commit private keys. The orchestrator reads `certs/ca.crt` relative to
+the repository: the `orphera` wrapper (`utils/orphera`) changes into
+`$ORPHERA_HOME` (default `~/orphera-pkg`) first, whatever directory you
+run it from. The agent reads its own certificate and key from
+`/etc/orphera-agent/tls/`.
+
+### Replacing the CA
+
+Do this if the CA key has been committed, copied somewhere it should not
+be, or otherwise exposed. Every node's certificate was signed by the old
+CA, so every node needs a new one, and the orchestrator trusts one CA at a
+time:
+
+1. Move the old directory away (`mv certs ~/certs-old`) and run
+   `make certs`. Keep `certs/ca.key` private.
+2. `orphera issue-certs --ssh-user <user>` (all nodes, or `--nodes ...`).
+   It works over SSH, so it does not need the old certificate to be
+   trusted, which is why it is used and not a gRPC command. Do one node
+   first: `orphera version --nodes <node>` fails before it has a
+   certificate from the new CA and succeeds afterwards.
+3. `orphera cert-info` should show every node's certificate as signed by
+   the new CA. A node that was down during the rollout keeps its old
+   certificate and cannot be reached until `issue-certs` has been run for
+   it. `bootstrap` also issues a certificate, for nodes being installed
+   or reinstalled.
+4. To confirm the old CA is rejected, make a directory that holds only the
+   old `certs/ca.crt` and the inventory, and run from it:
+
+   ```bash
+   mkdir -p /tmp/catest/certs
+   cp inventory.yaml /tmp/catest/
+   cp ~/certs-old/ca.crt /tmp/catest/certs/
+   ORPHERA_HOME=/tmp/catest orphera version --nodes <node>
+   ```
+
+   It must print `unreachable`. `ORPHERA_HOME` has to be a directory
+   because the `orphera` wrapper changes into it before it starts, so
+   running the command from another directory proves nothing.
+5. Delete the old directory, including backups.
+
+Git history keeps any key that was ever committed, so a key that has
+been public is replaced, not just removed from the tree.
 
 ## Running (development)
 
@@ -342,6 +386,7 @@ Verbs that act on nodes (`install`, `remove`, `dist-upgrade`, `run`, `copy`, `wr
 | `playbook <file.yaml \| file.scala \| compiled-name> [--resume] [--config <path>]` | Run an ordered, multi-task playbook — from a YAML file, a run-time-compiled Scala script, or a compiled DSL playbook by registered name — see [Playbooks](#playbooks). `--resume` skips tasks already completed in a previous run — see [Restartability](#restartability). `--config` points a `.scala` script at a per-VM YAML config file (`ConfigYaml.fromEnv()`, see [Per-VM config files](#per-vm-config-files---config)); has no effect on a `.yaml`/compiled playbook, which has no code of its own to read it |
 | `cluster-playbook <file.yaml \| file.scala> [<file2> ...] [--resume] [--config <path>]` | Run a staged, cross-node-coordinated playbook — see [Cross-node coordination](#cross-node-coordination-and-staged-playbooks). Same `--resume`/`--config` support as `playbook`, applied independently to each file. One or more files run in the order given, stopping at the first one that fails — a shorthand for a fixed sequence (e.g. tear down, then rebuild) without a wrapper script |
 | `log-summary <playbook-name \| file.jsonl>` | Print a human-readable table (per-task status/duration, failures called out) from a run's `.orphera-logs` output. A playbook name resolves to that playbook's most recently modified log file — see [Observability](#observability) |
+| `secrets init \| list \| generate <name> \| set <name> \| get <name> \| rm <name>` | Manage the encrypted secret store on the machine that runs `orphera` — see [Secrets](#secrets). Does not contact any node. `set` reads the value from one line of standard input; `get` prints the value, so use it only where that is wanted |
 
 There is no `apply <manifest.yaml>` command — the standalone
 declarative-file-manifest idea (independent, parallel file pushes, no
@@ -1119,15 +1164,157 @@ node isn't confirmed within the timeout, and it prints which ones.
 
 - **Transport:** TLS, agent cert verified against a private CA
   (`certs/ca.crt`) on the orchestrator side.
-- **Application auth:** a shared bearer token (`ORPHERA_TOKEN`),
-  checked via gRPC interceptor on every call. Must match between every
-  agent and every orchestrator invocation.
+- **Application auth:** a shared bearer token, checked via gRPC
+  interceptor on every call. Every agent and every orchestrator
+  invocation must hold the same token. The agent reads it from
+  `ORPHERA_TOKEN` (in `/etc/orphera-agent/agent.env`, which the package
+  ships with the line commented out). The orchestrator takes it from
+  `ORPHERA_TOKEN`, else from the secret store entry `orphera/agent-token`
+  (`AgentToken.scala`). **When none is set, both sides fall back to a
+  built-in development token that is in the source code, which
+  protects nothing**; the orchestrator prints a warning on stderr when
+  it does this, the agent does not. Set a real one:
+
+  ```bash
+  orphera secrets generate orphera/agent-token     # once
+  utils/set-agent-token.sh tst0 tst1 ...           # every node, over SSH
+  ```
+
+  `utils/set-agent-token.sh` sends the token on SSH's standard input
+  (never on a command line), writes it to `agent.env` (root only, mode
+  600, other lines kept) and restarts the agent. The package keeps a
+  changed `agent.env` when it is upgraded. `bootstrap` writes the same
+  token to a node it installs; the script is for nodes that are already
+  installed.
+- **What a failed call looks like:** the CLI prints `unreachable` for any
+  failed call to a node, a rejected token included.
+- **Agent logs:** the agent no longer writes the arguments of the
+  commands it runs to its journal. A command's arguments are still
+  visible in the process list on the node while it runs, so a command
+  that embeds a password exposes it for that time; `Resource.checkTask`
+  avoids this for file checks by sending a hash.
+- **Secrets in playbooks:** see [Secrets](#secrets).
 - **Not implemented:** mutual TLS (agent doesn't verify orchestrator
   identity beyond the shared token), per-destination-path
   restrictions on `copy` (an authenticated orchestrator can currently
-  write to any path the agent's root user can reach), audit logging,
-  and secrets management for manifest files (don't commit secrets into
-  `files/`).
+  write to any path the agent's root user can reach), per-node tokens,
+  and refusing to start an agent that has no token.
+
+## Secrets
+
+Passwords and keys that a playbook needs are kept in one encrypted file on
+the machine that runs `orphera`, not in the manifests. The file is
+encrypted with [age](https://age-encryption.org) (`sudo apt install age`
+on Ubuntu); it holds a JSON object of name to value, is written through a
+temporary file with mode 600, and is replaced atomically.
+
+```bash
+orphera secrets init                      # once: makes the age identity
+orphera secrets list                      # names only
+orphera secrets generate placement/db     # 24 random letters and digits
+printf '%s\n' 'value' | orphera secrets set placement/db
+orphera secrets get placement/db          # prints the value
+orphera secrets rm placement/db
+```
+
+| Where | Default | Override |
+|---|---|---|
+| encrypted store | `~/.config/orphera/secrets.age` | `ORPHERA_SECRETS` |
+| age identity | `~/.config/orphera/age.key` | `ORPHERA_AGE_KEY` |
+
+**Back up both files.** Without the identity the store cannot be read, and
+every generated password is lost with it. Names are letters, digits, `_`,
+`.`, `/` and `-`, starting with a letter or digit; by convention
+`<service>/<what>`.
+
+In a playbook:
+
+```scala
+private val dbPassword = Secrets.secret("placement/db")        // a Secret
+...
+s"... IDENTIFIED BY '${dbPassword.reveal}' ..."
+```
+
+- `Secrets.secret(name)` returns the stored value, **making a random one
+  and storing it the first time the name is asked for**. A new deployment
+  therefore needs no setup. An existing deployment does: seed the store
+  with the passwords already in use *before* applying a playbook that
+  reads from it, or the playbook will generate new values that do not
+  match the database users and service accounts that exist. For the test
+  lab, `manifests/seed_test_secrets.sh` loads the old fixed values and
+  leaves names that already have a value alone.
+- A `Secret` does not print: `toString`, string interpolation and any log
+  line give `<redacted>`, and the text is available only through
+  `.reveal`, so each place a secret goes into a command or a file is
+  visible in the source (`grep -n reveal manifests/`). Forgetting
+  `.reveal` writes `<redacted>` where the password should be and the
+  service refuses it, instead of leaking it. `Secrets.get(name)` returns a
+  plain `String` for code that needs one.
+- Every value read this way is also registered for masking: every event
+  that arrives from a node passes through `Secrets.mask`, so a value that
+  a command echoes shows as `<redacted>` on the console and in the
+  `.orphera-logs` run log. Values shorter than six characters are not
+  masked.
+- The bundled playbooks use these names: `keystone/admin`, `keystone/db`,
+  `placement/db`, `placement/service`, `glance/db`, `glance/service`,
+  `glance/ceph-key`, `cinder/db`, `cinder/service`, `cinder/rabbit`,
+  `cinder/ceph-key`, `nova/db`, `nova/service`, `nova/rabbit`,
+  `neutron/db`, `neutron/service`, `neutron/rabbit`, `horizon/secret-key`,
+  `galera/sst`, `galera/clustercheck`, `wordpress/db`,
+  `observability/mysqld-exporter`, and `orphera/agent-token` (see
+  [Authentication](#authentication-and-security-notes)).
+
+What this does not do: masking hides a value from the orchestrator's own
+output only. A command that contains a password still has it in its
+arguments on the node while it runs. The store is a single file on one
+machine, there is no rotation command, and the Ceph and database
+passwords are not changed on the nodes when a stored value changes.
+
+## Typed configuration files and check mode
+
+OpenStack services read INI files with hundreds of options, and a
+misspelt one is silently ignored. Instead of a heredoc, a playbook can
+describe such a file as a `ConfFile`, checked against the list of options
+the image itself declares:
+
+- `catalogues/<project>-2025.1-ubuntu-noble.json` is the output of
+  `oslo-config-generator --format json` run inside the Kolla image
+  (`manifests/dump_oslo_options.sh <image> [tag] [outdir]`, then
+  `manifests/slim_catalogue.py in out` to drop the help text). Catalogues
+  exist for placement-api, keystone, glance, cinder, nova and neutron.
+  `ORPHERA_CATALOGUES` names another directory.
+- `Catalogues.load("glance", Set("ceph"))` loads one; `ConfFile.text(path,
+  catalogue)(("section", "key", "value"), ...)` builds a file from
+  settings and **throws when the manifest is built**, before any task
+  runs, listing every error: an unknown section or option (with
+  suggestions), an old name that has been renamed, or a value of the
+  wrong type. Option names with `-` and `_` are the same, as in oslo.
+- Some sections take options the image does not list, such as the
+  authentication-plugin options in `[keystone_authtoken]`. These are
+  *open sections* (`keystone_authtoken` always; `ceph` for Glance and
+  Cinder; `service_user` for Nova). They accept other names, but refuse
+  one that is within two edits of a known option, so a typo is still
+  caught.
+- Typed so far: Placement, Keystone, Glance, Cinder and Nova (control
+  plane) and Neutron's four files. Nova compute's files are not, because
+  they take the host's name and address at run time.
+- Options marked secret in the catalogue, and keys named like `password`,
+  `secret` or `token`, are treated as secret values: they are never shown
+  in a drift diff.
+
+**Check mode.** The same description gives a task that writes the file and
+a task that checks it (the `Resource` type class). For the Placement
+playbook:
+
+```bash
+ORPHERA_CHECK=1 orphera cluster-playbook manifests/placement_single_node.scala
+```
+
+changes nothing. Each checked file is compared by SHA-256 on the node;
+`in sync` exits 0, a difference prints a unified diff and exits 1, a
+missing file exits 2. Secret values are replaced by `<redacted>` on both
+sides, and the output says when only a secret value differs. Only the
+Placement unit and `placement.conf` are checked so far.
 
 ## Provisioning a new host
 
@@ -1189,7 +1376,7 @@ auto-updated; remove the entry manually.
 |---|---|
 | `make` / `make all` | clean → test → assembly → deb |
 | `make clean` | `sbt clean`, removes `pkg/` and any built `.deb` / `.rpm` |
-| `make test` | `sbt test` |
+| `make test` | `sbt test`, then the check programs `ContainerCheck`, `ConfCheck` and `SecretsCheck` (set `CHECK_VERBOSE=1` to print every passing check) |
 | `make assembly` | `sbt agent/assembly` |
 | `make deb` | stages package contents, runs `dpkg-deb --build` |
 | `make rpm` | stages the same contents, runs `rpmbuild` to produce `orphera-agent-<version>-1.noarch.rpm` for Rocky/Red Hat hosts. Needs `rpmbuild` |
@@ -1218,9 +1405,32 @@ patch number.
 
 ## Testing
 
-Test infrastructure (munit + munit-cats-effect) and a proposed test
-plan exist but are only partially implemented as of this writing.
-Priority areas, roughly in order of value already identified:
+**What runs today.** `make test` runs `sbt test` and three check programs
+that need no cluster: `ContainerCheck` (49 checks: typed containers and
+`Resource`), `ConfCheck` (49: typed configuration files and catalogues)
+and `SecretsCheck` (35: the secret store, `Secret`, masking, the agent
+token; the checks that use real `age` are skipped when it is not
+installed). Each exits non-zero on a failure.
+
+The scripts `manifests/test_*.sh` apply a playbook to the lab and check the
+result independently of the playbook's own health check. They print a
+summary line, either `passed=N failed=M` or `=== Results: N passed, M
+failed ===`; the exit code is the result. Run them from the repository
+root on the machine that runs `orphera`. The log of each run is a good
+place to check that no password was printed:
+`grep -cE 'orphera-test-[a-z-]*-(password|key)' <log>` should print 0.
+
+**`manifests/test_mariadb_galera.sh` is destructive.** It tears the Galera
+cluster down first, so every database on it (Keystone's, Glance's and so
+on) is lost, and haproxy and keepalived are purged. It refuses to run
+unless `ORPHERA_ALLOW_DESTRUCTIVE=1` is set. To rebuild the stack
+afterwards, run `manifests/build_openstack_stack.sh --from galera`; that
+script only applies playbooks and tears nothing down. The records of what
+was run, and what it found, are in `docs/TESTS.md`.
+
+**Not yet done.** Test infrastructure (munit + munit-cats-effect) and a
+proposed test plan exist but are only partially implemented. Priority
+areas, roughly in order of value already identified:
 
 1. `Cli` argument parsing (pure, no I/O — highest value for effort)
 2. `FileTransfer` permission bit conversion and hash/attribute-mismatch
@@ -1451,7 +1661,17 @@ Two things worth knowing if adapting this to a different target:
 - No path allowlisting on `copy` **or `fetch`** — an authenticated
   orchestrator can write or read any path the agent's root user can
   reach
-- No secrets management
+- Secrets: one encrypted file on the orchestrator machine, no rotation,
+  and values are visible in a command's arguments on the node while it
+  runs (see [Secrets](#secrets)). The agent token falls back to a
+  built-in development token when none is set, `bootstrap` and
+  `mk-new-and-empty.sh` do not set one, and the CLI reports a rejected
+  token as `unreachable`
+- Typed configuration (see [Typed configuration files and check
+  mode](#typed-configuration-files-and-check-mode)) covers the OpenStack
+  control plane only; check mode covers Placement only; the
+  authentication-plugin options of `[keystone_authtoken]` are not in any
+  catalogue
 - ~~No automated verification that `deploy-agent` actually
   succeeded~~ — **closed**: `deploy-agent` now polls each node's
   `version` RPC after installing (see [Versioning](#versioning)) and
