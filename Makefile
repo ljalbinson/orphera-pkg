@@ -1,4 +1,4 @@
-.PHONY: all release rpm-if-available bump-patch _build_all clean test assembly pkg-stage deb rpm verify certs certs-clean certs-server fmt fmt-manifests scripting lint fix
+.PHONY: all release rpm-if-available bump-patch _build_all clean test assembly pkg-stage deb rpm verify certs certs-clean fmt fmt-manifests scripting lint fix
 
 VERSION_FILE := VERSION
 VERSION      := $(shell cat $(VERSION_FILE))
@@ -26,26 +26,20 @@ bump-patch:
 	@mv $(VERSION_FILE).tmp $(VERSION_FILE)
 	@echo "Version bumped: $$(cat $(VERSION_FILE))"
 
-# A new CA and wildcard server certificate. Refuses if a CA already exists:
-# replacing it means every deployed agent needs a new package (certs-clean).
+# A new CA, which signs each node's own certificate (orphera issue-certs).
+# Refuses if a CA already exists: replacing it means every node needs a new
+# certificate (certs-clean, then make certs, then orphera issue-certs).
 certs:
-	@test -n "$(DOMAIN)" || (echo "usage: make certs DOMAIN=yourdomain.com" && exit 1)
-	@test ! -f $(CERTS_DIR)/ca.crt || (echo "$(CERTS_DIR)/ca.crt already exists. To reissue only the server certificate: make certs-server DOMAIN=$(DOMAIN). To start again: make certs-clean" && exit 1)
+	@test ! -f $(CERTS_DIR)/ca.crt || (echo "$(CERTS_DIR)/ca.crt already exists. To renew node certificates: orphera issue-certs. To start again: make certs-clean" && exit 1)
 	mkdir -p $(CERTS_DIR)
 	openssl req -x509 -newkey rsa:4096 -nodes -days 3650 -subj "/CN=Orphera Dev CA" \
 	  -keyout $(CERTS_DIR)/ca.key -out $(CERTS_DIR)/ca.crt 2>/dev/null
 	chmod 600 $(CERTS_DIR)/ca.key
-	./buildcert $(DOMAIN)
-
-# A new server certificate and key from the existing CA (e.g. for a new domain
-# or an expiring certificate). Agents need a new package; the CA is unchanged.
-certs-server:
-	@test -n "$(DOMAIN)" || (echo "usage: make certs-server DOMAIN=yourdomain.com" && exit 1)
-	./buildcert $(DOMAIN)
+	@echo "Made $(CERTS_DIR)/ca.crt. Issue node certificates with: orphera issue-certs --ssh-user <user>"
 
 certs-clean:
-	@echo "This deletes the CA and server keys and certificates in $(CERTS_DIR)/."
-	@echo "Every deployed agent will stop being trusted until it gets a package built with new certs."
+	@echo "This deletes the CA key and certificate in $(CERTS_DIR)/."
+	@echo "Every node will stop being trusted until it is issued a certificate by a new CA (make certs, then orphera issue-certs)."
 	@printf "Type 'delete' to continue: "; read ans; [ "$$ans" = delete ] || (echo "Cancelled." && exit 1)
 	rm -f $(CERTS_DIR)/ca.crt $(CERTS_DIR)/ca.key $(CERTS_DIR)/ca.srl \
 	  $(CERTS_DIR)/server.crt $(CERTS_DIR)/server.key $(CERTS_DIR)/server.csr
@@ -144,7 +138,10 @@ assembly:
 	sbt agent/assembly
 	@test -f $(JAR_SRC) || (echo "ERROR: expected jar not found at $(JAR_SRC)" && exit 1)
 
+# Starts from an empty staging tree, so files dropped from the package (such
+# as the old wildcard server.key) cannot be carried over from an earlier build.
 pkg-stage: assembly
+	rm -rf $(PKG_DIR)
 	mkdir -p $(PKG_DIR)/DEBIAN
 	mkdir -p $(PKG_DIR)/opt/orphera-agent
 	mkdir -p $(PKG_DIR)/etc/orphera-agent/certs
@@ -158,8 +155,10 @@ pkg-stage: assembly
 	cp packaging/agent.env $(PKG_DIR)/etc/orphera-agent/agent.env
 	cp packaging/orphera-agent.service $(PKG_DIR)/etc/systemd/system/orphera-agent.service
 
-	@test -f $(CERTS_DIR)/server.crt || (echo "ERROR: $(CERTS_DIR)/server.crt not found - generate certs first" && exit 1)
-	cp $(CERTS_DIR)/server.crt $(CERTS_DIR)/server.key $(CERTS_DIR)/ca.crt $(PKG_DIR)/etc/orphera-agent/certs/
+	# Only the CA certificate (public). Each node's own key and certificate are
+	# issued over SSH into /etc/orphera-agent/tls by bootstrap / issue-certs.
+	@test -f $(CERTS_DIR)/ca.crt || (echo "ERROR: $(CERTS_DIR)/ca.crt not found - run: make certs" && exit 1)
+	cp $(CERTS_DIR)/ca.crt $(PKG_DIR)/etc/orphera-agent/certs/
 
 	sed "s/@VERSION@/$(VERSION)/" packaging/control.template > $(PKG_DIR)/DEBIAN/control
 	cp packaging/postinst $(PKG_DIR)/DEBIAN/postinst

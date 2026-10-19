@@ -67,13 +67,9 @@ object SshDeployer:
                 AgentPackages.remotePathFor(true, remotePath),
                 onLine
               )
-      _ <-
-        if NodeCerts.caAvailable then
-          NodeCerts.issue(node, sshUser, sshKeyPath, onLine)
-        else
-          onLine(
-            "certs/ca.key not found here: no per-node certificate issued; the agent uses the packaged wildcard"
-          )
+      // The package carries no server certificate, so the agent cannot start
+      // until it has its own (checked up front in Orchestrator.bootstrapAgent).
+      _ <- NodeCerts.issue(node, sshUser, sshKeyPath, onLine)
       _ <- setAgentToken(node, sshUser, sshKeyPath, onLine)
     yield ()
 

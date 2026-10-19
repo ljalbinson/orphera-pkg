@@ -159,6 +159,11 @@ object Orchestrator:
       onLine: (Node, String) => IO[Unit] = (node, line) =>
         IO.println(s"[${node.name}] $line")
   ): IO[Unit] =
+    IO.raiseUnless(NodeCerts.caAvailable)(
+      new RuntimeException(
+        "bootstrap needs certs/ca.crt and certs/ca.key to issue each node its certificate (run: make certs)"
+      )
+    ) >>
     packages.paths.traverse_(requireOrpheraAgentPackage) >>
       nodes.parTraverse_ { node =>
         SshDeployer.bootstrap(

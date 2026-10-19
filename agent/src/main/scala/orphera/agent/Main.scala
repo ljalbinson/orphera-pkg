@@ -2,8 +2,6 @@
 
 package orphera.agent
 
-import java.io.File
-
 import cats.effect.*
 
 import fs2.grpc.syntax.all.*
@@ -15,13 +13,14 @@ import orphera.common.AgentFs2Grpc
 
 object Main extends IOApp.Simple:
 
-  def run =
-    // A certificate of this node's own (tls/, issued by `orphera issue-certs`
-    // or bootstrap) when there is one, else the wildcard the package ships.
-    val perNode = (new File("tls/server.crt"), new File("tls/server.key"))
-    val (certFile, keyFile) =
-      if perNode._1.isFile && perNode._2.isFile then perNode
-      else (new File("certs/server.crt"), new File("certs/server.key"))
+  def run: IO[Unit] =
+    TlsFiles.choose match
+      case None =>
+        IO.println(TlsFiles.Missing) >>
+          IO.raiseError(new RuntimeException("no TLS certificate"))
+      case Some((certFile, keyFile)) => serve(certFile, keyFile)
+
+  private def serve(certFile: java.io.File, keyFile: java.io.File): IO[Unit] =
     val sslContext = GrpcSslContexts
       .forServer(certFile, keyFile)
       .build()

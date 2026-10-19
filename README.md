@@ -195,51 +195,40 @@ Orphera uses TLS between orchestrator and agent, verified against a
 private CA, plus a shared-secret token (`ORPHERA_TOKEN`) checked on
 every RPC as a second, independent auth factor.
 
-Generate a CA and a wildcard server certificate for your domain:
+Make the CA once:
 
 ```bash
-make certs DOMAIN=yourdomain.com
+make certs
 ```
 
-This produces `certs/ca.{crt,key}` and `certs/server.{crt,key}`. The
-server cert is a wildcard (`*.yourdomain.com`) plus `localhost` /
-`127.0.0.1`, shared across every agent — **all agents currently use the
-same private key.** This is a deliberate simplicity/security trade-off:
-it makes the fleet trivial to extend (any new host under the domain
-just works, no per-host cert issuance) at the cost of a single shared
-secret whose compromise affects every agent at once. Revisit with
-per-node certs (same CA, distinct key per host) if that trade-off stops
-being acceptable — see inline notes in `Makefile`/`NodeClient.scala`.
-
-**Important:** wildcard SANs only match one DNS label under the domain
-and never match raw IP literals. Nodes must be addressed by a DNS name
-under the wildcard's domain in `Inventory.all` — an IP-addressed node
-will fail TLS hostname verification.
+This produces `certs/ca.{crt,key}`. The orchestrator trusts `ca.crt`;
+`ca.key` signs each node's own certificate and must stay private.
 
 ### Per-node certificates
 
-`orphera issue-certs --nodes ... --ssh-user localadmin` gives each node a
-certificate of its own, so a node's key no longer opens every other node.
-Over SSH, each node generates a new key in `/etc/orphera-agent/tls/`
-(mode 0600; the key never leaves the node) and sends back a signing
-request; the orchestrator signs it with `certs/ca.key`, naming exactly
-the node's inventory `host` (an IP address works too, which the wildcard
-cannot cover), and sends the certificate back. The node checks that the
+Every agent has a certificate and key of its own; the agent package ships
+none. `orphera bootstrap` issues one to each node it installs, and
+`orphera issue-certs [--nodes ...] --ssh-user localadmin` issues (or
+renews) them for nodes already running. Over SSH, each node generates a
+new key in `/etc/orphera-agent/tls/` (mode 0600; the key never leaves the
+node) and sends back a signing request; the orchestrator signs it with
+`certs/ca.key`, naming exactly the node's inventory `host` (a DNS name or
+an IP address), and sends the certificate back. The node checks that the
 certificate matches the new key before replacing anything and restarting
 the agent, so a failure leaves the current pair in place. Certificates
-are valid for 825 days; rerun `issue-certs` to renew. `bootstrap` does
-the same for each node it installs, whenever `certs/ca.key` is present.
+are valid for 825 days; rerun `issue-certs` to renew.
 
-The agent uses `tls/server.{crt,key}` when both exist and otherwise falls
-back to the wildcard the package ships, so nodes can move over one at a
-time. No package owns `tls/`, so installing or upgrading the agent never
-removes it. The wildcard stays in the package until every node has its own
-certificate; a later release will drop it. `orphera cert-info [--nodes ...]` shows which certificate each agent
+No package owns `tls/`, so installing or upgrading the agent never
+removes it. An agent with no certificate in `tls/` will not start, and
+says so in its journal; `deploy-agent` refuses to upgrade such a node,
+since the upgraded agent could not start and there would be no SSH
+session to recover with — run `issue-certs` for it first.
+
+`orphera cert-info [--nodes ...]` shows which certificate each agent
 actually presents, read from the TLS handshake (no SSH or token needed):
 
 ```
 [tst8] per-node tst8.ljalbinson.com  expires 2029-01-21 (825d)  serial 5f3a9c001122  sha256 AB:CD:...
-[tst9] wildcard *.ljalbinson.com,localhost,127.0.0.1  expires 2036-10-17 (3650d)  serial ...
 ```
 
 A line ending `!! ...` names a problem: the certificate does not name the
@@ -1143,7 +1132,7 @@ node isn't confirmed within the timeout, and it prints which ones.
 ## Provisioning a new host
 
 ```bash
-make certs DOMAIN=yourdomain.com   # once, if not already done
+make certs                         # once, if not already done
 make deb                            # build the agent .deb
 make rpm                            # and/or the .rpm, for Rocky/Red Hat hosts
 
@@ -1205,10 +1194,9 @@ auto-updated; remove the entry manually.
 | `make deb` | stages package contents, runs `dpkg-deb --build` |
 | `make rpm` | stages the same contents, runs `rpmbuild` to produce `orphera-agent-<version>-1.noarch.rpm` for Rocky/Red Hat hosts. Needs `rpmbuild` |
 | `make verify` | builds, then prints `.deb` contents/metadata |
-| `make certs DOMAIN=...` | generates CA + wildcard server cert. Refuses to run if `certs/ca.crt` already exists |
-| `make certs-server DOMAIN=...` | issues a new server certificate and key from the existing CA (same as `./buildcert DOMAIN`). Refuses, changing nothing, if `ca.crt` and `ca.key` do not match. Agents need a new package |
+| `make certs` | generates the CA (`certs/ca.{crt,key}`) that signs each node's certificate. Refuses to run if `certs/ca.crt` already exists |
 | `orphera issue-certs --nodes ...` | issues each node its own certificate over SSH (see *Per-node certificates*) |
-| `make certs-clean` | deletes the CA and server keys and certificates in `certs/` — you must type `delete` to confirm; invalidates every already-deployed agent's trust |
+| `make certs-clean` | deletes the CA in `certs/` — you must type `delete` to confirm; every node then needs a certificate from a new CA (`make certs`, `orphera issue-certs`) |
 | `make orpheracli` | builds the orchestrator and installs it as `/usr/local/lib/orphera-orchestrator.jar`, with the `orphera` launcher in `/usr/local/bin` |
 | `make release` | bumps the patch version in `VERSION`, then runs the full clean/test/assembly/deb chain (plus the `.rpm` when `rpmbuild` is installed) at the new version |
 
@@ -1459,7 +1447,6 @@ Two things worth knowing if adapting this to a different target:
 - No standalone declarative file-manifest mechanism (`apply`) or task
   ordering within one — playbooks are the actual implemented mechanism
   for ordered, multi-step execution, see [Playbooks](#playbooks)
-- No per-node TLS certs (shared wildcard key across the fleet)
 - No mutual TLS
 - No path allowlisting on `copy` **or `fetch`** — an authenticated
   orchestrator can write or read any path the agent's root user can

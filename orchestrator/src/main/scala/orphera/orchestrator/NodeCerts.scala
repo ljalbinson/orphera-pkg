@@ -8,8 +8,8 @@ import java.security.SecureRandom
 
 import cats.effect.*
 
-/** A TLS certificate of its own for each agent, instead of the wildcard key
-  * every agent package carries.
+/** A TLS certificate of its own for each agent. The agent package carries
+  * none (it used to carry one wildcard key shared by every node).
   *
   * The node's private key is generated on the node and never leaves it: the
   * node sends back only a certificate signing request, which is signed here
@@ -18,10 +18,8 @@ import cats.effect.*
   * The certificate names exactly the node's inventory `host` (a DNS name, or an
   * IP address, which the wildcard could never cover).
   *
-  * Files on the node: `/etc/orphera-agent/tls/server.{key,crt}`. The agent uses
-  * them when both exist and falls back to the packaged `certs/` wildcard
-  * otherwise. No package owns `tls/`, so installing or upgrading the agent
-  * never removes them.
+  * Files on the node: `/etc/orphera-agent/tls/server.{key,crt}`. No package
+  * owns `tls/`, so installing or upgrading the agent never removes them.
   *
   * The new key and certificate are checked against each other on the node and
   * only then moved into place, so a failure at any step leaves the node's

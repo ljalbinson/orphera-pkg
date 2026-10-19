@@ -32,9 +32,7 @@ rm -rf %{buildroot}/DEBIAN
 %config(noreplace) /etc/orphera-agent/agent.env
 %dir /etc/orphera-agent
 %dir /etc/orphera-agent/certs
-/etc/orphera-agent/certs/server.crt
 /etc/orphera-agent/certs/ca.crt
-%attr(0600,root,root) /etc/orphera-agent/certs/server.key
 /etc/systemd/system/orphera-agent.service
 %dir /var/lib/orphera
 %dir /var/lib/orphera/network-backups

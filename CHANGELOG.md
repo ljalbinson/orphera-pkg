@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Removed — the shared wildcard key is no longer in the agent package
+- The `.deb` and `.rpm` carry only `certs/ca.crt`. Upgrading removes the old `certs/server.{crt,key}` from each node;
+  agents use their own certificate in `/etc/orphera-agent/tls/` (`orphera cert-info` shows which certificate each presents).
+- An agent with no certificate in `tls/` does not start and says why. `deploy-agent` refuses to upgrade such a node,
+  because the new agent could not start and the RPC would be the only way back in: run `orphera issue-certs` for it first.
+- `bootstrap` always issues the node its certificate, and stops at once if `certs/ca.key` is missing.
+- `make certs` now makes only the CA (no `DOMAIN` needed). `make certs-server` and `buildcert`, which made the wildcard,
+  are gone, as is the committed `certs/server.crt`. Package staging starts from an empty tree, so a file dropped from the
+  package cannot survive from an earlier build.
+
 ### Added — `orphera cert-info`
 - Shows the certificate each agent presents, read from the TLS handshake: per-node or wildcard, the names it covers,
   expiry and days left, serial and SHA-256 fingerprint. Flags a certificate that does not name the node's host, is not
