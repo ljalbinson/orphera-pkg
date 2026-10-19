@@ -14,7 +14,7 @@
 # started the VM; it does not wait for the guest to answer. To wait for SSH, or
 # to reset a guest that is "running" but halted, use
 #   orphera cluster-playbook manifests/kvm_vm_start.scala --config config/<vm>.yaml
-# See also stop-vm.sh and hard-reboot-vm.sh.
+# See also stop-vm.sh and reboot-vm.sh.
 #
 # Run from scala0, in orphera-pkg (config/ is a relative path; needs `orphera`
 # and an agent on the hypervisor). Exit code 1 if any VM could not be started.

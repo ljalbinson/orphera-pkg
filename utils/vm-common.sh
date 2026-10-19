@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# Shared by start-vm.sh, stop-vm.sh and hard-reboot-vm.sh; sourced, not run.
+# Shared by start-vm.sh, stop-vm.sh and reboot-vm.sh; sourced, not run.
 # Finds a VM's hypervisor and libvirt domain name in its config file and runs a
 # script on the hypervisor through `orphera run`.
 
