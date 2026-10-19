@@ -1175,7 +1175,9 @@ auto-updated; remove the entry manually.
 | `make rpm` | stages the same contents, runs `rpmbuild` to produce `orphera-agent-<version>-1.noarch.rpm` for Rocky/Red Hat hosts. Needs `rpmbuild` |
 | `make verify` | builds, then prints `.deb` contents/metadata |
 | `make certs DOMAIN=...` | generates CA + wildcard server cert. Refuses to run if `certs/ca.crt` already exists |
-| `make certs-clean` | deletes `certs/` — interactive confirmation required; invalidates every already-deployed agent's trust |
+| `make certs-server DOMAIN=...` | issues a new server certificate and key from the existing CA (same as `./buildcert DOMAIN`). Refuses, changing nothing, if `ca.crt` and `ca.key` do not match. Agents need a new package |
+| `make certs-clean` | deletes the CA and server keys and certificates in `certs/` — you must type `delete` to confirm; invalidates every already-deployed agent's trust |
+| `make orpheracli` | builds the orchestrator and installs it as `/usr/local/lib/orphera-orchestrator.jar`, with the `orphera` launcher in `/usr/local/bin` |
 | `make release` | bumps the patch version in `VERSION`, then runs the full clean/test/assembly/deb chain (plus the `.rpm` when `rpmbuild` is installed) at the new version |
 
 `certs`, `certs-clean`, and `release` are intentionally **not** part of

@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — `make certs`, `make certs-server`, `make certs-clean`
+- The README described `make certs` and `make certs-clean`, but the Makefile had no such targets. `make certs DOMAIN=...` makes
+  a CA and a wildcard server certificate and refuses if a CA already exists; `make certs-server DOMAIN=...` reissues only the
+  server pair; `make certs-clean` deletes them after you type `delete`.
+
+### Fixed — `buildcert` no longer leaves a key that does not match its certificate
+- It had no `#!` line, so `./buildcert` ran under `sh` (dash on Ubuntu), which wrote a new `server.key` and then failed on the
+  signing line, leaving the old `server.crt`. It also wrote the new key before checking that `ca.crt` and `ca.key` match.
+  It now runs under bash (also as `sh buildcert`), checks the CA pair first, and moves the new key and certificate into place
+  only after the certificate is signed and verified, so a failure changes nothing. Takes the domain as an argument
+  (default `ljalbinson.com`).
+
+### Fixed — `orphera` runs the orchestrator `make orpheracli` installed last
+- The launcher ran whichever `/usr/local/lib/orchestrator-assembly-*.jar` had the highest version, so a stray higher-numbered
+  jar from an earlier `make release` silently won over a fresh build. `make orpheracli` now installs to one fixed name,
+  `/usr/local/lib/orphera-orchestrator.jar`, and installs the launcher too. The old versioned jars are no longer used and
+  can be deleted.
+
 ### Added — scalafix and wartremover in the build
 - `sbt-scalafix` 0.14.9 with `.scalafix.conf` (OrganizeImports, RemoveUnused, DisableSyntax, LeakingImplicitClassVal,
   NoValInForComprehension, RedundantSyntax). `make lint` checks, `make fix` applies them and then runs `make fmt`.

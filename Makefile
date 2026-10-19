@@ -1,4 +1,4 @@
-.PHONY: all release rpm-if-available bump-patch _build_all clean test assembly pkg-stage deb rpm verify certs certs-clean fmt fmt-manifests scripting lint fix
+.PHONY: all release rpm-if-available bump-patch _build_all clean test assembly pkg-stage deb rpm verify certs certs-clean certs-server fmt fmt-manifests scripting lint fix
 
 VERSION_FILE := VERSION
 VERSION      := $(shell cat $(VERSION_FILE))
@@ -10,6 +10,8 @@ RPM_FILE     := $(PKG_NAME)-$(VERSION)-1.noarch.rpm
 RPM_TOP      := $(CURDIR)/pkg/rpmbuild
 JAR_SRC      := agent/target/scala-3.8.4/agent-assembly-$(VERSION).jar
 CERTS_DIR    := certs
+CLI_JAR      := /usr/local/lib/orphera-orchestrator.jar
+CLI_BIN      := /usr/local/bin/orphera
 
 all: clean test assembly deb rpm
 
@@ -23,6 +25,30 @@ bump-patch:
 	@awk -F. '{printf "%d.%d.%d", $$1, $$2, $$3+1}' $(VERSION_FILE) > $(VERSION_FILE).tmp
 	@mv $(VERSION_FILE).tmp $(VERSION_FILE)
 	@echo "Version bumped: $$(cat $(VERSION_FILE))"
+
+# A new CA and wildcard server certificate. Refuses if a CA already exists:
+# replacing it means every deployed agent needs a new package (certs-clean).
+certs:
+	@test -n "$(DOMAIN)" || (echo "usage: make certs DOMAIN=yourdomain.com" && exit 1)
+	@test ! -f $(CERTS_DIR)/ca.crt || (echo "$(CERTS_DIR)/ca.crt already exists. To reissue only the server certificate: make certs-server DOMAIN=$(DOMAIN). To start again: make certs-clean" && exit 1)
+	mkdir -p $(CERTS_DIR)
+	openssl req -x509 -newkey rsa:4096 -nodes -days 3650 -subj "/CN=Orphera Dev CA" \
+	  -keyout $(CERTS_DIR)/ca.key -out $(CERTS_DIR)/ca.crt 2>/dev/null
+	chmod 600 $(CERTS_DIR)/ca.key
+	./buildcert $(DOMAIN)
+
+# A new server certificate and key from the existing CA (e.g. for a new domain
+# or an expiring certificate). Agents need a new package; the CA is unchanged.
+certs-server:
+	@test -n "$(DOMAIN)" || (echo "usage: make certs-server DOMAIN=yourdomain.com" && exit 1)
+	./buildcert $(DOMAIN)
+
+certs-clean:
+	@echo "This deletes the CA and server keys and certificates in $(CERTS_DIR)/."
+	@echo "Every deployed agent will stop being trusted until it gets a package built with new certs."
+	@printf "Type 'delete' to continue: "; read ans; [ "$$ans" = delete ] || (echo "Cancelled." && exit 1)
+	rm -f $(CERTS_DIR)/ca.crt $(CERTS_DIR)/ca.key $(CERTS_DIR)/ca.srl \
+	  $(CERTS_DIR)/server.crt $(CERTS_DIR)/server.key $(CERTS_DIR)/server.csr
 
 lint:
 	sbt "scalafixAll --check"
@@ -89,9 +115,16 @@ check-uptimes:
 reboot-all:
 	sbt "orchestrator/runMain orphera.orchestrator.Main reboot"
 
+# Installs the orchestrator under one fixed name, so `orphera` always runs the
+# jar built last (not whichever versioned file in /usr/local/lib sorts highest),
+# and installs the launcher with it. Copy-then-rename, so a run that starts
+# mid-install never sees a half-written jar.
 orpheracli:
 	sbt orchestrator/assembly
-	sudo cp -p orchestrator/target/scala-3.8.4/orchestrator-assembly-$(VERSION).jar /usr/local/lib
+	sudo cp orchestrator/target/scala-3.8.4/orchestrator-assembly-$(VERSION).jar $(CLI_JAR).new
+	sudo mv $(CLI_JAR).new $(CLI_JAR)
+	sudo install -m 755 utils/orphera $(CLI_BIN)
+	@echo "Installed orchestrator $(VERSION) as $(CLI_JAR)"
 
 scripting:
 	sbt scripting/assembly

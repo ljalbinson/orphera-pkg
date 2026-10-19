@@ -22,18 +22,18 @@ fi
 
 cd "$REPO_DIR"
 
-# JAR=$(ls orchestrator/target/scala-*/orchestrator-assembly-*.jar 2>/dev/null | sort -V | tail -1)
-JAR=$(ls /usr/local/lib/orchestrator-assembly-*.jar 2>/dev/null | sort -V | tail -1)
+# `make orpheracli` installs the orchestrator under this fixed name. Older
+# installs left versioned jars here and the newest-sorting one was used, so a
+# stray higher-numbered jar silently won over a fresh build.
+JAR=/usr/local/lib/orphera-orchestrator.jar
 
-if [ -z "$JAR" ]; then
-  echo "No orchestrator assembly jar found in $REPO_DIR — building it now..." >&2
-  sbt orchestrator/assembly
+if [ ! -f "$JAR" ]; then
   JAR=$(ls orchestrator/target/scala-*/orchestrator-assembly-*.jar 2>/dev/null | sort -V | tail -1)
-fi
-
-if [ -z "$JAR" ]; then
-  echo "Error: orchestrator assembly jar still not found after build. Check for build errors above." >&2
-  exit 1
+  if [ -z "$JAR" ]; then
+    echo "No orchestrator jar installed. Run 'make orpheracli' in $REPO_DIR." >&2
+    exit 1
+  fi
+  echo "Note: using $JAR from the build tree; run 'make orpheracli' to install it." >&2
 fi
 
 exec java -cp "$JAR" orphera.orchestrator.Main "$@"
