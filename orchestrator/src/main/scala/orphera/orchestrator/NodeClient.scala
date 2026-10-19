@@ -524,6 +524,14 @@ object NodeClient:
         stub.getUptime(UptimeRequest(), authMetadata())
       }
 
+  def getThreadInfo(node: Node, resetPeak: Boolean): IO[ThreadInfo] =
+    channelBuilder(node)
+      .resource[IO]
+      .flatMap(AgentFs2Grpc.stubResource[IO])
+      .use { stub =>
+        stub.getThreadInfo(ThreadInfoRequest(resetPeak), authMetadata())
+      }
+
   def executeCommand(
       node: Node,
       command: List[String],

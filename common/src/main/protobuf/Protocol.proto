@@ -132,6 +132,37 @@ message UptimeInfo {
   double load_average_1m = 2;
 }
 
+message ThreadInfoRequest {
+  // Start the peak thread count again from the current count, after reading it.
+  bool reset_peak = 1;
+}
+
+message NameCount {
+  string name = 1;
+  int32 count = 2;
+}
+
+message ThreadInfo {
+  // Threads of the agent process as the operating system counts them: the Java
+  // threads plus the JVM's own (garbage collector, compiler).
+  int32 os_threads = 1;
+  // Live Java threads, the most there have been since the JVM started (or since
+  // the last reset), how many are daemon threads, and how many have ever started.
+  int32 jvm_threads = 2;
+  int32 jvm_peak = 3;
+  int32 jvm_daemon = 4;
+  int64 jvm_started = 5;
+  int32 cpus = 6;
+  int64 rss_bytes = 7;
+  int64 heap_used_bytes = 8;
+  // -1 when the JVM does not define a limit.
+  int64 heap_max_bytes = 9;
+  // Java threads by state (RUNNABLE, WAITING, ...), largest first.
+  repeated NameCount states = 10;
+  // The process's OS threads grouped by name, largest first.
+  repeated NameCount groups = 11;
+}
+
 message RunCommandRequest {
   repeated string command = 1;
   int32 timeout_seconds = 2;
@@ -179,6 +210,7 @@ service Agent {
   rpc TriggerShutdown(ShutdownRequest) returns (ShutdownAck);
   rpc GetVersion(VersionRequest) returns (VersionInfo);
   rpc GetUptime(UptimeRequest) returns (UptimeInfo);
+  rpc GetThreadInfo(ThreadInfoRequest) returns (ThreadInfo);
   rpc ExecuteCommand(RunCommandRequest) returns (stream Event);
 }
 

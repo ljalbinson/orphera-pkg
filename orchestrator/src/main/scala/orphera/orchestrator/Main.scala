@@ -346,6 +346,23 @@ object Main extends IOApp:
               }
           }
 
+      case Right(Command.Threads(nodeNames, detail, resetPeak)) =>
+        withTargets(nodeNames) { targets =>
+          Orchestrator.getThreadInfos(targets, resetPeak).flatMap { results =>
+            targets.traverse_ { node =>
+              results.get(node.name) match
+                case Some(Right(info)) =>
+                  ThreadReport
+                    .lines(info, detail, resetPeak)
+                    .traverse_(line => IO.println(s"[${node.name}] $line"))
+                case Some(Left(e)) =>
+                  IO.println(s"[${node.name}] ${NodeError.line(e)}")
+                case None =>
+                  IO.println(s"[${node.name}] unreachable")
+            }
+          }
+        }
+
       case Right(Command.Uptime(nodeNames)) =>
         withTargets(nodeNames) { targets =>
           Orchestrator.getUptimes(targets).flatMap { uptimes =>

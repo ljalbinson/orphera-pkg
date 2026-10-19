@@ -114,6 +114,12 @@ class AgentServiceImpl(
   def getUptime(request: UptimeRequest, ctx: Metadata): IO[UptimeInfo] =
     UptimeReader.read()
 
+  def getThreadInfo(
+      request: ThreadInfoRequest,
+      ctx: Metadata
+  ): IO[ThreadInfo] =
+    ThreadReader.read(request.resetPeak)
+
   def executeCommand(
       request: RunCommandRequest,
       ctx: Metadata

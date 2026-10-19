@@ -475,6 +475,19 @@ object Orchestrator:
       }
       .map(_.toMap)
 
+  def getThreadInfos(
+      nodes: List[Node],
+      resetPeak: Boolean
+  ): IO[Map[String, Either[Throwable, ThreadInfo]]] =
+    nodes
+      .parTraverse { node =>
+        NodeClient
+          .getThreadInfo(node, resetPeak)
+          .attempt
+          .map(result => node.name -> result)
+      }
+      .map(_.toMap)
+
   def executeCommand(
       nodes: List[Node],
       command: List[String],
