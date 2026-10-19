@@ -73,10 +73,11 @@ orchestrator (CLI)  --gRPC/TLS-->  agent (daemon, runs as root on managed host)
   (`Protocol.proto`), compiled via `sbt-fs2-grpc` into fs2/Cats Effect
   streaming clients and server stubs.
 
-All agent RPCs are server-streaming (or bidi, for file transfer) and
-report progress via a shared `Event` type (`PROGRESS` / `OUTPUT` /
-`RESULT`), so the console output for every command follows the same
-shape.
+The agent RPCs that change a host are server-streaming (or bidi, for
+file transfer) and report progress via a shared `Event` type
+(`PROGRESS` / `OUTPUT` / `RESULT`), so the console output for every
+command follows the same shape. The read-only queries (`facts`,
+`version`, `uptime`, `thread-info`) are plain request/response calls.
 
 ## Requirements
 
@@ -135,6 +136,10 @@ machine, or different):
 
 - JDK 21, to run the orchestrator's assembly jar (or `sbt run` it
   directly from source).
+- [`age`](https://age-encryption.org) (Ubuntu: `sudo apt install age`,
+  which also provides `age-keygen`), for the encrypted secret store used
+  by `orphera secrets` and by playbooks that need a password. Nothing
+  else needs it; see [Secrets](#secrets).
 - SSH client (`ssh`, `scp`) with non-interactive key-based auth
   configured to target hosts, for `bootstrap`/`teardown` specifically.
   Password or passphrase-prompting auth will hang rather than fail
@@ -186,10 +191,15 @@ yet.
 
 ### Versions and tags
 
-`VERSION` is bumped by the build (`make bump-patch`), and releases are tagged
-`v<VERSION>` as annotated git tags. The first tag is `v0.1.156`, a development
-baseline that compiles; see [CHANGELOG.md](CHANGELOG.md). To check out the code
-a given `.deb` was built from: `git checkout v0.1.156`.
+`VERSION` is bumped by `make release` (`make bump-patch`), which does not
+commit the change or tag it: commit `VERSION` with a message such as
+`Release 0.1.198`, and tag by hand (`git tag -a v0.1.198 -m "Release
+0.1.198"`, then `git push origin v0.1.198`) when a version is worth
+marking. Tags exist only for some versions (the first is `v0.1.156`, a
+development baseline that compiles; the latest is `v0.1.191`), so to find
+the code a given `.deb` was built from, look for its `Release <version>`
+commit with `git log --grep "Release 0.1.198"`. See
+[CHANGELOG.md](CHANGELOG.md) for what each version contains.
 
 ## Certificates
 
@@ -374,13 +384,16 @@ Verbs that act on nodes (`install`, `remove`, `dist-upgrade`, `run`, `copy`, `wr
 | `network-apply [--timeout 60]` | Apply pushed `.network`/`.netdev`/`.link` files (or, on NetworkManager hosts, `.nmconnection` keyfiles) with automatic rollback if not confirmed within the timeout — see [Network config safety](#network-config-safety) |
 | `reboot [--delay 5] [--wait] [--wait-timeout 300]` | Reboot a host. Runs fully detached from the agent's own process (`systemd-run`), for the same reason as `deploy-agent` below — the agent's own systemd unit would otherwise be killed by the reboot before it can schedule it. `--wait` polls the agent afterward and reports when it's reachable again (or times out) — see [Known gaps](#known-gaps--not-yet-built) for exactly what "reachable" does and doesn't confirm |
 | `version [--nodes ...]` | Report each agent's running version, baked in at build time from the `VERSION` file — see [Versioning](#versioning) |
-| `deploy-agent [--file <local.deb\|.rpm>] [--remote-path]` | Push and install an updated agent package (`.deb` or `.rpm`, chosen per node; found automatically when `--file` is omitted) on a host **that already has an agent running**. The install runs fully detached from the agent's own process (`systemd-run`), since the agent's own service restart would otherwise kill its own upgrade mid-unpack, so the RPC call that launches it can't itself confirm completion — instead, each node is polled afterward via the `version` RPC (60s default timeout) until it reports the `.deb`'s own version or the timeout elapses; the command's exit code and printed summary reflect that confirmation, not just that the install was launched — see [Versioning](#versioning) |
-| `bootstrap [--file <local.deb\|.rpm>] --nodes ... [--ssh-user] [--ssh-key] [--forget-host-key]` | First-time agent install via SSH, for a host with **no agent yet**. The host's package manager decides whether the `.deb` or `.rpm` is used. `--ssh-user` defaults to `root`; the cloud images used here block root login, so pass `--ssh-user localadmin`. Afterwards it sets `ORPHERA_TOKEN` in the node's `/etc/orphera-agent/agent.env` to this orchestrator's token (keeping any other lines) and restarts the agent. On a dnf host a package of the same version and release is reinstalled rather than skipped, so a rebuild at an unchanged `VERSION` (new certificates, say) still reaches the node |
-| `teardown --nodes ... --yes [--purge]` | Uninstall the agent via SSH. Requires explicit `--nodes` and `--yes` — no fleet-wide default, given the host becomes unmanageable via gRPC afterward |
+| `deploy-agent [--file <local.deb\|.rpm>] [--remote-path]` | Push and install an updated agent package (`.deb` or `.rpm`, chosen per node; found automatically when `--file` is omitted) on a host **that already has an agent running**. It refuses to start if the orchestrator has no agent token configured, since an upgraded agent would not start without one, and `deploy-agent` could not repair it. The install runs fully detached from the agent's own process (`systemd-run`), since the agent's own service restart would otherwise kill its own upgrade mid-unpack, so the RPC call that launches it can't itself confirm completion — instead, each node is polled afterward via the `version` RPC (60s default timeout) until it reports the `.deb`'s own version or the timeout elapses; the command's exit code and printed summary reflect that confirmation, not just that the install was launched — see [Versioning](#versioning) |
+| `bootstrap [--file <local.deb\|.rpm>] --nodes ... [--ssh-user] [--ssh-key] [--forget-host-key]` | First-time agent install via SSH, for a host with **no agent yet**. The host's package manager decides whether the `.deb` or `.rpm` is used. `--ssh-user` defaults to `root`; the cloud images used here block root login, so pass `--ssh-user localadmin`. It then issues the node its own certificate (as `issue-certs`; needs `certs/ca.key`) and sets `ORPHERA_TOKEN` in the node's `/etc/orphera-agent/agent.env` to this orchestrator's token (keeping any other lines), restarting the agent. It stops before touching any node if the CA key is missing or if the orchestrator has no agent token configured, because an agent without a token does not start. On a dnf host a package of the same version and release is reinstalled rather than skipped, so a rebuild at an unchanged `VERSION` (new certificates, say) still reaches the node |
+| `teardown --nodes ... --yes [--purge]` | Uninstall the agent via SSH. Requires explicit `--nodes` and `--yes` — no fleet-wide default, given the host becomes unmanageable via gRPC afterward. `--purge` also removes the agent's configuration, including its certificate and key in `/etc/orphera-agent/tls` |
 | `fetch <remote-path> [--out ./dir]` | Pull a file back from one or more agents into a local directory, one file per node (named `<node>-<filename>`) |
 | `facts [--nodes ...]` | Gather and print basic host facts (OS, kernel, CPU/memory, disks, interfaces) from one or more agents |
 | `shutdown --nodes ... --yes [--delay 5]` | Power hosts **off** (`shutdown -P now`, detached via `systemd-run` like `reboot`). Refuses to run without `--yes` or without explicit `--nodes`/`--node-groups` (never defaults to everything), because nothing here can power a host back on. Returns once the agent acknowledges scheduling it — it does not confirm the host actually went down |
 | `uptime [--nodes ...]` | Report each agent's host uptime and 1-minute load average — the concrete way to confirm a `reboot` genuinely rebooted the host, not just that the agent came back |
+| `cert-info [--nodes ...]` | Show the TLS certificate each agent presents, read from the TLS handshake (no SSH or token needed): per-node or wildcard, the names it covers, whether it names the host and is signed by `certs/ca.crt`, expiry and days left, serial, SHA-256 fingerprint. Exits non-zero if any node has a problem or cannot be reached — see [Per-node certificates](#per-node-certificates) |
+| `issue-certs [--nodes ...] [--ssh-user] [--ssh-key]` | Give each node a TLS certificate of its own over SSH: the node generates its key (it never leaves the node), the orchestrator signs the request with `certs/ca.key`, and the agent is restarted. A failure changes nothing. Also the way to renew (825 days) or to re-issue after replacing the CA — see [Replacing the CA](#replacing-the-ca) |
+| `audit-log [--limit 20]` | List recent invocations of mutating commands (install, copy, bootstrap, teardown, playbooks, ...) from `.orphera-audit/audit.jsonl`: the command, its nodes, outcome and duration. Read-only commands are not recorded, and there is no per-operator identity — only that someone holding the token ran it from this host. The file rotates by size |
 | `thread-info [--nodes ...] [--detail] [--reset-peak]` | Report each agent process's thread count: all OS threads, the Java threads and the most there have been since the agent started, CPUs, resident memory and heap. `--detail` adds the Java thread states and the threads grouped by name (`ioapp-compute`, `grpc-default-ex`, `GC Thread`, ...); `--reset-peak` starts the peak again after reading it, so the next call shows the highest count for one piece of work. An agent older than the orchestrator answers `unsupported` |
 | `pipeline <step>... (--nodes ... \| --node-groups ...) [--parallel N] [--quiet]` | Run a chain of verbs on each node, the nodes in parallel. Each step is one quoted verb line, e.g. `orphera pipeline "install tree" "dist-upgrade" "reboot --wait" --node-groups mons`. Steps run in order per node and a failure stops that node only; output is prefixed `[node]`, logged to `.orphera-build-logs/<time>/<node>.log`, and followed by a summary table; exit 1 if any node failed. A step may be any node verb (`install`, `remove`, `autoremove`, `dist-upgrade`, `copy`, `write-file`, `network-apply`, `deploy-agent`, `run`, `fetch`, `facts`, `version`, `uptime`, `thread-info`, `reboot`, `shutdown`) but may not give its own `--nodes` |
 | `run <command...> [--nodes] [--timeout 60] [--quiet]` | Run an arbitrary command on one or more agents, streaming stdout/stderr and reporting the real exit code. `--quiet` prints only the command's output (still prefixed `[node]`); a failure still prints its exit line and sets the exit code. Use `--` before the command to separate it from `run`'s own flags, e.g. `orphera run --nodes tst0 -- systemctl status nginx` |
@@ -1329,13 +1342,20 @@ Placement unit and `placement.conf` are checked so far.
 ## Provisioning a new host
 
 ```bash
-make certs                         # once, if not already done
-make deb                            # build the agent .deb
-make rpm                            # and/or the .rpm, for Rocky/Red Hat hosts
+make certs                                     # once: the CA
+orphera secrets init                           # once: the secret store
+orphera secrets generate orphera/agent-token   # once: the token every agent accepts
+make release                                   # builds the .deb, and the .rpm when rpmbuild is installed
 
-sbt "orchestrator/run bootstrap orphera-agent_0.1.0_amd64.deb \
-  --nodes newhost --ssh-user root --ssh-key ~/.ssh/id_ed25519"
+orphera bootstrap --nodes newhost --ssh-user localadmin --ssh-key ~/.ssh/id_ed25519
 ```
+
+Besides installing the package, `bootstrap` gives the node a certificate of
+its own (see [Per-node certificates](#per-node-certificates)) and this
+orchestrator's token (see [Authentication and security
+notes](#authentication-and-security-notes)). Without a certificate or a
+token the agent does not start, so `bootstrap` stops before touching the
+node when `certs/ca.key` is missing or no token is configured.
 
 `bootstrap` requires non-interactive SSH key auth (`BatchMode=yes`) —
 an unlocked key or agent-forwarded key, no passphrase prompts, and if
@@ -1377,7 +1397,8 @@ sbt "orchestrator/run teardown --nodes oldhost --yes --purge"
 ```
 
 After teardown, the host is no longer reachable via gRPC — re-run
-`bootstrap` if it needs to be managed again. `Inventory.all` is not
+`bootstrap` if it needs to be managed again (it issues a new certificate and
+sets the token again). `Inventory.all` is not
 auto-updated; remove the entry manually.
 
 ## Makefile targets
@@ -1395,7 +1416,17 @@ auto-updated; remove the entry manually.
 | `orphera issue-certs --nodes ...` | issues each node its own certificate over SSH (see *Per-node certificates*) |
 | `make certs-clean` | deletes the CA in `certs/` — you must type `delete` to confirm; every node then needs a certificate from a new CA (`make certs`, `orphera issue-certs`) |
 | `make orpheracli` | builds the orchestrator and installs it as `/usr/local/lib/orphera-orchestrator.jar`, with the `orphera` launcher in `/usr/local/bin` |
-| `make release` | bumps the patch version in `VERSION`, then runs the full clean/test/assembly/deb chain (plus the `.rpm` when `rpmbuild` is installed) at the new version |
+| `make release` | bumps the patch version in `VERSION`, then runs the full clean/test/assembly/deb chain (plus the `.rpm` when `rpmbuild` is installed) at the new version, and installs the new orchestrator on this machine as `make orpheracli` does. It does not commit `VERSION` or tag; see [Versions and tags](#versions-and-tags) |
+| `make fmt` | `scalafmt` over the sources, then over `manifests/` (`make fmt-manifests`) |
+| `make lint` | the `scalafix` rules in `.scalafix.conf` in check mode; CI runs the same check |
+| `make fix` | applies the `scalafix` rules, then runs `make fmt` |
+| `make fmt-manifests` | `scalafmt` over the files in `manifests/` only |
+| `make scripting` | `sbt scripting/assembly`: the jar that compiles and runs `.scala` playbooks at run time |
+| `make lines` | counts the lines of Scala source |
+| `make reload` | `sbt reload` |
+| `make check-versions`, `make check-uptimes` | `orphera version` / `orphera uptime` over the whole inventory, through `sbt` |
+| `make deploy-agents` | `deploy-agent` of `orphera-agent_$(VERSION)_amd64.deb` to the whole inventory |
+| `make reboot-all` | **reboots every node in the inventory**, hypervisors included, with no confirmation |
 
 `certs`, `certs-clean`, and `release` are intentionally **not** part of
 the default `all` chain. Cert (re)generation is a deliberate,
@@ -1463,7 +1494,8 @@ of it is reflected in code yet.
 
 This project was developed with AI pair-programming assistance (Claude)
 for code generation, debugging, and drafting documentation. Architecture
-decisions, design trade-offs (e.g. the wildcard-cert approach, the
+decisions, design trade-offs (e.g. the move from a shared wildcard
+certificate to per-node ones, the
 SSH-based bootstrap/teardown split from gRPC-based day-to-day management,
 the network-config rollback design), review, and testing direction are
 the author's.
@@ -1678,7 +1710,8 @@ Two things worth knowing if adapting this to a different target:
   runs (see [Secrets](#secrets)). The orchestrator still falls back to
   the built-in development token (with a warning) when none is
   configured; agents refuse to run with it. All commands other than
-  `version` and `uptime` show a rejected token as a raw gRPC error
+  `version`, `uptime` and `thread-info` show a rejected token as a raw
+  gRPC error
 - Typed configuration (see [Typed configuration files and check
   mode](#typed-configuration-files-and-check-mode)) covers the OpenStack
   control plane only; check mode covers Placement only; the
@@ -1743,10 +1776,11 @@ Two things worth knowing if adapting this to a different target:
 - `-Werror`/`-Wconf` are now enabled in `build.sbt`, which has already
   caught at least one real bug (a `Command.Fetch` case parsed by `Cli`
   but never handled in `Main.scala`) as a hard compile failure instead
-  of a silent runtime crash. No CI pipeline exists yet to run this
-  automatically on every push, which remains the main way build
-  breakages have been caught late in this project's history rather
-  than immediately.
+  of a silent runtime crash. CI (`.github/workflows/ci.yml`,
+  `.gitlab-ci.yml`) runs `sbt clean compile "scalafixAll --check" test` on
+  every push, which catches compile and lint failures. It does not run the
+  check programs (`make test` does) or any of the lab tests under
+  `manifests/test_*.sh`, which need the cluster.
 - **`wait` cannot be used as a case class/`enum case`/parameter name
   anywhere in this codebase.** `java.lang.Object` declares a `final`
   `wait()` method, inherited by every class; a Scala class or enum

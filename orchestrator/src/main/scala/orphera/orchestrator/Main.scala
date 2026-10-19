@@ -25,8 +25,8 @@ object Main extends IOApp:
     */
   private def dispatch(args: List[String]): IO[ExitCode] =
     args match
-      // Looked after before the command parser, so no Command case, audit
-      // classification or usage entry has to change for it.
+      // Looked after before the command parser, so no Command case or audit
+      // classification has to change for it (its usage is in the help text).
       case "secrets" :: rest =>
         IO.blocking(SecretsTool.run(rest))
           .map(code => if code == 0 then ExitCode.Success else ExitCode.Error)

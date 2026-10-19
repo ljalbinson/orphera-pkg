@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Documentation
+- README, `docs/TESTS.md` and `Software-Hierarchy` brought up to date: certificates and the agent token, Rocky/dnf, the
+  secret store, check mode, `thread-info`, release flow and the `Makefile` targets.
+- The CLI help text lists `secrets`; the bash completion knows `secrets` and its subcommands.
+
+## [0.1.198] - 2026-10-19
+
 ### Added — `orphera thread-info`
 - `orphera thread-info [--nodes ...] [--detail] [--reset-peak]` reports each agent process's threads: the OS thread count,
   the Java threads, the highest Java thread count since the agent started (the JVM's own peak, so it needs no sampling),
@@ -14,6 +21,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   after reading it. New gRPC call `GetThreadInfo`; an agent older than the orchestrator answers `unsupported` (the CLI
   maps `UNIMPLEMENTED` for this) and is fixed by `deploy-agent`. Needs agent 0.1.198 or later. Allowed as a pipeline step,
   not audited (read-only), added to the bash completion. New check program `ThreadInfoCheck` (16), run by `make test`.
+
+## [0.1.197] - 2026-10-19
 
 ### Security — an agent refuses to start without a real token
 - With `ORPHERA_TOKEN` unset (the packaged `agent.env` leaves it commented out) an agent accepted the built-in
@@ -31,6 +40,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - A node that answered and rejected the token now shows `unauthenticated: the node rejected this orchestrator's token`,
   and one that did not answer shows `unreachable: <gRPC status>`, as before. `uptime` used to print a bare `unreachable` and
   hide the reason. The gRPC status code decides (`NodeError`), not the message text.
+
+### Security — the agent token comes from the secret store (`AgentToken.scala`, `utils/set-agent-token.sh`)
+- The orchestrator sent, and the agents accepted, the built-in `dev-only-insecure-token` whenever `ORPHERA_TOKEN` was not set, and
+  the packaged `agent.env` leaves it unset. The orchestrator now takes the token from `ORPHERA_TOKEN`, else from the secret store
+  (`orphera secrets generate orphera/agent-token`), and warns on stderr when it has to use the built-in one.
+  `utils/set-agent-token.sh <node>...` writes the stored token to each agent's `agent.env` (over ssh stdin, mode 600) and restarts
+  the agent, for nodes that are already installed.
+- `orphera bootstrap` now writes the same token (`AgentToken.current`) into the node's `agent.env`. It had used only the
+  `ORPHERA_TOKEN` environment variable or the built-in default, so with the token in the secret store a bootstrapped node would
+  have been given a token the orchestrator does not send, and every call to it would have failed.
+
+## [0.1.196] - 2026-10-19
 
 ### Removed — the shared wildcard key is no longer in the agent package
 - The `.deb` and `.rpm` carry only `certs/ca.crt`. Upgrading removes the old `certs/server.{crt,key}` from each node;
@@ -85,6 +106,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `/usr/local/lib/orphera-orchestrator.jar`, and installs the launcher too. The old versioned jars are no longer used and
   can be deleted.
 
+## [0.1.195] - 2026-10-19
+
+_This release also covers 0.1.192 to 0.1.194, which were never released separately._
+
 ### Added — scalafix and wartremover in the build
 - `sbt-scalafix` 0.14.9 with `.scalafix.conf` (OrganizeImports, RemoveUnused, DisableSyntax, LeakingImplicitClassVal,
   NoValInForComprehension, RedundantSyntax). `make lint` checks, `make fix` applies them and then runs `make fmt`.
@@ -93,16 +118,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   errors in main code (not tests). Generated gRPC and BuildInfo sources are excluded.
 - `-Wunused:all` is on, so with `-Werror` an unused import or parameter fails the build; `sbt scalafixAll` removes most.
 - `FactPrinter` and `AgeCipher` no longer use `asInstanceOf` or `List.head`, which the new checks reject.
-
-### Security — the agent token comes from the secret store (`AgentToken.scala`, `utils/set-agent-token.sh`)
-- The orchestrator sent, and the agents accepted, the built-in `dev-only-insecure-token` whenever `ORPHERA_TOKEN` was not set, and
-  the packaged `agent.env` leaves it unset. The orchestrator now takes the token from `ORPHERA_TOKEN`, else from the secret store
-  (`orphera secrets generate orphera/agent-token`), and warns on stderr when it has to use the built-in one.
-  `utils/set-agent-token.sh <node>...` writes the stored token to each agent's `agent.env` (over ssh stdin, mode 600) and restarts
-  the agent, for nodes that are already installed.
-- `orphera bootstrap` now writes the same token (`AgentToken.current`) into the node's `agent.env`. It had used only the
-  `ORPHERA_TOKEN` environment variable or the built-in default, so with the token in the secret store a bootstrapped node would
-  have been given a token the orchestrator does not send, and every call to it would have failed.
 
 ### Security — private keys out of the repository, and no command lines in the agent's log
 - `certs/ca.key`, `certs/server.key`, `certs/ca.srl` and `certs/server.csr` were committed (the README said they were ignored).

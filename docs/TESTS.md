@@ -1,8 +1,8 @@
-# Orphera tests (A-G run for v0.1.163 on 2026-10-08, H after it, I on branch rocky-support 2026-10-09)
+# Orphera tests (A-G run for v0.1.163 on 2026-10-08; later sections dated individually, latest K33 on 2026-10-19)
 
 Run from `~/orphera-pkg` on scala0 after `git pull && make orpheracli`.
-Test VMs: tst0-tst7 (tst0-tst2 have OSD data disks; tst7 is the spare) and
-tst8 (Rocky 10, on gs3, 10.10.5.20; section I).
+Test VMs: tst0-tst19 on the hypervisors gs1-gs3 and st0 (tst8 is Rocky 10, section I; the roles
+are in section L). Sections A-J were run on the earlier, smaller layout.
 
 ## A. Multi-config `cluster-playbook`
 
@@ -660,6 +660,8 @@ Expect: each of the tests above passes as before.  Not changed: the Ceph
 manifests (tst0-tst2).  `etcd_grow_cluster.scala` still names tst3/tst4 as the
 members it adds; those are Galera nodes now, so that test is retired until it is
 pointed at other nodes.
+
+## K (continued). K22-K33, written after the node reassignment in L
 
 ### K22. `Resource` type class and check mode (`Resource.scala`) - PASSED (2026-10-15)
 One description of a file on a node gives both the task that writes it and the task that checks it. `ContainerCheck` 49/49
