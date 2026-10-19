@@ -37,8 +37,12 @@ object RpmInstaller:
 
           _ <- IO.blocking {
             val script =
-              s"""for i in $$(seq 1 12); do
-                 |  if dnf -y install ${cmd.path}; then exit 0; fi
+              // dnf skips an rpm whose name, version and release are already
+              // installed, so a rebuild at an unchanged VERSION is reinstalled.
+              s"""nvr=$$(rpm -qp --queryformat '%{NAME}-%{VERSION}-%{RELEASE}' ${cmd.path})
+                 |if rpm -q "$$nvr" >/dev/null 2>&1; then op=reinstall; else op=install; fi
+                 |for i in $$(seq 1 12); do
+                 |  if dnf -y $$op ${cmd.path}; then exit 0; fi
                  |  sleep 5
                  |done
                  |exit 1""".stripMargin
