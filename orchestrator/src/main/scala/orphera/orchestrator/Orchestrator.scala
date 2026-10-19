@@ -319,7 +319,8 @@ object Orchestrator:
       remotePath: String = "/tmp/orphera-agent.deb",
       confirmTimeoutSeconds: Int = 60
   ): IO[Map[String, Boolean]] =
-    gatherFacts(nodes).flatMap { facts =>
+    // Before gatherFacts, which is already a call to every node.
+    AgentToken.requireConfigured >> gatherFacts(nodes).flatMap { facts =>
       val (rpmNodes, debNodes) = nodes.partition(n =>
         facts
           .get(n.name)
