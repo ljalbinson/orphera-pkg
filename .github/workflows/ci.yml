@@ -18,8 +18,5 @@ jobs:
       - if: failure()
         shell: bash
         run: |
-          set +e +o pipefail
-          tail -n 250 sbt.log | cut -c1-300 > tail.log
-          msg=$(sed -e 's/%/%25/g' -e 's/\r/%0D/g' tail.log | awk 'BEGIN{ORS="%0A"}{print}')
+          msg=$(grep -E '^\[(error|warn)\]' sbt.log | head -300 | sed -e 's/%/%25/g' | awk 'BEGIN{ORS="%0A"}{print}')
           echo "::error title=sbt-log::${msg}"
-          exit 0
