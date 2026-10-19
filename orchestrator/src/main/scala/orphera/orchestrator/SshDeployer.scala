@@ -108,6 +108,19 @@ object SshDeployer:
       stdin = Some(Auth.SharedToken + "\n")
     ) >> onLine(s"agent token set to $source")
 
+  /** Removes a package left at `remotePath` by an earlier deploy-agent, which
+    * writes it as root: in /tmp (sticky) scp as the ssh user cannot replace a
+    * root-owned file.
+    */
+  private def removeStale(
+      node: Node,
+      sshUser: String,
+      sshKeyPath: Option[String],
+      remotePath: String,
+      onLine: String => IO[Unit]
+  ): IO[Unit] =
+    sshRun(node, sshUser, sshKeyPath, s"sudo rm -f $remotePath", onLine)
+
   private enum RemotePm:
     case Apt, Dnf
 
@@ -173,6 +186,7 @@ object SshDeployer:
         aptGet("install -y default-jre"),
         onLine
       )
+      _ <- removeStale(node, sshUser, sshKeyPath, remotePath, onLine)
       _ <- scp(node, localDebPath, sshUser, sshKeyPath, remotePath, onLine)
       _ <- sshRun(
         node,
@@ -198,6 +212,7 @@ object SshDeployer:
       onLine: String => IO[Unit]
   ): IO[Unit] =
     for
+      _ <- removeStale(node, sshUser, sshKeyPath, remotePath, onLine)
       _ <- scp(node, localRpmPath, sshUser, sshKeyPath, remotePath, onLine)
       _ <- sshRun(
         node,
