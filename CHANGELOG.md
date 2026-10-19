@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Documentation
 - README, `docs/TESTS.md` and `Software-Hierarchy` brought up to date: certificates and the agent token, Rocky/dnf, the
   secret store, check mode, `thread-info`, release flow and the `Makefile` targets.
+- `make orpheracli` (and so `make release`) also installs `orphera-completion.bash` as `/etc/bash_completion.d/orphera`.
 - The CLI help text lists `secrets`; the bash completion knows `secrets` and its subcommands.
 
 ## [0.1.198] - 2026-10-19

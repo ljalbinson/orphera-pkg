@@ -12,6 +12,7 @@ JAR_SRC      := agent/target/scala-3.8.4/agent-assembly-$(VERSION).jar
 CERTS_DIR    := certs
 CLI_JAR      := /usr/local/lib/orphera-orchestrator.jar
 CLI_BIN      := /usr/local/bin/orphera
+CLI_COMPLETION := /etc/bash_completion.d/orphera
 
 all: clean test assembly deb rpm
 
@@ -118,7 +119,8 @@ orpheracli:
 	sudo cp orchestrator/target/scala-3.8.4/orchestrator-assembly-$(VERSION).jar $(CLI_JAR).new
 	sudo mv $(CLI_JAR).new $(CLI_JAR)
 	sudo install -m 755 utils/orphera $(CLI_BIN)
-	@echo "Installed orchestrator $(VERSION) as $(CLI_JAR)"
+	sudo install -D -m 644 orphera-completion.bash $(CLI_COMPLETION)
+	@echo "Installed orchestrator $(VERSION) as $(CLI_JAR); tab completion applies to new shells"
 
 scripting:
 	sbt scripting/assembly

@@ -2,7 +2,8 @@
 #
 # Bash completion for the orphera CLI.
 #
-# Install:
+# `make orpheracli` installs this file as /etc/bash_completion.d/orphera.
+# To install it by hand:
 #   sudo cp orphera-completion.bash /etc/bash_completion.d/orphera
 # or, per-user:
 #   mkdir -p ~/.local/share/bash-completion/completions
