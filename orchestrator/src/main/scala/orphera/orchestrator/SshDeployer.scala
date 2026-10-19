@@ -230,7 +230,7 @@ object SshDeployer:
         // are already installed, so rebuilding at an unchanged VERSION (e.g.
         // after replacing the certificates) would deploy nothing. Reinstall then.
         s"""nvr=$$(rpm -qp --queryformat '%{NAME}-%{VERSION}-%{RELEASE}' $remotePath); """ +
-          s"""if rpm -q "$$nvr" >/dev/null 2>&1; then echo "$$nvr is already installed; reinstalling it"; """ +
+          """if rpm -q "$nvr" >/dev/null 2>&1; then echo "$nvr is already installed; reinstalling it"; """ +
           s"""sudo dnf -y reinstall $remotePath; else sudo dnf -y install $remotePath; fi""",
         onLine
       )
