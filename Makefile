@@ -107,7 +107,12 @@ check-versions:
 check-uptimes:
 	sbt "orchestrator/runMain orphera.orchestrator.Main uptime"
 
+# Reboots every node in the inventory, hypervisors included, so it refuses to
+# run unless ORPHERA_ALLOW_DESTRUCTIVE=1. To reboot some nodes: orphera reboot --nodes ...
 reboot-all:
+	@test "$$ORPHERA_ALLOW_DESTRUCTIVE" = "1" || { \
+	  echo "make reboot-all reboots EVERY node in the inventory, hypervisors included." >&2; \
+	  echo "Run it with ORPHERA_ALLOW_DESTRUCTIVE=1 if that is what you want." >&2; exit 1; }
 	sbt "orchestrator/runMain orphera.orchestrator.Main reboot"
 
 # Installs the orchestrator under one fixed name, so `orphera` always runs the

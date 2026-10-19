@@ -1426,7 +1426,7 @@ auto-updated; remove the entry manually.
 | `make reload` | `sbt reload` |
 | `make check-versions`, `make check-uptimes` | `orphera version` / `orphera uptime` over the whole inventory, through `sbt` |
 | `make deploy-agents` | `deploy-agent` of `orphera-agent_$(VERSION)_amd64.deb` to the whole inventory |
-| `make reboot-all` | **reboots every node in the inventory**, hypervisors included, with no confirmation |
+| `make reboot-all` | **reboots every node in the inventory**, hypervisors included; refuses to run unless `ORPHERA_ALLOW_DESTRUCTIVE=1` is set |
 
 `certs`, `certs-clean`, and `release` are intentionally **not** part of
 the default `all` chain. Cert (re)generation is a deliberate,

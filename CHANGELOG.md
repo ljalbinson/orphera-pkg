@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+- `make reboot-all` refuses to run unless `ORPHERA_ALLOW_DESTRUCTIVE=1` is set, as the destructive test scripts already do.
+
 ### Documentation
 - README, `docs/TESTS.md` and `Software-Hierarchy` brought up to date: certificates and the agent token, Rocky/dnf, the
   secret store, check mode, `thread-info`, release flow and the `Makefile` targets.
