@@ -741,3 +741,16 @@ against CC:11:B7:... for the new one), `orphera version --nodes tst0` prints `un
 TLS handler, so a client that trusts only the old CA cannot talk to a node. The `orphera` wrapper changes into `$ORPHERA_HOME`
 before it starts and needs `inventory.yaml` and `certs/ca.crt` there; a first attempt at this test run from the current
 directory proved nothing. Remaining by hand: delete `~/certs-old` and `~/certs-backup` on scala0.
+
+### K32. Agents refuse to start without a real token; `unauthenticated` - PASSED (2026-10-19)
+`make test`: ContainerCheck 49, ConfCheck 49, SecretsCheck 44 (nine new: token rules, constant-time comparison, error
+labels). On tst7, `deploy-agent` upgraded the agent to 0.1.197 and confirmed it. With `ORPHERA_TOKEN` commented out of
+`agent.env` the unit failed with `exit-code` and was restarted by systemd (the `Refusing to start` line itself was not
+captured in the journal excerpt that was pasted). With a different valid token on the node, `orphera version --nodes tst7`
+printed `unauthenticated: the node rejected this orchestrator's token (utils/set-agent-token.sh <node> sets it)`;
+`utils/set-agent-token.sh tst7` restored it. The orchestrator pre-flight: with `ORPHERA_TOKEN` unset and an empty secret
+store, `deploy-agent` first failed with a raw `UNAUTHENTICATED`, because `deployAgent` calls `gatherFacts` on every node
+before `deployDeb`, where the check was; fixed (9e8733f) by checking at the top of `deployAgent`. The rerun printed `no
+agent token is configured here, and an agent now refuses to start without one`, and sent nothing to tst7. Fleet: after
+`deploy-agent` of the 0.1.197 package, `orphera version` reports 0.1.197 on all 24 nodes (tst0-tst19, gs1-gs3, st0); each
+upgraded agent started, which it only does with a token of its own.
