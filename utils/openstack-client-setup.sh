@@ -14,9 +14,10 @@
 #   openstack volume list
 #
 # Sourcing the rc file puts the venv first on PATH and sets the OS_* variables,
-# and `deactivate-openstack` undoes both. Nothing here changes the repository,
-# and the credentials are the project's hard-coded TEST values (see
-# keystone_single_node.scala), not secrets.
+# and `deactivate-openstack` undoes both. Nothing here changes the repository.
+# The admin password is not written to the rc file: sourcing it reads it from the
+# secret store (`orphera secrets get keystone/admin`), so `orphera` must work
+# in that shell.
 #
 # Safe to re-run: it upgrades the clients, refreshes the CA and rewrites the rc
 # file. Override locations with VENV_DIR, CONF_DIR, KEYSTONE_HOST, CA_SSH_USER.
@@ -33,9 +34,10 @@ CA_SSH_USER="${CA_SSH_USER:-localadmin}"
 # Where keystone_single_node.scala leaves a world-readable copy of its test CA.
 REMOTE_CA="/etc/kolla/keystone/ssl/ca.crt"
 
-# Test-only credentials from keystone_single_node.scala (bootstrap admin).
+# The bootstrap admin of keystone_single_node.scala. Its password is the secret
+# keystone/admin.
 ADMIN_USER="admin"
-ADMIN_PASSWORD="orphera-test-keystone-admin-password"
+ADMIN_SECRET="keystone/admin"
 ADMIN_PROJECT="admin"
 
 CA_FILE="$CONF_DIR/keystone-ca.crt"
@@ -118,7 +120,11 @@ export OS_INTERFACE=public
 export OS_REGION_NAME=RegionOne
 export OS_AUTH_TYPE=password
 export OS_USERNAME="$ADMIN_USER"
-export OS_PASSWORD="$ADMIN_PASSWORD"
+if ! OS_PASSWORD="\$(orphera secrets get $ADMIN_SECRET 2>/dev/null)" || [ -z "\$OS_PASSWORD" ]; then
+  unset OS_PASSWORD
+  echo "admin-openrc: could not read the secret $ADMIN_SECRET (orphera secrets get $ADMIN_SECRET)" >&2
+fi
+export OS_PASSWORD
 export OS_PROJECT_NAME="$ADMIN_PROJECT"
 export OS_USER_DOMAIN_NAME=Default
 export OS_PROJECT_DOMAIN_NAME=Default

@@ -31,7 +31,8 @@ HOST="tst7.ljalbinson.com"
 PROM="http://$HOST:9090"
 GRAF="http://$HOST:3000"
 GUSER="admin"
-GPASS="admin"   # test-only constant, set by observability_stack.scala
+GPASS=$(orphera secrets get observability/grafana-admin 2>/dev/null) || {
+  echo "cannot read the secret observability/grafana-admin (run observability_stack.scala first)" >&2; exit 2; }
 
 # job=up/total, sorted, as observability_*.scala should leave them.
 EXPECTED_JOBS="haproxy=3/3 mysqld=3/3 node_exporter=7/7 prometheus=1/1"

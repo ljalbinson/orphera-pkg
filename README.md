@@ -1309,8 +1309,7 @@ s"... IDENTIFIED BY '${dbPassword.reveal}' ..."
   with the passwords already in use *before* applying a playbook that
   reads from it, or the playbook will generate new values that do not
   match the database users and service accounts that exist. For the test
-  lab, `manifests/seed_test_secrets.sh` loads the old fixed values and
-  leaves names that already have a value alone.
+  lab, put the values in use into the store with `orphera secrets set`.
 - A `Secret` does not print: `toString`, string interpolation and any log
   line give `<redacted>`, and the text is available only through
   `.reveal`, so each place a secret goes into a command or a file is

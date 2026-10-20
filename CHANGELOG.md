@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Security — no passwords or keys in the repository
+- Removed `manifests/seed_test_secrets.sh`, which held the lab's service passwords and two Ceph client keys
+  (`glance/ceph-key`, `cinder/ceph-key`) in plain text in a public repository. They are still in git history: treat them
+  as published, and replace them in the lab (see below). A new deployment needs no seeding, as Orphera makes random
+  values on first use; an existing one loads its values with `orphera secrets set`.
+- `utils/openstack-client-setup.sh` no longer writes the Keystone admin password into the rc file or the script: sourcing
+  the rc file reads `keystone/admin` from the secret store.
+- Grafana's admin password is the secret `observability/grafana-admin` instead of `admin`, and `observability_stack.scala`
+  sets it with `grafana cli admin reset-admin-password` so an existing Grafana agrees. `test_observability_stack.sh`
+  reads it from the store.
+
 ### Added
 - `utils/start-vm.sh`, `utils/stop-vm.sh` and `utils/reboot-vm.sh` (which read `ORPHERA_CONFIG_DIR`, file locations only): start, shut down, or reboot from the hypervisor
   (`--soft`: `virsh reboot`; `--hard`: shut down, then start) a VM, finding the hypervisor in its `config/<vm>.yaml`. They share

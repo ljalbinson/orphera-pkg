@@ -45,17 +45,14 @@ object observability_stack extends OrpheraClusterPlaybook:
   private val allNodes =
     List("tst0", "tst1", "tst2", "tst3", "tst4", "tst5", "tst6")
 
-  // Grafana's default admin/admin credentials on a truly fresh install —
-  // same "test-only, fine for disposable infrastructure" convention as
-  // every other hardcoded credential in this project (sstPassword,
-  // clustercheckPassword, wordpress's dbPassword). Grafana only forces a
-  // password change through its own UI login flow, not the API used
-  // below to confirm the datasource — unconfirmed against a real run,
-  // flagged the same way mariadb_galera_cluster.scala flags its own
-  // unix-socket-root assumption: an easy, loud failure to spot (401) if
-  // it's wrong, not a silent wrong result.
+  // Grafana's admin login. The password is the secret observability/grafana-admin
+  // (made on first use, hidden from the output). grafana.ini's admin_password
+  // only applies when Grafana creates its database, so the install script also
+  // sets it with `grafana cli admin reset-admin-password`, which makes a Grafana
+  // that already exists (with the old admin/admin) agree with the secret.
+  // Unconfirmed against a real run: a wrong command fails the install step loudly.
   private val grafanaAdminUser = "admin"
-  private val grafanaAdminPassword = "admin"
+  private val grafanaAdminPassword = Secrets.get("observability/grafana-admin")
 
   // Builds the full `scrape_configs` target list from inventory data —
   // same {{nodes.<name>.cluster_ip}} templating every other manifest in
@@ -235,6 +232,13 @@ object observability_stack extends OrpheraClusterPlaybook:
       |  echo "grafana-server is running but either /api/health never returned success, or the admin account never finished being created, after 90s — see 'journalctl -xeu grafana-server'" >&2
       |  exit 1
       |fi
+      |PW='$grafanaAdminPassword'
+      |if ! runuser -u grafana -- grafana cli --homepath /usr/share/grafana admin reset-admin-password "$$PW" >/dev/null 2>&1; then
+      |  if ! runuser -u grafana -- grafana-cli --homepath /usr/share/grafana admin reset-admin-password "$$PW" >/dev/null 2>&1; then
+      |    echo "could not set grafana's admin password with 'grafana cli admin reset-admin-password'" >&2
+      |    exit 1
+      |  fi
+      |fi
       |echo "grafana running on :3000, provisioned with a Prometheus datasource"""".stripMargin
 
   // Not just "is Prometheus up": confirms it has actually scraped every
@@ -336,7 +340,7 @@ object observability_stack extends OrpheraClusterPlaybook:
         .task("observability stack confirmed")(
           Task.Debug(
             s"Prometheus at http://tst7.ljalbinson.com:9090 (scraping ${allNodes.length} node_exporter targets + itself), " +
-              s"Grafana at http://tst7.ljalbinson.com:3000 (login $grafanaAdminUser/$grafanaAdminPassword, Prometheus datasource pre-wired)."
+              s"Grafana at http://tst7.ljalbinson.com:3000 (login $grafanaAdminUser, password: orphera secrets get observability/grafana-admin; Prometheus datasource pre-wired)."
           )
         )
         .build
