@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
 #
 # Create new, empty virtual machines, then bring each one up to a usable base:
 #   1. provision the VM on its hypervisor     (kvm_zfs_vm_provision.scala or

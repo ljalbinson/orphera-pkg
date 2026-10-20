@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 .PHONY: all release rpm-if-available bump-patch _build_all clean test assembly pkg-stage deb rpm verify certs certs-clean fmt fmt-manifests scripting lint fix
 
 VERSION_FILE := VERSION
@@ -112,6 +113,10 @@ check-uptimes:
 # Checks inventory.yaml and config/*.yaml against schemas/ (needs python3-jsonschema and python3-yaml).
 check-schemas:
 	utils/validate-schemas.py
+
+# Fails if a tracked source file has no SPDX-License-Identifier header and is not listed in utils/spdx-exempt.txt.
+check-spdx:
+	utils/spdx.py --check
 
 # Fails if a tracked file holds a lab password, a quoted cephx key or a private key.
 check-secrets:

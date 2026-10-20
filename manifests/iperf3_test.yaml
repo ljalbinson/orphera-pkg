@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 name: iperf3-network-test
 
 # Runs iperf3 clients on tst1 and tst2 simultaneously against a

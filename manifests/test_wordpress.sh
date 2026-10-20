@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
 #
 # Non-destructive test for WordPress on tst7 (wordpress_site.scala).
 #

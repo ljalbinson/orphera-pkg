@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
 
 orphera cluster-playbook manifests/ceph-mon-keyring.yaml
 orphera cluster-playbook manifests/ceph-mon-quorum.yaml

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 name: CI
 
 on: [push, pull_request]
@@ -9,6 +10,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: No credentials in tracked files
         run: utils/check-no-secrets.sh
+      - name: SPDX headers
+        run: utils/spdx.py --check
       - uses: actions/setup-java@v4
         with:
           distribution: temurin

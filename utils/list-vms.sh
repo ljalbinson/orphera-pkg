@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
 #
 # Lists every VM on each hypervisor: name, state, vCPUs and memory, with a total
 # per hypervisor for the running VMs.

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
 #
 # Regression test for RunLog.scala / the .orphera-logs/*.jsonl structured
 # event log (run_start, task_start, task_end, task_skipped, run_end).

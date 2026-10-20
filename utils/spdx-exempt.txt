@@ -1,0 +1,39 @@
+# Files that carry no SPDX header: data, documentation, and formats with no comment syntax.
+# The repository LICENSE (Apache-2.0) covers them. One glob per line: `*` matches within a
+# directory, `**` matches across directories. Checked by utils/spdx.py (make check-spdx).
+
+# repository metadata and build configuration
+.gitignore
+.gitmessage
+.scalafix.conf
+.scalafmt.conf
+LICENSE
+VERSION
+project/build.properties
+
+# documentation
+README.md
+CHANGELOG.md
+RATIONALE.md
+docs/**
+manifests/*.md
+
+# data: VM configs, the inventory, schemas, catalogues, certificates, templates, native-image metadata
+config/**
+inventory.yaml
+schemas/*.json
+catalogues/**
+certs/**
+files/**
+native-image-config/**
+ansible-compare/**
+
+# package control files and templates (formats that do not take comments)
+packaging/agent.env
+packaging/conffiles
+packaging/control.template
+packaging/orphera-agent.spec.template
+
+# deleted on the unmerged repo-cleanup branch; left alone here so that branch still merges
+build
+manifests/ceph-mgr.scala

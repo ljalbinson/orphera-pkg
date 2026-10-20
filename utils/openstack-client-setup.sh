@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
 #
 # Sets up the OpenStack command-line clients on the machine you run `orphera`
 # from (scala0), OUTSIDE this repository:

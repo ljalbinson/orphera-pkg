@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 ---
 # Deliberately fails: exercises the flat-playbook path of the exit-code
 # fix. Before the fix, `orphera playbook manifests/exit_code_fail.yaml`

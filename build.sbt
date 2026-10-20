@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import sbt._
 import Keys._
 import sbtassembly.AssemblyPlugin.autoImport._

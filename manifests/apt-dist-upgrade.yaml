@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # apt update -> apt dist-upgrade -> apt autoremove across the test nodes,
 # using the native dist_upgrade and autoremove tasks (both show up in the
 # agent's apt handling; dist_upgrade runs `apt-get update` first by default,

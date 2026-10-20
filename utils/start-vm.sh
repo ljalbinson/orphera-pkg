@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
 #
 # Starts one or more VMs on their hypervisors. The hypervisor and the libvirt
 # domain name come from each VM's config file (the same config/<vm>.yaml the

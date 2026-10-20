@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
 #
 # End-to-end test for the Prometheus + Grafana monitoring stack on tst7
 # (observability_stack.scala and observability_extended.scala).

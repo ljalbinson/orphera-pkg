@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 ---
 # Control case: exercises the same cluster-playbook (staged) path as
 # cluster_exit_code_fail.yaml, but should genuinely succeed.

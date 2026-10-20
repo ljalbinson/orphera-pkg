@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
 #
 # DESTRUCTIVE: destroys and re-creates the OpenStack virtual machines, then builds OpenStack on them.
 #

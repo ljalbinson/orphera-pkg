@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 ---
 # Deliberately fails: exercises the cluster-playbook (staged) path of
 # the exit-code fix. Before the fix, `orphera cluster-playbook

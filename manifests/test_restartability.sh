@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
 #
 # Regression test for --resume / Checkpoint.scala. Doesn't just check
 # that a resumed run doesn't crash — proves the actual mechanism:

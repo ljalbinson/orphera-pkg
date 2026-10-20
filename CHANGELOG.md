@@ -20,6 +20,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `--yes` to apply; backs up the store first; never touches `orphera/agent-token` or `orphera/inventory-db-*`). The running
   lab keeps the old values until it is rebuilt: see `docs/ROTATING-LAB-SECRETS.md`.
 
+### Changed
+- SPDX headers on every tracked source file, not only `.scala`: 101 files gained a `SPDX-License-Identifier: Apache-2.0` line
+  (Scala, shell, YAML playbooks, sbt, proto, Makefile, the systemd unit, the packaging scripts). Nothing else in them
+  changed; the header goes after a shebang or a `yaml-language-server` modeline. Data, documentation and formats without
+  comments (JSON, configs, certificates, package control files) are listed in `utils/spdx-exempt.txt` and covered by
+  `LICENSE`. `utils/spdx.py --check` (`make check-spdx`, and a CI step) fails if a file lacks a header and is not exempt.
+  `utils/add-spdx-headers.sh` still works and now calls it.
+
 ### Security
 - Removed `manifests/mariadb_galera_cluster.yaml`, a stale YAML copy of the Galera playbook that held the SST password as a
   literal. It targeted tst0-tst2 (now the Ceph nodes) and nothing referred to it; `mariadb_galera_cluster.scala` is the

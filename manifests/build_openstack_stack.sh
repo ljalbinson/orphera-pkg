@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
 #
 # Master script: builds the whole OpenStack stack (control plane and compute nodes) from
 # freshly provisioned VMs that only have the Orphera agent, in dependency order, and ends

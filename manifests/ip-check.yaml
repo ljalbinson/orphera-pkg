@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 name: ip-check
 nodes: [tst0, tst1, tst2, tst4]
 tasks:

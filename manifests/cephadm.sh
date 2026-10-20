@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
 
 orphera bootstrap orphera-agent_0.*.deb --ssh-user localadmin
 orphera reboot --wait

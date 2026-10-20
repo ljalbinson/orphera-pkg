@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 ---
 # Three tasks, deliberately built so task 2 fails until a marker file
 # is created on tst0 — lets test_restartability.sh force a real partial

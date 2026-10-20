@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
 #
 # Stops one or more VMs by asking the guest to shut down (virsh shutdown, an
 # ACPI power-button press), then waits until libvirt reports it shut off. The

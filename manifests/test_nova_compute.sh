@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
 #
 # DRAFT end-to-end test for nova_compute.scala (nova-compute + Neutron OVS agent on
 # tst17 and tst18).

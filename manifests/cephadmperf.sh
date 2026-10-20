@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
 
 cephadm shell -- ceph osd pool create testbench 128 128
 cephadm shell -- rados bench -p testbench 10 write --no-cleanup

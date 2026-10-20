@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import orphera.orchestrator.*
 import orphera.orchestrator.PlaybookDsl.*
 

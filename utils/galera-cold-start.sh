@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
 #
 # Bring the Galera cluster on tst3, tst4 and tst5 back after every node was stopped.
 #

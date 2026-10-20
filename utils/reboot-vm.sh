@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
 #
 # Reboots one or more VMs from the hypervisor, without going through the
 # guest's own agent: for a VM whose Orphera agent or SSH is not answering. The

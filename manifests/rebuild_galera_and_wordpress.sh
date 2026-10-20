@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
 #
 # DESTRUCTIVE: tears down the Galera cluster (every database on it, including
 # Keystone's and Cinder's, is lost) and rebuilds Galera, the VIP and WordPress.
