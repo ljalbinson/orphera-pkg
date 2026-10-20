@@ -26,7 +26,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   changed; the header goes after a shebang or a `yaml-language-server` modeline. Data, documentation and formats without
   comments (JSON, configs, certificates, package control files) are listed in `utils/spdx-exempt.txt` and covered by
   `LICENSE`. `utils/spdx.py --check` (`make check-spdx`, and a CI step) fails if a file lacks a header and is not exempt.
-  `utils/add-spdx-headers.sh` still works and now calls it.
+  `utils/add-spdx-headers.sh` still works and now calls it. The GitLab pipeline runs this check and the credential check too.
 
 ### Security
 - Removed `manifests/mariadb_galera_cluster.yaml`, a stale YAML copy of the Galera playbook that held the SST password as a

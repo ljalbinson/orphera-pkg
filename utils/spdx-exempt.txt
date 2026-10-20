@@ -2,6 +2,9 @@
 # The repository LICENSE (Apache-2.0) covers them. One glob per line: `*` matches within a
 # directory, `**` matches across directories. Checked by utils/spdx.py (make check-spdx).
 
+# this list
+utils/spdx-exempt.txt
+
 # repository metadata and build configuration
 .gitignore
 .gitmessage
