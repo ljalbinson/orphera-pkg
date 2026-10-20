@@ -81,6 +81,42 @@ lazy val orchestrator = project
   .settings(
     Compile / run / fork := true,
     Compile / run / baseDirectory := (ThisBuild / baseDirectory).value,
+    // Which build is this jar? `orphera version` prints it first, so an installed
+    // jar older than the checkout is visible. Uses the commit's own date, not the
+    // clock, so the file changes only when the commit does; "unknown" outside git.
+    Compile / sourceGenerators += Def.task {
+      val root = (ThisBuild / baseDirectory).value
+      val outFile =
+        (Compile / sourceManaged).value / "orphera" / "orchestrator" / "BuildInfo.scala"
+      def git(args: String*): String =
+        scala.util.Try(
+          scala.sys.process
+            .Process(Seq("git") ++ args, root)
+            .!!(scala.sys.process.ProcessLogger((_: String) => ()))
+            .trim
+        ).getOrElse("")
+      val commitRaw = git("rev-parse", "--short", "HEAD")
+      val commit = if (commitRaw.isEmpty) "unknown" else commitRaw
+      val commitDate = git("show", "-s", "--format=%cI", "HEAD")
+      val dirty = git("status", "--porcelain", "--untracked-files=no").nonEmpty
+      val suffix = if (dirty) "+uncommitted changes" else ""
+      val versionString = IO.read(root / "VERSION").trim
+      val summary =
+        s"$versionString (commit $commit$suffix, committed $commitDate)"
+      val content =
+        s"""// SPDX-License-Identifier: Apache-2.0
+           |package orphera.orchestrator
+           |
+           |object BuildInfo:
+           |  val version: String = "$versionString"
+           |  val commit: String = "$commit"
+           |  val commitDate: String = "$commitDate"
+           |  val dirty: Boolean = $dirty
+           |  val summary: String = "$summary"
+           |""".stripMargin
+      if (!outFile.exists || IO.read(outFile) != content) IO.write(outFile, content)
+      Seq(outFile)
+    },
     libraryDependencies ++= Seq(
       "org.typelevel" %% "cats-effect" % "3.7.1",
       "co.fs2" %% "fs2-io" % "3.11.0",

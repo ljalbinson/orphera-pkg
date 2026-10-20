@@ -280,15 +280,16 @@ object Main extends IOApp:
         }
 
       case Right(Command.Version(nodeNames)) =>
-        withTargets(nodeNames) { targets =>
-          Orchestrator.getVersions(targets).flatMap { versions =>
-            targets.traverse_ { node =>
-              IO.println(
-                s"[${node.name}] ${versions.getOrElse(node.name, "unknown")}"
-              )
+        IO.println(s"orphera ${BuildInfo.summary}") >>
+          withTargets(nodeNames) { targets =>
+            Orchestrator.getVersions(targets).flatMap { versions =>
+              targets.traverse_ { node =>
+                IO.println(
+                  s"[${node.name}] ${versions.getOrElse(node.name, "unknown")}"
+                )
+              }
             }
           }
-        }
 
       case Right(Command.RunPlaybook(source, resume, config)) =>
         if source.endsWith(".scala") then

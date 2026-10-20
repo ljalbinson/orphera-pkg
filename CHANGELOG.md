@@ -20,6 +20,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `--yes` to apply; backs up the store first; never touches `orphera/agent-token` or `orphera/inventory-db-*`). The running
   lab keeps the old values until it is rebuilt: see `docs/ROTATING-LAB-SECRETS.md`.
 
+### Added
+- Agent-side `never-reboot`. An agent refuses `TriggerReboot` and `TriggerShutdown` (`FAILED_PRECONDITION`, naming the file)
+  while its host has `/etc/orphera-agent/never-reboot`, or the path in `ORPHERA_NEVER_REBOOT_FILE`, so a stale or other
+  client cannot reboot or power off a protected host. Checked on each request, no restart. `utils/sync-never-reboot.py`
+  creates the file on every host the inventory protects (dry run unless `--apply`; `--prune` removes it elsewhere). New
+  `AgentGuardCheck` (9), run by `make test`; it exercises only the refusal, never the real reboot path. Needs the agent
+  deployed first.
+- `orphera version` first prints the build of the command itself: version, commit, commit date, and "+uncommitted changes"
+  when the tree was dirty. It makes a stale installed jar visible: it was how a shutdown reached a protected hypervisor.
+
 ### Fixed
 - `never-reboot` now also protects against `orphera shutdown`. A protected node (or a member of a protected group) is
   skipped with a message and the rest are shut down; `NodeClient.shutdown` refuses it before opening any connection. Until

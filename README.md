@@ -357,6 +357,19 @@ powered off either. It guards Orphera's own reboot and shutdown paths: it does n
 off the host itself (run with `orphera run -- shutdown`), nor the VM scripts in `utils/`, which act on a guest, not the
 host the property is usually set on.
 
+The inventory is read by the `orphera` command, so only a current `orphera` obeys it: an older build sends the shutdown
+straight to the host. For a host that must stay up, the agent can refuse as well. An agent whose host has the file
+`/etc/orphera-agent/never-reboot` (or the path in `ORPHERA_NEVER_REBOOT_FILE`) answers a reboot or shutdown request with
+`FAILED_PRECONDITION`, whichever `orphera` sent it. It checks the file on every request, so creating or removing it
+needs no restart. `utils/sync-never-reboot.py` creates the file on every host the inventory protects (same rule: the
+node, or a group it is in); it shows what it would do unless given `--apply`, and `--prune` also removes the file from
+hosts that are no longer protected. The agent must be a build that has the check: deploy it first, then run the script.
+An older agent ignores the file.
+
+`orphera version` prints the build of `orphera` itself first (version, commit, commit date, and whether the tree had
+uncommitted changes), then each node's agent version. Compare the commit with `git log -1` in the checkout to see whether the
+installed jar is older than the code.
+
 A missing or malformed `inventory.yaml` fails loudly — a clear stderr
 warning at startup, then an empty inventory (so every subsequent "no
 matching nodes" error traces back to it) — rather than failing
@@ -1501,7 +1514,8 @@ token and when an agent will start, how a failed call is labelled; the
 checks that use real `age` are skipped when it is not installed) and
 `ThreadInfoCheck` (16: `thread-info`'s counting, report and command
 line), `InventoryCheck` (12: reading `never-reboot`, which nodes it protects, and that `shutdown` refuses and skips them) and `LocationsCheck`
-(25: `-I`/`-c`, the environment variables, config names, reading through a URI). Each exits non-zero on a failure.
+(25: `-I`/`-c`, the environment variables, config names, reading through a URI) and `AgentGuardCheck` (9: the agent refuses a reboot and a
+shutdown on a host with the marker; it never calls the unprotected path, which would really reboot the test machine). Each exits non-zero on a failure.
 
 The scripts `manifests/test_*.sh` apply a playbook to the lab and check the
 result independently of the playbook's own health check. They print a

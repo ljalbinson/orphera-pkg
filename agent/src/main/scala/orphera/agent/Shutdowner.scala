@@ -11,10 +11,24 @@ import orphera.common.*
   * by the shutdown, so the command has to outlive it and the ack has to reach
   * the orchestrator first. There is no remote way to power the host back on
   * from here.
+  *
+  * Refuses, without starting anything, if this host carries the never-reboot
+  * marker (see `NeverReboot`). `env` is a parameter so a check can point it at
+  * a temporary marker; the agent itself uses the process environment.
   */
 object Shutdowner:
 
-  def trigger(request: ShutdownRequest): IO[ShutdownAck] =
+  def trigger(
+      request: ShutdownRequest,
+      env: Map[String, String] = sys.env
+  ): IO[ShutdownAck] =
+    val marker = NeverReboot.markerPath(env)
+    IO.blocking(NeverReboot.isProtected(marker)).flatMap { guarded =>
+      if guarded then IO.raiseError(NeverReboot.refusal("power off", marker))
+      else schedule(request)
+    }
+
+  private def schedule(request: ShutdownRequest): IO[ShutdownAck] =
     val delay = if request.delaySeconds > 0 then request.delaySeconds else 5
 
     for _ <- IO.blocking {
