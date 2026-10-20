@@ -61,8 +61,8 @@ SQL
 ```
 
 The same for `orphera_admin` with the account that loads and edits the data. The server needs TLS configured
-(`ssl_cert`, `ssl_key`, `ssl_ca`, which `orphera issue-certs` can supply keys for), and the orchestrator is the only
-client that needs `orphera_reader`.
+(`ssl_cert`, `ssl_key`, `ssl_ca`) for `REQUIRE SSL` to work, and the orchestrator is the only client that needs
+`orphera_reader`.
 
 ## Loading the existing files
 
