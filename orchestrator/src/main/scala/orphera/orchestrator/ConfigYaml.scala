@@ -2,8 +2,6 @@
 
 package orphera.orchestrator
 
-import java.nio.file.{Files, Paths}
-
 import io.circe.*
 import io.circe.yaml.parser
 
@@ -208,11 +206,7 @@ object ConfigYaml:
 
   def load(path: String): Either[String, VmParams] =
     for
-      content <- scala.util
-        .Try(Files.readString(Paths.get(path)))
-        .toEither
-        .left
-        .map(_.getMessage)
+      content <- Sources.read(path)
       json <- parser.parse(content).left.map(_.getMessage)
       paramsJson <- json.hcursor
         .get[Json]("params")

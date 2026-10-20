@@ -1131,6 +1131,15 @@ object Cli:
   val usage: String =
     """orphera-orchestrator - test CLI for the Orphera agent protocol
       |
+      |Usage: orphera [-I <inventory>] [-c <config-dir>] <command> [args...]
+      |  -I, --inventory <uri>   where the inventory is: a path or a URI such as
+      |                          file:///etc/orphera/inventory.yaml
+      |                          (default $ORPHERA_INVENTORY, else inventory.yaml)
+      |  -c, --config-dir <uri>  where the per-VM config files are; `--config tst0`
+      |                          then means <config-dir>/tst0.yaml
+      |                          (default $ORPHERA_CONFIG_DIR, else config)
+      |  These go before the command. Only file locations can be read so far.
+      |
       |Targeting: every command taking --nodes also takes
       |  --node-groups g1,g2   (groups from inventory.yaml; union with --nodes)
       |

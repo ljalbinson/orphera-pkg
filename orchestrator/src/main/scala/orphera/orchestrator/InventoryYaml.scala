@@ -2,8 +2,6 @@
 
 package orphera.orchestrator
 
-import java.nio.file.{Files, Paths}
-
 import cats.syntax.all.*
 
 import io.circe.*
@@ -40,11 +38,7 @@ object InventoryYaml:
 
   def load(path: String): Either[String, (List[Node], List[Group])] =
     for
-      content <- scala.util
-        .Try(Files.readString(Paths.get(path)))
-        .toEither
-        .left
-        .map(_.getMessage)
+      content <- Sources.read(path)
       json <- parser.parse(content).left.map(_.getMessage)
       result <- decodeInventory(json.hcursor).left.map(_.getMessage)
     yield result

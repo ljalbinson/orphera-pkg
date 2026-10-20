@@ -29,7 +29,10 @@
 # already handles that correctly on its own.
 # Group names from inventory.yaml (the `groups:` section), for --node-groups.
 _orphera_groups() {
-  local inv="${ORPHERA_INVENTORY:-inventory.yaml}"
+  local inv="${_ORPHERA_INV:-${ORPHERA_INVENTORY:-inventory.yaml}}"
+  inv="${inv#file://}"
+  # Only a file can be read here; another kind of location has no groups to offer.
+  case "$inv" in *://*) return 0 ;; esac
   [ -r "$inv" ] || return 0
   awk '/^groups:/ {g=1; next} /^[^ #-]/ {g=0} g && /^[ ]*- name:/ {print $NF}' "$inv"
 }
@@ -62,12 +65,33 @@ _orphera_completions() {
   # Flags common to most verbs that take --nodes
   local nodes_flag="--nodes"
 
+  # The global options (-I/--inventory <uri>, -c/--config-dir <uri>) come before
+  # the verb. Take each finished pair out of `words`, so everything below sees
+  # the verb at words[1] as usual, and keep the inventory for --node-groups.
+  local _ORPHERA_INV=""
+  while [[ $cword -gt 2 ]]; do
+    case "${words[1]}" in
+      -I|--inventory)
+        _ORPHERA_INV="${words[2]}"
+        words=("${words[0]}" "${words[@]:3}"); cword=$((cword - 2)) ;;
+      -c|--config-dir)
+        words=("${words[0]}" "${words[@]:3}"); cword=$((cword - 2)) ;;
+      *) break ;;
+    esac
+  done
+  # The value of one of those options: a path or a URI.
+  if [[ $cword -eq 2 ]]; then
+    case "${words[1]}" in
+      -I|--inventory|-c|--config-dir) _filedir; return ;;
+    esac
+  fi
+
   # First word after "orphera" itself — complete the verb.
   if [[ $cword -eq 1 ]]; then
     # `--help` is accepted as the first argument too, but only offered once
     # a dash has been typed, so it doesn't clutter the plain verb list.
     if [[ "$cur" == -* ]]; then
-      COMPREPLY=($(compgen -W "--help" -- "$cur"))
+      COMPREPLY=($(compgen -W "--help -I --inventory -c --config-dir" -- "$cur"))
     else
       COMPREPLY=($(compgen -W "$verbs" -- "$cur"))
     fi

@@ -11,6 +11,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (`--soft`: `virsh reboot`; `--hard`: shut down, then start) a VM, finding the hypervisor in its `config/<vm>.yaml`. They share
   `utils/vm-common.sh`.
 
+### Added — `-I` and `-c`: the inventory and the config directory as URIs
+- `orphera -I <uri> -c <uri> <command>`, or `ORPHERA_INVENTORY` and the new `ORPHERA_CONFIG_DIR`. The option wins over the
+  variable, the variable over the default (`inventory.yaml`, `config`). A plain path or a `file:` URI is read today;
+  `Sources.register` adds another scheme (a database, a dynamic connector) without touching the code that uses the
+  inventory. An unsupported scheme is refused naming those there are.
+- With `-c`, `--config tst7` means `<config-dir>/tst7.yaml`; a value with a `/`, a scheme or a `.yaml` ending is used as
+  given, as before. Playbook scripts and pipeline steps started by `orphera` are given the same locations.
+- New check program `LocationsCheck` (25), run by `make test`.
+
 ### Added — `never-reboot`
 - `never-reboot: true` on an inventory node or group. `orphera reboot` (and `make reboot-all`) skips such nodes, and a
   `reboot` task fails on them, so a hypervisor can be protected from any reboot Orphera would start. New check program

@@ -312,8 +312,9 @@ mid-request `RST_STREAM CANCEL` errors.
 ## Inventory
 
 Hosts, groups, and their variables are defined in `inventory.yaml` at
-the repo root (path overridable via `ORPHERA_INVENTORY`), loaded once
-at startup by `InventoryYaml.scala`:
+the repo root, loaded once at startup by `InventoryYaml.scala`. Its
+location is a path or a URI, chosen with `-I <uri>` before the command or
+`ORPHERA_INVENTORY` (see [Where the inventory and configs are](#where-the-inventory-and-configs-are)):
 
 ```yaml
 nodes:
@@ -382,6 +383,31 @@ There is no dynamic inventory source (cloud provider API, etc.) —
 static and hand-edited only, for now.
 
 ## CLI reference
+
+### Where the inventory and configs are
+
+Two global options go **before** the command:
+
+| Option | Environment variable | Default | What it locates |
+|---|---|---|---|
+| `-I`, `--inventory <uri>` | `ORPHERA_INVENTORY` | `inventory.yaml` | the inventory |
+| `-c`, `--config-dir <uri>` | `ORPHERA_CONFIG_DIR` | `config` | the directory of per-VM config files |
+
+```
+orphera -I file:///etc/orphera/inventory.yaml -c file:///etc/orphera/config version
+orphera -c /srv/vms cluster-playbook manifests/gen_set_dns.scala --config tst7
+```
+
+The option wins over the environment variable, which wins over the default. A location is a plain path or a URI;
+`file:` URIs (`file:///path`) and plain paths can be read today. The locations are URIs so that the inventory or the
+configs can later come from a database or another dynamic source: a new scheme is added in one place
+(`Sources.register`, `Locations.scala`) and nothing that reads the inventory changes. A scheme with no reader is
+refused with the list of those there are. Relative paths are relative to `ORPHERA_HOME`, as the launcher changes into
+it first. The options also reach the playbook scripts and pipeline steps that `orphera` starts. They go before the
+command because after it `-c` would be ambiguous (`orphera run sh -c ...`).
+
+With `-c` set, `--config tst7` means `<config-dir>/tst7.yaml`. A `--config` value that has a `/`, a scheme or a
+`.yaml`/`.yml` ending (`config/tst7.yaml`, `/x/y.yaml`) is used exactly as given, as before.
 
 Run `sbt "orchestrator/run help"` for the live version of this. Every
 command accepts `--nodes host1,host2` (and/or `--node-groups g1,g2`) to target a
@@ -1425,7 +1451,7 @@ auto-updated; remove the entry manually.
 |---|---|
 | `make` / `make all` | clean → test → assembly → deb |
 | `make clean` | `sbt clean`, removes `pkg/` and any built `.deb` / `.rpm` |
-| `make test` | `sbt test`, then the check programs `ContainerCheck`, `ConfCheck`, `SecretsCheck`, `ThreadInfoCheck` and `InventoryCheck` (set `CHECK_VERBOSE=1` to print every passing check) |
+| `make test` | `sbt test`, then the check programs `ContainerCheck`, `ConfCheck`, `SecretsCheck`, `ThreadInfoCheck`, `InventoryCheck` and `LocationsCheck` (set `CHECK_VERBOSE=1` to print every passing check) |
 | `make assembly` | `sbt agent/assembly` |
 | `make deb` | stages package contents, runs `dpkg-deb --build` |
 | `make rpm` | stages the same contents, runs `rpmbuild` to produce `orphera-agent-<version>-1.noarch.rpm` for Rocky/Red Hat hosts. Needs `rpmbuild` |
@@ -1471,7 +1497,8 @@ that need no cluster: `ContainerCheck` (49 checks: typed containers and
 token and when an agent will start, how a failed call is labelled; the
 checks that use real `age` are skipped when it is not installed) and
 `ThreadInfoCheck` (16: `thread-info`'s counting, report and command
-line) and `InventoryCheck` (10: reading `never-reboot` and which nodes it protects). Each exits non-zero on a failure.
+line), `InventoryCheck` (10: reading `never-reboot` and which nodes it protects) and `LocationsCheck`
+(25: `-I`/`-c`, the environment variables, config names, reading through a URI). Each exits non-zero on a failure.
 
 The scripts `manifests/test_*.sh` apply a playbook to the lab and check the
 result independently of the playbook's own health check. They print a

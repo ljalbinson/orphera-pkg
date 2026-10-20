@@ -10,9 +10,16 @@ import cats.syntax.all.*
 object Main extends IOApp:
 
   def run(args: List[String]): IO[ExitCode] =
-    dispatch(args).handleErrorWith { err =>
-      IO.println(s"Error: ${err.getMessage}") >> IO.pure(ExitCode.Error)
-    }
+    // The global options (-I, -c) come off first, before anything reads the
+    // inventory, which is loaded the first time it is used.
+    Locations.extract(args) match
+      case Left(err) =>
+        IO.println(s"Error: $err") >> IO.pure(ExitCode.Error)
+      case Right((overrides, rest)) =>
+        Locations.install(overrides)
+        dispatch(rest).handleErrorWith { err =>
+          IO.println(s"Error: ${err.getMessage}") >> IO.pure(ExitCode.Error)
+        }
 
   /** Entry point for every invocation. Auditable commands (see
     * AuditLog.isAuditable) get a start/end record in the audit trail wrapped
@@ -50,8 +57,33 @@ object Main extends IOApp:
       )
     yield exitCode
 
+  /** `--config tst0` names a file of the config directory (-c); see
+    * Locations.resolveConfig.
+    */
+  private def withResolvedConfigs(command: Command): Command =
+    command match
+      case Command.RunPlaybook(source, resume, config) =>
+        Command.RunPlaybook(source, resume, config.map(Locations.resolveConfig))
+      case Command.RunClusterPlaybook(
+            paths,
+            resume,
+            configs,
+            parallel,
+            quiet,
+            bootstrap
+          ) =>
+        Command.RunClusterPlaybook(
+          paths,
+          resume,
+          configs.map(Locations.resolveConfig),
+          parallel,
+          quiet,
+          bootstrap
+        )
+      case other => other
+
   private def dispatchCommand(args: List[String]): IO[ExitCode] =
-    Cli.parse(args) match
+    Cli.parse(args).map(withResolvedConfigs) match
 
       case Left(error) =>
         // The whole usage text only for an unknown command; for a bad
@@ -485,9 +517,7 @@ object Main extends IOApp:
     * file name without the extension (`config/tst3.yaml` -> `tst3`).
     */
   private def configLabel(config: String): String =
-    val name = Paths.get(config).getFileName.toString
-    val dot = name.lastIndexOf('.')
-    if dot > 0 then name.substring(0, dot) else name
+    Locations.label(config)
 
   /** `cluster-playbook <chain> --config a b c ...`: runs the whole playbook
     * sequence once per config, at most `parallel` configs at a time (default
@@ -657,6 +687,7 @@ object Main extends IOApp:
           "orphera.scripting.Main",
           scriptPath
         )
+        Locations.childEnv.foreach((k, v) => builder.environment().put(k, v))
         builder.environment().put("ORPHERA_CONFIG", config)
         builder.environment().put("ORPHERA_RUN_TAG", label)
         if resume then builder.environment().put("ORPHERA_RESUME", "true")
@@ -847,6 +878,9 @@ object Main extends IOApp:
             case Right(args) =>
               note(s"[$index/${steps.size}] $step") >> {
                 val builder = new ProcessBuilder(selfCommand(args)*)
+                Locations.childEnv.foreach((k, v) =>
+                  builder.environment().put(k, v)
+                )
                 runProcessCaptured(builder, node, logFile, quiet).flatMap {
                   case ExitCode.Success => go(rest)
                   case _                => IO.pure(Some(step))
@@ -971,6 +1005,9 @@ object Main extends IOApp:
             jar,
             "orphera.scripting.Main",
             scriptPath
+          )
+          Locations.childEnv.foreach((k, v) =>
+            builder.environment().put(k, v)
           )
           if resume then builder.environment().put("ORPHERA_RESUME", "true")
           config

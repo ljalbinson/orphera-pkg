@@ -19,15 +19,12 @@ final case class Group(
 
 object Inventory:
 
-  private val defaultPath =
-    sys.env.getOrElse("ORPHERA_INVENTORY", "inventory.yaml")
-
   private val loaded: (List[Node], List[Group]) =
-    InventoryYaml.load(defaultPath) match
+    InventoryYaml.load(Locations.inventory) match
       case Right(result) => result
       case Left(err)     =>
         Console.err.println(
-          s"WARNING: could not load inventory from $defaultPath: $err"
+          s"WARNING: could not load inventory from ${Locations.inventory}: $err"
         )
         Console.err.println(
           "Falling back to an empty inventory — every 'no matching nodes' error traces back to this."
