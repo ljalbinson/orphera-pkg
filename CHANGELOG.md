@@ -20,6 +20,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `--yes` to apply; backs up the store first; never touches `orphera/agent-token` or `orphera/inventory-db-*`). The running
   lab keeps the old values until it is rebuilt: see `docs/ROTATING-LAB-SECRETS.md`.
 
+### Security
+- Removed `manifests/mariadb_galera_cluster.yaml`, a stale YAML copy of the Galera playbook that held the SST password as a
+  literal. It targeted tst0-tst2 (now the Ceph nodes) and nothing referred to it; `mariadb_galera_cluster.scala` is the
+  maintained version and takes the value from the secret store (`galera/sst`). It stays in git history.
+- `utils/check-no-secrets.sh` (`make check-secrets`) fails if a tracked file holds a lab password in the old style, a quoted
+  cephx key or a PEM private key.
+
 ### Fixed
 - `mariadb_haproxy_keepalived.scala` checks that nothing outside tst3-tst5 answers ARP for the VIP before it configures
   haproxy and keepalived (new stage `check-vip-not-in-use`, on tst3). During a rebuild another host held 10.10.5.100, some

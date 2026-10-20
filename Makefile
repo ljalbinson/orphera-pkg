@@ -113,6 +113,10 @@ check-uptimes:
 check-schemas:
 	utils/validate-schemas.py
 
+# Fails if a tracked file holds a lab password, a quoted cephx key or a private key.
+check-secrets:
+	utils/check-no-secrets.sh
+
 reboot-all:
 	@test "$$ORPHERA_ALLOW_DESTRUCTIVE" = "1" || { \
 	  echo "make reboot-all reboots EVERY node in the inventory, hypervisors included." >&2; \

@@ -41,7 +41,8 @@ Orphera does not change a password on a running service. The new values reach th
 - `manifests/build_openstack_stack.sh` does not rotate anything. It is non-destructive and keeps existing services.
 - The old CA keys and the old agent token are in history too. The CA and token were replaced on 2026-10-19; this
   script does not touch `orphera/agent-token`.
-- One literal remains: the Galera SST value in `mariadb_galera_cluster.yaml`. The VRRP password is now the secret
-  `galera/vrrp` (keepalived uses its first 8 characters).
+- No credential literal remains in the repository. The Galera SST value is `galera/sst` (the Scala playbook already used it;
+  the stale YAML copy that held a literal was removed) and the VRRP password is `galera/vrrp` (keepalived uses its first 8
+  characters). `make check-secrets` fails if one comes back.
 - A rebuild after the 2026-10-19 CA and token rotation has not been tested. `bootstrap` issues each node's certificate
   from the current CA, so it should work, but the first VM built is the thing to watch.
