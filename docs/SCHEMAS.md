@@ -73,6 +73,11 @@ For an editor, a first line makes the YAML language server validate as you type:
 
 `inventory.yaml` and `config/dns.yaml` have it; the per-VM configs do not.
 
+## In a database
+
+`schemas/mariadb/` has the same data as MariaDB tables, with the rules above as keys and checks, and
+`utils/yaml-to-sql.py` loads the files into it: see [MARIADB.md](MARIADB.md).
+
 ## Not done
 
 - Orphera itself does not validate: `orphera` loads the files as before. A `validate` verb in the orchestrator, using

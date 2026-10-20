@@ -11,6 +11,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (`--soft`: `virsh reboot`; `--hard`: shut down, then start) a VM, finding the hypervisor in its `config/<vm>.yaml`. They share
   `utils/vm-common.sh`.
 
+### Added — the inventory and configs as MariaDB tables
+- `schemas/mariadb/001-tables.sql` and `002-roles.sql`: the inventory and the per-VM configs as tables, with the rules a
+  JSON Schema cannot state (unique names, group members and hypervisors exist, no shared addresses) as keys and
+  checks; and two roles, with no accounts or passwords. Needs MariaDB 10.10 or later. See `docs/MARIADB.md`.
+- `utils/yaml-to-sql.py` writes the existing YAML files as SQL for those tables (checked first; one transaction;
+  `--replace` to make the database match the files). Orphera cannot yet read from MariaDB: that needs a
+  `mariadb:` reader. Tested against a SQLite translation of the tables, not on MariaDB.
+
 ### Added — `-I` and `-c`: the inventory and the config directory as URIs
 - `orphera -I <uri> -c <uri> <command>`, or `ORPHERA_INVENTORY` and the new `ORPHERA_CONFIG_DIR`. The option wins over the
   variable, the variable over the default (`inventory.yaml`, `config`). A plain path or a `file:` URI is read today;
