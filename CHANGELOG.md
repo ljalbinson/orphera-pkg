@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Documentation
+- `docs/TESTS.md` K34-K37: the credential replacement and lab rebuild, the second duplicate-VIP conflict, the shutdown that
+  reached a protected hypervisor, and the agent-side guard on tst20. `docs/ROTATING-LAB-SECRETS.md` now records the verified
+  procedure. `docs/MARIADB.md` lists what is missing before the database can be the source for a rebuild.
+
+## [0.1.199] - 2026-10-20
+
 ### Security — no passwords or keys in the repository
 - Removed `manifests/seed_test_secrets.sh`, which held the lab's service passwords and two Ceph client keys
   (`glance/ceph-key`, `cinder/ceph-key`) in plain text in a public repository. They are still in git history: treat them

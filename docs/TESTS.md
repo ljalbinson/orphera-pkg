@@ -779,3 +779,56 @@ The count grows with the CPU count (Cats Effect compute pool, Netty event loops,
 the host's memory), well above what is used. On tst7 the Java thread count rose from 15 to 17 over three calls as Netty
 added worker threads for new connections (bounded at twice the CPU count). Not yet measured: the peak during a heavy
 run, which `thread-info` now shows without sampling (the peak accumulates until the agent restarts).
+
+### K34. Test credentials replaced; lab rebuilt on the new values - PASSED (2026-10-20)
+The lab's service passwords and two Ceph client keys had been published in `manifests/seed_test_secrets.sh`
+(removed; still in history). The service secrets were replaced in the store (`utils/rotate-lab-secrets.sh --yes` removes them,
+so Orphera makes new random values on first use, replaces `glance/ceph-key` and `cinder/ceph-key` with newly generated cephx
+keys, and backs the store up first) and `manifests/rebuild_openstack_from_scratch.sh` rebuilt the lab; the checks below show the
+old values were gone. It stopped at the end of the Galera front end
+(K35); after that was fixed, `manifests/build_openstack_stack.sh --from galera` continued, and the observability test on
+tst7 printed `passed=13 failed=0` on its second run. `test_vip_failover.sh`: 6 passed, 0 failed (VIP moved tst3 to tst4 when
+HAProxy stopped, and back). Old values refused: Keystone, `openstack token issue` with the old published admin password
+gave `HTTP 401`, and the stored password worked; Grafana, `admin:admin` gave 401 and the stored password 200; Ceph, the old
+`client.glance` and `client.cinder` keys gave `RADOS permission denied` through `cephadm shell`, and the new keys printed the
+cluster status. The client CA in `~/.config/openstack/keystone-ca.crt` was the previous Keystone's, so the first checks failed
+with `CERTIFICATE_VERIFY_FAILED` until `utils/openstack-client-setup.sh` fetched the new one. Not recorded here: the results of
+the eight per-service test scripts, WordPress, and the smoke and CirrOS boot steps of the build. Ceph reports `HEALTH_WARN` for
+"insecure key types" (the AES type the keys have; `glance_single_node.scala` allows it on purpose). Not changed: the CA keys
+and the old agent token remain in git history (the CA and token were replaced on 2026-10-19).
+
+### K35. Second duplicate-address conflict on the Galera VIP - RECORDED, fixed (2026-10-20)
+The build stopped at `confirm-ha-frontend`: `mariadb -h 10.10.5.100` from tst4 failed with `ERROR 2002 ... (115)`, although
+tst3 held the VIP and HAProxy listened on it on all three nodes. `arping -I enp1s0 10.10.5.100` from tst4 showed two MACs
+answering, tst3's `52:54:00:5b:b5:c5` and `52:54:00:2c:c2:f8`, the same MAC as the conflict recorded in J. It belonged to no
+guest on gs1, gs2, gs3 or st0 and to no interface on tst0-tst19 or the hypervisors. `ssh-keyscan` across 10.10.5.0/24 for its
+host key found it at 10.10.5.100 itself: a host called `kayobe1`, with 10.10.5.100 as the only address on `ens3`, which
+accepted ssh and refused 3306. It was disabled by hand. After `ip neigh flush 10.10.5.100` on the nodes, `arping` showed one
+MAC and the query through the VIP printed `served by tst3`. Added: the first stage of `mariadb_haproxy_keepalived.scala`,
+`check-vip-not-in-use`, arpings the VIP from tst3 and stops, naming the MAC, if one answers that is not a cluster node's.
+Checked against a stub `arping` for no reply, a node holding the VIP, and a foreign MAC; it has not yet run on the lab.
+
+### K36. `orphera shutdown` reached a `never-reboot` hypervisor - RECORDED, fixed (2026-10-20)
+`never-reboot` stopped only `reboot`; `orphera shutdown --nodes gs1 --yes` had no guard (`shutdown-guard`, 9ccd445, added
+one: the node is skipped with `skipped: never-reboot is set in the inventory, so it is not shut down`, and
+`NodeClient.shutdown` refuses it). After that was merged, the command was run to test it, but the installed jar
+`/usr/local/lib/orphera-orchestrator.jar` was dated 14:22, before the merge, so it was the old build and gs1 powered off (scala0,
+tst0 and tst1 are its guests). gs1 and its guests were back later. Ceph, checked then, with the monitors up for about 70
+seconds: three monitors in quorum, 6 of 6 OSDs up, 65 PGs `active+clean`. After `make orpheracli` the jar was rebuilt and the guard confirmed: with a throwaway inventory
+(`-I /tmp/inv.yaml`, a host `dummy.invalid` with `never-reboot: true`) and on the real inventory (`orphera shutdown --nodes gs2
+--yes`) the output was `skipped: never-reboot is set in the inventory, so it is not shut down`. `make test` passed. Lesson: do
+not test a guard on a host that matters, and check the installed jar first. Changed as a result: `orphera version` prints its
+own build first (K37), and agents can refuse on their own.
+
+### K37. Agent-side `never-reboot` marker; release 0.1.199 - PASSED on tst20, hypervisors NOT YET DONE (2026-10-20)
+An agent refuses `TriggerReboot` and `TriggerShutdown` with `FAILED_PRECONDITION` while its host has
+`/etc/orphera-agent/never-reboot` (`NeverReboot.scala`, `Rebooter`, `Shutdowner`); `utils/sync-never-reboot.py` creates the file
+on every host the inventory protects (checked against the real inventory: gs1, gs2, gs3 and st0; and against a stub
+`orphera`). `AgentGuardCheck` (9 checks) is run by `make test`; it never calls the unprotected path. `orphera version` now
+begins with `orphera 0.1.199 (commit 8486e34, committed 2026-10-20T19:38:19+01:00)`. Release 0.1.199 was built and tagged
+`v0.1.199` (8486e34). tst20 had no agent (`Connection refused` on 50051, no package); `orphera bootstrap --file
+orphera-agent_0.1.199_amd64.deb --ssh-user localadmin --nodes tst20` installed it. The steps after it (`orphera version --nodes
+tst20` showing 0.1.199, the marker created by hand, `orphera reboot --nodes tst20` refused, the marker removed) were reported as
+working; their output was not pasted, so the exact refusal text is not recorded. Not done: the
+agent is not yet on gs1, gs2, gs3 and st0, so the markers are not yet placed there. Until then those hosts are protected by the
+inventory check in the current `orphera` only.

@@ -32,9 +32,16 @@ Orphera does not change a password on a running service. The new values reach th
        orphera cluster-playbook manifests/observability_extended.scala
        manifests/test_observability_stack.sh
 
-5. Source `~/.config/openstack/admin-openrc.sh` afresh (it reads `keystone/admin` from the store when sourced).
+5. Refresh the OpenStack client setup: the rebuilt Keystone has a new CA, so the old `~/.config/openstack/keystone-ca.crt`
+   fails with `CERTIFICATE_VERIFY_FAILED`. Run `utils/openstack-client-setup.sh`, then source
+   `~/.config/openstack/admin-openrc.sh` (it reads `keystone/admin` from the store when sourced).
 
-6. Check that the old values no longer work, using the old Keystone admin password from the history.
+6. Check that the old values no longer work. The old values are in history: `git show f6c1a35^:manifests/seed_test_secrets.sh`.
+   Keystone: `OS_PASSWORD='<old>' openstack token issue` must fail with `HTTP 401`, and `openstack token issue` must work.
+   Grafana: `curl -u admin:admin http://tst7.ljalbinson.com:3000/api/user` must give 401, and the stored
+   `observability/grafana-admin` password 200. Ceph (the tools run in a container, so use `cephadm shell`):
+   `ssh tst0 "sudo cephadm shell -- ceph -n client.glance --key='<old>' -s"` must end with `RADOS permission denied`, and the
+   same with `$(orphera secrets get glance/ceph-key)` must print the cluster status; the same for `client.cinder`.
 
 ## Not covered
 
@@ -44,5 +51,8 @@ Orphera does not change a password on a running service. The new values reach th
 - No credential literal remains in the repository. The Galera SST value is `galera/sst` (the Scala playbook already used it;
   the stale YAML copy that held a literal was removed) and the VRRP password is `galera/vrrp` (keepalived uses its first 8
   characters). `make check-secrets` fails if one comes back.
-- A rebuild after the 2026-10-19 CA and token rotation has not been tested. `bootstrap` issues each node's certificate
-  from the current CA, so it should work, but the first VM built is the thing to watch.
+- Verified on 2026-10-20 (docs/TESTS.md K34): the rebuild after the 2026-10-19 CA and token rotation worked, and `bootstrap`
+  of a new node (tst20) issued its certificate from the current CA. The rebuild stopped once, at the end of the Galera front
+  end, because another host held the VIP address (K35); `mariadb_haproxy_keepalived.scala` now checks for that first.
+- The Ceph keys are generated as the older AES key type, as the originals were. Ceph reports `HEALTH_WARN` for that
+  ("auth client entities with insecure key types"); `glance_single_node.scala` allows the type deliberately.

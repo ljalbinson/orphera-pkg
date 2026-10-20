@@ -5,6 +5,23 @@
 from MariaDB yet.** This is the database design and a way to load the existing files into it; a reader in the
 orchestrator is a separate piece of work (a JDBC driver, and a `Sources.register("mariadb", ...)` reader).
 
+## Not ready to be the source for a rebuild (2026-10-20)
+
+Running Ceph and OpenStack end to end from the database as the only source of the inventory and configs is not possible yet.
+Needed first:
+
+| Gap | Detail |
+|---|---|
+| No reader | `Sources` has no `mariadb:` scheme, and the build has no JDBC driver. A reader has to turn the rows into the same data the YAML readers produce, and reach the server over TLS (the certificate is signed by the Orphera CA; DBeaver only connected with `sslMode=trust`, so verification is untested) with the `orphera/inventory-db-reader` secret. |
+| Scripts read files | `build_openstack_stack.sh`, `mk-new-and-empty.sh`, `par-mk-new-and-empty.sh`, `rebuild_openstack_from_scratch.sh`, `test_apt_cache.sh`, `test_ceph_lifecycle.sh`, `test_rpm_cache.sh` and the VM scripts in `utils/` open `config/<vm>.yaml` directly (the VM's hypervisor, its address). The first step of a rebuild, creating the VMs, therefore still needs the files. |
+| No export | `yaml-to-sql.py` loads files into the database; nothing writes the database back out as files, so there is no check that the rows hold everything the files do. |
+| No source of truth | The files are in git and the database is edited by hand or by `yaml-to-sql.py --replace`. Which wins, and how a change reaches the other, is undecided. |
+| Failure mode | If the inventory cannot be read, `orphera` falls back to an empty inventory with a warning; with a database, an outage would look the same. `never-reboot` is also then absent from `orphera`, though a host's own agent marker still holds. |
+
+A way to get there without the Scala reader: export the database to files (the reverse of `yaml-to-sql.py`), check that they
+equal the committed ones, then run the rebuild with `-I`/`-c` (or `ORPHERA_CONFIG_DIR`) pointing at the exported copy. That
+shows the data is complete before the reader is written.
+
 The tables hold the same data as the [JSON Schemas](SCHEMAS.md). Where a schema could only say "checked by
 `validate-schemas.py`", the database enforces the rule itself:
 
