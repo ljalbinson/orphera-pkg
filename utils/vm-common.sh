@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Shared by start-vm.sh, stop-vm.sh and reboot-vm.sh; sourced, not run.
-# Finds a VM's hypervisor and libvirt domain name in its config file and runs a
+# Finds a VM's hypervisor and libvirt domain name in its config file (in
+# $ORPHERA_CONFIG_DIR, default config) and runs a
 # script on the hypervisor through `orphera run`.
 
 # Value of a top-level `key:` under `params:` in a config file, without quotes.
@@ -17,13 +18,29 @@ config_value() {
     }' "$1"
 }
 
+# The directory of config files: ORPHERA_CONFIG_DIR, as a path or a file: URI,
+# else config. Any other kind of location cannot be read by a shell script.
+config_dir() {
+  local d="${ORPHERA_CONFIG_DIR:-config}"
+  d="${d#file://}"
+  case "$d" in
+    *://*) echo "ORPHERA_CONFIG_DIR is $d: these scripts read files only" >&2; return 1 ;;
+  esac
+  printf '%s\n' "${d%/}"
+}
+
 # vm_lookup <name | number | config.yaml>  sets cfg, hv and vm. Returns 1, after
 # saying why on stderr, if they cannot be found.
 vm_lookup() {
+  local dir
   case "$1" in
     *.yaml) cfg=$1 ;;
-    *[!0-9]*) cfg="config/$1.yaml" ;;
-    *) cfg="config/tst$1.yaml" ;;
+    *)
+      dir=$(config_dir) || return 1
+      case "$1" in
+        *[!0-9]*) cfg="$dir/$1.yaml" ;;
+        *) cfg="$dir/tst$1.yaml" ;;
+      esac ;;
   esac
   if [ ! -f "$cfg" ]; then
     echo "$1: no config file $cfg" >&2

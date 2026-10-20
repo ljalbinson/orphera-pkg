@@ -7,7 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
-- `utils/start-vm.sh`, `utils/stop-vm.sh` and `utils/reboot-vm.sh`: start, shut down, or reboot from the hypervisor
+- `utils/start-vm.sh`, `utils/stop-vm.sh` and `utils/reboot-vm.sh` (which read `ORPHERA_CONFIG_DIR`, file locations only): start, shut down, or reboot from the hypervisor
   (`--soft`: `virsh reboot`; `--hard`: shut down, then start) a VM, finding the hypervisor in its `config/<vm>.yaml`. They share
   `utils/vm-common.sh`.
 
