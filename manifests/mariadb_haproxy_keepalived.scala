@@ -69,7 +69,15 @@ object mariadb_haproxy_keepalived extends OrpheraClusterPlaybook:
   // SHOW STATUS) — it never touches any actual data.
   private val clustercheckUser = "clustercheck"
   private val clustercheckPassword = Secrets.secret("galera/clustercheck")
-  private val vrrpAuthPass = "orphera-test-vrrp-pass"
+  // VRRP "PASS" authentication is plain text on the wire and keepalived uses
+  // only the first 8 characters of it ("Truncating auth_pass to 8 characters"),
+  // so it is a guard against a stray VRRP speaker on the segment, not a secret
+  // in the cryptographic sense. It still comes from the secret store rather than
+  // the repository. The 8-character slice is registered so it is masked in output.
+  private val vrrpAuthPass =
+    val v = Secrets.get("galera/vrrp").take(8)
+    Secrets.register(v)
+    v
 
   // Created once, on tst3 only — like sst_user in mariadb_galera_cluster.scala,
   // CREATE USER/GRANT are ordinary DML/DDL that Galera replicates to every
@@ -337,14 +345,47 @@ object mariadb_haproxy_keepalived extends OrpheraClusterPlaybook:
   private val vipConnectivityScript =
     s"""mariadb -h $vip -P 3306 -u$clustercheckUser -p${clustercheckPassword.reveal} -N -e "SELECT CONCAT('served by ', @@hostname)""""
 
+  // Refuses to go on if something outside the cluster already answers ARP for the
+  // VIP. Seen twice in this lab: another host (kayobe1) held 10.10.5.100, so
+  // some clients reached it and others reached the cluster, and the failure
+  // surfaced only at the last check of this playbook as a refused connection.
+  // Runs on tst3 before haproxy and keepalived are touched. The replies are
+  // compared with the MACs of the three nodes' own interfaces (this node's from
+  // sysfs, the other two resolved by arping their cluster addresses), so a re-run
+  // while one of the nodes legitimately holds the VIP passes.
+  private val vipFreeScript =
+    s"""IFACE=$$(ip -4 route show default | awk '{print $$5; exit}')
+       |MACRE='[0-9a-f]{2}(:[0-9a-f]{2}){5}'
+       |ALLOWED=$$(cat /sys/class/net/$$IFACE/address)
+       |for PEER in {{nodes.tst4.cluster_ip}} {{nodes.tst5.cluster_ip}}; do
+       |  ALLOWED="$$ALLOWED $$(arping -c 2 -w 4 -I $$IFACE $$PEER 2>/dev/null | grep -Eo "$$MACRE" | sort -u | xargs)"
+       |done
+       |FOUND=$$(arping -c 3 -w 6 -I $$IFACE $vip 2>/dev/null | grep -Eo "$$MACRE" | sort -u)
+       |BAD=""
+       |for M in $$FOUND; do
+       |  case " $$ALLOWED " in *" $$M "*) ;; *) BAD="$$BAD $$M" ;; esac
+       |done
+       |if [ -n "$$BAD" ]; then
+       |  echo "$vip is already answered by a device that is not one of tst3, tst4, tst5 (MAC:$$BAD; the cluster's own MACs: $$ALLOWED). Remove or re-address that device, then re-run." >&2
+       |  exit 1
+       |fi
+       |echo "$vip is not answered by anything outside the cluster (replies from: $${FOUND:-none})"
+       |""".stripMargin
+
   val playbook: ClusterPlaybook =
     clusterPlaybook("mariadb-haproxy-keepalived")(
       stage("install-haproxy-keepalived", "tst3", "tst4", "tst5")
         .task("install haproxy, keepalived")(
           Task.Install(
-            packages = List("haproxy", "keepalived"),
+            packages = List("haproxy", "keepalived", "iputils-arping"),
             updateCache = true
           )
+        )
+        .build,
+
+      stage("check-vip-not-in-use", "tst3")
+        .task(s"check that nothing outside the cluster answers for $vip")(
+          Task.RunCommand(List("sh", "-c", vipFreeScript))
         )
         .build,
 

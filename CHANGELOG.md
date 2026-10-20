@@ -20,6 +20,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `--yes` to apply; backs up the store first; never touches `orphera/agent-token` or `orphera/inventory-db-*`). The running
   lab keeps the old values until it is rebuilt: see `docs/ROTATING-LAB-SECRETS.md`.
 
+### Fixed
+- `mariadb_haproxy_keepalived.scala` checks that nothing outside tst3-tst5 answers ARP for the VIP before it configures
+  haproxy and keepalived (new stage `check-vip-not-in-use`, on tst3). During a rebuild another host held 10.10.5.100, some
+  clients reached it, and the failure showed only at the last check as a refused connection. The check names the MAC and
+  compares it with the three nodes' own, so re-running while a node legitimately holds the VIP passes.
+- The VRRP password of that playbook is the secret `galera/vrrp` instead of a literal in the repository.
+  `utils/rotate-lab-secrets.sh` includes it.
+
 ### Added
 - `utils/start-vm.sh`, `utils/stop-vm.sh` and `utils/reboot-vm.sh` (which read `ORPHERA_CONFIG_DIR`, file locations only): start, shut down, or reboot from the hypervisor
   (`--soft`: `virsh reboot`; `--hard`: shut down, then start) a VM, finding the hypervisor in its `config/<vm>.yaml`. They share

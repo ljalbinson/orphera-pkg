@@ -259,8 +259,10 @@ Two faults found while getting there; neither was an Orphera bug:
   Diagnosis commands: `arping -I enp1s0 -c 4 10.10.5.100` from a host on the
   segment; `ovs-appctl fdb/show br-net105`; pinning a MAC with `ip neigh replace
   ... nud permanent` needs `ip neigh del` afterwards (`flush` does not remove it).
-  Idea, not built: have `mariadb_haproxy_keepalived.scala` check for a duplicate
-  VIP address (`arping -D`) before starting keepalived.
+  Built (2026-10-20, after the same device, `kayobe1`, claimed the address again during a
+  rebuild): `mariadb_haproxy_keepalived.scala` now has a first stage, `check-vip-not-in-use`,
+  that arpings the VIP from tst3 and stops if any MAC other than the three nodes' own answers,
+  naming it.
 
 ### J2. Ceph lifecycle on Ubuntu with the Rocky-branch code
 See I8a.  PASSED.
