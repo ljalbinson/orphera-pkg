@@ -16,6 +16,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Grafana's admin password is the secret `observability/grafana-admin` instead of `admin`, and `observability_stack.scala`
   sets it with `grafana cli admin reset-admin-password` so an existing Grafana agrees. `test_observability_stack.sh`
   reads it from the store.
+- `utils/rotate-lab-secrets.sh` replaces the lab's service passwords and Ceph keys in the secret store (dry run by default,
+  `--yes` to apply; backs up the store first; never touches `orphera/agent-token` or `orphera/inventory-db-*`). The running
+  lab keeps the old values until it is rebuilt: see `docs/ROTATING-LAB-SECRETS.md`.
 
 ### Added
 - `utils/start-vm.sh`, `utils/stop-vm.sh` and `utils/reboot-vm.sh` (which read `ORPHERA_CONFIG_DIR`, file locations only): start, shut down, or reboot from the hypervisor
