@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/ljalbinson/orphera-pkg/main/schemas/dns-config.schema.json",
+  "title": "Orphera DNS config",
+  "description": "The parameters of manifests/gen_set_dns.scala (config/dns.yaml): the same top-level `params:` as a per-VM config, but a different set of keys. gen_set_dns can also be pointed at a per-VM config (see vm-config.schema.json), and then takes its one node from hostname and its resolvers from dns1, dns2 and domainname.",
+  "type": "object",
+  "required": ["params"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": 1 },
+    "params": {
+      "type": "object",
+      "required": ["dns_servers"],
+      "additionalProperties": false,
+      "patternProperties": { "^x-": {} },
+      "properties": {
+        "nodes": {
+          "description": "The nodes to configure, by inventory name. If omitted, a per-VM file's hostname is used.",
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$" }
+        },
+        "dns_servers": {
+          "description": "Resolvers in order of preference: IPv4 or IPv6 literals.",
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "anyOf": [{ "format": "ipv4" }, { "format": "ipv6" }]
+          }
+        },
+        "search_domains": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "format": "hostname" }
+        },
+        "round_robin": {
+          "description": "true: spread queries across the servers (glibc `options rotate` in a static /etc/resolv.conf) instead of the systemd-resolved drop-in, which only fails over. Needs 2 or 3 servers.",
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "if": { "properties": { "round_robin": { "const": true } }, "required": ["round_robin"] },
+      "then": { "properties": { "dns_servers": { "minItems": 2, "maxItems": 3 } } }
+    }
+  }
+}

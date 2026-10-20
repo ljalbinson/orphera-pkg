@@ -1,0 +1,116 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/ljalbinson/orphera-pkg/main/schemas/inventory.schema.json",
+  "title": "Orphera inventory",
+  "description": "The hosts Orphera manages, and the groups they belong to. Read by InventoryYaml.scala from the location given by -I / ORPHERA_INVENTORY. Rules a schema cannot state (names are unique, group members exist) are in docs/SCHEMAS.md and checked by utils/validate-schemas.py.",
+  "type": "object",
+  "required": ["nodes"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "description": "Version of this schema the file was written for. Optional; for sources that are not a file (a database, a connector) so a reader can tell what shape it is getting.",
+      "const": 1
+    },
+    "nodes": {
+      "description": "Every host. A node name is what --nodes, the playbooks and the config files refer to.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/node" }
+    },
+    "groups": {
+      "description": "Named sets of nodes, for --node-groups.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/group" }
+    }
+  },
+  "$defs": {
+    "name": {
+      "description": "A node or group name. Used in commands, file names and log names, so only plain characters are allowed.",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$"
+    },
+    "address": {
+      "description": "A DNS name or an IP address.",
+      "type": "string",
+      "anyOf": [
+        { "format": "hostname" },
+        { "format": "ipv4" },
+        { "format": "ipv6" }
+      ]
+    },
+    "vars": {
+      "description": "Free-form variables, always strings (quote numbers and booleans: \"10.10.5.12\"). A node's own vars are not merged with its groups' vars by the inventory itself. The names listed here are the ones Orphera's own playbooks read.",
+      "type": "object",
+      "propertyNames": { "pattern": "^[A-Za-z_][A-Za-z0-9_-]*$" },
+      "additionalProperties": { "type": "string" },
+      "properties": {
+        "cluster_ip": {
+          "description": "The node's address on the cluster network.",
+          "type": "string",
+          "anyOf": [{ "format": "ipv4" }, { "format": "ipv6" }]
+        },
+        "ceph_role": {
+          "description": "The node's role in the Ceph cluster.",
+          "type": "string",
+          "examples": ["mon", "mon-leader"]
+        },
+        "ceph_version": { "type": "string" },
+        "osd_disks": {
+          "description": "Comma-separated stable /dev/disk/by-id paths that cephadm_add_osds turns into OSDs.",
+          "type": "string",
+          "pattern": "^/[^,\\s]+(,\\s*/[^,\\s]+)*$"
+        },
+        "zap_disks": {
+          "description": "Comma-separated stable /dev/disk/by-id paths that cephadm_teardown wipes: every spare disk, including ones osd_disks does not use.",
+          "type": "string",
+          "pattern": "^/[^,\\s]+(,\\s*/[^,\\s]+)*$"
+        }
+      }
+    },
+    "node": {
+      "type": "object",
+      "required": ["name", "host"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "$ref": "#/$defs/name" },
+        "host": {
+          "description": "Where the agent is reached.",
+          "$ref": "#/$defs/address"
+        },
+        "port": {
+          "description": "The agent's port.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535,
+          "default": 50051
+        },
+        "never-reboot": {
+          "description": "true: Orphera never reboots this node (orphera reboot skips it, a reboot task fails on it). For hypervisors.",
+          "type": "boolean",
+          "default": false
+        },
+        "vars": { "$ref": "#/$defs/vars" }
+      }
+    },
+    "group": {
+      "type": "object",
+      "required": ["name", "members"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "$ref": "#/$defs/name" },
+        "members": {
+          "description": "Node names. Each must be a node of this inventory.",
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/name" }
+        },
+        "never-reboot": {
+          "description": "true: every member is protected from reboots, as if each had never-reboot set.",
+          "type": "boolean",
+          "default": false
+        },
+        "vars": { "$ref": "#/$defs/vars" }
+      }
+    }
+  }
+}

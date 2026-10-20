@@ -404,7 +404,8 @@ configs can later come from a database or another dynamic source: a new scheme i
 (`Sources.register`, `Locations.scala`) and nothing that reads the inventory changes. A scheme with no reader is
 refused with the list of those there are. Relative paths are relative to `ORPHERA_HOME`, as the launcher changes into
 it first. The options also reach the playbook scripts and pipeline steps that `orphera` starts. They go before the
-command because after it `-c` would be ambiguous (`orphera run sh -c ...`).
+command because after it `-c` would be ambiguous (`orphera run sh -c ...`). The files have JSON Schemas, in
+[`schemas/`](schemas/) and described in [docs/SCHEMAS.md](docs/SCHEMAS.md); `make check-schemas` checks them.
 
 With `-c` set, `--config tst7` means `<config-dir>/tst7.yaml`. A `--config` value that has a `/`, a scheme or a
 `.yaml`/`.yml` ending (`config/tst7.yaml`, `/x/y.yaml`) is used exactly as given, as before.

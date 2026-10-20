@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=../schemas/dns-config.schema.json
 # DNS settings for manifests/gen_set_dns.scala. Run with:
 #   orphera cluster-playbook manifests/gen_set_dns.scala --config config/dns.yaml
 #

@@ -20,6 +20,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   given, as before. Playbook scripts and pipeline steps started by `orphera` are given the same locations.
 - New check program `LocationsCheck` (25), run by `make test`.
 
+### Added — schemas for the inventory and the config files
+- `schemas/inventory.schema.json`, `schemas/vm-config.schema.json` and `schemas/dns-config.schema.json` (JSON Schema
+  2020-12), described in `docs/SCHEMAS.md`. Unknown keys, bad addresses and ports, and names with odd characters are
+  errors; `x-` keys are allowed in a config. A database or connector source has to produce documents that validate
+  against them.
+- `utils/validate-schemas.py` (`make check-schemas`) checks the files against the schemas, then the rules a schema cannot
+  state (unique names, group members exist, a VM's hypervisor is in the inventory, `cidr`/`netmask`/`gateway` agree,
+  no duplicate addresses). Needs python3-jsonschema and python3-yaml. Orphera itself does not validate yet.
+
 ### Added — `never-reboot`
 - `never-reboot: true` on an inventory node or group. `orphera reboot` (and `make reboot-all`) skips such nodes, and a
   `reboot` task fails on them, so a hypervisor can be protected from any reboot Orphera would start. New check program

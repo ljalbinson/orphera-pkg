@@ -109,6 +109,10 @@ check-uptimes:
 
 # Reboots every node in the inventory, hypervisors included, so it refuses to
 # run unless ORPHERA_ALLOW_DESTRUCTIVE=1. To reboot some nodes: orphera reboot --nodes ...
+# Checks inventory.yaml and config/*.yaml against schemas/ (needs python3-jsonschema and python3-yaml).
+check-schemas:
+	utils/validate-schemas.py
+
 reboot-all:
 	@test "$$ORPHERA_ALLOW_DESTRUCTIVE" = "1" || { \
 	  echo "make reboot-all reboots EVERY node in the inventory, hypervisors included." >&2; \

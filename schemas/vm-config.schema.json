@@ -1,0 +1,199 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/ljalbinson/orphera-pkg/main/schemas/vm-config.schema.json",
+  "title": "Orphera per-VM config",
+  "description": "One VM's sizing and network parameters, in the shape of the kayobe/kttb-virt-ansible per-VM file. Read by ConfigYaml.scala (--config, or config/<vm>.yaml in -c / ORPHERA_CONFIG_DIR) for the KVM provisioning and start playbooks, gen_packages, gen_dist_upgrade and the bootstrap step. Numbers that the reader takes as strings (disk, memory, cpu) are strings here too: quote them.",
+  "type": "object",
+  "required": ["params"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": 1 },
+    "params": { "$ref": "#/$defs/params" }
+  },
+  "$defs": {
+    "name": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$"
+    },
+    "ip": {
+      "type": "string",
+      "anyOf": [{ "format": "ipv4" }, { "format": "ipv6" }]
+    },
+    "ipv4": { "type": "string", "format": "ipv4" },
+    "cidr": {
+      "type": "string",
+      "pattern": "^([0-9]{1,3}\\.){3}[0-9]{1,3}/([0-9]|[12][0-9]|3[0-2])$"
+    },
+    "positiveIntegerString": {
+      "description": "A whole number, as a string.",
+      "type": "string",
+      "pattern": "^[1-9][0-9]*$"
+    },
+    "diskGB": {
+      "description": "A disk size in GB.",
+      "anyOf": [
+        { "type": "integer", "minimum": 1 },
+        { "$ref": "#/$defs/positiveIntegerString" }
+      ]
+    },
+    "disks": {
+      "description": "Extra data disks, in the order they are attached. The canonical entry is a one-key map, `- disk: 256` (size in GB). A bare number or string is accepted as well.",
+      "type": "array",
+      "items": {
+        "anyOf": [
+          {
+            "type": "object",
+            "required": ["disk"],
+            "additionalProperties": false,
+            "properties": { "disk": { "$ref": "#/$defs/diskGB" } }
+          },
+          { "$ref": "#/$defs/diskGB" }
+        ]
+      }
+    },
+    "packages": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "routing": {
+      "description": "Source routing: with table > 0 the gateway and subnet route go into that routing table, and a rule `from <ipaddress> lookup <table> priority <priority>` is added, so replies leave through this NIC.",
+      "type": "object",
+      "properties": {
+        "table": { "type": "integer", "minimum": 0, "maximum": 4294967295, "default": 0 },
+        "priority": { "type": "integer", "minimum": 0, "maximum": 32767, "default": 0 }
+      }
+    },
+    "nic0": {
+      "description": "The VM's first NIC, with the address it is reached on.",
+      "type": "object",
+      "required": ["nic", "ipaddress", "gateway", "bridge", "netmask"],
+      "additionalProperties": false,
+      "patternProperties": { "^x-": {} },
+      "properties": {
+        "nic": {
+          "description": "The interface's name inside the guest.",
+          "type": "string",
+          "examples": ["enp1s0"]
+        },
+        "ipaddress": { "$ref": "#/$defs/ipv4" },
+        "netmask": { "$ref": "#/$defs/ipv4" },
+        "cidr": {
+          "description": "The subnet, such as 10.10.5.0/24. Must agree with ipaddress and netmask (checked by utils/validate-schemas.py).",
+          "$ref": "#/$defs/cidr"
+        },
+        "gateway": { "$ref": "#/$defs/ipv4" },
+        "bridge": {
+          "description": "The Open vSwitch bridge on the hypervisor.",
+          "type": "string",
+          "minLength": 1
+        },
+        "mtu": { "type": "integer", "minimum": 576, "maximum": 9216, "default": 1500 },
+        "table": { "$ref": "#/$defs/routing/properties/table" },
+        "priority": { "$ref": "#/$defs/routing/properties/priority" }
+      }
+    },
+    "extraNic": {
+      "description": "A further NIC. Without an ipaddress it is brought up layer 2 only (for a Neutron provider network). Its MAC is derived from the hostname and its position, so it is stable across re-provisioning.",
+      "type": "object",
+      "required": ["bridge"],
+      "additionalProperties": false,
+      "patternProperties": { "^x-": {} },
+      "properties": {
+        "nic": {
+          "description": "The interface's name inside the guest. Default enp2s0, enp3s0, ... by position.",
+          "type": "string"
+        },
+        "bridge": { "type": "string", "minLength": 1 },
+        "mtu": { "type": "integer", "minimum": 576, "maximum": 9216, "default": 1500 },
+        "ipaddress": { "$ref": "#/$defs/ipv4" },
+        "netmask": { "$ref": "#/$defs/ipv4" },
+        "cidr": { "$ref": "#/$defs/cidr" },
+        "gateway": { "$ref": "#/$defs/ipv4" },
+        "table": { "$ref": "#/$defs/routing/properties/table" },
+        "priority": { "$ref": "#/$defs/routing/properties/priority" }
+      },
+      "dependentSchemas": {
+        "ipaddress": {
+          "anyOf": [{ "required": ["cidr"] }, { "required": ["netmask"] }]
+        }
+      }
+    },
+    "params": {
+      "type": "object",
+      "required": [
+        "hypervisor", "hostname", "domainname", "os", "disk", "memory", "cpu",
+        "dns1", "dns2", "host_type", "nic0"
+      ],
+      "additionalProperties": false,
+      "patternProperties": { "^x-": {} },
+      "properties": {
+        "hypervisor": {
+          "description": "The inventory node that runs libvirt for this VM. Must be a node of the inventory.",
+          "$ref": "#/$defs/name"
+        },
+        "hostname": {
+          "description": "The VM's name: its libvirt domain, and its node name in the inventory. By convention also the config file's name (config/<hostname>.yaml).",
+          "$ref": "#/$defs/name"
+        },
+        "domainname": {
+          "type": "string",
+          "format": "hostname"
+        },
+        "os": {
+          "description": "The cloud image the VM is built from, by file name.",
+          "type": "string",
+          "minLength": 1,
+          "examples": [
+            "noble-server-cloudimg-amd64.img",
+            "Rocky-10-GenericCloud-Base.latest.x86_64.qcow2"
+          ]
+        },
+        "disk": {
+          "description": "The system disk in GB, as a string.",
+          "$ref": "#/$defs/positiveIntegerString"
+        },
+        "memory": {
+          "description": "Memory in MiB, as a string.",
+          "$ref": "#/$defs/positiveIntegerString"
+        },
+        "cpu": {
+          "description": "Number of vCPUs, as a string.",
+          "$ref": "#/$defs/positiveIntegerString"
+        },
+        "host_type": {
+          "description": "The libvirt CPU mode.",
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$",
+          "examples": ["host-passthrough", "host-model"]
+        },
+        "dns1": { "$ref": "#/$defs/ip" },
+        "dns2": { "$ref": "#/$defs/ip" },
+        "nic0": { "$ref": "#/$defs/nic0" },
+        "nics": {
+          "description": "Further NICs, in order: the first entry is the VM's second NIC.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/extraNic" },
+          "default": []
+        },
+        "disks": { "$ref": "#/$defs/disks", "default": [] },
+        "pdisks": {
+          "description": "Passthrough disks. Not implemented: the provisioning playbook warns and ignores them. Leave empty.",
+          "type": "array",
+          "maxItems": 0,
+          "default": []
+        },
+        "pre_basic_packages": {
+          "description": "Installed first, before the dist-upgrade (qemu-guest-agent and the like).",
+          "$ref": "#/$defs/packages",
+          "default": []
+        },
+        "basic_packages": {
+          "description": "Installed by gen_packages after the dist-upgrade.",
+          "$ref": "#/$defs/packages",
+          "default": []
+        }
+      }
+    }
+  }
+}

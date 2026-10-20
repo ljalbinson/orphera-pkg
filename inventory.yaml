@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=schemas/inventory.schema.json
 nodes:
   - name: tst0
     host: tst0.ljalbinson.com
