@@ -111,7 +111,9 @@ CREATE TABLE vm_config (
   CONSTRAINT vm_config_hypervisor FOREIGN KEY (hypervisor) REFERENCES node (name)
     ON UPDATE CASCADE ON DELETE RESTRICT,
   CONSTRAINT vm_config_hostname_ok CHECK (hostname REGEXP '^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$'),
-  CONSTRAINT vm_config_not_own_hypervisor CHECK (hypervisor <> hostname),
+  -- A VM cannot be its own hypervisor: not a CHECK, since MariaDB refuses a CHECK
+  -- on a column of a foreign key that cascades (error 1901). utils/validate-schemas.py
+  -- and utils/yaml-to-sql.py refuse it.
   CONSTRAINT vm_config_sizes_ok CHECK (disk_gb >= 1 AND memory_mib >= 1 AND cpu >= 1),
   CONSTRAINT vm_config_mtu_ok CHECK (nic0_mtu BETWEEN 576 AND 9216),
   CONSTRAINT vm_config_priority_ok CHECK (nic0_priority <= 32767),

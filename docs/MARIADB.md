@@ -13,7 +13,7 @@ The tables hold the same data as the [JSON Schemas](SCHEMAS.md). Where a schema 
 | node names and group names are unique | primary keys |
 | a group member is a node | foreign key `group_member.node_name` |
 | a VM's `hypervisor` is a node, and cannot be deleted while it has VMs | foreign key `vm_config.hypervisor`, `ON DELETE RESTRICT` |
-| a VM is not its own hypervisor | `CHECK` |
+| a VM is not its own hypervisor | not in the database (MariaDB refuses a `CHECK` on a cascading foreign key column); `validate-schemas.py` and `yaml-to-sql.py` refuse it |
 | no two nodes share a `cluster_ip` | unique key on a generated column of `node_var` |
 | no two VMs share a `nic0` address, and a hostname has one config | unique key, primary key |
 | a NIC address has a netmask or a cidr | `CHECK` on `vm_nic` |
