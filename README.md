@@ -350,9 +350,12 @@ groups:
     never-reboot: true
 ```
 
-`orphera reboot` skips such nodes and says so, and still reboots the others. A `reboot` task in a playbook, or a
-`reboot` pipeline step, fails on such a node with a message naming the property. Only the value `true` or `false` is
-accepted. It guards Orphera's own reboot paths: it does not stop a command that reboots the host itself (run with `orphera run`), nor `shutdown`.
+`orphera reboot` and `orphera shutdown` skip such nodes and say so, and still act on the others. A `reboot` task in a
+playbook, or a `reboot` pipeline step, fails on such a node with a message naming the property. Only the value `true`
+or `false` is accepted. The name says reboot, but it also stops `orphera shutdown`: a host that must stay up must not be
+powered off either. It guards Orphera's own reboot and shutdown paths: it does not stop a command that reboots or powers
+off the host itself (run with `orphera run -- shutdown`), nor the VM scripts in `utils/`, which act on a guest, not the
+host the property is usually set on.
 
 A missing or malformed `inventory.yaml` fails loudly — a clear stderr
 warning at startup, then an empty inventory (so every subsequent "no
@@ -1497,7 +1500,7 @@ that need no cluster: `ContainerCheck` (49 checks: typed containers and
 token and when an agent will start, how a failed call is labelled; the
 checks that use real `age` are skipped when it is not installed) and
 `ThreadInfoCheck` (16: `thread-info`'s counting, report and command
-line), `InventoryCheck` (10: reading `never-reboot` and which nodes it protects) and `LocationsCheck`
+line), `InventoryCheck` (12: reading `never-reboot`, which nodes it protects, and that `shutdown` refuses and skips them) and `LocationsCheck`
 (25: `-I`/`-c`, the environment variables, config names, reading through a URI). Each exits non-zero on a failure.
 
 The scripts `manifests/test_*.sh` apply a playbook to the lab and check the

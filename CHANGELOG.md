@@ -20,6 +20,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `--yes` to apply; backs up the store first; never touches `orphera/agent-token` or `orphera/inventory-db-*`). The running
   lab keeps the old values until it is rebuilt: see `docs/ROTATING-LAB-SECRETS.md`.
 
+### Fixed
+- `never-reboot` now also protects against `orphera shutdown`. A protected node (or a member of a protected group) is
+  skipped with a message and the rest are shut down; `NodeClient.shutdown` refuses it before opening any connection. Until
+  now the property stopped only reboots, so `orphera shutdown --nodes gs1 --yes` would have powered off a hypervisor that
+  cannot be powered back on remotely. `InventoryCheck` has two new checks (12 in all). `orphera run -- shutdown` is still not
+  guarded, as before.
+
 ### Changed
 - SPDX headers on every tracked source file, not only `.scala`: 101 files gained a `SPDX-License-Identifier: Apache-2.0` line
   (Scala, shell, YAML playbooks, sbt, proto, Makefile, the systemd unit, the packaging scripts). Nothing else in them

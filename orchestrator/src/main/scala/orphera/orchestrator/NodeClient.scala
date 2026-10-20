@@ -363,8 +363,24 @@ object NodeClient:
   /** Powers the host off after `delaySeconds`. Returns once the agent has
     * acknowledged scheduling it — the host going down afterwards is not
     * confirmed (the agent is the thing being shut down), see `uptime`/ping.
+    * Fails, without contacting the node, if it has `never-reboot` set: a host
+    * that must not be rebooted must not be powered off either, and powering off
+    * is worse, since it cannot be undone remotely.
     */
   def shutdown(
+      node: Node,
+      delaySeconds: Int,
+      onLine: String => IO[Unit]
+  ): IO[Unit] =
+    if Inventory.neverReboot(node) then
+      IO.raiseError(
+        new IllegalStateException(
+          s"${node.name} has never-reboot set in the inventory, so it is not shut down"
+        )
+      )
+    else shutdownAllowed(node, delaySeconds, onLine)
+
+  private def shutdownAllowed(
       node: Node,
       delaySeconds: Int,
       onLine: String => IO[Unit]

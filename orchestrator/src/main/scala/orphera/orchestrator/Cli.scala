@@ -1209,7 +1209,8 @@ object Cli:
       |  reboot            [--nodes host1,host2] [--delay 5] [--wait] [--wait-timeout 300]
       |  shutdown          --nodes host1,host2 --yes [--delay 5]
       |                    — powers the host OFF (not reboot); needs explicit targets and
-      |                      --yes, and there is no remote way to power it back on
+      |                      --yes, and there is no remote way to power it back on;
+      |                      skips nodes with never-reboot set in the inventory
       |  version           [--nodes host1,host2]
       |  uptime            [--nodes host1,host2]
       |  thread-info       [--nodes host1,host2] [--detail] [--reset-peak]

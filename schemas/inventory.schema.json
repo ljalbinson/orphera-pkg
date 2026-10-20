@@ -84,7 +84,7 @@
           "default": 50051
         },
         "never-reboot": {
-          "description": "true: Orphera never reboots this node (orphera reboot skips it, a reboot task fails on it). For hypervisors.",
+          "description": "true: Orphera never reboots or shuts down this node (orphera reboot and orphera shutdown skip it, a reboot task fails on it). For hypervisors.",
           "type": "boolean",
           "default": false
         },
@@ -105,7 +105,7 @@
           "items": { "$ref": "#/$defs/name" }
         },
         "never-reboot": {
-          "description": "true: every member is protected from reboots, as if each had never-reboot set.",
+          "description": "true: every member is protected from reboots and shutdown, as if each had never-reboot set.",
           "type": "boolean",
           "default": false
         },

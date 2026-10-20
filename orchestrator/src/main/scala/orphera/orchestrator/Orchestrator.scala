@@ -462,13 +462,20 @@ object Orchestrator:
       }
 
   def shutdown(nodes: List[Node], delaySeconds: Int = 5): IO[Unit] =
-    nodes.parTraverse_ { node =>
-      NodeClient.shutdown(
-        node,
-        delaySeconds,
-        line => IO.println(s"[${node.name}] $line")
+    val protectedNodes = nodes.filter(Inventory.neverReboot)
+    val allowed = nodes.filterNot(Inventory.neverReboot)
+    protectedNodes.traverse_(n =>
+      IO.println(
+        s"[${n.name}] skipped: never-reboot is set in the inventory, so it is not shut down"
       )
-    }
+    ) >>
+      allowed.parTraverse_ { node =>
+        NodeClient.shutdown(
+          node,
+          delaySeconds,
+          line => IO.println(s"[${node.name}] $line")
+        )
+      }
 
   def getUptimes(
       nodes: List[Node]
