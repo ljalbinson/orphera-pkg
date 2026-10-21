@@ -3,7 +3,7 @@
 """Reads the inventory and the per-VM configs back out of the MariaDB tables in
 schemas/mariadb/001-tables.sql: the reverse of utils/yaml-to-sql.py.
 
-  utils/sql-to-yaml.py --mariadb "-h db.example.com -u orphera_reader --ssl-ca certs/ca.crt orphera" --compare
+  utils/sql-to-yaml.py --mariadb "-h db.example.com -u orphera_ro --ssl-ca certs/ca.crt orphera" --compare
   utils/sql-to-yaml.py --mariadb "..." --out /tmp/from-db           # inventory.yaml and config/*.yaml
   utils/sql-to-yaml.py --sqlite copy.db --compare -I inventory.yaml -c config   # a SQLite copy, for tests
 
@@ -292,7 +292,12 @@ def main():
     ap.add_argument("--compare", action="store_true", help="check the database against the files")
     ap.add_argument("-I", "--inventory", default=os.environ.get("ORPHERA_INVENTORY") or "inventory.yaml")
     ap.add_argument("-c", "--config-dir", default=os.environ.get("ORPHERA_CONFIG_DIR") or "config")
-    args = ap.parse_args()
+    argv = sys.argv[1:]
+    for flag in ("--mariadb", "--sqlite"):  # a value that starts with "-" (such as "-h host ...") is not taken by argparse
+        if flag in argv and argv.index(flag) + 1 < len(argv):
+            i = argv.index(flag)
+            argv[i:i + 2] = [flag + "=" + argv[i + 1]]
+    args = ap.parse_args(argv)
     if not (args.out or args.compare):
         ap.error("give --compare, --out DIR, or both")
 

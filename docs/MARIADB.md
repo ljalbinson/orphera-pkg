@@ -12,8 +12,8 @@ orchestrator is a separate piece of work (a JDBC driver, and a `Sources.register
 `orphera/inventory-db-reader`, or from `MYSQL_PWD`, and is not put on the command line):
 
 ```
-utils/sql-to-yaml.py --mariadb "-h DBHOST -u orphera_reader --ssl-ca certs/ca.crt orphera" --compare
-utils/sql-to-yaml.py --mariadb "..." --out /tmp/from-db
+utils/sql-to-yaml.py --mariadb="-h DBHOST -u orphera_ro --ssl-ca certs/ca.crt orphera" --compare
+utils/sql-to-yaml.py --mariadb="..." --out /tmp/from-db
 ```
 
 `--compare` checks that the database holds what `inventory.yaml` and `config/*.yaml` hold, as data and not as text, and
@@ -104,7 +104,7 @@ SET DEFAULT ROLE orphera_reader FOR 'orphera_ro'@'10.10.5.%';
 SQL
 ```
 
-The same for `orphera_admin` with the account that loads and edits the data. The server needs TLS configured
+The account has to exist for the host the client connects from, as the server sees it (`scala0.ljalbinson.com`, say, for a client on scala0), so create one per client host. Roles cannot log in. The same for `orphera_admin` with the account that loads and edits the data. The server needs TLS configured
 (`ssl_cert`, `ssl_key`, `ssl_ca`) for `REQUIRE SSL` to work, and the orchestrator is the only client that needs
 `orphera_reader`.
 

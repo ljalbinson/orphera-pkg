@@ -14,6 +14,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   exporter's column lists drift from `001-tables.sql`. Not yet run against the real server.
 
 ### Fixed
+- `utils/sql-to-yaml.py` accepts `--mariadb "-h host ..."` (a value starting with `-`); the documentation names the login account `orphera_ro`, not the role `orphera_reader`, and says an account is needed per client host. Run against the real server: the database equals `inventory.yaml` and `config/`.
 - `utils/yaml-to-sql.py` refuses a config with a non-empty `pdisks` instead of dropping it silently (no table holds it).
 
 ### Documentation
