@@ -1,9 +1,39 @@
 # The inventory and configs in MariaDB
 
-`schemas/mariadb/` has the inventory and the per-VM configs as MariaDB tables, for a future `-I mariadb://...` /
-`-c mariadb://...` source (see [`-I` and `-c`](../README.md#where-the-inventory-and-configs-are)). **Orphera cannot read
-from MariaDB yet.** This is the database design and a way to load the existing files into it; a reader in the
-orchestrator is a separate piece of work (a JDBC driver, and a `Sources.register("mariadb", ...)` reader).
+`schemas/mariadb/` has the inventory and the per-VM configs as MariaDB tables, with a loader from the files
+(`yaml-to-sql.py`), a reader that writes them back (`sql-to-yaml.py`), and a `mariadb://` source for `orphera` itself
+(see [`-I` and `-c`](../README.md#where-the-inventory-and-configs-are) and [Reading it with orphera](#reading-it-with-orphera)).
+**The files in git are the source of truth**; the database is a copy loaded from them, and `orphera` only reads it.
+
+## Reading it with orphera
+
+```
+orphera -I mariadb://orphera_ro@dbhost.example.com/orphera/inventory \
+        -c mariadb://orphera_ro@dbhost.example.com/orphera/config \
+        version
+```
+
+The first form names the inventory, the second the directory of configs; `--config tst3` is then
+`mariadb://.../config/tst3.yaml`, and the last part of the path is the config's name (a VM's hostname, or a
+`config_document` such as `dns`). The port defaults to 3306. The same two variables work: `ORPHERA_INVENTORY`,
+`ORPHERA_CONFIG_DIR`.
+
+- **Read-only.** `orphera` runs `SELECT`s, nothing else. The account should be able to do no more (role `orphera_reader`).
+- **Always verified.** The connection checks the server's certificate and its host name against the Orphera CA,
+  `certs/ca.crt` or the file named by `ORPHERA_DB_CA`. The host in the URI must be a name on the certificate
+  (`dbhost.ljalbinson.com`). There is no option to skip this.
+- **Password.** The secret `orphera/inventory-db-reader`, which must exist: it is not made on first use, so a missing secret
+  is an error and not a new, wrong password. The URI cannot carry a password; one that does is refused.
+- **Same data.** The rows become the documents the files hold (`DbDocuments.scala`, the twin of `sql-to-yaml.py`), so
+  everything downstream is unchanged. Within one run the tables are fetched once.
+- **Failure mode.** If the database cannot be read, the inventory falls back to empty with a warning, as for a missing file.
+  Check `orphera -I ... version` lists the fleet before relying on a `never-reboot` that comes from the database.
+- The shell scripts still read files only (`ORPHERA_CONFIG_DIR` and `ORPHERA_INVENTORY` as paths); export with
+  `sql-to-yaml.py --out DIR` for them.
+
+To check the Scala reader against the files, compare what each source gives:
+`orphera -I inventory.yaml version` and `orphera -I mariadb://... version` list the same nodes, and
+`utils/sql-to-yaml.py --compare` checks the database against the files.
 
 ## Reading it back
 
@@ -38,15 +68,16 @@ Needed first:
 
 | Gap | Detail |
 |---|---|
-| No reader | `Sources` has no `mariadb:` scheme, and the build has no JDBC driver. A reader has to turn the rows into the same data the YAML readers produce, and reach the server over TLS (the certificate is signed by the Orphera CA; DBeaver only connected with `sslMode=trust`, so verification is untested) with the `orphera/inventory-db-reader` secret. |
+| Reader not yet run against the server | `mariadb://` is implemented (see above) and its conversion is checked by `DbDocumentsCheck`, but it has not yet been run against the real server, so the JDBC connection and the certificate check are untested. |
 | Scripts read files | The shell scripts read a VM's hypervisor and address from `config/<vm>.yaml`. They now take the directory from `ORPHERA_CONFIG_DIR` and the inventory from `ORPHERA_INVENTORY`, as `orphera` does (`utils/orphera-sources.sh`), but only files, so a database has to be exported first. They do not read `-I`/`-c`. |
 | Export not yet run against the server | `utils/sql-to-yaml.py` writes the database back out as files and compares it with the committed ones (see [Reading it back](#reading-it-back)). It is tested against a SQLite copy of the tables, not against your MariaDB server. |
-| No source of truth | The files are in git and the database is edited by hand or by `yaml-to-sql.py --replace`. Which wins, and how a change reaches the other, is undecided. |
+| Copy, not source | The files in git are the source of truth (decided 2026-10-21). The database must be reloaded with `yaml-to-sql.py --replace` after any change to a file, and `sql-to-yaml.py --compare` shows when it is behind. |
 | Failure mode | If the inventory cannot be read, `orphera` falls back to an empty inventory with a warning; with a database, an outage would look the same. `never-reboot` is also then absent from `orphera`, though a host's own agent marker still holds. |
 
-A way to get there without the Scala reader: export the database to files (the reverse of `yaml-to-sql.py`), check that they
-equal the committed ones, then run the rebuild with `-I`/`-c` (or `ORPHERA_CONFIG_DIR`) pointing at the exported copy. That
-shows the data is complete before the reader is written.
+Two ways to run from the database before a full rebuild is tried: `orphera -I mariadb://... -c mariadb://...` directly, or
+export the database to files (`sql-to-yaml.py --out DIR`) and point `ORPHERA_INVENTORY`/`ORPHERA_CONFIG_DIR` (and `-I`/`-c`) at the copy.
+The export route has been checked against the real server (the database equals the files, and `orphera version` and the
+dry run of `rebuild_openstack_from_scratch.sh` work from it).
 
 The tables hold the same data as the [JSON Schemas](SCHEMAS.md). Where a schema could only say "checked by
 `validate-schemas.py`", the database enforces the rule itself:

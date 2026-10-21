@@ -122,7 +122,9 @@ lazy val orchestrator = project
       "co.fs2" %% "fs2-io" % "3.11.0",
       "io.circe" %% "circe-yaml" % "0.15.1",
       "io.circe" %% "circe-generic" % "0.14.10",
-      "com.github.spullara.mustache.java" % "compiler" % "0.9.14"
+      "com.github.spullara.mustache.java" % "compiler" % "0.9.14",
+      // Reads the inventory and configs from MariaDB (mariadb:// locations, MariaDbSource.scala)
+      "org.mariadb.jdbc" % "mariadb-java-client" % "3.5.1"
     )
   )
 

@@ -415,8 +415,9 @@ orphera -c /srv/vms cluster-playbook manifests/gen_set_dns.scala --config tst7
 ```
 
 The option wins over the environment variable, which wins over the default. A location is a plain path or a URI;
-`file:` URIs (`file:///path`) and plain paths can be read today. The locations are URIs so that the inventory or the
-configs can later come from a database or another dynamic source: a new scheme is added in one place
+`file:` URIs (`file:///path`), plain paths and `mariadb://` can be read. A `mariadb://user@host/database/inventory` or
+`.../database/config` location reads the tables read-only, over TLS verified against `certs/ca.crt`, with the password from the
+secret `orphera/inventory-db-reader` ([docs/MARIADB.md](docs/MARIADB.md)). Another source is added in one place
 (`Sources.register`, `Locations.scala`) and nothing that reads the inventory changes. A scheme with no reader is
 refused with the list of those there are. Relative paths are relative to `ORPHERA_HOME`, as the launcher changes into
 it first. The options also reach the playbook scripts and pipeline steps that `orphera` starts. They go before the
@@ -1475,7 +1476,7 @@ auto-updated; remove the entry manually.
 |---|---|
 | `make` / `make all` | clean → test → assembly → deb |
 | `make clean` | `sbt clean`, removes `pkg/` and any built `.deb` / `.rpm` |
-| `make test` | `sbt test`, then the check programs `ContainerCheck`, `ConfCheck`, `SecretsCheck`, `ThreadInfoCheck`, `InventoryCheck` and `LocationsCheck` (set `CHECK_VERBOSE=1` to print every passing check) |
+| `make test` | `sbt test`, then the check programs `ContainerCheck`, `ConfCheck`, `SecretsCheck`, `ThreadInfoCheck`, `InventoryCheck`, `LocationsCheck` and `DbDocumentsCheck` (set `CHECK_VERBOSE=1` to print every passing check) |
 | `make assembly` | `sbt agent/assembly` |
 | `make deb` | stages package contents, runs `dpkg-deb --build` |
 | `make rpm` | stages the same contents, runs `rpmbuild` to produce `orphera-agent-<version>-1.noarch.rpm` for Rocky/Red Hat hosts. Needs `rpmbuild` |
@@ -1522,7 +1523,7 @@ token and when an agent will start, how a failed call is labelled; the
 checks that use real `age` are skipped when it is not installed) and
 `ThreadInfoCheck` (16: `thread-info`'s counting, report and command
 line), `InventoryCheck` (12: reading `never-reboot`, which nodes it protects, and that `shutdown` refuses and skips them) and `LocationsCheck`
-(25: `-I`/`-c`, the environment variables, config names, reading through a URI) and `AgentGuardCheck` (9: the agent refuses a reboot and a
+(25: `-I`/`-c`, the environment variables, config names, reading through a URI) and `DbDocumentsCheck` (the `mariadb://` locations and the rows-to-documents conversion, with no database) and `AgentGuardCheck` (9: the agent refuses a reboot and a
 shutdown on a host with the marker; it never calls the unprotected path, which would really reboot the test machine). Each exits non-zero on a failure.
 
 The scripts `manifests/test_*.sh` apply a playbook to the lab and check the

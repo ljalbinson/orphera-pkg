@@ -10,9 +10,10 @@ import java.util.concurrent.atomic.AtomicReference
 /** Where the inventory and the per-VM configuration files live, as URIs.
   *
   * A location is a plain path (`inventory.yaml`, `/etc/orphera/inventory.yaml`)
-  * or a URI (`file:///etc/orphera/inventory.yaml`). Only `file:` and plain
-  * paths can be read today; `Sources.register` is where another scheme (a
-  * database, a dynamic connector) plugs in, and nothing else needs to change.
+  * or a URI (`file:///etc/orphera/inventory.yaml`). `file:`, plain paths and
+  * `mariadb:` (MariaDbSource.scala) can be read; `Sources.register` is where
+  * another scheme (a dynamic connector) plugs in, and nothing else needs to
+  * change.
   *
   * Each of the two locations is taken from, in order:
   *   1. the global option before the command: `-I`/`--inventory <uri>` and
@@ -108,7 +109,10 @@ object Sources:
   private val SchemePattern = "^([A-Za-z][A-Za-z0-9+.-]+):.*$".r
 
   private val readers = new AtomicReference[Map[String, Reader]](
-    Map("file" -> readFile)
+    Map(
+      "file" -> readFile,
+      MariaDbSource.Scheme -> MariaDbSource.read
+    )
   )
 
   /** Adds the reader for a URI scheme (`postgres`, `https`, ...). */
