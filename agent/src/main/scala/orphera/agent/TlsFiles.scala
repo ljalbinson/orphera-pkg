@@ -13,7 +13,8 @@ import java.io.File
 object TlsFiles:
 
   private val perNode = (new File("tls/server.crt"), new File("tls/server.key"))
-  private val legacy = (new File("certs/server.crt"), new File("certs/server.key"))
+  private val legacy =
+    (new File("certs/server.crt"), new File("certs/server.key"))
 
   private def present(pair: (File, File)): Boolean =
     pair._1.isFile && pair._2.isFile

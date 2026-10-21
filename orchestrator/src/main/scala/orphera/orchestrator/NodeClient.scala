@@ -335,7 +335,14 @@ object NodeClient:
           s"${node.name} has never-reboot set in the inventory, so it is not rebooted"
         )
       )
-    else rebootAllowed(node, delaySeconds, waitForReturn, waitTimeoutSeconds, onLine)
+    else
+      rebootAllowed(
+        node,
+        delaySeconds,
+        waitForReturn,
+        waitTimeoutSeconds,
+        onLine
+      )
 
   private def rebootAllowed(
       node: Node,

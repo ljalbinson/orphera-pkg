@@ -4,12 +4,11 @@ package orphera.orchestrator
 
 import io.grpc.Status
 
-/** How a failed call to an agent is reported. `unauthenticated` means the
-  * agent answered and refused this orchestrator's token, which is fixed by
-  * setting the token on that node; `unsupported` means it answered but is too
-  * old to know the call; `unreachable` means nothing usable came
-  * back (no route, no listener, a certificate the orchestrator does not
-  * trust), which is not.
+/** How a failed call to an agent is reported. `unauthenticated` means the agent
+  * answered and refused this orchestrator's token, which is fixed by setting
+  * the token on that node; `unsupported` means it answered but is too old to
+  * know the call; `unreachable` means nothing usable came back (no route, no
+  * listener, a certificate the orchestrator does not trust), which is not.
   */
 object NodeError:
 

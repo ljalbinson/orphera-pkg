@@ -12,11 +12,11 @@ import io.grpc.{Status, StatusRuntimeException}
   * The inventory's `never-reboot` is checked by the orchestrator, but only a
   * current orchestrator checks it: an older build sent a shutdown straight to a
   * hypervisor. A host that must stay up therefore also carries a marker file,
-  * `/etc/orphera-agent/never-reboot` (or the path in `ORPHERA_NEVER_REBOOT_FILE`),
-  * and its agent refuses `TriggerReboot` and `TriggerShutdown` while the file
-  * exists. The file is looked at on every request, so creating or removing it
-  * needs no agent restart. `utils/sync-never-reboot.py` creates it from the
-  * inventory.
+  * `/etc/orphera-agent/never-reboot` (or the path in
+  * `ORPHERA_NEVER_REBOOT_FILE`), and its agent refuses `TriggerReboot` and
+  * `TriggerShutdown` while the file exists. The file is looked at on every
+  * request, so creating or removing it needs no agent restart.
+  * `utils/sync-never-reboot.py` creates it from the inventory.
   */
 object NeverReboot:
   val DefaultMarker: String = "/etc/orphera-agent/never-reboot"
@@ -27,8 +27,8 @@ object NeverReboot:
 
   def isProtected(marker: Path): Boolean = Files.exists(marker)
 
-  /** The error a protected host's agent answers with. `action` reads as "refuses
-    * to <action>", for example "reboot" or "power off".
+  /** The error a protected host's agent answers with. `action` reads as
+    * "refuses to <action>", for example "reboot" or "power off".
     */
   def refusal(action: String, marker: Path): StatusRuntimeException =
     Status.FAILED_PRECONDITION

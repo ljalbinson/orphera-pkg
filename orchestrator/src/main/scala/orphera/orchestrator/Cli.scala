@@ -262,9 +262,9 @@ object Cli:
         parsePlaybookFlags(rest, resume = false, config = None).map {
           case (resume, config) => Command.RunPlaybook(path, resume, config)
         }
-      case "version" :: rest  => parseVersion(rest, None)
-      case "cert-info" :: rest => parseCertInfo(rest, None)
-      case "uptime" :: rest   => parseUptime(rest, None)
+      case "version" :: rest     => parseVersion(rest, None)
+      case "cert-info" :: rest   => parseCertInfo(rest, None)
+      case "uptime" :: rest      => parseUptime(rest, None)
       case "thread-info" :: rest =>
         parseThreads(rest, None, detail = false, resetPeak = false)
       case "shutdown" :: rest =>
@@ -1087,7 +1087,7 @@ object Cli:
         )
       case "--detail" :: rest     => parseThreads(rest, nodes, true, resetPeak)
       case "--reset-peak" :: rest => parseThreads(rest, nodes, detail, true)
-      case other :: _ =>
+      case other :: _             =>
         Left(s"Unknown argument to thread-info: $other")
 
   private def parseRunCommand(

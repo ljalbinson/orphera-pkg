@@ -6,14 +6,14 @@ import cats.effect.IO
 
 import orphera.common.Auth
 
-/** The shared token the orchestrator sends to every agent (`ORPHERA_TOKEN` on the
-  * agent's side). Where it comes from, first match wins:
+/** The shared token the orchestrator sends to every agent (`ORPHERA_TOKEN` on
+  * the agent's side). Where it comes from, first match wins:
   *
   *   1. the environment variable `ORPHERA_TOKEN`
-  *   2. the secret store, under `orphera/agent-token`
-  *      (`orphera secrets generate orphera/agent-token`)
-  *   3. the built-in development token, which is in the source code and therefore
-  *      protects nothing; a warning says so, once, on stderr.
+  *   2. the secret store, under `orphera/agent-token` (`orphera secrets
+  *      generate orphera/agent-token`)
+  *   3. the built-in development token, which is in the source code and
+  *      therefore protects nothing; a warning says so, once, on stderr.
   *
   * The token is registered for masking, so it does not appear in the output.
   */
@@ -55,7 +55,7 @@ object AgentToken:
         token
       case None =>
         System.err.println(
-          s"warning: no agent token is configured, so the built-in development token is used, " +
+          "warning: no agent token is configured, so the built-in development token is used, " +
             s"which anyone who has the source can use. Run `orphera secrets generate $StoreName`, " +
             "then `utils/set-agent-token.sh <node>...`."
         )

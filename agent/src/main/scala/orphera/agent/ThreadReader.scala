@@ -46,15 +46,17 @@ object ThreadReader:
               .map(_.getState.toString)
           )
         ),
-        groups = named(ThreadStats.counts(osThreadNames().map(ThreadStats.groupName)))
+        groups =
+          named(ThreadStats.counts(osThreadNames().map(ThreadStats.groupName)))
       )
     }
 
   private def named(counts: List[(String, Int)]): List[NameCount] =
     counts.map { case (name, count) => NameCount(name, count) }
 
-  /** The name of every OS thread of this process (`/proc/self/task/<tid>/comm`),
-    * which includes the JVM's own threads that Java code cannot list.
+  /** The name of every OS thread of this process
+    * (`/proc/self/task/<tid>/comm`), which includes the JVM's own threads that
+    * Java code cannot list.
     */
   private def osThreadNames(): List[String] =
     Using(Files.newDirectoryStream(Paths.get("/proc/self/task"))) { tasks =>

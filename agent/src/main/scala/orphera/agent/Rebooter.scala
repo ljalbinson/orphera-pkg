@@ -9,8 +9,8 @@ import orphera.common.*
 object Rebooter:
 
   /** Refuses, without starting anything, if this host carries the never-reboot
-    * marker (see `NeverReboot`). `env` is a parameter so a check can point it at
-    * a temporary marker; the agent itself uses the process environment.
+    * marker (see `NeverReboot`). `env` is a parameter so a check can point it
+    * at a temporary marker; the agent itself uses the process environment.
     */
   def trigger(
       request: RebootRequest,

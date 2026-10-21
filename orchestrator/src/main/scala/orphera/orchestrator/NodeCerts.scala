@@ -8,15 +8,15 @@ import java.security.SecureRandom
 
 import cats.effect.*
 
-/** A TLS certificate of its own for each agent. The agent package carries
-  * none (it used to carry one wildcard key shared by every node).
+/** A TLS certificate of its own for each agent. The agent package carries none
+  * (it used to carry one wildcard key shared by every node).
   *
   * The node's private key is generated on the node and never leaves it: the
   * node sends back only a certificate signing request, which is signed here
   * with the CA in `certs/` (the same CA the orchestrator already trusts, so no
-  * orchestrator change is needed), and the signed certificate is sent back.
-  * The certificate names exactly the node's inventory `host` (a DNS name, or an
-  * IP address, which the wildcard could never cover).
+  * orchestrator change is needed), and the signed certificate is sent back. The
+  * certificate names exactly the node's inventory `host` (a DNS name, or an IP
+  * address, which the wildcard could never cover).
   *
   * Files on the node: `/etc/orphera-agent/tls/server.{key,crt}`. No package
   * owns `tls/`, so installing or upgrading the agent never removes them.
@@ -33,7 +33,8 @@ object NodeCerts:
   private val ValidDays = 825
 
   /** Whether this orchestrator can sign node certificates at all. */
-  def caAvailable: Boolean = Files.isRegularFile(CaCert) && Files.isRegularFile(CaKey)
+  def caAvailable: Boolean =
+    Files.isRegularFile(CaCert) && Files.isRegularFile(CaKey)
 
   def issue(
       node: Node,
@@ -70,7 +71,9 @@ object NodeCerts:
         cert,
         onLine
       )
-      _ <- onLine(s"issued a certificate for ${node.host} (valid $ValidDays days); agent restarted")
+      _ <- onLine(
+        s"issued a certificate for ${node.host} (valid $ValidDays days); agent restarted"
+      )
     yield ()
 
   /** Makes `server.key.new` (mode 0600) and prints a CSR for it. Nothing the
@@ -121,13 +124,27 @@ object NodeCerts:
         val serial = "0x" + serialBytes.map(b => f"$b%02x").mkString
         val (code, output) = runLocal(
           List(
-            "openssl", "x509", "-req", "-in", csrFile.toString,
-            "-CA", CaCert.toString, "-CAkey", CaKey.toString,
-            "-set_serial", serial, "-days", ValidDays.toString,
-            "-extfile", extFile.toString, "-out", certFile.toString
+            "openssl",
+            "x509",
+            "-req",
+            "-in",
+            csrFile.toString,
+            "-CA",
+            CaCert.toString,
+            "-CAkey",
+            CaKey.toString,
+            "-set_serial",
+            serial,
+            "-days",
+            ValidDays.toString,
+            "-extfile",
+            extFile.toString,
+            "-out",
+            certFile.toString
           )
         )
-        if code != 0 then Left(s"signing the certificate for $host failed: ${output.trim}")
+        if code != 0 then
+          Left(s"signing the certificate for $host failed: ${output.trim}")
         else Right(Files.readString(certFile, UTF_8))
       finally
         Option(dir.toFile.listFiles()).toList.flatten.foreach(_.delete())
@@ -143,7 +160,10 @@ object NodeCerts:
   /** The first PEM block of the given type, with its BEGIN/END lines. Other
     * output (ssh notices, warnings) is ignored.
     */
-  private[orchestrator] def pemBlock(lines: List[String], kind: String): Option[String] =
+  private[orchestrator] def pemBlock(
+      lines: List[String],
+      kind: String
+  ): Option[String] =
     val begin = s"-----BEGIN $kind-----"
     val end = s"-----END $kind-----"
     val fromBegin = lines.map(_.trim).dropWhile(_ != begin)

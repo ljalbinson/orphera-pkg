@@ -75,13 +75,14 @@ class AgentServiceImpl(
       Empty()
     )
 
-  /** Refuses on a node without a certificate of its own: the package no
-    * longer ships one, so after the upgrade the agent could not start, and
-    * this RPC is the only way in (no ssh to recover with).
+  /** Refuses on a node without a certificate of its own: the package no longer
+    * ships one, so after the upgrade the agent could not start, and this RPC is
+    * the only way in (no ssh to recover with).
     */
   def installDebPackage(request: InstallDeb, ctx: Metadata): Stream[IO, Event] =
     streamTask { queue =>
-      if TlsFiles.perNodePresent then Dispatcher.dispatchInstallDeb(request, queue)
+      if TlsFiles.perNodePresent then
+        Dispatcher.dispatchInstallDeb(request, queue)
       else
         queue.offer(
           Event(

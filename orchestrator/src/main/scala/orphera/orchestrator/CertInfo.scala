@@ -22,8 +22,8 @@ import cats.syntax.all.*
   *
   * It connects to the agent's port and reads the certificate from the TLS
   * handshake, rather than reading files on the node, so it reports what the
-  * orchestrator really sees: a per-node or the wildcard certificate, whether
-  * it names the node's host, whether it chains to `certs/ca.crt`, and when it
+  * orchestrator really sees: a per-node or the wildcard certificate, whether it
+  * names the node's host, whether it chains to `certs/ca.crt`, and when it
   * expires. It needs neither SSH nor the token. The certificate is recorded
   * before it is judged, so an untrusted or mismatched one is still described
   * rather than only refused.
@@ -54,7 +54,10 @@ object CertInfo:
 
   def inspect(node: Node): IO[Report] =
     IO.blocking(presentedChain(node.host, node.port)).flatMap {
-      case Nil  => IO.raiseError(new RuntimeException("the agent presented no certificate"))
+      case Nil =>
+        IO.raiseError(
+          new RuntimeException("the agent presented no certificate")
+        )
       case leaf :: rest => IO.pure(describe(node.host, leaf, leaf :: rest))
     }
 
@@ -79,8 +82,10 @@ object CertInfo:
       raw.setSoTimeout(TimeoutMillis)
       val tls = ctx.getSocketFactory.createSocket(raw, host, port, true) match
         case s: SSLSocket => s
-        case other =>
-          throw new IllegalStateException(s"not a TLS socket: ${other.getClass}")
+        case other        =>
+          throw new IllegalStateException(
+            s"not a TLS socket: ${other.getClass}"
+          )
       val params = tls.getSSLParameters
       params.setApplicationProtocols(Array("h2"))
       tls.setSSLParameters(params)
@@ -144,9 +149,13 @@ object CertInfo:
       val ca = Using.resource(new FileInputStream(CaCert)) { in =>
         factory.generateCertificate(in) match
           case x: X509Certificate => x
-          case _ => throw new IllegalStateException(s"$CaCert is not an X.509 certificate")
+          case _                  =>
+            throw new IllegalStateException(
+              s"$CaCert is not an X.509 certificate"
+            )
       }
-      val params = new PKIXParameters(java.util.Set.of(new TrustAnchor(ca, null)))
+      val params =
+        new PKIXParameters(java.util.Set.of(new TrustAnchor(ca, null)))
       params.setRevocationEnabled(false)
       CertPathValidator
         .getInstance("PKIX")

@@ -12,7 +12,11 @@ object ThreadReport:
   /** One summary line, and with `detail` the Java thread states and the
     * process's threads by name.
     */
-  def lines(info: ThreadInfo, detail: Boolean, resetPeak: Boolean): List[String] =
+  def lines(
+      info: ThreadInfo,
+      detail: Boolean,
+      resetPeak: Boolean
+  ): List[String] =
     val heap =
       if info.heapMaxBytes > 0 then
         s"${info.heapUsedBytes / Mb} of ${info.heapMaxBytes / Mb} MB"

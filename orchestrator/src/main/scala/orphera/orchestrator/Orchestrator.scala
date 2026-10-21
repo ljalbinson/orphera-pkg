@@ -161,12 +161,12 @@ object Orchestrator:
         IO.println(s"[${node.name}] $line")
   ): IO[Unit] =
     AgentToken.requireConfigured >>
-    IO.raiseUnless(NodeCerts.caAvailable)(
-      new RuntimeException(
-        "bootstrap needs certs/ca.crt and certs/ca.key to issue each node its certificate (run: make certs)"
-      )
-    ) >>
-    packages.paths.traverse_(requireOrpheraAgentPackage) >>
+      IO.raiseUnless(NodeCerts.caAvailable)(
+        new RuntimeException(
+          "bootstrap needs certs/ca.crt and certs/ca.key to issue each node its certificate (run: make certs)"
+        )
+      ) >>
+      packages.paths.traverse_(requireOrpheraAgentPackage) >>
       nodes.parTraverse_ { node =>
         SshDeployer.bootstrap(
           node,
@@ -385,7 +385,9 @@ object Orchestrator:
           val failed = results.count(_.isLeft)
           IO.println(
             s"Issued ${results.size - failed} of ${results.size} node certificates" +
-              (if failed > 0 then s"; $failed failed (their current certificate is unchanged)" else "")
+              (if failed > 0 then
+                 s"; $failed failed (their current certificate is unchanged)"
+               else "")
           ).as(failed == 0)
         }
 

@@ -72,9 +72,9 @@ object Locations:
       .orElse(fromEnv("ORPHERA_CONFIG_DIR"))
       .getOrElse(DefaultConfigDir)
 
-  /** The environment a child process (a playbook script, a pipeline step)
-    * needs so it looks in the same places: the options given on this command
-    * line, which the environment it inherits does not have.
+  /** The environment a child process (a playbook script, a pipeline step) needs
+    * so it looks in the same places: the options given on this command line,
+    * which the environment it inherits does not have.
     */
   def childEnv: Map[String, String] =
     val c = current.get()
@@ -91,8 +91,8 @@ object Locations:
       !value.endsWith(".yaml") && !value.endsWith(".yml")
     if isName then s"${configDir.stripSuffix("/")}/$value.yaml" else value
 
-  /** The short name of a config for output and log names: the last path
-    * segment without its extension (`file:///x/tst3.yaml` -> `tst3`).
+  /** The short name of a config for output and log names: the last path segment
+    * without its extension (`file:///x/tst3.yaml` -> `tst3`).
     */
   def label(config: String): String =
     val last = config.takeWhile(c => c != '?' && c != '#').split('/').lastOption

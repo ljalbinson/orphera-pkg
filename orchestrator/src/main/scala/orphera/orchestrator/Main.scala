@@ -363,7 +363,9 @@ object Main extends IOApp:
         else
           IO.realTimeInstant.flatMap { now =>
             targets
-              .parTraverse(node => CertInfo.inspect(node).attempt.map(node -> _))
+              .parTraverse(node =>
+                CertInfo.inspect(node).attempt.map(node -> _)
+              )
               .flatMap { results =>
                 results.traverse_ {
                   case (node, Right(report)) =>
@@ -373,7 +375,8 @@ object Main extends IOApp:
                       s"[${node.name}] unreachable: ${Option(e.getMessage).getOrElse(e.toString)}"
                     )
                 } >> IO.pure(
-                  if results.forall(_._2.exists(_.ok(now))) then ExitCode.Success
+                  if results.forall(_._2.exists(_.ok(now))) then
+                    ExitCode.Success
                   else ExitCode.Error
                 )
               }
@@ -1007,9 +1010,7 @@ object Main extends IOApp:
             "orphera.scripting.Main",
             scriptPath
           )
-          Locations.childEnv.foreach((k, v) =>
-            builder.environment().put(k, v)
-          )
+          Locations.childEnv.foreach((k, v) => builder.environment().put(k, v))
           if resume then builder.environment().put("ORPHERA_RESUME", "true")
           config
             .foreach(path => builder.environment().put("ORPHERA_CONFIG", path))

@@ -6,7 +6,6 @@ import java.io.*
 
 import cats.effect.*
 
-
 object SshDeployer:
 
   /** apt-get invocation shared by bootstrap's two prerequisite steps. Same
@@ -332,7 +331,8 @@ object SshDeployer:
           sshKeyPath,
           // dpkg --purge leaves /etc/orphera-agent/tls (no package owns it).
           s"sudo dpkg --$purgeOrRemove orphera-agent" +
-            (if purgeConfig then s" && sudo rm -rf ${NodeCerts.RemoteDir}" else ""),
+            (if purgeConfig then s" && sudo rm -rf ${NodeCerts.RemoteDir}"
+             else ""),
           onLine
         )
       case RemotePm.Dnf =>
@@ -423,7 +423,14 @@ object SshDeployer:
       input: String,
       onLine: String => IO[Unit]
   ): IO[Unit] =
-    sshRun(node, sshUser, sshKeyPath, remoteCommand, onLine, stdin = Some(input))
+    sshRun(
+      node,
+      sshUser,
+      sshKeyPath,
+      remoteCommand,
+      onLine,
+      stdin = Some(input)
+    )
 
   private def sshRun(
       node: Node,

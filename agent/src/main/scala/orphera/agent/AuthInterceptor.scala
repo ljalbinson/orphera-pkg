@@ -6,7 +6,8 @@ import io.grpc.*
 
 import orphera.common.Auth
 
-/** Lets a call through only when it carries `token` (see `Auth.requireToken`). */
+/** Lets a call through only when it carries `token` (see `Auth.requireToken`).
+  */
 class AuthInterceptor(token: String) extends ServerInterceptor:
   override def interceptCall[ReqT, RespT](
       call: ServerCall[ReqT, RespT],
