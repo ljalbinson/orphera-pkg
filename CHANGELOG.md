@@ -13,6 +13,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `teardown`, `bootstrap`, pipelines and playbooks it is an error, so they still never default to every node. A name that was
   not selected, or an exclusion that leaves nothing, is an error.
 
+### Changed
+- Tab completion: offers `--exclude-nodes` with every verb that takes `--nodes`, completes node names (from the inventory, `-I` and
+  `ORPHERA_INVENTORY` honoured) after `--nodes` and `--exclude-nodes` as a comma-separated list that leaves out names already given,
+  and completes the config names after `show-config`.
+
 ### Removed
 - `build` (an old script that ran a 0.1.0-SNAPSHOT jar) and `manifests/ceph-mgr.scala` (a copy of `ceph_mgr.scala`), with their SPDX exemptions.
 

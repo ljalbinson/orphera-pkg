@@ -37,6 +37,35 @@ _orphera_groups() {
   awk '/^groups:/ {g=1; next} /^[^ #-]/ {g=0} g && /^[ ]*- name:/ {print $NF}' "$inv"
 }
 
+# Node names from inventory.yaml (the `nodes:` section), for --nodes and --exclude-nodes.
+_orphera_nodes() {
+  local inv="${_ORPHERA_INV:-${ORPHERA_INVENTORY:-inventory.yaml}}"
+  inv="${inv#file://}"
+  # Only a file can be read here; another kind of location has no names to offer.
+  case "$inv" in *://*) return 0 ;; esac
+  [ -r "$inv" ] || return 0
+  awk '/^nodes:/ {n=1; next} /^[^ #-]/ {n=0} n && /^[ ]*- name:/ {print $NF}' "$inv"
+}
+
+# The value of --nodes / --exclude-nodes: a comma-separated list of node names.
+# Completes the part after the last comma and keeps what came before it.
+_orphera_complete_nodelist() {
+  local cur="$1" prefix="" last="$1"
+  if [[ "$cur" == *,* ]]; then
+    prefix="${cur%,*},"
+    last="${cur##*,}"
+  fi
+  # Leave out the names already in the list.
+  local chosen=",$prefix" names="" n
+  for n in $(_orphera_nodes); do
+    case "$chosen" in *",$n,"*) ;; *) names="$names $n" ;; esac
+  done
+  COMPREPLY=($(compgen -P "$prefix" -W "$names" -- "$last"))
+  # No space after a name, so that a comma can follow it.
+  [[ ${#COMPREPLY[@]} -gt 0 ]] && compopt -o nospace 2>/dev/null
+  return 0
+}
+
 _orphera_playbook_path_completions() {
   local cur="$1"
   local -a matches
@@ -68,13 +97,14 @@ _orphera_completions() {
   # The global options (-I/--inventory <uri>, -c/--config-dir <uri>) come before
   # the verb. Take each finished pair out of `words`, so everything below sees
   # the verb at words[1] as usual, and keep the inventory for --node-groups.
-  local _ORPHERA_INV=""
+  local _ORPHERA_INV="" _ORPHERA_CFG=""
   while [[ $cword -gt 2 ]]; do
     case "${words[1]}" in
       -I|--inventory)
         _ORPHERA_INV="${words[2]}"
         words=("${words[0]}" "${words[@]:3}"); cword=$((cword - 2)) ;;
       -c|--config-dir)
+        _ORPHERA_CFG="${words[2]}"
         words=("${words[0]}" "${words[@]:3}"); cword=$((cword - 2)) ;;
       *) break ;;
     esac
@@ -99,6 +129,11 @@ _orphera_completions() {
   fi
 
   local verb="${words[1]}"
+
+  # Whatever the verb, the value of --nodes / --exclude-nodes is a list of node names.
+  case "$prev" in
+    --nodes|--exclude-nodes) _orphera_complete_nodelist "$cur"; return 0 ;;
+  esac
 
   case "$verb" in
     install)
@@ -197,6 +232,19 @@ _orphera_completions() {
         --nodes) COMPREPLY=() ;;
         --node-groups) COMPREPLY=($(compgen -W "$(_orphera_groups)" -- "$cur")) ;;
         *) COMPREPLY=($(compgen -W "--nodes --node-groups --exclude-nodes" -- "$cur")) ;;
+      esac
+      ;;
+
+    show-config)
+      # Names of the files in the config directory (-c, ORPHERA_CONFIG_DIR, else config);
+      # a database location has no files to list.
+      local cfg="${_ORPHERA_CFG:-${ORPHERA_CONFIG_DIR:-config}}" names
+      cfg="${cfg#file://}"
+      case "$cfg" in
+        *://*) COMPREPLY=() ;;
+        *)
+          names=$(cd "$cfg" 2>/dev/null && for f in *.yaml; do [ -e "$f" ] && echo "${f%.yaml}"; done)
+          COMPREPLY=($(compgen -W "$names" -- "$cur")) ;;
       esac
       ;;
 
