@@ -395,6 +395,20 @@ orphera dist-upgrade --node-groups mons
 orphera run --node-groups mons --nodes tst5 -- uptime
 ```
 
+**Leaving nodes out.** `--exclude-nodes a,b` takes nodes out of what `--nodes` and `--node-groups` selected, so a group
+can be used with some members left out:
+
+```
+orphera dist-upgrade --node-groups mons --exclude-nodes tst1
+orphera reboot --node-groups ceph --exclude-nodes tst0 --yes
+```
+
+It only subtracts. With neither `--nodes` nor `--node-groups` it is an error and never means "everything except", so
+`reboot` and `shutdown` still cannot be pointed at the whole fleet by leaving one node out. A name that was not selected
+is an error too (a typo would otherwise leave the node in), as is an exclusion that leaves no nodes. It is applied with
+the group expansion, so the audit log records the nodes that were actually targeted. A pipeline's steps cannot give it;
+put it on the pipeline itself.
+
 There is no dynamic inventory source (cloud provider API, etc.) —
 static and hand-edited only, for now.
 

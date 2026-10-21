@@ -80,6 +80,53 @@ object InventoryCheck:
     val skipped = Orchestrator.shutdown(List(guarded)).attempt.unsafeRunSync()
     check("Orchestrator.shutdown skips a never-reboot node instead of failing", skipped.isRight, skipped.toString)
 
+    // --exclude-nodes: a group with some members left out
+    val grp = List(
+      Group("mons", List("a", "b", "c")),
+      Group("osds", List("c", "d"))
+    )
+    def expanded(args: String*) = Cli.expandNodeGroups(args.toList, grp)
+    check(
+      "a group with a member excluded",
+      expanded("uptime", "--node-groups", "mons", "--exclude-nodes", "b") ==
+        Right(List("uptime", "--nodes", "a,c"))
+    )
+    check(
+      "an exclusion applies to the union of --nodes and groups",
+      expanded("uptime", "--nodes", "z", "--node-groups", "mons,osds", "--exclude-nodes", "c,z") ==
+        Right(List("uptime", "--nodes", "a,b,d"))
+    )
+    check(
+      "--exclude-nodes with --nodes alone",
+      expanded("uptime", "--nodes", "a,b", "--exclude-nodes", "a") ==
+        Right(List("uptime", "--nodes", "b"))
+    )
+    check(
+      "--exclude-nodes alone is refused, not read as everything except",
+      expanded("shutdown", "--exclude-nodes", "a", "--yes").isLeft
+    )
+    check(
+      "excluding a node that was not selected is refused",
+      expanded("uptime", "--node-groups", "mons", "--exclude-nodes", "d").swap
+        .exists(e => e.contains("d") && e.contains("not selected"))
+    )
+    check(
+      "excluding every selected node is refused",
+      expanded("uptime", "--node-groups", "osds", "--exclude-nodes", "c,d").isLeft
+    )
+    check(
+      "args without the options pass through unchanged",
+      expanded("uptime", "--nodes", "a") == Right(List("uptime", "--nodes", "a"))
+    )
+    check(
+      "an unknown group is still refused with an exclusion present",
+      expanded("uptime", "--node-groups", "nope", "--exclude-nodes", "a").swap.exists(_.contains("Unknown node group"))
+    )
+    check(
+      "a pipeline step may not give --exclude-nodes",
+      Cli.parse(List("pipeline", "uptime --exclude-nodes a", "--nodes", "a,b")).isLeft
+    )
+
     val bad = Files.createTempFile("inventory-check", ".yaml")
     Files.writeString(bad, "nodes:\n  - name: x\n    host: x\n    never-reboot: sometimes\n")
     check("a value that is not true or false is refused", InventoryYaml.load(bad.toString).isLeft)

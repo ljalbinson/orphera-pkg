@@ -181,8 +181,17 @@ object Cli:
     * `--nodes` (teardown and bootstrap included) accepts it without per-command
     * plumbing, and the audit log records the expanded node list. Combined with
     * an explicit `--nodes` it is a union (order kept, duplicates dropped). With
-    * no `--node-groups` present the args pass through untouched. An unknown
-    * group is an error rather than a silently smaller target set.
+    * neither `--node-groups` nor `--exclude-nodes` present the args pass
+    * through untouched. An unknown group is an error rather than a silently
+    * smaller target set.
+    *
+    * `--exclude-nodes a,b` takes those nodes out of what `--nodes` and
+    * `--node-groups` selected, so a group can be used with some members left
+    * out. It only ever subtracts: with no `--nodes` or `--node-groups` it is an
+    * error and never means "everything except", because `reboot` and `shutdown`
+    * refuse to default to every node and this must not be a way round that. A
+    * name that was not selected is an error too (a typo would otherwise leave
+    * the node in), as is an exclusion that leaves nothing.
     */
   def expandNodeGroups(
       args: List[String],
@@ -197,19 +206,22 @@ object Cli:
         rest: List[String],
         nodes: List[String],
         grps: List[String],
-        sawNodes: Boolean
-    ): (List[String], List[String], List[String], Boolean) =
+        excluded: List[String]
+    ): (List[String], List[String], List[String], List[String]) =
       in match
         case "--node-groups" :: v :: tl =>
-          scan(tl, rest, nodes, grps ++ split(v), sawNodes)
+          scan(tl, rest, nodes, grps ++ split(v), excluded)
         case "--nodes" :: v :: tl =>
-          scan(tl, rest, nodes ++ split(v), grps, sawNodes = true)
-        case h :: tl => scan(tl, rest :+ h, nodes, grps, sawNodes)
-        case Nil     => (rest, nodes, grps, sawNodes)
+          scan(tl, rest, nodes ++ split(v), grps, excluded)
+        case "--exclude-nodes" :: v :: tl =>
+          scan(tl, rest, nodes, grps, excluded ++ split(v))
+        case h :: tl => scan(tl, rest :+ h, nodes, grps, excluded)
+        case Nil     => (rest, nodes, grps, excluded)
 
-    if !args.contains("--node-groups") then Right(args)
+    if !args.exists(a => a == "--node-groups" || a == "--exclude-nodes") then
+      Right(args)
     else
-      val (rest, nodes, grps, _) = scan(args, Nil, Nil, Nil, sawNodes = false)
+      val (rest, nodes, grps, excluded) = scan(args, Nil, Nil, Nil, Nil)
       val unknown = grps.filterNot(g => groups.exists(_.name == g))
       if unknown.nonEmpty then
         Left(
@@ -219,11 +231,26 @@ object Cli:
                 else groups.map(_.name).mkString(", ")
               }"
         )
+      else if excluded.nonEmpty && nodes.isEmpty && grps.isEmpty then
+        Left(
+          "--exclude-nodes takes nodes out of a selection: give --nodes or " +
+            "--node-groups as well (it never means \"everything except\")"
+        )
       else
         val members =
           grps.flatMap(g => groups.find(_.name == g).toList.flatMap(_.members))
         val merged = (nodes ++ members).distinct
-        Right(rest ++ List("--nodes", merged.mkString(",")))
+        val notSelected = excluded.filterNot(merged.contains)
+        if notSelected.nonEmpty then
+          Left(
+            s"--exclude-nodes names node(s) that are not selected: ${notSelected.mkString(", ")}. " +
+              s"Selected: ${merged.mkString(", ")}"
+          )
+        else
+          val targets = merged.filterNot(excluded.contains)
+          if excluded.nonEmpty && targets.isEmpty then
+            Left("--exclude-nodes leaves no nodes to act on")
+          else Right(rest ++ List("--nodes", targets.mkString(",")))
 
   def parse(rawArgs: List[String]): Either[String, Command] =
     expandNodeGroups(rawArgs).flatMap(parseExpanded)
@@ -414,9 +441,11 @@ object Cli:
           Left(
             s"'$verb' cannot be a pipeline step (allowed: ${pipelineVerbs.toList.sorted.mkString(", ")})"
           )
-        case _ if tokens.exists(t => t == "--nodes" || t == "--node-groups") =>
+        case _ if tokens.exists(t =>
+              t == "--nodes" || t == "--node-groups" || t == "--exclude-nodes"
+            ) =>
           Left(
-            s"A pipeline step must not give its own --nodes/--node-groups (the pipeline's targets apply): $step"
+            s"A pipeline step must not give its own --nodes/--node-groups/--exclude-nodes (the pipeline's targets apply): $step"
           )
         case _ =>
           val full = tokens ++ List("--nodes", node)
@@ -1138,10 +1167,14 @@ object Cli:
       |  -c, --config-dir <uri>  where the per-VM config files are; `--config tst0`
       |                          then means <config-dir>/tst0.yaml
       |                          (default $ORPHERA_CONFIG_DIR, else config)
-      |  These go before the command. Only file locations can be read so far.
+      |                          mariadb://<user>@<host>/<database>/inventory (or
+      |                          .../config) reads the database, read-only
+      |  These go before the command.
       |
       |Targeting: every command taking --nodes also takes
       |  --node-groups g1,g2   (groups from inventory.yaml; union with --nodes)
+      |  --exclude-nodes a,b   (takes nodes out of what --nodes/--node-groups selected;
+      |                         needs one of them, and names must be in the selection)
       |
       |Usage:
       |  install           <package> [<package> ...] [--nodes host1,host2] [--update-cache]
