@@ -64,23 +64,25 @@ that the exported files pass `validate-schemas.py`, that a made-up config with t
 extension keys, a custom port, group vars) survives the trip, and that a changed or missing row is reported. It needs no
 database server, so it does not test the server's own rules, the `mariadb` client path, or TLS.
 
-## Not ready to be the source for a rebuild (2026-10-20)
+## Status (2026-10-21)
 
-Running Ceph and OpenStack end to end from the database as the only source of the inventory and configs is not possible yet.
-Needed first:
+Checked against the real server, from scala0, over the verified TLS connection:
+
+- `utils/sql-to-yaml.py --compare`: the database equals `inventory.yaml` and `config/*.yaml`.
+- `orphera -I mariadb://... version` lists the same 25 nodes as the file (the database is sorted by name; compare with `sort`).
+- `orphera -c mariadb://... show-config` prints the same 22 configs as `orphera -c config show-config`.
+- The export (`sql-to-yaml.py --out DIR`) passes `validate-schemas.py`, works as `-I`/`-c`, and `rebuild_openstack_from_scratch.sh --dry-run`
+  prints the same plan from it.
+
+Not done: a real rebuild from the database. It tears down and rebuilds the OpenStack VMs, so it is a planned run, not a test.
+What it would still depend on:
 
 | Gap | Detail |
 |---|---|
-| Reader not yet run against the server | `mariadb://` is implemented (see above) and its conversion is checked by `DbDocumentsCheck`, but it has not yet been run against the real server, so the JDBC connection and the certificate check are untested. |
-| Scripts read files | The shell scripts read a VM's hypervisor and address from `config/<vm>.yaml`. They now take the directory from `ORPHERA_CONFIG_DIR` and the inventory from `ORPHERA_INVENTORY`, as `orphera` does (`utils/orphera-sources.sh`), but only files, so a database has to be exported first. They do not read `-I`/`-c`. |
-| Export not yet run against the server | `utils/sql-to-yaml.py` writes the database back out as files and compares it with the committed ones (see [Reading it back](#reading-it-back)). It is tested against a SQLite copy of the tables, not against your MariaDB server. |
+| Scripts read files | The shell scripts read a VM's hypervisor and address from `config/<vm>.yaml`. They take the directory from `ORPHERA_CONFIG_DIR` and the inventory from `ORPHERA_INVENTORY`, as `orphera` does (`utils/orphera-sources.sh`), but only files, so a database has to be exported first (`sql-to-yaml.py --out DIR`). They do not read `-I`/`-c`. |
 | Copy, not source | The files in git are the source of truth (decided 2026-10-21). The database must be reloaded with `yaml-to-sql.py --replace` after any change to a file, and `sql-to-yaml.py --compare` shows when it is behind. |
 | Failure mode | If the inventory cannot be read, `orphera` falls back to an empty inventory with a warning; with a database, an outage would look the same. `never-reboot` is also then absent from `orphera`, though a host's own agent marker still holds. |
-
-Two ways to run from the database before a full rebuild is tried: `orphera -I mariadb://... -c mariadb://...` directly, or
-export the database to files (`sql-to-yaml.py --out DIR`) and point `ORPHERA_INVENTORY`/`ORPHERA_CONFIG_DIR` (and `-I`/`-c`) at the copy.
-The export route has been checked against the real server (the database equals the files, and `orphera version` and the
-dry run of `rebuild_openstack_from_scratch.sh` work from it).
+| One account per client host | The login accounts are per host (`orphera_ro@scala0.ljalbinson.com` for scala0, `orphera_ro@192.168.1.91` for DBeaver); the role `orphera_reader` cannot log in. |
 
 The tables hold the same data as the [JSON Schemas](SCHEMAS.md). Where a schema could only say "checked by
 `validate-schemas.py`", the database enforces the rule itself:
