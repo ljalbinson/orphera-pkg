@@ -22,8 +22,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (`make check-roundtrip`) loads the real files into a SQLite copy of the tables and reads them back; it fails if the
   exporter's column lists drift from `001-tables.sql`. Run against the real server: the database equals `inventory.yaml` and `config/*.yaml`.
 
+### Removed
+- `build` (an old script that ran a 0.1.0-SNAPSHOT jar) and `manifests/ceph-mgr.scala` (a copy of `ceph_mgr.scala`), with their SPDX exemptions.
+
 ### Changed
-- `build` and `manifests/ceph-mgr.scala` carry the SPDX header like every other file; the two exemptions for them are gone.
 - The shell scripts (`build_openstack_stack.sh`, `mk-new-and-empty.sh`, `par-mk-new-and-empty.sh`,
   `rebuild_openstack_from_scratch.sh`, and the VM scripts through `vm-common.sh`) read the VM configs from
   `ORPHERA_CONFIG_DIR` and the inventory from `ORPHERA_INVENTORY` (plain path or `file:` URI; defaults unchanged) through the
