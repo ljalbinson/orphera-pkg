@@ -1174,7 +1174,7 @@ object Cli:
   val usage: String =
     """orphera-orchestrator - test CLI for the Orphera agent protocol
       |
-      |Usage: orphera [-I <inventory>] [-c <config-dir>] <command> [args...]
+      |Usage: orphera [-I <inventory>] [-c <config-dir>] [-m <manifests>] <command> [args...]
       |  -I, --inventory <uri>   where the inventory is: a path or a URI such as
       |                          file:///etc/orphera/inventory.yaml
       |                          (default $ORPHERA_INVENTORY, else inventory.yaml)
@@ -1183,6 +1183,10 @@ object Cli:
       |                          (default $ORPHERA_CONFIG_DIR, else config)
       |                          mariadb://<user>@<host>/<database>/inventory (or
       |                          .../config) reads the database, read-only
+      |  -m, --manifests <dir>   where the playbooks are: a playbook given as a bare file
+      |                          name (etcd_cluster.scala) is looked for there first; a path
+      |                          (manifests/etcd_cluster.scala) is used as it is
+      |                          (default $ORPHERA_MANIFESTS, else manifests)
       |  These go before the command.
       |
       |Targeting: every command taking --nodes also takes

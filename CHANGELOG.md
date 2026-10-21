@@ -7,6 +7,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- `-m` / `--manifests <dir>` (and `ORPHERA_MANIFESTS`, default `manifests`) says where the playbooks are. A playbook given as a bare
+  file name (`orphera -m /usr/share/orphera/manifests cluster-playbook gen_set_dns.scala`) is looked for in that directory first, then
+  taken as it is; a name with a `/`, `@bootstrap` and compiled playbook names are never looked up, so existing command lines are
+  unchanged. The option reaches the playbook scripts `orphera` starts as `ORPHERA_MANIFESTS`. A first step towards running without
+  the repository underneath.
 - `--exclude-nodes a,b` takes nodes out of what `--nodes` / `--node-groups` selected (`orphera dist-upgrade --node-groups mons
   --exclude-nodes tst1`). Without `--nodes` or `--node-groups` it means every node except those, for the
   commands where no `--nodes` already means every node (`deploy-agent ... --exclude-nodes tst8`); for `reboot`, `shutdown`,

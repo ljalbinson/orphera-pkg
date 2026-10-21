@@ -421,19 +421,27 @@ static and hand-edited only, for now.
 
 ## CLI reference
 
-### Where the inventory and configs are
+### Where the inventory, configs and playbooks are
 
-Two global options go **before** the command:
+Three global options go **before** the command:
 
 | Option | Environment variable | Default | What it locates |
 |---|---|---|---|
 | `-I`, `--inventory <uri>` | `ORPHERA_INVENTORY` | `inventory.yaml` | the inventory |
 | `-c`, `--config-dir <uri>` | `ORPHERA_CONFIG_DIR` | `config` | the directory of per-VM config files |
+| `-m`, `--manifests <dir>` | `ORPHERA_MANIFESTS` | `manifests` | the directory of playbooks |
 
 ```
 orphera -I file:///etc/orphera/inventory.yaml -c file:///etc/orphera/config version
 orphera -c /srv/vms cluster-playbook manifests/gen_set_dns.scala --config tst7
+orphera -m /usr/share/orphera/manifests cluster-playbook gen_set_dns.scala gen_packages.scala --config tst7
 ```
+
+A playbook given as a bare file name ending in `.scala`, `.yaml` or `.yml` is looked for in the manifests directory first and,
+if it is not there, taken as it is (so a file in the current directory still works). A name with a `/`
+(`manifests/gen_set_dns.scala`, `/srv/pb/x.yaml`), the `@bootstrap` step and the name of a compiled playbook are never looked
+up, so every command line that worked before still means the same. The manifests directory is a plain path or a `file:`
+URI: a `.scala` playbook is compiled from a file.
 
 The option wins over the environment variable, which wins over the default. A location is a plain path or a URI;
 `file:` URIs (`file:///path`), plain paths and `mariadb://` can be read. A `mariadb://user@host/database/inventory` or

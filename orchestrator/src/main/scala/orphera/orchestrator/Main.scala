@@ -10,16 +10,22 @@ import cats.syntax.all.*
 object Main extends IOApp:
 
   def run(args: List[String]): IO[ExitCode] =
-    // The global options (-I, -c) come off first, before anything reads the
+    // The global options (-I, -c, -m) come off first, before anything reads the
     // inventory, which is loaded the first time it is used.
     Locations.extract(args) match
       case Left(err) =>
         IO.println(s"Error: $err") >> IO.pure(ExitCode.Error)
       case Right((overrides, rest)) =>
         Locations.install(overrides)
-        dispatch(rest).handleErrorWith { err =>
-          IO.println(s"Error: ${err.getMessage}") >> IO.pure(ExitCode.Error)
-        }
+        Locations.manifestsEnvError.filter(_ => overrides.manifests.isEmpty) match
+          case Some(err) =>
+            IO.println(s"Error: ORPHERA_MANIFESTS: $err") >>
+              IO.pure(ExitCode.Error)
+          case None =>
+            dispatch(rest).handleErrorWith { err =>
+              IO.println(s"Error: ${err.getMessage}") >>
+                IO.pure(ExitCode.Error)
+            }
 
   /** Entry point for every invocation. Auditable commands (see
     * AuditLog.isAuditable) get a start/end record in the audit trail wrapped
@@ -60,13 +66,18 @@ object Main extends IOApp:
       )
     yield exitCode
 
-  /** `--config tst0` names a file of the config directory (-c); see
-    * Locations.resolveConfig.
+  /** `--config tst0` names a file of the config directory (-c), see
+    * Locations.resolveConfig; a bare playbook file name is looked for in the
+    * manifests directory (-m), see Locations.resolveManifest.
     */
   private def withResolvedConfigs(command: Command): Command =
     command match
       case Command.RunPlaybook(source, resume, config) =>
-        Command.RunPlaybook(source, resume, config.map(Locations.resolveConfig))
+        Command.RunPlaybook(
+          Locations.resolveManifest(source),
+          resume,
+          config.map(Locations.resolveConfig)
+        )
       case Command.RunClusterPlaybook(
             paths,
             resume,
@@ -76,7 +87,7 @@ object Main extends IOApp:
             bootstrap
           ) =>
         Command.RunClusterPlaybook(
-          paths,
+          paths.map(Locations.resolveManifest(_)),
           resume,
           configs.map(Locations.resolveConfig),
           parallel,

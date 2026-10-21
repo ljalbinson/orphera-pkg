@@ -69,11 +69,19 @@ _orphera_complete_nodelist() {
 _orphera_playbook_path_completions() {
   local cur="$1"
   local -a matches
+  # The manifests directory: -m, ORPHERA_MANIFESTS, else manifests.
+  local man="${_ORPHERA_MAN:-${ORPHERA_MANIFESTS:-manifests}}"
+  man="${man#file://}"
 
   matches+=($(compgen -f -X '!*.@(yaml|yml|scala)' -- "$cur"))
 
-  if [[ -d manifests && "$cur" != */* ]]; then
-    matches+=($(compgen -f -X '!*.@(yaml|yml|scala)' -- "manifests/$cur"))
+  if [[ -d "$man" && "$cur" != */* ]]; then
+    if [[ "$man" == manifests ]]; then
+      matches+=($(compgen -f -X '!*.@(yaml|yml|scala)' -- "manifests/$cur"))
+    else
+      # Another directory: offer the bare file names, which orphera looks up there.
+      matches+=($(cd "$man" 2>/dev/null && compgen -f -X '!*.@(yaml|yml|scala)' -- "$cur"))
+    fi
   fi
 
   # De-duplicate (a bare cur of "" would otherwise repeat nothing here,
@@ -94,10 +102,10 @@ _orphera_completions() {
   # Flags common to most verbs that take --nodes
   local nodes_flag="--nodes"
 
-  # The global options (-I/--inventory <uri>, -c/--config-dir <uri>) come before
-  # the verb. Take each finished pair out of `words`, so everything below sees
+  # The global options (-I/--inventory <uri>, -c/--config-dir <uri>, -m/--manifests
+  # <dir>) come before the verb. Take each finished pair out of `words`, so everything below sees
   # the verb at words[1] as usual, and keep the inventory for --node-groups.
-  local _ORPHERA_INV="" _ORPHERA_CFG=""
+  local _ORPHERA_INV="" _ORPHERA_CFG="" _ORPHERA_MAN=""
   while [[ $cword -gt 2 ]]; do
     case "${words[1]}" in
       -I|--inventory)
@@ -106,6 +114,9 @@ _orphera_completions() {
       -c|--config-dir)
         _ORPHERA_CFG="${words[2]}"
         words=("${words[0]}" "${words[@]:3}"); cword=$((cword - 2)) ;;
+      -m|--manifests)
+        _ORPHERA_MAN="${words[2]}"
+        words=("${words[0]}" "${words[@]:3}"); cword=$((cword - 2)) ;;
       *) break ;;
     esac
   done
@@ -113,6 +124,7 @@ _orphera_completions() {
   if [[ $cword -eq 2 ]]; then
     case "${words[1]}" in
       -I|--inventory|-c|--config-dir) _filedir; return ;;
+      -m|--manifests) _filedir -d; return ;;
     esac
   fi
 
@@ -121,7 +133,7 @@ _orphera_completions() {
     # `--help` is accepted as the first argument too, but only offered once
     # a dash has been typed, so it doesn't clutter the plain verb list.
     if [[ "$cur" == -* ]]; then
-      COMPREPLY=($(compgen -W "--help -I --inventory -c --config-dir" -- "$cur"))
+      COMPREPLY=($(compgen -W "--help -I --inventory -c --config-dir -m --manifests" -- "$cur"))
     else
       COMPREPLY=($(compgen -W "$verbs" -- "$cur"))
     fi

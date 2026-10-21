@@ -57,6 +57,36 @@ object LocationsCheck:
         Right((Locations.Overrides(None, None), List("run", "sh", "-c", "uptime")))
     )
 
+    check(
+      "-m and --manifests take a directory, with the other options in any order",
+      extracted("-m", "/srv/pb", "-c", "cfg", "playbook", "a.scala") ==
+        Right(
+          (
+            Locations.Overrides(None, Some("cfg"), Some("/srv/pb")),
+            List("playbook", "a.scala")
+          )
+        ) &&
+        extracted("--manifests", "pb", "version") ==
+          Right((Locations.Overrides(None, None, Some("pb")), List("version")))
+    )
+    check(
+      "a file: URI for the manifests is reduced to its path",
+      extracted("-m", "file:///srv/pb", "version") ==
+        Right((Locations.Overrides(None, None, Some("/srv/pb")), List("version")))
+    )
+    check(
+      "a manifests location that is not a directory path is refused",
+      extracted("-m", "mariadb://u@h/db/config", "version").swap
+        .exists(_.contains("mariadb")) &&
+        extracted("-m").swap.exists(_.contains("-m")) &&
+        extracted("--manifests", "--nodes").swap.exists(_.contains("--manifests"))
+    )
+    check(
+      "-m after the command belongs to the command",
+      extracted("run", "sh", "-m", "x") ==
+        Right((Locations.Overrides(None, None), List("run", "sh", "-m", "x")))
+    )
+
     // Where things are looked for
     val before = (Locations.inventory, Locations.configDir)
     Locations.install(
@@ -82,6 +112,40 @@ object LocationsCheck:
     )
     Locations.install(Locations.Overrides(None, None))
     check("no options, no child environment", Locations.childEnv.isEmpty)
+
+    // The manifests directory
+    check(
+      "the default manifests directory when nothing is set",
+      sys.env.contains("ORPHERA_MANIFESTS") || Locations.manifests == "manifests"
+    )
+    Locations.install(Locations.Overrides(None, None, Some("/srv/pb/")))
+    check("an option sets the manifests directory", Locations.manifests == "/srv/pb/")
+    check(
+      "the child process is told the manifests directory",
+      Locations.childEnv == Map("ORPHERA_MANIFESTS" -> "/srv/pb/")
+    )
+    val present = Set("/srv/pb/a.scala", "/srv/pb/b.yaml", "/srv/pb/c.yml")
+    check(
+      "a bare playbook file name is looked for in the manifests directory",
+      List("a.scala", "b.yaml", "c.yml").forall(n =>
+        Locations.resolveManifest(n, present.contains) == s"/srv/pb/$n"
+      )
+    )
+    check(
+      "a bare name that is not there is taken as it is",
+      Locations.resolveManifest("here.scala", present.contains) == "here.scala"
+    )
+    check(
+      "a path, a step, and a compiled playbook's name are never looked up",
+      List("manifests/a.scala", "/x/a.scala", "./a.scala", "@bootstrap", "arithmetic", "a.txt")
+        .forall(v => Locations.resolveManifest(v, _ => true) == v)
+    )
+    Locations.install(Locations.Overrides(None, None))
+    check(
+      "the default directory is manifests",
+      sys.env.contains("ORPHERA_MANIFESTS") ||
+        Locations.resolveManifest("a.scala", _ == "manifests/a.scala") == "manifests/a.scala"
+    )
     check(
       "the defaults when nothing is set",
       sys.env.contains("ORPHERA_INVENTORY") || Locations.inventory == "inventory.yaml"
