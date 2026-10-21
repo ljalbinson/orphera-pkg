@@ -5,6 +5,33 @@
 from MariaDB yet.** This is the database design and a way to load the existing files into it; a reader in the
 orchestrator is a separate piece of work (a JDBC driver, and a `Sources.register("mariadb", ...)` reader).
 
+## Reading it back
+
+`utils/sql-to-yaml.py` is the reverse of `yaml-to-sql.py`. It uses only `SELECT`, through the `mariadb` command-line client
+(the arguments you would give it to connect, in one string; the password is read from the secret
+`orphera/inventory-db-reader`, or from `MYSQL_PWD`, and is not put on the command line):
+
+```
+utils/sql-to-yaml.py --mariadb "-h DBHOST -u orphera_reader --ssl-ca certs/ca.crt orphera" --compare
+utils/sql-to-yaml.py --mariadb "..." --out /tmp/from-db
+```
+
+`--compare` checks that the database holds what `inventory.yaml` and `config/*.yaml` hold, as data and not as text, and
+prints one line per difference (exit 1), for example `config vm tst0.disks: file [256, 256] != database [256, 128]`.
+`--out DIR` writes `DIR/inventory.yaml` and `DIR/config/*.yaml` (the directory must be empty or new). A rebuild can then be
+started against the copy with `ORPHERA_INVENTORY=DIR/inventory.yaml ORPHERA_CONFIG_DIR=DIR/config`. The `orphera` command
+follows these; the shell scripts listed below still open `config/<vm>.yaml` relative to the repository, so copy the exported
+`config/` over a scratch checkout for those.
+
+What the database cannot hold, and so the export differs in: the order of nodes, groups and members (the export is sorted by
+name), and `pdisks` (`yaml-to-sql.py` now refuses a non-empty one instead of dropping it; all the current configs have it empty).
+
+`make check-roundtrip` runs `utils/test-sql-roundtrip.py`: it creates the tables in SQLite from the column lists in
+`001-tables.sql`, loads the real files with `yaml-to-sql.py`, reads them back with `sql-to-yaml.py`, and checks the two agree,
+that the exported files pass `validate-schemas.py`, that a made-up config with the cases the real files lack (extra NICs, scalar disks,
+extension keys, a custom port, group vars) survives the trip, and that a changed or missing row is reported. It needs no
+database server, so it does not test the server's own rules, the `mariadb` client path, or TLS.
+
 ## Not ready to be the source for a rebuild (2026-10-20)
 
 Running Ceph and OpenStack end to end from the database as the only source of the inventory and configs is not possible yet.
@@ -14,7 +41,7 @@ Needed first:
 |---|---|
 | No reader | `Sources` has no `mariadb:` scheme, and the build has no JDBC driver. A reader has to turn the rows into the same data the YAML readers produce, and reach the server over TLS (the certificate is signed by the Orphera CA; DBeaver only connected with `sslMode=trust`, so verification is untested) with the `orphera/inventory-db-reader` secret. |
 | Scripts read files | `build_openstack_stack.sh`, `mk-new-and-empty.sh`, `par-mk-new-and-empty.sh`, `rebuild_openstack_from_scratch.sh`, `test_apt_cache.sh`, `test_ceph_lifecycle.sh`, `test_rpm_cache.sh` and the VM scripts in `utils/` open `config/<vm>.yaml` directly (the VM's hypervisor, its address). The first step of a rebuild, creating the VMs, therefore still needs the files. |
-| No export | `yaml-to-sql.py` loads files into the database; nothing writes the database back out as files, so there is no check that the rows hold everything the files do. |
+| Export not yet run against the server | `utils/sql-to-yaml.py` writes the database back out as files and compares it with the committed ones (see [Reading it back](#reading-it-back)). It is tested against a SQLite copy of the tables, not against your MariaDB server. |
 | No source of truth | The files are in git and the database is edited by hand or by `yaml-to-sql.py --replace`. Which wins, and how a change reaches the other, is undecided. |
 | Failure mode | If the inventory cannot be read, `orphera` falls back to an empty inventory with a warning; with a database, an outage would look the same. `never-reboot` is also then absent from `orphera`, though a host's own agent marker still holds. |
 

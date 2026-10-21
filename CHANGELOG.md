@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- `utils/sql-to-yaml.py`, the reverse of `yaml-to-sql.py`: reads the MariaDB tables (through the `mariadb` client, `SELECT`
+  only, password from the secret store) and either checks them against `inventory.yaml` and `config/*.yaml`
+  (`--compare`, data not text, one line per difference) or writes them as files (`--out DIR`). `utils/test-sql-roundtrip.py`
+  (`make check-roundtrip`) loads the real files into a SQLite copy of the tables and reads them back; it fails if the
+  exporter's column lists drift from `001-tables.sql`. Not yet run against the real server.
+
+### Fixed
+- `utils/yaml-to-sql.py` refuses a config with a non-empty `pdisks` instead of dropping it silently (no table holds it).
+
 ### Documentation
 - `docs/TESTS.md` K34-K37: the credential replacement and lab rebuild, the second duplicate-VIP conflict, the shutdown that
   reached a protected hypervisor, and the agent-side guard on tst20. `docs/ROTATING-LAB-SECRETS.md` now records the verified

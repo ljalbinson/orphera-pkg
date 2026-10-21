@@ -75,6 +75,9 @@ def inventory_sql(doc):
 
 def vm_sql(params):
     host, nic0 = params["hostname"], params["nic0"]
+    if params.get("pdisks"):
+        # No table holds them yet; writing the rest would silently lose them.
+        sys.exit(f"{host}: pdisks is not stored in the database yet, so no SQL is written (empty pdisks is fine)")
     ext = {k: v for k, v in params.items() if k.startswith("x-")}
     out = [insert(
         "vm_config", hostname=host, hypervisor=params["hypervisor"], domainname=params["domainname"],

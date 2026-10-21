@@ -114,6 +114,11 @@ check-uptimes:
 check-schemas:
 	utils/validate-schemas.py
 
+# Loads the real inventory and configs into a SQLite copy of the database tables with utils/yaml-to-sql.py, reads them
+# back with utils/sql-to-yaml.py and checks they are equal (needs python3-yaml and python3-jsonschema; no database server).
+check-roundtrip:
+	utils/test-sql-roundtrip.py
+
 # Fails if a tracked source file has no SPDX-License-Identifier header and is not listed in utils/spdx-exempt.txt.
 check-spdx:
 	utils/spdx.py --check
