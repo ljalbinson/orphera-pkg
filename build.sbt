@@ -124,7 +124,9 @@ lazy val orchestrator = project
       "io.circe" %% "circe-generic" % "0.14.10",
       "com.github.spullara.mustache.java" % "compiler" % "0.9.14",
       // Reads the inventory and configs from MariaDB (mariadb:// locations, MariaDbSource.scala)
-      "org.mariadb.jdbc" % "mariadb-java-client" % "3.5.1"
+      "org.mariadb.jdbc" % "mariadb-java-client" % "3.5.1",
+      // The driver logs through SLF4J; without a backend every run prints "No SLF4J providers were found"
+      "org.slf4j" % "slf4j-nop" % "2.0.7"
     )
   )
 

@@ -11,7 +11,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   inventory and the per-VM configs from the MariaDB tables, read-only, with the server certificate and host name always
   verified against `certs/ca.crt` (or `ORPHERA_DB_CA`) and the password from the secret `orphera/inventory-db-reader`, which is
   never created on first use. The files stay the source of truth. `DbDocumentsCheck` covers the locations and the conversion.
-  Not yet run against the real server.
+  Run against the real server: the inventory it reads equals `inventory.yaml`. `slf4j-nop` silences the driver's logging notice.
 - `utils/sql-to-yaml.py`, the reverse of `yaml-to-sql.py`: reads the MariaDB tables (through the `mariadb` client, `SELECT`
   only, password from the secret store) and either checks them against `inventory.yaml` and `config/*.yaml`
   (`--compare`, data not text, one line per difference) or writes them as files (`--out DIR`). `utils/test-sql-roundtrip.py`
