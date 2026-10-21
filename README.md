@@ -403,9 +403,16 @@ orphera dist-upgrade --node-groups mons --exclude-nodes tst1
 orphera reboot --node-groups ceph --exclude-nodes tst0 --yes
 ```
 
-It only subtracts. With neither `--nodes` nor `--node-groups` it is an error and never means "everything except", so
-`reboot` and `shutdown` still cannot be pointed at the whole fleet by leaving one node out. A name that was not selected
-is an error too (a typo would otherwise leave the node in), as is an exclusion that leaves no nodes. It is applied with
+With neither `--nodes` nor `--node-groups` it means every node except those, for the commands where no `--nodes` already
+means every node (`install`, `remove`, `autoremove`, `dist-upgrade`, `copy`, `write-file`, `network-apply`, `deploy-agent`,
+`run`, `fetch`, `facts`, `version`, `uptime`, `thread-info`):
+
+```
+orphera deploy-agent --file orphera-agent_0.1.200_amd64.deb --exclude-nodes tst8
+```
+
+For `reboot`, `shutdown`, `teardown`, `bootstrap`, a pipeline and the playbook commands it is an error, so leaving one node
+out can never point them at the whole fleet. A name that was not selected is an error (a typo would otherwise leave the node in), as is an exclusion that leaves no nodes. It is applied with
 the group expansion, so the audit log records the nodes that were actually targeted. A pipeline's steps cannot give it;
 put it on the pipeline itself.
 

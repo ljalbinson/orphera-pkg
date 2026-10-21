@@ -8,8 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 - `--exclude-nodes a,b` takes nodes out of what `--nodes` / `--node-groups` selected (`orphera dist-upgrade --node-groups mons
-  --exclude-nodes tst1`). It only subtracts: without `--nodes` or `--node-groups` it is an error, so `reboot` and `shutdown` still
-  never default to every node; a name that was not selected, or an exclusion that leaves nothing, is an error.
+  --exclude-nodes tst1`). Without `--nodes` or `--node-groups` it means every node except those, for the
+  commands where no `--nodes` already means every node (`deploy-agent ... --exclude-nodes tst8`); for `reboot`, `shutdown`,
+  `teardown`, `bootstrap`, pipelines and playbooks it is an error, so they still never default to every node. A name that was
+  not selected, or an exclusion that leaves nothing, is an error.
 
 ### Removed
 - `build` (an old script that ran a 0.1.0-SNAPSHOT jar) and `manifests/ceph-mgr.scala` (a copy of `ceph_mgr.scala`), with their SPDX exemptions.

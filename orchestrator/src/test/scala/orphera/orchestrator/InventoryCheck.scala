@@ -85,7 +85,8 @@ object InventoryCheck:
       Group("mons", List("a", "b", "c")),
       Group("osds", List("c", "d"))
     )
-    def expanded(args: String*) = Cli.expandNodeGroups(args.toList, grp)
+    def expanded(args: String*) =
+      Cli.expandNodeGroups(args.toList, grp, List("a", "b", "c", "d"))
     check(
       "a group with a member excluded",
       expanded("uptime", "--node-groups", "mons", "--exclude-nodes", "b") ==
@@ -102,8 +103,19 @@ object InventoryCheck:
         Right(List("uptime", "--nodes", "b"))
     )
     check(
-      "--exclude-nodes alone is refused, not read as everything except",
-      expanded("shutdown", "--exclude-nodes", "a", "--yes").isLeft
+      "--exclude-nodes alone means all nodes but those, for a command that defaults to all",
+      expanded("deploy-agent", "--file", "x.deb", "--exclude-nodes", "b") ==
+        Right(List("deploy-agent", "--file", "x.deb", "--nodes", "a,c,d"))
+    )
+    check(
+      "--exclude-nodes alone is refused for shutdown, reboot, teardown and bootstrap",
+      List("shutdown", "reboot", "teardown", "bootstrap").forall(verb =>
+        expanded(verb, "--exclude-nodes", "a", "--yes").isLeft
+      )
+    )
+    check(
+      "excluding a node that is not in the inventory is refused",
+      expanded("uptime", "--exclude-nodes", "zzz").swap.exists(_.contains("not selected"))
     )
     check(
       "excluding a node that was not selected is refused",

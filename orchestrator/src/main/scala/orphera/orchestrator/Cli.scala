@@ -187,15 +187,25 @@ object Cli:
     *
     * `--exclude-nodes a,b` takes those nodes out of what `--nodes` and
     * `--node-groups` selected, so a group can be used with some members left
-    * out. It only ever subtracts: with no `--nodes` or `--node-groups` it is an
-    * error and never means "everything except", because `reboot` and `shutdown`
-    * refuse to default to every node and this must not be a way round that. A
-    * name that was not selected is an error too (a typo would otherwise leave
-    * the node in), as is an exclusion that leaves nothing.
+    * out. With neither, it means every node except those, but only for the
+    * verbs where no `--nodes` already means every node (`defaultsToAll`:
+    * `deploy-agent --file x.deb --exclude-nodes tst8`). For the others
+    * (`reboot`, `shutdown`, `teardown`, `bootstrap`, a pipeline, the
+    * playbooks) it is an error: they refuse to default to every node and this
+    * must not be a way round that. A name that was not selected is an error
+    * (a typo would otherwise leave the node in), as is an exclusion that leaves
+    * nothing.
     */
+  /** The verbs where leaving out `--nodes` already means every node in the
+    * inventory. `reboot` and `shutdown` are the pipeline verbs that are not
+    * here: one needs an explicit target and the other a deliberate override.
+    */
+  private def defaultsToAll: Set[String] = pipelineVerbs -- Set("reboot", "shutdown")
+
   def expandNodeGroups(
       args: List[String],
-      groups: List[Group] = Inventory.groups
+      groups: List[Group] = Inventory.groups,
+      allNodes: => List[String] = Inventory.all.map(_.name)
   ): Either[String, List[String]] =
     def split(v: String): List[String] =
       v.split(",").toList.map(_.trim).filter(_.nonEmpty)
@@ -231,15 +241,19 @@ object Cli:
                 else groups.map(_.name).mkString(", ")
               }"
         )
-      else if excluded.nonEmpty && nodes.isEmpty && grps.isEmpty then
+      else if excluded.nonEmpty && nodes.isEmpty && grps.isEmpty &&
+        !args.headOption.exists(defaultsToAll.contains)
+      then
         Left(
           "--exclude-nodes takes nodes out of a selection: give --nodes or " +
-            "--node-groups as well (it never means \"everything except\")"
+            "--node-groups as well (this command does not default to every node)"
         )
       else
         val members =
           grps.flatMap(g => groups.find(_.name == g).toList.flatMap(_.members))
-        val merged = (nodes ++ members).distinct
+        val merged =
+          if nodes.isEmpty && grps.isEmpty then allNodes
+          else (nodes ++ members).distinct
         val notSelected = excluded.filterNot(merged.contains)
         if notSelected.nonEmpty then
           Left(
@@ -1173,8 +1187,9 @@ object Cli:
       |
       |Targeting: every command taking --nodes also takes
       |  --node-groups g1,g2   (groups from inventory.yaml; union with --nodes)
-      |  --exclude-nodes a,b   (takes nodes out of what --nodes/--node-groups selected;
-      |                         needs one of them, and names must be in the selection)
+      |  --exclude-nodes a,b   (takes nodes out of what --nodes/--node-groups selected,
+      |                         or out of all nodes for a command that defaults to all,
+      |                         such as deploy-agent; names must be in the selection)
       |
       |Usage:
       |  install           <package> [<package> ...] [--nodes host1,host2] [--update-cache]
