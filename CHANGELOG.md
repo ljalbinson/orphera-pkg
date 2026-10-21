@@ -13,6 +13,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (`make check-roundtrip`) loads the real files into a SQLite copy of the tables and reads them back; it fails if the
   exporter's column lists drift from `001-tables.sql`. Not yet run against the real server.
 
+### Changed
+- The shell scripts (`build_openstack_stack.sh`, `mk-new-and-empty.sh`, `par-mk-new-and-empty.sh`,
+  `rebuild_openstack_from_scratch.sh`, and the VM scripts through `vm-common.sh`) read the VM configs from
+  `ORPHERA_CONFIG_DIR` and the inventory from `ORPHERA_INVENTORY` (plain path or `file:` URI; defaults unchanged) through the
+  new `utils/orphera-sources.sh`, so a rebuild can run from a copy exported from the database. `make check-scripts`
+  (`utils/test-shell-sources.sh`) checks it, with no lab, and fails if a script opens a fixed `config/` path again.
+
 ### Fixed
 - `utils/sql-to-yaml.py` accepts `--mariadb "-h host ..."` (a value starting with `-`); the documentation names the login account `orphera_ro`, not the role `orphera_reader`, and says an account is needed per client host. Run against the real server: the database equals `inventory.yaml` and `config/`.
 - `utils/yaml-to-sql.py` refuses a config with a non-empty `pdisks` instead of dropping it silently (no table holds it).

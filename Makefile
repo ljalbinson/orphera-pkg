@@ -119,6 +119,10 @@ check-schemas:
 check-roundtrip:
 	utils/test-sql-roundtrip.py
 
+# Checks that the shell scripts read the inventory and VM configs from ORPHERA_INVENTORY and ORPHERA_CONFIG_DIR (no lab needed).
+check-scripts:
+	utils/test-shell-sources.sh
+
 # Fails if a tracked source file has no SPDX-License-Identifier header and is not listed in utils/spdx-exempt.txt.
 check-spdx:
 	utils/spdx.py --check

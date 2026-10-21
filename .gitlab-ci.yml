@@ -25,4 +25,5 @@ compile_and_test:
   script:
     - utils/check-no-secrets.sh
     - utils/spdx.py --check
+    - bash utils/test-shell-sources.sh
     - sbt clean compile "scalafixAll --check" test

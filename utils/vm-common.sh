@@ -1,33 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Shared by start-vm.sh, stop-vm.sh and reboot-vm.sh; sourced, not run.
-# Finds a VM's hypervisor and libvirt domain name in its config file (in
-# $ORPHERA_CONFIG_DIR, default config) and runs a
+# Finds a VM's hypervisor and libvirt domain name in its config file (found by
+# orphera-sources.sh: $ORPHERA_CONFIG_DIR, default config) and runs a
 # script on the hypervisor through `orphera run`.
 
-# Value of a top-level `key:` under `params:` in a config file, without quotes.
-config_value() {
-  awk -v key="$2" '
-    $0 ~ "^  " key ":" {
-      v = $0
-      sub("^  " key ":[ \t]*", "", v)
-      sub(/[ \t]*#.*$/, "", v)
-      gsub(/^["\x27]|["\x27]$/, "", v)
-      print v
-      exit
-    }' "$1"
-}
-
-# The directory of config files: ORPHERA_CONFIG_DIR, as a path or a file: URI,
-# else config. Any other kind of location cannot be read by a shell script.
-config_dir() {
-  local d="${ORPHERA_CONFIG_DIR:-config}"
-  d="${d#file://}"
-  case "$d" in
-    *://*) echo "ORPHERA_CONFIG_DIR is $d: these scripts read files only" >&2; return 1 ;;
-  esac
-  printf '%s\n' "${d%/}"
-}
+. "$(dirname "${BASH_SOURCE[0]}")/orphera-sources.sh"
 
 # vm_lookup <name | number | config.yaml>  sets cfg, hv and vm. Returns 1, after
 # saying why on stderr, if they cannot be found.

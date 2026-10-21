@@ -20,8 +20,7 @@ utils/sql-to-yaml.py --mariadb="..." --out /tmp/from-db
 prints one line per difference (exit 1), for example `config vm tst0.disks: file [256, 256] != database [256, 128]`.
 `--out DIR` writes `DIR/inventory.yaml` and `DIR/config/*.yaml` (the directory must be empty or new). A rebuild can then be
 started against the copy with `ORPHERA_INVENTORY=DIR/inventory.yaml ORPHERA_CONFIG_DIR=DIR/config`. The `orphera` command
-follows these; the shell scripts listed below still open `config/<vm>.yaml` relative to the repository, so copy the exported
-`config/` over a scratch checkout for those.
+and the shell scripts both follow these two variables; the options `-I` and `-c` are only for `orphera`.
 
 What the database cannot hold, and so the export differs in: the order of nodes, groups and members (the export is sorted by
 name), and `pdisks` (`yaml-to-sql.py` now refuses a non-empty one instead of dropping it; all the current configs have it empty).
@@ -40,7 +39,7 @@ Needed first:
 | Gap | Detail |
 |---|---|
 | No reader | `Sources` has no `mariadb:` scheme, and the build has no JDBC driver. A reader has to turn the rows into the same data the YAML readers produce, and reach the server over TLS (the certificate is signed by the Orphera CA; DBeaver only connected with `sslMode=trust`, so verification is untested) with the `orphera/inventory-db-reader` secret. |
-| Scripts read files | `build_openstack_stack.sh`, `mk-new-and-empty.sh`, `par-mk-new-and-empty.sh`, `rebuild_openstack_from_scratch.sh`, `test_apt_cache.sh`, `test_ceph_lifecycle.sh`, `test_rpm_cache.sh` and the VM scripts in `utils/` open `config/<vm>.yaml` directly (the VM's hypervisor, its address). The first step of a rebuild, creating the VMs, therefore still needs the files. |
+| Scripts read files | The shell scripts read a VM's hypervisor and address from `config/<vm>.yaml`. They now take the directory from `ORPHERA_CONFIG_DIR` and the inventory from `ORPHERA_INVENTORY`, as `orphera` does (`utils/orphera-sources.sh`), but only files, so a database has to be exported first. They do not read `-I`/`-c`. |
 | Export not yet run against the server | `utils/sql-to-yaml.py` writes the database back out as files and compares it with the committed ones (see [Reading it back](#reading-it-back)). It is tested against a SQLite copy of the tables, not against your MariaDB server. |
 | No source of truth | The files are in git and the database is edited by hand or by `yaml-to-sql.py --replace`. Which wins, and how a change reaches the other, is undecided. |
 | Failure mode | If the inventory cannot be read, `orphera` falls back to an empty inventory with a warning; with a database, an outage would look the same. `never-reboot` is also then absent from `orphera`, though a host's own agent marker still holds. |

@@ -19,6 +19,8 @@
 # non-zero if any node failed, and lists which ones.
 
 set -uo pipefail
+. "$(dirname "$0")/../utils/orphera-sources.sh"
+CONF_DIR=$(config_dir) || exit 1
 
 deb=""
 while getopts "f:h" opt; do
@@ -64,12 +66,12 @@ banner "Agent package: $deb"
 # All config files must exist before anything is created, so a typo in the
 # node list fails now rather than after seven VMs have been built.
 for node in "${nodes[@]}"; do
-    [ -f "config/$node.yaml" ] || { echo "missing config/$node.yaml" >&2; exit 1; }
+    [ -f "$CONF_DIR/$node.yaml" ] || { echo "missing $CONF_DIR/$node.yaml" >&2; exit 1; }
 done
 
 hypervisor_of() {
     local hv
-    hv=$(awk -F: '/^[[:space:]]*hypervisor:/ {gsub(/[[:space:]"'\'']/, "", $2); print $2; exit}' "config/$1.yaml")
+    hv=$(awk -F: '/^[[:space:]]*hypervisor:/ {gsub(/[[:space:]"'\'']/, "", $2); print $2; exit}' "$CONF_DIR/$1.yaml")
     echo "${hv:-unknown-$1}"
 }
 
@@ -91,7 +93,7 @@ provision_playbook() {
 }
 
 build_node() {
-    local node=$1 cfg="config/$1.yaml" prov
+    local node=$1 cfg="$CONF_DIR/$1.yaml" prov
     step() { echo; banner "=== $(date '+%F %T') $node: $* ==="; }
 
     prov=$(provision_playbook "$(hypervisor_of "$node")") || return 1

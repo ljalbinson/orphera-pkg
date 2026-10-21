@@ -56,6 +56,8 @@
 set -uo pipefail
 
 cd "$(dirname "$0")/.." || exit 1
+. utils/orphera-sources.sh
+CONF_DIR=$(config_dir) || exit 1
 MANIFESTS="manifests"
 
 ALL_STEPS=(prep caches ceph galera keystone cinder glance placement nova neutron compute horizon clients smoke boot)
@@ -162,7 +164,7 @@ preflight() {
   done
   if [ -n "$bad" ]; then
     for n in $bad; do
-      hv=$(awk -F: '/^[[:space:]]*hypervisor:/ {gsub(/[[:space:]"'"'"']/, "", $2); print $2; exit}' "config/$n.yaml" 2>/dev/null)
+      hv=$(awk -F: '/^[[:space:]]*hypervisor:/ {gsub(/[[:space:]"'"'"']/, "", $2); print $2; exit}' "$CONF_DIR/$n.yaml" 2>/dev/null)
       [ -n "$hv" ] && log "  start $n:  orphera run sh -c \"virsh start $n\" --nodes $hv"
     done
     die "no agent answer from:$bad (inventory entry, VM up, agent running?)"

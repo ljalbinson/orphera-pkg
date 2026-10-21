@@ -423,12 +423,13 @@ it first. The options also reach the playbook scripts and pipeline steps that `o
 command because after it `-c` would be ambiguous (`orphera run sh -c ...`). The files have JSON Schemas, in
 [`schemas/`](schemas/) and described in [docs/SCHEMAS.md](docs/SCHEMAS.md); `make check-schemas` checks them.
 
-**The shell scripts do not follow `-I` and `-c`.** They read the files themselves: `manifests/build_openstack_stack.sh`,
-`mk-new-and-empty.sh`, `par-mk-new-and-empty.sh`, `rebuild_openstack_from_scratch.sh`, `test_apt_cache.sh`,
-`test_ceph_lifecycle.sh` and `test_rpm_cache.sh` read `config/<vm>.yaml` (for example to find a VM's hypervisor), and
-`utils/start-vm.sh`, `stop-vm.sh` and `reboot-vm.sh` read it through `utils/vm-common.sh`, which honours
-`ORPHERA_CONFIG_DIR` for file locations only. So the `orphera` command can take its inventory or configs from another
-place, but a rebuild started from those scripts still needs the files. See [docs/MARIADB.md](docs/MARIADB.md).
+**The shell scripts follow the environment variables, not the options.** `manifests/build_openstack_stack.sh`,
+`mk-new-and-empty.sh`, `par-mk-new-and-empty.sh`, `rebuild_openstack_from_scratch.sh` and the VM scripts in `utils/`
+find `config/<vm>.yaml` and `inventory.yaml` through `utils/orphera-sources.sh`, which reads `ORPHERA_CONFIG_DIR` and
+`ORPHERA_INVENTORY` (a plain path or a `file:` URI; any other scheme is refused with a message). They do not read `-I` and
+`-c`, because those are options of the `orphera` command, so set the variables, which `orphera` itself also reads. For a
+database, export it first (`utils/sql-to-yaml.py --out DIR`) and point both variables at `DIR`. `make check-scripts` checks
+this without a lab. See [docs/MARIADB.md](docs/MARIADB.md).
 
 With `-c` set, `--config tst7` means `<config-dir>/tst7.yaml`. A `--config` value that has a `/`, a scheme or a
 `.yaml`/`.yml` ending (`config/tst7.yaml`, `/x/y.yaml`) is used exactly as given, as before.

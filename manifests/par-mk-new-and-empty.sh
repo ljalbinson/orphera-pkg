@@ -38,6 +38,9 @@
 # Ctrl-C stops every running node (a VM caught mid-provision is left half-built).
 
 set -uo pipefail
+. "$(dirname "$0")/../utils/orphera-sources.sh"
+CONF_DIR=$(config_dir) || exit 1
+INV_FILE=$(inventory_file) || exit 1
 
 jobs_max=4
 deb=""
@@ -100,7 +103,7 @@ banner "Agent package: $deb"
 # All config files must exist before anything is created, so a typo in the
 # node list fails now rather than after seven VMs have been built.
 for node in "${nodes[@]}"; do
-    [ -f "config/$node.yaml" ] || { echo "missing config/$node.yaml" >&2; exit 1; }
+    [ -f "$CONF_DIR/$node.yaml" ] || { echo "missing $CONF_DIR/$node.yaml" >&2; exit 1; }
 done
 
 logdir=".orphera-build-logs/$(date +%Y%m%d-%H%M%S)"
@@ -126,12 +129,12 @@ with_lock() {
 # `bootstrap --forget-host-key` passes to ssh-keygen -R).
 inventory_host() {
     awk -v n="$1" '$1 == "-" && $2 == "name:" {cur = $3}
-                   $1 == "host:" && cur == n {print $2; exit}' inventory.yaml 2>/dev/null
+                   $1 == "host:" && cur == n {print $2; exit}' "$INV_FILE" 2>/dev/null
 }
 
 hypervisor_of() {
     local hv
-    hv=$(awk -F: '/^[[:space:]]*hypervisor:/ {gsub(/[[:space:]"'\'']/, "", $2); print $2; exit}' "config/$1.yaml")
+    hv=$(awk -F: '/^[[:space:]]*hypervisor:/ {gsub(/[[:space:]"'\'']/, "", $2); print $2; exit}' "$CONF_DIR/$1.yaml")
     echo "${hv:-unknown-$1}"
 }
 
@@ -153,7 +156,7 @@ provision_playbook() {
 }
 
 build_node() {
-    local node=$1 cfg="config/$1.yaml" hv prov
+    local node=$1 cfg="$CONF_DIR/$1.yaml" hv prov
     hv=$(hypervisor_of "$node")
     step() { echo; banner "=== $(date '+%F %T') $node: $* ==="; }
 
@@ -168,7 +171,7 @@ build_node() {
     # A rebuilt VM has a new SSH host key under the same name, so the old one is
     # dropped first. ssh-keygen -R rewrites known_hosts, so that (and only that)
     # is done under the lock; bootstrap itself then runs unlocked and just
-    # appends the new key. If the node's host can't be found in inventory.yaml,
+    # appends the new key. If the node's host can't be found in the inventory,
     # fall back to bootstrap's own --forget-host-key, with bootstrap locked.
     step "install agent"
     local host
@@ -177,7 +180,7 @@ build_node() {
         with_lock known_hosts ssh-keygen -R "$host" || true
         orphera bootstrap --file "$deb" --ssh-user localadmin --nodes "$node" || return 1
     else
-        echo "no host for $node in inventory.yaml — using bootstrap --forget-host-key under the lock"
+        echo "no host for $node in $INV_FILE — using bootstrap --forget-host-key under the lock"
         with_lock known_hosts orphera bootstrap --file "$deb" --ssh-user localadmin \
             --nodes "$node" --forget-host-key || return 1
     fi

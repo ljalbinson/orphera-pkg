@@ -29,6 +29,8 @@
 # VMs may not exist. A failed step stops the run and says how to resume.
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
+. utils/orphera-sources.sh
+CONF_DIR=$(config_dir) || exit 1
 
 NODES=(tst0 tst1 tst2 tst3 tst4 tst5 tst6 tst10 tst13 tst14 tst17 tst18 tst19)
 YES="" DRY="" JOBS=6 DEB="" TESTS="" WORDPRESS=""
@@ -50,15 +52,15 @@ die() { log "STOPPED: $1"; exit 1; }
 
 [ -n "$DEB" ] || DEB=$(ls -t orphera-agent_*_amd64.deb 2>/dev/null | head -n 1)
 [ -f "$DEB" ] || die "no agent package found (orphera-agent_*_amd64.deb in this directory, or -f FILE)"
-for n in "${NODES[@]}"; do [ -f "config/$n.yaml" ] || die "missing config/$n.yaml"; done
+for n in "${NODES[@]}"; do [ -f "$CONF_DIR/$n.yaml" ] || die "missing $CONF_DIR/$n.yaml"; done
 
-hypervisor_of() { awk -F: '/^[[:space:]]*hypervisor:/ {gsub(/[[:space:]"'\'']/, "", $2); print $2; exit}' "config/$1.yaml"; }
+hypervisor_of() { awk -F: '/^[[:space:]]*hypervisor:/ {gsub(/[[:space:]"'\'']/, "", $2); print $2; exit}' "$CONF_DIR/$1.yaml"; }
 
 log "=== rebuild OpenStack from scratch ==="
 log "agent package: $DEB"
 printf '%-7s %-11s %s\n' node hypervisor ip
 for n in "${NODES[@]}"; do
-  printf '%-7s %-11s %s\n' "$n" "$(hypervisor_of "$n")" "$(awk '/ipaddress:/ {gsub(/[\x27"]/, "", $2); print $2; exit}' "config/$n.yaml")"
+  printf '%-7s %-11s %s\n' "$n" "$(hypervisor_of "$n")" "$(awk '/ipaddress:/ {gsub(/[\x27"]/, "", $2); print $2; exit}' "$CONF_DIR/$n.yaml")"
 done
 log "NOT touched: tst7, tst8, tst9, tst11, tst12 and the hypervisors"
 [ -z "$WORDPRESS" ] && log "note: tst7's WordPress keeps pointing at a Galera that is about to be rebuilt; add --wordpress to rebuild it afterwards"
