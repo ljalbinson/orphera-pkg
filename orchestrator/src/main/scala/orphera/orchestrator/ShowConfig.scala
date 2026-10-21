@@ -2,6 +2,8 @@
 
 package orphera.orchestrator
 
+import io.circe.*
+
 /** `orphera show-config <name>...`: prints each VM config as `orphera` reads it,
   * one line per config, from wherever `-c` / `ORPHERA_CONFIG_DIR` points (a
   * directory of files, or a `mariadb://` location). It only reads, and runs on
@@ -23,6 +25,21 @@ object ShowConfig:
     "Usage: orphera [-c <config-dir>] show-config <name>...   " +
       "(a name is a file of the config directory, such as tst3)"
 
+  /** The extra NICs are kept as the JSON they were written as, whose keys come
+    * in the order of the source (a file keeps its own, the database has a fixed
+    * one). Sorting the keys makes two sources with the same data print the same.
+    */
+  private def sortedKeys(json: Json): Json =
+    json.fold(
+      json,
+      _ => json,
+      _ => json,
+      _ => json,
+      array => Json.arr(array.map(sortedKeys)*),
+      obj =>
+        Json.obj(obj.toList.sortBy(_._1).map((k, v) => k -> sortedKeys(v))*)
+    )
+
   def run(args: List[String]): Int =
     if args.isEmpty || args.exists(_.startsWith("-")) then
       System.err.println(Usage)
@@ -31,7 +48,7 @@ object ShowConfig:
       val allRead = args.map { name =>
         ConfigYaml.load(Locations.resolveConfig(name)) match
           case Right(params) =>
-            println(s"$name: $params")
+            println(s"$name: ${params.copy(nics = params.nics.map(sortedKeys))}")
             true
           case Left(err) =>
             println(s"$name: ERROR $err")
