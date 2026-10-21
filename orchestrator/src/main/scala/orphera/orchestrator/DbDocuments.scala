@@ -5,9 +5,9 @@ package orphera.orchestrator
 import io.circe.*
 import io.circe.yaml.parser
 
-/** Turns the rows of the MariaDB tables (schemas/mariadb/001-tables.sql) into the
-  * documents `inventory.yaml` and `config/<vm>.yaml` hold, as JSON, which the
-  * YAML readers parse unchanged. It is the Scala twin of `build_inventory`,
+/** Turns the rows of the MariaDB tables (schemas/mariadb/001-tables.sql) into
+  * the documents `inventory.yaml` and `config/<vm>.yaml` hold, as JSON, which
+  * the YAML readers parse unchanged. It is the Scala twin of `build_inventory`,
   * `build_vm` and `build_configs` in `utils/sql-to-yaml.py`; a change to one is
   * a change to the other.
   *
@@ -309,11 +309,13 @@ object DbDocuments:
     (rowsOf(rows, "vm_config").flatMap(r => text(r, "hostname")) ++
       rowsOf(rows, "config_document").flatMap(r => text(r, "name"))).sorted
 
-  /** `config/<name>.yaml` as a document: a VM from its tables, or a
-    * free-form document (such as `dns`) from `config_document`.
+  /** `config/<name>.yaml` as a document: a VM from its tables, or a free-form
+    * document (such as `dns`) from `config_document`.
     */
   def config(rows: Rows, name: String): Either[String, Json] =
-    rowsOf(rows, "vm_config").find(r => text(r, "hostname").contains(name)) match
+    rowsOf(rows, "vm_config").find(r =>
+      text(r, "hostname").contains(name)
+    ) match
       case Some(r) => vm(rows, r)
       case None    =>
         rowsOf(rows, "config_document").find(r =>

@@ -19,9 +19,8 @@ import io.circe.yaml.parser
   *         -c mariadb://orphera_ro@dbhost.example.com/orphera/config  version
   * }}}
   *
-  * `--config tst3` then means `<config-dir>/tst3.yaml`, as for a directory,
-  * and the part after the last `/` names the config. The port defaults to
-  * 3306.
+  * `--config tst3` then means `<config-dir>/tst3.yaml`, as for a directory, and
+  * the part after the last `/` names the config. The port defaults to 3306.
   *
   * Read-only: the account should only be able to `SELECT` (the role
   * `orphera_reader` in schemas/mariadb/002-roles.sql). The connection always
@@ -32,9 +31,9 @@ import io.circe.yaml.parser
   * use.
   *
   * The rows become the same documents the files hold (see `DbDocuments`) and
-  * are handed to the YAML readers as JSON, which is YAML, so nothing else
-  * knows where the data came from. The first read of a database in a run
-  * fetches the tables; later reads in the same run use that copy.
+  * are handed to the YAML readers as JSON, which is YAML, so nothing else knows
+  * where the data came from. The first read of a database in a run fetches the
+  * tables; later reads in the same run use that copy.
   */
 object MariaDbSource:
 
@@ -86,7 +85,14 @@ object MariaDbSource:
         case db :: ("inventory" | "inventory.yaml") :: Nil =>
           checked(location, user, host, port, db, InventoryDoc)
         case db :: "config" :: file :: Nil =>
-          checked(location, user, host, port, db, ConfigDoc(stripExtension(file)))
+          checked(
+            location,
+            user,
+            host,
+            port,
+            db,
+            ConfigDoc(stripExtension(file))
+          )
         case _ => Left(s"$location: $Usage")
 
   private def stripExtension(file: String): String =
@@ -131,14 +137,15 @@ object MariaDbSource:
       what: What
   ): Either[String, Json] =
     what match
-      case InventoryDoc => Right(DbDocuments.inventory(rows))
+      case InventoryDoc    => Right(DbDocuments.inventory(rows))
       case ConfigDoc(name) => DbDocuments.config(rows, name)
 
   private def rowsFor(t: Target): Either[String, DbDocuments.Rows] =
     val tables = t.what match
       case InventoryDoc => DbDocuments.InventoryTables
       case ConfigDoc(_) => DbDocuments.ConfigTables
-    val key = s"${t.user}@${t.host}:${t.port}/${t.database}/${tables.map(_._1).mkString(",")}"
+    val key =
+      s"${t.user}@${t.host}:${t.port}/${t.database}/${tables.map(_._1).mkString(",")}"
     Option(cache.get(key)) match
       case Some(rows) => Right(rows)
       case None       =>
@@ -150,7 +157,11 @@ object MariaDbSource:
   // ---- the connection ------------------------------------------------------
 
   private def caFile: String =
-    sys.env.get("ORPHERA_DB_CA").map(_.trim).filter(_.nonEmpty).getOrElse("certs/ca.crt")
+    sys.env
+      .get("ORPHERA_DB_CA")
+      .map(_.trim)
+      .filter(_.nonEmpty)
+      .getOrElse("certs/ca.crt")
 
   private def password: Either[String, String] =
     SecretStore.default().flatMap(_.get(PasswordSecret)).flatMap {
@@ -200,7 +211,11 @@ object MariaDbSource:
       .Try {
         val connection: Connection =
           Option(new org.mariadb.jdbc.Driver().connect(url, props))
-            .getOrElse(throw new IllegalStateException(s"the driver does not accept $url"))
+            .getOrElse(
+              throw new IllegalStateException(
+                s"the driver does not accept $url"
+              )
+            )
         try
           connection.setReadOnly(true)
           val statement = connection.createStatement()
@@ -212,8 +227,10 @@ object MariaDbSource:
                 s"SELECT COALESCE(JSON_ARRAYAGG(JSON_OBJECT($pairs)), '[]') FROM $table"
               )
               try
-                if result.next() then table -> parseRows(table, result.getString(1))
-                else table -> (Right(List.empty[Json]): Either[String, List[Json]])
+                if result.next() then
+                  table -> parseRows(table, result.getString(1))
+                else
+                  table -> (Right(List.empty[Json]): Either[String, List[Json]])
               finally result.close()
             }
           finally statement.close()
@@ -223,15 +240,24 @@ object MariaDbSource:
       .left
       .map(e => s"cannot read the database at ${t.host}: ${e.getMessage}")
       .flatMap { results =>
-        results.collectFirst { case (table, Left(err)) => s"$table: $err" } match
+        results.collectFirst { case (table, Left(err)) =>
+          s"$table: $err"
+        } match
           case Some(err) => Left(err)
           case None      =>
-            Right(results.collect { case (table, Right(rows)) => table -> rows }.toMap)
+            Right(results.collect { case (table, Right(rows)) =>
+              table -> rows
+            }.toMap)
       }
 
-  private def parseRows(table: String, text: String): Either[String, List[Json]] =
+  private def parseRows(
+      table: String,
+      text: String
+  ): Either[String, List[Json]] =
     parser
       .parse(text)
       .left
       .map(e => s"the rows are not JSON: ${e.getMessage}")
-      .flatMap(_.asArray.map(_.toList).toRight(s"the rows of $table are not a list"))
+      .flatMap(
+        _.asArray.map(_.toList).toRight(s"the rows of $table are not a list")
+      )
