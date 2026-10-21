@@ -36,7 +36,3 @@ packaging/agent.env
 packaging/conffiles
 packaging/control.template
 packaging/orphera-agent.spec.template
-
-# deleted on the unmerged repo-cleanup branch; left alone here so that branch still merges
-build
-manifests/ceph-mgr.scala
