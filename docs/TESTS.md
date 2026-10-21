@@ -820,7 +820,7 @@ seconds: three monitors in quorum, 6 of 6 OSDs up, 65 PGs `active+clean`. After 
 not test a guard on a host that matters, and check the installed jar first. Changed as a result: `orphera version` prints its
 own build first (K37), and agents can refuse on their own.
 
-### K37. Agent-side `never-reboot` marker; release 0.1.199 - PASSED on tst20, hypervisors NOT YET DONE (2026-10-20)
+### K37. Agent-side `never-reboot` marker; release 0.1.199 - PASSED on tst20 and rolled out to the hypervisors (2026-10-21)
 An agent refuses `TriggerReboot` and `TriggerShutdown` with `FAILED_PRECONDITION` while its host has
 `/etc/orphera-agent/never-reboot` (`NeverReboot.scala`, `Rebooter`, `Shutdowner`); `utils/sync-never-reboot.py` creates the file
 on every host the inventory protects (checked against the real inventory: gs1, gs2, gs3 and st0; and against a stub
@@ -829,6 +829,8 @@ begins with `orphera 0.1.199 (commit 8486e34, committed 2026-10-20T19:38:19+01:0
 `v0.1.199` (8486e34). tst20 had no agent (`Connection refused` on 50051, no package); `orphera bootstrap --file
 orphera-agent_0.1.199_amd64.deb --ssh-user localadmin --nodes tst20` installed it. The steps after it (`orphera version --nodes
 tst20` showing 0.1.199, the marker created by hand, `orphera reboot --nodes tst20` refused, the marker removed) were reported as
-working; their output was not pasted, so the exact refusal text is not recorded. Not done: the
-agent is not yet on gs1, gs2, gs3 and st0, so the markers are not yet placed there. Until then those hosts are protected by the
-inventory check in the current `orphera` only.
+working; their output was not pasted, so the exact refusal text is not recorded. Rollout, checked
+on 2026-10-21: `orphera version` reports 0.1.199 on all 25 nodes (tst0-tst20, gs1-gs3, st0), and
+`ls -l /etc/orphera-agent/never-reboot` on gs1, gs2, gs3 and st0 shows the empty marker file on each (created by
+`utils/sync-never-reboot.py --apply`; gs1 lists the time in UTC, an hour behind the others). Not recorded: a refused
+reboot or shutdown on one of the hypervisors themselves (the refusal was tested on tst20 only), and the pipeline results.
