@@ -1230,6 +1230,10 @@ object Cli:
       |                      .orphera-audit/audit.jsonl (command, nodes, outcome,
       |                      duration); see log-summary for one playbook run's
       |                      task-level detail
+      |  show-config       <name>...
+      |                    — prints each VM config as orphera reads it, from the
+      |                      -c / ORPHERA_CONFIG_DIR location (files or mariadb://);
+      |                      read-only, nothing is sent to a node
       |  secrets           init | list | generate <name> | set <name> | get <name> | rm <name>
       |                    — the encrypted store of passwords and keys that playbooks
       |                      use (~/.config/orphera/secrets.age); runs on this machine

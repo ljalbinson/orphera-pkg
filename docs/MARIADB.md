@@ -31,9 +31,12 @@ The first form names the inventory, the second the directory of configs; `--conf
 - The shell scripts still read files only (`ORPHERA_CONFIG_DIR` and `ORPHERA_INVENTORY` as paths); export with
   `sql-to-yaml.py --out DIR` for them.
 
-To check the Scala reader against the files, compare what each source gives:
-`orphera -I inventory.yaml version` and `orphera -I mariadb://... version` list the same nodes, and
-`utils/sql-to-yaml.py --compare` checks the database against the files.
+To check the Scala reader against the files, compare what each source gives. The inventory:
+`diff <(orphera -I inventory.yaml version | sort) <(orphera -I mariadb://... version | sort)` (the database is sorted by name,
+the file is not). The configs: `orphera show-config` prints each config as read, so
+`names=$(ls config | sed 's/\.yaml$//')` then `diff <(orphera -c config show-config $names) <(orphera -c mariadb://.../config show-config $names)`
+(`dns` is not a VM and prints the same error from both). `utils/sql-to-yaml.py --compare` checks the database against the files
+without `orphera`.
 
 ## Reading it back
 

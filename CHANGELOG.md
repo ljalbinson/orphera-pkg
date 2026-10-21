@@ -7,6 +7,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- `orphera show-config <name>...` prints each VM config as `orphera` reads it, from the `-c` / `ORPHERA_CONFIG_DIR` location (files or
+  `mariadb://`), one line per config, so the two sources can be compared with `diff`. Read-only; runs on this machine.
 - `mariadb://` locations for `-I` and `-c` (`MariaDbSource.scala`, `DbDocuments.scala`, mariadb-java-client): `orphera` reads the
   inventory and the per-VM configs from the MariaDB tables, read-only, with the server certificate and host name always
   verified against `certs/ca.crt` (or `ORPHERA_DB_CA`) and the password from the secret `orphera/inventory-db-reader`, which is

@@ -60,7 +60,7 @@ _orphera_completions() {
 
   local verbs="install remove autoremove dist-upgrade copy write-file network-apply reboot shutdown uptime thread-info run
     playbook cluster-playbook deploy-agent bootstrap issue-certs teardown fetch facts
-    version cert-info log-summary audit-log pipeline secrets help"
+    version cert-info log-summary audit-log pipeline secrets show-config help"
 
   # Flags common to most verbs that take --nodes
   local nodes_flag="--nodes"
