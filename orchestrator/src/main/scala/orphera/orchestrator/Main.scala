@@ -17,7 +17,9 @@ object Main extends IOApp:
         IO.println(s"Error: $err") >> IO.pure(ExitCode.Error)
       case Right((overrides, rest)) =>
         Locations.install(overrides)
-        Locations.manifestsEnvError.filter(_ => overrides.manifests.isEmpty) match
+        Locations.manifestsEnvError.filter(_ =>
+          overrides.manifests.isEmpty
+        ) match
           case Some(err) =>
             IO.println(s"Error: ORPHERA_MANIFESTS: $err") >>
               IO.pure(ExitCode.Error)

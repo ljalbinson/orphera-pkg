@@ -190,17 +190,17 @@ object Cli:
     * out. With neither, it means every node except those, but only for the
     * verbs where no `--nodes` already means every node (`defaultsToAll`:
     * `deploy-agent --file x.deb --exclude-nodes tst8`). For the others
-    * (`reboot`, `shutdown`, `teardown`, `bootstrap`, a pipeline, the
-    * playbooks) it is an error: they refuse to default to every node and this
-    * must not be a way round that. A name that was not selected is an error
-    * (a typo would otherwise leave the node in), as is an exclusion that leaves
-    * nothing.
+    * (`reboot`, `shutdown`, `teardown`, `bootstrap`, a pipeline, the playbooks)
+    * it is an error: they refuse to default to every node and this must not be
+    * a way round that. A name that was not selected is an error (a typo would
+    * otherwise leave the node in), as is an exclusion that leaves nothing.
     */
   /** The verbs where leaving out `--nodes` already means every node in the
     * inventory. `reboot` and `shutdown` are the pipeline verbs that are not
     * here: one needs an explicit target and the other a deliberate override.
     */
-  private def defaultsToAll: Set[String] = pipelineVerbs -- Set("reboot", "shutdown")
+  private def defaultsToAll: Set[String] =
+    pipelineVerbs -- Set("reboot", "shutdown")
 
   def expandNodeGroups(
       args: List[String],
@@ -455,7 +455,8 @@ object Cli:
           Left(
             s"'$verb' cannot be a pipeline step (allowed: ${pipelineVerbs.toList.sorted.mkString(", ")})"
           )
-        case _ if tokens.exists(t =>
+        case _
+            if tokens.exists(t =>
               t == "--nodes" || t == "--node-groups" || t == "--exclude-nodes"
             ) =>
           Left(

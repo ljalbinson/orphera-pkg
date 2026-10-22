@@ -145,8 +145,8 @@ object Locations:
     * `.yaml` or `.yml` (`etcd_cluster.scala`) is looked for in the manifests
     * directory first and, if it is not there, taken as it is, so a file in the
     * current directory still works. Anything with a `/` (`manifests/x.scala`,
-    * `/srv/pb/x.yaml`), a built-in step (`@bootstrap`) and the name of a compiled
-    * playbook (no extension) are taken as they are, as before.
+    * `/srv/pb/x.yaml`), a built-in step (`@bootstrap`) and the name of a
+    * compiled playbook (no extension) are taken as they are, as before.
     */
   def resolveManifest(
       value: String,
