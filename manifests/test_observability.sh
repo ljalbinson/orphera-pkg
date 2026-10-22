@@ -32,7 +32,6 @@
 
 set -uo pipefail
 
-MANIFESTS_DIR="manifests"
 MANIFEST="restartability_test.yaml"
 CONDITION_MANIFEST="observability_condition_test.scala"
 CHECKPOINT_FILE=".orphera-state/playbook-restartability-test.txt"
@@ -113,7 +112,7 @@ cleanup
 # never runs.
 # ---------------------------------------------------------------------
 log "Run 1: expect task1 to succeed, task2 to fail, exit nonzero"
-output1=$(orphera playbook "$MANIFESTS_DIR/$MANIFEST" 2>&1)
+output1=$(orphera playbook "$MANIFEST" 2>&1)
 rc1=$?
 echo "$output1"
 
@@ -204,7 +203,7 @@ apply_verdicts <<< "$verdicts1"
 # task_skipped.
 # ---------------------------------------------------------------------
 log "Run 2 (no --resume): expect task1 to run again, not be skipped"
-output2=$(orphera playbook "$MANIFESTS_DIR/$MANIFEST" 2>&1)
+output2=$(orphera playbook "$MANIFEST" 2>&1)
 rc2=$?
 echo "$output2"
 
@@ -260,7 +259,7 @@ apply_verdicts <<< "$verdicts2"
 log "Creating marker on tst0 so task2 can succeed, then running --resume"
 orphera run --nodes tst0 -- sh -c "touch $MARKER_PATH" >/dev/null 2>&1
 
-output3=$(orphera playbook "$MANIFESTS_DIR/$MANIFEST" --resume 2>&1)
+output3=$(orphera playbook "$MANIFEST" --resume 2>&1)
 rc3=$?
 echo "$output3"
 
@@ -330,7 +329,7 @@ cleanup
 # succeeding (a condition skip is not a failure).
 # ---------------------------------------------------------------------
 log "Run 4: task2 gated on an impossible condition — expect task_skipped(reason=condition_not_met)"
-output4=$(orphera playbook "$MANIFESTS_DIR/$CONDITION_MANIFEST" 2>&1)
+output4=$(orphera playbook "$CONDITION_MANIFEST" 2>&1)
 rc4=$?
 echo "$output4"
 

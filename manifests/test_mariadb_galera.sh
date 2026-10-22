@@ -55,7 +55,6 @@ SSH_USER="localadmin"      # the real login on these nodes — was "ubuntu"
                             # by cloud-init on these images, same as the
                             # Ceph test hits — commands below go through
                             # `sudo` on the target instead.
-MANIFESTS_DIR="manifests"
 TEST_DB="orphera_galera_test"
 TEST_MARKER="orphera-test-$(date +%s)-$$"   # unique per run, so a stale row
                                              # from a previous run can never
@@ -88,7 +87,7 @@ run_playbook() {
   local manifest="$1"
   local rc output
   log "Running $manifest ..."
-  output=$(orphera cluster-playbook "$MANIFESTS_DIR/$manifest" 2>&1)
+  output=$(orphera cluster-playbook "$manifest" 2>&1)
   rc=$?
   echo "$output"
   if [ "$rc" -ne 0 ] || printf '%s' "$output" | grep -q "aborting remaining stages"; then

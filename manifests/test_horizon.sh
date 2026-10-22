@@ -46,7 +46,7 @@ assert_contains() {
 
 if [ -z "${NO_APPLY:-}" ]; then
   log "install"
-  if ! orphera cluster-playbook manifests/horizon_single_node.scala; then
+  if ! orphera cluster-playbook horizon_single_node.scala; then
     log "FAIL: horizon_single_node.scala did not complete"; exit 1
   fi
 fi
@@ -79,7 +79,7 @@ fi
 
 if [ -z "${NO_APPLY:-}" ]; then
   log "re-apply (idempotence)"
-  if orphera cluster-playbook manifests/horizon_single_node.scala; then
+  if orphera cluster-playbook horizon_single_node.scala; then
     log "PASS: second run completed"; PASS=$((PASS + 1))
   else
     log "FAIL: second run of horizon_single_node.scala failed"; FAIL=$((FAIL + 1))

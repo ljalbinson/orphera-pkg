@@ -58,7 +58,6 @@ set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
 . utils/orphera-sources.sh
 CONF_DIR=$(config_dir) || exit 1
-MANIFESTS="manifests"
 
 ALL_STEPS=(prep caches ceph galera keystone cinder glance placement nova neutron compute horizon clients smoke boot)
 WITH_CACHES=""
@@ -139,7 +138,7 @@ die() {
 # runner's failure markers (older builds were seen exiting 0 after a failed
 # stage, so both are checked).
 playbook() {
-  local f="$MANIFESTS/$1" out rc
+  local f="$1" out rc
   log "applying $1"
   shift
   out=$(mktemp)

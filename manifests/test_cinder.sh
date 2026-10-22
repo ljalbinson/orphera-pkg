@@ -51,7 +51,7 @@ assert_not_contains() {
 }
 
 log "install"
-if ! orphera cluster-playbook manifests/cinder_single_node.scala; then
+if ! orphera cluster-playbook cinder_single_node.scala; then
   log "FAIL: cinder_single_node.scala did not complete"; exit 1
 fi
 
@@ -81,7 +81,7 @@ else
 fi
 
 log "re-apply (idempotence)"
-if orphera cluster-playbook manifests/cinder_single_node.scala; then
+if orphera cluster-playbook cinder_single_node.scala; then
   log "PASS: second run completed"; PASS=$((PASS + 1))
 else
   log "FAIL: second run of cinder_single_node.scala failed"; FAIL=$((FAIL + 1))

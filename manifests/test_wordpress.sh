@@ -57,7 +57,7 @@ assert_absent() {
 
 if [ -z "${NO_APPLY:-}" ]; then
   log "apply wordpress_site.scala"
-  if ! orphera cluster-playbook manifests/wordpress_site.scala; then
+  if ! orphera cluster-playbook wordpress_site.scala; then
     log "FAIL: wordpress_site.scala did not complete"; exit 1
   fi
 fi
@@ -89,7 +89,7 @@ assert_absent "no database connection error on the page" "Error establishing a d
 
 if [ -z "${NO_APPLY:-}" ]; then
   log "re-apply (idempotence)"
-  if orphera cluster-playbook manifests/wordpress_site.scala; then
+  if orphera cluster-playbook wordpress_site.scala; then
     log "PASS: second run completed"; PASS=$((PASS + 1))
   else
     log "FAIL: second run failed"; FAIL=$((FAIL + 1))

@@ -28,6 +28,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   not selected, or an exclusion that leaves nothing, is an error.
 
 ### Changed
+- The shell scripts in `manifests/` name their playbooks by bare file name instead of `manifests/<file>`, so they follow
+  `ORPHERA_MANIFESTS` (and `-m`), and `rebuild_openstack_from_scratch.sh` calls its sibling scripts relative to its own location. They need
+  an `orphera` with the `-m` option. `make check-scripts` fails if a script names a playbook by its `manifests/` path again.
 - `manifests/rebuild_openstack_from_scratch.sh --tests` now runs the closing checks (`clients`, `smoke`, the CirrOS `boot`) again after
   the test scripts. `test_keystone.sh` tears Keystone down (new database, new CA), so the checks made before the tests did not show the
   finished cluster works. Its `--help` text no longer cuts off at a fixed line.

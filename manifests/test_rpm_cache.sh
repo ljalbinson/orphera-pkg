@@ -67,15 +67,15 @@ cleanup() {
 trap cleanup EXIT
 
 log "teardown (failures here are tolerated: nothing may be installed yet)"
-orphera cluster-playbook manifests/rpm_cache_teardown.scala || true
+orphera cluster-playbook rpm_cache_teardown.scala || true
 
 log "install the cache"
-if ! orphera cluster-playbook manifests/rpm_cache.scala; then
+if ! orphera cluster-playbook rpm_cache.scala; then
   log "FAIL: rpm_cache.scala did not complete"; exit 1
 fi
 
 log "point the Rocky client at it"
-if ! orphera cluster-playbook manifests/rpm_cache_clients.scala; then
+if ! orphera cluster-playbook rpm_cache_clients.scala; then
   log "FAIL: rpm_cache_clients.scala did not complete"; exit 1
 fi
 
@@ -139,7 +139,7 @@ assert_contains "the cache answers again when it is back" "ok" "$OUT"
 # ---- idempotence -----------------------------------------------------------
 
 log "re-apply (idempotence)"
-if orphera cluster-playbook manifests/rpm_cache.scala && orphera cluster-playbook manifests/rpm_cache_clients.scala; then
+if orphera cluster-playbook rpm_cache.scala && orphera cluster-playbook rpm_cache_clients.scala; then
   log "PASS: second run completed"; PASS=$((PASS + 1))
 else
   log "FAIL: second run failed"; FAIL=$((FAIL + 1))

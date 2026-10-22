@@ -7,10 +7,10 @@
 # manifests/test_cinder.sh and utils/openstack-client-setup.sh.
 # For a non-destructive WordPress check use manifests/test_wordpress.sh.
 
-orphera cluster-playbook manifests/mariadb_galera_teardown.scala
-orphera cluster-playbook manifests/mariadb_galera_cluster.scala
-orphera cluster-playbook manifests/mariadb_galera_rolling_restart.scala
-orphera cluster-playbook manifests/mariadb_haproxy_keepalived.scala
-orphera cluster-playbook manifests/wordpress_site.scala
+orphera cluster-playbook mariadb_galera_teardown.scala
+orphera cluster-playbook mariadb_galera_cluster.scala
+orphera cluster-playbook mariadb_galera_rolling_restart.scala
+orphera cluster-playbook mariadb_haproxy_keepalived.scala
+orphera cluster-playbook wordpress_site.scala
 
 

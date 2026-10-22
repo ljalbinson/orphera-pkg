@@ -51,4 +51,14 @@ for f in manifests/*.sh utils/*.sh; do
 done
 [ "$fail" -ne "$before" ] || ok "no script opens a fixed config/ or inventory.yaml path"
 
+# Playbooks are named bare (etcd_cluster.scala): orphera looks them up in -m / ORPHERA_MANIFESTS, so no script
+# may name them as manifests/<file>.
+before=$fail
+for f in manifests/*.sh utils/*.sh; do
+  [ "$f" = utils/test-shell-sources.sh ] && continue
+  hits=$(grep -n -E 'orphera +(cluster-playbook|playbook) +"?manifests/|MANIFESTS_DIR' "$f" | grep -v -E '^[0-9]+:[ ]*#' || true)
+  [ -z "$hits" ] || bad "$f names a playbook by its manifests/ path: $hits"
+done
+[ "$fail" -ne "$before" ] || ok "no script names a playbook by its manifests/ path"
+
 if [ "$fail" -eq 0 ]; then echo "test-shell-sources: all checks passed"; else echo "test-shell-sources: $fail failed"; exit 1; fi

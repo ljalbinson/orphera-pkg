@@ -37,7 +37,6 @@ ADMIN_SSH_USER="localadmin"             # the real login on these nodes — was
                                         # these images. cephadm still needs root, so commands below go
                                         # through `sudo` instead of `ssh root@...`.
 EXPECTED_MON_COUNT=3                   # tst0, tst1, tst2
-MANIFESTS_DIR="manifests"
 
 # EXPECTED_OSD_COUNT is NOT a hand-maintained constant, and not derived
 # by scanning any source/config file either — both were tried and both
@@ -93,7 +92,7 @@ run_playbook() {
   local manifest="$1"
   local rc
   log "Running $manifest ..."
-  LAST_PLAYBOOK_OUTPUT=$(orphera cluster-playbook "$MANIFESTS_DIR/$manifest" 2>&1)
+  LAST_PLAYBOOK_OUTPUT=$(orphera cluster-playbook "$manifest" 2>&1)
   rc=$?
   echo "$LAST_PLAYBOOK_OUTPUT"
   if [ "$rc" -ne 0 ] || printf '%s' "$LAST_PLAYBOOK_OUTPUT" | grep -q "aborting remaining stages"; then

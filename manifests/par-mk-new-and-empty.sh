@@ -145,12 +145,12 @@ hypervisor_of() {
 provision_playbook() {
     local hv=$1 out
     case "${PROVISION:-}" in
-        zfs) echo manifests/kvm_zfs_vm_provision.scala; return 0 ;;
-        native) echo manifests/kvm_native_vm_provision.scala; return 0 ;;
+        zfs) echo kvm_zfs_vm_provision.scala; return 0 ;;
+        native) echo kvm_native_vm_provision.scala; return 0 ;;
     esac
     out=$(orphera run sh -c "zfs list -H -o name tank/kvm/$hv >/dev/null 2>&1 && echo ORPHERA-ZFS || echo ORPHERA-NATIVE" --nodes "$hv" 2>&1)
-    if grep -q "^\[$hv\] ORPHERA-ZFS" <<<"$out"; then echo manifests/kvm_zfs_vm_provision.scala
-    elif grep -q "^\[$hv\] ORPHERA-NATIVE" <<<"$out"; then echo manifests/kvm_native_vm_provision.scala
+    if grep -q "^\[$hv\] ORPHERA-ZFS" <<<"$out"; then echo kvm_zfs_vm_provision.scala
+    elif grep -q "^\[$hv\] ORPHERA-NATIVE" <<<"$out"; then echo kvm_native_vm_provision.scala
     else echo "cannot tell how $hv stores VMs (is its agent answering?): $out" >&2; return 1
     fi
 }
@@ -186,13 +186,13 @@ build_node() {
     fi
 
     step "set DNS"
-    orphera cluster-playbook manifests/gen_set_dns.scala --config "$cfg" || return 1
+    orphera cluster-playbook gen_set_dns.scala --config "$cfg" || return 1
 
     step "dist-upgrade"
     orphera dist-upgrade --nodes "$node" || return 1
 
     step "install packages"
-    orphera cluster-playbook manifests/gen_packages.scala --config "$cfg" || return 1
+    orphera cluster-playbook gen_packages.scala --config "$cfg" || return 1
 }
 
 # One node, run as a background pipeline: its output is prefixed (when several

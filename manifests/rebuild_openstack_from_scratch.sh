@@ -31,7 +31,8 @@
 # (tst9, tst11, tst12) or tst7: the build skips the cache steps unless run with --with-caches, and those
 # VMs may not exist. A failed step stops the run and says how to resume.
 set -uo pipefail
-cd "$(dirname "$0")/.." || exit 1
+HERE=$(cd "$(dirname "$0")" && pwd) || exit 1
+cd "$HERE/.." || exit 1
 . utils/orphera-sources.sh
 CONF_DIR=$(config_dir) || exit 1
 
@@ -77,13 +78,13 @@ fi
 
 log "--- step 1: virtual machines (destroy, create, agent, DNS, dist-upgrade, packages) ---"
 S=$(date +%s)
-manifests/par-mk-new-and-empty.sh -q -j "$JOBS" -f "$DEB" "${NODES[@]}" \
+"$HERE/par-mk-new-and-empty.sh" -q -j "$JOBS" -f "$DEB" "${NODES[@]}" \
   || die "building the VMs failed for some nodes (see the list above and .orphera-build-logs/); fix, then re-run with only those nodes: manifests/par-mk-new-and-empty.sh <nodes>, and continue with: manifests/build_openstack_stack.sh"
 log "VMs done in $(( $(date +%s) - S ))s"
 
 log "--- step 2: OpenStack ---"
 S=$(date +%s)
-manifests/build_openstack_stack.sh \
+"$HERE/build_openstack_stack.sh" \
   || die "the OpenStack build stopped; fix it and resume with the command it printed"
 log "OpenStack done in $(( $(date +%s) - S ))s"
 
@@ -91,18 +92,18 @@ FAILED=""
 if [ -n "$TESTS" ]; then
   log "--- step 3: test scripts ---"
   for t in keystone cinder glance placement nova neutron nova_compute horizon; do
-    if manifests/test_$t.sh >"/tmp/rebuild-test-$t.log" 2>&1; then log "PASS: test_$t.sh"
+    if "$HERE/test_$t.sh" >"/tmp/rebuild-test-$t.log" 2>&1; then log "PASS: test_$t.sh"
     else log "FAIL: test_$t.sh (output: /tmp/rebuild-test-$t.log)"; FAILED="$FAILED $t"; fi
   done
   # test_keystone.sh rebuilt Keystone (and its CA) after the stack was checked, so check the
   # cluster again as it now stands: the CLI's CA, real objects in every service, a booted instance.
   log "--- step 3b: the cluster after the tests (clients, smoke, boot) ---"
-  if manifests/build_openstack_stack.sh --from clients; then log "PASS: the cluster works after the tests"
+  if "$HERE/build_openstack_stack.sh" --from clients; then log "PASS: the cluster works after the tests"
   else log "FAIL: the closing checks after the tests (see above; re-run: manifests/build_openstack_stack.sh --from clients)"; FAILED="$FAILED closing-checks"; fi
 fi
 if [ -n "$WORDPRESS" ]; then
   log "--- WordPress on tst7 ---"
-  orphera cluster-playbook manifests/wordpress_site.scala || { log "FAIL: wordpress_site.scala"; FAILED="$FAILED wordpress"; }
+  orphera cluster-playbook wordpress_site.scala || { log "FAIL: wordpress_site.scala"; FAILED="$FAILED wordpress"; }
 fi
 
 log "=== finished in $(( $(date +%s) - T0 ))s ==="

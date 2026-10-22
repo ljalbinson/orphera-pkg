@@ -108,8 +108,8 @@ wait_for_targets() {
 }
 
 apply_all() {
-  orphera cluster-playbook manifests/observability_stack.scala || return 1
-  orphera cluster-playbook manifests/observability_extended.scala || return 1
+  orphera cluster-playbook observability_stack.scala || return 1
+  orphera cluster-playbook observability_extended.scala || return 1
 }
 
 if [ -z "${NO_APPLY:-}" ]; then

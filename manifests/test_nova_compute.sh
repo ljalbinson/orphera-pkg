@@ -60,7 +60,7 @@ assert_contains() {
 
 if [ -z "${NO_APPLY:-}" ]; then
   log "install"
-  if ! orphera cluster-playbook manifests/nova_compute.scala; then
+  if ! orphera cluster-playbook nova_compute.scala; then
     log "FAIL: nova_compute.scala did not complete"; exit 1
   fi
 fi
@@ -134,7 +134,7 @@ fi
 
 if [ -z "${NO_APPLY:-}" ]; then
   log "re-apply (idempotence)"
-  if orphera cluster-playbook manifests/nova_compute.scala; then
+  if orphera cluster-playbook nova_compute.scala; then
     log "PASS: second run completed"; PASS=$((PASS + 1))
   else
     log "FAIL: second run of nova_compute.scala failed"; FAIL=$((FAIL + 1))

@@ -21,7 +21,6 @@
 
 set -uo pipefail
 
-MANIFESTS_DIR="manifests"
 MANIFEST="restartability_test.yaml"
 CHECKPOINT_FILE=".orphera-state/playbook-restartability-test.txt"
 MARKER_PATH="/tmp/orphera-resume-test-marker"
@@ -45,7 +44,7 @@ cleanup
 # --- Run 1: no --resume, marker absent. task1 succeeds, task2 fails,
 #     task3 never runs. Playbook must exit nonzero. ---
 log "Run 1: expect task1 to succeed, task2 to fail, exit nonzero"
-output1=$(orphera playbook "$MANIFESTS_DIR/$MANIFEST" 2>&1)
+output1=$(orphera playbook "$MANIFEST" 2>&1)
 rc1=$?
 echo "$output1"
 
@@ -76,7 +75,7 @@ fi
 #     unchanged — task1 must run again (NOT be skipped), task2 fails
 #     again, exit nonzero again. ---
 log "Run 2 (no --resume): expect task1 to run again, not be skipped"
-output2=$(orphera playbook "$MANIFESTS_DIR/$MANIFEST" 2>&1)
+output2=$(orphera playbook "$MANIFEST" 2>&1)
 rc2=$?
 echo "$output2"
 
@@ -96,7 +95,7 @@ fi
 log "Creating marker on tst0 so task2 can succeed, then running --resume"
 orphera run --nodes tst0 -- sh -c "touch $MARKER_PATH" >/dev/null 2>&1
 
-output3=$(orphera playbook "$MANIFESTS_DIR/$MANIFEST" --resume 2>&1)
+output3=$(orphera playbook "$MANIFEST" --resume 2>&1)
 rc3=$?
 echo "$output3"
 
