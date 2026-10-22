@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.1.203] - 2026-10-22
+
+The agent is unchanged from 0.1.202: these are changes to the `orphera` command and its packaging.
+
 ### Fixed
 - A playbook's relative `src` (`files/motd`, `files/ready-sentinel.txt`) is read from the current directory when it exists there, as
   before, else from `ORPHERA_ROOT`, which the packaged launcher sets to `/opt/orphera`. The packaged `WebBaseline`, `mini-cluster` and
