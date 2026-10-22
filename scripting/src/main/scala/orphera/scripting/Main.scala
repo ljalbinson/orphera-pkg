@@ -3,7 +3,8 @@
 package orphera.scripting
 
 import java.io.File
-import java.nio.file.{Files, Paths}
+import java.nio.file.{Files, Path, Paths}
+import java.util.Comparator
 
 import orphera.orchestrator.Installation
 
@@ -41,28 +42,41 @@ object Main:
 
     val outDir = Files.createTempDirectory("orphera-script-classes")
 
-    val compileExit = runProcess(
-      List(
-        "java",
-        "-cp",
-        selfJar,
-        "dotty.tools.dotc.Main",
-        "-classpath",
-        orchestratorJar,
-        "-d",
-        outDir.toString,
-        scriptPath
-      )
-    )
+    // sys.exit does not run finally blocks, so the exit code is a value and the directory is
+    // removed before exiting. Without this every run left a directory of classes in the temp dir.
+    val exitCode =
+      try
+        val compileExit = runProcess(
+          List(
+            "java",
+            "-cp",
+            selfJar,
+            "dotty.tools.dotc.Main",
+            "-classpath",
+            orchestratorJar,
+            "-d",
+            outDir.toString,
+            scriptPath
+          )
+        )
+        if compileExit != 0 then
+          System.err.println(s"Error: compilation of $scriptPath failed.")
+          compileExit
+        else
+          val runClasspath = s"$outDir${File.pathSeparator}$orchestratorJar"
+          runProcess(List("java", "-cp", runClasspath, objectName))
+      finally deleteTree(outDir)
 
-    if compileExit != 0 then
-      System.err.println(s"Error: compilation of $scriptPath failed.")
-      sys.exit(compileExit)
+    sys.exit(exitCode)
 
-    val runClasspath = s"$outDir${File.pathSeparator}$orchestratorJar"
-
-    val runExit = runProcess(List("java", "-cp", runClasspath, objectName))
-    sys.exit(runExit)
+  private def deleteTree(dir: Path): Unit =
+    val paths = Files.walk(dir)
+    try
+      paths.sorted(Comparator.reverseOrder[Path]()).forEach { p =>
+        Files.deleteIfExists(p)
+        ()
+      }
+    finally paths.close()
 
   private def runProcess(command: List[String]): Int =
     new ProcessBuilder(command*).inheritIO().start().waitFor()

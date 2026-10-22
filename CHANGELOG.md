@@ -17,6 +17,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   scripts pick up the same defaults. Needs no build.
 - `rebuild_openstack_from_scratch.sh -f` resolves a relative path against the directory the script was started from.
 
+### Fixed
+- Running a `.scala` playbook no longer leaves its compiled classes behind: the `orphera-script-classes*` directory the scripting jar
+  creates in the temp directory is now removed when the playbook ends, whether it compiled, failed or ran.
+
 ## [0.1.201] - 2026-10-22
 
 The agent is unchanged from 0.1.200: these are changes to the `orphera` command, the shell scripts and the documentation.
