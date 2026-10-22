@@ -29,6 +29,9 @@ object Inventory:
         Console.err.println(
           "Falling back to an empty inventory — every 'no matching nodes' error traces back to this."
         )
+        Console.err.println(
+          "Set the location with -I/--inventory or ORPHERA_INVENTORY (a packaged install reads /etc/orphera/inventory.yaml)."
+        )
         (Nil, Nil)
 
   val all: List[Node] = loaded._1

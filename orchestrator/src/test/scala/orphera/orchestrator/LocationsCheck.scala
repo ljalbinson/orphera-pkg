@@ -176,6 +176,10 @@ object LocationsCheck:
       Sources.read(dir.resolve("none.yaml").toString).swap.exists(_.contains("none.yaml"))
     )
     check(
+      "a missing file is said to be missing, not just named",
+      Sources.read(dir.resolve("none.yaml").toString).swap.exists(_.endsWith(": no such file"))
+    )
+    check(
       "an unsupported scheme names it and what is supported",
       Sources.read("postgres://h/db").swap.exists(e =>
         e.contains("'postgres'") && e.contains("file")

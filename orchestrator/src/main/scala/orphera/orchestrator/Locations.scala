@@ -4,7 +4,7 @@ package orphera.orchestrator
 
 import java.net.URI
 import java.nio.charset.StandardCharsets.UTF_8
-import java.nio.file.{Files, Paths}
+import java.nio.file.{AccessDeniedException, Files, NoSuchFileException, Paths}
 import java.util.concurrent.atomic.AtomicReference
 
 /** Where the inventory, the per-VM configuration files and the playbooks
@@ -209,7 +209,15 @@ object Sources:
       .Try(Files.readString(Paths.get(path), UTF_8))
       .toEither
       .left
-      .map(e => s"cannot read $path: ${e.getMessage}")
+      .map(e => s"cannot read $path: ${describe(e)}")
+
+  /** The reason a file could not be read. The JDK's message for a missing or
+    * unreadable file is just the path, which says nothing.
+    */
+  private def describe(e: Throwable): String = e match
+    case _: NoSuchFileException     => "no such file"
+    case _: AccessDeniedException   => "permission denied"
+    case other                      => Option(other.getMessage).getOrElse(other.toString)
 
   private def readFile(location: String): Either[String, String] =
     scala.util

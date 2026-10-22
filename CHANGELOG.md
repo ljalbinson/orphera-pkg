@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+- A file that cannot be read now says why (`cannot read /etc/orphera/inventory.yaml: no such file`, or `permission denied`) instead of repeating
+  the path, and the warning about a missing inventory says how to set its location.
+
 ## [0.1.202] - 2026-10-22
 
 The agent is unchanged from 0.1.201: these are changes to the `orphera` command, its packaging and the shell scripts.
