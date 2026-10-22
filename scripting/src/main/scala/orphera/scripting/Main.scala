@@ -5,6 +5,8 @@ package orphera.scripting
 import java.io.File
 import java.nio.file.{Files, Paths}
 
+import orphera.orchestrator.Installation
+
 object Main:
 
   def main(args: Array[String]): Unit =
@@ -23,15 +25,11 @@ object Main:
 
     val objectName = script.getFileName.toString.stripSuffix(".scala")
 
-    val orchestratorJar =
-      findLatestJar("orchestrator/target", "orchestrator-assembly", ".jar")
-        .getOrElse {
-          System.err.println(
-            "Error: orchestrator-assembly jar not found under orchestrator/target/. " +
-              "Run 'sbt orchestrator/assembly' first."
-          )
-          sys.exit(1)
-        }
+    val orchestratorJar = Installation.orchestratorJar match
+      case Right(jar) => jar
+      case Left(err)  =>
+        System.err.println(s"Error: $err")
+        sys.exit(1)
 
     val selfJar = findOwnJarPath()
       .getOrElse {
@@ -68,25 +66,6 @@ object Main:
 
   private def runProcess(command: List[String]): Int =
     new ProcessBuilder(command*).inheritIO().start().waitFor()
-
-  private def findLatestJar(
-      dir: String,
-      prefix: String,
-      suffix: String
-  ): Option[String] =
-    val base = new File(dir)
-    if !base.isDirectory then None
-    else
-      val candidates =
-        Option(base.listFiles()).toList.flatten
-          .filter(_.isDirectory)
-          .flatMap(scalaDir => Option(scalaDir.listFiles()).toList.flatten)
-          .filter(f =>
-            f.isFile && f.getName.startsWith(prefix) && f.getName
-              .endsWith(suffix)
-          )
-          .sortBy(_.getName)
-      candidates.lastOption.map(_.getAbsolutePath)
 
   private def findOwnJarPath(): Option[String] =
     Option(getClass.getProtectionDomain.getCodeSource)

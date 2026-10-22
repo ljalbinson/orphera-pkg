@@ -474,8 +474,9 @@ With `-c` set, `--config tst7` means `<config-dir>/tst7.yaml`. A `--config` valu
 | the CA certificate and key (`ca.crt`, `ca.key`) | `ORPHERA_CERTS_DIR` | `certs` |
 | run state: `.orphera-state`, `.orphera-logs`, `.orphera-audit`, `.orphera-build-logs` | `ORPHERA_STATE_DIR` | the current directory |
 
-The jar that runs `.scala` playbooks is installed by `make orpheracli` as `/usr/local/lib/orphera-scripting.jar`
-(`ORPHERA_SCRIPTING_JAR` names another). The `orphera` launcher runs from `$ORPHERA_HOME` if that is set (it must exist), else
+The jars that compile and run `.scala` playbooks are installed by `make orpheracli` as `/usr/local/lib/orphera-scripting.jar`
+and `/usr/local/lib/orphera-orchestrator.jar` (`ORPHERA_SCRIPTING_JAR` and `ORPHERA_ORCHESTRATOR_JAR` name others; each falls
+back to the build tree under `scripting/target/` or `orchestrator/target/`). The `orphera` launcher runs from `$ORPHERA_HOME` if that is set (it must exist), else
 from `~/orphera-pkg` if that exists, else from the current directory, so on a machine with no checkout the relative defaults
 above apply to wherever you run it, and the settings move them. Playbook scripts started by `orphera` inherit the
 environment variables. `make certs` honours `ORPHERA_CERTS_DIR` too.

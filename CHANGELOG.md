@@ -7,6 +7,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- A `.scala` playbook is compiled against the installed orchestrator jar (`/usr/local/lib/orphera-orchestrator.jar`, or
+  `ORPHERA_ORCHESTRATOR_JAR`), not only one under `orchestrator/target/`, so `orphera playbook x.scala` works with no build tree.
 - `ORPHERA_CERTS_DIR` (default `certs`) says where `ca.crt` and `ca.key` are, and `ORPHERA_STATE_DIR` (default the current directory) where
   `.orphera-state`, `.orphera-logs`, `.orphera-audit` and `.orphera-build-logs` are written; `make certs` honours the first. The `orphera`
   launcher no longer exits when `~/orphera-pkg` does not exist: it runs from `$ORPHERA_HOME` if set, else `~/orphera-pkg` if present, else

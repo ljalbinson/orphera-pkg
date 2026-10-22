@@ -28,6 +28,8 @@ import java.nio.file.{Files, Path, Paths}
 object Installation:
 
   val ScriptingEnv = "ORPHERA_SCRIPTING_JAR"
+  val OrchestratorEnv = "ORPHERA_ORCHESTRATOR_JAR"
+  val InstalledOrchestratorJar = "/usr/local/lib/orphera-orchestrator.jar"
   val CertsEnv = "ORPHERA_CERTS_DIR"
   val StateEnv = "ORPHERA_STATE_DIR"
   val DefaultCertsDir = "certs"
@@ -62,6 +64,14 @@ object Installation:
       findLatestJar("scripting/target", "scripting-assembly", ".jar")
     )
 
+  /** The orchestrator jar a `.scala` playbook is compiled and run against. */
+  def orchestratorJar: Either[String, String] =
+    resolveOrchestratorJar(
+      name => sys.env.get(name),
+      path => Files.isRegularFile(Paths.get(path)),
+      findLatestJar("orchestrator/target", "orchestrator-assembly", ".jar")
+    )
+
   /** Pure: the choice, given the environment, a file test and the jar found in
     * a build tree.
     */
@@ -70,17 +80,50 @@ object Installation:
       isFile: String => Boolean,
       built: => Option[String]
   ): Either[String, String] =
-    set(env, ScriptingEnv) match
+    resolveJar(
+      ScriptingEnv,
+      InstalledScriptingJar,
+      "scripting jar for .scala playbooks",
+      "sbt scripting/assembly",
+      env,
+      isFile,
+      built
+    )
+
+  def resolveOrchestratorJar(
+      env: String => Option[String],
+      isFile: String => Boolean,
+      built: => Option[String]
+  ): Either[String, String] =
+    resolveJar(
+      OrchestratorEnv,
+      InstalledOrchestratorJar,
+      "orchestrator jar for .scala playbooks",
+      "sbt orchestrator/assembly",
+      env,
+      isFile,
+      built
+    )
+
+  private def resolveJar(
+      envName: String,
+      installed: String,
+      what: String,
+      buildCommand: String,
+      env: String => Option[String],
+      isFile: String => Boolean,
+      built: => Option[String]
+  ): Either[String, String] =
+    set(env, envName) match
       case Some(path) =>
         if isFile(path) then Right(path)
-        else Left(s"$ScriptingEnv is $path, which is not a file")
+        else Left(s"$envName is $path, which is not a file")
       case None =>
-        if isFile(InstalledScriptingJar) then Right(InstalledScriptingJar)
+        if isFile(installed) then Right(installed)
         else
           built.toRight(
-            "no scripting jar for .scala playbooks: run 'make orpheracli' " +
-              s"(it installs $InstalledScriptingJar), or set $ScriptingEnv, or " +
-              "run 'sbt scripting/assembly' in the repository"
+            s"no $what: run 'make orpheracli' (it installs $installed), " +
+              s"or set $envName, or run '$buildCommand' in the repository"
           )
 
   /** The newest jar called `<prefix>*<suffix>` in a subdirectory of `dir`. */

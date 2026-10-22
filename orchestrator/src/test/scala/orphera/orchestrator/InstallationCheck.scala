@@ -74,6 +74,27 @@ object InstallationCheck:
       }
     )
 
+    // The orchestrator jar a playbook is compiled against
+    val InstalledOrch = Installation.InstalledOrchestratorJar
+    check(
+      "the orchestrator jar follows ORPHERA_ORCHESTRATOR_JAR, then the installed jar, then a build tree",
+      Installation.resolveOrchestratorJar(
+        Map(Installation.OrchestratorEnv -> "/x/o.jar").get,
+        Set("/x/o.jar", InstalledOrch).contains,
+        None
+      ) == Right("/x/o.jar") &&
+        Installation.resolveOrchestratorJar(_ => None, Set(InstalledOrch).contains, Built) ==
+          Right(InstalledOrch) &&
+        Installation.resolveOrchestratorJar(_ => None, _ => false, Built) ==
+          Right(Built.getOrElse(""))
+    )
+    check(
+      "no orchestrator jar says how to get one",
+      Installation.resolveOrchestratorJar(_ => None, _ => false, None).swap.exists(e =>
+        e.contains("make orpheracli") && e.contains(Installation.OrchestratorEnv)
+      )
+    )
+
     // The certificate authority and the run state
     check(
       "the CA is in certs by default",
