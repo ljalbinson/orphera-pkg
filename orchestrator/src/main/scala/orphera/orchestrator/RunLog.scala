@@ -61,7 +61,9 @@ object RunLog:
     */
   def start(kind: String, playbookName: String): IO[Handle] =
     for
-      dir <- IO.blocking(Files.createDirectories(Installation.statePath(".orphera-logs")))
+      dir <- IO.blocking(
+        Files.createDirectories(Installation.statePath(".orphera-logs"))
+      )
       timestamp = DateTimeFormatter
         .ofPattern("yyyyMMdd-HHmmss")
         .format(java.time.LocalDateTime.now())

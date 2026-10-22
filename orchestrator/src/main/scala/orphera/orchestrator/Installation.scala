@@ -14,9 +14,9 @@ import java.nio.file.{Files, Path, Paths}
   * and `ca.key`.
   *
   * Run state (`.orphera-state`, `.orphera-logs`, `.orphera-audit`,
-  * `.orphera-build-logs`): under `ORPHERA_STATE_DIR` when it is set, else in the
-  * current directory, as before. Playbook scripts started by `orphera` inherit
-  * both variables.
+  * `.orphera-build-logs`): under `ORPHERA_STATE_DIR` when it is set, else in
+  * the current directory, as before. Playbook scripts started by `orphera`
+  * inherit both variables.
   *
   * The scripting jar is taken from, in order:
   *   1. `ORPHERA_SCRIPTING_JAR`, which must name a file
