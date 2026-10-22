@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.1.202] - 2026-10-22
+
+The agent is unchanged from 0.1.201: these are changes to the `orphera` command, its packaging and the shell scripts.
+
 ### Added
 - The `orphera` command can be installed as a package: `make cli-package` builds `orphera_<version>_all.deb`, a tarball
   `orphera-<version>.tar.gz` and, when `rpmbuild` is installed, `orphera-<version>-1.noarch.rpm`. The program goes in the read-only

@@ -1,5 +1,5 @@
 # RPM spec for the orphera command line, filled in and built by `make cli-rpm` from the same
-# staged tree as the .deb (pkg-cli). The tree is copied in from %{stagedir}.
+# staged tree as the .deb (pkg-cli). The tree is copied in from the stagedir macro.
 Name:           orphera
 Version:        %{version}
 Release:        1
