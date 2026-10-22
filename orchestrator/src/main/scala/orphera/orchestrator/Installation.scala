@@ -11,8 +11,8 @@ import java.nio.file.{Files, Paths}
   *
   * The jar is taken from, in order:
   *   1. `ORPHERA_SCRIPTING_JAR`, which must name a file
-  *   1. `/usr/local/lib/orphera-scripting.jar`, where `make orpheracli` installs
-  *      it beside the orchestrator jar
+  *   1. `/usr/local/lib/orphera-scripting.jar`, where `make orpheracli`
+  *      installs it beside the orchestrator jar
   *   1. the newest `scripting-assembly*.jar` under `scripting/target/`, as
   *      before, for a build tree
   */

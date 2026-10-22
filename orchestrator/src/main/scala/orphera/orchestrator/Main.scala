@@ -1010,7 +1010,7 @@ object Main extends IOApp:
   ): IO[ExitCode] =
     IO.blocking {
       Installation.scriptingJar match
-        case Left(err) => Left(err)
+        case Left(err)  => Left(err)
         case Right(jar) =>
           val builder = new ProcessBuilder(
             "java",
