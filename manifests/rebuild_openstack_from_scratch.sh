@@ -31,6 +31,7 @@
 # (tst9, tst11, tst12) or tst7: the build skips the cache steps unless run with --with-caches, and those
 # VMs may not exist. A failed step stops the run and says how to resume.
 set -uo pipefail
+START_DIR=$PWD
 HERE=$(cd "$(dirname "$0")" && pwd) || exit 1
 cd "$HERE/.." || exit 1
 . utils/orphera-sources.sh
@@ -54,7 +55,9 @@ T0=$(date +%s)
 log() { printf '[%s] %s\n' "$(date +%H:%M:%S)" "$1"; }
 die() { log "STOPPED: $1"; exit 1; }
 
-[ -n "$DEB" ] || DEB=$(ls -t orphera-agent_*_amd64.deb 2>/dev/null | head -n 1)
+# A relative -f is relative to where the script was started, not to the directory it moves into.
+case "$DEB" in /*|"") ;; *) [ -f "$START_DIR/$DEB" ] && DEB="$START_DIR/$DEB" ;; esac
+[ -n "$DEB" ] || DEB=$(ls -t "$START_DIR"/orphera-agent_*_amd64.deb orphera-agent_*_amd64.deb 2>/dev/null | head -n 1)
 [ -f "$DEB" ] || die "no agent package found (orphera-agent_*_amd64.deb in this directory, or -f FILE)"
 for n in "${NODES[@]}"; do [ -f "$CONF_DIR/$n.yaml" ] || die "missing $CONF_DIR/$n.yaml"; done
 

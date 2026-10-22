@@ -47,6 +47,7 @@ untrusted networks or adversarial input.
 - [Typed configuration files and check mode](#typed-configuration-files-and-check-mode)
 - [Provisioning a new host](#provisioning-a-new-host)
 - [Decommissioning a host](#decommissioning-a-host)
+- [Installing the command line](#installing-the-command-line)
 - [Makefile targets](#makefile-targets)
 - [Testing](#testing)
 - [Development notes](#development-notes)
@@ -1522,6 +1523,38 @@ After teardown, the host is no longer reachable via gRPC — re-run
 sets the token again). `Inventory.all` is not
 auto-updated; remove the entry manually.
 
+## Installing the command line
+
+`make cli-package` builds a package of the `orphera` command, separate from the agent package. It needs the same tools as
+`make release` (`sbt`, `dpkg-deb`; `rpmbuild` for the `.rpm`).
+
+| Where | What |
+|---|---|
+| `/opt/orphera` | the program, read-only: `bin/`, `lib/` (both jars), `manifests/`, `utils/`, `catalogues/`, `schemas/`, `files/`, `docs/`, `examples/` |
+| `/usr/bin/orphera` | link to `/opt/orphera/bin/orphera`; bash completion is in `/etc/bash_completion.d/orphera` |
+| `/etc/orphera` | your site: `inventory.yaml`, `config/` (per-VM configs) and `certs/` (`ca.crt`, `ca.key`). The package creates the directories empty and never overwrites what is in them |
+| `~/.local/state/orphera` | run state per user (`.orphera-state`, `.orphera-logs`, `.orphera-audit`, `.orphera-build-logs`); `$XDG_STATE_HOME` moves it |
+
+```sh
+sudo apt install ./orphera_<version>_all.deb         # or: sudo dnf install ./orphera-<version>-1.noarch.rpm
+sudo cp /opt/orphera/examples/inventory.yaml /etc/orphera/      # starting points: edit both
+sudo cp -r /opt/orphera/examples/config/. /etc/orphera/config/
+sudoedit /etc/orphera/inventory.yaml
+orphera version
+```
+
+The packaged launcher sets `ORPHERA_INVENTORY`, `ORPHERA_CONFIG_DIR`, `ORPHERA_CERTS_DIR`, `ORPHERA_MANIFESTS`, `ORPHERA_CATALOGUES`,
+`ORPHERA_STATE_DIR` and the two jar variables to those places only when they are not already set, so the environment, `-I`, `-c` and
+`-m` all still win. Set `ORPHERA_SITE_DIR` to move the three site paths together. The shell scripts in `/opt/orphera/manifests`
+read the same defaults, and `orphera` is on their `PATH`.
+
+The tarball unpacks as `orphera-<version>/`. Without root, unpack it anywhere, set `ORPHERA_SITE_DIR` to a directory of your own, and
+run `<dir>/bin/orphera`.
+
+Known limits: `manifests/WebBaseline.scala` reads `files/motd` relative to the current directory, so it only works when run from
+`/opt/orphera`. `rebuild_openstack_from_scratch.sh` needs the agent `.deb` named with `-f` (or in the directory you run it from), as the
+command-line package does not contain it. `make release` does not build this package yet.
+
 ## Makefile targets
 
 | Target | Does |
@@ -1543,6 +1576,8 @@ auto-updated; remove the entry manually.
 | `make fix` | applies the `scalafix` rules, then runs `make fmt` |
 | `make fmt-manifests` | `scalafmt` over the files in `manifests/` only |
 | `make scripting` | `sbt scripting/assembly`: the jar that compiles and runs `.scala` playbooks at run time (`make orpheracli` builds and installs it too) |
+| `make cli-package` | builds the `orphera` command-line package (see [Installing the command line](#installing-the-command-line)): `.deb` and `.tar.gz`, plus `.rpm` when `rpmbuild` is installed. Individual targets: `cli-stage`, `cli-deb`, `cli-rpm`, `cli-tar` |
+| `make check-package` | stages the command-line package with stand-in jars and checks its layout and launcher; needs no build |
 | `make lines` | counts the lines of Scala source |
 | `make reload` | `sbt reload` |
 | `make check-versions`, `make check-uptimes` | `orphera version` / `orphera uptime` over the whole inventory, through `sbt` |

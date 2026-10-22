@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-.PHONY: all release rpm-if-available bump-patch _build_all clean test assembly pkg-stage deb rpm verify certs certs-clean fmt fmt-manifests scripting lint fix
+.PHONY: all release rpm-if-available bump-patch _build_all clean test assembly pkg-stage deb rpm verify certs certs-clean fmt fmt-manifests scripting lint fix cli-stage cli-deb cli-rpm cli-tar cli-package check-package
 
 VERSION_FILE := VERSION
 VERSION      := $(shell cat $(VERSION_FILE))
@@ -160,9 +160,47 @@ scripting:
 sleep30:
 	sleep 30
 
+# The orphera command-line package (/opt/orphera): deb, rpm and tarball. Separate from the
+# agent package above; staged in $(CLI_STAGE) so the two never touch each other.
+CLI_STAGE := pkg-cli
+CLI_DEB := orphera_$(VERSION)_all.deb
+CLI_RPM := orphera-$(VERSION)-1.noarch.rpm
+CLI_TAR := orphera-$(VERSION).tar.gz
+
+cli-stage:
+	sbt orchestrator/assembly scripting/assembly
+	rm -rf $(CLI_STAGE)
+	packaging/cli/stage.sh $(CLI_STAGE) $(VERSION) \
+	  orchestrator/target/scala-3.8.4/orchestrator-assembly-$(VERSION).jar \
+	  scripting/target/scala-3.8.4/scripting-assembly-$(VERSION).jar
+
+cli-deb: cli-stage
+	dpkg-deb --build --root-owner-group $(CLI_STAGE) $(CLI_DEB)
+	@echo "Built $(CLI_DEB)"
+
+cli-rpm: cli-stage
+	rpmbuild -bb packaging/cli/orphera.spec.template \
+	  --define "_topdir $(CURDIR)/$(CLI_STAGE)-rpm" --define "version $(VERSION)" \
+	  --define "stagedir $(CURDIR)/$(CLI_STAGE)"
+	cp $(CLI_STAGE)-rpm/RPMS/noarch/$(CLI_RPM) .
+	@echo "Built $(CLI_RPM)"
+
+# Unpacks as orphera-<version>/ (bin, lib, manifests, ...). Set ORPHERA_SITE_DIR to run it without root.
+cli-tar: cli-stage
+	tar --owner=0 --group=0 --transform 's,^orphera,orphera-$(VERSION),' -C $(CLI_STAGE)/opt -czf $(CLI_TAR) orphera
+	@echo "Built $(CLI_TAR)"
+
+cli-package: cli-deb cli-tar
+	@if command -v rpmbuild >/dev/null 2>&1; then $(MAKE) cli-rpm; else echo "rpmbuild not installed: skipping $(CLI_RPM)"; fi
+
+# No build needed: stages the package with stand-in jars and checks layout, launcher and scripts.
+check-package:
+	utils/test-cli-package.sh
+
 clean:
 	sbt clean
-	rm -rf pkg $(DEB_FILE)
+	rm -rf pkg $(DEB_FILE) $(CLI_STAGE) $(CLI_STAGE)-rpm
+	rm -f orphera_*_all.deb orphera-*.noarch.rpm orphera-*.tar.gz
 	rm -f orphera-agent_*_amd64.deb orphera-agent-*.rpm
 
 test:

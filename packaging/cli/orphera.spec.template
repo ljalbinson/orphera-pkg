@@ -1,0 +1,36 @@
+# RPM spec for the orphera command line, filled in and built by `make cli-rpm` from the same
+# staged tree as the .deb (pkg-cli). The tree is copied in from %{stagedir}.
+Name:           orphera
+Version:        %{version}
+Release:        1
+Summary:        Orphera orchestration command line
+License:        Apache-2.0
+BuildArch:      noarch
+Requires:       java-headless
+Recommends:     python3-pyyaml
+AutoReqProv:    no
+# The jars are already compressed, and the tree has jars and scripts, not ELF files.
+%global __os_install_post %{nil}
+
+%description
+The orphera command, its playbooks (manifests) and helper scripts. Installs under
+/opt/orphera; the inventory, per-VM configs and the certificate authority belong in
+/etc/orphera.
+
+%prep
+
+%build
+
+%install
+mkdir -p %{buildroot}
+cp -a %{stagedir}/. %{buildroot}/
+rm -rf %{buildroot}/DEBIAN
+
+%files
+%defattr(-,root,root,-)
+/opt/orphera
+/usr/bin/orphera
+/etc/bash_completion.d/orphera
+%dir /etc/orphera
+%dir /etc/orphera/config
+%dir /etc/orphera/certs

@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- The `orphera` command can be installed as a package: `make cli-package` builds `orphera_<version>_all.deb`, a tarball
+  `orphera-<version>.tar.gz` and, when `rpmbuild` is installed, `orphera-<version>-1.noarch.rpm`. The program goes in the read-only
+  `/opt/orphera` (jars, playbooks, helper scripts, catalogues, schemas, docs, examples), with `/usr/bin/orphera` and bash completion.
+  Site data lives in `/etc/orphera` (`inventory.yaml`, `config/`, `certs/`) and run state per user under
+  `${XDG_STATE_HOME:-~/.local/state}/orphera`. The packaged launcher sets these as defaults; the `ORPHERA_*` variables and
+  `-I`/`-c`/`-m` still override. `ORPHERA_SITE_DIR` moves the three site paths together.
+- `make check-package` (also run by CI) stages the package with stand-in jars and checks the layout, the launcher and that the shell
+  scripts pick up the same defaults. Needs no build.
+- `rebuild_openstack_from_scratch.sh -f` resolves a relative path against the directory the script was started from.
+
 ## [0.1.201] - 2026-10-22
 
 The agent is unchanged from 0.1.200: these are changes to the `orphera` command, the shell scripts and the documentation.

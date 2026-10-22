@@ -19,6 +19,9 @@ metals.sbt
 
 *.deb
 *.rpm
+*.tar.gz
+pkg-cli/
+pkg-cli-rpm/
 
 runtime
 

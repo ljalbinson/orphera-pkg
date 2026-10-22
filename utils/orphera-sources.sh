@@ -7,6 +7,20 @@
 # `utils/sql-to-yaml.py --mariadb "..." --out DIR` and point both variables at DIR.
 # Sourced, not run.
 
+# In an installed package (lib/orphera-env.sh beside utils/) the site defaults, and the orphera
+# command on PATH, come from the installation; in a checkout there is no such file and nothing changes.
+_orphera_utils_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+if [ -f "$_orphera_utils_dir/../lib/orphera-env.sh" ]; then
+  ORPHERA_PREFIX=$(cd "$_orphera_utils_dir/.." && pwd)
+  export ORPHERA_PREFIX
+  . "$_orphera_utils_dir/../lib/orphera-env.sh"
+  case ":$PATH:" in
+    *":$ORPHERA_PREFIX/bin:"*) ;;
+    *) PATH="$ORPHERA_PREFIX/bin:$PATH"; export PATH ;;
+  esac
+fi
+unset _orphera_utils_dir
+
 # Value of a top-level `key:` under `params:` in a config file, without quotes.
 config_value() {
   awk -v key="$2" '

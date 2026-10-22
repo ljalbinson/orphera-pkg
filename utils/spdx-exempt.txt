@@ -36,3 +36,5 @@ packaging/agent.env
 packaging/conffiles
 packaging/control.template
 packaging/orphera-agent.spec.template
+packaging/cli/control.template
+packaging/cli/orphera.spec.template

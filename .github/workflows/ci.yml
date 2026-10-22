@@ -14,6 +14,8 @@ jobs:
         run: utils/spdx.py --check
       - name: Shell scripts follow ORPHERA_CONFIG_DIR and ORPHERA_INVENTORY
         run: utils/test-shell-sources.sh
+      - name: Command-line package layout and launcher
+        run: utils/test-cli-package.sh
       - uses: actions/setup-java@v4
         with:
           distribution: temurin

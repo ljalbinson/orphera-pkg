@@ -1,0 +1,33 @@
+#!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
+# The orphera command of an installed package (/opt/orphera/bin/orphera, usually reached as
+# /usr/bin/orphera). It works out where it is installed from where this file is, so the same
+# tree works under /opt/orphera or anywhere a tarball is unpacked, takes the site defaults from
+# lib/orphera-env.sh (inventory, configs, certificates and playbooks; each can be overridden by
+# the environment or by -I, -c and -m), and runs from the current directory.
+#
+# Not the launcher of a checkout (utils/orphera), which runs from the repository.
+
+set -e
+
+self=$0
+while [ -h "$self" ]; do
+  dir=$(cd "$(dirname "$self")" && pwd)
+  link=$(readlink "$self")
+  case $link in
+    /*) self=$link ;;
+    *) self=$dir/$link ;;
+  esac
+done
+ORPHERA_PREFIX=$(cd "$(dirname "$self")/.." && pwd)
+export ORPHERA_PREFIX
+
+# shellcheck disable=SC1091
+. "$ORPHERA_PREFIX/lib/orphera-env.sh"
+
+if [ ! -f "$ORPHERA_ORCHESTRATOR_JAR" ]; then
+  echo "Error: $ORPHERA_ORCHESTRATOR_JAR not found: the installation at $ORPHERA_PREFIX is incomplete" >&2
+  exit 1
+fi
+
+exec "${JAVA_HOME:+$JAVA_HOME/bin/}java" -cp "$ORPHERA_ORCHESTRATOR_JAR" orphera.orchestrator.Main "$@"
