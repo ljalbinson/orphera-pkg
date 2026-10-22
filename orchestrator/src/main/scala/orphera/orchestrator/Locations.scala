@@ -215,9 +215,9 @@ object Sources:
     * unreadable file is just the path, which says nothing.
     */
   private def describe(e: Throwable): String = e match
-    case _: NoSuchFileException     => "no such file"
-    case _: AccessDeniedException   => "permission denied"
-    case other                      => Option(other.getMessage).getOrElse(other.toString)
+    case _: NoSuchFileException   => "no such file"
+    case _: AccessDeniedException => "permission denied"
+    case other => Option(other.getMessage).getOrElse(other.toString)
 
   private def readFile(location: String): Either[String, String] =
     scala.util
