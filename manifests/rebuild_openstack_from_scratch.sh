@@ -9,7 +9,10 @@
 #   --dry-run    show the plan (nodes, hypervisors, how each hypervisor stores VMs) and stop
 #   -j N         VMs built at the same time (default 6)
 #   -f FILE      agent package to install (default: newest orphera-agent_*_amd64.deb here)
-#   --tests      afterwards run the per-service test scripts (keystone ... nova_compute)
+#   --tests      afterwards run the per-service test scripts (keystone ... nova_compute), then the
+#                closing checks again (clients, smoke, CirrOS boot). test_keystone.sh tears Keystone
+#                down (new database, new CA) and the later scripts re-register their services, so
+#                only the closing checks show the finished cluster works together.
 #   --wordpress  afterwards rebuild WordPress on tst7 (its database lives on Galera)
 #
 # The VMs: tst0-tst2 (Ceph), tst3-tst5 (Galera), tst6 (Keystone), tst10 (Cinder, RabbitMQ), tst13
@@ -42,7 +45,7 @@ while [ $# -gt 0 ]; do
     -f) DEB="${2:?-f needs a file}"; shift 2 ;;
     --tests) TESTS=1; shift ;;
     --wordpress) WORDPRESS=1; shift ;;
-    -h|--help) sed -n '2,29p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,/^set -uo pipefail/{/^set -uo pipefail/!p}' "$0"; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
@@ -91,6 +94,11 @@ if [ -n "$TESTS" ]; then
     if manifests/test_$t.sh >"/tmp/rebuild-test-$t.log" 2>&1; then log "PASS: test_$t.sh"
     else log "FAIL: test_$t.sh (output: /tmp/rebuild-test-$t.log)"; FAILED="$FAILED $t"; fi
   done
+  # test_keystone.sh rebuilt Keystone (and its CA) after the stack was checked, so check the
+  # cluster again as it now stands: the CLI's CA, real objects in every service, a booted instance.
+  log "--- step 3b: the cluster after the tests (clients, smoke, boot) ---"
+  if manifests/build_openstack_stack.sh --from clients; then log "PASS: the cluster works after the tests"
+  else log "FAIL: the closing checks after the tests (see above; re-run: manifests/build_openstack_stack.sh --from clients)"; FAILED="$FAILED closing-checks"; fi
 fi
 if [ -n "$WORDPRESS" ]; then
   log "--- WordPress on tst7 ---"

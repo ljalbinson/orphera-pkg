@@ -19,6 +19,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   not selected, or an exclusion that leaves nothing, is an error.
 
 ### Changed
+- `manifests/rebuild_openstack_from_scratch.sh --tests` now runs the closing checks (`clients`, `smoke`, the CirrOS `boot`) again after
+  the test scripts. `test_keystone.sh` tears Keystone down (new database, new CA), so the checks made before the tests did not show the
+  finished cluster works. Its `--help` text no longer cuts off at a fixed line.
 - Tab completion: offers `--exclude-nodes` with every verb that takes `--nodes`, completes node names (from the inventory, `-I` and
   `ORPHERA_INVENTORY` honoured) after `--nodes` and `--exclude-nodes` as a comma-separated list that leaves out names already given,
   and completes the config names after `show-config`.

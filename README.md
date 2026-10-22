@@ -1165,8 +1165,9 @@ rather than guessing).
 `manifests/rebuild_openstack_from_scratch.sh` is the whole OpenStack stack from nothing: it destroys
 and re-creates the 13 OpenStack VMs (tst0-tst6, tst10, tst13, tst14, tst17-tst19) with
 `par-mk-new-and-empty.sh`, then runs `build_openstack_stack.sh`. `--dry-run` shows the plan,
-`--yes` skips the "type rebuild" confirmation, `--tests` runs the per-service test scripts afterwards
-and `--wordpress` rebuilds WordPress on tst7, whose database lives on Galera. It leaves the caches
+`--yes` skips the "type rebuild" confirmation, `--tests` runs the per-service test scripts afterwards,
+then the closing checks again (CLI, smoke objects, a CirrOS boot), because `test_keystone.sh` tears Keystone down, and
+ `--wordpress` rebuilds WordPress on tst7, whose database lives on Galera. It leaves the caches
 (tst9, tst11, tst12), tst7, tst8 and the hypervisors alone.
 
 The one value this file does **not** read from `--config` is the SSH
