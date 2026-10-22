@@ -7,6 +7,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- `.scala` playbooks no longer need a build tree: `make orpheracli` also installs the scripting jar as
+  `/usr/local/lib/orphera-scripting.jar`, and `orphera` uses, in order, `ORPHERA_SCRIPTING_JAR`, that installed jar, and the newest
+  `scripting/target/` jar as before. With no jar at all the error says how to get one. `InstallationCheck` covers the choice.
 - `-m` / `--manifests <dir>` (and `ORPHERA_MANIFESTS`, default `manifests`) says where the playbooks are. A playbook given as a bare
   file name (`orphera -m /usr/share/orphera/manifests cluster-playbook gen_set_dns.scala`) is looked for in that directory first, then
   taken as it is; a name with a `/`, `@bootstrap` and compiled playbook names are never looked up, so existing command lines are

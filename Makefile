@@ -12,6 +12,7 @@ RPM_TOP      := $(CURDIR)/pkg/rpmbuild
 JAR_SRC      := agent/target/scala-3.8.4/agent-assembly-$(VERSION).jar
 CERTS_DIR    := certs
 CLI_JAR      := /usr/local/lib/orphera-orchestrator.jar
+SCRIPTING_JAR := /usr/local/lib/orphera-scripting.jar
 CLI_BIN      := /usr/local/bin/orphera
 CLI_COMPLETION := /etc/bash_completion.d/orphera
 
@@ -141,13 +142,17 @@ reboot-all:
 # jar built last (not whichever versioned file in /usr/local/lib sorts highest),
 # and installs the launcher with it. Copy-then-rename, so a run that starts
 # mid-install never sees a half-written jar.
+# Installs the CLI and the jar that compiles and runs .scala playbooks (Installation.scala
+# looks for it at $(SCRIPTING_JAR)), so neither needs a build tree.
 orpheracli:
-	sbt orchestrator/assembly
+	sbt orchestrator/assembly scripting/assembly
 	sudo cp orchestrator/target/scala-3.8.4/orchestrator-assembly-$(VERSION).jar $(CLI_JAR).new
 	sudo mv $(CLI_JAR).new $(CLI_JAR)
+	sudo cp scripting/target/scala-3.8.4/scripting-assembly-$(VERSION).jar $(SCRIPTING_JAR).new
+	sudo mv $(SCRIPTING_JAR).new $(SCRIPTING_JAR)
 	sudo install -m 755 utils/orphera $(CLI_BIN)
 	sudo install -D -m 644 orphera-completion.bash $(CLI_COMPLETION)
-	@echo "Installed orchestrator $(VERSION) as $(CLI_JAR); tab completion applies to new shells"
+	@echo "Installed orchestrator $(VERSION) as $(CLI_JAR) and the scripting jar as $(SCRIPTING_JAR); tab completion applies to new shells"
 
 scripting:
 	sbt scripting/assembly
@@ -161,7 +166,7 @@ clean:
 	rm -f orphera-agent_*_amd64.deb orphera-agent-*.rpm
 
 test:
-	sbt test "orchestrator/Test/runMain orphera.orchestrator.kolla.ContainerCheck" "orchestrator/Test/runMain orphera.orchestrator.conf.ConfCheck" "orchestrator/Test/runMain orphera.orchestrator.SecretsCheck" "orchestrator/Test/runMain orphera.orchestrator.ThreadInfoCheck" "orchestrator/Test/runMain orphera.orchestrator.InventoryCheck" "orchestrator/Test/runMain orphera.orchestrator.LocationsCheck" "orchestrator/Test/runMain orphera.orchestrator.DbDocumentsCheck" "agent/Test/runMain orphera.agent.AgentGuardCheck"
+	sbt test "orchestrator/Test/runMain orphera.orchestrator.kolla.ContainerCheck" "orchestrator/Test/runMain orphera.orchestrator.conf.ConfCheck" "orchestrator/Test/runMain orphera.orchestrator.SecretsCheck" "orchestrator/Test/runMain orphera.orchestrator.ThreadInfoCheck" "orchestrator/Test/runMain orphera.orchestrator.InventoryCheck" "orchestrator/Test/runMain orphera.orchestrator.LocationsCheck" "orchestrator/Test/runMain orphera.orchestrator.InstallationCheck" "orchestrator/Test/runMain orphera.orchestrator.DbDocumentsCheck" "agent/Test/runMain orphera.agent.AgentGuardCheck"
 
 assembly:
 	sbt agent/assembly

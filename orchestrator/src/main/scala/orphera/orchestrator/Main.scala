@@ -692,14 +692,10 @@ object Main extends IOApp:
       logFile: java.nio.file.Path,
       quiet: Boolean
   ): IO[ExitCode] =
-    IO.blocking(
-      findLatestJar("scripting/target", "scripting-assembly", ".jar")
-    ).flatMap {
-      case None =>
-        IO.println(
-          s"[$label] Error: scripting-assembly jar not found under scripting/target/. Run 'sbt scripting/assembly' first."
-        ) >> IO.pure(ExitCode.Error)
-      case Some(jar) =>
+    IO.blocking(Installation.scriptingJar).flatMap {
+      case Left(err) =>
+        IO.println(s"[$label] Error: $err") >> IO.pure(ExitCode.Error)
+      case Right(jar) =>
         val builder = new ProcessBuilder(
           "java",
           "-cp",
@@ -1013,12 +1009,9 @@ object Main extends IOApp:
       config: Option[String]
   ): IO[ExitCode] =
     IO.blocking {
-      findLatestJar("scripting/target", "scripting-assembly", ".jar") match
-        case None =>
-          Left(
-            "scripting-assembly jar not found under scripting/target/. Run 'sbt scripting/assembly' first."
-          )
-        case Some(jar) =>
+      Installation.scriptingJar match
+        case Left(err) => Left(err)
+        case Right(jar) =>
           val builder = new ProcessBuilder(
             "java",
             "-cp",
@@ -1064,25 +1057,6 @@ object Main extends IOApp:
               Left(s"Could not read --content-file '$path': ${err.getMessage}")
             case Right(bytes) => Right(bytes)
           }
-
-  private def findLatestJar(
-      dir: String,
-      prefix: String,
-      suffix: String
-  ): Option[String] =
-    val base = new java.io.File(dir)
-    if !base.isDirectory then None
-    else
-      val candidates =
-        Option(base.listFiles()).toList.flatten
-          .filter(_.isDirectory)
-          .flatMap(scalaDir => Option(scalaDir.listFiles()).toList.flatten)
-          .filter(f =>
-            f.isFile && f.getName.startsWith(prefix) && f.getName
-              .endsWith(suffix)
-          )
-          .sortBy(_.getName)
-      candidates.lastOption.map(_.getAbsolutePath)
 
   private def withTargets(nodeNames: Option[List[String]])(
       action: List[Node] => IO[Unit]

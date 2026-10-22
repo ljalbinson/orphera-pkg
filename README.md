@@ -1506,7 +1506,7 @@ auto-updated; remove the entry manually.
 |---|---|
 | `make` / `make all` | clean → test → assembly → deb |
 | `make clean` | `sbt clean`, removes `pkg/` and any built `.deb` / `.rpm` |
-| `make test` | `sbt test`, then the check programs `ContainerCheck`, `ConfCheck`, `SecretsCheck`, `ThreadInfoCheck`, `InventoryCheck`, `LocationsCheck` and `DbDocumentsCheck` (set `CHECK_VERBOSE=1` to print every passing check) |
+| `make test` | `sbt test`, then the check programs `ContainerCheck`, `ConfCheck`, `SecretsCheck`, `ThreadInfoCheck`, `InventoryCheck`, `LocationsCheck`, `InstallationCheck` and `DbDocumentsCheck` (set `CHECK_VERBOSE=1` to print every passing check) |
 | `make assembly` | `sbt agent/assembly` |
 | `make deb` | stages package contents, runs `dpkg-deb --build` |
 | `make rpm` | stages the same contents, runs `rpmbuild` to produce `orphera-agent-<version>-1.noarch.rpm` for Rocky/Red Hat hosts. Needs `rpmbuild` |
@@ -1514,13 +1514,13 @@ auto-updated; remove the entry manually.
 | `make certs` | generates the CA (`certs/ca.{crt,key}`) that signs each node's certificate. Refuses to run if `certs/ca.crt` already exists |
 | `orphera issue-certs --nodes ...` | issues each node its own certificate over SSH (see *Per-node certificates*) |
 | `make certs-clean` | deletes the CA in `certs/` — you must type `delete` to confirm; every node then needs a certificate from a new CA (`make certs`, `orphera issue-certs`) |
-| `make orpheracli` | builds the orchestrator and installs it as `/usr/local/lib/orphera-orchestrator.jar`, with the `orphera` launcher in `/usr/local/bin` and the bash completion in `/etc/bash_completion.d/orphera` (effective in new shells) |
+| `make orpheracli` | builds the orchestrator and the scripting jar and installs them as `/usr/local/lib/orphera-orchestrator.jar` and `/usr/local/lib/orphera-scripting.jar`, with the `orphera` launcher in `/usr/local/bin` and the bash completion in `/etc/bash_completion.d/orphera` (effective in new shells) |
 | `make release` | bumps the patch version in `VERSION`, then runs the full clean/test/assembly/deb chain (plus the `.rpm` when `rpmbuild` is installed) at the new version, and installs the new orchestrator on this machine as `make orpheracli` does. It does not commit `VERSION` or tag; see [Versions and tags](#versions-and-tags) |
 | `make fmt` | `scalafmt` over the sources, then over `manifests/` (`make fmt-manifests`) |
 | `make lint` | the `scalafix` rules in `.scalafix.conf` in check mode; CI runs the same check |
 | `make fix` | applies the `scalafix` rules, then runs `make fmt` |
 | `make fmt-manifests` | `scalafmt` over the files in `manifests/` only |
-| `make scripting` | `sbt scripting/assembly`: the jar that compiles and runs `.scala` playbooks at run time |
+| `make scripting` | `sbt scripting/assembly`: the jar that compiles and runs `.scala` playbooks at run time (`make orpheracli` builds and installs it too) |
 | `make lines` | counts the lines of Scala source |
 | `make reload` | `sbt reload` |
 | `make check-versions`, `make check-uptimes` | `orphera version` / `orphera uptime` over the whole inventory, through `sbt` |
