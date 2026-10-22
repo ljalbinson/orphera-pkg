@@ -61,13 +61,13 @@ object Installation:
       exists: Path => Boolean,
       src: String
   ): Path =
-    val given = Paths.get(src)
-    if given.isAbsolute || exists(given) then given
+    val asGiven = Paths.get(src)
+    if asGiven.isAbsolute || exists(asGiven) then asGiven
     else
       set(env, RootEnv)
         .map(root => Paths.get(root).resolve(src))
         .filter(exists)
-        .getOrElse(given)
+        .getOrElse(asGiven)
 
   def source(src: String): Path =
     sourceOf(key => sys.env.get(key), p => Files.exists(p), src)
