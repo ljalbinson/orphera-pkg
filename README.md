@@ -1553,7 +1553,7 @@ run `<dir>/bin/orphera`.
 
 Known limits: `manifests/WebBaseline.scala` reads `files/motd` relative to the current directory, so it only works when run from
 `/opt/orphera`. `rebuild_openstack_from_scratch.sh` needs the agent `.deb` named with `-f` (or in the directory you run it from), as the
-command-line package does not contain it. `make release` does not build this package yet.
+command-line package does not contain it.
 
 ## Makefile targets
 
@@ -1570,7 +1570,7 @@ command-line package does not contain it. `make release` does not build this pac
 | `orphera issue-certs --nodes ...` | issues each node its own certificate over SSH (see *Per-node certificates*) |
 | `make certs-clean` | deletes the CA in `certs/` — you must type `delete` to confirm; every node then needs a certificate from a new CA (`make certs`, `orphera issue-certs`) |
 | `make orpheracli` | builds the orchestrator and the scripting jar and installs them as `/usr/local/lib/orphera-orchestrator.jar` and `/usr/local/lib/orphera-scripting.jar`, with the `orphera` launcher in `/usr/local/bin` and the bash completion in `/etc/bash_completion.d/orphera` (effective in new shells) |
-| `make release` | bumps the patch version in `VERSION`, then runs the full clean/test/assembly/deb chain (plus the `.rpm` when `rpmbuild` is installed) at the new version, and installs the new orchestrator on this machine as `make orpheracli` does. It does not commit `VERSION` or tag; see [Versions and tags](#versions-and-tags) |
+| `make release` | bumps the patch version in `VERSION`, then runs the full clean/test/assembly/deb chain (plus the `.rpm` when `rpmbuild` is installed) and the command-line package (`make cli-package`) at the new version, and installs the new orchestrator on this machine as `make orpheracli` does. It does not commit `VERSION` or tag; see [Versions and tags](#versions-and-tags) |
 | `make fmt` | `scalafmt` over the sources, then over `manifests/` (`make fmt-manifests`) |
 | `make lint` | the `scalafix` rules in `.scalafix.conf` in check mode; CI runs the same check |
 | `make fix` | applies the `scalafix` rules, then runs `make fmt` |

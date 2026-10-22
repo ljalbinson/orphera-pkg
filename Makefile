@@ -21,7 +21,7 @@ all: clean test assembly deb rpm
 release: bump-patch
 	$(MAKE) _build_all
 
-_build_all: clean test assembly deb rpm-if-available orpheracli scripting
+_build_all: clean test assembly deb rpm-if-available orpheracli scripting cli-package
 	@echo "Released $$(cat $(VERSION_FILE))"
 
 bump-patch:
