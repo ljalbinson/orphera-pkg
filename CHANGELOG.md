@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+- A missing or unreadable CA certificate is reported as such (`no CA certificate: /etc/orphera/certs/ca.crt does not exist (put ca.crt
+  there, or set ORPHERA_CERTS_DIR ...)`) instead of the TLS library's "File does not contain valid certificates", which it also gives for
+  a file that is not there.
 ## [0.1.203] - 2026-10-22
 
 The agent is unchanged from 0.1.202: these are changes to the `orphera` command and its packaging.

@@ -163,6 +163,22 @@ object InstallationCheck:
         "/etc/motd"
     )
 
+    // The CA certificate
+    check(
+      "a missing CA certificate is said to be missing, with how to fix it",
+      Installation.caCertProblemOf("/etc/orphera/certs/ca.crt", false, false).exists(m =>
+        m.contains("/etc/orphera/certs/ca.crt does not exist") && m.contains("ORPHERA_CERTS_DIR")
+      )
+    )
+    check(
+      "an unreadable CA certificate is said to be unreadable",
+      Installation.caCertProblemOf("certs/ca.crt", true, false).exists(_.contains("permission denied"))
+    )
+    check(
+      "a CA certificate that is there is no problem",
+      Installation.caCertProblemOf("certs/ca.crt", true, true).isEmpty
+    )
+
     if failures > 0 then
       println(s"$failures check(s) failed, $passes passed")
       sys.exit(1)

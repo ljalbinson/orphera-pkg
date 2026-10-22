@@ -51,6 +51,27 @@ object Installation:
   def caCert: String = s"${certsDirOf(name => sys.env.get(name))}/ca.crt"
   def caKey: String = s"${certsDirOf(name => sys.env.get(name))}/ca.key"
 
+  /** Why the CA certificate cannot be used, or `None` when the file is there
+    * and readable. The TLS library only says "File does not contain valid
+    * certificates" for a missing file as much as for a bad one.
+    */
+  def caCertProblemOf(
+      path: String,
+      exists: Boolean,
+      readable: Boolean
+  ): Option[String] =
+    if !exists then
+      Some(
+        s"no CA certificate: $path does not exist (put ca.crt there, or set $CertsEnv to the directory that has it)"
+      )
+    else if !readable then
+      Some(s"cannot read the CA certificate $path: permission denied")
+    else None
+
+  def caCertProblem: Option[String] =
+    val file = new File(caCert)
+    caCertProblemOf(caCert, file.isFile, file.canRead)
+
   /** The file a playbook means by `src`: as given when it is absolute or exists
     * relative to the current directory, else under `ORPHERA_ROOT` when it is
     * there, else as given, so that a missing file is reported under the name

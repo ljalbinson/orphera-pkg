@@ -18,6 +18,9 @@ import orphera.common.*
 object NodeClient:
 
   private def channelBuilder(node: Node): NettyChannelBuilder =
+    Installation.caCertProblem.foreach(problem =>
+      throw new IllegalStateException(problem)
+    )
     val sslContext = GrpcSslContexts
       .forClient()
       .trustManager(new File(Installation.caCert))
