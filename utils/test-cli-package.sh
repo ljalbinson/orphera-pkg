@@ -59,6 +59,7 @@ has "launcher: inventory default" "$out" "ORPHERA_INVENTORY=/etc/orphera/invento
 has "launcher: config default" "$out" "ORPHERA_CONFIG_DIR=/etc/orphera/config"
 has "launcher: certs default" "$out" "ORPHERA_CERTS_DIR=/etc/orphera/certs"
 has "launcher: manifests default" "$out" "ORPHERA_MANIFESTS=$p/manifests"
+has "launcher: root default" "$out" "ORPHERA_ROOT=$p"
 has "launcher: catalogues default" "$out" "ORPHERA_CATALOGUES=$p/catalogues"
 has "launcher: state under the home" "$out" "ORPHERA_STATE_DIR=$tmp/home/.local/state/orphera"
 has "launcher: scripting jar default" "$out" "ORPHERA_SCRIPTING_JAR=$p/lib/orphera-scripting.jar"

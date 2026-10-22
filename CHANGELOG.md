@@ -7,6 +7,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Fixed
+- A playbook's relative `src` (`files/motd`, `files/ready-sentinel.txt`) is read from the current directory when it exists there, as
+  before, else from `ORPHERA_ROOT`, which the packaged launcher sets to `/opt/orphera`. The packaged `WebBaseline`, `mini-cluster` and
+  other playbooks that push files now work from any directory. An absolute path and a missing file behave as before.
 - A file that cannot be read now says why (`cannot read /etc/orphera/inventory.yaml: no such file`, or `permission denied`) instead of repeating
   the path, and the warning about a missing inventory says how to set its location.
 

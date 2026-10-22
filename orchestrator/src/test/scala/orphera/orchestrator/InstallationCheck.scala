@@ -123,6 +123,46 @@ object InstallationCheck:
         ".orphera-state"
     )
 
+    // Files named by a playbook
+    import java.nio.file.Paths
+    val rootEnv = Map(Installation.RootEnv -> "/opt/orphera").get
+    val none: java.nio.file.Path => Boolean = _ => false
+    check(
+      "a file in the current directory is used as given",
+      Installation.sourceOf(rootEnv, p => p.toString == "files/motd", "files/motd").toString ==
+        "files/motd"
+    )
+    check(
+      "a file missing here is taken from ORPHERA_ROOT",
+      Installation.sourceOf(
+        rootEnv,
+        p => p == Paths.get("/opt/orphera/files/motd"),
+        "files/motd"
+      ).toString == "/opt/orphera/files/motd"
+    )
+    check(
+      "a file in both places is the one in the current directory",
+      Installation.sourceOf(rootEnv, _ => true, "files/motd").toString == "files/motd"
+    )
+    check(
+      "a file in neither place keeps the name the playbook used",
+      Installation.sourceOf(rootEnv, none, "files/motd").toString == "files/motd"
+    )
+    check(
+      "without ORPHERA_ROOT nothing changes",
+      Installation.sourceOf(_ => None, none, "files/motd").toString == "files/motd"
+    )
+    check(
+      "an empty ORPHERA_ROOT is ignored",
+      Installation.sourceOf(Map(Installation.RootEnv -> " ").get, _ => true, "files/motd")
+        .toString == "files/motd"
+    )
+    check(
+      "an absolute path is never moved",
+      Installation.sourceOf(rootEnv, p => p.toString.startsWith("/opt"), "/etc/motd").toString ==
+        "/etc/motd"
+    )
+
     if failures > 0 then
       println(s"$failures check(s) failed, $passes passed")
       sys.exit(1)

@@ -13,6 +13,11 @@ import java.nio.file.{Files, Path, Paths}
   * Certificate authority: `ORPHERA_CERTS_DIR` (default `certs`) holds `ca.crt`
   * and `ca.key`.
   *
+  * Files named by a playbook (`src = "files/motd"`): a relative path is read
+  * from the current directory, as before; when it is not there and
+  * `ORPHERA_ROOT` is set (the packaged launcher sets it to `/opt/orphera`), it
+  * is looked for under that directory. An absolute path is never moved.
+  *
   * Run state (`.orphera-state`, `.orphera-logs`, `.orphera-audit`,
   * `.orphera-build-logs`): under `ORPHERA_STATE_DIR` when it is set, else in
   * the current directory, as before. Playbook scripts started by `orphera`
@@ -32,6 +37,7 @@ object Installation:
   val InstalledOrchestratorJar = "/usr/local/lib/orphera-orchestrator.jar"
   val CertsEnv = "ORPHERA_CERTS_DIR"
   val StateEnv = "ORPHERA_STATE_DIR"
+  val RootEnv = "ORPHERA_ROOT"
   val DefaultCertsDir = "certs"
   val InstalledScriptingJar = "/usr/local/lib/orphera-scripting.jar"
 
@@ -44,6 +50,27 @@ object Installation:
 
   def caCert: String = s"${certsDirOf(name => sys.env.get(name))}/ca.crt"
   def caKey: String = s"${certsDirOf(name => sys.env.get(name))}/ca.key"
+
+  /** The file a playbook means by `src`: as given when it is absolute or exists
+    * relative to the current directory, else under `ORPHERA_ROOT` when it is
+    * there, else as given, so that a missing file is reported under the name
+    * the playbook used.
+    */
+  def sourceOf(
+      env: String => Option[String],
+      exists: Path => Boolean,
+      src: String
+  ): Path =
+    val given = Paths.get(src)
+    if given.isAbsolute || exists(given) then given
+    else
+      set(env, RootEnv)
+        .map(root => Paths.get(root).resolve(src))
+        .filter(exists)
+        .getOrElse(given)
+
+  def source(src: String): Path =
+    sourceOf(key => sys.env.get(key), p => Files.exists(p), src)
 
   /** A run-state directory such as `.orphera-logs`: inside `ORPHERA_STATE_DIR`
     * when that is set, else relative to the current directory.

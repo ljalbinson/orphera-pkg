@@ -1551,8 +1551,10 @@ read the same defaults, and `orphera` is on their `PATH`.
 The tarball unpacks as `orphera-<version>/`. Without root, unpack it anywhere, set `ORPHERA_SITE_DIR` to a directory of your own, and
 run `<dir>/bin/orphera`.
 
-Known limits: `manifests/WebBaseline.scala` reads `files/motd` relative to the current directory, so it only works when run from
-`/opt/orphera`. `rebuild_openstack_from_scratch.sh` needs the agent `.deb` named with `-f` (or in the directory you run it from), as the
+A file a playbook names with a relative path (`src = "files/motd"`) is read from the current directory when it is there, as before,
+and otherwise from `$ORPHERA_ROOT` (`/opt/orphera` in the package), so the packaged playbooks work from any directory.
+
+Known limit: `rebuild_openstack_from_scratch.sh` needs the agent `.deb` named with `-f` (or in the directory you run it from), as the
 command-line package does not contain it.
 
 ## Makefile targets

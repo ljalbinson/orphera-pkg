@@ -374,7 +374,7 @@ object ClusterPlaybookRunner:
         requireStreamedSuccess(render)(r =>
           NodeClient.copyFile(
             node,
-            java.nio.file.Paths.get(src),
+            Installation.source(src),
             dest,
             owner,
             group,

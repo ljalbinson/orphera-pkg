@@ -384,13 +384,13 @@ object PlaybookRunner:
       setFacts: SetFacts,
       node: Node
   ): IO[java.nio.file.Path] =
-    if !src.endsWith(".mustache") then IO.pure(java.nio.file.Paths.get(src))
+    if !src.endsWith(".mustache") then IO.pure(Installation.source(src))
     else
       buildTemplateVars(facts, context, node, setFacts).flatMap {
         templateVars =>
           IO.blocking {
             val templateContent =
-              java.nio.file.Files.readString(java.nio.file.Paths.get(src))
+              java.nio.file.Files.readString(Installation.source(src))
             val rendered =
               Templating.render(templateContent, templateVars ++ vars)
             val tmp =
