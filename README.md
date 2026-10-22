@@ -196,7 +196,7 @@ commit the change or tag it: commit `VERSION` with a message such as
 `Release 0.1.198`, and tag by hand (`git tag -a v0.1.198 -m "Release
 0.1.198"`, then `git push origin v0.1.198`) when a version is worth
 marking. Tags exist only for some versions (the first is `v0.1.156`, a
-development baseline that compiles; the latest is `v0.1.191`), so to find
+development baseline that compiles), so to find
 the code a given `.deb` was built from, look for its `Release <version>`
 commit with `git log --grep "Release 0.1.198"`. See
 [CHANGELOG.md](CHANGELOG.md) for what each version contains.
@@ -464,7 +464,7 @@ this without a lab. See [docs/MARIADB.md](docs/MARIADB.md).
 The scripts name playbooks by bare file name (`orphera cluster-playbook gen_set_dns.scala`), not `manifests/gen_set_dns.scala`, so
 `orphera` finds them in `-m` / `ORPHERA_MANIFESTS` (default `manifests`), and a script run with `ORPHERA_MANIFESTS=/opt/orphera/manifests`
 applies the playbooks from there. The scripts call each other relative to their own location. They need an `orphera` that has the
-`-m` option: a build of main from 2026-10-22 or later, or the release after 0.1.200 (0.1.200 itself does not have it).
+`-m` option: 0.1.201 or later (0.1.200 does not have it).
 
 With `-c` set, `--config tst7` means `<config-dir>/tst7.yaml`. A `--config` value that has a `/`, a scheme or a
 `.yaml`/`.yml` ending (`config/tst7.yaml`, `/x/y.yaml`) is used exactly as given, as before.

@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.1.201] - 2026-10-22
+
+The agent is unchanged from 0.1.200: these are changes to the `orphera` command, the shell scripts and the documentation.
+
 ### Added
 - A `.scala` playbook is compiled against the installed orchestrator jar (`/usr/local/lib/orphera-orchestrator.jar`, or
   `ORPHERA_ORCHESTRATOR_JAR`), not only one under `orchestrator/target/`, so `orphera playbook x.scala` works with no build tree.
