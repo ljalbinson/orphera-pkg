@@ -464,7 +464,7 @@ this without a lab. See [docs/MARIADB.md](docs/MARIADB.md).
 The scripts name playbooks by bare file name (`orphera cluster-playbook gen_set_dns.scala`), not `manifests/gen_set_dns.scala`, so
 `orphera` finds them in `-m` / `ORPHERA_MANIFESTS` (default `manifests`), and a script run with `ORPHERA_MANIFESTS=/opt/orphera/manifests`
 applies the playbooks from there. The scripts call each other relative to their own location. They need an `orphera` that has the
-`-m` option (0.1.201 or a build of main from 2026-10-22).
+`-m` option: a build of main from 2026-10-22 or later, or the release after 0.1.200 (0.1.200 itself does not have it).
 
 With `-c` set, `--config tst7` means `<config-dir>/tst7.yaml`. A `--config` value that has a `/`, a scheme or a
 `.yaml`/`.yml` ending (`config/tst7.yaml`, `/x/y.yaml`) is used exactly as given, as before.
