@@ -9,9 +9,9 @@
 #   4. dist-upgrade                           (orphera dist-upgrade)
 #   5. install the config's package lists     (gen_packages.scala)
 #
-# Usage: manifests/mk-new-and-empty.sh [-f agent.deb] [node ...]
+# Usage: manifests/mk-new-and-empty.sh [-a agent.deb] [node ...]
 #   node   a name (tst3) or a bare number (3); default is tst0..tst7
-#   -f     agent package to install; default is the newest
+#   -a     agent package to install (-f also works); default is the newest
 #          orphera-agent_*_amd64.deb in the current directory
 #
 # Run from the repository root (config/ and manifests/ are relative paths).
@@ -23,9 +23,9 @@ set -uo pipefail
 CONF_DIR=$(config_dir) || exit 1
 
 deb=""
-while getopts "f:h" opt; do
+while getopts "a:f:h" opt; do
     case $opt in
-        f) deb=$OPTARG ;;
+        a|f) deb=$OPTARG ;;
         *) sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
     esac
 done
@@ -56,11 +56,11 @@ command -v orphera >/dev/null || { echo "orphera not found in PATH" >&2; exit 1;
 
 if [ -z "$deb" ]; then
     # newest build wins; a bare glob would pass the literal pattern (or several
-    # files) to --file when there is no match (or more than one).
+    # files) to --agent when there is no match (or more than one).
     # shellcheck disable=SC2012
     deb=$(ls -t orphera-agent_*_amd64.deb 2>/dev/null | head -n 1)
 fi
-[ -f "$deb" ] || { echo "no agent .deb found (use -f <file>)" >&2; exit 1; }
+[ -f "$deb" ] || { echo "no agent .deb found (use -a <file>)" >&2; exit 1; }
 banner "Agent package: $deb"
 
 # All config files must exist before anything is created, so a typo in the
@@ -102,7 +102,7 @@ build_node() {
 
     # --forget-host-key: a rebuilt VM has a new SSH host key under the same name.
     step "install agent"
-    orphera bootstrap --file "$deb" --ssh-user localadmin --nodes "$node" \
+    orphera bootstrap --agent "$deb" --ssh-user localadmin --nodes "$node" \
         --forget-host-key || return 1
 
     step "set DNS"

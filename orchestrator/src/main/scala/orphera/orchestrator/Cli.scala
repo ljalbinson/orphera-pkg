@@ -3,7 +3,7 @@
 package orphera.orchestrator
 
 /** How the `@bootstrap` step of a `cluster-playbook` chain connects: the same
-  * values `orphera bootstrap` takes (`--ssh-user`, `--ssh-key`, `--file`,
+  * values `orphera bootstrap` takes (`--ssh-user`, `--ssh-key`, `--agent`,
   * `--forget-host-key`), with the same defaults.
   */
 final case class BootstrapOpts(
@@ -189,7 +189,7 @@ object Cli:
     * `--node-groups` selected, so a group can be used with some members left
     * out. With neither, it means every node except those, but only for the
     * verbs where no `--nodes` already means every node (`defaultsToAll`:
-    * `deploy-agent --file x.deb --exclude-nodes tst8`). For the others
+    * `deploy-agent --agent x.deb --exclude-nodes tst8`). For the others
     * (`reboot`, `shutdown`, `teardown`, `bootstrap`, a pipeline, the playbooks)
     * it is an error: they refuse to default to every node and this must not be
     * a way round that. A name that was not selected is an error (a typo would
@@ -383,7 +383,7 @@ object Cli:
     *     comma-separated list and repeating the flag work too),
     *   - `--parallel <n>`: how many configs to run at once,
     *   - `--quiet`: terse terminal output for a multi-config run,
-    *   - `--ssh-user`, `--ssh-key`, `--file`, `--forget-host-key`: how the
+    *   - `--ssh-user`, `--ssh-key`, `--agent`, `--forget-host-key`: how the
     *     `@bootstrap` step connects and which agent package it installs (the
     *     same options, and defaults, as `orphera bootstrap`).
     */
@@ -550,18 +550,18 @@ object Cli:
           rest,
           flags.copy(bootstrap = flags.bootstrap.copy(sshKeyPath = Some(key)))
         )
-      case "--file" :: file :: rest =>
+      case ("--agent" | "--file") :: file :: rest =>
         parseClusterPlaybookFlags(
           rest,
           flags.copy(bootstrap = flags.bootstrap.copy(file = Some(file)))
         )
       case flag :: Nil
-          if List("--parallel", "--ssh-user", "--ssh-key", "--file")
+          if List("--parallel", "--ssh-user", "--ssh-key", "--agent", "--file")
             .contains(flag) =>
         Left(s"$flag requires a value")
       case other :: _ =>
         Left(
-          s"Unknown argument: $other (expected --resume, --config <path> [<path> ...], --parallel <n>, --quiet, --ssh-user, --ssh-key, --file and/or --forget-host-key)"
+          s"Unknown argument: $other (expected --resume, --config <path> [<path> ...], --parallel <n>, --quiet, --ssh-user, --ssh-key, --agent and/or --forget-host-key)"
         )
 
   private def parseLogSummary(
@@ -824,7 +824,7 @@ object Cli:
   ): Either[String, Command] =
     args match
       case Nil => Right(Command.DeployAgent(local, remotePath, nodes))
-      case "--file" :: value :: rest =>
+      case ("--agent" | "--file") :: value :: rest =>
         parseDeployAgent(rest, Some(value), remotePath, nodes)
       case "--remote-path" :: value :: rest =>
         parseDeployAgent(rest, local, value, nodes)
@@ -859,7 +859,7 @@ object Cli:
             forgetHostKey
           )
         )
-      case "--file" :: value :: rest =>
+      case ("--agent" | "--file") :: value :: rest =>
         parseBootstrap(
           rest,
           Some(value),
@@ -1212,12 +1212,12 @@ object Cli:
       |                      multi-line; it still reads that file and sends its bytes,
       |                      same as copy, just under this command's own flags)
       |  network-apply     [--nodes host1,host2] [--timeout 60]
-      |  deploy-agent      [--file <local.deb|.rpm>] [--remote-path /tmp/orphera-agent.deb] [--nodes host1,host2]
+      |  deploy-agent      [--agent <local.deb|.rpm>] [--remote-path /tmp/orphera-agent.deb] [--nodes host1,host2]
       |                    — installs only the orphera-agent package (verified against
       |                      its control metadata, refused otherwise); auto-discovers
       |                      the freshly built orphera-agent_*.deb in the current
-      |                      directory if --file is omitted
-      |  bootstrap         [--file <local.deb|.rpm>] --nodes host1,host2 [--ssh-user root] [--ssh-key ~/.ssh/id_ed25519] [--remote-path /tmp/x.deb] [--forget-host-key]
+      |                      directory if --agent is omitted
+      |  bootstrap         [--agent <local.deb|.rpm>] --nodes host1,host2 [--ssh-user root] [--ssh-key ~/.ssh/id_ed25519] [--remote-path /tmp/x.deb] [--forget-host-key]
       |                    — same package check and auto-discovery as deploy-agent;
       |                      also issues the node its own certificate (as issue-certs)
       |                      and sets its ORPHERA_TOKEN
@@ -1235,7 +1235,7 @@ object Cli:
       |                      read via ConfigYaml.fromEnv() — ignored by .yaml/
       |                      compiled playbooks, which have no way to read it
       |  cluster-playbook  <file.yaml | file.scala | @bootstrap> [<file2> ...] [--resume] [--config <path> [<path> ...]] [--parallel <n>] [--quiet]
-      |                      [--ssh-user root] [--ssh-key ~/.ssh/id_ed25519] [--file <local.deb>] [--forget-host-key]
+      |                      [--ssh-user root] [--ssh-key ~/.ssh/id_ed25519] [--agent <local.deb>] [--forget-host-key]
       |                    — same --resume/--config semantics, per stage/task/node;
       |                      one or more files run in order, stopping at the first failure.
       |                      Several --config files (e.g. config/tst*.yaml) run the whole

@@ -37,7 +37,7 @@ already started on a node is not cancelled; it finished before the next test.)  
 Expect: all configs OK (about 11 min for 8 VMs).  PASSED.
 
 ### B2. Explicit agent package
-    ... --file ./orphera-agent_0.1.163_amd64.deb
+    ... --agent ./orphera-agent_0.1.163_amd64.deb
 Expect: same result as B1.  PASSED.
 
 ## C. Agent failure handling

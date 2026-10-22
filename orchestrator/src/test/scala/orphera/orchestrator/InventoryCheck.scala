@@ -104,8 +104,8 @@ object InventoryCheck:
     )
     check(
       "--exclude-nodes alone means all nodes but those, for a command that defaults to all",
-      expanded("deploy-agent", "--file", "x.deb", "--exclude-nodes", "b") ==
-        Right(List("deploy-agent", "--file", "x.deb", "--nodes", "a,c,d"))
+      expanded("deploy-agent", "--agent", "x.deb", "--exclude-nodes", "b") ==
+        Right(List("deploy-agent", "--agent", "x.deb", "--nodes", "a,c,d"))
     )
     check(
       "--exclude-nodes alone is refused for shutdown, reboot, teardown and bootstrap",
@@ -143,6 +143,25 @@ object InventoryCheck:
     Files.writeString(bad, "nodes:\n  - name: x\n    host: x\n    never-reboot: sometimes\n")
     check("a value that is not true or false is refused", InventoryYaml.load(bad.toString).isLeft)
     Files.delete(bad)
+
+    // The agent package option: --agent, with --file still accepted
+    def agentOf(args: String*): Option[String] = Cli.parse(args.toList) match
+      case Right(Command.DeployAgent(f, _, _))        => f
+      case Right(Command.Bootstrap(f, _, _, _, _, _)) => f
+      case _                                          => None
+    check(
+      "deploy-agent takes --agent",
+      agentOf("deploy-agent", "--agent", "x.deb").contains("x.deb")
+    )
+    check(
+      "bootstrap takes --agent",
+      agentOf("bootstrap", "--agent", "x.rpm", "--nodes", "a").contains("x.rpm")
+    )
+    check(
+      "--file is still accepted for the same thing",
+      agentOf("deploy-agent", "--file", "x.deb").contains("x.deb") &&
+        agentOf("bootstrap", "--file", "x.rpm", "--nodes", "a").contains("x.rpm")
+    )
 
     if failures > 0 then
       println(s"$failures check(s) failed")

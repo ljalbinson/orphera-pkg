@@ -6,10 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+- The option that names the agent package is now `--agent`, not `--file`, in `deploy-agent`, `bootstrap` and `cluster-playbook` (its
+  `@bootstrap` step): `orphera deploy-agent --agent orphera-agent_0.1.203_amd64.deb`. `--file` is still accepted, but is no longer shown
+  in the help, the completion or this documentation. The scripts `mk-new-and-empty.sh`, `par-mk-new-and-empty.sh` and
+  `rebuild_openstack_from_scratch.sh` take `-a` for the same thing, and still take `-f`. `--content-file` of `write-file` is unchanged, as
+  it names a file whose contents are sent.
+
 ### Fixed
 - A missing or unreadable CA certificate is reported as such (`no CA certificate: /etc/orphera/certs/ca.crt does not exist (put ca.crt
   there, or set ORPHERA_CERTS_DIR ...)`) instead of the TLS library's "File does not contain valid certificates", which it also gives for
   a file that is not there.
+
 ## [0.1.203] - 2026-10-22
 
 The agent is unchanged from 0.1.202: these are changes to the `orphera` command and its packaging.

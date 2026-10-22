@@ -17,11 +17,11 @@ final case class AgentPackages(deb: Option[String], rpm: Option[String]):
   def pick(rpmHost: Boolean): Either[String, String] =
     if rpmHost then
       rpm.toRight(
-        "this host uses dnf/rpm but no orphera-agent-*.rpm was given or found — run 'make rpm' or pass --file <path>.rpm"
+        "this host uses dnf/rpm but no orphera-agent-*.rpm was given or found — run 'make rpm' or pass --agent <path>.rpm"
       )
     else
       deb.toRight(
-        "this host uses apt/dpkg but no orphera-agent_*.deb was given or found — run 'make deb' or pass --file <path>.deb"
+        "this host uses apt/dpkg but no orphera-agent_*.deb was given or found — run 'make deb' or pass --agent <path>.deb"
       )
 
 object AgentPackages:
@@ -44,7 +44,7 @@ object AgentPackages:
       requested.stripSuffix(".rpm") + ".deb"
     else requested
 
-  /** An explicit `--file` selects one package (by extension); otherwise the
+  /** An explicit `--agent` selects one package (by extension); otherwise the
     * newest `orphera-agent_*_amd64.deb` and `orphera-agent-*.rpm` in `dir` are
     * both offered. Whether a file really is the agent package is checked later
     * (Orchestrator.requireOrpheraAgentPackage), not here.
@@ -63,8 +63,8 @@ object AgentPackages:
         )
         if found.isEmpty then
           Left(
-            "No orphera-agent_*.deb or orphera-agent-*.rpm found in the current directory, and no --file given. " +
-              "Run 'make deb' (or 'make release'; 'make rpm' for Rocky hosts) first, or pass --file <path>."
+            "No orphera-agent_*.deb or orphera-agent-*.rpm found in the current directory, and no --agent given. " +
+              "Run 'make deb' (or 'make release'; 'make rpm' for Rocky hosts) first, or pass --agent <path>."
           )
         else Right(found)
 

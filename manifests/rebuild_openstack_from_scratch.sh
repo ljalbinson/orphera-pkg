@@ -3,12 +3,12 @@
 #
 # DESTRUCTIVE: destroys and re-creates the OpenStack virtual machines, then builds OpenStack on them.
 #
-# Usage: manifests/rebuild_openstack_from_scratch.sh [--yes] [--dry-run] [-j N] [-f agent.deb]
+# Usage: manifests/rebuild_openstack_from_scratch.sh [--yes] [--dry-run] [-j N] [-a agent.deb]
 #                                                    [--tests] [--wordpress]
 #   --yes        do not ask for confirmation (otherwise you must type "rebuild")
 #   --dry-run    show the plan (nodes, hypervisors, how each hypervisor stores VMs) and stop
 #   -j N         VMs built at the same time (default 6)
-#   -f FILE      agent package to install (default: newest orphera-agent_*_amd64.deb here)
+#   -a FILE      agent package to install (-f also works; default: newest orphera-agent_*_amd64.deb here)
 #   --tests      afterwards run the per-service test scripts (keystone ... nova_compute), then the
 #                closing checks again (clients, smoke, CirrOS boot). test_keystone.sh tears Keystone
 #                down (new database, new CA) and the later scripts re-register their services, so
@@ -44,7 +44,7 @@ while [ $# -gt 0 ]; do
     --yes) YES=1; shift ;;
     --dry-run) DRY=1; shift ;;
     -j) JOBS="${2:?-j needs a number}"; shift 2 ;;
-    -f) DEB="${2:?-f needs a file}"; shift 2 ;;
+    -a|-f) DEB="${2:?-a needs a file}"; shift 2 ;;
     --tests) TESTS=1; shift ;;
     --wordpress) WORDPRESS=1; shift ;;
     -h|--help) sed -n '2,/^set -uo pipefail/{/^set -uo pipefail/!p}' "$0"; exit 0 ;;
@@ -55,10 +55,10 @@ T0=$(date +%s)
 log() { printf '[%s] %s\n' "$(date +%H:%M:%S)" "$1"; }
 die() { log "STOPPED: $1"; exit 1; }
 
-# A relative -f is relative to where the script was started, not to the directory it moves into.
+# A relative -a is relative to where the script was started, not to the directory it moves into.
 case "$DEB" in /*|"") ;; *) [ -f "$START_DIR/$DEB" ] && DEB="$START_DIR/$DEB" ;; esac
 [ -n "$DEB" ] || DEB=$(ls -t "$START_DIR"/orphera-agent_*_amd64.deb orphera-agent_*_amd64.deb 2>/dev/null | head -n 1)
-[ -f "$DEB" ] || die "no agent package found (orphera-agent_*_amd64.deb in this directory, or -f FILE)"
+[ -f "$DEB" ] || die "no agent package found (orphera-agent_*_amd64.deb in this directory, or -a FILE)"
 for n in "${NODES[@]}"; do [ -f "$CONF_DIR/$n.yaml" ] || die "missing $CONF_DIR/$n.yaml"; done
 
 hypervisor_of() { awk -F: '/^[[:space:]]*hypervisor:/ {gsub(/[[:space:]"'\'']/, "", $2); print $2; exit}' "$CONF_DIR/$1.yaml"; }
@@ -81,7 +81,7 @@ fi
 
 log "--- step 1: virtual machines (destroy, create, agent, DNS, dist-upgrade, packages) ---"
 S=$(date +%s)
-"$HERE/par-mk-new-and-empty.sh" -q -j "$JOBS" -f "$DEB" "${NODES[@]}" \
+"$HERE/par-mk-new-and-empty.sh" -q -j "$JOBS" -a "$DEB" "${NODES[@]}" \
   || die "building the VMs failed for some nodes (see the list above and .orphera-build-logs/); fix, then re-run with only those nodes: manifests/par-mk-new-and-empty.sh <nodes>, and continue with: manifests/build_openstack_stack.sh"
 log "VMs done in $(( $(date +%s) - S ))s"
 

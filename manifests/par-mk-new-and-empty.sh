@@ -9,9 +9,9 @@
 #   4. dist-upgrade                           (orphera dist-upgrade)
 #   5. install the config's package lists     (gen_packages.scala)
 #
-# Usage: manifests/par-mk-new-and-empty.sh [-f agent.deb] [-j jobs] [-q] [-H] [node ...]
+# Usage: manifests/par-mk-new-and-empty.sh [-a agent.deb] [-j jobs] [-q] [-H] [node ...]
 #   node   a name (tst3) or a bare number (3); default is tst0..tst7
-#   -f     agent package to install; default is the newest
+#   -a     agent package to install (-f also works); default is the newest
 #          orphera-agent_*_amd64.deb in the current directory
 #   -j     nodes built at the same time (default 4; -j 1 is strictly one after
 #          another, with plain unprefixed output)
@@ -46,9 +46,9 @@ jobs_max=4
 deb=""
 quiet=0
 hv_lock=0
-while getopts "f:j:qHLh" opt; do
+while getopts "a:f:j:qHLh" opt; do
     case $opt in
-        f) deb=$OPTARG ;;
+        a|f) deb=$OPTARG ;;
         j) jobs_max=$OPTARG ;;
         q) quiet=1 ;;
         H) hv_lock=1 ;;
@@ -93,11 +93,11 @@ fi
 
 if [ -z "$deb" ]; then
     # newest build wins; a bare glob would pass the literal pattern (or several
-    # files) to --file when there is no match (or more than one).
+    # files) to --agent when there is no match (or more than one).
     # shellcheck disable=SC2012
     deb=$(ls -t orphera-agent_*_amd64.deb 2>/dev/null | head -n 1)
 fi
-[ -f "$deb" ] || { echo "no agent .deb found (use -f <file>)" >&2; exit 1; }
+[ -f "$deb" ] || { echo "no agent .deb found (use -a <file>)" >&2; exit 1; }
 banner "Agent package: $deb"
 
 # All config files must exist before anything is created, so a typo in the
@@ -178,10 +178,10 @@ build_node() {
     host=$(inventory_host "$node")
     if [ -n "$host" ]; then
         with_lock known_hosts ssh-keygen -R "$host" || true
-        orphera bootstrap --file "$deb" --ssh-user localadmin --nodes "$node" || return 1
+        orphera bootstrap --agent "$deb" --ssh-user localadmin --nodes "$node" || return 1
     else
         echo "no host for $node in $INV_FILE — using bootstrap --forget-host-key under the lock"
-        with_lock known_hosts orphera bootstrap --file "$deb" --ssh-user localadmin \
+        with_lock known_hosts orphera bootstrap --agent "$deb" --ssh-user localadmin \
             --nodes "$node" --forget-host-key || return 1
     fi
 

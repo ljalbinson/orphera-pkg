@@ -409,7 +409,7 @@ means every node (`install`, `remove`, `autoremove`, `dist-upgrade`, `copy`, `wr
 `run`, `fetch`, `facts`, `version`, `uptime`, `thread-info`):
 
 ```
-orphera deploy-agent --file orphera-agent_0.1.200_amd64.deb --exclude-nodes tst8
+orphera deploy-agent --agent orphera-agent_0.1.200_amd64.deb --exclude-nodes tst8
 ```
 
 For `reboot`, `shutdown`, `teardown`, `bootstrap`, a pipeline and the playbook commands it is an error, so leaving one node
@@ -506,8 +506,8 @@ Verbs that act on nodes (`install`, `remove`, `dist-upgrade`, `run`, `copy`, `wr
 | `network-apply [--timeout 60]` | Apply pushed `.network`/`.netdev`/`.link` files (or, on NetworkManager hosts, `.nmconnection` keyfiles) with automatic rollback if not confirmed within the timeout — see [Network config safety](#network-config-safety) |
 | `reboot [--delay 5] [--wait] [--wait-timeout 300]` | Reboot a host. Runs fully detached from the agent's own process (`systemd-run`), for the same reason as `deploy-agent` below — the agent's own systemd unit would otherwise be killed by the reboot before it can schedule it. `--wait` polls the agent afterward and reports when it's reachable again (or times out) — see [Known gaps](#known-gaps--not-yet-built) for exactly what "reachable" does and doesn't confirm |
 | `version [--nodes ...]` | Print the build of `orphera` itself first (version, commit, commit date, "+uncommitted changes" if the tree was dirty), then each agent's running version, baked in at build time from the `VERSION` file — see [Versioning](#versioning) |
-| `deploy-agent [--file <local.deb\|.rpm>] [--remote-path]` | Push and install an updated agent package (`.deb` or `.rpm`, chosen per node; found automatically when `--file` is omitted) on a host **that already has an agent running**. It refuses to start if the orchestrator has no agent token configured, since an upgraded agent would not start without one, and `deploy-agent` could not repair it. The install runs fully detached from the agent's own process (`systemd-run`), since the agent's own service restart would otherwise kill its own upgrade mid-unpack, so the RPC call that launches it can't itself confirm completion — instead, each node is polled afterward via the `version` RPC (60s default timeout) until it reports the `.deb`'s own version or the timeout elapses; the command's exit code and printed summary reflect that confirmation, not just that the install was launched — see [Versioning](#versioning) |
-| `bootstrap [--file <local.deb\|.rpm>] --nodes ... [--ssh-user] [--ssh-key] [--forget-host-key]` | First-time agent install via SSH, for a host with **no agent yet**. The host's package manager decides whether the `.deb` or `.rpm` is used. `--ssh-user` defaults to `root`; the cloud images used here block root login, so pass `--ssh-user localadmin`. It then issues the node its own certificate (as `issue-certs`; needs `certs/ca.key`) and sets `ORPHERA_TOKEN` in the node's `/etc/orphera-agent/agent.env` to this orchestrator's token (keeping any other lines), restarting the agent. It stops before touching any node if the CA key is missing or if the orchestrator has no agent token configured, because an agent without a token does not start. On a dnf host a package of the same version and release is reinstalled rather than skipped, so a rebuild at an unchanged `VERSION` (new certificates, say) still reaches the node |
+| `deploy-agent [--agent <local.deb\|.rpm>] [--remote-path]` | Push and install an updated agent package (`.deb` or `.rpm`, chosen per node; found automatically when `--agent` is omitted) on a host **that already has an agent running**. It refuses to start if the orchestrator has no agent token configured, since an upgraded agent would not start without one, and `deploy-agent` could not repair it. The install runs fully detached from the agent's own process (`systemd-run`), since the agent's own service restart would otherwise kill its own upgrade mid-unpack, so the RPC call that launches it can't itself confirm completion — instead, each node is polled afterward via the `version` RPC (60s default timeout) until it reports the `.deb`'s own version or the timeout elapses; the command's exit code and printed summary reflect that confirmation, not just that the install was launched — see [Versioning](#versioning) |
+| `bootstrap [--agent <local.deb\|.rpm>] --nodes ... [--ssh-user] [--ssh-key] [--forget-host-key]` | First-time agent install via SSH, for a host with **no agent yet**. The host's package manager decides whether the `.deb` or `.rpm` is used. `--ssh-user` defaults to `root`; the cloud images used here block root login, so pass `--ssh-user localadmin`. It then issues the node its own certificate (as `issue-certs`; needs `certs/ca.key`) and sets `ORPHERA_TOKEN` in the node's `/etc/orphera-agent/agent.env` to this orchestrator's token (keeping any other lines), restarting the agent. It stops before touching any node if the CA key is missing or if the orchestrator has no agent token configured, because an agent without a token does not start. On a dnf host a package of the same version and release is reinstalled rather than skipped, so a rebuild at an unchanged `VERSION` (new certificates, say) still reaches the node |
 | `teardown --nodes ... --yes [--purge]` | Uninstall the agent via SSH. Requires explicit `--nodes` and `--yes` — no fleet-wide default, given the host becomes unmanageable via gRPC afterward. `--purge` also removes the agent's configuration, including its certificate and key in `/etc/orphera-agent/tls` |
 | `fetch <remote-path> [--out ./dir]` | Pull a file back from one or more agents into a local directory, one file per node (named `<node>-<filename>`) |
 | `facts [--nodes ...]` | Gather and print basic host facts (OS, kernel, CPU/memory, disks, interfaces) from one or more agents |
@@ -1152,7 +1152,7 @@ playbooks (a YAML playbook cannot read the config), and config file names must b
 distinct. Parallel runs get their own run-log and checkpoint files (the config's name is
 added to them), so `--resume` resumes each config where it stopped. `bootstrap` is not a playbook, so the chain has a
 built-in step for it: `@bootstrap` installs the agent on the config's `hostname` node over SSH
-(it must be in `inventory.yaml`), using the `--ssh-user` (default root), `--ssh-key`, `--file`
+(it must be in `inventory.yaml`), using the `--ssh-user` (default root), `--ssh-key`, `--agent`
 and `--forget-host-key` options that `orphera bootstrap` has. `gen_dist_upgrade.scala` covers
 `dist-upgrade`, so a whole build is one command:
 
@@ -1171,14 +1171,14 @@ named on the command line): provision, `bootstrap --forget-host-key`,
 `gen_set_dns.scala`, `dist-upgrade`, `gen_packages.scala`. A failed step stops
 that node and the script moves on, listing failures and exiting non-zero.
 `manifests/par-mk-new-and-empty.sh` does the same with the nodes built in
-parallel (`-j N`, default 4; `-q` for banners only; `-f <deb>`; `-H` to
+parallel (`-j N`, default 4; `-q` for banners only; `-a <deb>`; `-H` to
 provision one VM at a time per hypervisor): output is prefixed per node and
 saved under `.orphera-build-logs/<time>/<node>.log`. Only the removal of a node's
 old SSH host key (`ssh-keygen -R`, which rewrites `known_hosts`) is serialized;
 everything else, including the rest of `bootstrap`, runs in parallel. Ctrl-C
 stops every node. Don't use `--resume` with it —
 checkpoint state is per playbook name. Both pick the newest
-`orphera-agent_*_amd64.deb` in the current directory unless given `-f`.
+`orphera-agent_*_amd64.deb` in the current directory unless given `-a`.
 
 Both scripts choose the provisioning playbook per hypervisor: `kvm_zfs_vm_provision.scala` when the
 dataset `tank/kvm/<hypervisor>` exists there, otherwise `kvm_native_vm_provision.scala`
@@ -1554,7 +1554,7 @@ run `<dir>/bin/orphera`.
 A file a playbook names with a relative path (`src = "files/motd"`) is read from the current directory when it is there, as before,
 and otherwise from `$ORPHERA_ROOT` (`/opt/orphera` in the package), so the packaged playbooks work from any directory.
 
-Known limit: `rebuild_openstack_from_scratch.sh` needs the agent `.deb` named with `-f` (or in the directory you run it from), as the
+Known limit: `rebuild_openstack_from_scratch.sh` needs the agent `.deb` named with `-a` (or in the directory you run it from), as the
 command-line package does not contain it.
 
 ## Makefile targets
