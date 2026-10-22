@@ -30,7 +30,7 @@ import cats.syntax.all.*
   */
 object CertInfo:
 
-  private val CaCert = "certs/ca.crt"
+  private val CaCert = Installation.caCert
   private val TimeoutMillis = 5000
   val WarnDays = 30
 

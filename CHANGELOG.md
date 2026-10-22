@@ -7,6 +7,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- `ORPHERA_CERTS_DIR` (default `certs`) says where `ca.crt` and `ca.key` are, and `ORPHERA_STATE_DIR` (default the current directory) where
+  `.orphera-state`, `.orphera-logs`, `.orphera-audit` and `.orphera-build-logs` are written; `make certs` honours the first. The `orphera`
+  launcher no longer exits when `~/orphera-pkg` does not exist: it runs from `$ORPHERA_HOME` if set, else `~/orphera-pkg` if present, else
+  the current directory. With nothing set, behaviour is unchanged. A step towards running without the repository underneath.
 - `.scala` playbooks no longer need a build tree: `make orpheracli` also installs the scripting jar as
   `/usr/local/lib/orphera-scripting.jar`, and `orphera` uses, in order, `ORPHERA_SCRIPTING_JAR`, that installed jar, and the newest
   `scripting/target/` jar as before. With no jar at all the error says how to get one. `InstallationCheck` covers the choice.

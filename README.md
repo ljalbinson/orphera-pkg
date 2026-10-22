@@ -249,9 +249,9 @@ within 30 days. The command exits non-zero if any node has a problem or
 cannot be reached.
 
 `certs/*.key`, `certs/*.srl` and `certs/*.csr` are git-ignored; never
-commit private keys. The orchestrator reads `certs/ca.crt` relative to
-the repository: the `orphera` wrapper (`utils/orphera`) changes into
-`$ORPHERA_HOME` (default `~/orphera-pkg`) first, whatever directory you
+commit private keys. The orchestrator reads `ca.crt` from `ORPHERA_CERTS_DIR`
+(default `certs`, relative to where `orphera` runs): the `orphera` wrapper (`utils/orphera`) changes into
+`$ORPHERA_HOME` (default `~/orphera-pkg`, if that exists) first, whatever directory you
 run it from. The agent reads its own certificate and key from
 `/etc/orphera-agent/tls/`.
 
@@ -463,6 +463,22 @@ this without a lab. See [docs/MARIADB.md](docs/MARIADB.md).
 
 With `-c` set, `--config tst7` means `<config-dir>/tst7.yaml`. A `--config` value that has a `/`, a scheme or a
 `.yaml`/`.yml` ending (`config/tst7.yaml`, `/x/y.yaml`) is used exactly as given, as before.
+
+**Running without a checkout of the repository.** `orphera` needs five things, each with a place you can set:
+
+| What | Setting | Default |
+|---|---|---|
+| inventory | `-I` / `ORPHERA_INVENTORY` | `inventory.yaml` |
+| per-VM configs | `-c` / `ORPHERA_CONFIG_DIR` | `config` |
+| playbooks | `-m` / `ORPHERA_MANIFESTS` | `manifests` |
+| the CA certificate and key (`ca.crt`, `ca.key`) | `ORPHERA_CERTS_DIR` | `certs` |
+| run state: `.orphera-state`, `.orphera-logs`, `.orphera-audit`, `.orphera-build-logs` | `ORPHERA_STATE_DIR` | the current directory |
+
+The jar that runs `.scala` playbooks is installed by `make orpheracli` as `/usr/local/lib/orphera-scripting.jar`
+(`ORPHERA_SCRIPTING_JAR` names another). The `orphera` launcher runs from `$ORPHERA_HOME` if that is set (it must exist), else
+from `~/orphera-pkg` if that exists, else from the current directory, so on a machine with no checkout the relative defaults
+above apply to wherever you run it, and the settings move them. Playbook scripts started by `orphera` inherit the
+environment variables. `make certs` honours `ORPHERA_CERTS_DIR` too.
 
 Run `sbt "orchestrator/run help"` for the live version of this. Every
 command accepts `--nodes host1,host2` (and/or `--node-groups g1,g2`) to target a

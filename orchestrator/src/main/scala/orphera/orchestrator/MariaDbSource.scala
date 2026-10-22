@@ -161,7 +161,7 @@ object MariaDbSource:
       .get("ORPHERA_DB_CA")
       .map(_.trim)
       .filter(_.nonEmpty)
-      .getOrElse("certs/ca.crt")
+      .getOrElse(Installation.caCert)
 
   private def password: Either[String, String] =
     SecretStore.default().flatMap(_.get(PasswordSecret)).flatMap {

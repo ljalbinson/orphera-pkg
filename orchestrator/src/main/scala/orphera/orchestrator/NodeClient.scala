@@ -20,7 +20,7 @@ object NodeClient:
   private def channelBuilder(node: Node): NettyChannelBuilder =
     val sslContext = GrpcSslContexts
       .forClient()
-      .trustManager(new File("certs/ca.crt"))
+      .trustManager(new File(Installation.caCert))
       .build()
 
     NettyChannelBuilder

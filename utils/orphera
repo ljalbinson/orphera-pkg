@@ -2,9 +2,11 @@
 # SPDX-License-Identifier: Apache-2.0
 # Runs the orchestrator directly from its assembled jar.
 #
-# Looks for the Orphera repo at $ORPHERA_HOME, defaulting to
-# ~/orphera-pkg if unset. Override with:
-#   export ORPHERA_HOME=/path/to/orphera-pkg
+# Where it runs from, in order: $ORPHERA_HOME (which must exist), else
+# ~/orphera-pkg if that directory exists, else the current directory. Relative
+# paths (inventory.yaml, config/, manifests/, certs/, .orphera-*) are relative to
+# that directory, so a machine with no checkout can keep them anywhere and
+# say so with -I, -c, -m, ORPHERA_CERTS_DIR and ORPHERA_STATE_DIR.
 #
 # Usage: orphera <command> [args...]
 # e.g.:  orphera version --nodes tst0
@@ -12,16 +14,15 @@
 
 set -e
 
-REPO_DIR="${ORPHERA_HOME:-$HOME/orphera-pkg}"
-
-if [ ! -d "$REPO_DIR" ]; then
-  echo "Error: Orphera repo not found at $REPO_DIR" >&2
-  echo "Set ORPHERA_HOME to the correct path, e.g.:" >&2
-  echo "  export ORPHERA_HOME=/path/to/orphera-pkg" >&2
-  exit 1
+if [ -n "${ORPHERA_HOME:-}" ]; then
+  if [ ! -d "$ORPHERA_HOME" ]; then
+    echo "Error: ORPHERA_HOME is $ORPHERA_HOME, which is not a directory" >&2
+    exit 1
+  fi
+  cd "$ORPHERA_HOME"
+elif [ -d "$HOME/orphera-pkg" ]; then
+  cd "$HOME/orphera-pkg"
 fi
-
-cd "$REPO_DIR"
 
 # `make orpheracli` installs the orchestrator under this fixed name. Older
 # installs left versioned jars here and the newest-sorting one was used, so a
@@ -31,7 +32,7 @@ JAR=/usr/local/lib/orphera-orchestrator.jar
 if [ ! -f "$JAR" ]; then
   JAR=$(ls orchestrator/target/scala-*/orchestrator-assembly-*.jar 2>/dev/null | sort -V | tail -1)
   if [ -z "$JAR" ]; then
-    echo "No orchestrator jar installed. Run 'make orpheracli' in $REPO_DIR." >&2
+    echo "No orchestrator jar installed. Run 'make orpheracli' in the Orphera repository." >&2
     exit 1
   fi
   echo "Note: using $JAR from the build tree; run 'make orpheracli' to install it." >&2

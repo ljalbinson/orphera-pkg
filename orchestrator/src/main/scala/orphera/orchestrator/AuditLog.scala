@@ -2,7 +2,7 @@
 
 package orphera.orchestrator
 
-import java.nio.file.{Files, Path, Paths, StandardOpenOption}
+import java.nio.file.{Files, Path, StandardOpenOption}
 import java.time.Instant
 
 import scala.jdk.CollectionConverters.*
@@ -56,7 +56,7 @@ import cats.effect.IO
   */
 object AuditLog:
 
-  private val auditDir: Path = Paths.get(".orphera-audit")
+  private val auditDir: Path = Installation.statePath(".orphera-audit")
   private val auditFile: Path = auditDir.resolve("audit.jsonl")
 
   // Rotate once the current file would exceed ~5MB (audit lines are

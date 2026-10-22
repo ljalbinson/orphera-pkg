@@ -2,7 +2,7 @@
 
 package orphera.orchestrator
 
-import java.nio.file.{Files, Path, Paths, StandardCopyOption}
+import java.nio.file.{Files, Path, StandardCopyOption}
 
 import scala.jdk.CollectionConverters.*
 
@@ -114,7 +114,7 @@ object Checkpoint:
     */
   def load(kind: String, playbookName: String, resume: Boolean): IO[Handle] =
     for
-      dir <- IO.blocking(Files.createDirectories(Paths.get(".orphera-state")))
+      dir <- IO.blocking(Files.createDirectories(Installation.statePath(".orphera-state")))
       // A multi-config `cluster-playbook` run sets ORPHERA_RUN_TAG (the
       // config's name) so each parallel run keeps its own checkpoint, and
       // `--resume` resumes each config where it stopped.

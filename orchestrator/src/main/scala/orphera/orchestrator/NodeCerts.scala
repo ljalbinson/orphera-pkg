@@ -28,8 +28,8 @@ import cats.effect.*
 object NodeCerts:
 
   val RemoteDir = "/etc/orphera-agent/tls"
-  private val CaCert: Path = Paths.get("certs/ca.crt")
-  private val CaKey: Path = Paths.get("certs/ca.key")
+  private val CaCert: Path = Paths.get(Installation.caCert)
+  private val CaKey: Path = Paths.get(Installation.caKey)
   private val ValidDays = 825
 
   /** Whether this orchestrator can sign node certificates at all. */

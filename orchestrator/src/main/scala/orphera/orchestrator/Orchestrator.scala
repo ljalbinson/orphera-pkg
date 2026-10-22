@@ -163,7 +163,7 @@ object Orchestrator:
     AgentToken.requireConfigured >>
       IO.raiseUnless(NodeCerts.caAvailable)(
         new RuntimeException(
-          "bootstrap needs certs/ca.crt and certs/ca.key to issue each node its certificate (run: make certs)"
+          s"bootstrap needs ${Installation.caCert} and ${Installation.caKey} to issue each node its certificate (run: make certs)"
         )
       ) >>
       packages.paths.traverse_(requireOrpheraAgentPackage) >>
@@ -362,7 +362,7 @@ object Orchestrator:
   ): IO[Boolean] =
     if !NodeCerts.caAvailable then
       IO.println(
-        "certs/ca.crt and certs/ca.key are needed to sign node certificates (make certs DOMAIN=...)"
+        s"${Installation.caCert} and ${Installation.caKey} are needed to sign node certificates (make certs DOMAIN=...)"
       ).as(false)
     else
       nodes

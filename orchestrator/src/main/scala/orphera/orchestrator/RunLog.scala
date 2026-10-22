@@ -2,7 +2,7 @@
 
 package orphera.orchestrator
 
-import java.nio.file.{Files, Path, Paths, StandardOpenOption}
+import java.nio.file.{Files, Path, StandardOpenOption}
 import java.time.Instant
 import java.time.format.DateTimeFormatter
 
@@ -61,7 +61,7 @@ object RunLog:
     */
   def start(kind: String, playbookName: String): IO[Handle] =
     for
-      dir <- IO.blocking(Files.createDirectories(Paths.get(".orphera-logs")))
+      dir <- IO.blocking(Files.createDirectories(Installation.statePath(".orphera-logs")))
       timestamp = DateTimeFormatter
         .ofPattern("yyyyMMdd-HHmmss")
         .format(java.time.LocalDateTime.now())

@@ -585,7 +585,7 @@ object Main extends IOApp:
               java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss")
             )
         )
-        logDir = Paths.get(".orphera-build-logs", stamp)
+        logDir = Installation.statePath(".orphera-build-logs").resolve(stamp)
         _ <- IO.blocking(java.nio.file.Files.createDirectories(logDir))
         _ <- IO.println(
           s"Running ${paths.size} playbook(s) for ${configs.size} config(s), " +
@@ -843,7 +843,7 @@ object Main extends IOApp:
               java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss")
             )
         )
-        logDir = Paths.get(".orphera-build-logs", stamp)
+        logDir = Installation.statePath(".orphera-build-logs").resolve(stamp)
         _ <- IO.blocking(java.nio.file.Files.createDirectories(logDir))
         _ <- IO.println(
           s"Running ${steps.size} step(s) on ${targets.size} node(s), " +

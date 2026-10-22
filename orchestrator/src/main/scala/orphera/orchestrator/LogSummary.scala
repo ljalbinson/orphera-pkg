@@ -88,12 +88,12 @@ object LogSummary:
       val p = Paths.get(target)
       if Files.exists(p) then Right(p) else Left(s"No such file: $target")
     else
-      val dir = Paths.get(".orphera-logs")
+      val dir = Installation.statePath(".orphera-logs")
       if !Files.isDirectory(dir) then
         Left(
-          "No .orphera-logs directory found here — run this from the same " +
+          s"No $dir directory found — run this from the same " +
             "working directory a playbook/cluster-playbook run was launched " +
-            "from, or pass a .jsonl path directly"
+            s"from (or set ${Installation.StateEnv}), or pass a .jsonl path directly"
         )
       else
         val sanitized = sanitize(target)
@@ -107,7 +107,7 @@ object LogSummary:
           .maxByOption(_.lastModified())
           .map(_.toPath())
           .toRight(
-            s"No log files found for '$target' under .orphera-logs/ " +
+            s"No log files found for '$target' under $dir/ " +
               s"(looked for playbook-$sanitized-*.jsonl / cluster-$sanitized-*.jsonl)"
           )
 
@@ -263,7 +263,7 @@ object LogSummary:
   //     a third copy of it, since AuditLog.toJson emits the exact same
   //     flat-object grammar RunLog.toJson does. ---
 
-  private val auditDir: Path = Paths.get(".orphera-audit")
+  private val auditDir: Path = Installation.statePath(".orphera-audit")
   private val auditFile: Path = auditDir.resolve("audit.jsonl")
 
   // Fields every audit event already surfaces as their own named

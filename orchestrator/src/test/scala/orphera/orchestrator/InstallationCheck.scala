@@ -74,6 +74,34 @@ object InstallationCheck:
       }
     )
 
+    // The certificate authority and the run state
+    check(
+      "the CA is in certs by default",
+      Installation.certsDirOf(_ => None) == "certs"
+    )
+    check(
+      "ORPHERA_CERTS_DIR moves it, and a trailing slash does not matter",
+      Installation.certsDirOf(Map(Installation.CertsEnv -> "/etc/orphera/ca/").get) ==
+        "/etc/orphera/ca" &&
+        Installation.certsDirOf(Map(Installation.CertsEnv -> " ").get) == "certs"
+    )
+    check(
+      "run state is relative to the current directory by default",
+      Installation.statePathOf(_ => None, ".orphera-logs").toString == ".orphera-logs"
+    )
+    check(
+      "ORPHERA_STATE_DIR puts run state inside it",
+      Installation.statePathOf(
+        Map(Installation.StateEnv -> "/var/lib/orphera").get,
+        ".orphera-logs"
+      ).toString == "/var/lib/orphera/.orphera-logs"
+    )
+    check(
+      "an empty ORPHERA_STATE_DIR is ignored",
+      Installation.statePathOf(Map(Installation.StateEnv -> "").get, ".orphera-state").toString ==
+        ".orphera-state"
+    )
+
     if failures > 0 then
       println(s"$failures check(s) failed, $passes passed")
       sys.exit(1)
