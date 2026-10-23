@@ -1,0 +1,13 @@
+Package: orphera-agent
+Version: @VERSION@
+Section: admin
+Priority: optional
+Architecture: @ARCH@
+Maintainer: you@example.com
+Description: Orphera orchestration agent (Go)
+ Receives and executes package management, file distribution,
+ and network configuration commands over gRPC.
+ .
+ This build is the Go implementation: a single static binary with no
+ Java runtime needed. It serves the same protocol as the Scala build of
+ this package and replaces it in place.

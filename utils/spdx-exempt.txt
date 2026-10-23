@@ -38,3 +38,10 @@ packaging/control.template
 packaging/orphera-agent.spec.template
 packaging/cli/control.template
 packaging/cli/orphera.spec.template
+
+# the Go agent: module files, documentation and the package control template
+agent-go/.gitignore
+agent-go/README.md
+agent-go/go.mod
+agent-go/go.sum
+agent-go/packaging/deb/control.template

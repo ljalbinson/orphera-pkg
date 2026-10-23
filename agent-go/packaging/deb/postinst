@@ -1,0 +1,14 @@
+#!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
+set -e
+# The drop-in used to try the Go agent by hand (agent-go/packaging/
+# orphera-agent-go.conf) is not needed once the package is installed, and
+# would keep forcing the Go binary if the Scala package were put back later.
+dropin=/etc/systemd/system/orphera-agent.service.d/orphera-agent-go.conf
+if [ -f "$dropin" ]; then
+  rm -f "$dropin"
+  rmdir --ignore-fail-on-non-empty /etc/systemd/system/orphera-agent.service.d 2>/dev/null || true
+fi
+systemctl daemon-reload
+systemctl enable orphera-agent.service
+systemctl restart orphera-agent.service
