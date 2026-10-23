@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- `manifests/control_host.scala`: turns an empty test VM into a control and build host like scala0. It installs OpenJDK 21,
+  sbt (scala-sbt apt repository), make, dpkg-dev, rpm, openssl, Go 1.22 with protobuf-compiler, protoc-gen-go v1.35.2,
+  protoc-gen-go-grpc v1.5.1 and staticcheck 2024.1.1, age, mariadb-client, the Python modules the utils need, shellcheck
+  and jq; clones the repository into `~localadmin/orphera-pkg` (only if it is not there); runs `make orpheracli` and the
+  Go agent's `make`; then reports the versions. `--config tst15`.
+- `manifests/control_host_handover.scala`: copies the CA (`certs/ca.crt`, `ca.key`), the age identity and secret store,
+  and the SSH key pair from the machine running `orphera` to that host (all localadmin, mode 600 except the certificate
+  and public key), checks `orphera secrets list` and `orphera version` from there, and sets up the OpenStack clients
+  (`CONTROL_HOST_SKIP_OPENSTACK=1` leaves them out). Stops before copying anything if a source file is missing.
+- tst15 is the second control host: 4 CPUs and 8 GB in `config/tst15.yaml` (was 2 and 4 GB), for sbt builds.
+  Not run yet; neither playbook has been compiled (no Scala toolchain where they were written).
+
 ### Changed
 - The option that names the agent package is now `--agent`, not `--file`, in `deploy-agent`, `bootstrap` and `cluster-playbook` (its
   `@bootstrap` step): `orphera deploy-agent --agent orphera-agent_0.1.203_amd64.deb`. `--file` is still accepted, but is no longer shown
