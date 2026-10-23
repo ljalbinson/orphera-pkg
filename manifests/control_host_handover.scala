@@ -75,6 +75,25 @@ object control_host_handover extends OrpheraClusterPlaybook:
         s"not found, nothing copied: ${missing.mkString(", ")}"
       )
 
+  // The agents check ORPHERA_TOKEN. This host may take it from its own
+  // environment rather than from the store (AgentToken: the environment wins),
+  // and only the store is copied. Then the new host would hold a different
+  // token, or none, and every agent would reject it; stop now instead.
+  sys.env.get("ORPHERA_TOKEN").filter(_.nonEmpty).foreach { envToken =>
+    val stored = SecretStore
+      .default()
+      .toOption
+      .flatMap(_.get(AgentToken.StoreName).toOption.flatten)
+    if !stored.contains(envToken) then
+      throw new RuntimeException(
+        s"this host's agent token comes from ORPHERA_TOKEN, and the secret store's " +
+          s"${AgentToken.StoreName} is ${if stored.isEmpty then "not set" else "a different value"}; " +
+          "the new host would be rejected by every agent. Put the token in the store first:\n" +
+          s"""  printf '%s\\n' "$$ORPHERA_TOKEN" | orphera secrets set ${AgentToken.StoreName}\n""" +
+          "then run this playbook again. Nothing was copied."
+      )
+  }
+
   private val mode600 = 384 // 0600
   private val mode644 = 420 // 0644
   private val keyName = sshKey.getFileName.toString
@@ -95,12 +114,20 @@ object control_host_handover extends OrpheraClusterPlaybook:
     )
 
   // `secrets list` proves the identity opens the store; `version` on this host
-  // and one other proves the token and CA are right end to end.
+  // and one other proves the token and CA are right end to end. `version`
+  // exits 0 even when a node refuses it, so its output is checked: every
+  // `[node]` line must be a version number.
   private val checkScript =
     s"""set -e
        |cd ~/orphera-pkg
        |echo "secret names: $$(orphera secrets list | wc -l)"
-       |orphera version --nodes $host,tst0""".stripMargin
+       |out=$$(orphera version --nodes $host,tst0 2>&1)
+       |echo "$$out"
+       |bad=$$(echo "$$out" | grep '^\\[' | grep -v -E '^\\[[^]]+\\] [0-9]' || true)
+       |if [ -n "$$bad" ]; then
+       |  echo "a node did not answer with its version (token or CA wrong?)"
+       |  exit 1
+       |fi""".stripMargin
 
   private val skipOpenstack =
     sys.env.get("CONTROL_HOST_SKIP_OPENSTACK").contains("1")
