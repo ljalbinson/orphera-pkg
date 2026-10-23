@@ -20,6 +20,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   rejected by every agent). The check fails unless every node answers `orphera version` with a version.
 - tst15 is the second control host: 4 CPUs and 8 GB in `config/tst15.yaml` (was 2 and 4 GB), for sbt builds. Built with
   both playbooks on 2026-10-23 (OpenStack clients skipped: OpenStack was down).
+- README: [Building a second control host](README.md#building-a-second-control-host), the commands from an empty VM to a working
+  second control host, what each playbook installs or copies, and what the two hosts do not share.
 
 ### Fixed — `orphera audit-log`
 - A command that threw an error or was interrupted with Ctrl-C now writes its end record (exit 1 with the error message, or exit 130),

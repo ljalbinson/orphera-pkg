@@ -48,6 +48,7 @@ untrusted networks or adversarial input.
 - [Provisioning a new host](#provisioning-a-new-host)
 - [Decommissioning a host](#decommissioning-a-host)
 - [Installing the command line](#installing-the-command-line)
+- [Building a second control host](#building-a-second-control-host)
 - [Makefile targets](#makefile-targets)
 - [Testing](#testing)
 - [Development notes](#development-notes)
@@ -1591,6 +1592,71 @@ and otherwise from `$ORPHERA_ROOT` (`/opt/orphera` in the package), so the packa
 
 Known limit: `rebuild_openstack_from_scratch.sh` needs the agent `.deb` named with `-a` (or in the directory you run it from), as the
 command-line package does not contain it.
+
+## Building a second control host
+
+A second control and build host, equivalent to scala0, is built with Orphera itself, from an empty test VM. tst15 is that host
+(4 CPUs and 8 GB, in `config/tst15.yaml`); any VM with a config file and an inventory entry can be used the same way. Run everything
+on the existing control host, as localadmin, from `~/orphera-pkg`:
+
+```bash
+cd ~/orphera-pkg
+git checkout main && git pull origin main
+make orpheracli                                       # an up-to-date orphera on this host first
+
+manifests/mk-new-and-empty.sh 15                      # destroy and recreate the VM; agent, DNS, dist-upgrade, base packages
+orphera cluster-playbook control_host.scala --config tst15
+CONTROL_HOST_SKIP_OPENSTACK=1 orphera cluster-playbook control_host_handover.scala --config tst15
+
+orphera audit-log --limit 10                          # every step OK
+ssh localadmin@tst15 'cd ~/orphera-pkg && orphera version --nodes tst0,tst15'
+```
+
+`mk-new-and-empty.sh` destroys any existing VM of that name and its disk first. Nothing on the new host is its own: the checkout comes
+from GitHub and the keys from this host, so rebuilding it loses nothing. The whole run takes about 12 minutes, half of it the
+dist-upgrade. If the script stops at the dist-upgrade, run its last two steps by hand and carry on with `control_host.scala`:
+
+```bash
+orphera dist-upgrade --nodes tst15
+orphera cluster-playbook gen_packages.scala --config tst15
+```
+
+**`control_host.scala`** installs the toolchain, clones the repository into `~localadmin/orphera-pkg` (only if it is not there, so
+local work is never overwritten), runs `make orpheracli` and the Go agent's `make`, and prints the tool versions. Safe to re-run.
+
+| For | Installed |
+|---|---|
+| the Scala build | OpenJDK 21 (Ubuntu's; GraalVM is only needed for native-image), sbt from the scala-sbt apt repository |
+| packages | make, dpkg-dev, rpm, openssl |
+| the Go agent | Go 1.22, protobuf-compiler, protoc-gen-go v1.35.2, protoc-gen-go-grpc v1.5.1, staticcheck 2024.1.1 |
+| running orphera | age, openssh-client, git |
+| `utils/` | python3-yaml, python3-jsonschema, python3-venv, mariadb-client, jq, shellcheck |
+
+apt installs sbt 2.x; that is fine, because the launcher reads `project/build.properties` and runs the pinned sbt 1.10.7.
+
+**`control_host_handover.scala`** gives the new host the keys to the fleet, copied from the host running it: `certs/ca.crt` and
+`ca.key`, the age identity and secret store (`~/.config/orphera/age.key`, `secrets.age`), and the SSH key pair (`~/.ssh/id_ed25519`,
+else `id_rsa`). All are owned by localadmin, mode 600 except the certificate and the public key. It then checks, as localadmin on the
+new host, that `orphera secrets list` opens the store and that the new host and tst0 both answer `orphera version`; and, unless
+`CONTROL_HOST_SKIP_OPENSTACK=1`, sets up the OpenStack clients (`utils/openstack-client-setup.sh`), which needs Keystone up. It is kept
+separate from `control_host.scala` so that building a host and trusting it are two decisions. Re-running it overwrites the copies.
+
+It stops before copying anything if a source file is missing, or if this host's agent token comes from `ORPHERA_TOKEN` and the
+store's `orphera/agent-token` is missing or different: only the store is copied, so the new host would be rejected by every agent.
+The fix it prints:
+
+```bash
+printf '%s\n' "$ORPHERA_TOKEN" | orphera secrets set orphera/agent-token
+```
+
+Afterwards both hosts hold the same CA key, secret store and SSH key, and either can do anything the other can. Not shared:
+
+- **Secrets added later.** A secret generated on one host reaches the other only when the handover is run again.
+- **Run state.** Each host has its own `.orphera-state`, `.orphera-logs` and audit log.
+- **The database.** Read access to the MariaDB copy needs an `orphera_ro` account for the new host (see [docs/MARIADB.md](docs/MARIADB.md)).
+- **GitHub.** The new host has no push credentials; add them before committing from it.
+- **OpenStack clients** when the handover ran with `CONTROL_HOST_SKIP_OPENSTACK=1`: run `utils/openstack-client-setup.sh` there once
+  Keystone is up.
 
 ## Makefile targets
 
