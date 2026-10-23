@@ -33,9 +33,18 @@ Needs Go 1.22 or later.
 
 ```sh
 cd agent-go
+make          # make check, then make build
+make check    # make lint, then make test
+make lint     # gofmt check, go vet and staticcheck; changes nothing
+make fmt      # rewrite the Go files in gofmt's layout
 make test     # go vet, and unit + end-to-end tests with the race detector
 make build    # static binaries: bin/orphera-agent-go-amd64, bin/orphera-agent-go-arm64
 ```
+
+`make lint` needs staticcheck (`go install honnef.co/go/tools/cmd/staticcheck@latest`);
+it is found on `PATH` or in `$(go env GOPATH)/bin`, or set `STATICCHECK=<path>`.
+A finding that is deliberate is marked in the code with
+`//lint:ignore <check> <reason>`, as the operator-facing error messages are.
 
 The version is the repository's `VERSION` with `+go` added. `CGO_ENABLED=0`, so the
 binaries have no dependencies: no JVM, no libc version to match.

@@ -21,9 +21,15 @@ RPM_ARCH  := $(if $(filter arm64,$(ARCH)),aarch64,x86_64)
 RPM_TOP   := $(CURDIR)/pkg/rpmbuild-$(ARCH)
 RPM_FILE  := orphera-agent-$(VERSION)-1.$(RPM_ARCH).rpm
 
-.PHONY: all build amd64 arm64 test gen stage deb rpm clean
+# staticcheck: from PATH, else where `go install` puts it.
+STATICCHECK ?= $(or $(shell command -v staticcheck 2>/dev/null),$(wildcard $(shell go env GOPATH)/bin/staticcheck))
 
-all: test build
+.PHONY: all build amd64 arm64 test lint fmt check gen stage deb rpm clean
+
+all: check build
+
+# Everything a change should pass: formatting, vet, staticcheck, the tests.
+check: lint test
 
 build: amd64 arm64
 
@@ -36,6 +42,20 @@ arm64:
 test:
 	go vet ./...
 	go test -race ./...
+
+# Fails on unformatted files, go vet findings or staticcheck findings; changes
+# nothing. A finding that is deliberate is marked in the code with
+# //lint:ignore <check> <reason>.
+lint:
+	@unformatted=$$(gofmt -l .); if [ -n "$$unformatted" ]; then \
+	  echo "Not gofmt-formatted (run: make fmt):"; echo "$$unformatted"; exit 1; fi
+	go vet ./...
+	@test -n "$(STATICCHECK)" || (echo "ERROR: staticcheck not found. Install it with: go install honnef.co/go/tools/cmd/staticcheck@latest" && exit 1)
+	$(STATICCHECK) ./...
+
+# Rewrites the Go files in gofmt's layout.
+fmt:
+	gofmt -w .
 
 # Regenerate internal/pb from common/src/main/protobuf/Protocol.proto.
 gen:
