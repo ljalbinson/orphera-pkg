@@ -41,8 +41,6 @@ rm -rf %{buildroot}/DEBIAN
 /opt/orphera-agent
 %config(noreplace) /etc/orphera-agent/agent.env
 %dir /etc/orphera-agent
-%dir /etc/orphera-agent/certs
-/etc/orphera-agent/certs/ca.crt
 /etc/systemd/system/orphera-agent.service
 %dir /var/lib/orphera
 %dir /var/lib/orphera/network-backups

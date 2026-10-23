@@ -1,0 +1,61 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# When a tag vX.Y.Z is pushed, builds the agent and command-line packages and publishes them, with
+# SHA-256 sums, as a GitHub Release. The packages are the same for every site (they contain no
+# certificates), so nothing from the lab is needed to build them.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: The tag matches VERSION
+        run: |
+          version=$(cat VERSION)
+          if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "tag $GITHUB_REF_NAME does not match VERSION $version: commit VERSION before tagging" >&2
+            exit 1
+          fi
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: sbt/setup-sbt@v1
+
+      - name: Install rpmbuild
+        run: sudo apt-get update && sudo apt-get install -y rpm
+
+      - name: Build the packages
+        run: make deb rpm cli-package
+
+      - name: Collect the files and their sums
+        run: |
+          version=$(cat VERSION)
+          mkdir release
+          cp "orphera-agent_${version}_amd64.deb" "orphera-agent-${version}-1.noarch.rpm" \
+             "orphera_${version}_all.deb" "orphera-${version}-1.noarch.rpm" "orphera-${version}.tar.gz" release/
+          (cd release && sha256sum * > SHA256SUMS && cat SHA256SUMS)
+
+      - name: Release notes from the changelog
+        run: |
+          version=$(cat VERSION)
+          awk -v v="$version" '$0 ~ "^## \\[" v "\\]" {f=1; next} /^## \[/ {f=0} f' CHANGELOG.md > notes.md
+          if [ ! -s notes.md ]; then echo "See CHANGELOG.md." > notes.md; fi
+          cat notes.md
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" release/* \
+            --title "$GITHUB_REF_NAME" --notes-file notes.md --verify-tag

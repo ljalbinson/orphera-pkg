@@ -7,6 +7,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- `.github/workflows/release.yml`: pushing a tag `vX.Y.Z` builds the agent package (`.deb`, `.rpm`) and the command-line package (`.deb`,
+  `.rpm`, tarball) on GitHub and publishes them with a `SHA256SUMS` file as a GitHub Release, with that version's CHANGELOG section as its
+  notes. It refuses a tag that does not match `VERSION`. The Go agent packages are not built there yet.
 - `manifests/control_host.scala`: turns an empty test VM into a control and build host like scala0. It installs OpenJDK 21,
   sbt (scala-sbt apt repository), make, dpkg-dev, rpm, openssl, Go 1.22 with protobuf-compiler, protoc-gen-go v1.35.2,
   protoc-gen-go-grpc v1.5.1 and staticcheck 2024.1.1, age, mariadb-client, the Python modules the utils need, shellcheck
@@ -39,7 +42,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `deploy-agent` records `remote_path` only when `--remote-path` was given; the default shown before said `.deb` even for `.rpm` installs.
 
 ### Changed
-- The agent package no longer contains `certs/ca.crt` (`/etc/orphera-agent/certs/ca.crt`). The agent never read it: it presents the
+- The agent packages (Scala and Go) no longer contain `certs/ca.crt` (`/etc/orphera-agent/certs/ca.crt`). The agent never read it: it presents the
   certificate `bootstrap` or `issue-certs` put in `/etc/orphera-agent/tls`, and only the orchestrator verifies it against its own CA. The
   package is now the same for every site, so it can be published, and `make deb` / `make rpm` no longer need `make certs` first. An
   upgrade removes the old file; nothing else changes on the node.

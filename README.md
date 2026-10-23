@@ -238,6 +238,33 @@ the code a given `.deb` was built from, look for its `Release <version>`
 commit with `git log --grep "Release 0.1.198"`. See
 [CHANGELOG.md](CHANGELOG.md) for what each version contains.
 
+### Releases
+
+Pushing a tag `vX.Y.Z` (as above) starts `.github/workflows/release.yml`, which checks the tag against
+`VERSION`, builds the packages and publishes a GitHub Release with these files and a `SHA256SUMS`:
+
+| File | What |
+|---|---|
+| `orphera-agent_<version>_amd64.deb`, `orphera-agent-<version>-1.noarch.rpm` | the agent, for Debian/Ubuntu and Rocky/Red Hat hosts |
+| `orphera_<version>_all.deb`, `orphera-<version>-1.noarch.rpm`, `orphera-<version>.tar.gz` | the `orphera` command line (see [Installing the command line](#installing-the-command-line)) |
+
+None contains a certificate, so the same files serve every site; each node gets its own certificate from `orphera bootstrap`.
+A cold start on a new control host:
+
+```sh
+curl -LO https://github.com/ljalbinson/orphera-pkg/releases/download/v<version>/orphera_<version>_all.deb
+curl -LO https://github.com/ljalbinson/orphera-pkg/releases/download/v<version>/orphera-agent_<version>_amd64.deb
+curl -LO https://github.com/ljalbinson/orphera-pkg/releases/download/v<version>/SHA256SUMS
+sha256sum --ignore-missing -c SHA256SUMS
+sudo apt install ./orphera_<version>_all.deb
+# put inventory.yaml and config/ in /etc/orphera, and the CA in /etc/orphera/certs: copy yours, or make a new one
+# (the same command as `make certs`; keep ca.key private):
+sudo openssl req -x509 -newkey rsa:4096 -nodes -days 3650 -subj "/CN=Orphera CA" \
+  -keyout /etc/orphera/certs/ca.key -out /etc/orphera/certs/ca.crt
+sudo chmod 600 /etc/orphera/certs/ca.key
+orphera bootstrap --agent orphera-agent_<version>_amd64.deb --nodes ... --ssh-user localadmin
+```
+
 ## Certificates
 
 Orphera uses TLS between orchestrator and agent, verified against a

@@ -78,8 +78,9 @@ cd .. && orphera deploy-agent --agent agent-go/orphera-agent-0.1.203+go-1.x86_64
 
 The package is the same `orphera-agent` package as the Scala build, with the
 same files apart from the agent itself (`/opt/orphera-agent/orphera-agent-go`
-instead of `orphera-agent.jar`), the same service unit, `agent.env` (kept as a
-conffile, so the node's token survives) and `ca.crt`. It has no Java
+instead of `orphera-agent.jar`), the same service unit and `agent.env` (kept as a
+conffile, so the node's token survives); like the Scala package it contains no
+certificate. It has no Java
 dependency. Installing it over the Scala package replaces it; installing the
 Scala package again puts the Scala agent back. Both directions were tested
 with `dpkg -i`. The `.rpm` follows the Scala spec
