@@ -78,7 +78,9 @@ with `dpkg -i`. The `.rpm` follows the Scala spec
 `%config(noreplace)`, the service is restarted in `%post`, and on SELinux hosts
 the Go binary is labelled `bin_t` as well as `run.sh`. It is built for a real
 architecture rather than `noarch`; dnf allows a package to move between
-`noarch` and an architecture on upgrade.
+`noarch` and an architecture on upgrade. Tested with deploy-agent on a Rocky 10
+node with SELinux enforcing: Scala 0.1.201 to Go 0.1.203+go, confirmed in about
+15 seconds.
 
 Its version is the repository version with `+go` added, for example
 `0.1.203+go`, and the agent reports that same string. So:
@@ -179,9 +181,7 @@ These need a real node; the build machine could not test them:
 - apt and dnf installs, removals and upgrades on Debian/Ubuntu and Rocky/Fedora hosts;
 - `networkctl` and `nmcli` reloads and an actual rollback;
 - `systemd-run` for reboot, power off and self-upgrade;
-- interface order on hosts with IPv6 (run `compare/compare-facts.sh`);
-- `make rpm` and installing the `.rpm` on a Rocky host (rpmbuild was not
-  available where it was written).
+- interface order on hosts with IPv6 (run `compare/compare-facts.sh`).
 
 ## Size and start-up, measured on the build machine
 
