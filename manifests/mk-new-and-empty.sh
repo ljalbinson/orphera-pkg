@@ -10,7 +10,8 @@
 #   5. install the config's package lists     (gen_packages.scala)
 #
 # Usage: manifests/mk-new-and-empty.sh [-a agent.deb] [node ...]
-#   node   a name (tst3) or a bare number (3); default is tst0..tst7
+#   node   a name (tst3, scala1) or a bare number (3, meaning tst3); default is tst0..tst7.
+#          A name needs its config file (config/<name>.yaml) and an inventory.yaml entry.
 #   -a     agent package to install (-f also works); default is the newest
 #          orphera-agent_*_amd64.deb in the current directory
 #
@@ -35,8 +36,8 @@ if [ $# -gt 0 ]; then
     nodes=()
     for n in "$@"; do
         case $n in
-            tst*) nodes+=("$n") ;;
-            *) nodes+=("tst$n") ;;
+            *[!0-9]*) nodes+=("$n") ;;     # a name: tst3, scala1
+            *) nodes+=("tst$n") ;;          # a bare number: 3 is tst3
         esac
     done
 else

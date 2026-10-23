@@ -1203,7 +1203,8 @@ The shell script below does the same with more locking and a different output la
 ### Building a set of new VMs end to end
 
 `manifests/mk-new-and-empty.sh` chains the steps above for tst0-tst7 (or the nodes
-named on the command line): provision, `bootstrap --forget-host-key`,
+named on the command line: a name such as `tst3` or `scala1`, or a bare number, `3`
+meaning `tst3`; a name needs `config/<name>.yaml` and an inventory entry): provision, `bootstrap --forget-host-key`,
 `gen_set_dns.scala`, `dist-upgrade`, `gen_packages.scala`. A failed step stops
 that node and the script moves on, listing failures and exiting non-zero.
 `manifests/par-mk-new-and-empty.sh` does the same with the nodes built in

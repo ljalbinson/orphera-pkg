@@ -23,6 +23,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - README: [Building a second control host](README.md#building-a-second-control-host), the commands from an empty VM to a working
   second control host, what each playbook installs or copies, and what the two hosts do not share.
 
+### Fixed — VM build scripts
+- `mk-new-and-empty.sh` and `par-mk-new-and-empty.sh` take any node name (`scala1`, `gs2`), not only `tst...` names: a bare number
+  still means `tst<number>`, and anything else is used as given. Before, `scala1` became `tstscala1`.
+
 ### Fixed — `orphera audit-log`
 - A command that threw an error or was interrupted with Ctrl-C now writes its end record (exit 1 with the error message, or exit 130),
   instead of being listed as in progress for ever. Seen with `deploy-agent`, `bootstrap` and `dist-upgrade` on 2026-10-23.
