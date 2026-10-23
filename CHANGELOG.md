@@ -39,6 +39,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `deploy-agent` records `remote_path` only when `--remote-path` was given; the default shown before said `.deb` even for `.rpm` installs.
 
 ### Changed
+- The agent package no longer contains `certs/ca.crt` (`/etc/orphera-agent/certs/ca.crt`). The agent never read it: it presents the
+  certificate `bootstrap` or `issue-certs` put in `/etc/orphera-agent/tls`, and only the orchestrator verifies it against its own CA. The
+  package is now the same for every site, so it can be published, and `make deb` / `make rpm` no longer need `make certs` first. An
+  upgrade removes the old file; nothing else changes on the node.
 - The option that names the agent package is now `--agent`, not `--file`, in `deploy-agent`, `bootstrap` and `cluster-playbook` (its
   `@bootstrap` step): `orphera deploy-agent --agent orphera-agent_0.1.203_amd64.deb`. `--file` is still accepted, but is no longer shown
   in the help, the completion or this documentation. The scripts `mk-new-and-empty.sh`, `par-mk-new-and-empty.sh` and

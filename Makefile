@@ -217,7 +217,7 @@ pkg-stage: assembly
 	rm -rf $(PKG_DIR)
 	mkdir -p $(PKG_DIR)/DEBIAN
 	mkdir -p $(PKG_DIR)/opt/orphera-agent
-	mkdir -p $(PKG_DIR)/etc/orphera-agent/certs
+	mkdir -p $(PKG_DIR)/etc/orphera-agent
 	mkdir -p $(PKG_DIR)/etc/systemd/system
 	mkdir -p $(PKG_DIR)/var/lib/orphera/network-backups
 
@@ -228,10 +228,9 @@ pkg-stage: assembly
 	cp packaging/agent.env $(PKG_DIR)/etc/orphera-agent/agent.env
 	cp packaging/orphera-agent.service $(PKG_DIR)/etc/systemd/system/orphera-agent.service
 
-	# Only the CA certificate (public). Each node's own key and certificate are
-	# issued over SSH into /etc/orphera-agent/tls by bootstrap / issue-certs.
-	@test -f $(CERTS_DIR)/ca.crt || (echo "ERROR: $(CERTS_DIR)/ca.crt not found - run: make certs" && exit 1)
-	cp $(CERTS_DIR)/ca.crt $(PKG_DIR)/etc/orphera-agent/certs/
+	# No certificates: the agent never reads the CA (only the orchestrator verifies it), and each
+	# node's own key and certificate are issued over SSH into /etc/orphera-agent/tls by bootstrap /
+	# issue-certs. So this package is the same for every site, and building it needs no CA.
 
 	sed "s/@VERSION@/$(VERSION)/" packaging/control.template > $(PKG_DIR)/DEBIAN/control
 	cp packaging/postinst $(PKG_DIR)/DEBIAN/postinst

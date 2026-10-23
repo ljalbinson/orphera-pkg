@@ -256,7 +256,8 @@ This produces `certs/ca.{crt,key}`. The orchestrator trusts `ca.crt`;
 ### Per-node certificates
 
 Every agent has a certificate and key of its own; the agent package ships
-none. `orphera bootstrap` issues one to each node it installs, and
+none, and not the CA certificate either (the agent never reads it), so the same
+package serves every site and building it needs no `make certs`. `orphera bootstrap` issues one to each node it installs, and
 `orphera issue-certs [--nodes ...] --ssh-user localadmin` issues (or
 renews) them for nodes already running. Over SSH, each node generates a
 new key in `/etc/orphera-agent/tls/` (mode 0600; the key never leaves the
