@@ -578,8 +578,8 @@ object Cli:
       full: Boolean
   ): Either[String, Command] =
     args match
-      case Nil                        => Right(Command.ShowAuditLog(limit, full))
-      case "--full" :: rest           => parseAuditLog(rest, limit, true)
+      case Nil              => Right(Command.ShowAuditLog(limit, full))
+      case "--full" :: rest => parseAuditLog(rest, limit, true)
       case "--limit" :: value :: rest =>
         scala.util.Try(value.toInt).toOption match
           case Some(parsed) if parsed > 0 => parseAuditLog(rest, parsed, full)

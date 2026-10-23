@@ -351,7 +351,9 @@ object LogSummary:
                 .pure(false)
             else
               val invocations = correlateAudit(events).sortBy(_.startTs)
-              IO.println(renderAudit(invocations, limit, files.size, full)) >> IO
+              IO.println(
+                renderAudit(invocations, limit, files.size, full)
+              ) >> IO
                 .pure(true)
         }
 
@@ -423,10 +425,10 @@ object LogSummary:
   private final case class NodeRun(prefix: String, from: Int, to: Int)
 
   /** A node list as runs: `tst0,tst1,...,tst7,tst9,gs1,gs2,gs3,st0` is
-    * `tst0-7,tst9,gs1-3,st0`. Only names that follow each other in the list
-    * and in number are joined, so the order is kept and nothing is implied
-    * that was not there; a number with a leading zero (`node01`) is left
-    * alone, as joining it would lose the zero.
+    * `tst0-7,tst9,gs1-3,st0`. Only names that follow each other in the list and
+    * in number are joined, so the order is kept and nothing is implied that was
+    * not there; a number with a leading zero (`node01`) is left alone, as
+    * joining it would lose the zero.
     */
   def compressNodes(nodes: String): String =
     val names = nodes.split(",").toList.map(_.trim).filter(_.nonEmpty)
@@ -445,7 +447,7 @@ object LogSummary:
       }
     runs.reverse
       .map {
-        case Left(name)                                   => name
+        case Left(name)                                    => name
         case Right(NodeRun(p, from, to)) if from == to     => s"$p$from"
         case Right(NodeRun(p, from, to)) if to == from + 1 => s"$p$from,$p$to"
         case Right(NodeRun(p, from, to))                   => s"$p$from-$to"
@@ -536,7 +538,8 @@ object LogSummary:
       sb.append(
         widths.zipWithIndex
           .map { case (w, i) =>
-            "-" * (if i == headers.size - 1 then math.min(w, detailWidth) else w)
+            "-" * (if i == headers.size - 1 then math.min(w, detailWidth)
+                   else w)
           }
           .mkString("  ")
       ).append('\n')

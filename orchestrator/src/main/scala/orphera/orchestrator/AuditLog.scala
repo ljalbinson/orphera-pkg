@@ -113,13 +113,17 @@ object AuditLog:
       append(
         ("event" -> "command_start") :: ("invocation_id" -> invocationId) ::
           ("pid" -> self.pid()) ::
-          ("pid_start" -> self.info().startInstant().toScala.map(_.toEpochMilli)) ::
+          ("pid_start" -> self
+            .info()
+            .startInstant()
+            .toScala
+            .map(_.toEpochMilli)) ::
           describe(command)
       )
     }
 
-  /** `error` is set when the command did not return an exit code of its own:
-    * it threw (the message) or was interrupted ("interrupted", exit 130).
+  /** `error` is set when the command did not return an exit code of its own: it
+    * threw (the message) or was interrupted ("interrupted", exit 130).
     */
   def recordEnd(
       command: Command,
@@ -210,7 +214,9 @@ object AuditLog:
           "local_path" -> localPath.getOrElse("(auto-discovered)"),
           "nodes" -> nodesField(nodes)
         ) ++ Option
-          .when(remotePath != defaultAgentRemotePath)("remote_path" -> remotePath)
+          .when(remotePath != defaultAgentRemotePath)(
+            "remote_path" -> remotePath
+          )
           .toList
       case Command.Bootstrap(
             localPath,
