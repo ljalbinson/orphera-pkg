@@ -195,6 +195,12 @@ nodes:
     vars:
       cluster_ip: "192.168.1.81"
 
+  - name: scala1
+    host: scala1.ljalbinson.com
+    never-reboot: true
+    vars:
+      cluster_ip: "10.10.5.50"
+
 groups:
   - name: mons
     members: [tst0, tst1, tst2]
