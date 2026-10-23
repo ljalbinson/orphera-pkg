@@ -1,0 +1,73 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Runs the same work on a node with the Go agent (tst0) and a node with the
+# Scala agent (tst1), so their output can be compared line by line. It touches
+# only two small packages (pv, tree) and one file under /etc, and removes all
+# of them at the end, so if pv or tree were already installed they will be gone
+# afterwards.
+#
+#   orphera playbook agent-go/compare/agent-compare.yaml
+#
+# Apart from timings and the node names, the output for tst0 and tst1 should
+# be the same.
+name: agent-compare
+
+nodes: [tst0, tst1]
+
+tasks:
+  # Facts, including the interface list the templates below rely on.
+  - name: facts
+    dump_facts: {}
+
+  # apt-get update, then install, then the post-install check that waits for
+  # /usr/bin/pv and /usr/bin/tree to be present.
+  - name: install packages
+    install:
+      packages: [pv, tree]
+      update_cache: true
+
+  # Templating from facts and inventory, written with owner, group and mode.
+  - name: write templated file
+    write_file:
+      dest: /etc/orphera-agent-compare.conf
+      owner: root
+      group: root
+      mode: "0640"
+      content: |
+        host={{facts.hostname}}
+        os={{facts.os_id}} {{facts.os_version}} {{facts.architecture}}
+        tst0_ip_secondary={{nodes.tst0.ip_secondary}}
+        tst1_ip_secondary={{nodes.tst1.ip_secondary}}
+        tst0_cluster_ip={{nodes.tst0.cluster_ip}}
+        tst1_cluster_ip={{nodes.tst1.cluster_ip}}
+
+  # Writing the same content again: the file is unchanged.
+  - name: write templated file again
+    write_file:
+      dest: /etc/orphera-agent-compare.conf
+      owner: root
+      group: root
+      mode: "0640"
+      content: |
+        host={{facts.hostname}}
+        os={{facts.os_id}} {{facts.os_version}} {{facts.architecture}}
+        tst0_ip_secondary={{nodes.tst0.ip_secondary}}
+        tst1_ip_secondary={{nodes.tst1.ip_secondary}}
+        tst0_cluster_ip={{nodes.tst0.cluster_ip}}
+        tst1_cluster_ip={{nodes.tst1.cluster_ip}}
+
+  # Streamed command output, stdout and stderr, and the result.
+  - name: show the file and the installed tools
+    run_command:
+      command: ["sh", "-c", "stat -c '%U:%G %a %s' /etc/orphera-agent-compare.conf; cat /etc/orphera-agent-compare.conf; pv --version | head -1; tree --version; echo 'to stderr' >&2"]
+      timeout: 30
+
+  - name: remove packages
+    remove:
+      packages: [pv, tree]
+      purge: true
+
+  - name: remove the file
+    run_command:
+      command: ["rm", "-f", "/etc/orphera-agent-compare.conf"]
+      timeout: 10
