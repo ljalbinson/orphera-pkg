@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.1.204] - 2026-10-23
+
+The agent's code is unchanged from 0.1.203: the agent packages no longer contain the CA certificate, and the rest is changes to the `orphera` command, the shell scripts and the documentation.
+
 ### Added
 - `.github/workflows/release.yml`: pushing a tag `vX.Y.Z` builds the agent package (`.deb`, `.rpm`) and the command-line package (`.deb`,
   `.rpm`, tarball) on GitHub and publishes them with a `SHA256SUMS` file as a GitHub Release, with that version's CHANGELOG section as its
