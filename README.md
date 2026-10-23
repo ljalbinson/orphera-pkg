@@ -67,6 +67,8 @@ orchestrator (CLI)  --gRPC/TLS-->  agent (daemon, runs as root on managed host)
 - **`agent`** — a small daemon, one per managed host, listening on
   `50051`. Executes commands locally (`apt-get` or `dnf`, file writes,
   `networkctl reload` or `nmcli`, `dpkg` or `rpm`, `shutdown`) and streams progress back.
+  There are two implementations of it: `agent/` in Scala, which the
+  top-level build packages, and `agent-go/` in Go (see [Go agent](#go-agent)).
 - **`orchestrator`** — a CLI you run from your workstation or a control
   host. Reads a static inventory, dispatches commands to one or more
   agents in parallel, and renders their event streams to the console.
@@ -188,7 +190,40 @@ generating full reflection/resource config via GraalVM's tracing agent
 run against a real end-to-end exercise of every RPC path, or (b)
 swapping the transport away from `grpc-netty-shaded` to a native-image-
 friendly alternative (e.g. `http4s-grpc`). Neither has been attempted
-yet.
+yet. The Go agent below is the other route to an agent with no JRE.
+
+### Go agent
+
+`agent-go/` is a second implementation of the agent, in Go. It serves the
+same gRPC protocol (generated from the same `Protocol.proto`) on the same
+port, with the same token, certificates and never-reboot marker, so the
+orchestrator works with either. It builds to a single static binary with no
+Java runtime; `orphera thread-info` shows it at about 15 MB resident and 8
+threads, against roughly 170 to 200 MB and 30 threads for the JVM agent.
+
+It has its own Makefile and is not part of the sbt build or `make release`:
+
+```bash
+cd agent-go
+make            # lint (gofmt, go vet, staticcheck), tests, binaries
+make deb        # orphera-agent_<version>+go_amd64.deb
+make rpm        # orphera-agent-<version>+go-1.x86_64.rpm
+cd ..
+orphera deploy-agent --agent agent-go/orphera-agent_<version>+go_amd64.deb --nodes tst0
+```
+
+The packages are the same `orphera-agent` package as the Scala ones, with the
+Go binary in place of the jar, so either replaces the other with
+`deploy-agent`. Their version is `VERSION` with `+go` added, which the agent
+also reports, so `orphera version` shows which agent a node runs.
+
+`make release` builds only the Scala packages, and `deploy-agent` without
+`--agent` picks those, so nodes running the Go agent go back to the Scala one
+at the next release unless the Go package is passed with `--agent`.
+
+[`agent-go/README.md`](agent-go/README.md) has the details: layout,
+differences from the Scala agent, how its facts match the JVM's, and trying
+it on a node by hand.
 
 ### Versions and tags
 
