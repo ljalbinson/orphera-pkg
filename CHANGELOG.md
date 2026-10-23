@@ -7,6 +7,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- `docs/GETTING_STARTED.md`: from the release packages to a first command and a first playbook (install, inventory, `init-ca`, the
+  token, `bootstrap`, `run`, a YAML playbook, upgrades, and what the common errors mean). It is in the command-line package under
+  `/opt/orphera/docs`.
 - The release workflow also builds and publishes the Go agent's packages, as `orphera-go-agent_<version>_amd64.deb` and
   `orphera-go-agent-<version>-1.x86_64.rpm`. The package inside is `orphera-agent` at version `<version>+go`; the file names avoid the `+`,
   which GitHub does not keep, and the `orphera-agent_*` / `orphera-agent-*` patterns that `deploy-agent` searches, so the Scala agent

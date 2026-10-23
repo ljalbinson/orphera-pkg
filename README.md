@@ -26,6 +26,8 @@ untrusted networks or adversarial input.
 
 ## Index
 
+New to Orphera? [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md) takes you from the release packages to a first command and a first playbook.
+
 - [Architecture](#architecture)
 - [Requirements](#requirements)
 - [Building](#building)
