@@ -259,9 +259,10 @@ sha256sum --ignore-missing -c SHA256SUMS
 sudo apt install ./orphera_<version>_all.deb
 # put inventory.yaml and config/ in /etc/orphera, and the CA in /etc/orphera/certs: copy yours, or make a new one
 # (the same command as `make certs`; keep ca.key private):
-sudo openssl req -x509 -newkey rsa:4096 -nodes -days 3650 -subj "/CN=Orphera CA" \
+sudo chown "$USER" /etc/orphera/certs
+openssl req -x509 -newkey rsa:4096 -nodes -days 3650 -subj "/CN=Orphera CA" \
   -keyout /etc/orphera/certs/ca.key -out /etc/orphera/certs/ca.crt
-sudo chmod 600 /etc/orphera/certs/ca.key
+chmod 600 /etc/orphera/certs/ca.key
 orphera bootstrap --agent orphera-agent_<version>_amd64.deb --nodes ... --ssh-user localadmin
 ```
 
