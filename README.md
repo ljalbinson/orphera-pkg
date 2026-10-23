@@ -258,12 +258,9 @@ curl -LO https://github.com/ljalbinson/orphera-pkg/releases/download/v<version>/
 curl -LO https://github.com/ljalbinson/orphera-pkg/releases/download/v<version>/SHA256SUMS
 sha256sum --ignore-missing -c SHA256SUMS
 sudo apt install ./orphera_<version>_all.deb
-# put inventory.yaml and config/ in /etc/orphera, and the CA in /etc/orphera/certs: copy yours, or make a new one
-# (the same command as `make certs`; keep ca.key private):
+# put inventory.yaml and config/ in /etc/orphera, and make the CA (or copy yours into /etc/orphera/certs):
 sudo chown "$USER" /etc/orphera/certs
-openssl req -x509 -newkey rsa:4096 -nodes -days 3650 -subj "/CN=Orphera CA" \
-  -keyout /etc/orphera/certs/ca.key -out /etc/orphera/certs/ca.crt
-chmod 600 /etc/orphera/certs/ca.key
+orphera init-ca
 orphera bootstrap --agent orphera-agent_<version>_amd64.deb --nodes ... --ssh-user localadmin
 ```
 
@@ -276,7 +273,8 @@ every RPC as a second, independent auth factor.
 Make the CA once:
 
 ```bash
-make certs
+make certs        # in a checkout
+orphera init-ca   # anywhere: the same CA, made in ORPHERA_CERTS_DIR (/etc/orphera/certs for the package)
 ```
 
 This produces `certs/ca.{crt,key}`. The orchestrator trusts `ca.crt`;
@@ -588,6 +586,7 @@ Verbs that act on nodes (`install`, `remove`, `dist-upgrade`, `run`, `copy`, `wr
 | `playbook <file.yaml \| file.scala \| compiled-name> [--resume] [--config <path>]` | Run an ordered, multi-task playbook — from a YAML file, a run-time-compiled Scala script, or a compiled DSL playbook by registered name — see [Playbooks](#playbooks). `--resume` skips tasks already completed in a previous run — see [Restartability](#restartability). `--config` points a `.scala` script at a per-VM YAML config file (`ConfigYaml.fromEnv()`, see [Per-VM config files](#per-vm-config-files---config)); has no effect on a `.yaml`/compiled playbook, which has no code of its own to read it |
 | `cluster-playbook <file.yaml \| file.scala> [<file2> ...] [--resume] [--config <path>]` | Run a staged, cross-node-coordinated playbook — see [Cross-node coordination](#cross-node-coordination-and-staged-playbooks). Same `--resume`/`--config` support as `playbook`, applied independently to each file. One or more files run in the order given, stopping at the first one that fails — a shorthand for a fixed sequence (e.g. tear down, then rebuild) without a wrapper script |
 | `log-summary <playbook-name \| file.jsonl>` | Print a human-readable table (per-task status/duration, failures called out) from a run's `.orphera-logs` output. A playbook name resolves to that playbook's most recently modified log file — see [Observability](#observability) |
+| `init-ca [--days 3650] [--name "Orphera CA"]` | Make the certificate authority (`ca.crt`, `ca.key`) in `ORPHERA_CERTS_DIR` (default `certs`), as `make certs` does but without a checkout. It prints the certificate's SHA-256 fingerprint, and refuses if a CA is already there, since replacing it leaves every node with a certificate nobody trusts. Needs `openssl`; runs on this machine only |
 | `secrets init \| list \| generate <name> \| set <name> \| get <name> \| rm <name>` | Manage the encrypted secret store on the machine that runs `orphera` — see [Secrets](#secrets). Does not contact any node. `set` reads the value from one line of standard input; `get` prints the value, so use it only where that is wanted |
 
 There is no `apply <manifest.yaml>` command — the standalone
@@ -1695,12 +1694,12 @@ Afterwards both hosts hold the same CA key, secret store and SSH key, and either
 |---|---|
 | `make` / `make all` | clean → test → assembly → deb |
 | `make clean` | `sbt clean`, removes `pkg/` and any built `.deb` / `.rpm` |
-| `make test` | `sbt test`, then the check programs `ContainerCheck`, `ConfCheck`, `SecretsCheck`, `ThreadInfoCheck`, `InventoryCheck`, `LocationsCheck`, `InstallationCheck` and `DbDocumentsCheck` (set `CHECK_VERBOSE=1` to print every passing check) |
+| `make test` | `sbt test`, then the check programs `ContainerCheck`, `ConfCheck`, `SecretsCheck`, `ThreadInfoCheck`, `InventoryCheck`, `LocationsCheck`, `InstallationCheck`, `CaInitCheck` and `DbDocumentsCheck` (set `CHECK_VERBOSE=1` to print every passing check) |
 | `make assembly` | `sbt agent/assembly` |
 | `make deb` | stages package contents, runs `dpkg-deb --build` |
 | `make rpm` | stages the same contents, runs `rpmbuild` to produce `orphera-agent-<version>-1.noarch.rpm` for Rocky/Red Hat hosts. Needs `rpmbuild` |
 | `make verify` | builds, then prints `.deb` contents/metadata |
-| `make certs` | generates the CA (`certs/ca.{crt,key}`) that signs each node's certificate. Refuses to run if `certs/ca.crt` already exists |
+| `make certs` | generates the CA (`certs/ca.{crt,key}`) that signs each node's certificate. Refuses to run if `certs/ca.crt` already exists. `orphera init-ca` does the same without a checkout |
 | `orphera issue-certs --nodes ...` | issues each node its own certificate over SSH (see *Per-node certificates*) |
 | `make certs-clean` | deletes the CA in `certs/` — you must type `delete` to confirm; every node then needs a certificate from a new CA (`make certs`, `orphera issue-certs`) |
 | `make orpheracli` | builds the orchestrator and the scripting jar and installs them as `/usr/local/lib/orphera-orchestrator.jar` and `/usr/local/lib/orphera-scripting.jar`, with the `orphera` launcher in `/usr/local/bin` and the bash completion in `/etc/bash_completion.d/orphera` (effective in new shells) |

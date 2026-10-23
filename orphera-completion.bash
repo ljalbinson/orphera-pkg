@@ -97,7 +97,7 @@ _orphera_completions() {
 
   local verbs="install remove autoremove dist-upgrade copy write-file network-apply reboot shutdown uptime thread-info run
     playbook cluster-playbook deploy-agent bootstrap issue-certs teardown fetch facts
-    version cert-info log-summary audit-log pipeline secrets show-config help"
+    version cert-info log-summary audit-log pipeline secrets show-config init-ca help"
 
   # Flags common to most verbs that take --nodes
   local nodes_flag="--nodes"
@@ -245,6 +245,10 @@ _orphera_completions() {
         --node-groups) COMPREPLY=($(compgen -W "$(_orphera_groups)" -- "$cur")) ;;
         *) COMPREPLY=($(compgen -W "--nodes --node-groups --exclude-nodes" -- "$cur")) ;;
       esac
+      ;;
+
+    init-ca)
+      COMPREPLY=($(compgen -W "--days --name" -- "$cur"))
       ;;
 
     show-config)

@@ -48,6 +48,9 @@ object Main extends IOApp:
       case "secrets" :: rest =>
         IO.blocking(SecretsTool.run(rest))
           .map(code => if code == 0 then ExitCode.Success else ExitCode.Error)
+      case "init-ca" :: rest =>
+        IO.blocking(CaInit.run(rest))
+          .map(code => if code == 0 then ExitCode.Success else ExitCode.Error)
       case _ =>
         Cli.parse(args).toOption.filter(AuditLog.isAuditable) match
           case Some(command) => auditedRun(command, args)

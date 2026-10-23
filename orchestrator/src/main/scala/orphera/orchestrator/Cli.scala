@@ -1290,6 +1290,11 @@ object Cli:
       |                    — prints each VM config as orphera reads it, from the
       |                      -c / ORPHERA_CONFIG_DIR location (files or mariadb://);
       |                      read-only, nothing is sent to a node
+      |  init-ca           [--days 3650] [--name "Orphera CA"]
+      |                    — makes the certificate authority (ca.crt, ca.key) in
+      |                      ORPHERA_CERTS_DIR that signs each node's certificate,
+      |                      as 'make certs' does; refuses if one is already there;
+      |                      runs on this machine only, nothing is sent to a node
       |  secrets           init | list | generate <name> | set <name> | get <name> | rm <name>
       |                    — the encrypted store of passwords and keys that playbooks
       |                      use (~/.config/orphera/secrets.age); runs on this machine

@@ -11,6 +11,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `orphera-go-agent-<version>-1.x86_64.rpm`. The package inside is `orphera-agent` at version `<version>+go`; the file names avoid the `+`,
   which GitHub does not keep, and the `orphera-agent_*` / `orphera-agent-*` patterns that `deploy-agent` searches, so the Scala agent
   stays the default.
+- `orphera init-ca [--days 3650] [--name "Orphera CA"]` makes the certificate authority (`ca.crt`, `ca.key`) in `ORPHERA_CERTS_DIR`, as `make certs`
+  does, for an installation with no checkout to run `make` in. It prints the SHA-256 fingerprint and refuses to replace a CA that is there.
+  `CaInitCheck` covers it, making a real CA when `openssl` is installed.
 
 ## [0.1.204] - 2026-10-23
 
