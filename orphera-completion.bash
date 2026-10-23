@@ -396,7 +396,7 @@ _orphera_completions() {
     audit-log)
       case "$prev" in
         --limit) COMPREPLY=() ;;
-        *) COMPREPLY=($(compgen -W "--limit" -- "$cur")) ;;
+        *) COMPREPLY=($(compgen -W "--limit --full" -- "$cur")) ;;
       esac
       ;;
 

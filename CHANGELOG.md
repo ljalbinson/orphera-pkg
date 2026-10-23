@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed — `orphera audit-log`
+- A command that threw an error or was interrupted with Ctrl-C now writes its end record (exit 1 with the error message, or exit 130),
+  instead of being listed as in progress for ever. Seen with `deploy-agent`, `bootstrap` and `dist-upgrade` on 2026-10-23.
+- The start record now holds the process id and its start time, so a command with no end record shows as RUNNING while its process is
+  alive and NO END RECORD once it is gone (killed with SIGKILL, say). Older records, which have neither, show NO END RECORD.
+- The table no longer breaks up: a multi-line `run` script is put on one line, node lists are shown as runs (24 nodes become
+  `tst0-7,tst9-20,gs1-3,st0`), Nodes is cut at 40 characters and Detail at 100, and the last column is not padded. `--full` shows both
+  uncut. Durations of a second or more are in seconds (`89.2s`).
+- Playbooks, which name no nodes on the command line, show `-` in Nodes instead of `?`.
+- `deploy-agent` records `remote_path` only when `--remote-path` was given; the default shown before said `.deb` even for `.rpm` installs.
+
 ### Changed
 - The option that names the agent package is now `--agent`, not `--file`, in `deploy-agent`, `bootstrap` and `cluster-playbook` (its
   `@bootstrap` step): `orphera deploy-agent --agent orphera-agent_0.1.203_amd64.deb`. `--file` is still accepted, but is no longer shown

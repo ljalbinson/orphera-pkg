@@ -156,7 +156,7 @@ enum Command:
   // command_start/command_end pairs. Distinct from LogSummary: that's
   // one playbook run's task-by-task detail, this is a flat trail
   // across every mutating command ever run here.
-  case ShowAuditLog(limit: Int)
+  case ShowAuditLog(limit: Int, full: Boolean = false)
   // `pipeline`: each step is a verb line (e.g. "install tree"); the whole
   // list runs on every node, nodes in parallel, steps in order per node —
   // see Main.runPipeline.
@@ -348,7 +348,7 @@ object Cli:
       case "log-summary" :: target :: rest =>
         parseLogSummary(rest, target)
       case "pipeline" :: rest                => parsePipeline(rest)
-      case "audit-log" :: rest               => parseAuditLog(rest, 20)
+      case "audit-log" :: rest               => parseAuditLog(rest, 20, false)
       case "help" :: _ | "--help" :: _ | Nil => Right(Command.Help)
       case "run" :: rest => parseRunCommand(rest, Nil, None, 60, false)
       case other => Left(s"Unknown command: ${other.headOption.getOrElse("")}")
@@ -574,13 +574,15 @@ object Cli:
 
   private def parseAuditLog(
       args: List[String],
-      limit: Int
+      limit: Int,
+      full: Boolean
   ): Either[String, Command] =
     args match
-      case Nil                        => Right(Command.ShowAuditLog(limit))
+      case Nil                        => Right(Command.ShowAuditLog(limit, full))
+      case "--full" :: rest           => parseAuditLog(rest, limit, true)
       case "--limit" :: value :: rest =>
         scala.util.Try(value.toInt).toOption match
-          case Some(parsed) if parsed > 0 => parseAuditLog(rest, parsed)
+          case Some(parsed) if parsed > 0 => parseAuditLog(rest, parsed, full)
           case _ => Left(s"Invalid limit: $value (expected a positive integer)")
       case other :: _ =>
         Left(s"Unknown argument to audit-log: $other")
@@ -1278,11 +1280,12 @@ object Cli:
       |  log-summary       <playbook-name | file.jsonl>
       |                    — summarizes a run's .orphera-logs/*.jsonl output as a
       |                      table (latest run for that playbook, if a name is given)
-      |  audit-log         [--limit 20]
+      |  audit-log         [--limit 20] [--full]
       |                    — lists recent mutating-command invocations from
       |                      .orphera-audit/audit.jsonl (command, nodes, outcome,
-      |                      duration); see log-summary for one playbook run's
-      |                      task-level detail
+      |                      duration); node lists and details are cut
+      |                      short unless --full; see log-summary for one
+      |                      playbook run's task-level detail
       |  show-config       <name>...
       |                    — prints each VM config as orphera reads it, from the
       |                      -c / ORPHERA_CONFIG_DIR location (files or mariadb://);

@@ -6,6 +6,7 @@ import java.nio.file.{Files, Path, StandardOpenOption}
 import java.time.Instant
 
 import scala.jdk.CollectionConverters.*
+import scala.jdk.OptionConverters.*
 
 import cats.effect.IO
 
@@ -97,29 +98,48 @@ object AuditLog:
       case Command.Uptime(_)                            => false
       case Command.Threads(_, _, _)                     => false
       case Command.LogSummary(_)                        => false
-      case Command.ShowAuditLog(_)                      => false
+      case Command.ShowAuditLog(_, _)                   => false
       case Command.Pipeline(_, _, _, _)                 =>
         false // each step runs as its own audited orphera command
       case Command.Help => false
 
+  /** The process id and its start time go in the start record, so that
+    * `audit-log` can tell a command that is still running from one that ended
+    * without an end record (killed with SIGKILL, the machine went down): the
+    * pid alone could since have been reused by another process.
+    */
   def recordStart(command: Command, invocationId: String): IO[Unit] =
-    append(
-      ("event" -> "command_start") :: ("invocation_id" -> invocationId) :: describe(
-        command
+    IO.delay(ProcessHandle.current()).flatMap { self =>
+      append(
+        ("event" -> "command_start") :: ("invocation_id" -> invocationId) ::
+          ("pid" -> self.pid()) ::
+          ("pid_start" -> self.info().startInstant().toScala.map(_.toEpochMilli)) ::
+          describe(command)
       )
-    )
+    }
 
+  /** `error` is set when the command did not return an exit code of its own:
+    * it threw (the message) or was interrupted ("interrupted", exit 130).
+    */
   def recordEnd(
       command: Command,
       invocationId: String,
       exitCode: Int,
-      durationMs: Long
+      durationMs: Long,
+      error: Option[String] = None
   ): IO[Unit] =
     append(
       ("event" -> "command_end") :: ("invocation_id" -> invocationId) ::
         ("exit_code" -> exitCode) :: ("success" -> (exitCode == 0)) ::
-        ("duration_ms" -> durationMs) :: describe(command)
+        ("duration_ms" -> durationMs) ::
+        (error.map(e => "error" -> e).toList ++ describe(command))
     )
+
+  /** The `--remote-path` default; the path really used depends on the package
+    * (`.rpm` on a dnf host, see AgentPackages.remotePathFor), so only a path
+    * given on the command line is worth recording.
+    */
+  private val defaultAgentRemotePath = "/tmp/orphera-agent.deb"
 
   private def describe(command: Command): List[(String, Any)] =
     command match
@@ -188,9 +208,10 @@ object AuditLog:
         List(
           "command" -> "deploy-agent",
           "local_path" -> localPath.getOrElse("(auto-discovered)"),
-          "remote_path" -> remotePath,
           "nodes" -> nodesField(nodes)
-        )
+        ) ++ Option
+          .when(remotePath != defaultAgentRemotePath)("remote_path" -> remotePath)
+          .toList
       case Command.Bootstrap(
             localPath,
             nodes,

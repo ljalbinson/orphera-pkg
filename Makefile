@@ -205,7 +205,7 @@ clean:
 	rm -f orphera-agent_*_amd64.deb orphera-agent-*.rpm
 
 test:
-	sbt test "orchestrator/Test/runMain orphera.orchestrator.kolla.ContainerCheck" "orchestrator/Test/runMain orphera.orchestrator.conf.ConfCheck" "orchestrator/Test/runMain orphera.orchestrator.SecretsCheck" "orchestrator/Test/runMain orphera.orchestrator.ThreadInfoCheck" "orchestrator/Test/runMain orphera.orchestrator.InventoryCheck" "orchestrator/Test/runMain orphera.orchestrator.LocationsCheck" "orchestrator/Test/runMain orphera.orchestrator.InstallationCheck" "orchestrator/Test/runMain orphera.orchestrator.DbDocumentsCheck" "agent/Test/runMain orphera.agent.AgentGuardCheck"
+	sbt test "orchestrator/Test/runMain orphera.orchestrator.kolla.ContainerCheck" "orchestrator/Test/runMain orphera.orchestrator.conf.ConfCheck" "orchestrator/Test/runMain orphera.orchestrator.SecretsCheck" "orchestrator/Test/runMain orphera.orchestrator.ThreadInfoCheck" "orchestrator/Test/runMain orphera.orchestrator.AuditLogCheck" "orchestrator/Test/runMain orphera.orchestrator.InventoryCheck" "orchestrator/Test/runMain orphera.orchestrator.LocationsCheck" "orchestrator/Test/runMain orphera.orchestrator.InstallationCheck" "orchestrator/Test/runMain orphera.orchestrator.DbDocumentsCheck" "agent/Test/runMain orphera.agent.AgentGuardCheck"
 
 assembly:
 	sbt agent/assembly

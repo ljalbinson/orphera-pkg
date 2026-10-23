@@ -5,6 +5,7 @@ package orphera.orchestrator
 import java.nio.file.{Files, Path, Paths}
 
 import scala.jdk.CollectionConverters.*
+import scala.jdk.OptionConverters.*
 
 import cats.effect.IO
 
@@ -278,7 +279,10 @@ object LogSummary:
       "ts",
       "exit_code",
       "success",
-      "duration_ms"
+      "duration_ms",
+      "pid",
+      "pid_start",
+      "error"
     )
 
   // AuditLog.scala rotates audit.jsonl by size — audit.jsonl.1 is the
@@ -315,14 +319,16 @@ object LogSummary:
       exitCode: Option[Int],
       success: Option[Boolean],
       durationMs: Option[Long],
-      ended: Boolean
+      ended: Boolean,
+      error: Option[String],
+      running: Boolean
   )
 
   /** Same "own return value is about whether the report itself could be
     * produced, not about what it reports" contract as `run` above — a report
     * full of FAILED rows is still a successfully rendered report.
     */
-  def runAuditLog(limit: Int): IO[Boolean] =
+  def runAuditLog(limit: Int, full: Boolean = false): IO[Boolean] =
     val files = allAuditFiles()
     if files.isEmpty then
       IO.println(
@@ -345,7 +351,7 @@ object LogSummary:
                 .pure(false)
             else
               val invocations = correlateAudit(events).sortBy(_.startTs)
-              IO.println(renderAudit(invocations, limit, files.size)) >> IO
+              IO.println(renderAudit(invocations, limit, files.size, full)) >> IO
                 .pure(true)
         }
 
@@ -367,13 +373,16 @@ object LogSummary:
           Invocation(
             invocationId = id,
             command = s.str("command").getOrElse("?"),
-            nodes = s.str("nodes").getOrElse("?"),
+            nodes = s.str("nodes").getOrElse("-"),
             startTs = s.str("ts").getOrElse("?"),
             detail = extraDetail(s),
             exitCode = end.flatMap(_.intField("exit_code")),
             success = end.flatMap(_.boolField("success")),
             durationMs = end.flatMap(_.longField("duration_ms")),
-            ended = end.isDefined
+            ended = end.isDefined,
+            error = end.flatMap(_.str("error")),
+            running = end.isEmpty &&
+              stillRunning(s.longField("pid"), s.longField("pid_start"))
           )
         }
       }
@@ -397,10 +406,74 @@ object LogSummary:
   private def formatTs(ts: String): String =
     if ts.length >= 19 then ts.substring(0, 19).replace('T', ' ') else ts
 
+  // A start record with no end: still running only if its process is alive
+  // and is the same process (same start time), not a later one given the pid.
+  // Records written before the pid was recorded have neither field.
+  private def stillRunning(pid: Option[Long], pidStart: Option[Long]): Boolean =
+    pid.exists { p =>
+      ProcessHandle.of(p).toScala.exists { h =>
+        h.isAlive && pidStart.forall(started =>
+          h.info().startInstant().toScala.exists(_.toEpochMilli == started)
+        )
+      }
+    }
+
+  private val Numbered = "^(.*?)(\\d{1,9})$".r
+
+  private final case class NodeRun(prefix: String, from: Int, to: Int)
+
+  /** A node list as runs: `tst0,tst1,...,tst7,tst9,gs1,gs2,gs3,st0` is
+    * `tst0-7,tst9,gs1-3,st0`. Only names that follow each other in the list
+    * and in number are joined, so the order is kept and nothing is implied
+    * that was not there; a number with a leading zero (`node01`) is left
+    * alone, as joining it would lose the zero.
+    */
+  def compressNodes(nodes: String): String =
+    val names = nodes.split(",").toList.map(_.trim).filter(_.nonEmpty)
+    val runs =
+      names.foldLeft(List.empty[Either[String, NodeRun]]) { (acc, name) =>
+        name match
+          case Numbered(prefix, digits)
+              if digits == "0" || !digits.startsWith("0") =>
+            val n = digits.toInt
+            acc match
+              case Right(NodeRun(p, from, to)) :: rest
+                  if p == prefix && to + 1 == n =>
+                Right(NodeRun(p, from, n)) :: rest
+              case _ => Right(NodeRun(prefix, n, n)) :: acc
+          case _ => Left(name) :: acc
+      }
+    runs.reverse
+      .map {
+        case Left(name)                                   => name
+        case Right(NodeRun(p, from, to)) if from == to     => s"$p$from"
+        case Right(NodeRun(p, from, to)) if to == from + 1 => s"$p$from,$p$to"
+        case Right(NodeRun(p, from, to))                   => s"$p$from-$to"
+      }
+      .mkString(",")
+
+  /** One line, at most `max` characters: newlines and runs of spaces in a
+    * multi-line `run` script become single spaces, and a longer text is cut
+    * with an ellipsis. `max` of 0 means no limit (--full).
+    */
+  def oneLine(text: String, max: Int): String =
+    val flat = text.replaceAll("\\s+", " ").trim
+    if max <= 0 || flat.length <= max then flat
+    else flat.take(max - 1) + "\u2026"
+
+  private def formatDuration(ms: Long): String =
+    if ms < 1000 then s"${ms}ms"
+    else if ms < 600000 then f"${ms / 1000.0}%.1fs"
+    else s"${ms / 60000}m${(ms / 1000) % 60}s"
+
+  private val nodesWidth = 40
+  private val detailWidth = 100
+
   private def renderAudit(
       invocations: List[Invocation],
       limit: Int,
-      fileCount: Int
+      fileCount: Int,
+      full: Boolean
   ): String =
     val sb = new StringBuilder
     val sourceNote =
@@ -421,38 +494,71 @@ object LogSummary:
         List("Time", "Command", "Nodes", "Status", "Duration", "Detail")
       val dataRows = shown.map { inv =>
         val status =
-          if !inv.ended then "IN PROGRESS / NO END RECORD"
+          if inv.running then "RUNNING"
+          else if !inv.ended then "NO END RECORD"
           else if inv.success.contains(true) then "OK"
+          else if inv.exitCode.contains(130) then "INTERRUPTED"
           else s"FAILED${inv.exitCode.map(c => s" (exit $c)").getOrElse("")}"
-        val duration = inv.durationMs.map(d => s"${d}ms").getOrElse("-")
+        val duration = inv.durationMs.map(formatDuration).getOrElse("-")
+        // An error comes first, so a shortened detail never cuts it off.
+        val detail =
+          (inv.error.map(e => "error: " + oneLine(e, 0) + " |").toList :+
+            inv.detail).mkString(" ")
+        val compressed = compressNodes(inv.nodes)
+        val nodes =
+          if full || compressed.isEmpty then inv.nodes else compressed
         List(
           formatTs(inv.startTs),
           inv.command,
-          inv.nodes,
+          oneLine(nodes, if full then 0 else nodesWidth),
           status,
           duration,
-          inv.detail
+          oneLine(detail, if full then 0 else detailWidth)
         )
       }
 
+      // The last column is not padded: it ends the line.
       val widths = headers.indices.map { i =>
         dataRows.map(_(i).length).foldLeft(headers(i).length)(math.max)
       }
 
       def formatRow(cells: List[String]): String =
-        cells.zip(widths).map { case (c, w) => c.padTo(w, ' ') }.mkString("  ")
+        cells
+          .zip(widths)
+          .zipWithIndex
+          .map { case ((c, w), i) =>
+            if i == headers.size - 1 then c else c.padTo(w, ' ')
+          }
+          .mkString("  ")
+          .stripTrailing
 
       sb.append(formatRow(headers)).append('\n')
-      sb.append(widths.map(w => "-" * w).mkString("  ")).append('\n')
+      sb.append(
+        widths.zipWithIndex
+          .map { case (w, i) =>
+            "-" * (if i == headers.size - 1 then math.min(w, detailWidth) else w)
+          }
+          .mkString("  ")
+      ).append('\n')
       for data <- dataRows do sb.append(formatRow(data)).append('\n')
 
       val ok = shown.count(inv => inv.success.contains(true))
-      val failed = shown.count(inv => inv.ended && !inv.success.contains(true))
-      val pending = shown.count(!_.ended)
-      sb.append('\n')
-      sb.append(
-        s"$ok succeeded, $failed failed, $pending without a recorded end\n"
+      val interrupted =
+        shown.count(inv => inv.ended && inv.exitCode.contains(130))
+      val failed = shown.count(inv =>
+        inv.ended && !inv.success.contains(true) && !inv.exitCode.contains(130)
       )
+      val running = shown.count(_.running)
+      val noEnd = shown.count(inv => !inv.ended && !inv.running)
+      val parts =
+        List(s"$ok succeeded", s"$failed failed") ++
+          Option.when(interrupted > 0)(s"$interrupted interrupted") ++
+          Option.when(running > 0)(s"$running running") ++
+          Option.when(noEnd > 0)(
+            s"$noEnd with no end record (the process ended without writing one)"
+          )
+      sb.append('\n')
+      sb.append(parts.mkString(", ")).append('\n')
 
     sb.toString
 

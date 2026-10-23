@@ -58,14 +58,35 @@ object Main extends IOApp:
       invocationId <- IO.delay(java.util.UUID.randomUUID().toString)
       startMs <- IO.delay(System.currentTimeMillis())
       _ <- AuditLog.recordStart(command, invocationId)
-      exitCode <- dispatchCommand(args)
-      endMs <- IO.delay(System.currentTimeMillis())
-      _ <- AuditLog.recordEnd(
-        command,
-        invocationId,
-        exitCode.code,
-        endMs - startMs
-      )
+      // The end is recorded however the command finishes: with its own exit
+      // code, by throwing (exit 1 and the message; Main.run still prints it),
+      // or interrupted with Ctrl-C (exit 130). Before, only the first wrote an
+      // end record, and the others were listed as still in progress for ever.
+      exitCode <- dispatchCommand(args).guaranteeCase { outcome =>
+        IO.delay(System.currentTimeMillis() - startMs).flatMap { took =>
+          outcome match
+            case Outcome.Succeeded(result) =>
+              result.flatMap(code =>
+                AuditLog.recordEnd(command, invocationId, code.code, took)
+              )
+            case Outcome.Errored(err) =>
+              AuditLog.recordEnd(
+                command,
+                invocationId,
+                1,
+                took,
+                Some(Option(err.getMessage).getOrElse(err.getClass.getName))
+              )
+            case Outcome.Canceled() =>
+              AuditLog.recordEnd(
+                command,
+                invocationId,
+                130,
+                took,
+                Some("interrupted")
+              )
+        }
+      }
     yield exitCode
 
   /** `--config tst0` names a file of the config directory (-c), see
@@ -476,13 +497,13 @@ object Main extends IOApp:
           .run(target)
           .map(ok => if ok then ExitCode.Success else ExitCode.Error)
 
-      case Right(Command.ShowAuditLog(limit)) =>
+      case Right(Command.ShowAuditLog(limit, full)) =>
         // Same "own exit code is about whether the report itself
         // rendered, not about what it reports" reasoning as
         // LogSummary above — a table full of FAILED rows is still a
         // successfully produced report.
         LogSummary
-          .runAuditLog(limit)
+          .runAuditLog(limit, full)
           .map(ok => if ok then ExitCode.Success else ExitCode.Error)
 
   private def formatUptime(seconds: Long): String =
