@@ -99,7 +99,7 @@ reload:
 
 lines:
 	find . -name "*.scala" -not -path "*/target/*" -not -path "*/project/*" | xargs wc -l | tail -1
-	find . -name "*.go" -not -path "*/target/*" -not -path "*/project/*" | xargs wc -l | tail -1
+	find . -name "*.go" -not -path "*/target/*" -not -path "*/project/*" -not -path "*/internal/pb/*" | xargs wc -l | tail -1
 
 deploy-agents:
 	sbt "orchestrator/runMain orphera.orchestrator.Main deploy-agent orphera-agent_$(VERSION)_amd64.deb"
