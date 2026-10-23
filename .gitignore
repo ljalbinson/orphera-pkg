@@ -43,3 +43,4 @@ certs/*.key
 certs/*.srl
 certs/*.csr
 __pycache__/
+github-files/
