@@ -246,6 +246,7 @@ Pushing a tag `vX.Y.Z` (as above) starts `.github/workflows/release.yml`, which 
 | File | What |
 |---|---|
 | `orphera-agent_<version>_amd64.deb`, `orphera-agent-<version>-1.noarch.rpm` | the agent, for Debian/Ubuntu and Rocky/Red Hat hosts |
+| `orphera-go-agent_<version>_amd64.deb`, `orphera-go-agent-<version>-1.x86_64.rpm` | the [Go agent](#go-agent): the same `orphera-agent` package with a Go binary instead of the JVM, no Java needed (the package version is `<version>+go`) |
 | `orphera_<version>_all.deb`, `orphera-<version>-1.noarch.rpm`, `orphera-<version>.tar.gz` | the `orphera` command line (see [Installing the command line](#installing-the-command-line)) |
 
 None contains a certificate, so the same files serve every site; each node gets its own certificate from `orphera bootstrap`.

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# When a tag vX.Y.Z is pushed, builds the agent and command-line packages and publishes them, with
+# When a tag vX.Y.Z is pushed, builds the agent (Scala and Go) and command-line packages and publishes them, with
 # SHA-256 sums, as a GitHub Release. The packages are the same for every site (they contain no
 # certificates), so nothing from the lab is needed to build them.
 name: Release
@@ -32,11 +32,18 @@ jobs:
           java-version: '21'
       - uses: sbt/setup-sbt@v1
 
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: agent-go/go.mod
+          cache-dependency-path: agent-go/go.sum
+
       - name: Install rpmbuild
         run: sudo apt-get update && sudo apt-get install -y rpm
 
       - name: Build the packages
-        run: make deb rpm cli-package
+        run: |
+          make deb rpm cli-package
+          make -C agent-go deb rpm
 
       - name: Collect the files and their sums
         run: |
@@ -44,6 +51,11 @@ jobs:
           mkdir release
           cp "orphera-agent_${version}_amd64.deb" "orphera-agent-${version}-1.noarch.rpm" \
              "orphera_${version}_all.deb" "orphera-${version}-1.noarch.rpm" "orphera-${version}.tar.gz" release/
+          # The Go agent: its packages carry the version ${version}+go, and a '+' in a file name is not kept by
+          # GitHub, so the files are named without it. The names also stay clear of the patterns that
+          # deploy-agent searches for (orphera-agent_*.deb, orphera-agent-*.rpm), so the Scala agent stays the default.
+          cp "agent-go/orphera-agent_${version}+go_amd64.deb" "release/orphera-go-agent_${version}_amd64.deb"
+          cp "agent-go/orphera-agent-${version}+go-1.x86_64.rpm" "release/orphera-go-agent-${version}-1.x86_64.rpm"
           (cd release && sha256sum * > SHA256SUMS && cat SHA256SUMS)
 
       - name: Release notes from the changelog
