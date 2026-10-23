@@ -52,12 +52,14 @@ rollback, and the interface ordering.
 
 ```sh
 make amd64
-scp bin/orphera-agent-go-amd64 packaging/orphera-agent-go.conf root@tst0:/tmp/
-ssh root@tst0 '
-  install -m 0755 /tmp/orphera-agent-go-amd64 /opt/orphera-agent/orphera-agent-go
-  install -D -m 0644 /tmp/orphera-agent-go.conf /etc/systemd/system/orphera-agent.service.d/orphera-agent-go.conf
-  systemctl daemon-reload && systemctl restart orphera-agent'
+scp bin/orphera-agent-go-amd64 packaging/orphera-agent-go.conf localadmin@tst0:/tmp/
+ssh -t localadmin@tst0 '
+  sudo install -m 0755 /tmp/orphera-agent-go-amd64 /opt/orphera-agent/orphera-agent-go &&
+  sudo install -D -m 0644 /tmp/orphera-agent-go.conf /etc/systemd/system/orphera-agent.service.d/orphera-agent-go.conf &&
+  sudo systemctl daemon-reload && sudo systemctl restart orphera-agent'
 ```
+
+Log in as your admin user and use `sudo`; Ubuntu does not allow root logins.
 
 The drop-in replaces only `ExecStart`, so the unit, `agent.env`, the
 certificates and the never-reboot marker are the same ones the Scala agent
