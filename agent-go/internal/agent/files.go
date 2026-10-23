@@ -112,7 +112,10 @@ func withTimeout(d time.Duration, msg string, f func() error) error {
 }
 
 func applyAttributes(path string, meta *pb.FileMetadata) error {
-	wrap := func(err error) error { return fmt.Errorf("Failed to set file attributes: %w", err) }
+	wrap := func(err error) error {
+		//lint:ignore ST1005 shown to the operator as "FAILED: <message>", worded as by the Scala agent
+		return fmt.Errorf("Failed to set file attributes: %w", err)
+	}
 	if meta.Owner != "" {
 		uid, err := lookupUID(meta.Owner)
 		if err != nil {

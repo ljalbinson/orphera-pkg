@@ -30,10 +30,12 @@ const howToSet = "From the orchestrator run: orphera secrets generate orphera/ag
 func RequireToken(token string, set bool) (string, error) {
 	switch {
 	case !set || token == "":
+		//lint:ignore ST1005 printed to the operator as a sentence, as by the Scala agent
 		return "", errors.New("Refusing to start: ORPHERA_TOKEN is not set in /etc/orphera-agent/agent.env. " +
 			"Without it the agent would accept the built-in development token, which anyone " +
 			"who has the source code knows. " + howToSet)
 	case token == DevToken:
+		//lint:ignore ST1005 printed to the operator as a sentence, as by the Scala agent
 		return "", errors.New("Refusing to start: ORPHERA_TOKEN in /etc/orphera-agent/agent.env is the built-in " +
 			"development token, which anyone who has the source code knows. " + howToSet)
 	}

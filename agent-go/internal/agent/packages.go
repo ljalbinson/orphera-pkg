@@ -106,6 +106,7 @@ func runNoResult(command []string, stage string, q *queue) error {
 		return err
 	}
 	if exit != 0 {
+		//lint:ignore ST1005 shown to the operator as "FAILED: <message>", worded as by the Scala agent
 		return fmt.Errorf("Command failed with exit %d: %s", exit, strings.Join(command, " "))
 	}
 	return nil
