@@ -18,7 +18,7 @@ shared `.proto` with `-M` options instead of adding a `go_package` to it.
 | `cmd/agent/` | `main`: token and certificate checks, TLS gRPC server, shutdown on SIGTERM |
 | `internal/agent/` | The service, one file per area (packages, command, files, network, facts, interfaces, power, stats, auth) |
 | `internal/pb/` | Generated from `Protocol.proto` by `gen.sh` (checked in, so building needs no `protoc`) |
-| `packaging/deb/` | Control file, launcher and postinst for `make deb` (the rest is shared with the Scala package) |
+| `packaging/deb/`, `packaging/rpm/` | Control file, launcher, postinst and spec for `make deb` and `make rpm` (the rest is shared with the Scala packages) |
 | `packaging/orphera-agent-go.conf` | systemd drop-in to run the Go agent in place of the Scala one by hand |
 | `compare/` | Compares the Go agent's interface and disk facts with the JVM's on a node |
 
@@ -56,7 +56,16 @@ cd agent-go && make deb          # builds orphera-agent_<version>+go_amd64.deb h
 cd .. && orphera deploy-agent --agent agent-go/orphera-agent_0.1.203+go_amd64.deb --nodes tst0
 ```
 
-`make deb ARCH=arm64` builds the arm64 package.
+For Rocky and other dnf hosts, `make rpm` builds
+`orphera-agent-<version>+go-1.x86_64.rpm` the same way (it needs `rpmbuild`:
+`sudo apt install rpm`):
+
+```sh
+cd agent-go && make rpm
+cd .. && orphera deploy-agent --agent agent-go/orphera-agent-0.1.203+go-1.x86_64.rpm --nodes <rocky nodes>
+```
+
+`make deb ARCH=arm64` and `make rpm ARCH=arm64` build the arm64 packages.
 
 The package is the same `orphera-agent` package as the Scala build, with the
 same files apart from the agent itself (`/opt/orphera-agent/orphera-agent-go`
@@ -64,7 +73,12 @@ instead of `orphera-agent.jar`), the same service unit, `agent.env` (kept as a
 conffile, so the node's token survives) and `ca.crt`. It has no Java
 dependency. Installing it over the Scala package replaces it; installing the
 Scala package again puts the Scala agent back. Both directions were tested
-with `dpkg -i`.
+with `dpkg -i`. The `.rpm` follows the Scala spec
+(`packaging/orphera-agent.spec.template`): `agent.env` is
+`%config(noreplace)`, the service is restarted in `%post`, and on SELinux hosts
+the Go binary is labelled `bin_t` as well as `run.sh`. It is built for a real
+architecture rather than `noarch`; dnf allows a package to move between
+`noarch` and an architecture on upgrade.
 
 Its version is the repository version with `+go` added, for example
 `0.1.203+go`, and the agent reports that same string. So:
@@ -83,8 +97,6 @@ that should stay the Scala package unless you choose otherwise.
 Installing the package removes the trial drop-in below if it is present.
 The Java runtime the Scala package depended on is left installed (apt marks it
 as no longer needed).
-
-There is no `.rpm` of the Go agent yet.
 
 ## Trying it on a node by hand
 
@@ -167,7 +179,9 @@ These need a real node; the build machine could not test them:
 - apt and dnf installs, removals and upgrades on Debian/Ubuntu and Rocky/Fedora hosts;
 - `networkctl` and `nmcli` reloads and an actual rollback;
 - `systemd-run` for reboot, power off and self-upgrade;
-- interface order on hosts with IPv6 (run `compare/compare-facts.sh`).
+- interface order on hosts with IPv6 (run `compare/compare-facts.sh`);
+- `make rpm` and installing the `.rpm` on a Rocky host (rpmbuild was not
+  available where it was written).
 
 ## Size and start-up, measured on the build machine
 

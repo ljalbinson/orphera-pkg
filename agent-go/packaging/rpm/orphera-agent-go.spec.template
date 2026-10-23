@@ -1,0 +1,85 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# RPM spec for the Orphera agent built from the Go implementation. Filled in
+# and built by `make rpm` in agent-go/ from the same staged tree as the Go
+# .deb, copied in from %%{stagedir}, so rpmbuild needs no sources. It follows
+# packaging/orphera-agent.spec.template (the Scala package) apart from: a
+# real architecture instead of noarch (passed with --target), no Java
+# requirement, and the Go binary labelled for SELinux as well as run.sh.
+Name:           orphera-agent
+Version:        @VERSION@
+Release:        1
+Summary:        Orphera orchestration agent (Go)
+License:        Apache-2.0
+# No automatic dependency scanning: the binary is static.
+AutoReqProv:    no
+
+# The binary is already stripped and has no debug information to extract.
+%global debug_package %{nil}
+%global __os_install_post %{nil}
+%define _build_id_links none
+
+%description
+Receives and executes package management, file distribution, and network
+configuration commands over gRPC.
+
+This build is the Go implementation: a single static binary with no Java
+runtime needed. It serves the same protocol as the Scala build of this
+package and replaces it in place.
+
+%prep
+
+%build
+
+%install
+mkdir -p %{buildroot}
+cp -a %{stagedir}/. %{buildroot}/
+rm -rf %{buildroot}/DEBIAN
+
+%files
+%defattr(-,root,root,-)
+/opt/orphera-agent
+%config(noreplace) /etc/orphera-agent/agent.env
+%dir /etc/orphera-agent
+%dir /etc/orphera-agent/certs
+/etc/orphera-agent/certs/ca.crt
+/etc/systemd/system/orphera-agent.service
+%dir /var/lib/orphera
+%dir /var/lib/orphera/network-backups
+
+%post
+# The drop-in used to try the Go agent by hand is not needed once the package
+# is installed, and would keep forcing the Go binary if the Scala package were
+# put back later.
+dropin=/etc/systemd/system/orphera-agent.service.d/orphera-agent-go.conf
+if [ -f "$dropin" ]; then
+  rm -f "$dropin"
+  rmdir --ignore-fail-on-non-empty /etc/systemd/system/orphera-agent.service.d 2>/dev/null || true
+fi
+systemctl daemon-reload
+# SELinux (enforcing on Rocky): systemd's init_t may only execute run.sh, and
+# what it runs, if they are labelled bin_t. Skipped where the SELinux tools
+# are not installed.
+if command -v semanage >/dev/null 2>&1 && command -v restorecon >/dev/null 2>&1; then
+  for f in /opt/orphera-agent/run.sh /opt/orphera-agent/orphera-agent-go; do
+    semanage fcontext -a -t bin_t "$f" 2>/dev/null || true
+    restorecon -F "$f" 2>/dev/null || true
+  done
+fi
+# firewalld (default on Rocky): open the agent's gRPC port if it is running.
+if command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state >/dev/null 2>&1; then
+  firewall-cmd --permanent --add-port=50051/tcp >/dev/null 2>&1 || true
+  firewall-cmd --reload >/dev/null 2>&1 || true
+fi
+systemctl enable orphera-agent.service
+systemctl restart orphera-agent.service
+
+%preun
+# $1 is 0 on erase and 1 on upgrade: stop only when really removing.
+if [ "$1" -eq 0 ]; then
+  systemctl stop orphera-agent.service || true
+  systemctl disable orphera-agent.service || true
+fi
+
+%postun
+systemctl daemon-reload || true
