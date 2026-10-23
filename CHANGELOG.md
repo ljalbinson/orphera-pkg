@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- `manifests/control_host.scala`: turns an empty test VM into a control and build host like scala0. It installs OpenJDK 21,
+  sbt (scala-sbt apt repository), make, dpkg-dev, rpm, openssl, Go 1.22 with protobuf-compiler, protoc-gen-go v1.35.2,
+  protoc-gen-go-grpc v1.5.1 and staticcheck 2024.1.1, age, mariadb-client, the Python modules the utils need, shellcheck
+  and jq; clones the repository into `~localadmin/orphera-pkg` (only if it is not there); runs `make orpheracli` and the
+  Go agent's `make`; then reports the versions. `--config tst15`.
+- `manifests/control_host_handover.scala`: copies the CA (`certs/ca.crt`, `ca.key`), the age identity and secret store,
+  and the SSH key pair from the machine running `orphera` to that host (all localadmin, mode 600 except the certificate
+  and public key), checks `orphera secrets list` and `orphera version` from there, and sets up the OpenStack clients
+  (`CONTROL_HOST_SKIP_OPENSTACK=1` leaves them out). Stops before copying anything if a source file is missing, or if the
+  agent token comes from `ORPHERA_TOKEN` and the store's `orphera/agent-token` does not match it (the new host would be
+  rejected by every agent). The check fails unless every node answers `orphera version` with a version.
+- tst15 is the second control host: 4 CPUs and 8 GB in `config/tst15.yaml` (was 2 and 4 GB), for sbt builds. Built with
+  both playbooks on 2026-10-23 (OpenStack clients skipped: OpenStack was down).
+
 ### Fixed — `orphera audit-log`
 - A command that threw an error or was interrupted with Ctrl-C now writes its end record (exit 1 with the error message, or exit 130),
   instead of being listed as in progress for ever. Seen with `deploy-agent`, `bootstrap` and `dist-upgrade` on 2026-10-23.

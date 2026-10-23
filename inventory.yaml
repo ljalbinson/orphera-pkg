@@ -60,7 +60,8 @@ nodes:
   #   tst19       Neutron (server, Open vSwitch + DHCP agents); its second NIC (br-net106) is the
   #               flat provider network, no address on it
   #   tst17, tst18  second NIC on br-net106 (provider network): nova-compute (nova_compute.scala)
-  #   tst15, tst16  not assigned yet
+  #   tst15       control and build host, a second scala0 (control_host.scala, control_host_handover.scala)
+  #   tst16       not assigned yet
   #   tst11       apt cache (apt-cacher-ng)
   #   tst12       rpm cache (nginx caching mirror of Rocky/EPEL)
   # No osd_disks/zap_disks on tst3 and up: no Ceph role there (see the
