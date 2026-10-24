@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+- `make lines` counted the copies of the manifests in the package staging trees (`pkg-cli/`, `pkg/`) along with the real ones. It now counts
+  the files git tracks plus new ones, never anything `.gitignore` excludes, and still leaves out the generated Go in `internal/pb/`.
+
 ### Added
 - `manifests/file_server.scala`: a file server for Linux and macOS on one node. Samba shares `/srv/files` with `fruit` (Finder metadata and
   resource forks), Avahi announces it so Finder lists it, and `FILE_SERVER_TIMEMACHINE=yes` adds a Time Machine share. Users and their

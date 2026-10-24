@@ -97,9 +97,12 @@ fmt-manifests:
 reload:
 	sbt reload
 
+# Counts the source in the repository: files git tracks, plus new ones not yet added, and never what .gitignore
+# excludes (the package staging trees pkg/, pkg-cli/ and pkg-cli-rpm/ hold copies of the manifests, and build output
+# is elsewhere). The protobuf-generated Go in internal/pb/ is left out.
 lines:
-	find . -name "*.scala" -not -path "*/target/*" -not -path "*/project/*" | xargs wc -l | tail -1
-	find . -name "*.go" -not -path "*/target/*" -not -path "*/project/*" -not -path "*/internal/pb/*" | xargs wc -l | tail -1
+	git ls-files -co --exclude-standard '*.scala' | xargs wc -l | tail -1
+	git ls-files -co --exclude-standard '*.go' | grep -v '/internal/pb/' | xargs wc -l | tail -1
 
 deploy-agents:
 	sbt "orchestrator/runMain orphera.orchestrator.Main deploy-agent orphera-agent_$(VERSION)_amd64.deb"
