@@ -47,6 +47,10 @@ eq "the site certs directory is empty" "$(ls -A "$stage/etc/orphera/certs")" ""
 mkdir -p "$tmp/fakebin" "$tmp/home"
 cat >"$tmp/fakebin/java" <<'JAVA'
 #!/bin/sh
+if [ "$1" = "-version" ] && [ -n "${FAKE_JAVA_VERSION:-}" ]; then
+  echo "openjdk version \"$FAKE_JAVA_VERSION\" 2025-01-01" >&2
+  exit 0
+fi
 echo "ARGS $*"
 env | grep '^ORPHERA_' | sort
 JAVA
@@ -63,6 +67,14 @@ has "launcher: root default" "$out" "ORPHERA_ROOT=$p"
 has "launcher: catalogues default" "$out" "ORPHERA_CATALOGUES=$p/catalogues"
 has "launcher: state under the home" "$out" "ORPHERA_STATE_DIR=$tmp/home/.local/state/orphera"
 has "launcher: scripting jar default" "$out" "ORPHERA_SCRIPTING_JAR=$p/lib/orphera-scripting.jar"
+
+# JVM options by Java version: none on an older JDK (which would refuse them), the warnings' options on a newer one
+out=$(run FAKE_JAVA_VERSION=21.0.4 "$p/bin/orphera" help)
+has "java 21: no extra options" "$out" "ARGS -cp $p/lib/orphera-orchestrator.jar"
+out=$(run FAKE_JAVA_VERSION=24.0.1 "$p/bin/orphera" help)
+has "java 24: native access" "$out" "ARGS --enable-native-access=ALL-UNNAMED --sun-misc-unsafe-memory-access=allow -cp $p/lib/orphera-orchestrator.jar"
+out=$(run FAKE_JAVA_VERSION=22.0.1 "$p/bin/orphera" help)
+has "java 22: native access only" "$out" "ARGS --enable-native-access=ALL-UNNAMED -cp $p/lib/orphera-orchestrator.jar"
 
 out=$(run ORPHERA_INVENTORY=/x/inv.yaml ORPHERA_SITE_DIR=/srv/o XDG_STATE_HOME=/var/st "$p/bin/orphera" help)
 has "environment wins over the default" "$out" "ORPHERA_INVENTORY=/x/inv.yaml"

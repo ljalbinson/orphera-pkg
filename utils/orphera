@@ -38,4 +38,18 @@ if [ ! -f "$JAR" ]; then
   echo "Note: using $JAR from the build tree; run 'make orpheracli' to install it." >&2
 fi
 
-exec java -cp "$JAR" orphera.orchestrator.Main "$@"
+# Newer JDKs warn on every start about things the runtime libraries do (Scala's lazy vals, Netty's native
+# library). The options that silence them exist only from the JDK that introduced the warning, and an
+# older JDK refuses an unknown option, so they are added by version.
+java_cmd=java
+java_major=$("$java_cmd" -version 2>&1 | sed -n '1s/^[^"]*"\([0-9][0-9]*\).*/\1/p')
+jvm_opts=
+if [ -n "$java_major" ] && [ "$java_major" -ge 22 ]; then
+  jvm_opts="--enable-native-access=ALL-UNNAMED"
+fi
+if [ -n "$java_major" ] && [ "$java_major" -ge 23 ]; then
+  jvm_opts="$jvm_opts --sun-misc-unsafe-memory-access=allow"
+fi
+
+# shellcheck disable=SC2086
+exec "$java_cmd" $jvm_opts -cp "$JAR" orphera.orchestrator.Main "$@"

@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+- The `orphera` launchers pass `--enable-native-access=ALL-UNNAMED` (Java 22 and later) and `--sun-misc-unsafe-memory-access=allow`
+  (Java 23 and later), so a newer JDK no longer prints its `WARNING: ... sun.misc.Unsafe` and native-access warnings on every command.
+  Older JDKs get no extra options, as they would refuse them.
+- `docs/GETTING_STARTED.md` says how to give the SSH user passwordless `sudo`, and lists the error that `bootstrap` gives without it.
+
 ## [0.1.205] - 2026-10-24
 
 The agent's code is unchanged from 0.1.204. New: the Go agent's packages in the release, `orphera init-ca`, and the getting started guide.

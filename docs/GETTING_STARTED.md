@@ -30,7 +30,10 @@ On each machine to manage:
 
 - A user you can reach with SSH **without a password** (an SSH key), who may use `sudo` without a
   password. This is only used to install the agent. The examples call it `localadmin`. Root login is not
-  needed, and not used.
+  needed, and not used. The install runs over SSH with no terminal, so a `sudo` that asks for a password
+  fails with `sudo: A terminal is required to authenticate`. To allow it, on that machine:
+  `echo 'localadmin ALL=(ALL) NOPASSWD:ALL' | sudo tee /etc/sudoers.d/localadmin` and
+  `sudo chmod 440 /etc/sudoers.d/localadmin`; `sudo -n true && echo ok` checks it.
 - Port 50051 reachable from the control host.
 - A DNS name or address for the control host to use. The agent's certificate will name it exactly.
 
@@ -226,6 +229,7 @@ Scala scripts*.
 | `No matching nodes found in inventory` | the name in `--nodes` is not in the inventory; or the inventory did not load (look at the first line) |
 | `no CA certificate: ... does not exist` | step 3 not done, or `ORPHERA_CERTS_DIR` points somewhere else |
 | `bootstrap` refuses: no agent token | `orphera secrets generate orphera/agent-token` (step 3) |
+| `sudo: A terminal is required to authenticate` from `bootstrap` | the SSH user's `sudo` asks for a password: see *What you need* |
 | `unreachable` in `version` | the machine is down, port 50051 is blocked, or its name does not resolve |
 | `unauthenticated` in `version` | that agent holds a different token from this machine's secret store |
 | The agent keeps restarting | on the machine, `journalctl -u orphera-agent`; it says why (no token, no certificate) |
