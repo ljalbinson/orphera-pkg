@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.1.205] - 2026-10-24
+
+The agent's code is unchanged from 0.1.204. New: the Go agent's packages in the release, `orphera init-ca`, and the getting started guide.
+
 ### Added
 - `docs/GETTING_STARTED.md`: from the release packages to a first command and a first playbook (install, inventory, `init-ca`, the
   token, `bootstrap`, `run`, a YAML playbook, upgrades, and what the common errors mean). It is in the command-line package under
