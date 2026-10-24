@@ -49,7 +49,8 @@ object CaInit:
         case other :: _ => Left(s"Unknown argument to init-ca: $other")
     go(args, Options(DefaultDays, DefaultName))
 
-  /** The `openssl` command that makes a self-signed CA certificate and its key. */
+  /** The `openssl` command that makes a self-signed CA certificate and its key.
+    */
   def opensslArgs(o: Options, keyFile: Path, certFile: Path): List[String] =
     List(
       "openssl",
@@ -74,7 +75,9 @@ object CaInit:
     if present.isEmpty then None
     else
       Some(
-        s"${present.mkString(" and ")} already exist${if present.size == 1 then "s" else ""}; nothing was changed. " +
+        s"${present.mkString(" and ")} already exist${
+            if present.size == 1 then "s" else ""
+          }; nothing was changed. " +
           "To renew node certificates: orphera issue-certs. To start again with a new CA, move the old one away " +
           "(every node then needs a certificate from the new CA: orphera issue-certs)"
       )
@@ -127,7 +130,9 @@ object CaInit:
                 cert.toString
               )
             )
-          yield fp._2.trim.stripPrefix("sha256 Fingerprint=").stripPrefix("SHA256 Fingerprint=")
+          yield fp._2.trim
+            .stripPrefix("sha256 Fingerprint=")
+            .stripPrefix("SHA256 Fingerprint=")
         if result.isLeft then cleanUp()
         result
 

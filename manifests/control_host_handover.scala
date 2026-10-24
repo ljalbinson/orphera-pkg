@@ -48,10 +48,14 @@ object control_host_handover extends OrpheraClusterPlaybook:
   private val certsDir =
     Paths.get(sys.env.getOrElse("ORPHERA_CERTS_DIR", "certs")).toAbsolutePath
   private val ageKey =
-    sys.env.get("ORPHERA_AGE_KEY").map((p: String) => Paths.get(p))
+    sys.env
+      .get("ORPHERA_AGE_KEY")
+      .map((p: String) => Paths.get(p))
       .getOrElse(home.resolve(".config/orphera/age.key"))
   private val store =
-    sys.env.get("ORPHERA_SECRETS").map((p: String) => Paths.get(p))
+    sys.env
+      .get("ORPHERA_SECRETS")
+      .map((p: String) => Paths.get(p))
       .getOrElse(home.resolve(".config/orphera/secrets.age"))
 
   // The same order kvm_native_vm_provision.scala looks for the public key it
@@ -67,7 +71,13 @@ object control_host_handover extends OrpheraClusterPlaybook:
       )
 
   private val sources =
-    List(certsDir.resolve("ca.crt"), certsDir.resolve("ca.key"), ageKey, store, sshKey)
+    List(
+      certsDir.resolve("ca.crt"),
+      certsDir.resolve("ca.key"),
+      ageKey,
+      store,
+      sshKey
+    )
   sources.filterNot(Files.exists(_)) match
     case Nil     => ()
     case missing =>
@@ -87,7 +97,9 @@ object control_host_handover extends OrpheraClusterPlaybook:
     if !stored.contains(envToken) then
       throw new RuntimeException(
         s"this host's agent token comes from ORPHERA_TOKEN, and the secret store's " +
-          s"${AgentToken.StoreName} is ${if stored.isEmpty then "not set" else "a different value"}; " +
+          s"${AgentToken.StoreName} is ${
+              if stored.isEmpty then "not set" else "a different value"
+            }; " +
           "the new host would be rejected by every agent. Put the token in the store first:\n" +
           s"""  printf '%s\\n' "$$ORPHERA_TOKEN" | orphera secrets set ${AgentToken.StoreName}\n""" +
           "then run this playbook again. Nothing was copied."
@@ -138,10 +150,18 @@ object control_host_handover extends OrpheraClusterPlaybook:
         Task.RunCommand(List("sh", "-c", dirsScript), timeoutSeconds = 30)
       )
       .task("CA certificate")(
-        copy(certsDir.resolve("ca.crt"), s"$remoteHome/orphera-pkg/certs/ca.crt", mode644)
+        copy(
+          certsDir.resolve("ca.crt"),
+          s"$remoteHome/orphera-pkg/certs/ca.crt",
+          mode644
+        )
       )
       .task("CA key")(
-        copy(certsDir.resolve("ca.key"), s"$remoteHome/orphera-pkg/certs/ca.key", mode600)
+        copy(
+          certsDir.resolve("ca.key"),
+          s"$remoteHome/orphera-pkg/certs/ca.key",
+          mode600
+        )
       )
       .task("age identity")(
         copy(ageKey, s"$remoteHome/.config/orphera/age.key", mode600)
@@ -153,7 +173,11 @@ object control_host_handover extends OrpheraClusterPlaybook:
         copy(sshKey, s"$remoteHome/.ssh/$keyName", mode600)
       )
       .task(s"SSH public key $keyName.pub")(
-        copy(Paths.get(s"$sshKey.pub"), s"$remoteHome/.ssh/$keyName.pub", mode644)
+        copy(
+          Paths.get(s"$sshKey.pub"),
+          s"$remoteHome/.ssh/$keyName.pub",
+          mode644
+        )
       )
       .build
 
