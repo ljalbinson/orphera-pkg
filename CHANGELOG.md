@@ -7,6 +7,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Changed
+- A packaged `orphera` keeps its site (inventory, per-VM configs, certificate authority) in `~/.config/orphera`, beside the secret store, so two
+  people using one machine no longer share a CA key or overwrite each other's inventory, and `orphera init-ca` needs no `sudo chown`. The
+  system-wide `/etc/orphera` is still used when it holds an `inventory.yaml` or `certs/ca.crt` and the user has no site of their own, so an
+  installation set up before this change keeps working, and a team can share one site there. `ORPHERA_SITE_DIR`, `-I`, `-c`, `-m` and the
+  `ORPHERA_*` variables win as before. `docs/GETTING_STARTED.md` and the README follow.
 - The `orphera` launchers pass `--enable-native-access=ALL-UNNAMED` (Java 22 and later) and `--sun-misc-unsafe-memory-access=allow`
   (Java 23 and later), so a newer JDK no longer prints its `WARNING: ... sun.misc.Unsafe` and native-access warnings on every command.
   Older JDKs get no extra options, as they would refuse them.

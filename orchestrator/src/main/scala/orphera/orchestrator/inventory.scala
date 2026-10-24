@@ -30,7 +30,7 @@ object Inventory:
           "Falling back to an empty inventory — every 'no matching nodes' error traces back to this."
         )
         Console.err.println(
-          "Set the location with -I/--inventory or ORPHERA_INVENTORY (a packaged install reads /etc/orphera/inventory.yaml)."
+          "Set the location with -I/--inventory or ORPHERA_INVENTORY (a packaged install reads ~/.config/orphera/inventory.yaml, else /etc/orphera/inventory.yaml)."
         )
         (Nil, Nil)
 

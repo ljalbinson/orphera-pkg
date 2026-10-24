@@ -66,12 +66,15 @@ orphera version
 It prints a warning that it has no inventory, and its own version. That is right: you have not made
 one yet.
 
-The program lives in `/opt/orphera` and is read-only. Your own files go in `/etc/orphera`, and what
-`orphera` writes as it runs goes in `~/.local/state/orphera`.
+The program lives in `/opt/orphera` and is read-only. Your own files (inventory, configs, certificate
+authority) go in `~/.config/orphera`, next to your secret store, so two people using one machine each have
+their own. What `orphera` writes as it runs goes in `~/.local/state/orphera`. A team that shares one
+inventory and one authority can use `/etc/orphera` instead: see *Where the inventory, configs and playbooks
+are* in the README.
 
 ## 2. Describe your machines
 
-The inventory lists the machines. Make `/etc/orphera/inventory.yaml`:
+The inventory lists the machines. Make `~/.config/orphera/inventory.yaml` (`mkdir -p ~/.config/orphera` first):
 
 ```yaml
 nodes:
@@ -97,12 +100,11 @@ Start with one machine if you prefer; add the others later.
 The certificate authority signs each machine's certificate. Make it once:
 
 ```sh
-sudo chown "$USER" /etc/orphera/certs
 orphera init-ca
 ```
 
 It writes `ca.crt` (which `orphera` trusts) and `ca.key` (which signs certificates) in
-`/etc/orphera/certs`, and prints the certificate's fingerprint. **Keep `ca.key` private and back it up.**
+`~/.config/orphera/certs`, and prints the certificate's fingerprint. **Keep `ca.key` private and back it up.**
 Without it you cannot issue certificates to new machines, and replacing the authority means every machine
 needs a new certificate. `orphera init-ca` refuses to run again if one exists.
 
@@ -225,7 +227,7 @@ Scala scripts*.
 
 | What you see | Usually |
 |---|---|
-| `cannot read /etc/orphera/inventory.yaml: no such file` | no inventory yet (step 2), or you are using another location: `-I` or `ORPHERA_INVENTORY` |
+| `cannot read ...inventory.yaml: no such file` | no inventory yet (step 2), or you are using another location: `-I` or `ORPHERA_INVENTORY` |
 | `No matching nodes found in inventory` | the name in `--nodes` is not in the inventory; or the inventory did not load (look at the first line) |
 | `no CA certificate: ... does not exist` | step 3 not done, or `ORPHERA_CERTS_DIR` points somewhere else |
 | `bootstrap` refuses: no agent token | `orphera secrets generate orphera/agent-token` (step 3) |

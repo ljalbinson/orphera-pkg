@@ -15,7 +15,7 @@ AutoReqProv:    no
 %description
 The orphera command, its playbooks (manifests) and helper scripts. Installs under
 /opt/orphera; the inventory, per-VM configs and the certificate authority belong in
-/etc/orphera.
+~/.config/orphera (or /etc/orphera).
 
 %prep
 

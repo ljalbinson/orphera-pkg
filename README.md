@@ -260,8 +260,7 @@ curl -LO https://github.com/ljalbinson/orphera-pkg/releases/download/v<version>/
 curl -LO https://github.com/ljalbinson/orphera-pkg/releases/download/v<version>/SHA256SUMS
 sha256sum --ignore-missing -c SHA256SUMS
 sudo apt install ./orphera_<version>_all.deb
-# put inventory.yaml and config/ in /etc/orphera, and make the CA (or copy yours into /etc/orphera/certs):
-sudo chown "$USER" /etc/orphera/certs
+# put inventory.yaml (and config/) in ~/.config/orphera, then make the CA (or copy yours into ~/.config/orphera/certs):
 orphera init-ca
 orphera bootstrap --agent orphera-agent_<version>_amd64.deb --nodes ... --ssh-user localadmin
 ```
@@ -276,7 +275,7 @@ Make the CA once:
 
 ```bash
 make certs        # in a checkout
-orphera init-ca   # anywhere: the same CA, made in ORPHERA_CERTS_DIR (/etc/orphera/certs for the package)
+orphera init-ca   # anywhere: the same CA, made in ORPHERA_CERTS_DIR (~/.config/orphera/certs for the package)
 ```
 
 This produces `certs/ca.{crt,key}`. The orchestrator trusts `ca.crt`;
@@ -1600,20 +1599,26 @@ auto-updated; remove the entry manually.
 |---|---|
 | `/opt/orphera` | the program, read-only: `bin/`, `lib/` (both jars), `manifests/`, `utils/`, `catalogues/`, `schemas/`, `files/`, `docs/`, `examples/` |
 | `/usr/bin/orphera` | link to `/opt/orphera/bin/orphera`; bash completion is in `/etc/bash_completion.d/orphera` |
-| `/etc/orphera` | your site: `inventory.yaml`, `config/` (per-VM configs) and `certs/` (`ca.crt`, `ca.key`). The package creates the directories empty and never overwrites what is in them |
+| `~/.config/orphera` | your site, one per user: `inventory.yaml`, `config/` (per-VM configs) and `certs/` (`ca.crt`, `ca.key`), beside the secret store (`secrets.age`, `age.key`). `orphera init-ca` creates `certs/` here |
+| `/etc/orphera` | a site shared by everyone on the machine, used only when the user has none of their own (see below). The package creates the directories empty and never overwrites what is in them |
 | `~/.local/state/orphera` | run state per user (`.orphera-state`, `.orphera-logs`, `.orphera-audit`, `.orphera-build-logs`); `$XDG_STATE_HOME` moves it |
 
 ```sh
 sudo apt install ./orphera_<version>_all.deb         # or: sudo dnf install ./orphera-<version>-1.noarch.rpm
-sudo cp /opt/orphera/examples/inventory.yaml /etc/orphera/      # starting points: edit both
-sudo cp -r /opt/orphera/examples/config/. /etc/orphera/config/
-sudoedit /etc/orphera/inventory.yaml
+mkdir -p ~/.config/orphera/config
+cp /opt/orphera/examples/inventory.yaml ~/.config/orphera/      # starting points: edit both
+cp -r /opt/orphera/examples/config/. ~/.config/orphera/config/
+${EDITOR:-nano} ~/.config/orphera/inventory.yaml
 orphera version
 ```
 
 The packaged launcher sets `ORPHERA_INVENTORY`, `ORPHERA_CONFIG_DIR`, `ORPHERA_CERTS_DIR`, `ORPHERA_MANIFESTS`, `ORPHERA_CATALOGUES`,
 `ORPHERA_STATE_DIR` and the two jar variables to those places only when they are not already set, so the environment, `-I`, `-c` and
-`-m` all still win. Set `ORPHERA_SITE_DIR` to move the three site paths together. The shell scripts in `/opt/orphera/manifests`
+`-m` all still win. Set `ORPHERA_SITE_DIR` to move the three site paths together. Without it the site directory is
+`~/.config/orphera` when that holds an `inventory.yaml`, a `config/` or a `certs/`; otherwise `/etc/orphera` when that holds an
+`inventory.yaml` or `certs/ca.crt`; otherwise `~/.config/orphera` again (a new user, whose `orphera init-ca` creates it). To share one
+inventory and one CA on a machine, put them in `/etc/orphera` (group-readable for the people who use them) and give those users no
+site of their own. The shell scripts in `/opt/orphera/manifests`
 read the same defaults, and `orphera` is on their `PATH`.
 
 The tarball unpacks as `orphera-<version>/`. Without root, unpack it anywhere, set `ORPHERA_SITE_DIR` to a directory of your own, and

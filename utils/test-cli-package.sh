@@ -17,7 +17,7 @@ has() { if grep -qF -- "$3" <<<"$2"; then ok "$1"; else bad "$1: [$3] not in: $2
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 unset JAVA_HOME ORPHERA_INVENTORY ORPHERA_CONFIG_DIR ORPHERA_CERTS_DIR ORPHERA_MANIFESTS ORPHERA_CATALOGUES \
-  ORPHERA_STATE_DIR ORPHERA_SITE_DIR ORPHERA_ORCHESTRATOR_JAR ORPHERA_SCRIPTING_JAR ORPHERA_PREFIX XDG_STATE_HOME
+  ORPHERA_STATE_DIR ORPHERA_SITE_DIR ORPHERA_SYSTEM_SITE_DIR ORPHERA_ORCHESTRATOR_JAR ORPHERA_SCRIPTING_JAR ORPHERA_PREFIX XDG_STATE_HOME
 
 echo orchestrator >"$tmp/o.jar"
 echo scripting >"$tmp/s.jar"
@@ -55,13 +55,14 @@ echo "ARGS $*"
 env | grep '^ORPHERA_' | sort
 JAVA
 chmod +x "$tmp/fakebin/java"
-run() { env -i PATH="$tmp/fakebin:/usr/bin:/bin" HOME="$tmp/home" "$@"; }
+sys="$tmp/system-site"   # stands in for /etc/orphera, so the host's own does not matter
+run() { env -i PATH="$tmp/fakebin:/usr/bin:/bin" HOME="$tmp/home" ORPHERA_SYSTEM_SITE_DIR="$sys" "$@"; }
 
 out=$(run "$p/bin/orphera" version --nodes tst0)
 has "launcher: runs the orchestrator jar" "$out" "ARGS -cp $p/lib/orphera-orchestrator.jar orphera.orchestrator.Main version --nodes tst0"
-has "launcher: inventory default" "$out" "ORPHERA_INVENTORY=/etc/orphera/inventory.yaml"
-has "launcher: config default" "$out" "ORPHERA_CONFIG_DIR=/etc/orphera/config"
-has "launcher: certs default" "$out" "ORPHERA_CERTS_DIR=/etc/orphera/certs"
+has "launcher: inventory default" "$out" "ORPHERA_INVENTORY=$tmp/home/.config/orphera/inventory.yaml"
+has "launcher: config default" "$out" "ORPHERA_CONFIG_DIR=$tmp/home/.config/orphera/config"
+has "launcher: certs default" "$out" "ORPHERA_CERTS_DIR=$tmp/home/.config/orphera/certs"
 has "launcher: manifests default" "$out" "ORPHERA_MANIFESTS=$p/manifests"
 has "launcher: root default" "$out" "ORPHERA_ROOT=$p"
 has "launcher: catalogues default" "$out" "ORPHERA_CATALOGUES=$p/catalogues"
@@ -81,6 +82,18 @@ has "environment wins over the default" "$out" "ORPHERA_INVENTORY=/x/inv.yaml"
 has "ORPHERA_SITE_DIR moves the other site defaults" "$out" "ORPHERA_CONFIG_DIR=/srv/o/config"
 has "XDG_STATE_HOME moves the state" "$out" "ORPHERA_STATE_DIR=/var/st/orphera"
 
+# Which site directory: the user's own, or the system-wide one when only that holds a site
+site() { run "$@" "$p/bin/orphera" help | sed -n 's/^ORPHERA_SITE_DIR=//p'; }
+eq "site: nothing anywhere is the user's own" "$(site)" "$tmp/home/.config/orphera"
+mkdir -p "$tmp/home/.config/orphera" && echo "key" >"$tmp/home/.config/orphera/age.key"
+eq "site: only a secret store in the user's directory is not a site" "$(site)" "$tmp/home/.config/orphera"
+mkdir -p "$sys/certs" && : >"$sys/certs/ca.crt"
+eq "site: a system-wide CA is used when the user has no site" "$(site)" "$sys"
+mkdir -p "$tmp/home/.config/orphera/certs"
+eq "site: the user's own wins over the system-wide one" "$(site)" "$tmp/home/.config/orphera"
+eq "site: ORPHERA_SITE_DIR wins over both" "$(site ORPHERA_SITE_DIR=/srv/o)" "/srv/o"
+rm -rf "$tmp/home/.config/orphera/certs" "$sys"
+
 mkdir -p "$tmp/usrbin" && ln -s "$p/bin/orphera" "$tmp/usrbin/orphera"
 out=$(run "$tmp/usrbin/orphera" help)
 has "found through a symlink" "$out" "ARGS -cp $p/lib/orphera-orchestrator.jar"
@@ -97,14 +110,14 @@ out=$(run "$tmp/moved/bin/orphera" help 2>&1); rc=$?
 if [ "$rc" -ne 0 ] && grep -q "incomplete" <<<"$out"; then ok "a missing jar says the installation is incomplete"; else bad "a missing jar says the installation is incomplete: $out"; fi
 
 # The shell scripts of the package
-got=$(cd "$p" && env -i PATH=/usr/bin:/bin HOME="$tmp/home" bash -c '. utils/orphera-sources.sh; config_dir; inventory_file; echo "$PATH"')
-eq "scripts: config directory" "$(sed -n 1p <<<"$got")" "/etc/orphera/config"
-eq "scripts: inventory" "$(sed -n 2p <<<"$got")" "/etc/orphera/inventory.yaml"
+got=$(cd "$p" && env -i PATH=/usr/bin:/bin HOME="$tmp/home" ORPHERA_SYSTEM_SITE_DIR="$sys" bash -c '. utils/orphera-sources.sh; config_dir; inventory_file; echo "$PATH"')
+eq "scripts: config directory" "$(sed -n 1p <<<"$got")" "$tmp/home/.config/orphera/config"
+eq "scripts: inventory" "$(sed -n 2p <<<"$got")" "$tmp/home/.config/orphera/inventory.yaml"
 eq "scripts: orphera is on PATH" "$(sed -n 3p <<<"$got")" "$p/bin:/usr/bin:/bin"
-got=$(cd "$p" && env -i PATH=/usr/bin:/bin HOME="$tmp/home" ORPHERA_CONFIG_DIR=/y/cfg bash -c '. utils/orphera-sources.sh; config_dir')
+got=$(cd "$p" && env -i PATH=/usr/bin:/bin HOME="$tmp/home" ORPHERA_SYSTEM_SITE_DIR="$sys" ORPHERA_CONFIG_DIR=/y/cfg bash -c '. utils/orphera-sources.sh; config_dir')
 eq "scripts: the environment still wins" "$got" "/y/cfg"
-got=$(cd "$p/manifests" && env -i PATH=/usr/bin:/bin HOME="$tmp/home" bash -c '. ../utils/orphera-sources.sh; config_dir')
-eq "scripts: found from another directory" "$got" "/etc/orphera/config"
+got=$(cd "$p/manifests" && env -i PATH=/usr/bin:/bin HOME="$tmp/home" ORPHERA_SYSTEM_SITE_DIR="$sys" bash -c '. ../utils/orphera-sources.sh; config_dir')
+eq "scripts: found from another directory" "$got" "$tmp/home/.config/orphera/config"
 
 # A checkout is unchanged: no lib/orphera-env.sh beside utils/
 got=$(env -i PATH=/usr/bin:/bin HOME="$tmp/home" bash -c ". utils/orphera-sources.sh; config_dir; echo \"\$PATH\"")
