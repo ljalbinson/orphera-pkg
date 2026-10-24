@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- `manifests/file_server.scala`: a file server for Linux and macOS on one node. Samba shares `/srv/files` with `fruit` (Finder metadata and
+  resource forks), Avahi announces it so Finder lists it, and `FILE_SERVER_TIMEMACHINE=yes` adds a Time Machine share. Users and their
+  Samba passwords come from `FILE_SERVER_USERS` and the secret store (`fileserver/<user>`). The configuration is checked with `testparm` before
+  the services restart, and the share is then used end to end. It has not been run yet.
+
 ### Changed
 - A packaged `orphera` keeps its site (inventory, per-VM configs, certificate authority) in `~/.config/orphera`, beside the secret store, so two
   people using one machine no longer share a CA key or overwrite each other's inventory, and `orphera init-ca` needs no `sudo chown`. The

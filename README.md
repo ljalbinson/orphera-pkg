@@ -57,6 +57,7 @@ New to Orphera? [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md) takes you fro
 - [Example: a real Ceph cluster deployment](#example-a-real-ceph-cluster-deployment)
 - [Example: OpenStack Keystone and Cinder from Kolla images](#example-openstack-keystone-and-cinder-from-kolla-images)
 - [Example: parallel network throughput test (iperf3)](#example-parallel-network-throughput-test-iperf3)
+- [Example: a file server for Linux and macOS](#example-a-file-server-for-linux-and-macos)
 - [Known gaps / not yet built](#known-gaps--not-yet-built)
 
 ## Architecture
@@ -1993,6 +1994,35 @@ Two things worth knowing if adapting this to a different target:
   instead. This is a general pattern, not iperf3-specific: reach for
   `systemd-run` any time a playbook needs to start something meant to
   outlive the task that started it.
+
+## Example: a file server for Linux and macOS
+
+`manifests/file_server.scala` turns one Ubuntu or Debian node into a file server that Linux and macOS machines both use. It installs
+Samba and sets up one share (`files`, in `/srv/files`) that the members of a `fileusers` group can read and write. macOS gets
+Samba's `fruit` module, so Finder metadata and resource forks survive a copy, and Avahi, so the server shows up in Finder's
+Network sidebar. It can also be a Time Machine destination.
+
+```bash
+FILE_SERVER_NODE=fs0 FILE_SERVER_USERS="alice bob" FILE_SERVER_TIMEMACHINE=yes orphera playbook file_server.scala
+```
+
+| Setting | Meaning | Default |
+|---|---|---|
+| `FILE_SERVER_NODE` | inventory name of the node | `fs0` |
+| `FILE_SERVER_USERS` | who may use the share (space or comma separated) | `localadmin` |
+| `FILE_SERVER_TIMEMACHINE` | `yes` adds a Time Machine share, `timemachine` in `/srv/timemachine` | no |
+
+A user who has no account on the node gets one that cannot log in. Each Samba password is the secret `fileserver/<user>`, made at
+random the first time (`orphera secrets get fileserver/alice` prints it; `orphera secrets set` before the first run chooses
+one). The playbook checks the configuration with `testparm` before it restarts anything, then uses the share the way a client does:
+it lists it, writes a file, reads it back and deletes it. Running it again changes nothing that is already right.
+
+Clients: on macOS, Finder, *Go*, *Connect to Server* (Cmd-K), `smb://fs0.example.com/files`; for Time Machine, *System Settings*,
+*Time Machine*, *Add Backup Disk*. On Linux, `sudo mount -t cifs //fs0.example.com/files /mnt/files -o username=alice,vers=3.0,uid=$USER`,
+or `smb://fs0.example.com/files` in the file manager.
+
+Not done: the disk (`/srv` is on the root filesystem unless a volume is mounted there first), quotas, backup of the share itself, and
+hosts that use `dnf` (the package and service names differ).
 
 ## Known gaps / not yet built
 
