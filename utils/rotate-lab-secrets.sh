@@ -44,6 +44,7 @@ NAMES=(
   neutron/db neutron/service neutron/rabbit
   designate/db designate/service designate/rabbit
   heat/db heat/service heat/rabbit heat/domain-admin
+  barbican/db barbican/service barbican/rabbit barbican/kek  # NB: rotating kek makes stored Barbican secrets unreadable
   wordpress/db
   observability/mysqld-exporter observability/grafana-admin
   horizon/secret-key

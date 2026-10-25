@@ -166,7 +166,7 @@ nodes:
     vars:
       cluster_ip: "10.10.5.31"
 
-  # tst20: Heat (orchestration): heat_single_node.scala
+  # tst20: Heat (orchestration) and Barbican (key manager): heat_single_node.scala, barbican_single_node.scala
   - name: tst20
     host: tst20.ljalbinson.com
     vars:

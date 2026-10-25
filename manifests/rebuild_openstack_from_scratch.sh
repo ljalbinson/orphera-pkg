@@ -16,7 +16,7 @@
 #   --wordpress  afterwards rebuild WordPress on tst7 (its database lives on Galera)
 #
 # The VMs: tst0-tst2 (Ceph), tst3-tst5 (Galera), tst6 (Keystone), tst10 (Cinder, RabbitMQ), tst13
-# (Glance, Placement, Horizon), tst14 (Nova), tst16 (Designate), tst17-tst18 (compute), tst19 (Neutron), tst20 (Heat). NOT touched:
+# (Glance, Placement, Horizon), tst14 (Nova), tst16 (Designate), tst17-tst18 (compute), tst19 (Neutron), tst20 (Heat, Barbican). NOT touched:
 # the caches (tst9, tst11, tst12), tst7 (WordPress, Prometheus/Grafana), tst8 (Rocky), the
 # hypervisors and the machine running this. Everything on the rebuilt VMs is lost: the Ceph data,
 # every OpenStack database and every instance and image.
@@ -25,7 +25,7 @@
 #   1. par-mk-new-and-empty.sh: destroy and create each VM, install the agent, DNS, dist-upgrade,
 #      base packages (the provisioning script is chosen per hypervisor: ZFS or plain directory)
 #   2. build_openstack_stack.sh: Ceph, Galera, Keystone, Cinder, Glance, Placement, Nova, Neutron,
-#      compute nodes, Horizon, Designate, Heat, clients, smoke checks and a CirrOS boot
+#      compute nodes, Horizon, Designate, Heat, Barbican, clients, smoke checks and a CirrOS boot
 #   3. optional: the test scripts, WordPress
 # Run from the repository root, on the machine that runs `orphera`. Does not need the caches
 # (tst9, tst11, tst12) or tst7: the build skips the cache steps unless run with --with-caches, and those
@@ -94,7 +94,7 @@ log "OpenStack done in $(( $(date +%s) - S ))s"
 FAILED=""
 if [ -n "$TESTS" ]; then
   log "--- step 3: test scripts ---"
-  for t in keystone cinder glance placement nova neutron nova_compute horizon designate heat; do
+  for t in keystone cinder glance placement nova neutron nova_compute horizon designate heat barbican; do
     if "$HERE/test_$t.sh" >"/tmp/rebuild-test-$t.log" 2>&1; then log "PASS: test_$t.sh"
     else log "FAIL: test_$t.sh (output: /tmp/rebuild-test-$t.log)"; FAILED="$FAILED $t"; fi
   done

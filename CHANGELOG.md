@@ -7,6 +7,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- Barbican (key manager) on tst20, beside Heat: `manifests/barbican_single_node.scala` runs the API (behind Apache and mod_wsgi) and the worker
+  as Kolla containers, with the database on Galera and a `barbican` vhost on RabbitMQ (tst10), and registers service type `key-manager`, user
+  `barbican` and the roles `creator`, `observer` and `audit` in Keystone. Secrets use the `simple_crypto` plugin with a key-encrypting key
+  derived from the stored secret `barbican/kek` (keep the secret store backed up). `barbican_teardown.scala` undoes it and `test_barbican.sh`
+  checks it, including a key made by the worker from an order. `build_openstack_stack.sh` has a `barbican` step after `heat`,
+  `rebuild_openstack_from_scratch.sh` runs its test, and `rotate-lab-secrets.sh` knows `barbican/db`, `barbican/service`, `barbican/rabbit` and
+  `barbican/kek`. Not yet run: the first run on scala0 is the first compile.
 - Heat (orchestration) on tst20: `manifests/heat_single_node.scala` runs the API, the CloudFormation compatible API and the engine as Kolla
   containers on one node, with the database on Galera and a `heat` vhost on RabbitMQ (tst10), and makes the stack user domain `heat`, its admin
   and the Heat roles in Keystone. `heat_teardown.scala` undoes it and `test_heat.sh` checks it, including a stack that makes a Nova flavor

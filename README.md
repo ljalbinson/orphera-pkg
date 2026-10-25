@@ -1474,7 +1474,8 @@ s"... IDENTIFIED BY '${dbPassword.reveal}' ..."
   `cinder/ceph-key`, `nova/db`, `nova/service`, `nova/rabbit`,
   `neutron/db`, `neutron/service`, `neutron/rabbit`, `designate/db`,
   `designate/service`, `designate/rabbit`, `heat/db`, `heat/service`, `heat/rabbit`,
-  `heat/domain-admin`, `horizon/secret-key`,
+  `heat/domain-admin`, `barbican/db`, `barbican/service`, `barbican/rabbit`,
+  `barbican/kek`, `horizon/secret-key`,
   `galera/sst`, `galera/clustercheck`, `wordpress/db`,
   `observability/mysqld-exporter`, and `orphera/agent-token` (see
   [Authentication](#authentication-and-security-notes)).
@@ -1852,7 +1853,7 @@ Fleet layout used by these manifests (see `inventory.yaml`):
 | tst13 | Glance (glance-api, images in Ceph pool `images`) Placement (port 8780) and Horizon (port 8080) |
 | tst19 | Neutron (server, Open vSwitch + DHCP agents) for flat provider networks on its second NIC (br-net106, no address) |
 | tst14 | Nova control plane (API on 8774, scheduler, conductor, noVNC proxy on 6080); RabbitMQ vhost `nova` on tst10 |
-| tst20 | Heat (API on 8004, CloudFormation API on 8000, engine); RabbitMQ vhost `heat` on tst10 |
+| tst20 | Heat (API on 8004, CloudFormation API on 8000, engine) and Barbican (API on 9311, worker); RabbitMQ vhosts `heat` and `barbican` on tst10 |
 | tst16 | Designate (API on 9001, central, worker, producer, mdns on 5354) and a BIND9 name server on port 53; RabbitMQ vhost `designate` on tst10 |
 | tst17, tst18 | Compute nodes (nova-compute on KVM, Neutron Open vSwitch agent; second NIC is the provider port); VMs on gs2 with nested KVM |
 
@@ -1873,10 +1874,11 @@ result independently of the playbook's own health checks:
     manifests/test_horizon.sh                                   # applies horizon_single_node.scala
     manifests/test_designate.sh                                 # applies designate_single_node.scala
     manifests/test_heat.sh                                      # applies heat_single_node.scala
+    manifests/test_barbican.sh                                  # applies barbican_single_node.scala
     utils/openstack-client-setup.sh                             # CLI on the machine you run orphera from
 
 To build the whole stack in one go from freshly provisioned VMs that only have the agent, run
-`manifests/build_openstack_stack.sh` (Ceph, Galera + VIP, Keystone, Cinder, Glance, Placement, Nova, Neutron, the compute nodes, Horizon, Designate, Heat, the clients
+`manifests/build_openstack_stack.sh` (Ceph, Galera + VIP, Keystone, Cinder, Glance, Placement, Nova, Neutron, the compute nodes, Horizon, Designate, Heat, Barbican, the clients
 on scala0, then a smoke test that creates and deletes a real volume, image, flavor and network, and finally boots a CirrOS instance on KVM, checks its DHCP lease and deletes it). It only applies
 playbooks, never tears anything down, checks each step independently before the next, and on a
 failure prints the `--from STEP` command to resume. `--with-caches` builds the apt and Kolla
@@ -1905,6 +1907,19 @@ Keystone. After it is up, with the CLI (`python-heatclient`):
 
 The test stack that `test_heat.sh` uses needs only Nova (it makes a flavor); a stack with servers needs the compute nodes and a network
 too. The playbook and its test have not been run.
+
+**Barbican** (`manifests/barbican_single_node.scala`, undone by `barbican_teardown.scala`, checked by `test_barbican.sh`) puts a key manager
+on tst20 beside Heat: the API (9311) and the worker as Kolla containers. Secrets are encrypted with a key-encrypting key derived from the
+secret `barbican/kek` and kept in the database (the `simple_crypto` plugin, for a lab). **Back up the secret store: without `barbican/kek`
+every stored secret is unreadable.** After it is up, with the CLI (`python-barbicanclient`):
+
+    source ~/.config/openstack/admin-openrc.sh
+    openstack secret store --name demo --payload 'hello'
+    openstack secret list
+    openstack secret order create --name k --algorithm aes --bit-length 256 --mode cbc --payload-content-type application/octet-stream key
+
+Nothing else uses Barbican yet (Cinder volume encryption and Octavia certificates are the usual first users). The Keystone listener that
+removes a deleted project's secrets is not run. The playbook and its test have not been run.
 
 Separately, `manifests/apt_cache.scala` builds an apt package cache
 (apt-cacher-ng on tst11) and `manifests/apt_cache_clients.scala` points the
