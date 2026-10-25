@@ -201,6 +201,12 @@ nodes:
     vars:
       cluster_ip: "10.10.5.50"
 
+  - name: fs0
+    host: fs0.ljalbinson.com
+    never-reboot: false
+    vars:
+      cluster_ip: "10.10.6.12"
+
 groups:
   - name: mons
     members: [tst0, tst1, tst2]
