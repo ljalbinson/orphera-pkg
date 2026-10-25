@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.1.206] - 2026-10-25
+
+The agent's code is unchanged from 0.1.205. The `orphera` command now keeps its site in the user's home, the launchers quieten newer JDKs, and there is a file server playbook.
+
 ### Fixed
 - `make lines` counted the copies of the manifests in the package staging trees (`pkg-cli/`, `pkg/`) along with the real ones. It now counts
   the files git tracks plus new ones, never anything `.gitignore` excludes, and still leaves out the generated Go in `internal/pb/`.
@@ -14,7 +18,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `manifests/file_server.scala`: a file server for Linux and macOS on one node. Samba shares `/srv/files` with `fruit` (Finder metadata and
   resource forks), Avahi announces it so Finder lists it, and `FILE_SERVER_TIMEMACHINE=yes` adds a Time Machine share. Users and their
   Samba passwords come from `FILE_SERVER_USERS` and the secret store (`fileserver/<user>`). The configuration is checked with `testparm` before
-  the services restart, and the share is then used end to end. It has not been run yet.
+  the services restart, and the share is then used end to end. Run on one Ubuntu 24.04 node; a Mac and a Linux client have not yet used it.
 
 ### Changed
 - A packaged `orphera` keeps its site (inventory, per-VM configs, certificate authority) in `~/.config/orphera`, beside the secret store, so two
