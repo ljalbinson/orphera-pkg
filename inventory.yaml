@@ -166,6 +166,7 @@ nodes:
     vars:
       cluster_ip: "10.10.5.31"
 
+  # tst20: Heat (orchestration): heat_single_node.scala
   - name: tst20
     host: tst20.ljalbinson.com
     vars:

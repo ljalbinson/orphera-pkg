@@ -43,6 +43,7 @@ NAMES=(
   nova/db nova/service nova/rabbit
   neutron/db neutron/service neutron/rabbit
   designate/db designate/service designate/rabbit
+  heat/db heat/service heat/rabbit heat/domain-admin
   wordpress/db
   observability/mysqld-exporter observability/grafana-admin
   horizon/secret-key
