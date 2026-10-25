@@ -1855,6 +1855,7 @@ Fleet layout used by these manifests (see `inventory.yaml`):
 | tst14 | Nova control plane (API on 8774, scheduler, conductor, noVNC proxy on 6080); RabbitMQ vhost `nova` on tst10 |
 | tst20 | Heat (API on 8004, CloudFormation API on 8000, engine) and Barbican (API on 9311, worker); RabbitMQ vhosts `heat` and `barbican` on tst10 |
 | tst16 | Designate (API on 9001, central, worker, producer, mdns on 5354) and a BIND9 name server on port 53; RabbitMQ vhost `designate` on tst10 |
+| tst21 | Kolla image builder: builds the images from source, with a source tarball cache, a pip cache, and a writable registry on port 5000 |
 | tst17, tst18 | Compute nodes (nova-compute on KVM, Neutron Open vSwitch agent; second NIC is the provider port); VMs on gs2 with nested KVM |
 
 Run order, each with its own teardown and an end-to-end test that checks the
@@ -1920,6 +1921,22 @@ every stored secret is unreadable.** After it is up, with the CLI (`python-barbi
 
 Nothing else uses Barbican yet (Cinder volume encryption and Octavia certificates are the usual first users). The Keystone listener that
 removes a deleted project's secrets is not run. The playbook and its test have not been run.
+
+**Building the images from source** (`manifests/kolla_build.scala`, undone by `kolla_build_teardown.scala`, checked by `test_kolla_build.sh`)
+sets up tst21 as a builder, so the OpenStack containers do not have to come from quay.io. It keeps four caches: the OpenStack source
+tarballs for each project (`stable-2025.1`, from tarballs.opendev.org, served on port 8081), a devpi mirror of PyPI (3141), the apt cache on
+tst11, and the Ubuntu base image in its own registry (5000). A rebuild downloads only what changed. On tst21:
+
+    orphera-kolla-build status                   # what is cached and built
+    orphera-kolla-build sources refresh          # fetch newer source tarballs (only changed ones download)
+    orphera-kolla-build build [--refresh] [image ...]   # build and push; no names = /etc/kolla-build/images.txt
+
+From scala0: `orphera run sudo orphera-kolla-build build --nodes tst21`. A build uses the tarballs in the cache and nothing newer
+until you refresh; `/srv/kolla-sources/MANIFEST` and `/var/lib/orphera/kolla-build/last-build.txt` record their checksums. Built images
+are pushed as `tst21.ljalbinson.com:5000/openstack.kolla/<name>:2025.1-ubuntu-noble`, the same name the playbooks pull from quay.io; the
+playbooks point podman at tst21 first, then tst9, then quay.io, so an image that has not been built is taken from quay.io as before. The
+playbook and its test have not been run; the first build is likely to need adjustments to the kolla-build options (see the header of
+the playbook).
 
 Separately, `manifests/apt_cache.scala` builds an apt package cache
 (apt-cacher-ng on tst11) and `manifests/apt_cache_clients.scala` points the

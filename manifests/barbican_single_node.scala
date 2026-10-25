@@ -171,10 +171,14 @@ object barbican_single_node extends OrpheraClusterPlaybook:
        |location = "quay.io"
        |
        |[[registry.mirror]]
+       |location = "tst21.ljalbinson.com:5000"
+       |insecure = true
+       |
+       |[[registry.mirror]]
        |location = "$cacheHostPort"
        |insecure = true
        |REG
-       |echo "podman will try $cacheHostPort before quay.io"""".stripMargin
+       |echo "podman will try tst21.ljalbinson.com:5000 (built images), then $cacheHostPort, before quay.io"""".stripMargin
 
   private val pullScript =
     s"""${Pull.shellFunction(

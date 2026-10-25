@@ -131,10 +131,14 @@ object keystone_single_node extends OrpheraClusterPlaybook:
        |location = "quay.io"
        |
        |[[registry.mirror]]
+       |location = "tst21.ljalbinson.com:5000"
+       |insecure = true
+       |
+       |[[registry.mirror]]
        |location = "$cacheHostPort"
        |insecure = true
        |REG
-       |echo "podman will try $cacheHostPort before quay.io"""".stripMargin
+       |echo "podman will try tst21.ljalbinson.com:5000 (built images), then $cacheHostPort, before quay.io"""".stripMargin
 
   // tst3 only. IF NOT EXISTS / re-GRANT make a re-run a no-op. `@'%'` for the
   // same reason as wordpress_site.scala: haproxy's tcp mode hides the real

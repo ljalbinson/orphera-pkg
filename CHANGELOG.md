@@ -7,6 +7,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- Build the Kolla images from source: `manifests/kolla_build.scala` sets up tst21 (new in `inventory.yaml` and `config/tst21.yaml`) with
+  kolla-build, a writable registry, a cache of the OpenStack source tarballs, a devpi pip cache, the apt cache and a local copy of the
+  Ubuntu base image, and the `orphera-kolla-build` helper (`status`, `sources [refresh]`, `build [--refresh] [image ...]`). The OpenStack
+  playbooks now try tst21's registry before tst9 and quay.io. `kolla_build_teardown.scala` undoes it (the caches are kept unless
+  `KOLLA_BUILD_PURGE=yes`) and `test_kolla_build.sh` checks it (`BUILD=1` also builds keystone). Not yet run: the first run on scala0 is
+  the first compile and the first build will need the kolla-build options checked.
 - Barbican (key manager) on tst20, beside Heat: `manifests/barbican_single_node.scala` runs the API (behind Apache and mod_wsgi) and the worker
   as Kolla containers, with the database on Galera and a `barbican` vhost on RabbitMQ (tst10), and registers service type `key-manager`, user
   `barbican` and the roles `creator`, `observer` and `audit` in Keystone. Secrets use the `simple_crypto` plugin with a key-encrypting key

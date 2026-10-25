@@ -172,6 +172,13 @@ nodes:
     vars:
       cluster_ip: "10.10.5.32"
 
+  # tst21: Kolla image builder (kolla_build.scala): builds the Kolla images from source, with a source
+  # tarball cache, a pip cache and a writable registry that the nodes pull from before quay.io.
+  - name: tst21
+    host: tst21.ljalbinson.com
+    vars:
+      cluster_ip: "10.10.5.33"
+
   - name: gs1
     host: gs1.ljalbinson.com
     never-reboot: true
