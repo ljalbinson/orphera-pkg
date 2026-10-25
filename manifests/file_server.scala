@@ -79,8 +79,7 @@ object file_server extends OrpheraPlaybook:
         }
         .mkString("\n")
       val timeMachineDir =
-        if timeMachine then
-          s"""mkdir -p $timeMachinePath
+        if timeMachine then s"""mkdir -p $timeMachinePath
              |chgrp $group $timeMachinePath
              |chmod 2770 $timeMachinePath""".stripMargin
         else ""
