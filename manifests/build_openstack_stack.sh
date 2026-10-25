@@ -23,6 +23,8 @@
 #   compute  tst17,tst18 nova_compute (nova-compute on KVM + Neutron Open vSwitch agent, config drive;
 #                        the second NIC becomes the provider port, its address is removed)
 #   horizon  tst13       horizon_single_node (the dashboard, http://tst13:8080/)
+#   designate tst16      designate_single_node (DNS as a service: API, central, worker, producer, mdns and
+#                        a BIND9 name server; RabbitMQ vhost on tst10)
 #   clients  scala0      utils/openstack-client-setup.sh
 #   smoke                a real volume, image, resource provider, flavor and provider network
 #                        created and deleted
@@ -44,7 +46,7 @@
 #   --with-caches   build the apt cache, point the Ubuntu nodes at it, and
 #                   build the Kolla image cache first (tst9, tst11 required)
 #   --from STEP     start at STEP (prep caches ceph galera keystone cinder glance
-#                   placement nova neutron compute horizon clients smoke boot) - for resuming
+#                   placement nova neutron compute horizon designate clients smoke boot) - for resuming
 #                   after a failure
 #   --only STEP     run just that one step
 #   --list          print the plan and exit
@@ -59,7 +61,7 @@ cd "$(dirname "$0")/.." || exit 1
 . utils/orphera-sources.sh
 CONF_DIR=$(config_dir) || exit 1
 
-ALL_STEPS=(prep caches ceph galera keystone cinder glance placement nova neutron compute horizon clients smoke boot)
+ALL_STEPS=(prep caches ceph galera keystone cinder glance placement nova neutron compute horizon designate clients smoke boot)
 WITH_CACHES=""
 FROM=""
 ONLY=""
@@ -154,7 +156,7 @@ playbook() {
 # ---- preflight ------------------------------------------------------------
 
 preflight() {
-  local nodes="tst0 tst1 tst2 tst3 tst4 tst5 tst6 tst10 tst13 tst14 tst17 tst18 tst19" n out bad="" hv
+  local nodes="tst0 tst1 tst2 tst3 tst4 tst5 tst6 tst10 tst13 tst14 tst16 tst17 tst18 tst19" n out bad="" hv
   if [ -n "$WITH_CACHES" ]; then nodes="$nodes tst9 tst11"; fi
   log "preflight: every node must answer through its agent"
   for n in $nodes; do
@@ -180,7 +182,7 @@ preflight() {
 # prep covers only the nodes this build uses, the same list the preflight checks (tst7, tst9,
 # tst11 and tst12 are not part of the stack; tst9 and tst11 count only with --with-caches).
 step_prep() {
-  local nodes="tst0 tst1 tst2 tst3 tst4 tst5 tst6 tst10 tst13 tst14 tst17 tst18 tst19" cfg
+  local nodes="tst0 tst1 tst2 tst3 tst4 tst5 tst6 tst10 tst13 tst14 tst16 tst17 tst18 tst19" cfg
   if [ -n "$WITH_CACHES" ]; then nodes="$nodes tst9 tst11"; fi
   cfg=$(mktemp --suffix=.yaml)
   echo "nodes: [$(echo $nodes | sed 's/ /, /g')]" > "$cfg"
@@ -289,6 +291,15 @@ step_horizon() {
   local out
   out=$(run_on tst13 "sudo /usr/local/sbin/orphera-horizon-check login")
   check "admin can sign in to the dashboard" contains "login ok as admin" "$out"
+}
+
+step_designate() {
+  playbook designate_single_node.scala
+  local out
+  out=$(run_on tst16 "curl -s -o /dev/null -w 'http=%{http_code}' http://localhost:9001/")
+  check "the Designate API answers its version document" contains "http=" "$out"
+  out=$(run_on tst16 "sudo /usr/local/sbin/orphera-designate-api zone-cycle")
+  check "a zone made through the API is served by BIND9 and deleted again" contains "zone cycle ok" "$out"
 }
 
 step_clients() {

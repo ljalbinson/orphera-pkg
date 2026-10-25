@@ -42,6 +42,7 @@ NAMES=(
   cinder/db cinder/service cinder/rabbit
   nova/db nova/service nova/rabbit
   neutron/db neutron/service neutron/rabbit
+  designate/db designate/service designate/rabbit
   wordpress/db
   observability/mysqld-exporter observability/grafana-admin
   horizon/secret-key

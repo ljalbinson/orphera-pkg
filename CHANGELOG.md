@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- Designate (DNS as a service) on tst16: `manifests/designate_single_node.scala` runs the API, central, worker, producer and mdns, and a BIND9
+  name server, as Kolla containers on one node, with the database on Galera and a `designate` vhost on RabbitMQ (tst10). `designate_teardown.scala`
+  undoes it and `test_designate.sh` checks it, including a zone and a record made through the API and answered by BIND9 on port 53.
+  `build_openstack_stack.sh` has a `designate` step after `horizon`, `rebuild_openstack_from_scratch.sh` builds tst16, and
+  `rotate-lab-secrets.sh` knows `designate/db`, `designate/service` and `designate/rabbit`. Neutron's DNS integration and the notification sink are
+  not set up. Not yet run: the first run on scala0 is the first compile.
+
 ## [0.1.206] - 2026-10-25
 
 The agent's code is unchanged from 0.1.205. The `orphera` command now keeps its site in the user's home, the launchers quieten newer JDKs, and there is a file server playbook.

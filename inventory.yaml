@@ -61,7 +61,7 @@ nodes:
   #               flat provider network, no address on it
   #   tst17, tst18  second NIC on br-net106 (provider network): nova-compute (nova_compute.scala)
   #   tst15       control and build host, a second scala0 (control_host.scala, control_host_handover.scala)
-  #   tst16       not assigned yet
+  #   tst16       Designate (DNS as a service) with BIND9: designate_single_node.scala
   #   tst11       apt cache (apt-cacher-ng)
   #   tst12       rpm cache (nginx caching mirror of Rocky/EPEL)
   # No osd_disks/zap_disks on tst3 and up: no Ceph role there (see the

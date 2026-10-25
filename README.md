@@ -1472,7 +1472,8 @@ s"... IDENTIFIED BY '${dbPassword.reveal}' ..."
   `placement/db`, `placement/service`, `glance/db`, `glance/service`,
   `glance/ceph-key`, `cinder/db`, `cinder/service`, `cinder/rabbit`,
   `cinder/ceph-key`, `nova/db`, `nova/service`, `nova/rabbit`,
-  `neutron/db`, `neutron/service`, `neutron/rabbit`, `horizon/secret-key`,
+  `neutron/db`, `neutron/service`, `neutron/rabbit`, `designate/db`,
+  `designate/service`, `designate/rabbit`, `horizon/secret-key`,
   `galera/sst`, `galera/clustercheck`, `wordpress/db`,
   `observability/mysqld-exporter`, and `orphera/agent-token` (see
   [Authentication](#authentication-and-security-notes)).
@@ -1850,6 +1851,7 @@ Fleet layout used by these manifests (see `inventory.yaml`):
 | tst13 | Glance (glance-api, images in Ceph pool `images`) Placement (port 8780) and Horizon (port 8080) |
 | tst19 | Neutron (server, Open vSwitch + DHCP agents) for flat provider networks on its second NIC (br-net106, no address) |
 | tst14 | Nova control plane (API on 8774, scheduler, conductor, noVNC proxy on 6080); RabbitMQ vhost `nova` on tst10 |
+| tst16 | Designate (API on 9001, central, worker, producer, mdns on 5354) and a BIND9 name server on port 53; RabbitMQ vhost `designate` on tst10 |
 | tst17, tst18 | Compute nodes (nova-compute on KVM, Neutron Open vSwitch agent; second NIC is the provider port); VMs on gs2 with nested KVM |
 
 Run order, each with its own teardown and an end-to-end test that checks the
@@ -1867,14 +1869,27 @@ result independently of the playbook's own health checks:
     manifests/test_neutron.sh                                   # applies neutron_single_node.scala
     manifests/test_nova_compute.sh                              # applies nova_compute.scala, boots a CirrOS instance
     manifests/test_horizon.sh                                   # applies horizon_single_node.scala
+    manifests/test_designate.sh                                 # applies designate_single_node.scala
     utils/openstack-client-setup.sh                             # CLI on the machine you run orphera from
 
 To build the whole stack in one go from freshly provisioned VMs that only have the agent, run
-`manifests/build_openstack_stack.sh` (Ceph, Galera + VIP, Keystone, Cinder, Glance, Placement, Nova, Neutron, the compute nodes, Horizon, the clients
+`manifests/build_openstack_stack.sh` (Ceph, Galera + VIP, Keystone, Cinder, Glance, Placement, Nova, Neutron, the compute nodes, Horizon, Designate, the clients
 on scala0, then a smoke test that creates and deletes a real volume, image, flavor and network, and finally boots a CirrOS instance on KVM, checks its DHCP lease and deletes it). It only applies
 playbooks, never tears anything down, checks each step independently before the next, and on a
 failure prints the `--from STEP` command to resume. `--with-caches` builds the apt and Kolla
 caches first; `--list` shows the plan.
+
+**Designate** (`manifests/designate_single_node.scala`, undone by `designate_teardown.scala`, checked by `test_designate.sh`) puts DNS as
+a service on tst16: the API (9001), central, worker, producer and mdns (5354) as Kolla containers, and a BIND9 name server that answers on
+port 53 of the node's address and takes its zones from mdns. One pool, `default`, has that BIND9 as its only target. After it is up:
+
+    source ~/.config/openstack/admin-openrc.sh
+    openstack zone create --email hostmaster@example.org example.org.
+    openstack recordset create example.org. www --type A --record 192.0.2.10
+    dig +short @10.10.5.28 www.example.org A
+
+(the CLI needs `python-designateclient`.) Neutron's DNS integration and the notification sink, which create records for ports and
+instances, are not set up yet. The playbook and its test have not been run.
 
 Separately, `manifests/apt_cache.scala` builds an apt package cache
 (apt-cacher-ng on tst11) and `manifests/apt_cache_clients.scala` points the
