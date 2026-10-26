@@ -98,7 +98,10 @@ object kolla_build extends OrpheraClusterPlaybook:
     "heat-api-cfn",
     "heat-engine",
     "barbican-api",
-    "barbican-worker"
+    "barbican-worker",
+    "manila-api",
+    "manila-scheduler",
+    "manila-share"
   )
 
   private val projects =
@@ -113,7 +116,8 @@ object kolla_build extends OrpheraClusterPlaybook:
       "horizon",
       "designate",
       "heat",
-      "barbican"
+      "barbican",
+      "manila"
     )
 
   private val hostPackages = List(

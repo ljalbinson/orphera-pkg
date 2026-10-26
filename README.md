@@ -1855,6 +1855,7 @@ Fleet layout used by these manifests (see `inventory.yaml`):
 | tst14 | Nova control plane (API on 8774, scheduler, conductor, noVNC proxy on 6080); RabbitMQ vhost `nova` on tst10 |
 | tst20 | Heat (API on 8004, CloudFormation API on 8000, engine) and Barbican (API on 9311, worker); RabbitMQ vhosts `heat` and `barbican` on tst10 |
 | tst16 | Designate (API on 9001, central, worker, producer, mdns on 5354) and a BIND9 name server on port 53; RabbitMQ vhost `designate` on tst10 |
+| tst22 | Manila (API on 8786, scheduler, share service) with CephFS exported over NFS-Ganesha (on tst0) as the backend; RabbitMQ vhost `manila` on tst10 |
 | tst21 | Kolla image builder: builds the images from source, with a source tarball cache, a pip cache, and a writable registry on port 5000 |
 | tst17, tst18 | Compute nodes (nova-compute on KVM, Neutron Open vSwitch agent; second NIC is the provider port); VMs on gs2 with nested KVM |
 
@@ -1921,6 +1922,25 @@ every stored secret is unreadable.** After it is up, with the CLI (`python-barbi
 
 Nothing else uses Barbican yet (Cinder volume encryption and Octavia certificates are the usual first users). The Keystone listener that
 removes a deleted project's secrets is not run. The playbook and its test have not been run.
+
+**Manila** (`manifests/manila_single_node.scala`, undone by `manila_teardown.scala`, checked by `test_manila.sh`) provides shared file systems
+(NFS shares) on a new VM, tst22 (`config/tst22.yaml`, 10.10.5.34): the API (8786), the scheduler and the share service as Kolla containers.
+The backend is CephFS on the existing Ceph cluster, exported over NFS by NFS-Ganesha, so clients need only an NFS client and a route to the
+Ganesha host (tst0, 10.10.5.12, port 2049), no Ceph software and no key. The playbook also creates, on tst0, the filesystem `cephfs`, the NFS
+cluster `manila` and the cephx user `client.manila` (its key is derived from the secret `manila/ceph-key`). The share type `default_share_type`
+is made for you. Access is by client IP. After it is up, with the CLI (`python-manilaclient`):
+
+    source ~/.config/openstack/admin-openrc.sh
+    openstack share create --name demo NFS 1
+    openstack share list
+    openstack share access create demo ip 10.10.5.50 --access-level rw
+    openstack share show demo        # export_locations: 10.10.5.12:/volumes/_nogroup/...
+    sudo mount -t nfs -o nfsvers=4.1 <export location> /mnt
+
+`manila_teardown.scala` keeps CephFS and the NFS cluster (shares live there); `MANILA_PURGE_CEPH=yes` removes them and all data in them. The
+Manila images need `orphera-kolla-build sources refresh` and a build of `manila-api manila-scheduler manila-share` on tst21 (an existing
+`/etc/kolla-build/images.txt` is not rewritten; add the three names), or they come from quay.io. Share migration and backups (the data
+service) and shares with their own network (driver-handled share servers) are not set up. The playbook and its test have not been run.
 
 **Building the images from source** (`manifests/kolla_build.scala`, undone by `kolla_build_teardown.scala`, checked by `test_kolla_build.sh`)
 sets up tst21 as a builder, so the OpenStack containers do not have to come from quay.io. It keeps four caches: the OpenStack source

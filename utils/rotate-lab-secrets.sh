@@ -45,6 +45,7 @@ NAMES=(
   designate/db designate/service designate/rabbit
   heat/db heat/service heat/rabbit heat/domain-admin
   barbican/db barbican/service barbican/rabbit barbican/kek  # NB: rotating kek makes stored Barbican secrets unreadable
+  manila/db manila/service manila/rabbit manila/ceph-key  # NB: rotating ceph-key needs manila_single_node.scala re-run (it re-imports client.manila)
   wordpress/db
   observability/mysqld-exporter observability/grafana-admin
   horizon/secret-key

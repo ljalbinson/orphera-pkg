@@ -25,6 +25,8 @@
 #   horizon  tst13       horizon_single_node (the dashboard, http://tst13:8080/)
 #   heat     tst20       heat_single_node (orchestration: API, CloudFormation API, engine; RabbitMQ vhost on tst10)
 #   barbican tst20       barbican_single_node (key manager: API and worker, on the Heat node; RabbitMQ vhost on tst10)
+#   manila   tst22       manila_single_node (shared file systems: API, scheduler, share service on CephFS over NFS;
+#                        also makes the CephFS filesystem and the NFS cluster on tst0; RabbitMQ vhost on tst10)
 #   designate tst16      designate_single_node (DNS as a service: API, central, worker, producer, mdns and
 #                        a BIND9 name server; RabbitMQ vhost on tst10)
 #   clients  scala0      utils/openstack-client-setup.sh
@@ -48,7 +50,7 @@
 #   --with-caches   build the apt cache, point the Ubuntu nodes at it, and
 #                   build the Kolla image cache first (tst9, tst11 required)
 #   --from STEP     start at STEP (prep caches ceph galera keystone cinder glance
-#                   placement nova neutron compute horizon designate heat barbican clients smoke boot) - for resuming
+#                   placement nova neutron compute horizon designate heat barbican manila clients smoke boot) - for resuming
 #                   after a failure
 #   --only STEP     run just that one step
 #   --list          print the plan and exit
@@ -63,7 +65,7 @@ cd "$(dirname "$0")/.." || exit 1
 . utils/orphera-sources.sh
 CONF_DIR=$(config_dir) || exit 1
 
-ALL_STEPS=(prep caches ceph galera keystone cinder glance placement nova neutron compute horizon designate heat barbican clients smoke boot)
+ALL_STEPS=(prep caches ceph galera keystone cinder glance placement nova neutron compute horizon designate heat barbican manila clients smoke boot)
 WITH_CACHES=""
 FROM=""
 ONLY=""
@@ -158,7 +160,7 @@ playbook() {
 # ---- preflight ------------------------------------------------------------
 
 preflight() {
-  local nodes="tst0 tst1 tst2 tst3 tst4 tst5 tst6 tst10 tst13 tst14 tst16 tst17 tst18 tst19 tst20" n out bad="" hv
+  local nodes="tst0 tst1 tst2 tst3 tst4 tst5 tst6 tst10 tst13 tst14 tst16 tst17 tst18 tst19 tst20 tst22" n out bad="" hv
   if [ -n "$WITH_CACHES" ]; then nodes="$nodes tst9 tst11"; fi
   log "preflight: every node must answer through its agent"
   for n in $nodes; do
@@ -184,7 +186,7 @@ preflight() {
 # prep covers only the nodes this build uses, the same list the preflight checks (tst7, tst9,
 # tst11 and tst12 are not part of the stack; tst9 and tst11 count only with --with-caches).
 step_prep() {
-  local nodes="tst0 tst1 tst2 tst3 tst4 tst5 tst6 tst10 tst13 tst14 tst16 tst17 tst18 tst19 tst20" cfg
+  local nodes="tst0 tst1 tst2 tst3 tst4 tst5 tst6 tst10 tst13 tst14 tst16 tst17 tst18 tst19 tst20 tst22" cfg
   if [ -n "$WITH_CACHES" ]; then nodes="$nodes tst9 tst11"; fi
   cfg=$(mktemp --suffix=.yaml)
   echo "nodes: [$(echo $nodes | sed 's/ /, /g')]" > "$cfg"
@@ -324,6 +326,17 @@ step_barbican() {
   check "a secret is stored, read back and deleted" contains "secret cycle ok" "$out"
   out=$(run_on tst20 "sudo /usr/local/sbin/orphera-barbican-api order-cycle")
   check "the worker makes a key from an order" contains "order cycle ok" "$out"
+}
+
+step_manila() {
+  playbook manila_single_node.scala
+  local out
+  out=$(run_on tst22 "curl -s -o /dev/null -w 'http=%{http_code}' http://localhost:8786/")
+  check "the Manila API answers its version document" contains "http=" "$out"
+  out=$(run_on tst22 "sudo /usr/local/sbin/orphera-manila-api services")
+  check "the Manila scheduler and share service are listed" contains "services:" "$out"
+  out=$(run_on tst22 "sudo /usr/local/sbin/orphera-manila-api share-cycle")
+  check "a share is made, mounted over NFS, written and deleted" contains "share cycle ok" "$out"
 }
 
 step_clients() {

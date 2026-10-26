@@ -13,6 +13,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   playbooks now try tst21's registry before tst9 and quay.io. `kolla_build_teardown.scala` undoes it (the caches are kept unless
   `KOLLA_BUILD_PURGE=yes`) and `test_kolla_build.sh` checks it (`BUILD=1` also builds keystone). Not yet run: the first run on scala0 is
   the first compile and the first build will need the kolla-build options checked.
+- Manila (shared file systems) on a new VM, tst22 (`config/tst22.yaml`, `inventory.yaml`): `manifests/manila_single_node.scala` runs the
+  API, the scheduler and the share service as Kolla containers, with the database on Galera and a `manila` vhost on RabbitMQ (tst10), and
+  registers service type `sharev2` and user `manila` in Keystone. The backend is CephFS exported over NFS-Ganesha: the playbook makes the
+  filesystem `cephfs`, the NFS cluster `manila` and the cephx user `client.manila` (key derived from the stored secret `manila/ceph-key`)
+  through cephadm on tst0, and makes the share type `default_share_type`. `manila_teardown.scala` undoes it (CephFS and the NFS cluster are
+  kept unless `MANILA_PURGE_CEPH=yes`) and `test_manila.sh` checks it, including a share that is mounted over NFS, written, read back and
+  deleted. `build_openstack_stack.sh` has a `manila` step after `barbican`, `rebuild_openstack_from_scratch.sh` builds tst22 and runs its
+  test, `rotate-lab-secrets.sh` knows the four Manila secrets, and the Kolla builder's default list and sources include Manila.
+  `utils/openstack-client-setup.sh` now also installs the Designate, Heat, Barbican and Manila clients. Not yet run: the first run on
+  scala0 is the first compile.
 - Barbican (key manager) on tst20, beside Heat: `manifests/barbican_single_node.scala` runs the API (behind Apache and mod_wsgi) and the worker
   as Kolla containers, with the database on Galera and a `barbican` vhost on RabbitMQ (tst10), and registers service type `key-manager`, user
   `barbican` and the roles `creator`, `observer` and `audit` in Keystone. Secrets use the `simple_crypto` plugin with a key-encrypting key

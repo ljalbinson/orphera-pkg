@@ -179,6 +179,12 @@ nodes:
     vars:
       cluster_ip: "10.10.5.33"
 
+  # tst22: Manila (shared file systems): manila_single_node.scala, on CephFS exported over NFS
+  - name: tst22
+    host: tst22.ljalbinson.com
+    vars:
+      cluster_ip: "10.10.5.34"
+
   - name: gs1
     host: gs1.ljalbinson.com
     never-reboot: true
