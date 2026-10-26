@@ -23,13 +23,19 @@ object kolla_build_teardown extends OrpheraClusterPlaybook:
        |systemctl reload nginx 2>/dev/null || true
        |rm -f /usr/local/sbin/orphera-kolla-build
        |rm -rf /opt/kolla-build /opt/devpi /etc/kolla-build
-       |${if purge then "rm -rf /var/lib/orphera/kolla-registry /srv/kolla-sources /var/lib/orphera/devpi /var/lib/orphera/kolla-build\necho 'builder removed, data deleted'" else "echo 'builder removed; images, source tarballs and the pip cache kept (KOLLA_BUILD_PURGE=yes deletes them)'"}""".stripMargin
+       |${
+        if purge then
+          "rm -rf /var/lib/orphera/kolla-registry /srv/kolla-sources /var/lib/orphera/devpi /var/lib/orphera/kolla-build\necho 'builder removed, data deleted'"
+        else
+          "echo 'builder removed; images, source tarballs and the pip cache kept (KOLLA_BUILD_PURGE=yes deletes them)'"
+      }""".stripMargin
 
   val playbook: ClusterPlaybook =
     clusterPlaybook("kolla-build-teardown")(
       stage("teardown-kolla-build", node)
         .task("remove the Kolla builder")(
-          Task.RunCommand(List("sh", "-c", teardownScript), timeoutSeconds = 300)
+          Task
+            .RunCommand(List("sh", "-c", teardownScript), timeoutSeconds = 300)
         )
         .build
     )

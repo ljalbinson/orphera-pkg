@@ -63,29 +63,69 @@ object kolla_build extends OrpheraClusterPlaybook:
     env = List("REGISTRY_STORAGE_DELETE_ENABLED" -> "true"),
     network = Network.Published,
     ports = List(Port(registryPort, 5000)),
-    description = Some("Writable Kolla image registry (built images) managed by Orphera"),
+    description =
+      Some("Writable Kolla image registry (built images) managed by Orphera"),
     settleSeconds = 5
   )
 
   // Images built by default; written to /etc/kolla-build/images.txt once, then left to the user.
   private val images = List(
-    "keystone", "glance-api", "placement-api",
-    "nova-api", "nova-scheduler", "nova-conductor", "nova-novncproxy", "nova-compute", "nova-libvirt",
-    "neutron-server", "neutron-openvswitch-agent", "neutron-dhcp-agent",
-    "openvswitch-db-server", "openvswitch-vswitchd",
-    "cinder-api", "cinder-scheduler", "cinder-volume",
+    "keystone",
+    "glance-api",
+    "placement-api",
+    "nova-api",
+    "nova-scheduler",
+    "nova-conductor",
+    "nova-novncproxy",
+    "nova-compute",
+    "nova-libvirt",
+    "neutron-server",
+    "neutron-openvswitch-agent",
+    "neutron-dhcp-agent",
+    "openvswitch-db-server",
+    "openvswitch-vswitchd",
+    "cinder-api",
+    "cinder-scheduler",
+    "cinder-volume",
     "horizon",
-    "designate-api", "designate-central", "designate-worker", "designate-producer", "designate-mdns",
+    "designate-api",
+    "designate-central",
+    "designate-worker",
+    "designate-producer",
+    "designate-mdns",
     "designate-backend-bind9",
-    "heat-api", "heat-api-cfn", "heat-engine",
-    "barbican-api", "barbican-worker"
+    "heat-api",
+    "heat-api-cfn",
+    "heat-engine",
+    "barbican-api",
+    "barbican-worker"
   )
 
   private val projects =
-    List("requirements", "keystone", "glance", "placement", "nova", "neutron", "cinder", "horizon", "designate", "heat", "barbican")
+    List(
+      "requirements",
+      "keystone",
+      "glance",
+      "placement",
+      "nova",
+      "neutron",
+      "cinder",
+      "horizon",
+      "designate",
+      "heat",
+      "barbican"
+    )
 
   private val hostPackages = List(
-    "podman", "skopeo", "python3", "python3-venv", "python3-pip", "git", "curl", "nginx", "ca-certificates"
+    "podman",
+    "skopeo",
+    "python3",
+    "python3-venv",
+    "python3-pip",
+    "git",
+    "curl",
+    "nginx",
+    "ca-certificates"
   )
 
   private val waitAptIdleScript =
@@ -97,7 +137,9 @@ object kolla_build extends OrpheraClusterPlaybook:
       |echo "apt and dpkg idle"""".stripMargin
 
   private val pullRegistryScript =
-    s"""${Pull.shellFunction("the registry image name in kolla_build.scala; the pull is from Docker Hub")}
+    s"""${Pull.shellFunction(
+        "the registry image name in kolla_build.scala; the pull is from Docker Hub"
+      )}
        |pull_retry ${registryContainer.image.ref} || exit 1
        |echo "registry image ready"""".stripMargin
 
@@ -324,18 +366,25 @@ esac
     clusterPlaybook("kolla-build")(
       stage("install-kolla-build", node)
         .task("wait for apt and dpkg to be idle")(
-          Task.RunCommand(List("sh", "-c", waitAptIdleScript), timeoutSeconds = 960)
+          Task.RunCommand(
+            List("sh", "-c", waitAptIdleScript),
+            timeoutSeconds = 960
+          )
         )
         .task("install podman, nginx and tools")(
           Task.Install(packages = hostPackages, updateCache = true)
         )
         .task("pull the registry image")(
-          Task.RunCommand(List("sh", "-c", pullRegistryScript), timeoutSeconds = 600)
+          Task.RunCommand(
+            List("sh", "-c", pullRegistryScript),
+            timeoutSeconds = 600
+          )
         )
         .task("let podman use the local registry over HTTP")(
           Task.WriteFile(
             content = registriesConf,
-            dest = "/etc/containers/registries.conf.d/orphera-kolla-registry.conf",
+            dest =
+              "/etc/containers/registries.conf.d/orphera-kolla-registry.conf",
             owner = "root",
             group = "root",
             mode = 420
@@ -362,13 +411,21 @@ esac
         .task("create directories, install devpi, write the image list")(
           Task.RunCommand(List("sh", "-c", setupScript), timeoutSeconds = 900)
         )
-        .task(s"write ${registryContainer.unitName}")(registryContainer.writeUnit)
+        .task(s"write ${registryContainer.unitName}")(
+          registryContainer.writeUnit
+        )
         .task(s"start ${registryContainer.unitName}")(registryContainer.start)
         .task("start devpi, podman.socket and nginx")(
-          Task.RunCommand(List("sh", "-c", startServicesScript), timeoutSeconds = 120)
+          Task.RunCommand(
+            List("sh", "-c", startServicesScript),
+            timeoutSeconds = 120
+          )
         )
         .task("install kolla-build through the devpi cache")(
-          Task.RunCommand(List("sh", "-c", installKollaScript), timeoutSeconds = 900)
+          Task.RunCommand(
+            List("sh", "-c", installKollaScript),
+            timeoutSeconds = 900
+          )
         )
         .task("write the kolla-build helper")(
           Task.RunCommand(List("sh", "-c", helperScript))
