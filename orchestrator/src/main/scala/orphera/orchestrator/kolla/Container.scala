@@ -101,6 +101,10 @@ final case class Container(
     hostPid: Boolean = false,
     // Linux capabilities to add, e.g. "SYS_ADMIN"; a narrower alternative to `privileged`.
     capabilities: List[String] = Nil,
+    // `podman run --user`. Some Kolla images (designate-api, for one) set a non-root USER, which cannot
+    // open Apache's log files; the API containers that run Apache are started as root, and Kolla's
+    // start script drops each process to its service user as the image's config.json says.
+    user: Option[String] = None,
     // Host network by default; `Published` needs at least one port.
     network: Network = Network.Host,
     ports: List[Port] = Nil,
@@ -131,6 +135,7 @@ final case class Container(
     */
   def runArguments: String =
     (ports.map(_.flag) ++
+      user.map(u => s"--user $u").toList ++
       List("--privileged").filter(_ => privileged) ++
       List("--pid host").filter(_ => hostPid) ++
       capabilities.map(c => s"--cap-add=$c") ++

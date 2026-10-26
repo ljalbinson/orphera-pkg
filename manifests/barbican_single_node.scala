@@ -114,7 +114,9 @@ object barbican_single_node extends OrpheraClusterPlaybook:
         Mount(logDir, "/var/log/kolla/barbican", Access.ReadWrite),
         Mount(stateDir, "/var/lib/barbican", Access.ReadWrite)
       ),
-      env = List("KOLLA_CONFIG_STRATEGY" -> "COPY_ALWAYS")
+      env = List("KOLLA_CONFIG_STRATEGY" -> "COPY_ALWAYS"),
+      // The API image may set a non-root USER, which cannot open Apache's log files; start it as root.
+      user = if service == "barbican-api" then Some("root") else None
     )
   private val barbicanServices: List[Container] =
     List("barbican-worker", "barbican-api").map(barbicanContainer)

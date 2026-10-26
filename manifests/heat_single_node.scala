@@ -104,7 +104,9 @@ object heat_single_node extends OrpheraClusterPlaybook:
         Mount(logDir, "/var/log/kolla/heat", Access.ReadWrite),
         Mount(stateDir, "/var/lib/heat", Access.ReadWrite)
       ),
-      env = List("KOLLA_CONFIG_STRATEGY" -> "COPY_ALWAYS")
+      env = List("KOLLA_CONFIG_STRATEGY" -> "COPY_ALWAYS"),
+      // The API images may set a non-root USER, which cannot open Apache's log files; start them as root.
+      user = if service.startsWith("heat-api") then Some("root") else None
     )
   private val heatServices: List[Container] =
     List("heat-engine", "heat-api", "heat-api-cfn").map(heatContainer)

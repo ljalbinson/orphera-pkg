@@ -110,7 +110,9 @@ object designate_single_node extends OrpheraClusterPlaybook:
         Mount(logDir, "/var/log/kolla/designate", Access.ReadWrite),
         Mount(stateDir, "/var/lib/designate", Access.ReadWrite)
       ),
-      env = List("KOLLA_CONFIG_STRATEGY" -> "COPY_ALWAYS")
+      env = List("KOLLA_CONFIG_STRATEGY" -> "COPY_ALWAYS"),
+      // The image's own user cannot open Apache's log files; the API container starts as root.
+      user = if service == "designate-api" then Some("root") else None
     )
   private val designateServices: List[Container] =
     List(

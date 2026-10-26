@@ -267,6 +267,13 @@ object ContainerCheck:
       ) == 1
     )
 
+    val asRoot = placement.copy(user = Some("root"))
+    check(
+      "a container with a user is started with --user, and one without is not",
+      asRoot.render.contains("--network host --user root -e KOLLA_CONFIG_STRATEGY=COPY_ALWAYS") &&
+        !placement.render.contains("--user")
+    )
+
     // keystone_single_node.scala: one container whose state is two key directories.
     val keystone = Container(
       name = ContainerName("keystone"),
