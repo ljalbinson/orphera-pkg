@@ -551,7 +551,9 @@ def stack_cycle(basic):
     end = time.time() + 240
     while time.time() < end:
         s, p, _ = call('GET', url, None, token)
-        if s == 404:
+        # Heat keeps answering 200 with DELETE_COMPLETE for a deleted stack read by name and id; 404 is
+        # accepted too, in case a release hides it.
+        if s == 404 or (s == 200 and p['stack']['stack_status'] == 'DELETE_COMPLETE'):
             print('stack cycle ok: %s created (%s resources), output read back, stack deleted' % (name, len(resources)))
             return
         if s == 200 and p['stack']['stack_status'] == 'DELETE_FAILED':
