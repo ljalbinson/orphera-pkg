@@ -287,6 +287,8 @@ object heat_single_node extends OrpheraClusterPlaybook:
        |    if podman run --rm --entrypoint sh $$image -c 'test -d /etc/apache2/conf-enabled'; then
        |      APACHE_CONF=/etc/apache2/conf-enabled/heat-$$svc.conf
        |      APACHE_CMD="apache2 -DFOREGROUND"
+       |      # apache2ctl loads /etc/apache2/envvars (APACHE_RUN_DIR and the rest); plain apache2 does not
+       |      if podman run --rm --entrypoint sh $$image -c 'command -v apache2ctl' >/dev/null 2>&1; then APACHE_CMD="apache2ctl -DFOREGROUND"; fi
        |    else
        |      APACHE_CONF=/etc/httpd/conf.d/heat-$$svc.conf
        |      APACHE_CMD="/usr/sbin/httpd -DFOREGROUND"
