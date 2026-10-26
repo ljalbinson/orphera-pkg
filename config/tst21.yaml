@@ -20,16 +20,22 @@ params:
     priority: 101
     cidr: '10.10.5.0/24'
     mtu: 1500
-  hypervisor: st0
+  hypervisor: gs2
   hostname: tst21
-  disk: '200'
+  disk: '120'
   dns1: '192.168.1.70'
-  memory: '8192'
+  memory: '4096'
   os: noble-server-cloudimg-amd64.img
-  nics: []
+  nics:
+  # Provider network for Neutron (neutron_single_node.scala): a plain layer-2 NIC,
+  # deliberately no address. A VM provisioned from this file has none; the one that
+  # was provisioned earlier had 10.10.6.31 and neutron_single_node.scala removes it.
+  - nic: enp2s0
+    bridge: br-net106
+    mtu: 9000
   domainname: ljalbinson.com
   host_type: host-passthrough
   dns2: '192.168.1.71'
   disks: []
-  cpu: '4'
+  cpu: '2'
   pdisks: []
