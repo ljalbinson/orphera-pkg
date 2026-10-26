@@ -775,75 +775,75 @@ if __name__ == '__main__':
   private def installDesignate: StageBuilder =
     withServices(
       stage("install-designate", node)
-            .task("wait for apt and dpkg to be idle")(
-              Task.RunCommand(
-                List("sh", "-c", waitAptIdleScript),
-                timeoutSeconds = 960
-              )
-            )
-            .task("install podman and tools")(
-              Task.Install(packages = hostPackages, updateCache = true)
-            )
-            .task("use the Kolla cache as a mirror for quay.io")(
-              Task.RunCommand(List("sh", "-c", useCacheScript))
-            )
-            .task("pull the Designate and BIND9 images")(
-              Task.RunCommand(List("sh", "-c", pullScript), timeoutSeconds = 2400)
-            )
-            .task("fetch Keystone's CA from its TLS handshake")(
-              Task.RunCommand(
-                List("sh", "-c", fetchCaScript),
-                timeoutSeconds = 60
-              )
-            )
-            .task("create the Designate directories")(
-              Task.RunCommand(List("sh", "-c", dirsScript))
-            )
-            .task("write designate.conf")(
-              Task.WriteFile(
-                content = designateConf,
-                dest = s"$srcDir/designate.conf",
-                owner = "root",
-                group = "root",
-                mode = 384 // 0600
-              )
-            )
-            .task("write pools.yaml")(
-              Task.WriteFile(
-                content = poolsYaml,
-                dest = s"$srcDir/pools.yaml",
-                owner = "root",
-                group = "root",
-                mode = 420 // 0644
-              )
-            )
-            .task("write named.conf")(
-              Task.WriteFile(
-                content = namedConf,
-                dest = s"$srcDir/named.conf",
-                owner = "root",
-                group = "root",
-                mode = 420 // 0644
-              )
-            )
-            .task("make the rndc key, once")(
-              Task.RunCommand(List("sh", "-c", rndcKeyScript))
-            )
-            .task("write the Kolla config for each container")(
-              Task.RunCommand(
-                List("sh", "-c", kollaConfigScript),
-                timeoutSeconds = 300
-              )
-            )
-            .task("designate-manage database sync")(
-              Task.RunCommand(
-                List("sh", "-c", dbSyncScript),
-                timeoutSeconds = 600
-              )
-            )
-            .task("write the Designate API helper")(
-              Task.RunCommand(List("sh", "-c", helperScript))
-            )
+        .task("wait for apt and dpkg to be idle")(
+          Task.RunCommand(
+            List("sh", "-c", waitAptIdleScript),
+            timeoutSeconds = 960
+          )
+        )
+        .task("install podman and tools")(
+          Task.Install(packages = hostPackages, updateCache = true)
+        )
+        .task("use the Kolla cache as a mirror for quay.io")(
+          Task.RunCommand(List("sh", "-c", useCacheScript))
+        )
+        .task("pull the Designate and BIND9 images")(
+          Task.RunCommand(List("sh", "-c", pullScript), timeoutSeconds = 2400)
+        )
+        .task("fetch Keystone's CA from its TLS handshake")(
+          Task.RunCommand(
+            List("sh", "-c", fetchCaScript),
+            timeoutSeconds = 60
+          )
+        )
+        .task("create the Designate directories")(
+          Task.RunCommand(List("sh", "-c", dirsScript))
+        )
+        .task("write designate.conf")(
+          Task.WriteFile(
+            content = designateConf,
+            dest = s"$srcDir/designate.conf",
+            owner = "root",
+            group = "root",
+            mode = 384 // 0600
+          )
+        )
+        .task("write pools.yaml")(
+          Task.WriteFile(
+            content = poolsYaml,
+            dest = s"$srcDir/pools.yaml",
+            owner = "root",
+            group = "root",
+            mode = 420 // 0644
+          )
+        )
+        .task("write named.conf")(
+          Task.WriteFile(
+            content = namedConf,
+            dest = s"$srcDir/named.conf",
+            owner = "root",
+            group = "root",
+            mode = 420 // 0644
+          )
+        )
+        .task("make the rndc key, once")(
+          Task.RunCommand(List("sh", "-c", rndcKeyScript))
+        )
+        .task("write the Kolla config for each container")(
+          Task.RunCommand(
+            List("sh", "-c", kollaConfigScript),
+            timeoutSeconds = 300
+          )
+        )
+        .task("designate-manage database sync")(
+          Task.RunCommand(
+            List("sh", "-c", dbSyncScript),
+            timeoutSeconds = 600
+          )
+        )
+        .task("write the Designate API helper")(
+          Task.RunCommand(List("sh", "-c", helperScript))
+        )
     )
 
   private def applyPlaybook: ClusterPlaybook =
