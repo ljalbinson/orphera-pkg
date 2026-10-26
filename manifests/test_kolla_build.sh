@@ -32,7 +32,7 @@ assert_contains "devpi answers" "http=200" "$(run_on "curl -s -o /dev/null -w 'h
 assert_contains "the source tarballs are served" "keystone-stable-2025.1.tar.gz" "$(run_on "curl -s http://localhost:8081/")"
 assert_contains "the base image is in the local registry" "24.04" "$(run_on "curl -s http://localhost:5000/v2/library/ubuntu/tags/list")"
 assert_contains "the checksum manifest lists the keystone tarball" "keystone-stable-2025.1.tar.gz" "$(run_on "cat /srv/kolla-sources/MANIFEST")"
-assert_contains "kolla-build is installed" "kolla-build" "$(run_on "/opt/kolla-build/bin/kolla-build --version; echo kolla-build")"
+assert_contains "kolla-build is installed" "version=20" "$(run_on "echo version=\$(/opt/kolla-build/bin/kolla-build --version)")"
 assert_contains "a repeat of sources downloads nothing" "unchanged" "$(run_on "orphera-kolla-build sources refresh | head -3")"
 
 if [ -n "${BUILD:-}" ]; then
@@ -40,8 +40,8 @@ if [ -n "${BUILD:-}" ]; then
   OUT=$(run_on "sudo orphera-kolla-build build keystone")
   assert_contains "the build finished" "build finished" "$OUT"
   assert_contains "keystone is in the registry" "openstack.kolla/keystone" "$(run_on "curl -s http://localhost:5000/v2/_catalog")"
-  OUT=$(run_on "sudo podman pull --tls-verify=false tst21.ljalbinson.com:5000/openstack.kolla/keystone:2025.1-ubuntu-noble >/dev/null 2>&1 && echo pulled" tst6)
-  assert_contains "a node can pull the built image" "pulled" "$OUT"
+  OUT=$(run_on "sudo podman pull --tls-verify=false tst21.ljalbinson.com:5000/openstack.kolla/keystone:2025.1-ubuntu-noble >/dev/null 2>&1 && echo pull-ok-\$((6*7))" tst6)
+  assert_contains "a node can pull the built image" "pull-ok-42" "$OUT"
 fi
 
 if [ -z "${NO_APPLY:-}" ]; then
