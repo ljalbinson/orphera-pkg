@@ -62,7 +62,9 @@ object designate_teardown extends OrpheraClusterPlaybook:
   val playbook: ClusterPlaybook =
     clusterPlaybook("designate-teardown")(
       stage("teardown-designate-node", node)
-        .task("unregister from Keystone, remove the containers, units and state")(
+        .task(
+          "unregister from Keystone, remove the containers, units and state"
+        )(
           Task.RunCommand(List("sh", "-c", nodeScript), timeoutSeconds = 240)
         )
         .build,
