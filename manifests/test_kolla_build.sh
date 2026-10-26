@@ -15,7 +15,7 @@ NODE="tst21"
 PASS=0
 FAIL=0
 log() { printf '[%s] %s\n' "$(date +%H:%M:%S)" "$1"; }
-run_on() { orphera run sh -c "$1" --nodes "${2:-$NODE}" 2>&1; }
+run_on() { orphera run sh -c "$1" --nodes "${2:-$NODE}" --timeout "${RUN_TIMEOUT:-60}" 2>&1; }
 assert_contains() {
   local desc="$1" needle="$2" haystack="$3"
   if printf '%s' "$haystack" | grep -qF -- "$needle"; then log "PASS: $desc"; PASS=$((PASS + 1))
@@ -37,7 +37,7 @@ assert_contains "a repeat of sources downloads nothing" "unchanged" "$(run_on "o
 
 if [ -n "${BUILD:-}" ]; then
   log "build keystone (long the first time)"
-  OUT=$(run_on "sudo orphera-kolla-build build keystone")
+  OUT=$(RUN_TIMEOUT=3600 run_on "sudo orphera-kolla-build build keystone")
   assert_contains "the build finished" "build finished" "$OUT"
   assert_contains "keystone is in the registry" "openstack.kolla/keystone" "$(run_on "curl -s http://localhost:5000/v2/_catalog")"
   OUT=$(run_on "sudo podman pull --tls-verify=false tst21.ljalbinson.com:5000/openstack.kolla/keystone:2025.1-ubuntu-noble >/dev/null 2>&1 && echo pull-ok-\$((6*7))" tst6)
