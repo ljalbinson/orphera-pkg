@@ -244,6 +244,11 @@ def unregister():
 def catalog():
     _, p = get_token('admin', ADMIN_PW, 'admin')
     print('catalog types: ' + ' '.join(sorted(c['type'] for c in p['token']['catalog'])))
+    for c in p['token']['catalog']:
+        if c['type'] == 'object-store':
+            for e in c['endpoints']:
+                if e['interface'] == 'public':
+                    print('object-store url: ' + e['url'])
 
 
 def swift_cycle():
