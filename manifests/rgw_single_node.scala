@@ -16,7 +16,9 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 //     (v3, user `rgw` in project `service`), the accepted roles `member` and `admin`, one namespace per
 //     project (implicit tenants), the account in the Swift URL, and S3 requests checked against Keystone's
 //     EC2 credentials. The daemon is restarted only when this configuration changes (a hash of it is kept in
-//     /var/lib/orphera/rgw-applied-sha), so a repeated run does not interrupt service.
+//     /var/lib/orphera/rgw-applied-sha), so a repeated run does not interrupt service. The hash also covers
+//     /var/lib/orphera/rgw-keystone-state, which `register` updates when the `rgw` user is new or its password was
+//     set: RGW keeps the admin token it got at start-up, so after a Keystone rebuild it needs a restart.
 //   The pools (.rgw.root, default.rgw.*) are made by RGW itself when it first runs.
 //
 // What it adds to Keystone (done by the helper's `register`, repeatable): user `rgw` in project `service` with
@@ -116,7 +118,7 @@ object rgw_single_node extends OrpheraClusterPlaybook:
   // created with an AWS Signature V4 request, read back and deleted, and the credentials are removed.
   private val apiHelperPython =
     """#!/usr/bin/python3
-import hashlib, hmac, json, ssl, sys, time, urllib.request, urllib.error
+import hashlib, hmac, json, os, ssl, sys, time, urllib.request, urllib.error
 
 KS = 'https://@@KS@@:5000/v3'
 RGW = 'http://@@RGW@@'
@@ -195,10 +197,33 @@ def ensure_endpoint(token, service, iface, url):
         call('PATCH', KS + '/endpoints/' + ep['id'], {'endpoint': {'url': url}}, token)
 
 
+STATE_FILE = '/var/lib/orphera/rgw-keystone-state'
+
+
+def note_identity(user_id, patched):
+    # RGW keeps the admin token it got for user rgw until it restarts. A new rgw user (Keystone was rebuilt) or
+    # a changed password (Keystone revokes the old tokens) makes that token useless, so the playbook mixes this
+    # file into the hash that decides whether to restart the daemon: its number goes up when either happens.
+    old = ''
+    try:
+        with open(STATE_FILE) as f:
+            old = f.read()
+    except OSError:
+        pass
+    parts = old.split()
+    gen = int(parts[1]) if len(parts) == 2 and parts[1].isdigit() else 0
+    if len(parts) != 2 or parts[0] != user_id or patched:
+        gen += 1
+    os.makedirs(os.path.dirname(STATE_FILE), exist_ok=True)
+    with open(STATE_FILE, 'w') as f:
+        f.write('%s %d\n' % (user_id, gen))
+
+
 def register():
     token, _ = get_token('admin', ADMIN_PW, 'admin')
     project = ensure(token, 'projects', '/projects?name=service', 'projects', {'project': {'name': 'service', 'domain_id': 'default'}}, 'project')
     user = find(token, '/users?name=rgw', 'users')
+    patched = False
     if user is None:
         s, p, _ = call('POST', KS + '/users', {'user': {'name': 'rgw', 'domain_id': 'default', 'password': RGW_PW}}, token)
         if s != 201:
@@ -212,6 +237,8 @@ def register():
         status, _, _ = call('POST', KS + '/auth/tokens', probe)
         if status != 201:
             call('PATCH', KS + '/users/' + user['id'], {'user': {'password': RGW_PW}}, token)
+            patched = True
+    note_identity(user['id'], patched)
     admin_role = find(token, '/roles?name=admin', 'roles')
     if admin_role is None:
         die('role admin not found')
@@ -420,6 +447,7 @@ if __name__ == '__main__':
        |NEW=$$( { cat /tmp/rgw-spec.yaml; cat <<'OPTS'
        |$hashInput
        |OPTS
+       |cat $stateDir/rgw-keystone-state 2>/dev/null || true
        |} | sha256sum | cut -d' ' -f1)
        |rm -f /tmp/rgw-spec.yaml
        |mkdir -p $stateDir
