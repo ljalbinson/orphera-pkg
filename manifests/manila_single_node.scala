@@ -584,10 +584,14 @@ def catalog():
 
 
 def share_services(token):
-    s, p, _ = mcall('GET', '/services', token)
-    if s != 200:
-        die('service list failed: HTTP %s %s' % (s, p))
-    return p.get('services', [])
+    # /services is the current path; some releases serve only the older /os-services
+    for path in ('/services', '/os-services'):
+        s, p, _ = mcall('GET', path, token)
+        if s == 200:
+            return p.get('services', [])
+        if s != 404:
+            die('service list (%s) failed: HTTP %s %s' % (path, s, p))
+    die('service list failed: HTTP 404 on both /services and /os-services')
 
 
 def services():
