@@ -62,11 +62,11 @@ OUT=$(run_on "sudo $HELPER catalog")
 assert_contains "the catalog lists service type object-store" "object-store" "$OUT"
 assert_contains "the catalog lists service type s3" " s3" "$OUT"
 
-# The account itself: for a container that does not exist RGW answers 404 before it asks for credentials.
+# Anonymous reads get 404 and anonymous writes 403, so send a token that Keystone must reject.
 URL=$(printf '%s\n' "$OUT" | grep -o 'http://[^ ]*/AUTH_[0-9a-f]*' | tail -n 1)
 if [ -n "$URL" ]; then
-  OUT=$(run_on "curl -s -o /dev/null -w 'http=%{http_code}' $URL")
-  assert_contains "an unauthenticated Swift request is refused" "http=401" "$OUT"
+  OUT=$(run_on "curl -s -o /dev/null -w 'http=%{http_code}' -X PUT -H X-Auth-Token:invalid $URL/probe")
+  assert_contains "a Swift request with an invalid token is refused" "http=401" "$OUT"
 else
   log "FAIL: no object-store URL in the catalog output"; FAIL=$((FAIL + 1))
 fi
