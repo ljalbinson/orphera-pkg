@@ -35,7 +35,7 @@ object rgw_teardown extends OrpheraClusterPlaybook:
          |for o in $$(cephadm shell -- ceph config dump 2>/dev/null | awk '$$1 == "client.rgw.$serviceId" {print $$2}'); do
          |  cephadm shell -- ceph config rm client.rgw.$serviceId $$o
          |done
-         |rm -f /var/lib/orphera/rgw-applied-sha /usr/local/sbin/orphera-rgw-api
+         |rm -f /var/lib/orphera/rgw-applied-sha /var/lib/orphera/rgw-keystone-state /usr/local/sbin/orphera-rgw-api
          |rm -rf /etc/orphera/rgw-ca
          |echo "rgw service and options removed"""".stripMargin
     if purgePools then
