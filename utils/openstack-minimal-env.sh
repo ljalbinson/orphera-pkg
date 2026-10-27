@@ -308,7 +308,7 @@ ensure_server() {
 FLOATING_IP=""
 ensure_floating_ip() {
   local port
-  port="$(openstack port list --server "$VM_NAME" -f value -c ID | head -n 1)"
+  port="$(user_os port list --server "$VM_NAME" -f value -c ID | head -n 1)"
   [ -n "$port" ] || die "server $VM_NAME has no port"
   FLOATING_IP="$(user_os floating ip list --port "$port" -f value -c "Floating IP Address" | head -n 1)"
   if [ -n "$FLOATING_IP" ]; then
@@ -338,7 +338,7 @@ check_guest() {
   else log "WARNING: no login prompt or cloud-init finish line on the console after ${BOOT_TIMEOUT}s"; fi
 
   local mac
-  mac="$(openstack port list --server "$VM_NAME" -f value -c "MAC Address" 2>/dev/null | head -n 1)"
+  mac="$(user_os port list --server "$VM_NAME" -f value -c "MAC Address" 2>/dev/null | head -n 1)"
   if [ -n "$mac" ] && [ -x "$HERE/check-guest-dhcp.sh" ]; then
     local check_net="$NET_ID"
     [ "$MODE" = tenant ] && check_net="$TENANT_NET_ID"
