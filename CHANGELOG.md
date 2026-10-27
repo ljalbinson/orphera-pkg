@@ -7,6 +7,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- Magnum, part 1: `manifests/capi_management_cluster.scala` makes a Cluster API management cluster on tst23 (single-node k3s, Cluster API,
+  CAPO, cert-manager, the Azimuth addon provider and OpenStack janitor, helm, clusterctl) and a kubeconfig for Magnum's Cluster API Helm driver.
+  Versions are not pinned by default and are recorded in `/var/lib/orphera/capi/versions.txt`; `K3S_VERSION`, `CAPI_VERSION`, `CAPO_VERSION`,
+  `ADDON_PROVIDER_VERSION` and `JANITOR_VERSION` pin them. `capi_management_cluster_teardown.scala` undoes it and
+  `test_capi_management_cluster.sh` checks it. Magnum itself (part 2) is not written yet. Not yet run.
 - Load balancing: `manifests/octavia_single_node.scala` runs Octavia (API on 9876, worker, health manager, housekeeping; the Amphora
   provider) as Kolla containers on tst19, with the database on Galera and an `octavia` vhost on RabbitMQ (tst10), and registers service type
   `load-balancer`, the user `octavia` and the five `load-balancer_*` roles in Keystone. It also makes, in project `service`, the VXLAN network
