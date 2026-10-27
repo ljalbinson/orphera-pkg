@@ -7,6 +7,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- `manifests/p420_hba.scala`: presents every disk behind an HP Smart Array P420 / P420i to the host as a plain disk. It puts the controller in
+  HBA mode (`ssacli ctrl slot=N modify hbamode=on`, which takes effect after a reboot) and falls back to one single-drive RAID 0 logical drive
+  per disk if the firmware refuses. It installs `ssacli` if it is missing (HPE repository, or a .deb in `/var/lib/orphera/ssacli/`). It only
+  reports unless run with `P420_ERASE=yes`, because deleting logical drives destroys the data on the disks, and it refuses a controller whose
+  logical drives are mounted unless `P420_ALLOW_MOUNTED=yes`. The target is named in a `--config` file (`nodes: [name]`); there is no default.
+  Not yet run.
 - Load balancing: `manifests/octavia_single_node.scala` runs Octavia (API on 9876, worker, health manager, housekeeping; the Amphora
   provider) as Kolla containers on tst19, with the database on Galera and an `octavia` vhost on RabbitMQ (tst10), and registers service type
   `load-balancer`, the user `octavia` and the five `load-balancer_*` roles in Keystone. It also makes, in project `service`, the VXLAN network
