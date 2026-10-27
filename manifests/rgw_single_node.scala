@@ -413,8 +413,13 @@ if __name__ == '__main__':
        |OLD=$$(cat $stateDir/rgw-applied-sha 2>/dev/null || true)
        |STATE=unchanged
        |if [ "$$NEW" != "$$OLD" ]; then
-       |  STATE="changed, daemon restarted"
-       |  cephadm shell -- ceph orch restart rgw.$serviceId
+       |  # cephadm makes the daemon later; one that is not there yet starts with the options already set
+       |  if cephadm shell -- ceph orch ps --daemon-type rgw 2>/dev/null | grep -q 'rgw.$serviceId'; then
+       |    STATE="changed, daemon restarted"
+       |    cephadm shell -- ceph orch restart rgw.$serviceId
+       |  else
+       |    STATE="changed, daemon starting"
+       |  fi
        |  echo "$$NEW" > $stateDir/rgw-applied-sha
        |fi
        |echo "RGW configuration $$STATE"
