@@ -13,6 +13,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   playbooks now try tst21's registry before tst9 and quay.io. `kolla_build_teardown.scala` undoes it (the caches are kept unless
   `KOLLA_BUILD_PURGE=yes`) and `test_kolla_build.sh` checks it (`BUILD=1` also builds keystone). Not yet run: the first run on scala0 is
   the first compile and the first build will need the kolla-build options checked.
+- Object storage: `manifests/rgw_single_node.scala` runs the Ceph RADOS Gateway as a cephadm service (one daemon on tst0, port 8080) with the
+  Swift and S3 APIs both authenticated by Keystone, and registers the service types `object-store` and `s3` and the user `rgw` in Keystone. The
+  RGW options go into Ceph's configuration database, and the daemon is restarted only when they change. `rgw_teardown.scala` undoes it (the
+  pools and their data are kept unless `RGW_PURGE_POOLS=yes`) and `test_rgw.sh` checks it, including an object made through Swift with a
+  Keystone token and one through S3 with EC2 credentials. `build_openstack_stack.sh` has an `rgw` step after `manila`,
+  `rebuild_openstack_from_scratch.sh` runs its test, `rotate-lab-secrets.sh` knows `rgw/service`, and `utils/openstack-client-setup.sh` installs
+  `python-swiftclient`. Not yet run: the first run on scala0 is the first compile.
 - Manila (shared file systems) on a new VM, tst22 (`config/tst22.yaml`, `inventory.yaml`): `manifests/manila_single_node.scala` runs the
   API, the scheduler and the share service as Kolla containers, with the database on Galera and a `manila` vhost on RabbitMQ (tst10), and
   registers service type `sharev2` and user `manila` in Keystone. The backend is CephFS exported over NFS-Ganesha: the playbook makes the

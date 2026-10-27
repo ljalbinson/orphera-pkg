@@ -27,6 +27,8 @@
 #   barbican tst20       barbican_single_node (key manager: API and worker, on the Heat node; RabbitMQ vhost on tst10)
 #   manila   tst22       manila_single_node (shared file systems: API, scheduler, share service on CephFS over NFS;
 #                        also makes the CephFS filesystem and the NFS cluster on tst0; RabbitMQ vhost on tst10)
+#   rgw      tst0        rgw_single_node (object storage: the Ceph RADOS Gateway with the Swift and S3 APIs,
+#                        authenticated by Keystone; a cephadm service, no new VM)
 #   designate tst16      designate_single_node (DNS as a service: API, central, worker, producer, mdns and
 #                        a BIND9 name server; RabbitMQ vhost on tst10)
 #   clients  scala0      utils/openstack-client-setup.sh
@@ -50,7 +52,7 @@
 #   --with-caches   build the apt cache, point the Ubuntu nodes at it, and
 #                   build the Kolla image cache first (tst9, tst11 required)
 #   --from STEP     start at STEP (prep caches ceph galera keystone cinder glance
-#                   placement nova neutron compute horizon designate heat barbican manila clients smoke boot) - for resuming
+#                   placement nova neutron compute horizon designate heat barbican manila rgw clients smoke boot) - for resuming
 #                   after a failure
 #   --only STEP     run just that one step
 #   --list          print the plan and exit
@@ -65,7 +67,7 @@ cd "$(dirname "$0")/.." || exit 1
 . utils/orphera-sources.sh
 CONF_DIR=$(config_dir) || exit 1
 
-ALL_STEPS=(prep caches ceph galera keystone cinder glance placement nova neutron compute horizon designate heat barbican manila clients smoke boot)
+ALL_STEPS=(prep caches ceph galera keystone cinder glance placement nova neutron compute horizon designate heat barbican manila rgw clients smoke boot)
 WITH_CACHES=""
 FROM=""
 ONLY=""
@@ -337,6 +339,17 @@ step_manila() {
   check "the Manila scheduler and share service are listed" contains "services:" "$out"
   out=$(run_on tst22 "sudo /usr/local/sbin/orphera-manila-api share-cycle")
   check "a share is made, mounted over NFS, written and deleted" contains "share cycle ok" "$out"
+}
+
+step_rgw() {
+  playbook rgw_single_node.scala
+  local out
+  out=$(run_on tst0 "curl -s -o /dev/null -w 'http=%{http_code}' http://10.10.5.12:8080/")
+  check "RGW answers on 8080" contains "http=" "$out"
+  out=$(run_on tst0 "sudo /usr/local/sbin/orphera-rgw-api swift-cycle")
+  check "an object is made through the Swift API with a Keystone token" contains "swift cycle ok" "$out"
+  out=$(run_on tst0 "sudo /usr/local/sbin/orphera-rgw-api s3-cycle")
+  check "an object is made through the S3 API with EC2 credentials" contains "s3 cycle ok" "$out"
 }
 
 step_clients() {

@@ -1842,7 +1842,7 @@ Fleet layout used by these manifests (see `inventory.yaml`):
 
 | Nodes | Role |
 |---|---|
-| tst0-tst2 | Ceph (cephadm) |
+| tst0-tst2 | Ceph (cephadm); tst0 also runs the object storage gateway (RGW, port 8080), the NFS-Ganesha daemon for Manila (2049) and the CephFS filesystem |
 | tst3-tst5 | MariaDB Galera + haproxy + keepalived, VIP 10.10.5.100 |
 | tst6 | Keystone (TLS, test CA) |
 | tst7 | WordPress, Prometheus/Grafana |
@@ -1941,6 +1941,24 @@ is made for you. Access is by client IP. After it is up, with the CLI (`python-m
 Manila images need `orphera-kolla-build sources refresh` and a build of `manila-api manila-scheduler manila-share` on tst21 (an existing
 `/etc/kolla-build/images.txt` is not rewritten; add the three names), or they come from quay.io. Share migration and backups (the data
 service) and shares with their own network (driver-handled share servers) are not set up. The playbook and its test have not been run.
+
+**Object storage** (`manifests/rgw_single_node.scala`, undone by `rgw_teardown.scala`, checked by `test_rgw.sh`) is the Ceph RADOS Gateway with
+Keystone as its identity service. It is a cephadm service on the existing Ceph cluster (one daemon on tst0, `http://10.10.5.12:8080`), so it needs
+no new VM and no Kolla image. Both APIs authenticate against Keystone: **Swift** with an ordinary token (the catalog lists service type
+`object-store`; users need the role `member` or `admin` in their project), and **S3** with the EC2 credentials Keystone issues (service type `s3`;
+use path-style addressing and region `us-east-1`). After it is up, with the CLIs (`python-openstackclient` and `python-swiftclient`):
+
+    source ~/.config/openstack/admin-openrc.sh
+    openstack container create demo
+    openstack object create demo hello.txt
+    openstack object list demo
+    openstack ec2 credentials create        # access key and secret for an S3 client
+    aws --endpoint-url http://10.10.5.12:8080 s3 ls   # with those keys
+
+Each project gets its own namespace (implicit tenants). The RGW options and the service password are kept in Ceph's configuration database (set with
+`ceph config set client.rgw.orphera`), and the daemon is restarted only when they change. `rgw_teardown.scala` keeps the RGW pools and their data;
+`RGW_PURGE_POOLS=yes` deletes them. Not set up: a second daemon or a load balancer, TLS on the gateway, quotas, multisite, and the use of object
+storage by Glance or Cinder backup. The playbook and its test have not been run.
 
 **Building the images from source** (`manifests/kolla_build.scala`, undone by `kolla_build_teardown.scala`, checked by `test_kolla_build.sh`)
 sets up tst21 as a builder, so the OpenStack containers do not have to come from quay.io. It keeps four caches: the OpenStack source
