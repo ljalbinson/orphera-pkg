@@ -62,10 +62,10 @@ OUT=$(run_on "sudo $HELPER catalog")
 assert_contains "the catalog lists service type object-store" "object-store" "$OUT"
 assert_contains "the catalog lists service type s3" " s3" "$OUT"
 
-# An account that exists, so RGW asks for credentials instead of answering 404.
+# The account itself: for a container that does not exist RGW answers 404 before it asks for credentials.
 URL=$(printf '%s\n' "$OUT" | grep -o 'http://[^ ]*/AUTH_[0-9a-f]*' | tail -n 1)
 if [ -n "$URL" ]; then
-  OUT=$(run_on "curl -s -o /dev/null -w 'http=%{http_code}' $URL/x")
+  OUT=$(run_on "curl -s -o /dev/null -w 'http=%{http_code}' $URL")
   assert_contains "an unauthenticated Swift request is refused" "http=401" "$OUT"
 else
   log "FAIL: no object-store URL in the catalog output"; FAIL=$((FAIL + 1))
