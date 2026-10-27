@@ -423,18 +423,24 @@ if __name__ == '__main__':
        |  echo "$$NEW" > $stateDir/rgw-applied-sha
        |fi
        |echo "RGW configuration $$STATE"
-       |for i in $$(seq 1 60); do
-       |  CODE=$$(curl -s -o /dev/null -w '%{http_code}' http://$rgwIp:$rgwPort/ || true)
-       |  if [ "$$CODE" != "000" ] && [ -n "$$CODE" ]; then echo "RGW answers on $rgwIp:$rgwPort (HTTP $$CODE)"; exit 0; fi
-       |  sleep 5
+       |# RGW answers on its port while it starts or stops, so wait for the Swift capabilities document (HTTP 200
+       |# on /info or /swift/info) three times in a row, three seconds apart.
+       |OK=0
+       |for i in $$(seq 1 100); do
+       |  C1=$$(curl -s -o /dev/null -w '%{http_code}' http://$rgwIp:$rgwPort/info || true)
+       |  C2=$$(curl -s -o /dev/null -w '%{http_code}' http://$rgwIp:$rgwPort/swift/info || true)
+       |  if [ "$$C1" = "200" ] || [ "$$C2" = "200" ]; then OK=$$((OK + 1)); else OK=0; fi
+       |  if [ "$$OK" -ge 3 ]; then echo "RGW answers on $rgwIp:$rgwPort (Swift capabilities, three times in a row)"; exit 0; fi
+       |  sleep 3
        |done
-       |echo "RGW does not answer on $rgwIp:$rgwPort after 5 minutes - check 'ceph orch ps --daemon-type rgw' and 'cephadm logs --name rgw.$serviceId...'" >&2
+       |echo "RGW is not serving Swift on $rgwIp:$rgwPort after 5 minutes - check 'ceph orch ps --daemon-type rgw' and 'cephadm logs --name rgw.$serviceId...'" >&2
        |exit 1""".stripMargin
 
-  // Any HTTP answer (even 403 for the anonymous request) means RGW is up.
+  // The Swift capabilities document is served only once RGW is fully up (the port answers earlier).
   private val healthScript =
-    s"""CODE=$$(curl -s -o /dev/null -w '%{http_code}' http://$rgwIp:$rgwPort/ || true)
-       |[ -n "$$CODE" ] && [ "$$CODE" != "000" ]""".stripMargin
+    s"""C1=$$(curl -s -o /dev/null -w '%{http_code}' http://$rgwIp:$rgwPort/info || true)
+       |C2=$$(curl -s -o /dev/null -w '%{http_code}' http://$rgwIp:$rgwPort/swift/info || true)
+       |[ "$$C1" = "200" ] || [ "$$C2" = "200" ]""".stripMargin
 
   private val checkMode = sys.env.get("ORPHERA_CHECK").contains("1")
 
