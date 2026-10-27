@@ -5,13 +5,21 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 import orphera.orchestrator.kolla.*
 import orphera.orchestrator.conf.*
 
-// DRAFT. OpenStack Neutron for provider (flat) networks: neutron-server, the Open
-// vSwitch agent and the DHCP agent on one node, Kolla images under podman. Modelled
-// on nova_single_node.scala and placement_single_node.scala; read their headers for
-// the conventions. No L3 agent, no tenant (VXLAN) networks and no metadata agent
-// yet: instances get an address from the DHCP agent on a flat provider network that
-// is plain layer 2 on the second NIC, and Nova's metadata API is not deployed (use
-// config drive until it is).
+// DRAFT. OpenStack Neutron: neutron-server, the Open vSwitch agent, the DHCP agent and
+// the L3 agent on one node, Kolla images under podman. Modelled on
+// nova_single_node.scala and placement_single_node.scala; read their headers for the
+// conventions.
+//
+// Networks. Tenant networks are VXLAN (VNI 1-1000). The tunnel endpoint of each node is
+// its management address (10.10.5.x, UDP 4789 between the nodes; nothing here opens a
+// firewall), so tenant ports get an MTU of 1450 from Neutron's own calculation. The
+// flat provider network `provider` (plain layer 2 on the second NIC) is the external
+// network: routers take their gateway address from it and floating IPs come from it.
+// Mark that network external (`openstack network set --external <name>`); the
+// L3 agent does the NAT in router namespaces on this node. Instances can still be
+// plugged straight into the flat network. There is no metadata agent: Nova's metadata
+// API is not deployed, so instances use a config drive. The compute nodes need the
+// matching VXLAN settings (nova_compute.scala); apply that playbook after this one.
 //
 // Where it runs: tst19, whose second NIC (enp2s0, on the hypervisor's br-net106)
 // is the provider network. This playbook first removes the address that NIC was
@@ -88,8 +96,8 @@ object neutron_single_node extends OrpheraClusterPlaybook:
   private val caDir = "/etc/kolla/neutron-ca"
   private val ksUrl = s"https://$ksFqdn:5000"
 
-  // The three Neutron containers as data (orchestrator/.../kolla/Container.scala, checked by
-  // ContainerCheck). All share the config/log/state mounts; the two agents also run privileged
+  // The four Neutron containers as data (orchestrator/.../kolla/Container.scala, checked by
+  // ContainerCheck). All share the config/log/state mounts; the three agents also run privileged
   // in the host's process table with the Open vSwitch socket directory, the network-namespace
   // directory (shared both ways, so namespaces made in the container are visible on the host
   // and the other way round) and the kernel modules. The server needs none of that. Defined
@@ -127,7 +135,8 @@ object neutron_single_node extends OrpheraClusterPlaybook:
     List(
       neutronServer,
       neutronContainer("neutron-openvswitch-agent", agent = true),
-      neutronContainer("neutron-dhcp-agent", agent = true)
+      neutronContainer("neutron-dhcp-agent", agent = true),
+      neutronContainer("neutron-l3-agent", agent = true)
     )
   private val serverImage = neutronServer.image.ref
   private val ovsAgentImage = neutronServices(1).image.ref
@@ -317,7 +326,7 @@ object neutron_single_node extends OrpheraClusterPlaybook:
       ("DEFAULT", "state_path", "/var/lib/neutron"),
       ("DEFAULT", "use_stderr", "true"),
       ("DEFAULT", "core_plugin", "ml2"),
-      ("DEFAULT", "service_plugins", ""),
+      ("DEFAULT", "service_plugins", "router"),
       ("DEFAULT", "auth_strategy", "keystone"),
       (
         "DEFAULT",
@@ -367,20 +376,23 @@ object neutron_single_node extends OrpheraClusterPlaybook:
 
   private val ml2ConfIni: ConfFile =
     ConfFile.text(s"$srcDir/ml2_conf.ini", neutronCatalogue)(
-      ("ml2", "type_drivers", "flat"),
-      ("ml2", "tenant_network_types", ""),
-      ("ml2", "mechanism_drivers", "openvswitch"),
+      ("ml2", "type_drivers", "flat,vxlan"),
+      ("ml2", "tenant_network_types", "vxlan"),
+      ("ml2", "mechanism_drivers", "openvswitch,l2population"),
       ("ml2", "extension_drivers", "port_security"),
       ("ml2_type_flat", "flat_networks", s"$physnet"),
+      ("ml2_type_vxlan", "vni_ranges", "1:1000"),
       ("securitygroup", "enable_security_group", "true")
     )
 
   private val openvswitchAgentIni: ConfFile =
     ConfFile.text(s"$srcDir/openvswitch_agent.ini", neutronCatalogue)(
       ("ovs", "bridge_mappings", s"$physnet:$providerBridge"),
+      ("ovs", "local_ip", nodeIp),
       ("securitygroup", "firewall_driver", "openvswitch"),
       ("securitygroup", "enable_security_group", "true"),
-      ("agent", "tunnel_types", "")
+      ("agent", "tunnel_types", "vxlan"),
+      ("agent", "l2_population", "true")
     )
 
   private val dhcpAgentIni: ConfFile =
@@ -390,18 +402,30 @@ object neutron_single_node extends OrpheraClusterPlaybook:
       ("DEFAULT", "enable_isolated_metadata", "false")
     )
 
+  // Routers and floating IPs: legacy (centralised) routers in namespaces on this node. No
+  // external_network_bridge: the external network is the flat provider network, wired to
+  // br-provider by the Open vSwitch agent's bridge mapping. No metadata proxy (no metadata
+  // agent; instances use a config drive).
+  private val l3AgentIni: ConfFile =
+    ConfFile.text(s"$srcDir/l3_agent.ini", neutronCatalogue)(
+      ("DEFAULT", "interface_driver", "openvswitch"),
+      ("DEFAULT", "agent_mode", "legacy"),
+      ("DEFAULT", "enable_metadata_proxy", "false")
+    )
+
   // One config directory per service (Kolla mounts it at
   // /var/lib/kolla/config_files). The command for the server is checked in the
   // image first, as the WSGI paths are in the other playbooks.
   private val kollaConfigScript =
     s"""set -e
-       |mkdir -p $confRoot/neutron-server $confRoot/neutron-openvswitch-agent $confRoot/neutron-dhcp-agent
-       |for svc in server openvswitch-agent dhcp-agent; do
+       |mkdir -p $confRoot/neutron-server $confRoot/neutron-openvswitch-agent $confRoot/neutron-dhcp-agent $confRoot/neutron-l3-agent
+       |for svc in server openvswitch-agent dhcp-agent l3-agent; do
        |  cp $srcDir/neutron.conf $caDir/ca.crt $confRoot/neutron-$$svc/
        |done
        |cp $srcDir/ml2_conf.ini $confRoot/neutron-server/
        |cp $srcDir/openvswitch_agent.ini $confRoot/neutron-openvswitch-agent/
        |cp $srcDir/dhcp_agent.ini $confRoot/neutron-dhcp-agent/
+       |cp $srcDir/l3_agent.ini $confRoot/neutron-l3-agent/
        |if ! podman run --rm --entrypoint sh $serverImage -c 'command -v neutron-server >/dev/null'; then
        |  echo "neutron-server not found in $serverImage - see the header of neutron_single_node.scala" >&2
        |  exit 1
@@ -422,6 +446,9 @@ object neutron_single_node extends OrpheraClusterPlaybook:
        |cat > $confRoot/neutron-dhcp-agent/config.json <<JSON
        |{"command": "neutron-dhcp-agent --config-file /etc/neutron/neutron.conf --config-file /etc/neutron/dhcp_agent.ini", "config_files": [$$COMMON, {"source": "/var/lib/kolla/config_files/dhcp_agent.ini", "dest": "/etc/neutron/dhcp_agent.ini", "owner": "neutron", "perm": "0600"}], $$PERMS}
        |JSON
+       |cat > $confRoot/neutron-l3-agent/config.json <<JSON
+       |{"command": "neutron-l3-agent --config-file /etc/neutron/neutron.conf --config-file /etc/neutron/l3_agent.ini", "config_files": [$$COMMON, {"source": "/var/lib/kolla/config_files/l3_agent.ini", "dest": "/etc/neutron/l3_agent.ini", "owner": "neutron", "perm": "0600"}], $$PERMS}
+       |JSON
        |echo "kolla config written under $confRoot"""".stripMargin
 
   // neutron-db-manage runs in a one-off container with the two config files
@@ -434,11 +461,16 @@ object neutron_single_node extends OrpheraClusterPlaybook:
   // Standard-library Python, as in the other service playbooks. Plain string filled
   // in with replace(). Subcommands:
   //   register | unregister | catalog | agents | agents-up |
-  //   net-list | net-create | net-delete <id>
+  //   net-list | net-create | net-delete <id> | tenant-cycle
   // (net-create makes a flat network on the physical network `provider` and a
   // subnet with DHCP off, net-delete removes both: that exercises the API, the
   // database and the ML2 flat type driver. Only one flat network can exist per
-  // physical network, so net-create fails with a clear message if one is there.)
+  // physical network, so net-create fails with a clear message if one is there.
+  // tenant-cycle makes a VXLAN tenant network and subnet, a router with its gateway on the
+  // external network and the subnet as an interface, and a floating IP, waits for the router
+  // and its ports to go ACTIVE, and removes everything. It uses the existing external network,
+  // or a temporary flat external one if there is none; it refuses to run if the only flat
+  // network on the physical network is not marked external.)
   private val apiHelperPython =
     """#!/usr/bin/python3
 import json, ssl, sys, time, urllib.request, urllib.error
@@ -561,10 +593,10 @@ def agents():
 
 def agents_up():
     up = set(a.get('binary') for a in agent_list() if a.get('alive') and a.get('admin_state_up'))
-    missing = [b for b in ('neutron-openvswitch-agent', 'neutron-dhcp-agent') if b not in up]
+    missing = [b for b in ('neutron-openvswitch-agent', 'neutron-dhcp-agent', 'neutron-l3-agent') if b not in up]
     if missing:
         die('not alive yet: ' + ', '.join(missing))
-    print('neutron-openvswitch-agent and neutron-dhcp-agent are alive')
+    print('neutron-openvswitch-agent, neutron-dhcp-agent and neutron-l3-agent are alive')
 
 
 def net_list():
@@ -611,6 +643,91 @@ def net_delete(nid):
     print('deleted ' + nid)
 
 
+def get_json(token, path):
+    s, p, _ = call('GET', NEUTRON + '/v2.0' + path, None, token)
+    if s != 200:
+        die('GET %s failed: HTTP %s %s' % (path, s, p))
+    return p
+
+
+def tenant_cycle():
+    token, _ = get_token('admin', ADMIN_PW, 'admin')
+    base = NEUTRON + '/v2.0'
+
+    def api(method, path, body=None, ok=(200, 201, 204)):
+        s, p, _ = call(method, base + path, body, token)
+        if s not in ok:
+            die('%s %s failed: HTTP %s %s' % (method, path, s, p))
+        return p
+
+    def wait(what, check, tries=30, delay=3):
+        for _ in range(tries):
+            r = check()
+            if r:
+                return r
+            time.sleep(delay)
+        die('timed out waiting for ' + what)
+
+    nets = get_json(token, '/networks').get('networks', [])
+    ext = None
+    for n in nets:
+        if n.get('router:external'):
+            ext = n
+            break
+    undo = []
+    stamp = int(time.time())
+    iface = None
+    router = None
+    try:
+        if ext is None:
+            for n in nets:
+                if n.get('provider:physical_network') == PHYSNET:
+                    die('the flat network %s (%s) on %s is not external; run: openstack network set --external %s' % (n.get('name'), n['id'], PHYSNET, n['id']))
+            ext = api('POST', '/networks', {'network': {'name': 'orphera-ext-%d' % stamp, 'router:external': True, 'provider:network_type': 'flat', 'provider:physical_network': PHYSNET}})['network']
+            undo.append('/networks/' + ext['id'])
+            sub = api('POST', '/subnets', {'subnet': {'network_id': ext['id'], 'ip_version': 4, 'cidr': '10.99.98.0/24', 'enable_dhcp': False, 'name': 'orphera-ext-subnet'}})['subnet']
+            undo.append('/subnets/' + sub['id'])
+
+        net = api('POST', '/networks', {'network': {'name': 'orphera-tenant-%d' % stamp}})['network']
+        undo.append('/networks/' + net['id'])
+        if net.get('provider:network_type') != 'vxlan':
+            die('the tenant network is %s, expected vxlan' % net.get('provider:network_type'))
+        subnet = api('POST', '/subnets', {'subnet': {'network_id': net['id'], 'ip_version': 4, 'cidr': '192.168.77.0/24', 'name': 'orphera-tenant-subnet'}})['subnet']
+        undo.append('/subnets/' + subnet['id'])
+
+        router = api('POST', '/routers', {'router': {'name': 'orphera-router-%d' % stamp, 'external_gateway_info': {'network_id': ext['id']}}})['router']
+        undo.append('/routers/' + router['id'])
+        api('PUT', '/routers/%s/add_router_interface' % router['id'], {'subnet_id': subnet['id']})
+        iface = subnet['id']
+
+        def router_active():
+            r = api('GET', '/routers/' + router['id'])['router']
+            return r if r.get('status') == 'ACTIVE' else None
+
+        wait('the router to go ACTIVE (is neutron-l3-agent running?)', router_active)
+
+        def ports_active():
+            ports = api('GET', '/ports?device_id=' + router['id'])['ports']
+            owners = set(p['device_owner'] for p in ports if p.get('status') == 'ACTIVE')
+            return {'network:router_gateway', 'network:router_interface'} <= owners
+
+        wait('the router gateway and interface ports to go ACTIVE', ports_active)
+
+        fip = api('POST', '/floatingips', {'floatingip': {'floating_network_id': ext['id']}})['floatingip']
+        undo.append('/floatingips/' + fip['id'])
+        print('tenant cycle ok: vxlan segment %s, router ACTIVE with gateway on %s, floating IP %s' % (net.get('provider:segmentation_id'), ext.get('name'), fip.get('floating_ip_address')))
+    finally:
+        if iface is not None:
+            s, p, _ = call('PUT', base + '/routers/%s/remove_router_interface' % router['id'], {'subnet_id': iface}, token)
+        failed = []
+        for path in reversed(undo):
+            s, p, _ = call('DELETE', base + path, None, token)
+            if s not in (200, 204, 404):
+                failed.append('%s (HTTP %s)' % (path, s))
+        if failed:
+            sys.stderr.write('could not remove: ' + ', '.join(failed) + '\n')
+
+
 if __name__ == '__main__':
     cmd = sys.argv[1] if len(sys.argv) > 1 else ''
     if cmd == 'register':
@@ -629,8 +746,10 @@ if __name__ == '__main__':
         net_create()
     elif cmd == 'net-delete' and len(sys.argv) > 2:
         net_delete(sys.argv[2])
+    elif cmd == 'tenant-cycle':
+        tenant_cycle()
     else:
-        die('usage: orphera-neutron-api register | unregister | catalog | agents | agents-up | net-list | net-create | net-delete <id>')
+        die('usage: orphera-neutron-api register | unregister | catalog | agents | agents-up | net-list | net-create | net-delete <id> | tenant-cycle')
 """
 
   private val helperScript =
@@ -706,7 +825,8 @@ if __name__ == '__main__':
             confResource.write(openvswitchAgentIni)
           )
           .task("write dhcp_agent.ini")(confResource.write(dhcpAgentIni))
-          .task("write the Kolla config for the three services")(
+          .task("write l3_agent.ini")(confResource.write(l3AgentIni))
+          .task("write the Kolla config for the four services")(
             Task.RunCommand(
               List("sh", "-c", kollaConfigScript),
               timeoutSeconds = 180
@@ -736,7 +856,7 @@ if __name__ == '__main__':
             timeoutSeconds = 120
           )
         )
-        .task("the Open vSwitch and DHCP agents report in through the API")(
+        .task("the Open vSwitch, DHCP and L3 agents report in through the API")(
           Task.RunCommand(
             List(
               "sh",
@@ -748,7 +868,7 @@ if __name__ == '__main__':
         )
         .task("neutron confirmed")(
           Task.Debug(
-            s"Neutron up at http://$fqdn:$apiPort ($nodeIp): neutron-server, Open vSwitch agent and DHCP agent, flat provider network `$physnet` on $providerBridge/$providerNic, RabbitMQ vhost $rabbitVhost on $rabbitIp:5672, database via $vip:3306, identity from $ksUrl. No L3, tenant networks or metadata yet. Test: manifests/test_neutron.sh"
+            s"Neutron up at http://$fqdn:$apiPort ($nodeIp): neutron-server, Open vSwitch agent, DHCP agent and L3 agent, VXLAN tenant networks (tunnel endpoint $nodeIp), flat provider network `$physnet` on $providerBridge/$providerNic as the external network, RabbitMQ vhost $rabbitVhost on $rabbitIp:5672, database via $vip:3306, identity from $ksUrl. No metadata agent (config drive). Test: manifests/test_neutron.sh"
           )
         )
         .build

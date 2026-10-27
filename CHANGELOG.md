@@ -7,10 +7,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- Tenant networking: `neutron_single_node.scala` now has the router service plugin, VXLAN tenant networks (VNI 1-1000, `l2population`, the
+  node's management address as tunnel endpoint) and a fourth container, `neutron-l3-agent` (legacy routers, no metadata proxy), so routers
+  and floating IPs work with the flat provider network as the external network. `nova_compute.scala` gives the compute nodes' Open vSwitch
+  agents the matching tunnel settings, `neutron_teardown.scala` removes the L3 agent, the Kolla builder's default list includes
+  `neutron-l3-agent` (append it to an existing `/etc/kolla-build/images.txt`), and `test_neutron.sh` checks that the L3 agent is alive and makes
+  and removes a VXLAN network, a router with a gateway and a floating IP (`orphera-neutron-api tenant-cycle`). Existing labs: re-apply
+  Neutron, then Nova compute, and mark the flat network external (`openstack network set --external <name>`). Not yet run: the first run
+  on scala0 is the first compile.
 - `utils/openstack-minimal-env.sh`: builds a minimum OpenStack environment and boots Ubuntu 26.04 in it (project and user `demo`, the
   Ubuntu 26.04 image from cloud-images.ubuntu.com with its checksum verified, a flavor, the flat provider network and subnet, a security
-  group, a key pair and a server), checks that the guest booted, and removes it again with `down [--all]`. No router or floating IP: Neutron
-  has no L3 agent or tenant networks yet. Not yet run: the first run on scala0 is its first test.
+  group, a key pair and a server), checks that the guest booted, and removes it again with `down [--all]`. With the L3 agent it builds a VXLAN
+  tenant network, a router and a floating IP (`NETWORKING=auto|tenant|flat`); without it the server sits on the flat provider network.
 - Build the Kolla images from source: `manifests/kolla_build.scala` sets up tst21 (new in `inventory.yaml` and `config/tst21.yaml`) with
   kolla-build, a writable registry, a cache of the OpenStack source tarballs, a devpi pip cache, the apt cache and a local copy of the
   Ubuntu base image, and the `orphera-kolla-build` helper (`status`, `sources [refresh]`, `build [--refresh] [image ...]`). The OpenStack

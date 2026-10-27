@@ -1851,7 +1851,7 @@ Fleet layout used by these manifests (see `inventory.yaml`):
 | tst11 | apt cache (apt-cacher-ng) for the Ubuntu nodes |
 | tst12 | rpm cache (nginx caching mirror of Rocky/EPEL) for the Rocky nodes |
 | tst13 | Glance (glance-api, images in Ceph pool `images`) Placement (port 8780) and Horizon (port 8080) |
-| tst19 | Neutron (server, Open vSwitch + DHCP agents) for flat provider networks on its second NIC (br-net106, no address) |
+| tst19 | Neutron (server, Open vSwitch, DHCP and L3 agents): VXLAN tenant networks, routers and floating IPs, and the flat provider network on its second NIC (br-net106, no address) |
 | tst14 | Nova control plane (API on 8774, scheduler, conductor, noVNC proxy on 6080); RabbitMQ vhost `nova` on tst10 |
 | tst20 | Heat (API on 8004, CloudFormation API on 8000, engine) and Barbican (API on 9311, worker); RabbitMQ vhosts `heat` and `barbican` on tst10 |
 | tst16 | Designate (API on 9001, central, worker, producer, mdns on 5354) and a BIND9 name server on port 53; RabbitMQ vhost `designate` on tst10 |
@@ -2009,9 +2009,11 @@ Keystone's test CA, and writes `~/.config/openstack/admin-openrc.sh`:
 `utils/openstack-minimal-env.sh` then builds a small working environment with those clients and boots Ubuntu 26.04 in it:
 a project and user (`demo`, password in the secret store as `demo/user-password`), the Ubuntu 26.04 cloud image
 (downloaded, checksum verified, uploaded to Glance), a flavor, the flat provider network and its subnet, a security group
-for SSH and ping, a key pair and a server on the provider network. There is no router and no floating IP, because this
-Neutron has no L3 agent or tenant networks yet. It is safe to re-run, and `utils/openstack-minimal-env.sh down [--all]`
-removes it. While the provider network exists, the CirrOS boot test cannot make its own flat network.
+for SSH and ping, a key pair and a server. With the L3 agent present (the default) the server is on a VXLAN tenant
+network behind a router, with a floating IP from the provider network, which the script marks external;
+`NETWORKING=flat` puts the server straight on the provider network instead. It is safe to re-run, and
+`utils/openstack-minimal-env.sh down [--all]` removes it (switching modes needs `down` first). While the provider
+network exists, the CirrOS boot test cannot make its own flat network.
 
 Worth knowing:
 
@@ -2045,14 +2047,19 @@ Worth knowing:
   Servers are booted on the compute nodes below; the Nova test itself only creates and deletes a
   flavor. nova.conf carries `[glance] cafile` (Keystone's CA), so after upgrading from an older
   copy re-apply `nova_single_node.scala` once, or server creates fail with HTTP 500.
-- **Neutron** (provider networks only) is at `http://tst19.ljalbinson.com:9696` after
-  `manifests/test_neutron.sh`: neutron-server, the Open vSwitch agent and the DHCP agent on one
-  node, with ML2 flat networks on the physical network `provider` (OVS bridge `br-provider`,
-  whose port is tst19's second NIC; the playbook removes the address that NIC had). No L3 agent,
-  no tenant networks, no metadata agent: instances get DHCP on a provider network and can use
-  config drive. After applying it, re-apply `nova_single_node.scala` once so Nova's config gets the
-  `[neutron]` section. A real network: `openstack network create --provider-network-type flat
-  --provider-physical-network provider --share provider`, then a subnet on it.
+- **Neutron** is at `http://tst19.ljalbinson.com:9696` after `manifests/test_neutron.sh`:
+  neutron-server, the Open vSwitch agent, the DHCP agent and the L3 agent on one node. Tenant
+  networks are VXLAN (VNI 1-1000); the tunnel endpoints are the nodes' management addresses
+  (UDP 4789 between tst19, tst17 and tst18), so tenant ports have an MTU of 1450. The flat network
+  on the physical network `provider` (OVS bridge `br-provider`, whose port is tst19's second NIC;
+  the playbook removes the address that NIC had) is the external network: routers get their
+  gateway address and floating IPs from it, and the L3 agent on tst19 does the NAT. It must be
+  marked external. There is no metadata agent: instances use a config drive. After applying it,
+  re-apply `nova_compute.scala` so the compute nodes get the VXLAN settings, and `nova_single_node.scala`
+  once so Nova's config gets the `[neutron]` section. The external network: `openstack network create
+  --external --share --provider-network-type flat --provider-physical-network provider provider`, then
+  a subnet on it (or `openstack network set --external <name>` for one that exists). A tenant
+  network with a router and a floating IP: `utils/openstack-minimal-env.sh` builds one.
 - **Compute nodes** tst17 and tst18 (`manifests/test_nova_compute.sh`): nova-compute with
   `virt_type = kvm` (needs nested virtualization on gs2 and `host_type: host-passthrough`),
   libvirt/QEMU from apt, and the Neutron Open vSwitch agent; the second NIC becomes the provider

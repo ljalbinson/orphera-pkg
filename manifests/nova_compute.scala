@@ -456,15 +456,17 @@ object nova_compute extends OrpheraClusterPlaybook:
        |cat > $neutronSrcDir/openvswitch_agent.ini <<'CONF'
        |[ovs]
        |bridge_mappings = $physnet:$providerBridge
+       |local_ip = @@IP@@
        |
        |[securitygroup]
        |firewall_driver = openvswitch
        |enable_security_group = true
        |
        |[agent]
-       |tunnel_types =
+       |tunnel_types = vxlan
+       |l2_population = true
        |CONF
-       |sed -i "s/@@HOST@@/$$HOST/; s/@@IP@@/$$MYIP/" $novaSrcDir/nova.conf $neutronSrcDir/neutron.conf
+       |sed -i "s/@@HOST@@/$$HOST/; s/@@IP@@/$$MYIP/" $novaSrcDir/nova.conf $neutronSrcDir/neutron.conf $neutronSrcDir/openvswitch_agent.ini
        |chmod 640 $novaSrcDir/nova.conf $neutronSrcDir/neutron.conf $neutronSrcDir/openvswitch_agent.ini
        |echo "config files written for $$HOST ($$MYIP)"""".stripMargin
 
@@ -843,7 +845,7 @@ if __name__ == '__main__':
         )
         .task("compute confirmed")(
           Task.Debug(
-            s"nova-compute (KVM, config drive) and the Neutron Open vSwitch agent running on ${nodes.mkString(", ")}; flat provider network `$physnet` on $providerBridge/$providerNic. Test: manifests/test_nova_compute.sh"
+            s"nova-compute (KVM, config drive) and the Neutron Open vSwitch agent running on ${nodes.mkString(", ")}; flat provider network `$physnet` on $providerBridge/$providerNic, VXLAN tunnels to the other nodes from the management address. Test: manifests/test_nova_compute.sh"
           )
         )
         .build

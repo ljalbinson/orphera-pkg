@@ -7,19 +7,25 @@
 #   user      demo                       member of the project; password in the secret store (demo/user-password)
 #   image     ubuntu-26.04               downloaded from cloud-images.ubuntu.com, checksum verified, public
 #   flavor    orphera.small              1 vCPU, 2 GB RAM, 10 GB disk
-#   network   provider + subnet          the flat provider network (10.10.6.0/24, DHCP), shared
+#   network   provider + subnet          the flat provider network (10.10.6.0/24, DHCP), shared and EXTERNAL
+#   tenant    demo-net, demo-router      a VXLAN network (192.168.100.0/24) behind a router whose gateway is on
+#                                        the provider network (only when Neutron has an L3 agent)
 #   security  demo-ssh                   SSH and ICMP in, everything out
 #   keypair   demo-key                   from ~/.ssh/orphera-demo (made if missing)
-#   server    demo-vm                    Ubuntu 26.04 on the provider network, config drive for the key
+#   server    demo-vm                    Ubuntu 26.04, config drive for the key
+#   floating  one floating IP            from the provider network, on the server (tenant mode)
 #
-# NO ROUTER AND NO FLOATING IP. This lab's Neutron has neither an L3 agent nor tenant networks
-# (neutron_single_node.scala: no L3, no VXLAN, no metadata agent). The instance sits directly on the
-# flat provider network and gets its address from DHCP there. Router and floating IP steps need L3 added to
-# Neutron first.
+# TWO MODES (NETWORKING=auto|tenant|flat; auto picks tenant when the L3 agent exists):
+#   tenant  the server is on demo-net, reaches the outside through demo-router (SNAT) and is reached on its
+#           floating IP. Needs neutron_single_node.scala with the L3 agent and VXLAN, and nova_compute.scala
+#           re-applied for the tunnel settings.
+#   flat    the server sits directly on the provider network and gets its address from DHCP there.
+# Switching mode on an existing environment needs `down` first (the script says so).
 #
 # ONE FLAT NETWORK ONLY. The ML2 flat driver allows one network on the physical network `provider`. If one
-# already exists (any name) this script uses it. While it exists, the CirrOS boot test of
-# test_nova_compute.sh and the network create in the smoke check cannot make their own. `down --all` removes it.
+# already exists (any name) this script uses it, and marks it external when it needs to be. While it exists,
+# the CirrOS boot test of test_nova_compute.sh and the network create in the smoke check cannot make their
+# own. `down --all` removes it.
 #
 # Usage, from scala0 (needs the clients: utils/openstack-client-setup.sh):
 #
@@ -28,7 +34,7 @@
 #   utils/openstack-minimal-env.sh down      # removes the server, key pair, security group, user, project
 #   utils/openstack-minimal-env.sh down --all   # and the image, flavor, subnet, network and the stored password
 #
-# Settings (environment): OS_RC (admin-openrc.sh), DEMO_PROJECT, DEMO_USER, DEMO_PW_SECRET, IMAGE_NAME,
+# Settings (environment): OS_RC (admin-openrc.sh), NETWORKING, TENANT_CIDR, DEMO_PROJECT, DEMO_USER, DEMO_PW_SECRET, IMAGE_NAME,
 # IMAGE_FILE (a local image instead of the download), CACHE_DIR, FLAVOR, NET_NAME, PHYSNET, CIDR, GATEWAY,
 # POOL_START, POOL_END, DNS (a nameserver to hand out; unset = what the DHCP agent decides), KEY_FILE,
 # VM_NAME, BOOT_TIMEOUT (seconds to wait for the guest to finish booting).
@@ -61,6 +67,13 @@ GATEWAY="${GATEWAY:-10.10.6.1}"
 POOL_START="${POOL_START:-10.10.6.200}"
 POOL_END="${POOL_END:-10.10.6.220}"
 DNS="${DNS:-}"
+
+NETWORKING="${NETWORKING:-auto}"
+TENANT_NET="demo-net"
+TENANT_SUBNET="demo-subnet"
+TENANT_CIDR="${TENANT_CIDR:-192.168.100.0/24}"
+ROUTER="demo-router"
+MODE=""
 
 KEY_FILE="${KEY_FILE:-$HOME/.ssh/orphera-demo}"
 KEY_NAME="demo-key"
@@ -183,9 +196,13 @@ ensure_network() {
     NET_ID="${found%% *}"
     NET_NAME="${found#* }"
     log "network $NET_NAME ($NET_ID) exists on physical network $PHYSNET"
+    if [ "$(openstack network show "$NET_ID" -f value -c router:external)" != "True" ]; then
+      log "marking $NET_NAME external (routers take their gateway and floating IPs from it)"
+      openstack network set --external "$NET_ID" || die "could not mark the network external"
+    fi
   else
-    log "creating the flat network $NET_NAME on physical network $PHYSNET"
-    NET_ID="$(openstack network create --share --provider-network-type flat --provider-physical-network "$PHYSNET" \
+    log "creating the external flat network $NET_NAME on physical network $PHYSNET"
+    NET_ID="$(openstack network create --share --external --provider-network-type flat --provider-physical-network "$PHYSNET" \
       -f value -c id "$NET_NAME")" || die "could not create the network"
     [ -n "$NET_ID" ] || die "no network id came back"
   fi
@@ -199,6 +216,46 @@ ensure_network() {
       --allocation-pool "start=$POOL_START,end=$POOL_END" --dhcp "${dns_args[@]}" "$NET_NAME-subnet" >/dev/null \
       || die "could not create the subnet"
   fi
+}
+
+decide_mode() {
+  case "$NETWORKING" in
+    tenant|flat) MODE="$NETWORKING" ;;
+    auto)
+      if [ -n "$(openstack network agent list --agent-type l3 -f value -c ID 2>/dev/null)" ]; then MODE=tenant; else MODE=flat; fi ;;
+    *) die "NETWORKING must be auto, tenant or flat, not $NETWORKING" ;;
+  esac
+  log "network mode: $MODE"
+}
+
+TENANT_NET_ID=""
+ROUTER_ID=""
+ensure_tenant_network() {
+  if exists user_os network show "$TENANT_NET"; then
+    log "tenant network $TENANT_NET exists"
+  else
+    log "creating tenant network $TENANT_NET"
+    user_os network create "$TENANT_NET" >/dev/null || die "could not create the tenant network"
+  fi
+  TENANT_NET_ID="$(user_os network show "$TENANT_NET" -f value -c id)"
+  if exists user_os subnet show "$TENANT_SUBNET"; then
+    log "subnet $TENANT_SUBNET exists"
+  else
+    log "creating subnet $TENANT_SUBNET ($TENANT_CIDR)"
+    local dns_args=()
+    [ -n "$DNS" ] && dns_args=(--dns-nameserver "$DNS")
+    user_os subnet create --network "$TENANT_NET" --subnet-range "$TENANT_CIDR" "${dns_args[@]}" "$TENANT_SUBNET" >/dev/null \
+      || die "could not create the tenant subnet"
+  fi
+  if exists user_os router show "$ROUTER"; then
+    log "router $ROUTER exists"
+  else
+    log "creating router $ROUTER with its gateway on $NET_NAME"
+    user_os router create "$ROUTER" >/dev/null || die "could not create the router"
+    user_os router set --external-gateway "$NET_ID" "$ROUTER" || die "could not set the router's gateway (is $NET_NAME external, and is the L3 agent up?)"
+    user_os router add subnet "$ROUTER" "$TENANT_SUBNET" || die "could not add $TENANT_SUBNET to the router"
+  fi
+  ROUTER_ID="$(user_os router show "$ROUTER" -f value -c id)"
 }
 
 ensure_security_group() {
@@ -227,11 +284,16 @@ ensure_keypair() {
 }
 
 ensure_server() {
+  local boot_net="$NET_ID"
+  [ "$MODE" = tenant ] && boot_net="$TENANT_NET_ID"
   if exists user_os server show "$VM_NAME"; then
     log "server $VM_NAME exists"
+    if [ "$MODE" = tenant ] && ! user_os server show "$VM_NAME" -f value -c addresses | grep -q "$TENANT_NET"; then
+      die "server $VM_NAME is not on $TENANT_NET (it was made in flat mode); run: $0 down"
+    fi
   else
     log "booting $VM_NAME (this waits until Nova reports it ACTIVE)"
-    user_os server create --image "$IMAGE_NAME" --flavor "$FLAVOR" --network "$NET_ID" \
+    user_os server create --image "$IMAGE_NAME" --flavor "$FLAVOR" --network "$boot_net" \
       --key-name "$KEY_NAME" --security-group "$SG_NAME" --config-drive true --wait "$VM_NAME" >/dev/null \
       || { user_os server show "$VM_NAME" -f value -c fault 2>/dev/null; die "the server did not come up"; }
   fi
@@ -241,6 +303,22 @@ ensure_server() {
     user_os server show "$VM_NAME" -f value -c fault 2>/dev/null
     die "server $VM_NAME is $status, not ACTIVE"
   fi
+}
+
+FLOATING_IP=""
+ensure_floating_ip() {
+  local port
+  port="$(openstack port list --server "$VM_NAME" -f value -c ID | head -n 1)"
+  [ -n "$port" ] || die "server $VM_NAME has no port"
+  FLOATING_IP="$(user_os floating ip list --port "$port" -f value -c "Floating IP Address" | head -n 1)"
+  if [ -n "$FLOATING_IP" ]; then
+    log "floating IP $FLOATING_IP is already on $VM_NAME"
+    return 0
+  fi
+  FLOATING_IP="$(user_os floating ip create "$NET_ID" -f value -c floating_ip_address)" || die "could not make a floating IP"
+  [ -n "$FLOATING_IP" ] || die "no floating IP came back"
+  log "adding floating IP $FLOATING_IP to $VM_NAME"
+  user_os server add floating ip "$VM_NAME" "$FLOATING_IP" || die "could not add the floating IP"
 }
 
 SERVER_IP=""
@@ -262,20 +340,39 @@ check_guest() {
   local mac
   mac="$(openstack port list --server "$VM_NAME" -f value -c "MAC Address" 2>/dev/null | head -n 1)"
   if [ -n "$mac" ] && [ -x "$HERE/check-guest-dhcp.sh" ]; then
-    "$HERE/check-guest-dhcp.sh" "$SERVER_IP" "$mac" "$NET_ID" || log "WARNING: the guest did not answer ARP in the DHCP namespace on tst19"
+    local check_net="$NET_ID"
+    [ "$MODE" = tenant ] && check_net="$TENANT_NET_ID"
+    "$HERE/check-guest-dhcp.sh" "$SERVER_IP" "$mac" "$check_net" || log "WARNING: the guest did not answer ARP in the DHCP namespace on tst19"
+  fi
+
+  local ssh_ip="$SERVER_IP"
+  if [ "$MODE" = tenant ]; then
+    # The DHCP namespace is on tst19 and the guest on a compute node, so the ARP answer above went through the
+    # VXLAN tunnel. The router namespace is the second hop.
+    local out n
+    out="$(orphera run sh -c "ip netns exec qrouter-$ROUTER_ID ping -c 3 -W 2 $SERVER_IP >/dev/null 2>&1 && echo router-reaches=\$(echo guest)" --nodes tst19 --timeout 60 2>&1)"
+    if printf '%s' "$out" | grep -qF "router-reaches=guest"; then log "the router namespace reaches the guest at $SERVER_IP"
+    else log "WARNING: the router namespace on tst19 cannot ping the guest at $SERVER_IP"; fi
+    for n in $(seq 1 20); do
+      [ "$(user_os floating ip show "$FLOATING_IP" -f value -c status)" = "ACTIVE" ] && break
+      sleep 3
+    done
+    if [ "$(user_os floating ip show "$FLOATING_IP" -f value -c status)" = "ACTIVE" ]; then log "floating IP $FLOATING_IP is ACTIVE (the L3 agent applied the NAT)"
+    else log "WARNING: floating IP $FLOATING_IP is not ACTIVE"; fi
+    ssh_ip="$FLOATING_IP"
   fi
 
   # scala0 may not be on the provider network's VLAN; this is a best effort.
   local i
   for i in 1 2 3 4 5; do
     if ssh -i "$KEY_FILE" -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new \
-         "ubuntu@$SERVER_IP" true 2>/dev/null; then
-      log "SSH to ubuntu@$SERVER_IP works from here"
+         "ubuntu@$ssh_ip" true 2>/dev/null; then
+      log "SSH to ubuntu@$ssh_ip works from here"
       return 0
     fi
     sleep 3
   done
-  log "no SSH from this machine to $SERVER_IP (scala0 may not be on the provider network); the checks above are the evidence"
+  log "no SSH from this machine to $ssh_ip (scala0 may not be on the provider network); the checks above are the evidence"
 }
 
 up() {
@@ -283,11 +380,22 @@ up() {
   ensure_project_and_user
   ensure_image
   ensure_flavor
+  decide_mode
   ensure_network
+  [ "$MODE" = tenant ] && ensure_tenant_network
   ensure_security_group
   ensure_keypair
   ensure_server
+  [ "$MODE" = tenant ] && ensure_floating_ip
   check_guest
+  local net_line ssh_line
+  if [ "$MODE" = tenant ]; then
+    net_line="$TENANT_NET ($TENANT_CIDR, VXLAN) behind $ROUTER, gateway on $NET_NAME ($CIDR)"
+    ssh_line="ssh -i $KEY_FILE ubuntu@$FLOATING_IP     (floating IP; from a machine on the provider network)"
+  else
+    net_line="$NET_NAME ($CIDR, DHCP)    flat mode: no router, no floating IP"
+    ssh_line="ssh -i $KEY_FILE ubuntu@$SERVER_IP     (from a machine on the provider network)"
+  fi
   cat <<EOF
 
 Environment ready.
@@ -297,9 +405,9 @@ Environment ready.
   Horizon    log in with domain Default, user $DEMO_USER, that password
   image      $IMAGE_NAME
   flavor     $FLAVOR
-  network    $NET_NAME ($CIDR, DHCP)    no router, no floating IP: this Neutron has no L3
+  network    $net_line
   server     $VM_NAME at $SERVER_IP
-  ssh        ssh -i $KEY_FILE ubuntu@$SERVER_IP     (from a machine on the provider network)
+  ssh        $ssh_line
 
 Remove it with:  utils/openstack-minimal-env.sh down [--all]
 EOF
@@ -317,6 +425,18 @@ down() {
       log "deleting server $VM_NAME"
       user_os server delete --wait "$VM_NAME" || log "WARNING: could not delete $VM_NAME"
     fi
+    local fip
+    for fip in $(user_os floating ip list -f value -c ID 2>/dev/null); do
+      log "deleting floating IP $fip"; user_os floating ip delete "$fip"
+    done
+    if exists user_os router show "$ROUTER"; then
+      log "deleting router $ROUTER"
+      user_os router remove subnet "$ROUTER" "$TENANT_SUBNET" 2>/dev/null
+      user_os router unset --external-gateway "$ROUTER" 2>/dev/null
+      user_os router delete "$ROUTER" || log "WARNING: could not delete router $ROUTER"
+    fi
+    exists user_os subnet show "$TENANT_SUBNET" && { log "deleting subnet $TENANT_SUBNET"; user_os subnet delete "$TENANT_SUBNET"; }
+    exists user_os network show "$TENANT_NET" && { log "deleting network $TENANT_NET"; user_os network delete "$TENANT_NET"; }
     exists user_os keypair show "$KEY_NAME" && { log "deleting key pair $KEY_NAME"; user_os keypair delete "$KEY_NAME"; }
     exists user_os security group show "$SG_NAME" && { log "deleting security group $SG_NAME"; user_os security group delete "$SG_NAME"; }
   fi

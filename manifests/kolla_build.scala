@@ -82,6 +82,7 @@ object kolla_build extends OrpheraClusterPlaybook:
     "neutron-server",
     "neutron-openvswitch-agent",
     "neutron-dhcp-agent",
+    "neutron-l3-agent",
     "openvswitch-db-server",
     "openvswitch-vswitchd",
     "cinder-api",

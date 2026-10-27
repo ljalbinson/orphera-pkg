@@ -4,15 +4,18 @@
 # DRAFT end-to-end test for neutron_single_node.scala.
 #
 # Applies the playbook, then checks independently of its own health check:
-#  - the three Neutron units (server, Open vSwitch agent, DHCP agent) are active,
+#  - the four Neutron units (server, Open vSwitch agent, DHCP agent, L3 agent) are active,
 #  - the provider NIC (enp2s0) has no IPv4 address and is a port of br-provider,
 #    while the management NIC (enp1s0) still has its address,
 #  - the API answers its version document on 9696 without a token,
 #  - an unauthenticated request to a protected path is refused (401),
-#  - the Open vSwitch and DHCP agents are alive according to the API (RabbitMQ and
+#  - the Open vSwitch, DHCP and L3 agents are alive according to the API (RabbitMQ and
 #    the database both work),
 #  - a flat provider network and a subnet can be created, read back and deleted
 #    (database round trip and the ML2 flat type driver),
+#  - a VXLAN tenant network, a router with its gateway on the external network and a
+#    floating IP can be made; the router and its ports go ACTIVE (the L3 agent works);
+#    everything is removed again,
 #  - Neutron is in the Keystone catalog (service type `network`),
 #  - Nova (tst14) and Glance (tst13) still answer, so nothing collided,
 #  - a second run of the playbook succeeds (idempotence).
@@ -35,7 +38,7 @@ PASS=0
 FAIL=0
 
 log() { printf '[%s] %s\n' "$(date +%H:%M:%S)" "$1"; }
-run_on() { orphera run sh -c "$1" --nodes "$NODE" 2>&1; }
+run_on() { orphera run sh -c "$1" --nodes "$NODE" --timeout "${RUN_TIMEOUT:-120}" 2>&1; }
 
 assert_contains() {
   local desc="$1" needle="$2" haystack="$3"
@@ -55,7 +58,7 @@ if [ -z "${NO_APPLY:-}" ]; then
   fi
 fi
 
-for u in neutron-server neutron-openvswitch-agent neutron-dhcp-agent; do
+for u in neutron-server neutron-openvswitch-agent neutron-dhcp-agent neutron-l3-agent; do
   OUT=$(run_on "systemctl is-active orphera-$u")
   assert_contains "orphera-$u is active" "active" "$OUT"
 done
@@ -84,8 +87,9 @@ assert_contains "a protected path refuses a request without a token" "http=401" 
 OUT=$(run_on "sudo $HELPER agents")
 assert_contains "the API lists neutron-openvswitch-agent" "agent neutron-openvswitch-agent" "$OUT"
 assert_contains "the API lists neutron-dhcp-agent" "agent neutron-dhcp-agent" "$OUT"
+assert_contains "the API lists neutron-l3-agent" "agent neutron-l3-agent" "$OUT"
 OUT=$(run_on "sudo $HELPER agents-up")
-assert_contains "both agents are alive (RabbitMQ and database work)" "are alive" "$OUT"
+assert_contains "the three agents are alive (RabbitMQ and database work)" "neutron-l3-agent are alive" "$OUT"
 
 OUT=$(run_on "sudo $HELPER net-create")
 NID=$(printf '%s\n' "$OUT" | grep -Eo '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | tail -1)
@@ -98,6 +102,11 @@ else
   OUT=$(run_on "sudo $HELPER net-delete $NID")
   assert_contains "network deleted, then gone (404)" "deleted $NID" "$OUT"
 fi
+
+# The tenant cycle needs an external network. If the flat network on the provider physical network exists
+# and is not external, it says so; mark it with: openstack network set --external <name>
+OUT=$(RUN_TIMEOUT=300 run_on "sudo $HELPER tenant-cycle")
+assert_contains "a VXLAN network, a router with a gateway and a floating IP were made and removed" "tenant cycle ok: vxlan segment" "$OUT"
 
 OUT=$(run_on "sudo $HELPER catalog")
 assert_contains "the catalog lists service type network" "network" "$OUT"

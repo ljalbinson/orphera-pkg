@@ -5,7 +5,7 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 
 // DRAFT. Undoes neutron_single_node.scala: removes Neutron from Keystone (service
 // `network`, its endpoints, user `neutron`) through the helper installed by the main
-// playbook if it is still there, removes the three containers, units, config, state
+// playbook if it is still there, removes the four containers, units, config, state
 // and helper on tst19, deletes the Open vSwitch bridges br-provider and br-int (the
 // provider NIC goes back to being an ordinary, address-less port), drops the
 // neutron database and user, and removes the `neutron` vhost and user from RabbitMQ
@@ -25,7 +25,7 @@ object neutron_teardown extends OrpheraClusterPlaybook:
     """if [ -x /usr/local/sbin/orphera-neutron-api ]; then
       |  /usr/local/sbin/orphera-neutron-api unregister || echo "keystone cleanup failed (continuing)"
       |fi
-      |for u in neutron-server neutron-openvswitch-agent neutron-dhcp-agent; do
+      |for u in neutron-server neutron-openvswitch-agent neutron-dhcp-agent neutron-l3-agent; do
       |  systemctl disable --now orphera-$u 2>/dev/null || true
       |  rm -f /etc/systemd/system/orphera-$u.service
       |  if command -v podman >/dev/null 2>&1; then podman rm -f $u 2>/dev/null || true; fi
@@ -35,7 +35,7 @@ object neutron_teardown extends OrpheraClusterPlaybook:
       |  ovs-vsctl --if-exists del-br br-provider || true
       |  ovs-vsctl --if-exists del-br br-int || true
       |fi
-      |rm -rf /etc/kolla/neutron /etc/kolla/neutron-server /etc/kolla/neutron-openvswitch-agent /etc/kolla/neutron-dhcp-agent /etc/kolla/neutron-ca
+      |rm -rf /etc/kolla/neutron /etc/kolla/neutron-server /etc/kolla/neutron-openvswitch-agent /etc/kolla/neutron-dhcp-agent /etc/kolla/neutron-l3-agent /etc/kolla/neutron-ca
       |rm -rf /var/lib/orphera/neutron /var/log/kolla/neutron
       |rm -f /usr/local/sbin/orphera-neutron-api
       |echo "neutron containers, units, bridges, config and state removed"""".stripMargin
