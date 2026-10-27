@@ -474,7 +474,9 @@ NODE_IP = '@@NODEIP@@'
 ADMIN_PW = '@@ADMINPW@@'
 MANILA_PW = '@@MANILAPW@@'
 CTX = ssl.create_default_context(cafile='@@CA@@')
-VERSION = {'X-OpenStack-API-Version': 'shared-file-system 2.45'}
+# Manila's own header is the one older releases read; the generic one is for newer releases. Without a
+# version the API serves 2.0, which has no /services and a different access call (404).
+VERSION = {'X-OpenStack-Manila-API-Version': '2.45', 'X-OpenStack-API-Version': 'shared-file-system 2.45'}
 TYPE_NAME = 'default_share_type'
 MOUNT_DIR = '/mnt/orphera-manila-test'
 
