@@ -205,7 +205,13 @@ def register():
             die('creating user rgw failed: HTTP %s %s' % (s, p))
         user = p['user']
     else:
-        call('PATCH', KS + '/users/' + user['id'], {'user': {'password': RGW_PW}}, token)
+        # Setting a password makes Keystone revoke every token the user holds. RGW keeps its admin token and
+        # does not renew it on the s3tokens path, so S3 requests then fail until RGW restarts. Only set the
+        # password when the current one does not work.
+        probe = {'auth': {'identity': {'methods': ['password'], 'password': {'user': {'name': 'rgw', 'domain': {'name': 'Default'}, 'password': RGW_PW}}}}}
+        status, _, _ = call('POST', KS + '/auth/tokens', probe)
+        if status != 201:
+            call('PATCH', KS + '/users/' + user['id'], {'user': {'password': RGW_PW}}, token)
     admin_role = find(token, '/roles?name=admin', 'roles')
     if admin_role is None:
         die('role admin not found')
