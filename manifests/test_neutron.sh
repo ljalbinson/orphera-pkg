@@ -93,7 +93,10 @@ assert_contains "the three agents are alive (RabbitMQ and database work)" "neutr
 
 OUT=$(run_on "sudo $HELPER net-create")
 NID=$(printf '%s\n' "$OUT" | grep -Eo '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | tail -1)
-if [ -z "$NID" ]; then
+if [ -z "$NID" ] && printf '%s' "$OUT" | grep -qF 'already exists (only one is allowed)'; then
+  # The flat network of the demo environment (utils/openstack-minimal-env.sh) is on the physical network.
+  log "SKIP: a flat network already exists on the provider physical network, so a second cannot be made"
+elif [ -z "$NID" ]; then
   log "FAIL: network create returned no id"; printf '%s\n' "$OUT" | sed 's/^/    /'; FAIL=$((FAIL + 1))
 else
   log "PASS: flat provider network $NID and a subnet created and read back"; PASS=$((PASS + 1))
