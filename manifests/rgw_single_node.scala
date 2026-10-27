@@ -387,7 +387,9 @@ if __name__ == '__main__':
   // daemon is restarted only when the hash of spec + options differs from the last applied one.
   private val rgwScript: String =
     val sets = rgwOptions
-      .map((k, v) => s"cephadm shell -- ceph config set client.rgw.$serviceId $k '$v'")
+      .map((k, v) =>
+        s"cephadm shell -- ceph config set client.rgw.$serviceId $k '$v'"
+      )
       .mkString("\n       |")
     val hashInput = rgwOptions.map((k, v) => s"$k=$v").mkString("\n")
     s"""set -e
