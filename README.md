@@ -2006,6 +2006,13 @@ Keystone's test CA, and writes `~/.config/openstack/admin-openrc.sh`:
     openstack volume service list
     deactivate-openstack
 
+`utils/openstack-minimal-env.sh` then builds a small working environment with those clients and boots Ubuntu 26.04 in it:
+a project and user (`demo`, password in the secret store as `demo/user-password`), the Ubuntu 26.04 cloud image
+(downloaded, checksum verified, uploaded to Glance), a flavor, the flat provider network and its subnet, a security group
+for SSH and ping, a key pair and a server on the provider network. There is no router and no floating IP, because this
+Neutron has no L3 agent or tenant networks yet. It is safe to re-run, and `utils/openstack-minimal-env.sh down [--all]`
+removes it. While the provider network exists, the CirrOS boot test cannot make its own flat network.
+
 Worth knowing:
 
 - **Test credentials are hard-coded** in the manifests (admin, database,

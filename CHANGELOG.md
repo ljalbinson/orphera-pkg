@@ -7,6 +7,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- `utils/openstack-minimal-env.sh`: builds a minimum OpenStack environment and boots Ubuntu 26.04 in it (project and user `demo`, the
+  Ubuntu 26.04 image from cloud-images.ubuntu.com with its checksum verified, a flavor, the flat provider network and subnet, a security
+  group, a key pair and a server), checks that the guest booted, and removes it again with `down [--all]`. No router or floating IP: Neutron
+  has no L3 agent or tenant networks yet. Not yet run: the first run on scala0 is its first test.
 - Build the Kolla images from source: `manifests/kolla_build.scala` sets up tst21 (new in `inventory.yaml` and `config/tst21.yaml`) with
   kolla-build, a writable registry, a cache of the OpenStack source tarballs, a devpi pip cache, the apt cache and a local copy of the
   Ubuntu base image, and the `orphera-kolla-build` helper (`status`, `sources [refresh]`, `build [--refresh] [image ...]`). The OpenStack
