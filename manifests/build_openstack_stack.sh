@@ -29,6 +29,9 @@
 #                        also makes the CephFS filesystem and the NFS cluster on tst0; RabbitMQ vhost on tst10)
 #   rgw      tst0        rgw_single_node (object storage: the Ceph RADOS Gateway with the Swift and S3 APIs,
 #                        authenticated by Keystone; a cephadm service, no new VM)
+#   octavia  tst19       octavia_single_node (load balancing: API, worker, health manager, housekeeping with the
+#                        Amphora provider; makes the amphora network, flavor and test image, a port for the
+#                        health manager on br-int, and certificates; RabbitMQ vhost on tst10)
 #   designate tst16      designate_single_node (DNS as a service: API, central, worker, producer, mdns and
 #                        a BIND9 name server; RabbitMQ vhost on tst10)
 #   clients  scala0      utils/openstack-client-setup.sh
@@ -52,7 +55,7 @@
 #   --with-caches   build the apt cache, point the Ubuntu nodes at it, and
 #                   build the Kolla image cache first (tst9, tst11 required)
 #   --from STEP     start at STEP (prep caches ceph galera keystone cinder glance
-#                   placement nova neutron compute horizon designate heat barbican manila rgw clients smoke boot) - for resuming
+#                   placement nova neutron compute horizon designate heat barbican manila rgw octavia clients smoke boot) - for resuming
 #                   after a failure
 #   --only STEP     run just that one step
 #   --list          print the plan and exit
@@ -67,7 +70,7 @@ cd "$(dirname "$0")/.." || exit 1
 . utils/orphera-sources.sh
 CONF_DIR=$(config_dir) || exit 1
 
-ALL_STEPS=(prep caches ceph galera keystone cinder glance placement nova neutron compute horizon designate heat barbican manila rgw clients smoke boot)
+ALL_STEPS=(prep caches ceph galera keystone cinder glance placement nova neutron compute horizon designate heat barbican manila rgw octavia clients smoke boot)
 WITH_CACHES=""
 FROM=""
 ONLY=""
@@ -350,6 +353,17 @@ step_rgw() {
   check "an object is made through the Swift API with a Keystone token" contains "swift cycle ok" "$out"
   out=$(run_on tst0 "sudo /usr/local/sbin/orphera-rgw-api s3-cycle")
   check "an object is made through the S3 API with EC2 credentials" contains "s3 cycle ok" "$out"
+}
+
+step_octavia() {
+  playbook octavia_single_node.scala
+  local out
+  out=$(run_on tst19 "curl -s -o /dev/null -w 'http=%{http_code}' http://localhost:9876/")
+  check "the Octavia API answers its version document" contains "http=200" "$out"
+  out=$(run_on tst19 "sudo /usr/local/sbin/orphera-octavia-api providers")
+  check "the amphora provider is listed" contains "providers: amphora" "$out"
+  out=$(orphera run sh -c "sudo /usr/local/sbin/orphera-octavia-api lb-cycle" --nodes tst19 --timeout 1800 2>&1)
+  check "a load balancer answers an HTTP request through its amphora" contains "lb cycle ok" "$out"
 }
 
 step_clients() {

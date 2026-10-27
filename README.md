@@ -1851,7 +1851,7 @@ Fleet layout used by these manifests (see `inventory.yaml`):
 | tst11 | apt cache (apt-cacher-ng) for the Ubuntu nodes |
 | tst12 | rpm cache (nginx caching mirror of Rocky/EPEL) for the Rocky nodes |
 | tst13 | Glance (glance-api, images in Ceph pool `images`) Placement (port 8780) and Horizon (port 8080) |
-| tst19 | Neutron (server, Open vSwitch, DHCP and L3 agents): VXLAN tenant networks, routers and floating IPs, and the flat provider network on its second NIC (br-net106, no address) |
+| tst19 | Neutron (server, Open vSwitch, DHCP and L3 agents): VXLAN tenant networks, routers and floating IPs, and the flat provider network on its second NIC (br-net106, no address); also Octavia (API on 9876, worker, health manager, housekeeping) with the port `o-hm0` on br-int |
 | tst14 | Nova control plane (API on 8774, scheduler, conductor, noVNC proxy on 6080); RabbitMQ vhost `nova` on tst10 |
 | tst20 | Heat (API on 8004, CloudFormation API on 8000, engine) and Barbican (API on 9311, worker); RabbitMQ vhosts `heat` and `barbican` on tst10 |
 | tst16 | Designate (API on 9001, central, worker, producer, mdns on 5354) and a BIND9 name server on port 53; RabbitMQ vhost `designate` on tst10 |
@@ -1941,6 +1941,28 @@ is made for you. Access is by client IP. After it is up, with the CLI (`python-m
 Manila images need `orphera-kolla-build sources refresh` and a build of `manila-api manila-scheduler manila-share` on tst21 (an existing
 `/etc/kolla-build/images.txt` is not rewritten; add the three names), or they come from quay.io. Share migration and backups (the data
 service) and shares with their own network (driver-handled share servers) are not set up. The playbook and its test have not been run.
+
+**Load balancing** (`manifests/octavia_single_node.scala`, undone by `octavia_teardown.scala`, checked by `test_octavia.sh`) is Octavia with the
+Amphora provider on tst19: the API (9876), the worker, the health manager and housekeeping as Kolla containers. Each load balancer is a small VM
+running HAProxy, booted by Nova from an image tagged `amphora`. The controller reaches the amphorae on the VXLAN network `lb-mgmt-net`
+(192.168.200.0/24, project `service`) through a port, `o-hm0`, that the playbook plugs into `br-int` on tst19; the amphorae send their
+heartbeats to the health manager at that port's address. The playbook downloads the Octavia project's **test** amphora image on tst19 (if
+tst19 cannot reach tarballs.opendev.org, put the file at `/var/lib/orphera/octavia/amphora.qcow2`), makes the certificate authorities with
+openssl (kept in `/etc/kolla/octavia/certs`; the passphrase is the secret `octavia/ca-passphrase`) and checks itself with a real load balancer.
+After it is up, with the CLI (`python-octaviaclient`), on a tenant network with a subnet:
+
+    source ~/.config/openstack/admin-openrc.sh
+    openstack loadbalancer create --name lb1 --vip-subnet-id <subnet>
+    openstack loadbalancer show lb1          # wait for provisioning_status ACTIVE (a few minutes: it boots a VM)
+    openstack loadbalancer listener create --name l1 --protocol HTTP --protocol-port 80 lb1
+    openstack loadbalancer pool create --name p1 --lb-algorithm ROUND_ROBIN --listener l1 --protocol HTTP
+    openstack loadbalancer member create --subnet-id <subnet> --address <backend ip> --protocol-port 80 p1
+
+Users other than admin need the role `load-balancer_member` in their project (the playbook creates the roles). A floating IP can be
+attached to the load balancer's VIP port. The Octavia images need `orphera-kolla-build sources refresh` and a build of `octavia-api
+octavia-worker octavia-health-manager octavia-housekeeping` on tst21 (an existing `/etc/kolla-build/images.txt` is not rewritten; add the
+four names), or they come from quay.io. Not set up: the Horizon dashboard for Octavia, TLS-terminated listeners (Barbican), active-standby
+topology, availability zones. The playbook and its test have not been run.
 
 **Object storage** (`manifests/rgw_single_node.scala`, undone by `rgw_teardown.scala`, checked by `test_rgw.sh`) is the Ceph RADOS Gateway with
 Keystone as its identity service. It is a cephadm service on the existing Ceph cluster (one daemon on tst0, `http://10.10.5.12:8080`), so it needs

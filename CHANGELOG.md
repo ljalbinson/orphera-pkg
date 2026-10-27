@@ -7,6 +7,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- Load balancing: `manifests/octavia_single_node.scala` runs Octavia (API on 9876, worker, health manager, housekeeping; the Amphora
+  provider) as Kolla containers on tst19, with the database on Galera and an `octavia` vhost on RabbitMQ (tst10), and registers service type
+  `load-balancer`, the user `octavia` and the five `load-balancer_*` roles in Keystone. It also makes, in project `service`, the VXLAN network
+  `lb-mgmt-net` (192.168.200.0/24), two security groups, the flavor `orphera.amphora` and a Neutron port for the health manager that
+  `orphera-octavia-hm-port.service` plugs into `br-int` as `o-hm0`; downloads the Octavia project's test amphora image
+  (`test-only-amphora-x64-haproxy-ubuntu-noble.qcow2`) on the node and uploads it to Glance with the tag `amphora`; and makes its own server
+  and client certificate authorities with openssl. `octavia_teardown.scala` undoes it, `test_octavia.sh` checks it, including a load
+  balancer whose address answers an HTTP request through its amphora, and `build_openstack_stack.sh` has an `octavia` step after `rgw`. New
+  secrets: `octavia/db`, `octavia/service`, `octavia/rabbit`, `octavia/ca-passphrase`, `octavia/heartbeat-key` (in `rotate-lab-secrets.sh`).
+  `python-octaviaclient` is installed by `openstack-client-setup.sh`, and the Kolla builder's default list has the four Octavia images
+  (append them to an existing `/etc/kolla-build/images.txt`, then `sources refresh`). The test image is for tests only. Not yet run: the
+  first run on scala0 is the first compile.
 - Tenant networking: `neutron_single_node.scala` now has the router service plugin, VXLAN tenant networks (VNI 1-1000, `l2population`, the
   node's management address as tunnel endpoint) and a fourth container, `neutron-l3-agent` (legacy routers, no metadata proxy), so routers
   and floating IPs work with the flat provider network as the external network. `nova_compute.scala` gives the compute nodes' Open vSwitch
