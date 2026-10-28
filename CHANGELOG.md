@@ -7,6 +7,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- Telemetry (Ceilometer and Aodh) on a new VM, tst24 (`config/tst24.yaml`, 10.10.5.36, on gs3, 2 vCPU, 4096 MiB), with the Prometheus on tst7 as the
+  metrics store. `manifests/telemetry_single_node.scala` runs ceilometer-central, a Prometheus Pushgateway (9091), aodh-api (8042, Apache),
+  aodh-evaluator and aodh-notifier as containers on tst24, and ceilometer-compute on tst17 and tst18 (libvirt through `/run/libvirt`). Each agent
+  pushes to the Pushgateway in its own group; Prometheus scrapes it through `/etc/prometheus/scrape.d/openstack-telemetry.yml`. The helper
+  `orphera-telemetry-api` registers Aodh (`alarming`), Prometheus (`prometheus`) and the users `aodh` and `ceilometer` in Keystone, and checks
+  that Ceilometer series reach Prometheus and that two PromQL alarms reach the states alarm and ok. `telemetry_teardown.scala` undoes it and
+  `test_telemetry.sh` checks it. New secrets: `aodh/db`, `aodh/service`, `aodh/rabbit`, `ceilometer/service`, `ceilometer/rabbit`. The images are
+  in the Kolla build list. The notification agent and the Aodh listener are not run (no service publishes notifications yet). The playbook
+  and its test have not been run.
+- `observability_stack.scala` and `observability_extended.scala` write `scrape_config_files: /etc/prometheus/scrape.d/*.yml` into
+  `prometheus.yml` (and make the directory), so a scrape job kept in a separate file survives their whole-file rewrites; this needs Prometheus 2.43
+  or later. `test_observability_stack.sh` ignores the `pushgateway` job.
 - `utils/scan-vm-sizes.sh` compares every VM's CPU and memory three ways: the config file (`cpu:` and `memory:`), libvirt on the hypervisor
   (`virsh dominfo`, with the VM's state) and the running guest (`nproc` and `MemTotal`, accepted from `GUEST_MEM_MIN_PCT`, default 88, up to the
   configured size). It prints one row per VM with totals, lists VMs that libvirt has but no config file describes, and exits 1 on any

@@ -94,7 +94,7 @@ log "OpenStack done in $(( $(date +%s) - S ))s"
 FAILED=""
 if [ -n "$TESTS" ]; then
   log "--- step 3: test scripts ---"
-  for t in keystone cinder glance placement nova neutron nova_compute horizon designate heat barbican manila rgw octavia magnum; do
+  for t in keystone cinder glance placement nova neutron nova_compute horizon designate heat barbican manila rgw octavia magnum telemetry; do
     if "$HERE/test_$t.sh" >"/tmp/rebuild-test-$t.log" 2>&1; then log "PASS: test_$t.sh"
     else log "FAIL: test_$t.sh (output: /tmp/rebuild-test-$t.log)"; FAILED="$FAILED $t"; fi
   done

@@ -108,7 +108,12 @@ object kolla_build extends OrpheraClusterPlaybook:
     "octavia-health-manager",
     "octavia-housekeeping",
     "magnum-api",
-    "magnum-conductor"
+    "magnum-conductor",
+    "ceilometer-central",
+    "ceilometer-compute",
+    "aodh-api",
+    "aodh-evaluator",
+    "aodh-notifier"
   )
 
   private val projects =
@@ -126,7 +131,9 @@ object kolla_build extends OrpheraClusterPlaybook:
       "barbican",
       "manila",
       "octavia",
-      "magnum"
+      "magnum",
+      "ceilometer",
+      "aodh"
     )
 
   private val hostPackages = List(

@@ -1856,6 +1856,7 @@ Fleet layout used by these manifests (see `inventory.yaml`):
 | tst20 | Heat (API on 8004, CloudFormation API on 8000, engine) and Barbican (API on 9311, worker); RabbitMQ vhosts `heat` and `barbican` on tst10 |
 | tst16 | Designate (API on 9001, central, worker, producer, mdns on 5354) and a BIND9 name server on port 53; RabbitMQ vhost `designate` on tst10 |
 | tst22 | Manila (API on 8786, scheduler, share service) with CephFS exported over NFS-Ganesha (on tst0) as the backend; RabbitMQ vhost `manila` on tst10 |
+| tst24 | Telemetry: Ceilometer central agent, Pushgateway (9091) and Aodh (API on 8042, evaluator, notifier); the compute agents run on tst17 and tst18; metrics are stored by the Prometheus on tst7; RabbitMQ vhosts `aodh` and `ceilometer` on tst10 |
 | tst21 | Kolla image builder: builds the images from source, with a source tarball cache, a pip cache, and a writable registry on port 5000 |
 | tst17, tst18 | Compute nodes (nova-compute on KVM, Neutron Open vSwitch agent; second NIC is the provider port); VMs on gs2 with nested KVM |
 
@@ -1972,6 +1973,26 @@ load balancer is an amphora) and compute capacity for a control-plane node, a wo
 `openstack coe cluster create demo --cluster-template orphera-k8s --master-count 1 --node-count 1 --keypair orphera-magnum`; when it is
 `CREATE_COMPLETE`, `openstack coe cluster config demo` writes a kubeconfig. Two settings matter in this lab: the template's DNS server
 (`MAGNUM_DNS`, default 192.168.1.70) has to resolve the Keystone name, and the addon provider is pinned to 0.15.1 (see the CHANGELOG).
+
+**Telemetry** (`manifests/telemetry_single_node.scala`, undone by `telemetry_teardown.scala`, checked by `test_telemetry.sh`) is Ceilometer and Aodh
+on a new VM, tst24 (`config/tst24.yaml`, 10.10.5.36), with the existing Prometheus on tst7 as the metrics store; Gnocchi is not used. The Ceilometer
+central agent (tst24) and the compute agents (tst17, tst18, reading libvirt) poll every 60 s and push their samples with the `prometheus://`
+publisher to a Pushgateway on tst24, each agent in its own group (`job="ceilometer"`, `instance="<node>"`). Prometheus scrapes the Pushgateway
+through `/etc/prometheus/scrape.d/openstack-telemetry.yml`, which `scrape_config_files` in `prometheus.yml` names (needs Prometheus 2.43 or later;
+`observability_stack.scala` and `observability_extended.scala` now write that line, so re-running them keeps the job). A series is named after the
+meter with the label `resource_id`, for example `memory_usage{resource_id="<server id>"}` or `image_size{resource_id="<image id>"}`. Aodh runs
+PromQL alarms against that Prometheus, which it finds in the Keystone catalog as service type `prometheus` (registered by the playbook):
+
+    source ~/.config/openstack/admin-openrc.sh
+    openstack alarm create --name mem-high --type prometheus --query 'memory_usage{resource_id="<server id>"} > 3000' \
+      --comparison-operator gt --threshold 0
+    openstack alarm list
+
+Not set up: the Ceilometer notification agent and the Aodh listener, which
+need the services to publish notifications (`[oslo_messaging_notifications] driver = messagingv2` in each service), so there are no event alarms
+and no event data yet; billing (the Prometheus publisher sends no timestamps). The Ceilometer and Aodh images need `orphera-kolla-build sources
+refresh` and a build of `ceilometer-central ceilometer-compute aodh-api aodh-evaluator aodh-notifier` on tst21, or they come from quay.io. The
+playbook and its test have not been run.
 
 **Object storage** (`manifests/rgw_single_node.scala`, undone by `rgw_teardown.scala`, checked by `test_rgw.sh`) is the Ceph RADOS Gateway with
 Keystone as its identity service. It is a cephadm service on the existing Ceph cluster (one daemon on tst0, `http://10.10.5.12:8080`), so it needs
