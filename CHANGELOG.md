@@ -10,7 +10,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `utils/scan-vm-sizes.sh` compares every VM's CPU and memory three ways: the config file (`cpu:` and `memory:`), libvirt on the hypervisor
   (`virsh dominfo`, with the VM's state) and the running guest (`nproc` and `MemTotal`, accepted from `GUEST_MEM_MIN_PCT`, default 88, up to the
   configured size). It prints one row per VM with totals, lists VMs that libvirt has but no config file describes, and exits 1 on any
-  difference or unreachable hypervisor. Read-only. Run on a simulated `orphera`; not yet run on the lab.
+  difference or unreachable hypervisor. Read-only. Run on the lab: all 26 VMs agree (it found tst23 at 8192 MiB in libvirt against 6144 in its config, since corrected).
 - Magnum (Kubernetes clusters as a service, Cluster API Helm driver), in two playbooks on tst23. Run on the lab: `test_magnum.sh` 12 of 12,
   and two complete cycles of a real cluster (one control-plane node, one worker) made through Magnum, queried at its API address and deleted.
   - `manifests/capi_management_cluster.scala` makes the Cluster API management cluster: single-node k3s, Cluster API, CAPO, ORC
