@@ -7,19 +7,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
-- Magnum, part 1: `manifests/capi_management_cluster.scala` makes a Cluster API management cluster on tst23 (single-node k3s, Cluster API,
-  CAPO, cert-manager, the Azimuth addon provider and OpenStack janitor, helm, clusterctl) and a kubeconfig for Magnum's Cluster API Helm driver.
-  Versions are not pinned by default and are recorded in `/var/lib/orphera/capi/versions.txt`; `K3S_VERSION`, `CAPI_VERSION`, `CAPO_VERSION`,
-  `ADDON_PROVIDER_VERSION` (default 0.15.1) and `JANITOR_VERSION` pin them. It also installs ORC (`ORC_VERSION`, default v2.0.3), which CAPO needs and clusterctl does not install, and checks that the CAPO webhook has an endpoint. `capi_management_cluster_teardown.scala` undoes it and
-  `test_capi_management_cluster.sh` checks it. Not yet run.
-- Magnum, part 2: `manifests/magnum_single_node.scala` runs magnum-api (9511) and magnum-conductor as Kolla containers on tst23 with the
-  Cluster API Helm driver (`magnum-capi-helm`, installed with helm into two locally built images), the database on Galera and a `magnum`
-  vhost on RabbitMQ. It registers service type `container-infra`, the user `magnum` and the trustee domain `magnum` in Keystone, passes
-  Keystone's CA to the driver, makes the flavor `orphera.k8s`, uploads a Kubernetes node image (Azimuth manifest; `K8S_VERSION`,
-  `K8S_MINOR`, `K8S_IMAGE_URL` choose it), makes the template `orphera-k8s` and checks itself with a real cluster. `MAGNUM_CHART_VERSION`
-  (default 0.26.0), `MAGNUM_DNS` and `MAGNUM_CAPI_HELM_SPEC` are overridable. `magnum_teardown.scala` undoes it, `test_magnum.sh` checks it.
-  Also: secrets `magnum/*` in `rotate-lab-secrets.sh`, `python-magnumclient` in the client setup, the Magnum images in `kolla_build.scala`,
-  a `magnum` step in `build_openstack_stack.sh`. Not compiled or run yet.
+- Magnum (Kubernetes clusters as a service, Cluster API Helm driver), in two playbooks on tst23. Run on the lab: `test_magnum.sh` 12 of 12,
+  and two complete cycles of a real cluster (one control-plane node, one worker) made through Magnum, queried at its API address and deleted.
+  - `manifests/capi_management_cluster.scala` makes the Cluster API management cluster: single-node k3s, Cluster API, CAPO, ORC
+    (`ORC_VERSION`, default v2.0.3; CAPO needs its CRDs and clusterctl does not install it), cert-manager, the Azimuth addon provider and
+    OpenStack janitor, helm and clusterctl, and a kubeconfig for the driver. It checks that the CAPO webhook has an endpoint. Versions are
+    recorded in `/var/lib/orphera/capi/versions.txt`; `K3S_VERSION`, `CAPI_VERSION`, `CAPO_VERSION`, `ADDON_PROVIDER_VERSION` and
+    `JANITOR_VERSION` pin them. The addon provider defaults to 0.15.1: 0.16.x installs add-ons with Helm 4, which waits for custom resources to
+    become ready, and the NVIDIA GPU operator's `ClusterPolicy` never does on a cluster without GPUs or a Prometheus `ServiceMonitor` CRD, so
+    every Magnum cluster stayed in `CREATE_IN_PROGRESS`. `capi_management_cluster_teardown.scala` undoes it and
+    `test_capi_management_cluster.sh` checks it (14 of 14).
+  - `manifests/magnum_single_node.scala` runs magnum-api (9511) and magnum-conductor as Kolla containers with the database on Galera and a
+    `magnum` vhost on RabbitMQ. It registers service type `container-infra`, the user `magnum` and the trustee domain `magnum` in Keystone,
+    passes Keystone's CA to the driver, makes the flavor `orphera.k8s`, uploads a Kubernetes node image (Azimuth manifest; `K8S_VERSION`,
+    `K8S_MINOR` or `K8S_IMAGE_URL` choose it), makes the template `orphera-k8s` and checks itself with a real cluster.
+    `magnum-capi-helm` and helm are installed into a host directory that the containers mount, with `PYTHONPATH` set (`podman build` and
+    `podman commit` both failed on the Kolla images). The Kolla image also contains the other Cluster API driver, `magnum_cluster_api`;
+    it fails without a kubeconfig, so its five entry points are listed in `[drivers] disabled_drivers`. `MAGNUM_DNS` (default 192.168.1.70,
+    the lab resolver) must resolve the Keystone name: with 1.1.1.1 the cluster's cloud controller could not reach Keystone and nodes never
+    got a provider ID. `MAGNUM_CHART_VERSION` (default 0.26.0) and `MAGNUM_CAPI_HELM_SPEC` are overridable. `magnum_teardown.scala` undoes
+    it and `test_magnum.sh` checks it.
+  - Also: secrets `magnum/*` in `rotate-lab-secrets.sh`, `python-magnumclient` in the client setup, the Magnum images in `kolla_build.scala`,
+    a `magnum` step in `build_openstack_stack.sh`, and `docs/orphera-lab-installed-items.xlsx`, an inventory of what is installed on every VM.
 - Load balancing: `manifests/octavia_single_node.scala` runs Octavia (API on 9876, worker, health manager, housekeeping; the Amphora
   provider) as Kolla containers on tst19, with the database on Galera and an `octavia` vhost on RabbitMQ (tst10), and registers service type
   `load-balancer`, the user `octavia` and the five `load-balancer_*` roles in Keystone. It also makes, in project `service`, the VXLAN network

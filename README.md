@@ -1970,7 +1970,8 @@ single-node k3s management cluster with Cluster API and the OpenStack provider; 
 Keystone, uploads a Kubernetes node image, and makes the flavor `orphera.k8s` and the template `orphera-k8s`. It needs Octavia (every cluster's API
 load balancer is an amphora) and compute capacity for a control-plane node, a worker and an amphora. With the CLI (`python-magnumclient`):
 `openstack coe cluster create demo --cluster-template orphera-k8s --master-count 1 --node-count 1 --keypair orphera-magnum`; when it is
-`CREATE_COMPLETE`, `openstack coe cluster config demo` writes a kubeconfig. Not yet run.
+`CREATE_COMPLETE`, `openstack coe cluster config demo` writes a kubeconfig. Two settings matter in this lab: the template's DNS server
+(`MAGNUM_DNS`, default 192.168.1.70) has to resolve the Keystone name, and the addon provider is pinned to 0.15.1 (see the CHANGELOG).
 
 **Object storage** (`manifests/rgw_single_node.scala`, undone by `rgw_teardown.scala`, checked by `test_rgw.sh`) is the Ceph RADOS Gateway with
 Keystone as its identity service. It is a cephadm service on the existing Ceph cluster (one daemon on tst0, `http://10.10.5.12:8080`), so it needs
