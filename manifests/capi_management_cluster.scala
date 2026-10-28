@@ -186,13 +186,20 @@ object capi_management_cluster extends OrpheraClusterPlaybook:
       stage("install-capi-management-cluster", node)
         .task("wait for apt and dpkg to be idle")(run(waitAptIdleScript, 960))
         .task("install curl and tar")(
-          Task.Install(packages = List("curl", "ca-certificates", "tar"), updateCache = true)
+          Task.Install(
+            packages = List("curl", "ca-certificates", "tar"),
+            updateCache = true
+          )
         )
         .task("install k3s")(run(k3sScript, 900))
         .task("install helm and clusterctl")(run(toolsScript, 600))
         .task("write the kubeconfig for Magnum")(run(kubeconfigScript))
-        .task("install Cluster API, CAPO and cert-manager")(run(capiScript, 1500))
-        .task("install the addon provider and the OpenStack janitor")(run(addonsScript, 1500))
+        .task("install Cluster API, CAPO and cert-manager")(
+          run(capiScript, 1500)
+        )
+        .task("install the addon provider and the OpenStack janitor")(
+          run(addonsScript, 1500)
+        )
         .task("check the management cluster")(run(checkScript, 120))
         .build
     )
