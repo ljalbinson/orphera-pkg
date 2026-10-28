@@ -2100,7 +2100,8 @@ Worth knowing:
   `boot-cleanup`) is installed on both nodes; `KEEP_BOOT=1` leaves the test instance behind for
   inspection. Teardown: `nova_compute_teardown.scala`.
 - **Utilities** in `utils/`: `list-vms.sh [hv...]` lists every VM on each hypervisor with state,
-  vCPUs and memory; `start-vm.sh <vm>...` starts VMs, finding each one's hypervisor and domain name in
+  vCPUs and memory; `scan-vm-sizes.sh [vm...]` compares each VM's CPU and memory in its config file, in libvirt
+  and inside the running guest, and exits 1 on a difference; `start-vm.sh <vm>...` starts VMs, finding each one's hypervisor and domain name in
   its `config/<vm>.yaml` (a shut-off VM is started, a paused one resumed, a running one left alone; it
   does not wait for the guest, `manifests/kvm_vm_start.scala` does); `stop-vm.sh [--wait s] [--force] <vm>...`
   shuts a VM down with `virsh shutdown` and waits until it is off (`--force` powers it off if it has not
