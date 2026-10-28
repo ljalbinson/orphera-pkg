@@ -23,7 +23,10 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 // environment variables when running the playbook (each empty means the newest):
 //   K3S_VERSION (e.g. v1.31.4+k3s1)   HELM_VERSION (default v3.16.4)
 //   CAPI_VERSION (e.g. v1.9.5)         CAPO_VERSION (e.g. v0.11.5)
-//   ADDON_PROVIDER_VERSION             JANITOR_VERSION                (chart versions)
+//   ADDON_PROVIDER_VERSION (default 0.15.1: 0.16.x installs add-ons with Helm 4, which waits for custom resources to
+//                           become ready; the NVIDIA GPU operator's ClusterPolicy never does on a cluster without
+//                           GPUs or a Prometheus ServiceMonitor CRD, so every Magnum cluster stalled in CREATE_IN_PROGRESS)
+//   JANITOR_VERSION                (chart version)
 //   ORC_VERSION                        (OpenStack Resource Controller, default v2.0.3; CAPO needs its CRDs)
 //
 // Network: the node needs to reach get.k3s.io, github.com (release downloads), ghcr.io, registry.k8s.io, quay.io and
@@ -50,7 +53,7 @@ object capi_management_cluster extends OrpheraClusterPlaybook:
   private val helmVersion = env("HELM_VERSION", "v3.16.4")
   private val capiVersion = env("CAPI_VERSION")
   private val capoVersion = env("CAPO_VERSION")
-  private val addonVersion = env("ADDON_PROVIDER_VERSION")
+  private val addonVersion = env("ADDON_PROVIDER_VERSION", "0.15.1")
   private val janitorVersion = env("JANITOR_VERSION")
   // ORC (OpenStack Resource Controller) is a separate project that CAPO v0.12 and later need; clusterctl does
   // not install it. Without its CRDs the CAPO controller crash-loops and its webhook has no endpoints.
