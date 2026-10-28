@@ -37,7 +37,7 @@ import orphera.orchestrator.kolla.*
 //     directly (then K8S_VERSION and K8S_OS_VERSION are needed too). Without any of them the newest in the
 //     manifest is taken, which may be newer than the chart supports; pin it if clusters do not build.
 //   - the public cluster template `orphera-k8s` (Calico, the provider network as the external network, DNS
-//     server MAGNUM_DNS, default 1.1.1.1)
+//     server MAGNUM_DNS, default 192.168.1.70, the lab resolver, which must resolve the Keystone name for the cluster's cloud controller)
 //
 // The Kolla image also contains the Cluster API driver of another project (magnum_cluster_api, entry points
 // k8s_cluster_api_*). Magnum instantiates every installed driver to validate a template, and that one fails
@@ -108,7 +108,7 @@ object magnum_single_node extends OrpheraClusterPlaybook:
     sys.env.get(name).map(_.trim).filter(_.nonEmpty).getOrElse(default)
 
   private val chartVersion = env("MAGNUM_CHART_VERSION", "0.26.0")
-  private val dnsServer = env("MAGNUM_DNS", "1.1.1.1")
+  private val dnsServer = env("MAGNUM_DNS", "192.168.1.70")
   private val capiHelmSpec = env("MAGNUM_CAPI_HELM_SPEC", "magnum-capi-helm")
   private val k8sVersion = env("K8S_VERSION")
   private val k8sMinor = env("K8S_MINOR")
@@ -565,11 +565,11 @@ def ensure_template(cl):
         die('template list failed: HTTP %s %s' % (s, p))
     for t in p.get('clustertemplates', []):
         if t.get('name') == TEMPLATE:
-            if t.get('image_id') == img['id']:
+            if t.get('image_id') == img['id'] and t.get('dns_nameserver') == DNS:
                 return t['uuid']
             s, _, _ = cl.m('DELETE', '/clustertemplates/' + t['uuid'])
             if s not in (204, 202):
-                die('the template %s uses another image and cannot be replaced (clusters use it): HTTP %s' % (TEMPLATE, s))
+                die('the template %s uses another image or DNS server and cannot be replaced (clusters use it): HTTP %s' % (TEMPLATE, s))
     ext = external_network(cl)
     body = {'name': TEMPLATE, 'image_id': img['id'], 'coe': 'kubernetes', 'external_network_id': ext['id'], 'flavor_id': FLAVOR_NAME, 'master_flavor_id': FLAVOR_NAME, 'dns_nameserver': DNS, 'network_driver': 'calico', 'public': True, 'master_lb_enabled': True, 'floating_ip_enabled': True, 'labels': {}}
     s, p, _ = cl.m('POST', '/clustertemplates', body)
@@ -639,6 +639,22 @@ def cluster_cycle():
             time.sleep(15)
 
 
+def delete_clusters():
+    cl = Clients()
+    s, p, _ = cl.m('GET', '/clusters')
+    for c in p.get('clusters', []) if s == 200 else []:
+        cl.m('DELETE', '/clusters/' + c['uuid'])
+        print('deleting cluster %s' % c['name'])
+    end = time.time() + 1800
+    while time.time() < end:
+        s, p, _ = cl.m('GET', '/clusters')
+        if s != 200 or not p.get('clusters'):
+            print('no clusters left')
+            return
+        time.sleep(15)
+    die('clusters are still there after 30 minutes')
+
+
 def unregister():
     token, _ = get_token('admin', ADMIN_PW, 'admin')
     service = find(token, '/services?type=container-infra', 'services')
@@ -697,10 +713,12 @@ if __name__ == '__main__':
         template()
     elif cmd == 'cluster-cycle':
         cluster_cycle()
+    elif cmd == 'delete-clusters':
+        delete_clusters()
     elif cmd == 'teardown':
         teardown()
     else:
-        die('usage: orphera-magnum-api register | unregister | catalog | mservices | resources | image-present | image-upload FILE KUBE_VERSION OS_VERSION | template | cluster-cycle | teardown')
+        die('usage: orphera-magnum-api register | unregister | catalog | mservices | resources | image-present | image-upload FILE KUBE_VERSION OS_VERSION | template | cluster-cycle | delete-clusters | teardown')
 """
 
   private val helperScript =
