@@ -146,9 +146,14 @@ object capi_management_cluster extends OrpheraClusterPlaybook:
       |export KUBECONFIG=@@STATE@@/kubeconfig
       |helm repo add azimuth-addon https://azimuth-cloud.github.io/cluster-api-addon-provider >/dev/null
       |helm repo add azimuth-janitor https://azimuth-cloud.github.io/cluster-api-janitor-openstack >/dev/null
-      |helm repo update >/dev/null || { echo "cannot reach azimuth-cloud.github.io" >&2; exit 1; }
-      |ADDON_ARGS=""; if [ -n "@@ADDON@@" ]; then ADDON_ARGS="--version @@ADDON@@"; fi
-      |JAN_ARGS=""; if [ -n "@@JANITOR@@" ]; then JAN_ARGS="--version @@JANITOR@@"; fi
+      |if ! helm repo update >/dev/null; then
+      |  echo 'cannot reach azimuth-cloud.github.io' >&2
+      |  exit 1
+      |fi
+      |ADDON_ARGS=
+      |JAN_ARGS=
+      |if [ -n '@@ADDON@@' ]; then ADDON_ARGS='--version @@ADDON@@'; fi
+      |if [ -n '@@JANITOR@@' ]; then JAN_ARGS='--version @@JANITOR@@'; fi
       |helm upgrade --install cluster-api-addon-provider azimuth-addon/cluster-api-addon-provider --namespace capi-addon-system --create-namespace $ADDON_ARGS --wait --timeout 10m
       |helm upgrade --install cluster-api-janitor-openstack azimuth-janitor/cluster-api-janitor-openstack --namespace capi-janitor-system --create-namespace $JAN_ARGS --wait --timeout 10m
       |{
