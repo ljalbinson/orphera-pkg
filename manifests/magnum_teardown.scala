@@ -7,7 +7,7 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 // there) it deletes every Magnum cluster (and waits for them to go), the cluster template, the flavor
 // orphera.k8s, the key pair, the Kubernetes node image, and removes Magnum from Keystone (service type
 // container-infra, its endpoints, user magnum, domain magnum). Then, on tst23, it stops and removes the two
-// containers and their units, the locally built driver images, the config and state (with the downloaded
+// containers and their units, the config and state (with the downloaded
 // image file); it drops the magnum database and user and removes the magnum vhost and user from RabbitMQ.
 // The management cluster (capi_management_cluster.scala) is left alone; run capi_management_cluster_teardown
 // separately. podman and the other packages stay. The secrets (magnum/*) stay in the secret store.
@@ -33,9 +33,6 @@ object magnum_teardown extends OrpheraClusterPlaybook:
        |  if command -v podman >/dev/null 2>&1; then podman rm -f $$c 2>/dev/null || true; fi
        |done
        |systemctl daemon-reload
-       |if command -v podman >/dev/null 2>&1; then
-       |  podman rmi -f localhost/orphera/magnum-api-capi:2025.1-ubuntu-noble localhost/orphera/magnum-conductor-capi:2025.1-ubuntu-noble 2>/dev/null || true
-       |fi
        |for c in ${containers.mkString(" ")}; do rm -rf /etc/kolla/$$c; done
        |rm -rf /etc/kolla/magnum /etc/kolla/magnum-ca
        |rm -rf /var/lib/orphera/magnum /var/log/kolla/magnum

@@ -18,11 +18,12 @@ import orphera.orchestrator.kolla.*
 // What it builds (two Kolla containers on the host network):
 //   - magnum-api         the REST API, port 9511, plain HTTP like the other APIs here
 //   - magnum-conductor   does the work; loads the driver
-// The Kolla images do not contain the Cluster API driver or helm, so the playbook builds two small images on
-// the node from them (podman run and commit): `localhost/orphera/magnum-api-capi` and `.../magnum-conductor-capi`, which
-// add the pip package `magnum-capi-helm` (installed without its dependencies, then imported once as a check)
-// and the helm binary that capi_management_cluster.scala installed. MAGNUM_CAPI_HELM_SPEC sets the pip
-// requirement (default `magnum-capi-helm`).
+// The Kolla images do not contain the Cluster API driver or helm. podman build and podman commit both failed
+// on these images (a manifest error, then a podman crash), so the images stay as they are: the playbook installs
+// the pip package `magnum-capi-helm` (without its dependencies) into a host directory,
+// /var/lib/orphera/magnum/pylib, using the image's own Python, and the containers mount that directory and the
+// helm binary that capi_management_cluster.scala installed, with PYTHONPATH pointing at it.
+// MAGNUM_CAPI_HELM_SPEC sets the pip requirement (default `magnum-capi-helm`).
 //
 // What it makes besides the containers (the helper's subcommands, repeatable):
 //   - Keystone: user `magnum` (project service, admin), service `magnum` of type `container-infra` with the
@@ -129,11 +130,9 @@ object magnum_single_node extends OrpheraClusterPlaybook:
     Image("magnum-api", Release.R2025_1, Base.UbuntuNoble, registry).ref
   private val conductorBase =
     Image("magnum-conductor", Release.R2025_1, Base.UbuntuNoble, registry).ref
-  private val apiCapiImage = "localhost/orphera/magnum-api-capi:2025.1-ubuntu-noble"
-  private val conductorCapiImage =
-    "localhost/orphera/magnum-conductor-capi:2025.1-ubuntu-noble"
+  private val pylibDir = "/var/lib/orphera/magnum/pylib"
 
-  // The two containers as data. They run the locally built images. Defined after the directory vals, which
+  // The two containers as data. They run the stock Kolla images. Defined after the directory vals, which
   // they read; a val used before its definition is null in an object.
   private def magnumContainer(service: String, image: String): Container =
     Container(
@@ -142,16 +141,21 @@ object magnum_single_node extends OrpheraClusterPlaybook:
       mounts = List(
         Mount(s"$confRoot/$service", "/var/lib/kolla/config_files"),
         Mount(logDir, "/var/log/kolla/magnum", Access.ReadWrite),
-        Mount(dataDir, "/var/lib/magnum", Access.ReadWrite)
+        Mount(dataDir, "/var/lib/magnum", Access.ReadWrite),
+        Mount(pylibDir, pylibDir),
+        Mount("/usr/local/bin/helm", "/usr/local/bin/helm")
       ),
-      env = List("KOLLA_CONFIG_STRATEGY" -> "COPY_ALWAYS"),
+      env = List(
+        "KOLLA_CONFIG_STRATEGY" -> "COPY_ALWAYS",
+        "PYTHONPATH" -> pylibDir
+      ),
       user = Some("root"),
       settleSeconds = 12
     )
   private val magnumServices: List[Container] =
     List(
-      magnumContainer("magnum-conductor", conductorCapiImage),
-      magnumContainer("magnum-api", apiCapiImage)
+      magnumContainer("magnum-conductor", conductorBase),
+      magnumContainer("magnum-api", apiBase)
     )
 
   private val hostPackages =
@@ -164,6 +168,7 @@ object magnum_single_node extends OrpheraClusterPlaybook:
       .replace("@@STATE@@", stateDir)
       .replace("@@DATA@@", dataDir)
       .replace("@@BUILD@@", buildDir)
+      .replace("@@PYLIB@@", pylibDir)
       .replace("@@CA@@", caDir)
       .replace("@@HELPER@@", helperPath)
       .replace("@@KUBECONFIG@@", mgmtKubeconfig)
@@ -267,16 +272,15 @@ object magnum_single_node extends OrpheraClusterPlaybook:
       "mkdir -p @@SRC@@ @@LOG@@ @@STATE@@ @@DATA@@ @@DATA@@/tmp @@BUILD@@\necho directories ready"
     )
 
-  // The driver images: the Kolla image plus the pip package and the helm binary. They are made with
-  // `podman run` and `podman commit`, not `podman build`, because podman build failed on these Kolla images
-  // ("unsupported MIME type for compression"). The package is installed without its dependencies, so pip cannot
-  // replace the Magnum and oslo libraries in the image; a missing dependency shows up in the import check,
-  // which names it. The committed image keeps the base image's command.
+  // The driver goes into @@PYLIB@@ with the image's own Python, so the wheel matches the Python in the
+  // containers. No dependencies are installed (pip cannot replace the Magnum and oslo libraries); a missing
+  // dependency shows up in the import check, which names it. Only `podman run` is used.
   private val installInImage =
-    s"""chmod 0755 /usr/local/bin/helm
-       |PY=/var/lib/kolla/venv/bin/python; [ -x "$$PY" ] || PY=$$(command -v python3)
-       |if command -v uv >/dev/null 2>&1; then uv pip install --python "$$PY" --no-deps '$capiHelmSpec'; else "$$PY" -m pip install --no-deps '$capiHelmSpec'; fi
-       |"$$PY" -c 'import magnum_capi_helm.driver; print("driver import ok")'""".stripMargin
+    s"""PY=/var/lib/kolla/venv/bin/python; [ -x "$$PY" ] || PY=$$(command -v python3)
+       |rm -rf /out/*
+       |"$$PY" -m pip install --no-deps --target /out '$capiHelmSpec' || { echo "pip is not usable in the image" >&2; exit 1; }
+       |chmod -R a+rX /out
+       |PYTHONPATH=/out "$$PY" -c 'import magnum_capi_helm.driver; print("driver import ok")'""".stripMargin
 
   private val buildScript =
     fill(s"""set -e
@@ -284,33 +288,14 @@ object magnum_single_node extends OrpheraClusterPlaybook:
          |  echo "helm is not installed - apply capi_management_cluster.scala first" >&2
          |  exit 1
          |fi
-         |cd @@BUILD@@
-         |cat > install-in-image.sh <<'INSTALL'
+         |mkdir -p @@PYLIB@@ @@BUILD@@
+         |cat > @@BUILD@@/install-in-image.sh <<'INSTALL'
          |$installInImage
          |INSTALL
-         |make_image() {
-         |  base=$$1; target=$$2; work=orphera-build-$$$$
-         |  CMD=$$(podman image inspect --format '{{json .Config.Cmd}}' $$base)
-         |  podman rm -f $$work >/dev/null 2>&1 || true
-         |  podman run -d --name $$work --user root $$base sleep 3600 >/dev/null
-         |  podman cp /usr/local/bin/helm $$work:/usr/local/bin/helm
-         |  podman cp install-in-image.sh $$work:/tmp/install-in-image.sh
-         |  if ! podman exec --user root $$work sh /tmp/install-in-image.sh; then
-         |    podman rm -f $$work >/dev/null 2>&1 || true
-         |    echo "installing the driver into $$base failed" >&2
-         |    return 1
-         |  fi
-         |  podman exec --user root $$work rm -f /tmp/install-in-image.sh
-         |  podman commit --format docker --change "CMD $$CMD" $$work $$target >/dev/null
-         |  podman rm -f $$work >/dev/null 2>&1 || true
-         |  echo "built $$target"
-         |}
-         |make_image $apiBase $apiCapiImage
-         |make_image $conductorBase $conductorCapiImage
-         |for img in $apiCapiImage $conductorCapiImage; do
-         |  podman run --rm --entrypoint helm $$img version --short
-         |done
-         |echo "driver images built"
+         |podman run --rm --user root --entrypoint sh -v @@PYLIB@@:/out:z -v @@BUILD@@/install-in-image.sh:/install-in-image.sh:ro,z $conductorBase /install-in-image.sh
+         |podman run --rm --user root --entrypoint sh -e PYTHONPATH=@@PYLIB@@ -v @@PYLIB@@:@@PYLIB@@:ro,z $apiBase -c "/var/lib/kolla/venv/bin/python -c 'import magnum_capi_helm.driver' && echo api-image-import-ok"
+         |helm version --short
+         |echo "driver installed in @@PYLIB@@"
          |""".stripMargin)
 
   // Standard-library Python, as in the other service playbooks. Subcommands:
@@ -845,7 +830,7 @@ if __name__ == '__main__':
   private val dbSyncScript =
     fill(
       s"""set -e
-         |podman run --rm --network host --user root --entrypoint magnum-db-manage -v @@SRC@@/magnum.conf:/etc/magnum/magnum.conf:ro,z -v @@LOG@@:/var/log/kolla/magnum:z $apiCapiImage --config-file /etc/magnum/magnum.conf upgrade
+         |podman run --rm --network host --user root --entrypoint magnum-db-manage -v @@SRC@@/magnum.conf:/etc/magnum/magnum.conf:ro,z -v @@LOG@@:/var/log/kolla/magnum:z -e PYTHONPATH=@@PYLIB@@ -v @@PYLIB@@:@@PYLIB@@:ro,z $apiBase --config-file /etc/magnum/magnum.conf upgrade
          |echo "magnum database synced"""".stripMargin
     )
 
@@ -983,7 +968,7 @@ if __name__ == '__main__':
           runScript(fetchCaScript)
         )
         .task("create the Magnum directories")(runScript(dirsScript))
-        .task("build the images with the Cluster API driver and helm")(
+        .task("install the Cluster API driver for Magnum")(
           runScript(buildScript, 1800)
         )
         .task("write the Magnum API helper")(runScript(helperScript))
