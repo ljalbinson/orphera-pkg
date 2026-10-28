@@ -19,7 +19,7 @@ import orphera.orchestrator.kolla.*
 //   - magnum-api         the REST API, port 9511, plain HTTP like the other APIs here
 //   - magnum-conductor   does the work; loads the driver
 // The Kolla images do not contain the Cluster API driver or helm, so the playbook builds two small images on
-// the node from them (podman build): `localhost/orphera/magnum-api-capi` and `.../magnum-conductor-capi`, which
+// the node from them (podman run and commit): `localhost/orphera/magnum-api-capi` and `.../magnum-conductor-capi`, which
 // add the pip package `magnum-capi-helm` (installed without its dependencies, then imported once as a check)
 // and the helm binary that capi_management_cluster.scala installed. MAGNUM_CAPI_HELM_SPEC sets the pip
 // requirement (default `magnum-capi-helm`).
@@ -267,18 +267,16 @@ object magnum_single_node extends OrpheraClusterPlaybook:
       "mkdir -p @@SRC@@ @@LOG@@ @@STATE@@ @@DATA@@ @@DATA@@/tmp @@BUILD@@\necho directories ready"
     )
 
-  // The driver images: the Kolla image plus the pip package and the helm binary. The package is installed
-  // without its dependencies, so pip cannot replace the Magnum and oslo libraries in the image; a missing
-  // dependency shows up in the import check, which names it.
-  private def containerfile(base: String): String =
-    s"""FROM $base
-       |USER root
-       |COPY helm /usr/local/bin/helm
-       |RUN chmod 0755 /usr/local/bin/helm \\
-       | && PY=/var/lib/kolla/venv/bin/python; [ -x "$$PY" ] || PY=$$(command -v python3) \\
-       | && if command -v uv >/dev/null 2>&1; then uv pip install --python "$$PY" --no-deps '$capiHelmSpec'; else "$$PY" -m pip install --no-deps '$capiHelmSpec'; fi \\
-       | && "$$PY" -c 'import magnum_capi_helm.driver; print("driver import ok")'
-       |""".stripMargin
+  // The driver images: the Kolla image plus the pip package and the helm binary. They are made with
+  // `podman run` and `podman commit`, not `podman build`, because podman build failed on these Kolla images
+  // ("unsupported MIME type for compression"). The package is installed without its dependencies, so pip cannot
+  // replace the Magnum and oslo libraries in the image; a missing dependency shows up in the import check,
+  // which names it. The committed image keeps the base image's command.
+  private val installInImage =
+    s"""chmod 0755 /usr/local/bin/helm
+       |PY=/var/lib/kolla/venv/bin/python; [ -x "$$PY" ] || PY=$$(command -v python3)
+       |if command -v uv >/dev/null 2>&1; then uv pip install --python "$$PY" --no-deps '$capiHelmSpec'; else "$$PY" -m pip install --no-deps '$capiHelmSpec'; fi
+       |"$$PY" -c 'import magnum_capi_helm.driver; print("driver import ok")'""".stripMargin
 
   private val buildScript =
     fill(s"""set -e
@@ -287,13 +285,28 @@ object magnum_single_node extends OrpheraClusterPlaybook:
          |  exit 1
          |fi
          |cd @@BUILD@@
-         |cp /usr/local/bin/helm helm
-         |cat > Containerfile.api <<'CF'
-         |${containerfile(apiBase)}CF
-         |cat > Containerfile.conductor <<'CF'
-         |${containerfile(conductorBase)}CF
-         |podman build --format docker -t $apiCapiImage -f Containerfile.api .
-         |podman build --format docker -t $conductorCapiImage -f Containerfile.conductor .
+         |cat > install-in-image.sh <<'INSTALL'
+         |$installInImage
+         |INSTALL
+         |make_image() {
+         |  base=$$1; target=$$2; work=orphera-build-$$$$
+         |  CMD=$$(podman image inspect --format '{{json .Config.Cmd}}' $$base)
+         |  podman rm -f $$work >/dev/null 2>&1 || true
+         |  podman run -d --name $$work --user root $$base sleep 3600 >/dev/null
+         |  podman cp /usr/local/bin/helm $$work:/usr/local/bin/helm
+         |  podman cp install-in-image.sh $$work:/tmp/install-in-image.sh
+         |  if ! podman exec --user root $$work sh /tmp/install-in-image.sh; then
+         |    podman rm -f $$work >/dev/null 2>&1 || true
+         |    echo "installing the driver into $$base failed" >&2
+         |    return 1
+         |  fi
+         |  podman exec --user root $$work rm -f /tmp/install-in-image.sh
+         |  podman commit --format docker --change "CMD $$CMD" $$work $$target >/dev/null
+         |  podman rm -f $$work >/dev/null 2>&1 || true
+         |  echo "built $$target"
+         |}
+         |make_image $apiBase $apiCapiImage
+         |make_image $conductorBase $conductorCapiImage
          |for img in $apiCapiImage $conductorCapiImage; do
          |  podman run --rm --entrypoint helm $$img version --short
          |done
