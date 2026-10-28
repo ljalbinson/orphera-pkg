@@ -48,6 +48,7 @@ NAMES=(
   rgw/service  # also stored in the Ceph configuration database: re-run rgw_single_node.scala after rotating
   manila/db manila/service manila/rabbit manila/ceph-key  # NB: rotating ceph-key needs manila_single_node.scala re-run (it re-imports client.manila)
   octavia/db octavia/service octavia/rabbit octavia/ca-passphrase octavia/heartbeat-key  # NB: rotating ca-passphrase makes octavia_single_node.scala make new CAs; existing amphorae stop working
+  magnum/db magnum/service magnum/rabbit magnum/domain-admin
   wordpress/db
   observability/mysqld-exporter observability/grafana-admin
   horizon/secret-key

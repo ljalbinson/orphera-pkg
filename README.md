@@ -1964,6 +1964,14 @@ octavia-worker octavia-health-manager octavia-housekeeping` on tst21 (an existin
 four names), or they come from quay.io. Not set up: the Horizon dashboard for Octavia, TLS-terminated listeners (Barbican), active-standby
 topology, availability zones. The playbook and its test have not been run.
 
+**Kubernetes as a service** (`manifests/capi_management_cluster.scala` then `manifests/magnum_single_node.scala` on tst23, undone by `magnum_teardown.scala`
+and `capi_management_cluster_teardown.scala`, checked by `test_magnum.sh`) is Magnum with the Cluster API Helm driver. The first playbook makes a
+single-node k3s management cluster with Cluster API and the OpenStack provider; the second runs magnum-api and magnum-conductor, registers them in
+Keystone, uploads a Kubernetes node image, and makes the flavor `orphera.k8s` and the template `orphera-k8s`. It needs Octavia (every cluster's API
+load balancer is an amphora) and compute capacity for a control-plane node, a worker and an amphora. With the CLI (`python-magnumclient`):
+`openstack coe cluster create demo --cluster-template orphera-k8s --master-count 1 --node-count 1 --keypair orphera-magnum`; when it is
+`CREATE_COMPLETE`, `openstack coe cluster config demo` writes a kubeconfig. Not yet run.
+
 **Object storage** (`manifests/rgw_single_node.scala`, undone by `rgw_teardown.scala`, checked by `test_rgw.sh`) is the Ceph RADOS Gateway with
 Keystone as its identity service. It is a cephadm service on the existing Ceph cluster (one daemon on tst0, `http://10.10.5.12:8080`), so it needs
 no new VM and no Kolla image. Both APIs authenticate against Keystone: **Swift** with an ordinary token (the catalog lists service type

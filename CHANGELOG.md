@@ -11,7 +11,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   CAPO, cert-manager, the Azimuth addon provider and OpenStack janitor, helm, clusterctl) and a kubeconfig for Magnum's Cluster API Helm driver.
   Versions are not pinned by default and are recorded in `/var/lib/orphera/capi/versions.txt`; `K3S_VERSION`, `CAPI_VERSION`, `CAPO_VERSION`,
   `ADDON_PROVIDER_VERSION` and `JANITOR_VERSION` pin them. `capi_management_cluster_teardown.scala` undoes it and
-  `test_capi_management_cluster.sh` checks it. Magnum itself (part 2) is not written yet. Not yet run.
+  `test_capi_management_cluster.sh` checks it. Not yet run.
+- Magnum, part 2: `manifests/magnum_single_node.scala` runs magnum-api (9511) and magnum-conductor as Kolla containers on tst23 with the
+  Cluster API Helm driver (`magnum-capi-helm`, installed with helm into two locally built images), the database on Galera and a `magnum`
+  vhost on RabbitMQ. It registers service type `container-infra`, the user `magnum` and the trustee domain `magnum` in Keystone, passes
+  Keystone's CA to the driver, makes the flavor `orphera.k8s`, uploads a Kubernetes node image (Azimuth manifest; `K8S_VERSION`,
+  `K8S_MINOR`, `K8S_IMAGE_URL` choose it), makes the template `orphera-k8s` and checks itself with a real cluster. `MAGNUM_CHART_VERSION`
+  (default 0.26.0), `MAGNUM_DNS` and `MAGNUM_CAPI_HELM_SPEC` are overridable. `magnum_teardown.scala` undoes it, `test_magnum.sh` checks it.
+  Also: secrets `magnum/*` in `rotate-lab-secrets.sh`, `python-magnumclient` in the client setup, the Magnum images in `kolla_build.scala`,
+  a `magnum` step in `build_openstack_stack.sh`. Not compiled or run yet.
 - Load balancing: `manifests/octavia_single_node.scala` runs Octavia (API on 9876, worker, health manager, housekeeping; the Amphora
   provider) as Kolla containers on tst19, with the database on Galera and an `octavia` vhost on RabbitMQ (tst10), and registers service type
   `load-balancer`, the user `octavia` and the five `load-balancer_*` roles in Keystone. It also makes, in project `service`, the VXLAN network

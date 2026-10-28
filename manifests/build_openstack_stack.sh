@@ -32,6 +32,9 @@
 #   octavia  tst19       octavia_single_node (load balancing: API, worker, health manager, housekeeping with the
 #                        Amphora provider; makes the amphora network, flavor and test image, a port for the
 #                        health manager on br-int, and certificates; RabbitMQ vhost on tst10)
+#   magnum   tst23       capi_management_cluster (k3s with Cluster API, CAPO, cert-manager, addon provider, janitor)
+#                        then magnum_single_node (Kubernetes clusters as a service with the Cluster API Helm
+#                        driver; makes a Kubernetes image, flavor and template, and a real test cluster)
 #   designate tst16      designate_single_node (DNS as a service: API, central, worker, producer, mdns and
 #                        a BIND9 name server; RabbitMQ vhost on tst10)
 #   clients  scala0      utils/openstack-client-setup.sh
@@ -55,7 +58,7 @@
 #   --with-caches   build the apt cache, point the Ubuntu nodes at it, and
 #                   build the Kolla image cache first (tst9, tst11 required)
 #   --from STEP     start at STEP (prep caches ceph galera keystone cinder glance
-#                   placement nova neutron compute horizon designate heat barbican manila rgw octavia clients smoke boot) - for resuming
+#                   placement nova neutron compute horizon designate heat barbican manila rgw octavia magnum clients smoke boot) - for resuming
 #                   after a failure
 #   --only STEP     run just that one step
 #   --list          print the plan and exit
@@ -70,7 +73,7 @@ cd "$(dirname "$0")/.." || exit 1
 . utils/orphera-sources.sh
 CONF_DIR=$(config_dir) || exit 1
 
-ALL_STEPS=(prep caches ceph galera keystone cinder glance placement nova neutron compute horizon designate heat barbican manila rgw octavia clients smoke boot)
+ALL_STEPS=(prep caches ceph galera keystone cinder glance placement nova neutron compute horizon designate heat barbican manila rgw octavia magnum clients smoke boot)
 WITH_CACHES=""
 FROM=""
 ONLY=""
@@ -364,6 +367,18 @@ step_octavia() {
   check "the amphora provider is listed" contains "providers: amphora" "$out"
   out=$(orphera run sh -c "sudo /usr/local/sbin/orphera-octavia-api lb-cycle" --nodes tst19 --timeout 1800 2>&1)
   check "a load balancer answers an HTTP request through its amphora" contains "lb cycle ok" "$out"
+}
+
+step_magnum() {
+  playbook capi_management_cluster.scala
+  playbook magnum_single_node.scala
+  local out
+  out=$(run_on tst23 "curl -s -o /dev/null -w 'http=%{http_code}' http://localhost:9511/")
+  check "the Magnum API answers its version document" contains "http=" "$out"
+  out=$(run_on tst23 "sudo /usr/local/sbin/orphera-magnum-api mservices")
+  check "the Magnum conductor is up" contains "=up" "$out"
+  out=$(orphera run sh -c "sudo /usr/local/sbin/orphera-magnum-api cluster-cycle" --nodes tst23 --timeout 5400 2>&1)
+  check "a Kubernetes cluster is made, answers /version and is deleted" contains "cluster cycle ok" "$out"
 }
 
 step_clients() {
