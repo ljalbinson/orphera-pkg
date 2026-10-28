@@ -39,6 +39,11 @@ import orphera.orchestrator.kolla.*
 //   - the public cluster template `orphera-k8s` (Calico, the provider network as the external network, DNS
 //     server MAGNUM_DNS, default 1.1.1.1)
 //
+// The Kolla image also contains the Cluster API driver of another project (magnum_cluster_api, entry points
+// k8s_cluster_api_*). Magnum instantiates every installed driver to validate a template, and that one fails
+// without a kubeconfig, so [drivers] disabled_drivers switches those five off; magnum-capi-helm is
+// k8s_capi_helm_v1.
+//
 // Magnum's certificates are kept in its database (x509keypair), not in Barbican. The Keystone CA is passed to
 // the driver ([drivers] openstack_ca_file), which puts it into the cloud credentials that CAPO and the
 // cluster's OpenStack integrations use.
@@ -243,6 +248,10 @@ object magnum_single_node extends OrpheraClusterPlaybook:
        |    exit 1
        |  fi
        |done
+       |if ! podman run --rm --entrypoint sh $apiBase -c "grep -q disabled_drivers /var/lib/kolla/venv/lib/python3*/site-packages/magnum/conf/drivers.py"; then
+       |  echo "this Magnum has no [drivers] disabled_drivers option; the other Cluster API driver in the image cannot be switched off" >&2
+       |  exit 1
+       |fi
        |echo "the Magnum commands are in the images"""".stripMargin
 
   private val fetchCaScript =
@@ -757,6 +766,7 @@ if __name__ == '__main__':
        |[drivers]
        |openstack_ca_file = /etc/magnum/ssl/ca.crt
        |verify_ca = true
+       |disabled_drivers = k8s_cluster_api_ubuntu,k8s_cluster_api_ubuntu_focal,k8s_cluster_api_debian,k8s_cluster_api_flatcar,k8s_cluster_api_rockylinux
        |
        |[capi_helm]
        |kubeconfig_file = /etc/magnum/kubeconfig
