@@ -292,8 +292,8 @@ object magnum_single_node extends OrpheraClusterPlaybook:
          |${containerfile(apiBase)}CF
          |cat > Containerfile.conductor <<'CF'
          |${containerfile(conductorBase)}CF
-         |podman build -t $apiCapiImage -f Containerfile.api .
-         |podman build -t $conductorCapiImage -f Containerfile.conductor .
+         |podman build --format docker -t $apiCapiImage -f Containerfile.api .
+         |podman build --format docker -t $conductorCapiImage -f Containerfile.conductor .
          |for img in $apiCapiImage $conductorCapiImage; do
          |  podman run --rm --entrypoint helm $$img version --short
          |done
