@@ -24,7 +24,7 @@ params:
   hostname: tst19
   disk: '120'
   dns1: '192.168.1.70'
-  memory: '4096'
+  memory: '8192'
   os: noble-server-cloudimg-amd64.img
   nics:
   # Provider network for Neutron (neutron_single_node.scala): a plain layer-2 NIC,
@@ -37,5 +37,5 @@ params:
   host_type: host-passthrough
   dns2: '192.168.1.71'
   disks: []
-  cpu: '2'
+  cpu: '4'
   pdisks: []
