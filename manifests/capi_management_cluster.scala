@@ -24,6 +24,7 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 //   K3S_VERSION (e.g. v1.31.4+k3s1)   HELM_VERSION (default v3.16.4)
 //   CAPI_VERSION (e.g. v1.9.5)         CAPO_VERSION (e.g. v0.11.5)
 //   ADDON_PROVIDER_VERSION             JANITOR_VERSION                (chart versions)
+//   ORC_VERSION                        (OpenStack Resource Controller, default v2.0.3; CAPO needs its CRDs)
 //
 // Network: the node needs to reach get.k3s.io, github.com (release downloads), ghcr.io, registry.k8s.io, quay.io and
 // azimuth-cloud.github.io. If it cannot, the playbook stops at the first download with the address it could not
@@ -51,6 +52,9 @@ object capi_management_cluster extends OrpheraClusterPlaybook:
   private val capoVersion = env("CAPO_VERSION")
   private val addonVersion = env("ADDON_PROVIDER_VERSION")
   private val janitorVersion = env("JANITOR_VERSION")
+  // ORC (OpenStack Resource Controller) is a separate project that CAPO v0.12 and later need; clusterctl does
+  // not install it. Without its CRDs the CAPO controller crash-loops and its webhook has no endpoints.
+  private val orcVersion = env("ORC_VERSION", "v2.0.3")
 
   private def fill(s: String): String =
     s.replace("@@STATE@@", stateDir)
@@ -62,6 +66,7 @@ object capi_management_cluster extends OrpheraClusterPlaybook:
       .replace("@@CAPO@@", capoVersion)
       .replace("@@ADDON@@", addonVersion)
       .replace("@@JANITOR@@", janitorVersion)
+      .replace("@@ORC@@", orcVersion)
 
   private val waitAptIdleScript =
     """for i in $(seq 1 180); do
@@ -135,6 +140,13 @@ object capi_management_cluster extends OrpheraClusterPlaybook:
       |if [ -n "@@CAPI@@" ]; then ARGS="$ARGS --core cluster-api:@@CAPI@@ --bootstrap kubeadm:@@CAPI@@ --control-plane kubeadm:@@CAPI@@"; fi
       |echo "clusterctl init $ARGS"
       |clusterctl init $ARGS 2>&1 | tail -n 25
+      |echo "installing ORC @@ORC@@"
+      |k3s kubectl apply --server-side --force-conflicts -f "https://github.com/k-orc/openstack-resource-controller/releases/download/@@ORC@@/install.yaml" || { echo "cannot install ORC @@ORC@@ (set ORC_VERSION)" >&2; exit 1; }
+      |for crd in images.openstack.k-orc.cloud servers.openstack.k-orc.cloud; do
+      |  k3s kubectl wait --for=condition=Established crd/$crd --timeout=120s || { echo "CRD $crd did not appear" >&2; exit 1; }
+      |  k3s kubectl label crd/$crd clusterctl.cluster.x-k8s.io/move= --overwrite
+      |done
+      |k3s kubectl -n capo-system rollout restart deployment capo-controller-manager
       |for ns in cert-manager capi-system capi-kubeadm-bootstrap-system capi-kubeadm-control-plane-system capo-system; do
       |  k3s kubectl -n $ns wait --for=condition=Available deployment --all --timeout=600s || { echo "deployments in $ns are not available" >&2; k3s kubectl -n $ns get pods >&2; exit 1; }
       |done
@@ -174,6 +186,8 @@ object capi_management_cluster extends OrpheraClusterPlaybook:
       |  k3s kubectl get crd $crd >/dev/null || { echo "CRD $crd is missing" >&2; exit 1; }
       |done
       |k3s kubectl get crd | grep -c addons.stackhpc.com | sed 's/^/addon CRDs: /'
+      |k3s kubectl -n capo-system wait --for=condition=Available deployment/capo-controller-manager --timeout=120s || { echo "the CAPO controller is not available" >&2; k3s kubectl -n capo-system logs deploy/capo-controller-manager --tail=15 >&2; exit 1; }
+      |k3s kubectl -n capo-system get endpoints capo-webhook-service -o jsonpath='{.subsets[0].addresses[0].ip}' | grep -q . || { echo "the CAPO webhook service has no endpoints" >&2; exit 1; }
       |k3s kubectl get pods -A | grep -vE 'Running|Completed|NAME' || true
       |echo "management cluster ready at https://@@FQDN@@:6443"
       |""".stripMargin)

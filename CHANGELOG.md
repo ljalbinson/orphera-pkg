@@ -10,7 +10,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Magnum, part 1: `manifests/capi_management_cluster.scala` makes a Cluster API management cluster on tst23 (single-node k3s, Cluster API,
   CAPO, cert-manager, the Azimuth addon provider and OpenStack janitor, helm, clusterctl) and a kubeconfig for Magnum's Cluster API Helm driver.
   Versions are not pinned by default and are recorded in `/var/lib/orphera/capi/versions.txt`; `K3S_VERSION`, `CAPI_VERSION`, `CAPO_VERSION`,
-  `ADDON_PROVIDER_VERSION` and `JANITOR_VERSION` pin them. `capi_management_cluster_teardown.scala` undoes it and
+  `ADDON_PROVIDER_VERSION` and `JANITOR_VERSION` pin them. It also installs ORC (`ORC_VERSION`, default v2.0.3), which CAPO needs and clusterctl does not install, and checks that the CAPO webhook has an endpoint. `capi_management_cluster_teardown.scala` undoes it and
   `test_capi_management_cluster.sh` checks it. Not yet run.
 - Magnum, part 2: `manifests/magnum_single_node.scala` runs magnum-api (9511) and magnum-conductor as Kolla containers on tst23 with the
   Cluster API Helm driver (`magnum-capi-helm`, installed with helm into two locally built images), the database on Galera and a `magnum`
