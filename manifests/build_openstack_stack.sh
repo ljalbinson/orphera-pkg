@@ -35,6 +35,8 @@
 #   magnum   tst23       capi_management_cluster (k3s with Cluster API, CAPO, cert-manager, addon provider, janitor)
 #                        then magnum_single_node (Kubernetes clusters as a service with the Cluster API Helm
 #                        driver; makes a Kubernetes image, flavor and template, and a real test cluster)
+#   observability tst7   observability_stack + observability_extended (Prometheus, Grafana, node, haproxy and
+#                        mysqld exporters; telemetry stores its metrics in this Prometheus)
 #   telemetry tst24      telemetry_single_node (Ceilometer polling agents on tst24 and the compute nodes, a Pushgateway
 #                        feeding the Prometheus on tst7, and Aodh with PromQL alarms; RabbitMQ vhosts on tst10)
 #   designate tst16      designate_single_node (DNS as a service: API, central, worker, producer, mdns and
@@ -59,8 +61,10 @@
 #
 #   --with-caches   build the apt cache, point the Ubuntu nodes at it, and
 #                   build the Kolla image cache first (tst9, tst11 required)
+#   --with-build    set up the Kolla image builder on tst21 and build every image from source
+#                   (hours the first time; needs the caches: use it with --with-caches or after it)
 #   --from STEP     start at STEP (prep caches ceph galera keystone cinder glance
-#                   placement nova neutron compute horizon designate heat barbican manila rgw octavia magnum telemetry clients smoke boot) - for resuming
+#                   placement nova neutron compute horizon designate heat barbican manila rgw octavia magnum observability telemetry clients smoke boot) - for resuming
 #                   after a failure
 #   --only STEP     run just that one step
 #   --list          print the plan and exit
@@ -75,8 +79,9 @@ cd "$(dirname "$0")/.." || exit 1
 . utils/orphera-sources.sh
 CONF_DIR=$(config_dir) || exit 1
 
-ALL_STEPS=(prep caches ceph galera keystone cinder glance placement nova neutron compute horizon designate heat barbican manila rgw octavia magnum telemetry clients smoke boot)
+ALL_STEPS=(prep caches build ceph galera keystone cinder glance placement nova neutron compute horizon designate heat barbican manila rgw octavia magnum observability telemetry clients smoke boot)
 WITH_CACHES=""
+WITH_BUILD=""
 FROM=""
 ONLY=""
 LIST=""
@@ -84,6 +89,7 @@ LIST=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --with-caches) WITH_CACHES=1 ;;
+    --with-build) WITH_BUILD=1 ;;
     --from) FROM="${2:-}"; shift ;;
     --only) ONLY="${2:-}"; shift ;;
     --list) LIST=1 ;;
@@ -106,6 +112,7 @@ for s in "${ALL_STEPS[@]}"; do
   if [ -z "$FROM" ] || [ "$s" = "$FROM" ]; then started=1; fi
   [ -n "$started" ] || continue
   if [ "$s" = "caches" ] && [ -z "$WITH_CACHES" ] && [ "$FROM" != "caches" ] && [ "$ONLY" != "caches" ]; then continue; fi
+  if [ "$s" = "build" ] && [ -z "$WITH_BUILD" ] && [ "$FROM" != "build" ] && [ "$ONLY" != "build" ]; then continue; fi
   STEPS+=("$s")
 done
 
@@ -212,6 +219,19 @@ step_caches() {
   check "apt cache answers on tst11" contains "http=200" "$out"
   out=$(run_on tst9 "curl -s http://localhost:5000/v2/")
   check "Kolla registry answers on tst9" contains "{}" "$out"
+}
+
+step_build() {
+  playbook kolla_build.scala
+  local out
+  out=$(run_on tst21 "curl -s -o /dev/null -w 'http=%{http_code}' http://localhost:5000/v2/")
+  check "the image registry answers on tst21" contains "http=200" "$out"
+  out=$(orphera run sh -c "sudo orphera-kolla-build sources refresh" --nodes tst21 --timeout 3600 2>&1)
+  check "the source tarballs are cached" contains "keystone" "$out"
+  out=$(orphera run sh -c "sudo orphera-kolla-build build && echo build-finished" --nodes tst21 --timeout 28800 2>&1)
+  check "every image is built and pushed" contains "build-finished" "$out"
+  out=$(run_on tst21 "curl -s http://localhost:5000/v2/_catalog")
+  check "the registry lists the built Keystone image" contains "keystone" "$out"
 }
 
 step_ceph() {
@@ -381,6 +401,16 @@ step_magnum() {
   check "the Magnum conductor is up" contains "=up" "$out"
   out=$(orphera run sh -c "sudo /usr/local/sbin/orphera-magnum-api cluster-cycle" --nodes tst23 --timeout 5400 2>&1)
   check "a Kubernetes cluster is made, answers /version and is deleted" contains "cluster cycle ok" "$out"
+}
+
+step_observability() {
+  playbook observability_stack.scala
+  playbook observability_extended.scala
+  local out
+  out=$(run_on tst7 "curl -s http://localhost:9090/-/healthy")
+  check "Prometheus is healthy on tst7" contains "Healthy" "$out"
+  out=$(run_on tst7 "curl -s -o /dev/null -w 'http=%{http_code}' http://localhost:3000/api/health")
+  check "Grafana answers on tst7" contains "http=200" "$out"
 }
 
 step_telemetry() {

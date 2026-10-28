@@ -7,6 +7,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- `manifests/build_openstack_stack.sh` has two more steps: `observability` (observability_stack and observability_extended on tst7, before
+  `telemetry`, which stores its metrics in that Prometheus) and `build` (kolla_build.scala on tst21, then `orphera-kolla-build sources refresh` and
+  `build`; only with the new `--with-build`, or `--from build` / `--only build`; hours the first time, and an existing
+  `/etc/kolla-build/images.txt` is not rewritten). Not run yet.
 - Telemetry (Ceilometer and Aodh) on a new VM, tst24 (`config/tst24.yaml`, 10.10.5.36, on gs3, 2 vCPU, 4096 MiB), with the Prometheus on tst7 as the
   metrics store. `manifests/telemetry_single_node.scala` runs ceilometer-central, a Prometheus Pushgateway (9091), aodh-api (8042, Apache),
   aodh-evaluator and aodh-notifier as containers on tst24, and ceilometer-compute on tst17 and tst18 (libvirt through `/run/libvirt`). Each agent
