@@ -162,6 +162,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Fixed
 - `build_openstack_stack.sh`: the telemetry step looked for the old Pushgateway wording ("ceilometer series in prometheus") and now looks for
   "ceilometer exporters up". The README's telemetry section no longer says Aodh finds Prometheus through the Keystone catalog.
+- `nova_single_node.scala` and `nova_compute.scala` write a `[cinder]` section (`cafile`, `os_region_name`). Without it, a server with a Cinder volume
+  stayed in `scheduling` for ever: the conductor's Cinder client fetches its service token through a session built from `[cinder]`, found no CA
+  for Keystone's TLS certificate and failed in `attachment_get` (`CERTIFICATE_VERIFY_FAILED`). Found with Trove, the first service to attach a
+  volume at boot. Re-run `nova_single_node.scala` and `nova_compute.scala` to apply it.
 
 ## [0.1.206] - 2026-10-25
 

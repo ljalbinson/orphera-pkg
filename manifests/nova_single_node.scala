@@ -290,6 +290,8 @@ object nova_single_node extends OrpheraClusterPlaybook:
       ("neutron", "password", s"${neutronPassword.reveal}"),
       ("neutron", "valid_interfaces", "internal"),
       ("neutron", "cafile", "/etc/nova/ssl/ca.crt"),
+      ("cinder", "os_region_name", "RegionOne"),
+      ("cinder", "cafile", "/etc/nova/ssl/ca.crt"),
       ("oslo_concurrency", "lock_path", "/var/lib/nova/tmp"),
       ("scheduler", "discover_hosts_in_cells_interval", "60"),
       ("vnc", "enabled", "true"),

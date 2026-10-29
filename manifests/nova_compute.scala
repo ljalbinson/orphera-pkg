@@ -420,6 +420,10 @@ object nova_compute extends OrpheraClusterPlaybook:
        |valid_interfaces = internal
        |cafile = /etc/nova/ssl/ca.crt
        |
+       |[cinder]
+       |os_region_name = RegionOne
+       |cafile = /etc/nova/ssl/ca.crt
+       |
        |[oslo_concurrency]
        |lock_path = /var/lib/nova/tmp
        |
