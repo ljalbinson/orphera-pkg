@@ -2001,10 +2001,15 @@ the RabbitMQ vhost `trove` on tst10. A database instance is a Nova server (boote
 container; the guests reach RabbitMQ and Docker Hub over the `provider` network (`TROVE_MGMT_NETWORK` names another network). The playbook makes the
 user `trove` and the service type `database` in Keystone, and, in project `service`, the security group `trove-mgmt` and the keypair `trove-mgmt`
 (its private key is in `/var/lib/orphera/trove/trove-mgmt.pem` on tst25). This is part one: it installs the service and checks it through the API
-(`sudo orphera-trove-api check` on tst25). The guest image and the MySQL datastore are the second part (`trove_guest_image.scala`). Backups to Swift,
-replication and the dashboard are not set up. The Trove images need `orphera-kolla-build sources refresh` and a build of
+(`sudo orphera-trove-api check` on tst25). The second part, `manifests/trove_guest_image.scala` (undone by `trove_guest_image_teardown.scala`, checked
+by `test_trove_guest.sh`), builds the guest image on tst21 with diskimage-builder (an Ubuntu noble image with the guest agent and Docker; `trovestack`'s
+elements from the Trove `stable/2025.1` source, `DEV_MODE=false`), uploads it to Glance with the tags `trove` and `mysql`, makes the flavor
+`orphera.trove` (1 vCPU, 2048 MB, 10 GB) and registers the datastore `mysql` with `trove-manage`. The version is `8.0.29` (`TROVE_MYSQL_VERSION`
+chooses another MySQL 8.0 version; the name is also the tag of the Docker image the guests pull). The image is built once;
+`TROVE_REBUILD_IMAGE=1` builds it again. A database is then `openstack database instance create NAME orphera-trove --size 1 --datastore mysql
+--datastore-version 8.0.29`. Backups to Swift, replication and the dashboard are not set up. The Trove images need `orphera-kolla-build sources refresh` and a build of
 `trove-api trove-conductor trove-taskmanager` on tst21 (an existing `/etc/kolla-build/images.txt` is not rewritten; add them by hand), or they come
-from quay.io. `python-troveclient` is in `utils/openstack-client-setup.sh`. Run on the lab: `test_trove.sh` 12 of 12.
+from quay.io. `python-troveclient` is in `utils/openstack-client-setup.sh`. Run on the lab: `test_trove.sh` 12 of 12; `test_trove_guest.sh` not run yet.
 
 **Skyline** (`manifests/skyline_single_node.scala`, undone by `skyline_teardown.scala`, checked by `test_skyline.sh`) is the Skyline dashboard on tst13,
 beside Horizon: `http://tst13.ljalbinson.com:9999/`, log in as `admin` with domain `Default`. It is one container from the image the Skyline project

@@ -40,8 +40,8 @@
 #   telemetry tst24      telemetry_single_node (Ceilometer polling agents on tst24 and the compute nodes, exporters
 #                        scraped by the Prometheus on tst7, and Aodh with PromQL alarms; RabbitMQ vhosts on tst10)
 #   trove    tst25       trove_single_node (database as a service: API, taskmanager and conductor, guests on the
-#                        provider network; the guest image and a MySQL datastore come from trove_guest_image.scala,
-#                        which is not part of this step)
+#                        provider network), then trove_guest_image (builds the guest image on tst21, 10 to 30
+#                        minutes the first time, and registers the MySQL datastore)
 #   skyline  tst13       skyline_single_node (the Skyline dashboard, http://tst13:9999/, beside Horizon; one container
 #                        from the project's own image; run after every service is registered, it writes its
 #                        nginx file from the catalog)
@@ -437,6 +437,11 @@ step_trove() {
   check "the Trove API answers its version document" contains "http=" "$out"
   out=$(orphera run sh -c "sudo /usr/local/sbin/orphera-trove-api check" --nodes tst25 --timeout 300 2>&1)
   check "Trove answers an authenticated request and the guest network, group and keypair exist" contains "trove check ok" "$out"
+  playbook trove_guest_image.scala
+  out=$(orphera run sh -c "sudo /usr/local/sbin/orphera-trove-image present" --nodes tst21 --timeout 120 2>&1)
+  check "the Trove guest image is in Glance and the flavor exists" contains "is active and flavor orphera-trove exists" "$out"
+  out=$(orphera run sh -c "sudo /usr/local/sbin/orphera-trove-db datastores" --nodes tst25 --timeout 120 2>&1)
+  check "the Trove API lists the mysql datastore with a default version" contains "datastore mysql: versions" "$out"
 }
 
 step_skyline() {

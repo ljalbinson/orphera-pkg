@@ -14,7 +14,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `provider`; `TROVE_MGMT_NETWORK` overrides) and checks that an admin request to the API works. `trove_teardown.scala` undoes it and
   `test_trove.sh` checks it. New secrets: `trove/db`, `trove/service`, `trove/rabbit`. The images are in the Kolla build list and
   `python-troveclient` is in the client setup. `build_openstack_stack.sh` has a `trove` step after `telemetry`. The guest image and the MySQL datastore
-  (part two) are not built yet. Run on the lab: `test_trove.sh` 12 of 12, first run.
+  (part two) are in the next entry. Run on the lab: `test_trove.sh` 12 of 12, first run.
+- Trove, part two: the guest image and the MySQL datastore. `manifests/trove_guest_image.scala` builds an Ubuntu noble guest image on tst21 with
+  diskimage-builder, using the elements of the Trove `stable/2025.1` source (guest agent put into the image, Docker for the database container),
+  uploads it to Glance (public, tags `trove` and `mysql`), makes the flavor `orphera.trove` and registers the datastore `mysql` version `8.0.29`
+  (`TROVE_MYSQL_VERSION`) with `trove-manage` in a one-off container; `TROVE_REBUILD_IMAGE=1` builds the image again. The helpers
+  `orphera-trove-image` (tst21) and `orphera-trove-db` (tst25) upload, check and test. `trove_guest_image_teardown.scala` undoes it
+  (`TROVE_REMOVE_BUILD=1` also removes the built image). `test_trove_guest.sh` makes a real MySQL instance, waits for ACTIVE and HEALTHY, reads the
+  MySQL greeting on port 3306 and deletes the instance. `build_openstack_stack.sh` runs it in the `trove` step. Not run on the lab yet.
 - IPMI control of VMs through VirtualBMC. `manifests/virtualbmc.scala` installs it on the hypervisors (default gs1, gs2, gs3, st0; `VBMC_HOSTS`
   chooses): a virtualenv in `/opt/virtualbmc` (the libvirt bindings from apt), the unit `orphera-vbmcd.service`, and `/etc/orphera-vbmc.conf`
   (root only) with user `admin` and the first 16 characters of the new secret `vbmc/password` (IPMI 2.0 passwords are at most 20 bytes). `utils/vbmc-vm.sh` makes, starts, stops and removes the
