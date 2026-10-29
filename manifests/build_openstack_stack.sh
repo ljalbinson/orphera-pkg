@@ -39,6 +39,7 @@
 #                        mysqld exporters; telemetry stores its metrics in this Prometheus)
 #   telemetry tst24      telemetry_single_node (Ceilometer polling agents on tst24 and the compute nodes, exporters
 #                        scraped by the Prometheus on tst7, and Aodh with PromQL alarms; RabbitMQ vhosts on tst10)
+#   skyline  tst13       skyline_single_node (the Skyline dashboard, http://tst13:9999/, beside Horizon; one container
 #                        from the project's own image; run after every service is registered, it writes its
 #                        nginx file from the catalog)
 #   designate tst16      designate_single_node (DNS as a service: API, central, worker, producer, mdns and
