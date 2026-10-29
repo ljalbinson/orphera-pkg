@@ -20,7 +20,7 @@ params:
     priority: 101
     cidr: '10.10.5.0/24'
     mtu: 1500
-  hypervisor: gs2
+  hypervisor: gs3
   hostname: tst24
   disk: '40'
   dns1: '192.168.1.70'
