@@ -7,6 +7,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- IPMI control of VMs through VirtualBMC. `manifests/virtualbmc.scala` installs it on the hypervisors (default gs1, gs2, gs3, st0; `VBMC_HOSTS`
+  chooses): a virtualenv in `/opt/virtualbmc` (the libvirt bindings from apt), the unit `orphera-vbmcd.service`, and `/etc/orphera-vbmc.conf`
+  (root only) with user `admin` and the password from the new secret `vbmc/password`. `utils/vbmc-vm.sh` makes, starts, stops and removes the
+  endpoint of each VM (UDP port 6230 plus the VM number, on its hypervisor), lists them, and runs `power` (on, off, soft, cycle, reset, status)
+  and `bootdev` (pxe, disk, cdrom) with ipmitool, the way Ironic's ipmi driver reaches a VM. `virtualbmc_teardown.scala` undoes it and
+  `test_virtualbmc.sh` checks it (`TEST_VM=tstN`, `POWER_CYCLE=1`). The secret does not travel in a command: the script reads the password
+  from the file on the hypervisor. Not run yet.
 - `utils/scan-vm-sizes.sh` compares every VM's CPU and memory three ways: the config file (`cpu:` and `memory:`), libvirt on the hypervisor
   (`virsh dominfo`, with the VM's state) and the running guest (`nproc` and `MemTotal`, accepted from `GUEST_MEM_MIN_PCT`, default 88, up to the
   configured size). It prints one row per VM with totals, lists VMs that libvirt has but no config file describes, and exits 1 on any

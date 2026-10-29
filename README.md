@@ -2108,6 +2108,11 @@ Worth knowing:
   shut down in time); `reboot-vm.sh [--soft | --hard] <vm>...` reboots a VM from the hypervisor, for a
   guest whose agent or SSH is not answering (`--soft`, the default, is `virsh reboot`; `--hard` shuts the VM down,
   waits, and starts it again, with `--wait` and `--force` as for `stop-vm.sh`);
+  `vbmc-vm.sh add|remove|start|stop|list|power|bootdev` gives each VM an IPMI endpoint through VirtualBMC
+  (installed on the hypervisors by `manifests/virtualbmc.scala`, undone by `virtualbmc_teardown.scala`, checked by `test_virtualbmc.sh`):
+  the hypervisor's address, UDP port 6230 plus the VM's number, user `admin`, password in the secret `vbmc/password`. `vbmc-vm.sh
+  power tst17 off` and `ipmitool -I lanplus -H gs2.ljalbinson.com -p 6247 -U admin -E chassis power status` (password in
+  `IPMI_PASSWORD`) work the same way, and so does OpenStack Ironic's ipmi driver; power, reset and boot device only, no serial-over-LAN;
   `trace-dhcp.sh` captures DHCP on the provider NICs of tst17, tst18 and tst19
   while a test instance boots, to show where packets are lost; `check-guest-dhcp.sh <ip> <mac>
   <network-id>` proves a guest took its address (it answers ARP from the DHCP namespace on tst19;
