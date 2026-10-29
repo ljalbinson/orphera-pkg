@@ -2108,6 +2108,11 @@ Worth knowing:
   shut down in time); `reboot-vm.sh [--soft | --hard] <vm>...` reboots a VM from the hypervisor, for a
   guest whose agent or SSH is not answering (`--soft`, the default, is `virsh reboot`; `--hard` shuts the VM down,
   waits, and starts it again, with `--wait` and `--force` as for `stop-vm.sh`);
+  `move-vm.sh [--dry-run] [--yes] [--delete-source] <vm> <hypervisor>` moves a VM that was provisioned on ZFS
+  (`kvm_zfs_vm_provision.scala`) to another hypervisor: it checks both ends, shuts the guest down, sends a ZFS snapshot of
+  `tank/kvm/<hypervisor>/<vm>` with `zfs send | nc | zfs receive`, compares file names and sizes, defines the domain on the
+  destination (same UUID and MACs), undefines it on the source, changes `hypervisor:` in the VM's config file, starts it
+  and waits for its agent; a failure before the source is undefined is rolled back;
   `trace-dhcp.sh` captures DHCP on the provider NICs of tst17, tst18 and tst19
   while a test instance boots, to show where packets are lost; `check-guest-dhcp.sh <ip> <mac>
   <network-id>` proves a guest took its address (it answers ARP from the DHCP namespace on tst19;

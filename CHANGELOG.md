@@ -7,6 +7,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- `utils/move-vm.sh <vm> <hypervisor>` moves a ZFS-provisioned VM between hypervisors (cold move). It checks the domain and dataset on the
+  source (disks only inside `tank/kvm/<hypervisor>/<vm>`, no libvirt snapshots, no passthrough devices or NVRAM), the destination (no
+  clashing domain or dataset, the bridges, free space, memory, a free port) and the CPU vendor, shuts the guest down, sends a ZFS snapshot with
+  `zfs send | nc | zfs receive`, compares the file names and sizes on both sides, defines the domain on the destination from the source XML with
+  the dataset path changed, undefines it on the source, sets `hypervisor:` in `config/<vm>.yaml`, starts the VM if it was running and waits for
+  its agent. `--dry-run` prints the plan, `--delete-source` removes the source dataset afterwards. A failure before the source is undefined removes
+  what was made on the destination and restarts the VM on the source. The stream is not encrypted. Not run on the lab yet; the checks and the
+  dry run were exercised against stand-in `orphera`, `virsh` and `zfs` commands.
 - `utils/scan-vm-sizes.sh` compares every VM's CPU and memory three ways: the config file (`cpu:` and `memory:`), libvirt on the hypervisor
   (`virsh dominfo`, with the VM's state) and the running guest (`nproc` and `MemTotal`, accepted from `GUEST_MEM_MIN_PCT`, default 88, up to the
   configured size). It prints one row per VM with totals, lists VMs that libvirt has but no config file describes, and exits 1 on any
