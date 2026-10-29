@@ -222,7 +222,9 @@ V="virsh --connect qemu:///system"
 echo "$XML_B64" | base64 -d > "/tmp/$VM.xml" || { echo "RESULT|error|bad XML transfer"; exit 0; }
 if grep -q "/exports/kvm/$SRC/" "/tmp/$VM.xml"; then echo "RESULT|error|the XML still names the source path"; rm -f "/tmp/$VM.xml"; exit 0; fi
 out=$($V define "/tmp/$VM.xml" 2>&1) || { echo "RESULT|error|virsh define: $out"; rm -f "/tmp/$VM.xml"; exit 0; }
+LEFT=$(grep -n -w "$SRC" "/tmp/$VM.xml" | head -3 | tr '\n' ' ')
 rm -f "/tmp/$VM.xml"
+[ -z "$LEFT" ] || echo "DATA|leftover|$LEFT"
 if [ "$AUTOSTART" = "enable" ]; then $V autostart "$VM" >/dev/null 2>&1 || true; fi
 echo "RESULT|ok|defined (autostart: ${AUTOSTART:-disable})"
 SH
@@ -394,6 +396,8 @@ log "verified: $files_dst files, names and sizes match"
 # 5. define on the destination, undefine on the source
 step "$dst" "$(pre)"$'\n'"$(define_body)" 60 || abort "could not define $vm on $dst"
 log "defined on $dst"
+left=$(field leftover)
+[ -z "$left" ] || echo "WARNING: the XML on $dst still contains the name $src: $left" >&2
 step "$src" "$(pre)"$'\n'"$(undefine_body)" 60 || { step "$dst" "$(pre)"$'\n'"$(cleanup_dst_body)" 60 >/dev/null 2>&1; abort "could not undefine $vm on $src"; }
 src_undefined=1
 log "undefined on $src"
