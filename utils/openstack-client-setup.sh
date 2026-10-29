@@ -65,7 +65,7 @@ fi
 
 log "installing python-openstackclient, osc-placement and the Designate, Heat, Barbican, Manila and Swift clients (this takes a minute)"
 "$VENV_DIR/bin/python" -m pip install --quiet --upgrade pip
-"$VENV_DIR/bin/python" -m pip install --quiet --upgrade python-openstackclient osc-placement python-designateclient python-heatclient python-barbicanclient python-manilaclient python-swiftclient python-octaviaclient python-magnumclient python-aodhclient
+"$VENV_DIR/bin/python" -m pip install --quiet --upgrade python-openstackclient osc-placement python-designateclient python-heatclient python-barbicanclient python-manilaclient python-swiftclient python-octaviaclient python-magnumclient python-aodhclient python-troveclient
 log "installed: $("$VENV_DIR/bin/openstack" --version 2>&1)"
 
 # ---- 2. Keystone's CA -----------------------------------------------------

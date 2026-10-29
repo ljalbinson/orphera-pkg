@@ -1856,6 +1856,7 @@ Fleet layout used by these manifests (see `inventory.yaml`):
 | tst20 | Heat (API on 8004, CloudFormation API on 8000, engine) and Barbican (API on 9311, worker); RabbitMQ vhosts `heat` and `barbican` on tst10 |
 | tst16 | Designate (API on 9001, central, worker, producer, mdns on 5354) and a BIND9 name server on port 53; RabbitMQ vhost `designate` on tst10 |
 | tst22 | Manila (API on 8786, scheduler, share service) with CephFS exported over NFS-Ganesha (on tst0) as the backend; RabbitMQ vhost `manila` on tst10 |
+| tst25 | Trove (database as a service): API on 8779, taskmanager and conductor; the guests are Nova servers on the `provider` network; RabbitMQ vhost `trove` on tst10 |
 | tst24 | Telemetry: Ceilometer central agent (exporter on 9101) and Aodh (API on 8042, evaluator, notifier); the compute agents run on tst17 and tst18; metrics are stored by the Prometheus on tst7; RabbitMQ vhosts `aodh` and `ceilometer` on tst10 |
 | tst21 | Kolla image builder: builds the images from source, with a source tarball cache, a pip cache, and a writable registry on port 5000 |
 | tst17, tst18 | Compute nodes (nova-compute on KVM, Neutron Open vSwitch agent; second NIC is the provider port); VMs on gs2 with nested KVM |
@@ -1979,10 +1980,12 @@ on a new VM, tst24 (`config/tst24.yaml`, 10.10.5.36), with the existing Promethe
 central agent (tst24) and the compute agents (tst17, tst18, reading libvirt) poll every 60 s and expose what they collect themselves in Prometheus format on port 9101 (`[polling] enable_prometheus_exporter`; no
 notification agent, no pipeline.yaml). Prometheus scrapes the three exporters as `job="ceilometer"`, with a target per node, through `/etc/prometheus/scrape.d/openstack-telemetry.yml`, which `scrape_config_files` in `prometheus.yml` names (needs Prometheus 2.43 or later;
 `observability_stack.scala` and `observability_extended.scala` now write that line, so re-running them keeps the job). The series names are Ceilometer's own; the playbook prints the names it finds. Aodh runs
-PromQL alarms against that Prometheus, which it finds in the Keystone catalog as service type `prometheus` (registered by the playbook):
+PromQL alarms against that Prometheus, whose address the Aodh containers get in `PROMETHEUS_HOST` and `PROMETHEUS_PORT` (the library the
+evaluator uses reads it from nowhere else; the playbook also registers it in the Keystone catalog as service type `prometheus`). Run on the lab: `test_telemetry.sh` 18 of 18; only the image and volume
+metrics (`ceilometer_image_size`, `ceilometer_volume_size`) have been seen so far, the instance metrics appear once a VM runs on tst17 or tst18:
 
     source ~/.config/openstack/admin-openrc.sh
-    openstack alarm create --name mem-high --type prometheus --query 'memory_usage{resource_id="<server id>"} > 3000' \
+    openstack alarm create --name mem-high --type prometheus --query 'ceilometer_image_size > 1000000000' \
       --comparison-operator gt --threshold 0
     openstack alarm list
 
@@ -1991,6 +1994,17 @@ need the services to publish notifications (`[oslo_messaging_notifications] driv
 and no event data yet; billing (the Prometheus publisher sends no timestamps). The Ceilometer and Aodh images need `orphera-kolla-build sources
 refresh` and a build of `ceilometer-central ceilometer-compute aodh-api aodh-evaluator aodh-notifier` on tst21, or they come from quay.io. The
 playbook and its test have not been run.
+
+**Trove** (`manifests/trove_single_node.scala`, undone by `trove_teardown.scala`, checked by `test_trove.sh`) is database as a service on a new VM,
+tst25 (`config/tst25.yaml`, 10.10.5.37): the API (8779), the taskmanager and the conductor as Kolla containers, a `trove` database on Galera and
+the RabbitMQ vhost `trove` on tst10. A database instance is a Nova server (booted from the Trove guest image) whose guest agent runs MySQL as a
+container; the guests reach RabbitMQ and Docker Hub over the `provider` network (`TROVE_MGMT_NETWORK` names another network). The playbook makes the
+user `trove` and the service type `database` in Keystone, and, in project `service`, the security group `trove-mgmt` and the keypair `trove-mgmt`
+(its private key is in `/var/lib/orphera/trove/trove-mgmt.pem` on tst25). This is part one: it installs the service and checks it through the API
+(`sudo orphera-trove-api check` on tst25). The guest image and the MySQL datastore are the second part (`trove_guest_image.scala`). Backups to Swift,
+replication and the dashboard are not set up. The Trove images need `orphera-kolla-build sources refresh` and a build of
+`trove-api trove-conductor trove-taskmanager` on tst21 (an existing `/etc/kolla-build/images.txt` is not rewritten; add them by hand), or they come
+from quay.io. `python-troveclient` is in `utils/openstack-client-setup.sh`. The playbook and its test have not been run.
 
 **Skyline** (`manifests/skyline_single_node.scala`, undone by `skyline_teardown.scala`, checked by `test_skyline.sh`) is the Skyline dashboard on tst13,
 beside Horizon: `http://tst13.ljalbinson.com:9999/`, log in as `admin` with domain `Default`. It is one container from the image the Skyline project

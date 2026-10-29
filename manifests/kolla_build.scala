@@ -113,7 +113,10 @@ object kolla_build extends OrpheraClusterPlaybook:
     "ceilometer-compute",
     "aodh-api",
     "aodh-evaluator",
-    "aodh-notifier"
+    "aodh-notifier",
+    "trove-api",
+    "trove-conductor",
+    "trove-taskmanager"
   )
 
   private val projects =
@@ -133,7 +136,8 @@ object kolla_build extends OrpheraClusterPlaybook:
       "octavia",
       "magnum",
       "ceilometer",
-      "aodh"
+      "aodh",
+      "trove"
     )
 
   private val hostPackages = List(

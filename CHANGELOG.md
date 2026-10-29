@@ -7,6 +7,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- Trove (database as a service), part one: the service. `manifests/trove_single_node.scala` runs trove-api (8779), trove-taskmanager and
+  trove-conductor as containers on a new VM, tst25 (`config/tst25.yaml`, 10.10.5.37, on gs3, 2 vCPU, 4096 MiB), with the `trove` database on Galera and
+  the RabbitMQ vhost `trove` on tst10. The helper `orphera-trove-api` registers the user `trove` and the service type `database` in Keystone, makes
+  the guests' security group `trove-mgmt` and keypair `trove-mgmt` in project `service`, finds the management network (the flat network
+  `provider`; `TROVE_MGMT_NETWORK` overrides) and checks that an admin request to the API works. `trove_teardown.scala` undoes it and
+  `test_trove.sh` checks it. New secrets: `trove/db`, `trove/service`, `trove/rabbit`. The images are in the Kolla build list and
+  `python-troveclient` is in the client setup. `build_openstack_stack.sh` has a `trove` step after `telemetry`. The guest image and the MySQL datastore
+  (part two) are not built yet. The playbook and its test have not been run.
 - IPMI control of VMs through VirtualBMC. `manifests/virtualbmc.scala` installs it on the hypervisors (default gs1, gs2, gs3, st0; `VBMC_HOSTS`
   chooses): a virtualenv in `/opt/virtualbmc` (the libvirt bindings from apt), the unit `orphera-vbmcd.service`, and `/etc/orphera-vbmc.conf`
   (root only) with user `admin` and the first 16 characters of the new secret `vbmc/password` (IPMI 2.0 passwords are at most 20 bytes). `utils/vbmc-vm.sh` makes, starts, stops and removes the
@@ -143,6 +151,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `build_openstack_stack.sh` has a `designate` step after `horizon`, `rebuild_openstack_from_scratch.sh` builds tst16, and
   `rotate-lab-secrets.sh` knows `designate/db`, `designate/service` and `designate/rabbit`. Neutron's DNS integration and the notification sink are
   not set up. Not yet run: the first run on scala0 is the first compile.
+
+### Fixed
+- `build_openstack_stack.sh`: the telemetry step looked for the old Pushgateway wording ("ceilometer series in prometheus") and now looks for
+  "ceilometer exporters up". The README's telemetry section no longer says Aodh finds Prometheus through the Keystone catalog.
 
 ## [0.1.206] - 2026-10-25
 

@@ -50,6 +50,7 @@ NAMES=(
   octavia/db octavia/service octavia/rabbit octavia/ca-passphrase octavia/heartbeat-key  # NB: rotating ca-passphrase makes octavia_single_node.scala make new CAs; existing amphorae stop working
   magnum/db magnum/service magnum/rabbit magnum/domain-admin
   aodh/db aodh/service aodh/rabbit ceilometer/service ceilometer/rabbit
+  trove/db trove/service trove/rabbit
   skyline/db skyline/service skyline/secret-key
   wordpress/db
   observability/mysqld-exporter observability/grafana-admin

@@ -195,6 +195,11 @@ nodes:
     vars:
       cluster_ip: "10.10.5.36"
 
+  - name: tst25
+    host: tst25.ljalbinson.com
+    vars:
+      cluster_ip: "10.10.5.37"
+
   - name: gs1
     host: gs1.ljalbinson.com
     never-reboot: true

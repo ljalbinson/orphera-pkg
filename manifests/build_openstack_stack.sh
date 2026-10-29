@@ -39,6 +39,9 @@
 #                        mysqld exporters; telemetry stores its metrics in this Prometheus)
 #   telemetry tst24      telemetry_single_node (Ceilometer polling agents on tst24 and the compute nodes, exporters
 #                        scraped by the Prometheus on tst7, and Aodh with PromQL alarms; RabbitMQ vhosts on tst10)
+#   trove    tst25       trove_single_node (database as a service: API, taskmanager and conductor, guests on the
+#                        provider network; the guest image and a MySQL datastore come from trove_guest_image.scala,
+#                        which is not part of this step)
 #   skyline  tst13       skyline_single_node (the Skyline dashboard, http://tst13:9999/, beside Horizon; one container
 #                        from the project's own image; run after every service is registered, it writes its
 #                        nginx file from the catalog)
@@ -67,7 +70,7 @@
 #   --with-build    set up the Kolla image builder on tst21 and build every image from source
 #                   (hours the first time; needs the caches: use it with --with-caches or after it)
 #   --from STEP     start at STEP (prep caches ceph galera keystone cinder glance
-#                   placement nova neutron compute horizon designate heat barbican manila rgw octavia magnum observability telemetry skyline clients smoke boot) - for resuming
+#                   placement nova neutron compute horizon designate heat barbican manila rgw octavia magnum observability telemetry trove skyline clients smoke boot) - for resuming
 #                   after a failure
 #   --only STEP     run just that one step
 #   --list          print the plan and exit
@@ -82,7 +85,7 @@ cd "$(dirname "$0")/.." || exit 1
 . utils/orphera-sources.sh
 CONF_DIR=$(config_dir) || exit 1
 
-ALL_STEPS=(prep caches build ceph galera keystone cinder glance placement nova neutron compute horizon designate heat barbican manila rgw octavia magnum observability telemetry skyline clients smoke boot)
+ALL_STEPS=(prep caches build ceph galera keystone cinder glance placement nova neutron compute horizon designate heat barbican manila rgw octavia magnum observability telemetry trove skyline clients smoke boot)
 WITH_CACHES=""
 WITH_BUILD=""
 FROM=""
@@ -422,9 +425,18 @@ step_telemetry() {
   out=$(run_on tst24 "curl -s -o /dev/null -w 'http=%{http_code}' http://localhost:8042/")
   check "the Aodh API answers its version document" contains "http=" "$out"
   out=$(orphera run sh -c "sudo /usr/local/sbin/orphera-telemetry-api metrics" --nodes tst24 --timeout 420 2>&1)
-  check "Ceilometer series are in Prometheus" contains "ceilometer series in prometheus" "$out"
+  check "Ceilometer series are in Prometheus" contains "ceilometer exporters up" "$out"
   out=$(orphera run sh -c "sudo /usr/local/sbin/orphera-telemetry-api alarm-cycle" --nodes tst24 --timeout 480 2>&1)
   check "two PromQL alarms reach the states alarm and ok" contains "alarm cycle ok" "$out"
+}
+
+step_trove() {
+  playbook trove_single_node.scala
+  local out
+  out=$(run_on tst25 "curl -s -o /dev/null -w 'http=%{http_code}' http://localhost:8779/")
+  check "the Trove API answers its version document" contains "http=" "$out"
+  out=$(orphera run sh -c "sudo /usr/local/sbin/orphera-trove-api check" --nodes tst25 --timeout 300 2>&1)
+  check "Trove answers an authenticated request and the guest network, group and keypair exist" contains "trove check ok" "$out"
 }
 
 step_skyline() {
