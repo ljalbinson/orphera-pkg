@@ -415,7 +415,14 @@ fi
 rc=0
 if [ "$was_running" -eq 1 ] && [ "$NO_START" -eq 0 ]; then
   log "starting $vm on $dst"
-  if step "$dst" "$(pre)"$'\n'"$(start_body)" 60; then
+  # libvirt can fail the first start when the tap name it picked (vnetN) is still held by a stale Open vSwitch
+  # port on another bridge; the next attempt picks another name, so try twice.
+  started=0
+  for attempt in 1 2; do
+    if step "$dst" "$(pre)"$'\n'"$(start_body)" 60; then started=1; break; fi
+    [ "$attempt" -eq 1 ] && { log "start failed on $dst; trying once more in 5 s (see 'journalctl -u libvirtd' there for the reason)"; sleep 5; }
+  done
+  if [ "$started" -eq 1 ]; then
     log "waiting up to ${BOOT_WAIT}s for the agent in $vm"
     up=0; t=0
     while [ "$t" -lt "$BOOT_WAIT" ]; do

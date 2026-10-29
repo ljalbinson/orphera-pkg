@@ -15,6 +15,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   its agent. `--dry-run` prints the plan, `--delete-source` removes the source dataset afterwards. A failure before the source is undefined removes
   what was made on the destination and restarts the VM on the source. The stream is not encrypted. Not run on the lab yet; the checks and the
   dry run were exercised against stand-in `orphera`, `virsh` and `zfs` commands.
+  Run on the lab (tst24, gs3 to gs2): the move worked. The first start failed because libvirt picked a tap name that a stale Open vSwitch
+  port on another bridge still held; the script now tries the start twice.
 - Skyline dashboard on tst13 beside Horizon (http://tst13:9999/). `manifests/skyline_single_node.scala` creates the `skyline` database on Galera and
   the Keystone user `skyline`, installs PyMySQL into a host directory with the image's own Python, writes `skyline.yaml`, runs the documented
   `skyline_bootstrap` migrations and runs one container from `docker.io/99cloud/skyline` (`SKYLINE_IMAGE` overrides), restarting it when the
