@@ -335,6 +335,8 @@ object telemetry_single_node extends OrpheraClusterPlaybook:
        |
        |[database]
        |connection = mysql+pymysql://$dbUser:${dbPassword.reveal}@$vip:3306/$dbName
+       |# haproxy on the VIP closes connections idle for 30 s; recycle older pooled ones before they are reused
+       |connection_recycle_time = 20
        |
        |[keystone_authtoken]
        |www_authenticate_uri = $ksUrl

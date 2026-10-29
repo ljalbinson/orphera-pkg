@@ -19,6 +19,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   that Ceilometer series reach Prometheus and that two PromQL alarms reach the states alarm and ok. `telemetry_teardown.scala` undoes it and
   `test_telemetry.sh` checks it. New secrets: `aodh/db`, `aodh/service`, `aodh/rabbit`, `ceilometer/service`, `ceilometer/rabbit`. The images are
   in the Kolla build list. The notification agent and the Aodh listener are not run (no service publishes notifications yet). The playbook
+  The Aodh configuration sets `[database] connection_recycle_time = 20`, because haproxy on the Galera VIP closes connections idle for 30 s
+  and the evaluator's pooled connection otherwise dies between cycles (oslo.db then fails in its error handler and never reconnects).
   and its test have not been run.
 - `observability_stack.scala` and `observability_extended.scala` write `scrape_config_files: /etc/prometheus/scrape.d/*.yml` into
   `prometheus.yml` (and make the directory), so a scrape job kept in a separate file survives their whole-file rewrites; this needs Prometheus 2.43
