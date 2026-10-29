@@ -39,6 +39,9 @@
 #                        mysqld exporters; telemetry stores its metrics in this Prometheus)
 #   telemetry tst24      telemetry_single_node (Ceilometer polling agents on tst24 and the compute nodes, a Pushgateway
 #                        feeding the Prometheus on tst7, and Aodh with PromQL alarms; RabbitMQ vhosts on tst10)
+#   skyline  tst13       skyline_single_node (the Skyline dashboard, http://tst13:9999/, beside Horizon; one container
+#                        from the project's own image; run after every service is registered, it writes its
+#                        nginx file from the catalog)
 #   designate tst16      designate_single_node (DNS as a service: API, central, worker, producer, mdns and
 #                        a BIND9 name server; RabbitMQ vhost on tst10)
 #   clients  scala0      utils/openstack-client-setup.sh
@@ -64,7 +67,7 @@
 #   --with-build    set up the Kolla image builder on tst21 and build every image from source
 #                   (hours the first time; needs the caches: use it with --with-caches or after it)
 #   --from STEP     start at STEP (prep caches ceph galera keystone cinder glance
-#                   placement nova neutron compute horizon designate heat barbican manila rgw octavia magnum observability telemetry clients smoke boot) - for resuming
+#                   placement nova neutron compute horizon designate heat barbican manila rgw octavia magnum observability telemetry skyline clients smoke boot) - for resuming
 #                   after a failure
 #   --only STEP     run just that one step
 #   --list          print the plan and exit
@@ -79,7 +82,7 @@ cd "$(dirname "$0")/.." || exit 1
 . utils/orphera-sources.sh
 CONF_DIR=$(config_dir) || exit 1
 
-ALL_STEPS=(prep caches build ceph galera keystone cinder glance placement nova neutron compute horizon designate heat barbican manila rgw octavia magnum observability telemetry clients smoke boot)
+ALL_STEPS=(prep caches build ceph galera keystone cinder glance placement nova neutron compute horizon designate heat barbican manila rgw octavia magnum observability telemetry skyline clients smoke boot)
 WITH_CACHES=""
 WITH_BUILD=""
 FROM=""
@@ -422,6 +425,15 @@ step_telemetry() {
   check "Ceilometer series are in Prometheus" contains "ceilometer series in prometheus" "$out"
   out=$(orphera run sh -c "sudo /usr/local/sbin/orphera-telemetry-api alarm-cycle" --nodes tst24 --timeout 480 2>&1)
   check "two PromQL alarms reach the states alarm and ok" contains "alarm cycle ok" "$out"
+}
+
+step_skyline() {
+  playbook skyline_single_node.scala
+  local out
+  out=$(run_on tst13 "curl -s -o /dev/null -w 'http=%{http_code}' http://localhost:9999/")
+  check "the Skyline console answers on 9999" contains "http=200" "$out"
+  out=$(orphera run sh -c "sudo /usr/local/sbin/orphera-skyline-api login-check" --nodes tst13 --timeout 120 2>&1)
+  check "the admin user logs in to Skyline" contains "login ok" "$out"
 }
 
 step_clients() {

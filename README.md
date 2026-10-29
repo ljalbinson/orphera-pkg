@@ -1850,7 +1850,7 @@ Fleet layout used by these manifests (see `inventory.yaml`):
 | tst10 | Cinder (API, scheduler, volume, RabbitMQ) |
 | tst11 | apt cache (apt-cacher-ng) for the Ubuntu nodes |
 | tst12 | rpm cache (nginx caching mirror of Rocky/EPEL) for the Rocky nodes |
-| tst13 | Glance (glance-api, images in Ceph pool `images`) Placement (port 8780) and Horizon (port 8080) |
+| tst13 | Glance (glance-api, images in Ceph pool `images`) Placement (port 8780), Horizon (port 8080) and Skyline (port 9999) |
 | tst19 | Neutron (server, Open vSwitch, DHCP and L3 agents): VXLAN tenant networks, routers and floating IPs, and the flat provider network on its second NIC (br-net106, no address); also Octavia (API on 9876, worker, health manager, housekeeping) with the port `o-hm0` on br-int |
 | tst14 | Nova control plane (API on 8774, scheduler, conductor, noVNC proxy on 6080); RabbitMQ vhost `nova` on tst10 |
 | tst20 | Heat (API on 8004, CloudFormation API on 8000, engine) and Barbican (API on 9311, worker); RabbitMQ vhosts `heat` and `barbican` on tst10 |
@@ -1993,6 +1993,15 @@ need the services to publish notifications (`[oslo_messaging_notifications] driv
 and no event data yet; billing (the Prometheus publisher sends no timestamps). The Ceilometer and Aodh images need `orphera-kolla-build sources
 refresh` and a build of `ceilometer-central ceilometer-compute aodh-api aodh-evaluator aodh-notifier` on tst21, or they come from quay.io. The
 playbook and its test have not been run.
+
+**Skyline** (`manifests/skyline_single_node.scala`, undone by `skyline_teardown.scala`, checked by `test_skyline.sh`) is the Skyline dashboard on tst13,
+beside Horizon: `http://tst13.ljalbinson.com:9999/`, log in as `admin` with domain `Default`. It is one container from the image the Skyline project
+documents (`docker.io/99cloud/skyline:latest`; `SKYLINE_IMAGE` sets another reference), not a Kolla image, so tst21 does not build it and tst13 needs
+Docker Hub. The image runs the API server and the nginx in front of it, and writes nginx's configuration from the Keystone catalog each time it starts,
+so run the playbook again after registering a new service (it restarts the container when the catalog's public endpoints changed). The database
+`skyline` is on Galera, the Keystone user `skyline` (role admin, project `service`) is made for you, and the monitoring pages read the Prometheus on
+tst7. The image has no MySQL driver, so PyMySQL is installed into `/var/lib/orphera/skyline/pylib` with the image's own Python. The console is served
+over plain HTTP, so `ssl_enabled` is false in `skyline.yaml`; TLS is not set up. The playbook and its test have not been run.
 
 **Object storage** (`manifests/rgw_single_node.scala`, undone by `rgw_teardown.scala`, checked by `test_rgw.sh`) is the Ceph RADOS Gateway with
 Keystone as its identity service. It is a cephadm service on the existing Ceph cluster (one daemon on tst0, `http://10.10.5.12:8080`), so it needs
