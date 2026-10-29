@@ -37,8 +37,8 @@
 #                        driver; makes a Kubernetes image, flavor and template, and a real test cluster)
 #   observability tst7   observability_stack + observability_extended (Prometheus, Grafana, node, haproxy and
 #                        mysqld exporters; telemetry stores its metrics in this Prometheus)
-#   telemetry tst24      telemetry_single_node (Ceilometer polling agents on tst24 and the compute nodes, a Pushgateway
-#                        feeding the Prometheus on tst7, and Aodh with PromQL alarms; RabbitMQ vhosts on tst10)
+#   telemetry tst24      telemetry_single_node (Ceilometer polling agents on tst24 and the compute nodes, exporters
+#                        scraped by the Prometheus on tst7, and Aodh with PromQL alarms; RabbitMQ vhosts on tst10)
 #   designate tst16      designate_single_node (DNS as a service: API, central, worker, producer, mdns and
 #                        a BIND9 name server; RabbitMQ vhost on tst10)
 #   clients  scala0      utils/openstack-client-setup.sh

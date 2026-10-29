@@ -14,18 +14,20 @@ import orphera.orchestrator.kolla.*
 //
 // How the data flows:
 //   - ceilometer-central (tst24) polls the Glance, Cinder and Neutron APIs; ceilometer-compute (tst17, tst18)
-//     polls libvirt for the instances on its node. Each agent publishes its samples with the `prometheus://`
-//     publisher to the Pushgateway on tst24 (port 9091), in its own group (job=ceilometer, instance=<node>),
-//     so one agent's push never replaces another's.
-//   - Prometheus on tst7 scrapes the Pushgateway every 15 s (honor_labels, so the pushed job and instance
-//     labels are kept). The scrape job goes in /etc/prometheus/scrape.d/openstack-telemetry.yml, named by a
-//     `scrape_config_files` line in prometheus.yml. observability_stack.scala and observability_extended.scala
-//     rewrite prometheus.yml whole and both carry that line, so a re-run of either keeps the job.
+//     polls libvirt for the instances on its node. Each polling agent exposes what it collected itself, in
+//     Prometheus format, on port 9101 (`[polling] enable_prometheus_exporter`). There is no pipeline.yaml, no
+//     notification agent and no message bus traffic for the metrics: `enable_notifications = false`. (The
+//     polling agent does not apply pipeline.yaml: its samples go to a notification agent over the message bus,
+//     and only that agent runs the pipeline's publishers.)
+//   - Prometheus on tst7 scrapes the three exporters every 15 s. The scrape job goes in
+//     /etc/prometheus/scrape.d/openstack-telemetry.yml, named by a `scrape_config_files` line in prometheus.yml.
+//     observability_stack.scala and observability_extended.scala rewrite prometheus.yml whole and both carry
+//     that line, so a re-run of either keeps the job.
 //   - aodh-evaluator (tst24) runs PromQL alarms against the Prometheus it finds in the Keystone catalog (service
 //     type `prometheus`, registered here as http://tst7.ljalbinson.com:9090); aodh-notifier carries out the
 //     alarm actions; aodh-api (port 8042, Apache + mod_wsgi) is the REST API.
-// Ceilometer's Prometheus publisher sends no timestamps and only the label resource_id, so a series is named
-// after the meter (cpu, memory_usage, image_size ...) with {resource_id="..."}; the pollers run every 60 s.
+// The pollers run every 60 s; the series are named by Ceilometer's exporter (the helper's `metrics` prints the
+// names it finds).
 //
 // Left out of this first version: the Ceilometer notification agent and the Aodh listener. Both read the
 // notifications the services publish, and none of Nova, Cinder, Glance or Neutron here sends them yet
@@ -51,21 +53,21 @@ import orphera.orchestrator.kolla.*
 //     registration, configuration, Kolla config, `aodh-dbsync`, then the units.
 //   - install-ceilometer-compute (tst17, tst18): image pull, CA, configuration (host name filled in per
 //     node), Kolla config, unit.
-//   - telemetry-prometheus (tst7): the scrape job for the Pushgateway.
+//   - telemetry-prometheus (tst7): the scrape job for the three exporters.
 //   - confirm-telemetry-healthy (tst24): the Aodh API answers, ceilometer series appear in Prometheus, and two
 //     PromQL alarms reach the states they should.
 //
 // Check mode: `ORPHERA_CHECK=1 orphera cluster-playbook manifests/telemetry_single_node.scala` changes nothing
 // and reports whether the units on tst24 match what this playbook writes.
 //
-// Facts this was written from, to check if the first run fails: the Prometheus publisher is
-// prometheus://host:9091/metrics/job/<job>[/instance/<name>]; the Aodh Prometheus alarm rule is
-// {comparison_operator, threshold, query}; the Aodh evaluator finds Prometheus by service type `prometheus`
-// (the install stage prints the lines of the image's evaluator that name it); the aodh-api WSGI script is
-// found in the image as app.wsgi; the Kolla user names are ceilometer and aodh; ceilometer-polling takes
-// --polling-namespaces central|compute; instance_discovery_method = libvirt_metadata reads the instance
-// details from the libvirt domain XML, so the compute agent needs no Nova API; the Pushgateway image is
-// quay.io/prometheus/pushgateway.
+// Facts this was written from, to check if the first run fails: the exporter is [polling]
+// enable_prometheus_exporter and prometheus_listen_addresses (default 127.0.0.1:9101), fed by the polling task
+// whether or not notifications are on; the Aodh Prometheus alarm rule is {comparison_operator, threshold,
+// query}; the Aodh evaluator finds Prometheus by service type `prometheus` (the install stage prints the lines
+// of the image's evaluator that name it); the aodh-api WSGI script is found in the image as app.wsgi; the Kolla
+// user names are ceilometer and aodh; ceilometer-polling takes --polling-namespaces central|compute;
+// instance_discovery_method = libvirt_metadata reads the instance details from the libvirt domain XML, so the
+// compute agent needs no Nova API.
 //
 // Test-only credentials come from the secret store (aodh/db, aodh/service, aodh/rabbit, ceilometer/service,
 // ceilometer/rabbit), made on first use. Not compiled where this was written; the first run on scala0 is the
@@ -76,7 +78,7 @@ object telemetry_single_node extends OrpheraClusterPlaybook:
   private val fqdn = "tst24.ljalbinson.com"
   private val nodeIp = "10.10.5.36"
   private val aodhPort = 8042
-  private val pushPort = 9091
+  private val exporterPort = 9101
   private val computeNodes = List("tst17", "tst18")
 
   private val ksFqdn = "tst6.ljalbinson.com"
@@ -93,8 +95,6 @@ object telemetry_single_node extends OrpheraClusterPlaybook:
   // Keep in step with keystone_single_node.scala / kolla_cache.scala.
   private val registry = "quay.io/openstack.kolla"
   private val cacheHostPort = "tst9.ljalbinson.com:5000"
-  private val pushgatewayImage =
-    ExternalImage("quay.io/prometheus/pushgateway:v1.9.0")
 
   private val adminPassword = Secrets.secret("keystone/admin")
   private val dbName = "aodh"
@@ -139,13 +139,8 @@ object telemetry_single_node extends OrpheraClusterPlaybook:
     ),
     env = List("KOLLA_CONFIG_STRATEGY" -> "COPY_ALWAYS")
   )
-  private val pushgateway = Container(
-    name = ContainerName("pushgateway"),
-    image = pushgatewayImage,
-    description = Some("Prometheus Pushgateway for Ceilometer")
-  )
   private val nodeContainers: List[Container] =
-    List(pushgateway, centralContainer) ++
+    List(centralContainer) ++
       List("aodh-evaluator", "aodh-notifier", "aodh-api").map(aodhContainer)
 
   // The compute agent reads libvirt through the host's socket (nova_compute.scala opens it to all users) and
@@ -216,6 +211,11 @@ object telemetry_single_node extends OrpheraClusterPlaybook:
 
   // ---- tst7 (Prometheus) -----------------------------------------------
 
+  private val exporterHosts: List[String] =
+    (node :: computeNodes).map(n => s"$n.ljalbinson.com")
+  private val exporterTargets: String =
+    exporterHosts.map(h => s"'$h:$exporterPort'").mkString(", ")
+
   // The scrape job goes in its own file, named by a scrape_config_files line in prometheus.yml. The two
   // observability playbooks rewrite prometheus.yml and carry the same line. The old file is put back if
   // promtool does not accept the new one.
@@ -224,10 +224,9 @@ object telemetry_single_node extends OrpheraClusterPlaybook:
        |mkdir -p /etc/prometheus/scrape.d
        |cat > /etc/prometheus/scrape.d/openstack-telemetry.yml <<'SCRAPE'
        |scrape_configs:
-       |  - job_name: 'pushgateway'
-       |    honor_labels: true
+       |  - job_name: 'ceilometer'
        |    static_configs:
-       |      - targets: ['$fqdn:$pushPort']
+       |      - targets: [$exporterTargets]
        |SCRAPE
        |cp /etc/prometheus/prometheus.yml /etc/prometheus/prometheus.yml.orphera-bak
        |if ! grep -q '^scrape_config_files:' /etc/prometheus/prometheus.yml; then
@@ -244,7 +243,7 @@ object telemetry_single_node extends OrpheraClusterPlaybook:
        |  echo "prometheus did not come back healthy - see 'journalctl -xeu prometheus'" >&2
        |  exit 1
        |fi
-       |echo "prometheus scrapes the pushgateway at $fqdn:$pushPort"""".stripMargin
+       |echo "prometheus scrapes the Ceilometer exporters: $exporterTargets"""".stripMargin
 
   // ---- the nodes -------------------------------------------------------
 
@@ -375,25 +374,17 @@ object telemetry_single_node extends OrpheraClusterPlaybook:
         "/etc/ceilometer/ssl/ca.crt"
       )}
        |
+       |[polling]
+       |enable_prometheus_exporter = true
+       |prometheus_listen_addresses = 0.0.0.0:$exporterPort
+       |enable_notifications = false
+       |batch_size = 500
+       |
        |[compute]
        |instance_discovery_method = libvirt_metadata
        |
        |[oslo_concurrency]
        |lock_path = /var/lib/ceilometer/tmp
-       |""".stripMargin
-
-  private val pipelineYaml: String =
-    s"""---
-       |sources:
-       |  - name: meter_source
-       |    meters:
-       |      - "*"
-       |    sinks:
-       |      - meter_sink
-       |sinks:
-       |  - name: meter_sink
-       |    publishers:
-       |      - prometheus://$fqdn:$pushPort/metrics/job/ceilometer/instance/@@HOST@@
        |""".stripMargin
 
   private val centralPolling: String =
@@ -427,7 +418,7 @@ object telemetry_single_node extends OrpheraClusterPlaybook:
   private def put(content: String, dest: String): String =
     s"cat > $dest <<'ORPHERA_EOF'\n$content\nORPHERA_EOF\n"
 
-  // The ceilometer files for one agent: configuration, pipeline, polling, written under srcDir and then
+  // The ceilometer files for one agent: configuration and polling, written under srcDir and then
   // copied into the Kolla config directory with the CA and the config.json.
   private def ceilometerFilesScript(
       service: String,
@@ -435,16 +426,15 @@ object telemetry_single_node extends OrpheraClusterPlaybook:
       polling: String
   ): String =
     put(ceilometerConf, s"$srcDir/ceilometer.conf") +
-      put(pipelineYaml, s"$srcDir/pipeline.yaml") +
       put(polling, s"$srcDir/polling.yaml") +
       s"""set -e
          |HOST=$$(hostname -s)
-         |sed -i "s/@@HOST@@/$$HOST/" $srcDir/ceilometer.conf $srcDir/pipeline.yaml
+         |sed -i "s/@@HOST@@/$$HOST/" $srcDir/ceilometer.conf
          |mkdir -p $confRoot/$service
-         |cp $srcDir/ceilometer.conf $srcDir/pipeline.yaml $srcDir/polling.yaml $confRoot/$service/
+         |cp $srcDir/ceilometer.conf $srcDir/polling.yaml $confRoot/$service/
          |cp $caDir/ca.crt $confRoot/$service/ca.crt
          |cat > $confRoot/$service/config.json <<JSON
-         |{"command": "ceilometer-polling --polling-namespaces $namespace --config-file /etc/ceilometer/ceilometer.conf", "config_files": [{"source": "/var/lib/kolla/config_files/ceilometer.conf", "dest": "/etc/ceilometer/ceilometer.conf", "owner": "ceilometer", "perm": "0600"}, {"source": "/var/lib/kolla/config_files/pipeline.yaml", "dest": "/etc/ceilometer/pipeline.yaml", "owner": "ceilometer", "perm": "0600"}, {"source": "/var/lib/kolla/config_files/polling.yaml", "dest": "/etc/ceilometer/polling.yaml", "owner": "ceilometer", "perm": "0600"}, {"source": "/var/lib/kolla/config_files/ca.crt", "dest": "/etc/ceilometer/ssl/ca.crt", "owner": "ceilometer", "perm": "0644"}], "permissions": [{"path": "/var/log/kolla/ceilometer", "owner": "ceilometer:kolla", "recurse": true}, {"path": "/var/lib/ceilometer", "owner": "ceilometer:ceilometer", "recurse": true}]}
+         |{"command": "ceilometer-polling --polling-namespaces $namespace --config-file /etc/ceilometer/ceilometer.conf", "config_files": [{"source": "/var/lib/kolla/config_files/ceilometer.conf", "dest": "/etc/ceilometer/ceilometer.conf", "owner": "ceilometer", "perm": "0600"}, {"source": "/var/lib/kolla/config_files/polling.yaml", "dest": "/etc/ceilometer/polling.yaml", "owner": "ceilometer", "perm": "0600"}, {"source": "/var/lib/kolla/config_files/ca.crt", "dest": "/etc/ceilometer/ssl/ca.crt", "owner": "ceilometer", "perm": "0644"}], "permissions": [{"path": "/var/log/kolla/ceilometer", "owner": "ceilometer:kolla", "recurse": true}, {"path": "/var/lib/ceilometer", "owner": "ceilometer:ceilometer", "recurse": true}]}
          |JSON
          |python3 -c "import json; json.load(open('$confRoot/$service/config.json')); print('config.json is valid JSON')"
          |echo "kolla config written for $service on $$HOST"
@@ -658,19 +648,32 @@ def prom(path, params):
 
 
 def metrics():
+    expected = @@NTARGETS@@
     deadline = time.time() + 300
-    names = []
+    up = 0
     while time.time() < deadline:
-        p = prom('/api/v1/label/__name__/values', {'match[]': '{job="ceilometer"}'})
-        names = p.get('data', [])
+        q = prom('/api/v1/query', {'query': 'count(up{job="ceilometer"} == 1)'})
+        up = int(float(q['data']['result'][0]['value'][1])) if q['data']['result'] else 0
+        if up >= expected:
+            break
+        time.sleep(10)
+    if up < expected:
+        t = prom('/api/v1/targets', {})
+        bad = ['%s: %s' % (x['scrapeUrl'], x.get('lastError') or x['health']) for x in t['data']['activeTargets'] if x['labels'].get('job') == 'ceilometer' and x['health'] != 'up']
+        die('only %d of %d ceilometer exporters are up in prometheus after 5 minutes: %s - check "curl localhost:9101/metrics" on the node and the scrape job' % (up, expected, '; '.join(bad) or 'no ceilometer targets known'))
+    # The pollers run every 60 s, so give the first samples time to be scraped.
+    names = []
+    end = time.time() + 180
+    while time.time() < end:
+        names = [n for n in prom('/api/v1/label/__name__/values', {'match[]': '{job="ceilometer"}'}).get('data', []) if n not in ('up', 'scrape_duration_seconds', 'scrape_samples_scraped', 'scrape_samples_post_metric_relabeling', 'scrape_series_added')]
         if names:
             break
         time.sleep(10)
-    if not names:
-        die('no series with job="ceilometer" in prometheus after 5 minutes - check the pushgateway (curl %s:9091/metrics), the scrape job and the ceilometer-central log' % '@@PUSH@@')
-    q = prom('/api/v1/query', {'query': 'count({job="ceilometer"})'})
-    count = q['data']['result'][0]['value'][1] if q['data']['result'] else '0'
-    print('ceilometer series in prometheus: %s; names: %s' % (count, ' '.join(sorted(names))))
+    print('ceilometer exporters up: %d of %d' % (up, expected))
+    if names:
+        print('ceilometer metric names in prometheus: ' + ' '.join(sorted(names)))
+    else:
+        print('WARNING: the exporters are up but no Ceilometer metric has appeared yet (no instances, volumes or images to poll, or the pollsters are skipping): look at "podman logs ceilometer-central"')
 
 
 def acall(method, path, token, body=None):
@@ -734,7 +737,7 @@ if __name__ == '__main__':
         .replace("@@KS@@", ksFqdn)
         .replace("@@AODH@@", s"http://$fqdn:$aodhPort")
         .replace("@@PROM@@", promUrl)
-        .replace("@@PUSH@@", fqdn)
+        .replace("@@NTARGETS@@", exporterHosts.size.toString)
         .replace("@@ADMINPW@@", adminPassword.reveal)
         .replace("@@AODHPW@@", aodhPassword.reveal)
         .replace("@@CEILOMETERPW@@", ceilometerPassword.reveal)
@@ -746,8 +749,9 @@ if __name__ == '__main__':
     s"""CODE=$$(curl -s -o /dev/null -w '%{http_code}' http://localhost:$aodhPort/)
        |[ "$$CODE" = "200" ] || [ "$$CODE" = "300" ]""".stripMargin
 
-  private val pushgatewayHealthScript =
-    s"""curl -sf http://localhost:$pushPort/-/healthy >/dev/null"""
+  // The polling agent's exporter answers once the first poll cycle has started.
+  private val exporterHealthScript =
+    s"""curl -sf http://localhost:$exporterPort/metrics >/dev/null"""
 
   // ORPHERA_CHECK=1 turns the run into a check: it changes nothing on the node and fails, with a diff, if a
   // unit differs from what this playbook would write.
@@ -797,7 +801,7 @@ if __name__ == '__main__':
         .task("use the Kolla cache as a mirror for quay.io")(
           Task.RunCommand(List("sh", "-c", useCacheScript))
         )
-        .task("pull the Pushgateway, Ceilometer and Aodh images")(
+        .task("pull the Ceilometer and Aodh images")(
           Task.RunCommand(List("sh", "-c", nodePullScript), timeoutSeconds = 1800)
         )
         .task("fetch Keystone's CA from its TLS handshake")(
@@ -910,7 +914,7 @@ if __name__ == '__main__':
       installCompute.build,
 
       stage("telemetry-prometheus", promNode)
-        .task("add the Pushgateway scrape job to Prometheus")(
+        .task("add the Ceilometer scrape job to Prometheus")(
           Task.RunCommand(
             List("sh", "-c", prometheusScript),
             timeoutSeconds = 120
@@ -922,7 +926,7 @@ if __name__ == '__main__':
         .waitFor(
           HealthCheck.Command(
             onNode = node,
-            command = List("sh", "-c", pushgatewayHealthScript),
+            command = List("sh", "-c", exporterHealthScript),
             pollIntervalSeconds = 5,
             timeoutSeconds = 120
           )
@@ -957,7 +961,7 @@ if __name__ == '__main__':
         )
         .task("telemetry confirmed")(
           Task.Debug(
-            s"Telemetry up: Aodh at http://$fqdn:$aodhPort ($nodeIp), Pushgateway at $fqdn:$pushPort, ceilometer-central on $node and ceilometer-compute on ${computeNodes.mkString(", ")}, series in Prometheus at $promUrl (job=ceilometer), RabbitMQ vhosts aodh and ceilometer on $rabbitIp:5672, database $dbName via $vip:3306, identity from $ksUrl. Test: manifests/test_telemetry.sh"
+            s"Telemetry up: Aodh at http://$fqdn:$aodhPort ($nodeIp), Ceilometer exporters at $exporterTargets, ceilometer-central on $node and ceilometer-compute on ${computeNodes.mkString(", ")}, series in Prometheus at $promUrl (job=ceilometer), RabbitMQ vhosts aodh and ceilometer on $rabbitIp:5672, database $dbName via $vip:3306, identity from $ksUrl. Test: manifests/test_telemetry.sh"
           )
         )
         .build

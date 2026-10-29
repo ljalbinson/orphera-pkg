@@ -5,7 +5,7 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 
 // DRAFT. Undoes telemetry_single_node.scala: removes Aodh, Ceilometer and the Prometheus entry from Keystone
 // through the helper installed by the main playbook if it is still there, stops and removes the containers,
-// units, config, state and helper on tst24 and the compute agent on tst17 and tst18, removes the Pushgateway
+// units, config, state and helper on tst24 and the compute agent on tst17 and tst18, removes the Ceilometer
 // scrape job from Prometheus on tst7 (the scrape_config_files line in prometheus.yml stays; with no file in
 // scrape.d it does nothing), drops the aodh database and user, and removes the aodh and ceilometer vhosts and
 // users from RabbitMQ. Series already in Prometheus stay until its retention removes them. podman and the
@@ -38,8 +38,7 @@ object telemetry_teardown extends OrpheraClusterPlaybook:
       "aodh-api",
       "aodh-evaluator",
       "aodh-notifier",
-      "ceilometer-central",
-      "pushgateway"
+      "ceilometer-central"
     ),
     """if [ -x /usr/local/sbin/orphera-telemetry-api ]; then
       |  /usr/local/sbin/orphera-telemetry-api unregister || echo "keystone cleanup failed (continuing)"
@@ -73,7 +72,7 @@ object telemetry_teardown extends OrpheraClusterPlaybook:
       |if systemctl is-active --quiet prometheus; then
       |  systemctl restart prometheus
       |fi
-      |echo "pushgateway scrape job removed from prometheus"""".stripMargin
+      |echo "ceilometer scrape job removed from prometheus"""".stripMargin
 
   val playbook: ClusterPlaybook =
     clusterPlaybook("telemetry-teardown")(
@@ -91,7 +90,7 @@ object telemetry_teardown extends OrpheraClusterPlaybook:
         )
         .build,
 
-      stage("remove-pushgateway-scrape-job", promNode)
+      stage("remove-ceilometer-scrape-job", promNode)
         .task("remove the scrape job file and restart Prometheus")(
           Task.RunCommand(List("sh", "-c", prometheusScript), timeoutSeconds = 120)
         )
