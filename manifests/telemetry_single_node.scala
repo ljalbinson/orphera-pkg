@@ -23,8 +23,9 @@ import orphera.orchestrator.kolla.*
 //     /etc/prometheus/scrape.d/openstack-telemetry.yml, named by a `scrape_config_files` line in prometheus.yml.
 //     observability_stack.scala and observability_extended.scala rewrite prometheus.yml whole and both carry
 //     that line, so a re-run of either keeps the job.
-//   - aodh-evaluator (tst24) runs PromQL alarms against the Prometheus it finds in the Keystone catalog (service
-//     type `prometheus`, registered here as http://tst7.ljalbinson.com:9090); aodh-notifier carries out the
+//   - aodh-evaluator (tst24) runs PromQL alarms against the Prometheus named by its PROMETHEUS_HOST and
+//     PROMETHEUS_PORT environment variables (python-observabilityclient; the evaluator does not load without
+//     them); the playbook also registers it in the Keystone catalog as service type `prometheus`; aodh-notifier carries out the
 //     alarm actions; aodh-api (port 8042, Apache + mod_wsgi) is the REST API.
 // The pollers run every 60 s; the series are named by Ceilometer's exporter (the helper's `metrics` prints the
 // names it finds).
@@ -63,8 +64,8 @@ import orphera.orchestrator.kolla.*
 // Facts this was written from, to check if the first run fails: the exporter is [polling]
 // enable_prometheus_exporter and prometheus_listen_addresses (default 127.0.0.1:9101), fed by the polling task
 // whether or not notifications are on; the Aodh Prometheus alarm rule is {comparison_operator, threshold,
-// query}; the Aodh evaluator finds Prometheus by service type `prometheus` (the install stage prints the lines
-// of the image's evaluator that name it); the aodh-api WSGI script is found in the image as app.wsgi; the Kolla
+// query}; the Aodh evaluator finds Prometheus through PROMETHEUS_HOST and PROMETHEUS_PORT (found on the lab:
+// without them stevedore drops the prometheus evaluator and the alarms are skipped as an unsupported type); the aodh-api WSGI script is found in the image as app.wsgi; the Kolla
 // user names are ceilometer and aodh; ceilometer-polling takes --polling-namespaces central|compute;
 // instance_discovery_method = libvirt_metadata reads the instance details from the libvirt domain XML, so the
 // compute agent needs no Nova API.
@@ -85,7 +86,8 @@ object telemetry_single_node extends OrpheraClusterPlaybook:
   private val vip = "10.10.5.100"
 
   private val promNode = "tst7"
-  private val promUrl = "http://tst7.ljalbinson.com:9090"
+  private val promFqdn = "tst7.ljalbinson.com"
+  private val promUrl = s"http://$promFqdn:9090"
 
   private val rabbitNode = "tst10"
   private val rabbitIp = "10.10.5.22"
@@ -125,7 +127,13 @@ object telemetry_single_node extends OrpheraClusterPlaybook:
         Mount(aodhLogDir, "/var/log/kolla/aodh", Access.ReadWrite),
         Mount(s"$stateDir/aodh", "/var/lib/aodh", Access.ReadWrite)
       ),
-      env = List("KOLLA_CONFIG_STRATEGY" -> "COPY_ALWAYS"),
+      // The evaluator's observabilityclient library takes the Prometheus address from these two variables
+      // (or from ~/.config/openstack/prometheus.yaml); it does not read the Keystone catalog.
+      env = List(
+        "KOLLA_CONFIG_STRATEGY" -> "COPY_ALWAYS",
+        "PROMETHEUS_HOST" -> promFqdn,
+        "PROMETHEUS_PORT" -> "9090"
+      ),
       // The API image runs Apache, which cannot open its log files as a non-root user.
       user = if service == "aodh-api" then Some("root") else None
     )

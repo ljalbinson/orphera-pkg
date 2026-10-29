@@ -21,6 +21,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   in the Kolla build list. The notification agent and the Aodh listener are not run (no service publishes notifications yet). The playbook
   The Aodh configuration sets `[database] connection_recycle_time = 20`, because haproxy on the Galera VIP closes connections idle for 30 s
   and the evaluator's pooled connection otherwise dies between cycles (oslo.db then fails in its error handler and never reconnects).
+  The Aodh containers get `PROMETHEUS_HOST` and `PROMETHEUS_PORT`: python-observabilityclient reads the Prometheus address only from those
+  (or a `prometheus.yaml`), and without them the evaluator does not load its `prometheus` type and skips the alarms.
   and its test have not been run.
 - `observability_stack.scala` and `observability_extended.scala` write `scrape_config_files: /etc/prometheus/scrape.d/*.yml` into
   `prometheus.yml` (and make the directory), so a scrape job kept in a separate file survives their whole-file rewrites; this needs Prometheus 2.43
