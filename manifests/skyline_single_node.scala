@@ -439,7 +439,8 @@ if __name__ == '__main__':
           )
         )
         .task("skyline_bootstrap (database migrations)")(
-          Task.RunCommand(List("sh", "-c", bootstrapScript), timeoutSeconds = 600)
+          Task
+            .RunCommand(List("sh", "-c", bootstrapScript), timeoutSeconds = 600)
         )
         .task(s"write ${skylineContainer.unitName}")(skylineContainer.writeUnit)
         .task(s"start ${skylineContainer.unitName}")(skylineContainer.start)
