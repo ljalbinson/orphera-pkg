@@ -215,7 +215,10 @@ object telemetry_single_node extends OrpheraClusterPlaybook:
        |  exit 1
        |fi
        |${rabbitPart("aodh", aodhRabbitPassword.reveal)}
-       |${rabbitPart("ceilometer", ceilometerRabbitPassword.reveal)}""".stripMargin
+       |${rabbitPart(
+        "ceilometer",
+        ceilometerRabbitPassword.reveal
+      )}""".stripMargin
 
   // ---- tst7 (Prometheus) -----------------------------------------------
 
@@ -812,7 +815,10 @@ if __name__ == '__main__':
           Task.RunCommand(List("sh", "-c", useCacheScript))
         )
         .task("pull the Ceilometer and Aodh images")(
-          Task.RunCommand(List("sh", "-c", nodePullScript), timeoutSeconds = 1800)
+          Task.RunCommand(
+            List("sh", "-c", nodePullScript),
+            timeoutSeconds = 1800
+          )
         )
         .task("fetch Keystone's CA from its TLS handshake")(
           Task.RunCommand(List("sh", "-c", fetchCaScript), timeoutSeconds = 60)

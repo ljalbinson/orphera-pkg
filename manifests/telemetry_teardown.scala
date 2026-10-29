@@ -92,7 +92,10 @@ object telemetry_teardown extends OrpheraClusterPlaybook:
 
       stage("remove-ceilometer-scrape-job", promNode)
         .task("remove the scrape job file and restart Prometheus")(
-          Task.RunCommand(List("sh", "-c", prometheusScript), timeoutSeconds = 120)
+          Task.RunCommand(
+            List("sh", "-c", prometheusScript),
+            timeoutSeconds = 120
+          )
         )
         .build,
 
