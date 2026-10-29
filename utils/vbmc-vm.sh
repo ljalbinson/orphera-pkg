@@ -92,6 +92,7 @@ ipmi() {
   port=$(port_of "$vm") || { echo "$vm: no port rule for this name" >&2; return 1; }
   host=$(node_host "$hv"); host=${host:-$hv}
   pw=$(orphera secrets get vbmc/password 2>/dev/null) || { echo "cannot read the secret vbmc/password (apply manifests/virtualbmc.scala)" >&2; return 1; }
+  pw=${pw:0:16}   # IPMI 2.0 allows 20 bytes at most; the playbook uses the first 16 characters of the secret
   IPMI_PASSWORD=$pw ipmitool -I lanplus -H "$host" -p "$port" -U "$USER_NAME" -E "$@"
 }
 

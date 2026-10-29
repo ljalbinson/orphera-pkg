@@ -12,7 +12,8 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 //     ones), ipmitool
 //   - a virtualenv /opt/virtualbmc with `virtualbmc` from pip (VBMC_SPEC sets the requirement, default
 //     `virtualbmc`; set PIP_INDEX_URL in the environment of the run to use a mirror)
-//   - /etc/orphera-vbmc.conf (root only): VBMC_USER=admin and VBMC_PASSWORD from the secret `vbmc/password`.
+//   - /etc/orphera-vbmc.conf (root only): VBMC_USER=admin and VBMC_PASSWORD, the first 16 characters of the secret
+//     `vbmc/password` (IPMI 2.0 passwords are at most 20 bytes, and the generated secret is longer).
 //     utils/vbmc-vm.sh reads it on the hypervisor, so the password never travels in a command
 //   - the unit orphera-vbmcd.service running `vbmcd --foreground` as root with HOME=/root (VirtualBMC keeps its
 //     records in ~/.vbmc and starts again, on restart, the endpoints that were running)
@@ -101,7 +102,7 @@ object virtualbmc extends OrpheraClusterPlaybook:
         )
         .task("write /etc/orphera-vbmc.conf")(
           Task.WriteFile(
-            content = s"VBMC_USER=$user\nVBMC_PASSWORD='${password.reveal}'\n",
+            content = s"VBMC_USER=$user\nVBMC_PASSWORD='${password.reveal.take(16)}'\n",
             dest = "/etc/orphera-vbmc.conf",
             owner = "root",
             group = "root",
