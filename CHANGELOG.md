@@ -14,7 +14,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `provider`; `TROVE_MGMT_NETWORK` overrides) and checks that an admin request to the API works. `trove_teardown.scala` undoes it and
   `test_trove.sh` checks it. New secrets: `trove/db`, `trove/service`, `trove/rabbit`. The images are in the Kolla build list and
   `python-troveclient` is in the client setup. `build_openstack_stack.sh` has a `trove` step after `telemetry`. The guest image and the MySQL datastore
-  (part two) are not built yet. The playbook and its test have not been run.
+  (part two) are not built yet. Run on the lab: `test_trove.sh` 12 of 12, first run.
 - IPMI control of VMs through VirtualBMC. `manifests/virtualbmc.scala` installs it on the hypervisors (default gs1, gs2, gs3, st0; `VBMC_HOSTS`
   chooses): a virtualenv in `/opt/virtualbmc` (the libvirt bindings from apt), the unit `orphera-vbmcd.service`, and `/etc/orphera-vbmc.conf`
   (root only) with user `admin` and the first 16 characters of the new secret `vbmc/password` (IPMI 2.0 passwords are at most 20 bytes). `utils/vbmc-vm.sh` makes, starts, stops and removes the

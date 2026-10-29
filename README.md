@@ -2004,7 +2004,7 @@ user `trove` and the service type `database` in Keystone, and, in project `servi
 (`sudo orphera-trove-api check` on tst25). The guest image and the MySQL datastore are the second part (`trove_guest_image.scala`). Backups to Swift,
 replication and the dashboard are not set up. The Trove images need `orphera-kolla-build sources refresh` and a build of
 `trove-api trove-conductor trove-taskmanager` on tst21 (an existing `/etc/kolla-build/images.txt` is not rewritten; add them by hand), or they come
-from quay.io. `python-troveclient` is in `utils/openstack-client-setup.sh`. The playbook and its test have not been run.
+from quay.io. `python-troveclient` is in `utils/openstack-client-setup.sh`. Run on the lab: `test_trove.sh` 12 of 12.
 
 **Skyline** (`manifests/skyline_single_node.scala`, undone by `skyline_teardown.scala`, checked by `test_skyline.sh`) is the Skyline dashboard on tst13,
 beside Horizon: `http://tst13.ljalbinson.com:9999/`, log in as `admin` with domain `Default`. It is one container from the image the Skyline project
