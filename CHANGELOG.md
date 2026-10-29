@@ -13,7 +13,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   endpoint of each VM (UDP port 6230 plus the VM number, on its hypervisor), lists them, and runs `power` (on, off, soft, cycle, reset, status)
   and `bootdev` (pxe, disk, cdrom) with ipmitool, the way Ironic's ipmi driver reaches a VM. `virtualbmc_teardown.scala` undoes it and
   `test_virtualbmc.sh` checks it (`TEST_VM=tstN`, `POWER_CYCLE=1`). The secret does not travel in a command: the script reads the password
-  from the file on the hypervisor. Not run yet.
+  from the file on the hypervisor. Run on the lab (gs3, tst24): `test_virtualbmc.sh` 6 of 6, including `ipmitool chassis power status` agreeing
+  with libvirt; power cycling and `bootdev` are not tested yet.
 - `utils/move-vm.sh <vm> <hypervisor>` moves a ZFS-provisioned VM between hypervisors (cold move). It checks the domain and dataset on the
   source (disks only inside `tank/kvm/<hypervisor>/<vm>`, no libvirt snapshots, no passthrough devices or NVRAM), the destination (no
   clashing domain or dataset, the bridges, free space, memory, a free port) and the CPU vendor, shuts the guest down, sends a ZFS snapshot with
