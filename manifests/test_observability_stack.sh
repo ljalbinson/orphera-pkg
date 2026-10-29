@@ -90,7 +90,9 @@ except Exception:
     print("error"); sys.exit()
 up = collections.Counter(); tot = collections.Counter()
 for x in t:
-    j = x["labels"]["job"]; tot[j] += 1
+    j = x["labels"]["job"]
+    if j == "ceilometer": continue  # added by telemetry_single_node.scala, not part of this stack
+    tot[j] += 1
     if x["health"] == "up": up[j] += 1
     else: print("DOWN:", x["scrapeUrl"], x.get("lastError", ""), file=sys.stderr)
 print(" ".join("%s=%d/%d" % (j, up[j], tot[j]) for j in sorted(tot)))'
@@ -134,7 +136,7 @@ assert_equals "every target is up, per job" "$EXPECTED_JOBS" "$SUMMARY"
 R=$(prom_query 'count(up == 0)')
 assert_equals "no target reports up == 0" "0 -" "$R"
 
-R=$(prom_query 'count(up)')
+R=$(prom_query 'count(up{job!="ceilometer"})')
 assert_equals "$EXPECTED_TOTAL series in 'up'" "1 $EXPECTED_TOTAL" "$R"
 
 R=$(prom_query 'count(count by (instance) (node_cpu_seconds_total))')
@@ -169,7 +171,7 @@ DS_ID=${DS##* }
 # The datasource must answer a real query through Grafana (its proxy API).
 # Newer Grafana addresses it by uid; older by numeric id.
 for P in "uid/$DS_UID" "$DS_ID"; do
-  R=$(curl -sG --max-time 20 -u "$GUSER:$GPASS" --data-urlencode 'query=count(up)' \
+  R=$(curl -sG --max-time 20 -u "$GUSER:$GPASS" --data-urlencode 'query=count(up{job!="ceilometer"})' \
         "$GRAF/api/datasources/proxy/$P/api/v1/query" | python3 -c '
 import sys, json
 try:

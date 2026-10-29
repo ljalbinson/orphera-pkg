@@ -1850,12 +1850,13 @@ Fleet layout used by these manifests (see `inventory.yaml`):
 | tst10 | Cinder (API, scheduler, volume, RabbitMQ) |
 | tst11 | apt cache (apt-cacher-ng) for the Ubuntu nodes |
 | tst12 | rpm cache (nginx caching mirror of Rocky/EPEL) for the Rocky nodes |
-| tst13 | Glance (glance-api, images in Ceph pool `images`) Placement (port 8780) and Horizon (port 8080) |
+| tst13 | Glance (glance-api, images in Ceph pool `images`) Placement (port 8780), Horizon (port 8080) and Skyline (port 9999) |
 | tst19 | Neutron (server, Open vSwitch, DHCP and L3 agents): VXLAN tenant networks, routers and floating IPs, and the flat provider network on its second NIC (br-net106, no address); also Octavia (API on 9876, worker, health manager, housekeeping) with the port `o-hm0` on br-int |
 | tst14 | Nova control plane (API on 8774, scheduler, conductor, noVNC proxy on 6080); RabbitMQ vhost `nova` on tst10 |
 | tst20 | Heat (API on 8004, CloudFormation API on 8000, engine) and Barbican (API on 9311, worker); RabbitMQ vhosts `heat` and `barbican` on tst10 |
 | tst16 | Designate (API on 9001, central, worker, producer, mdns on 5354) and a BIND9 name server on port 53; RabbitMQ vhost `designate` on tst10 |
 | tst22 | Manila (API on 8786, scheduler, share service) with CephFS exported over NFS-Ganesha (on tst0) as the backend; RabbitMQ vhost `manila` on tst10 |
+| tst24 | Telemetry: Ceilometer central agent (exporter on 9101) and Aodh (API on 8042, evaluator, notifier); the compute agents run on tst17 and tst18; metrics are stored by the Prometheus on tst7; RabbitMQ vhosts `aodh` and `ceilometer` on tst10 |
 | tst21 | Kolla image builder: builds the images from source, with a source tarball cache, a pip cache, and a writable registry on port 5000 |
 | tst17, tst18 | Compute nodes (nova-compute on KVM, Neutron Open vSwitch agent; second NIC is the provider port); VMs on gs2 with nested KVM |
 
@@ -1972,6 +1973,36 @@ load balancer is an amphora) and compute capacity for a control-plane node, a wo
 `openstack coe cluster create demo --cluster-template orphera-k8s --master-count 1 --node-count 1 --keypair orphera-magnum`; when it is
 `CREATE_COMPLETE`, `openstack coe cluster config demo` writes a kubeconfig. Two settings matter in this lab: the template's DNS server
 (`MAGNUM_DNS`, default 192.168.1.70) has to resolve the Keystone name, and the addon provider is pinned to 0.15.1 (see the CHANGELOG).
+
+**Telemetry** (`manifests/telemetry_single_node.scala`, undone by `telemetry_teardown.scala`, checked by `test_telemetry.sh`) is Ceilometer and Aodh
+on a new VM, tst24 (`config/tst24.yaml`, 10.10.5.36), with the existing Prometheus on tst7 as the metrics store; Gnocchi is not used. The Ceilometer
+central agent (tst24) and the compute agents (tst17, tst18, reading libvirt) poll every 60 s and expose what they collect themselves in Prometheus format on port 9101 (`[polling] enable_prometheus_exporter`; no
+notification agent, no pipeline.yaml). Prometheus scrapes the three exporters as `job="ceilometer"`, with a target per node, through `/etc/prometheus/scrape.d/openstack-telemetry.yml`, which `scrape_config_files` in `prometheus.yml` names (needs Prometheus 2.43 or later;
+`observability_stack.scala` and `observability_extended.scala` now write that line, so re-running them keeps the job). The series names are Ceilometer's own; the playbook prints the names it finds. Aodh runs
+PromQL alarms against that Prometheus, which it finds in the Keystone catalog as service type `prometheus` (registered by the playbook):
+
+    source ~/.config/openstack/admin-openrc.sh
+    openstack alarm create --name mem-high --type prometheus --query 'memory_usage{resource_id="<server id>"} > 3000' \
+      --comparison-operator gt --threshold 0
+    openstack alarm list
+
+Not set up: the Ceilometer notification agent and the Aodh listener, which
+need the services to publish notifications (`[oslo_messaging_notifications] driver = messagingv2` in each service), so there are no event alarms
+and no event data yet; billing (the Prometheus publisher sends no timestamps). The Ceilometer and Aodh images need `orphera-kolla-build sources
+refresh` and a build of `ceilometer-central ceilometer-compute aodh-api aodh-evaluator aodh-notifier` on tst21, or they come from quay.io. The
+playbook and its test have not been run.
+
+**Skyline** (`manifests/skyline_single_node.scala`, undone by `skyline_teardown.scala`, checked by `test_skyline.sh`) is the Skyline dashboard on tst13,
+beside Horizon: `http://tst13.ljalbinson.com:9999/`, log in as `admin` with domain `Default`. It is one container from the image the Skyline project
+documents (`docker.io/99cloud/skyline:latest`; `SKYLINE_IMAGE` sets another reference), not a Kolla image, so tst21 does not build it and tst13 needs
+Docker Hub. The image runs the API server and the nginx in front of it, and writes nginx's configuration from the Keystone catalog each time it starts,
+so run the playbook again after registering a new service (it restarts the container when the catalog's public endpoints changed). The database
+`skyline` is on Galera, the Keystone user `skyline` (role admin, project `service`) is made for you, and the monitoring pages read the Prometheus on
+tst7. The image has no MySQL driver, so PyMySQL is installed into `/var/lib/orphera/skyline/pylib` with the image's own Python. The console is served
+over plain HTTP, so `ssl_enabled` is false in `skyline.yaml`; TLS is not set up. Run on the lab: `test_skyline.sh` 10 of 10. In this build
+(skyline-console 8.1.0.dev39) the Monitor Center has no entry in the left menu, but its pages work when opened by address, with the Administrator
+view on: `http://tst13.ljalbinson.com:9999/monitor-center/physical-node-admin` shows the node_exporter data from tst7 (CPU, memory, disk and
+file systems per node); `/monitor-center/overview-admin` expects other exporters and shows zeros here.
 
 **Object storage** (`manifests/rgw_single_node.scala`, undone by `rgw_teardown.scala`, checked by `test_rgw.sh`) is the Ceph RADOS Gateway with
 Keystone as its identity service. It is a cephadm service on the existing Ceph cluster (one daemon on tst0, `http://10.10.5.12:8080`), so it needs
@@ -2113,6 +2144,11 @@ Worth knowing:
   the hypervisor's address, UDP port 6230 plus the VM's number, user `admin`, password in the secret `vbmc/password`. `vbmc-vm.sh
   power tst17 off` and `ipmitool -I lanplus -H gs2.ljalbinson.com -p 6247 -U admin -E chassis power status` (password in
   `IPMI_PASSWORD`) work the same way, and so does OpenStack Ironic's ipmi driver; power, reset and boot device only, no serial-over-LAN;
+  `move-vm.sh [--dry-run] [--yes] [--delete-source] <vm> <hypervisor>` moves a VM that was provisioned on ZFS
+  (`kvm_zfs_vm_provision.scala`) to another hypervisor: it checks both ends, shuts the guest down, sends a ZFS snapshot of
+  `tank/kvm/<hypervisor>/<vm>` with `zfs send | nc | zfs receive`, compares file names and sizes, defines the domain on the
+  destination (same UUID and MACs), undefines it on the source, changes `hypervisor:` in the VM's config file, starts it
+  and waits for its agent; a failure before the source is undefined is rolled back;
   `trace-dhcp.sh` captures DHCP on the provider NICs of tst17, tst18 and tst19
   while a test instance boots, to show where packets are lost; `check-guest-dhcp.sh <ip> <mac>
   <network-id>` proves a guest took its address (it answers ARP from the DHCP namespace on tst19;

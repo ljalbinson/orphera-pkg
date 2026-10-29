@@ -81,9 +81,13 @@ object observability_stack extends OrpheraClusterPlaybook:
   // real fleet target list and nothing else (alerting/rules are left at
   // package defaults — out of scope for this first pass).
   private val prometheusConfigScript =
-    s"""cat > /etc/prometheus/prometheus.yml <<EOF
+    s"""mkdir -p /etc/prometheus/scrape.d
+       |cat > /etc/prometheus/prometheus.yml <<EOF
        |global:
        |  scrape_interval: 15s
+       |
+       |scrape_config_files:
+       |  - /etc/prometheus/scrape.d/*.yml
        |
        |scrape_configs:
        |  - job_name: 'node_exporter'
