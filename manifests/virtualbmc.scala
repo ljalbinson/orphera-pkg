@@ -31,7 +31,11 @@ object virtualbmc extends OrpheraClusterPlaybook:
     sys.env.get(name).map(_.trim).filter(_.nonEmpty).getOrElse(default)
 
   private val hosts: List[String] =
-    env("VBMC_HOSTS", "gs1,gs2,gs3,st0").split(",").map(_.trim).filter(_.nonEmpty).toList
+    env("VBMC_HOSTS", "gs1,gs2,gs3,st0")
+      .split(",")
+      .map(_.trim)
+      .filter(_.nonEmpty)
+      .toList
   private val spec = env("VBMC_SPEC", "virtualbmc")
   private val user = "admin"
   private val password = Secrets.secret("vbmc/password")
@@ -89,7 +93,10 @@ object virtualbmc extends OrpheraClusterPlaybook:
     clusterPlaybook("virtualbmc")(
       stage("install-virtualbmc", hosts*)
         .task("wait for apt and dpkg to be idle")(
-          Task.RunCommand(List("sh", "-c", waitAptIdleScript), timeoutSeconds = 960)
+          Task.RunCommand(
+            List("sh", "-c", waitAptIdleScript),
+            timeoutSeconds = 960
+          )
         )
         .task("install the packages")(
           Task.Install(
@@ -102,7 +109,8 @@ object virtualbmc extends OrpheraClusterPlaybook:
         )
         .task("write /etc/orphera-vbmc.conf")(
           Task.WriteFile(
-            content = s"VBMC_USER=$user\nVBMC_PASSWORD='${password.reveal.take(16)}'\n",
+            content =
+              s"VBMC_USER=$user\nVBMC_PASSWORD='${password.reveal.take(16)}'\n",
             dest = "/etc/orphera-vbmc.conf",
             owner = "root",
             group = "root",
