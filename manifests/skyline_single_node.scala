@@ -468,7 +468,7 @@ if __name__ == '__main__':
         )
         .task("skyline confirmed")(
           Task.Debug(
-            s"Skyline up at http://$fqdn:$port/ ($nodeIp): one container (apiserver + nginx) from ${skylineImage.ref}, database $dbName via $vip:3306, identity from $ksUrl, monitoring pages read $promUrl. Log in as admin (domain Default). Test: manifests/test_skyline.sh"
+            s"Skyline up at http://$fqdn:$port/ ($nodeIp): one container (apiserver + nginx) from ${skylineImage.ref}, database $dbName via $vip:3306, identity from $ksUrl, monitoring pages read $promUrl. Log in as admin (domain Default); the monitoring pages are not in the menu in this build, open /monitor-center/physical-node-admin. Test: manifests/test_skyline.sh"
           )
         )
         .build

@@ -1999,7 +1999,10 @@ Docker Hub. The image runs the API server and the nginx in front of it, and writ
 so run the playbook again after registering a new service (it restarts the container when the catalog's public endpoints changed). The database
 `skyline` is on Galera, the Keystone user `skyline` (role admin, project `service`) is made for you, and the monitoring pages read the Prometheus on
 tst7. The image has no MySQL driver, so PyMySQL is installed into `/var/lib/orphera/skyline/pylib` with the image's own Python. The console is served
-over plain HTTP, so `ssl_enabled` is false in `skyline.yaml`; TLS is not set up. The playbook and its test have not been run.
+over plain HTTP, so `ssl_enabled` is false in `skyline.yaml`; TLS is not set up. Run on the lab: `test_skyline.sh` 10 of 10. In this build
+(skyline-console 8.1.0.dev39) the Monitor Center has no entry in the left menu, but its pages work when opened by address, with the Administrator
+view on: `http://tst13.ljalbinson.com:9999/monitor-center/physical-node-admin` shows the node_exporter data from tst7 (CPU, memory, disk and
+file systems per node); `/monitor-center/overview-admin` expects other exporters and shows zeros here.
 
 **Object storage** (`manifests/rgw_single_node.scala`, undone by `rgw_teardown.scala`, checked by `test_rgw.sh`) is the Ceph RADOS Gateway with
 Keystone as its identity service. It is a cephadm service on the existing Ceph cluster (one daemon on tst0, `http://10.10.5.12:8080`), so it needs

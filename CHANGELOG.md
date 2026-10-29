@@ -12,7 +12,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `skyline_bootstrap` migrations and runs one container from `docker.io/99cloud/skyline` (`SKYLINE_IMAGE` overrides), restarting it when the
   Keystone catalog changes because the image writes its nginx file from the catalog at start. The helper `orphera-skyline-api` registers the
   user and checks the console, the API docs and an admin login. `skyline_teardown.scala` undoes it and `test_skyline.sh` checks it. New secrets:
-  `skyline/db`, `skyline/service`, `skyline/secret-key`. `build_openstack_stack.sh` has a `skyline` step after `telemetry`. Not run yet.
+  `skyline/db`, `skyline/service`, `skyline/secret-key`. `build_openstack_stack.sh` has a `skyline` step after `telemetry`. Run on the lab: `test_skyline.sh` 10 of 10. The Monitor Center has no
+  menu entry in this Skyline build, but `/monitor-center/physical-node-admin` works and shows the Prometheus data.
 - `manifests/build_openstack_stack.sh` has two more steps: `observability` (observability_stack and observability_extended on tst7, before
   `telemetry`, which stores its metrics in that Prometheus) and `build` (kolla_build.scala on tst21, then `orphera-kolla-build sources refresh` and
   `build`; only with the new `--with-build`, or `--from build` / `--only build`; hours the first time, and an existing
