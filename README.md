@@ -1856,7 +1856,7 @@ Fleet layout used by these manifests (see `inventory.yaml`):
 | tst20 | Heat (API on 8004, CloudFormation API on 8000, engine) and Barbican (API on 9311, worker); RabbitMQ vhosts `heat` and `barbican` on tst10 |
 | tst16 | Designate (API on 9001, central, worker, producer, mdns on 5354) and a BIND9 name server on port 53; RabbitMQ vhost `designate` on tst10 |
 | tst22 | Manila (API on 8786, scheduler, share service) with CephFS exported over NFS-Ganesha (on tst0) as the backend; RabbitMQ vhost `manila` on tst10 |
-| tst24 | Telemetry: Ceilometer central agent, Pushgateway (9091) and Aodh (API on 8042, evaluator, notifier); the compute agents run on tst17 and tst18; metrics are stored by the Prometheus on tst7; RabbitMQ vhosts `aodh` and `ceilometer` on tst10 |
+| tst24 | Telemetry: Ceilometer central agent (exporter on 9101) and Aodh (API on 8042, evaluator, notifier); the compute agents run on tst17 and tst18; metrics are stored by the Prometheus on tst7; RabbitMQ vhosts `aodh` and `ceilometer` on tst10 |
 | tst21 | Kolla image builder: builds the images from source, with a source tarball cache, a pip cache, and a writable registry on port 5000 |
 | tst17, tst18 | Compute nodes (nova-compute on KVM, Neutron Open vSwitch agent; second NIC is the provider port); VMs on gs2 with nested KVM |
 
@@ -1976,11 +1976,9 @@ load balancer is an amphora) and compute capacity for a control-plane node, a wo
 
 **Telemetry** (`manifests/telemetry_single_node.scala`, undone by `telemetry_teardown.scala`, checked by `test_telemetry.sh`) is Ceilometer and Aodh
 on a new VM, tst24 (`config/tst24.yaml`, 10.10.5.36), with the existing Prometheus on tst7 as the metrics store; Gnocchi is not used. The Ceilometer
-central agent (tst24) and the compute agents (tst17, tst18, reading libvirt) poll every 60 s and push their samples with the `prometheus://`
-publisher to a Pushgateway on tst24, each agent in its own group (`job="ceilometer"`, `instance="<node>"`). Prometheus scrapes the Pushgateway
-through `/etc/prometheus/scrape.d/openstack-telemetry.yml`, which `scrape_config_files` in `prometheus.yml` names (needs Prometheus 2.43 or later;
-`observability_stack.scala` and `observability_extended.scala` now write that line, so re-running them keeps the job). A series is named after the
-meter with the label `resource_id`, for example `memory_usage{resource_id="<server id>"}` or `image_size{resource_id="<image id>"}`. Aodh runs
+central agent (tst24) and the compute agents (tst17, tst18, reading libvirt) poll every 60 s and expose what they collect themselves in Prometheus format on port 9101 (`[polling] enable_prometheus_exporter`; no
+notification agent, no pipeline.yaml). Prometheus scrapes the three exporters as `job="ceilometer"`, with a target per node, through `/etc/prometheus/scrape.d/openstack-telemetry.yml`, which `scrape_config_files` in `prometheus.yml` names (needs Prometheus 2.43 or later;
+`observability_stack.scala` and `observability_extended.scala` now write that line, so re-running them keeps the job). The series names are Ceilometer's own; the playbook prints the names it finds. Aodh runs
 PromQL alarms against that Prometheus, which it finds in the Keystone catalog as service type `prometheus` (registered by the playbook):
 
     source ~/.config/openstack/admin-openrc.sh
