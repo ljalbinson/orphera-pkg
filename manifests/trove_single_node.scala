@@ -101,7 +101,8 @@ object trove_single_node extends OrpheraClusterPlaybook:
   private def kolla(service: String): Image =
     Image(service, Release.R2025_1, Base.UbuntuNoble, registry)
 
-  private val services = List("trove-api", "trove-taskmanager", "trove-conductor")
+  private val services =
+    List("trove-api", "trove-taskmanager", "trove-conductor")
 
   // The host's CA bundle has Keystone's CA in it (fetchCaScript): the clients in the containers verify
   // Keystone's certificate through it.
@@ -312,7 +313,8 @@ object trove_single_node extends OrpheraClusterPlaybook:
          |cat > $confRoot/trove-taskmanager/config.json <<JSON
          |{"command": "trove-taskmanager --config-file /etc/trove/trove.conf", "config_files": [$$COMMON, $$GUEST], $$PERMS}
          |JSON
-         |python3 -c "import json; [json.load(open('$confRoot/' + s + '/config.json')) for s in '${services.mkString(" ")}'.split()]; print('config.json files are valid JSON')"
+         |python3 -c "import json; [json.load(open('$confRoot/' + s + '/config.json')) for s in '${services
+          .mkString(" ")}'.split()]; print('config.json files are valid JSON')"
          |echo "kolla config written under $confRoot"
          |""".stripMargin
 
