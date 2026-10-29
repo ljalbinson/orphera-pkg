@@ -233,9 +233,13 @@ object observability_extended extends OrpheraClusterPlaybook:
     haProxyNodes.map(n => s"'{{nodes.$n.cluster_ip}}:9104'").mkString(", ")
 
   private val prometheusConfigScript =
-    s"""cat > /etc/prometheus/prometheus.yml <<EOF
+    s"""mkdir -p /etc/prometheus/scrape.d
+       |cat > /etc/prometheus/prometheus.yml <<EOF
        |global:
        |  scrape_interval: 15s
+       |
+       |scrape_config_files:
+       |  - /etc/prometheus/scrape.d/*.yml
        |
        |scrape_configs:
        |  - job_name: 'node_exporter'

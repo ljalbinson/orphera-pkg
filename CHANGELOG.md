@@ -15,6 +15,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   its agent. `--dry-run` prints the plan, `--delete-source` removes the source dataset afterwards. A failure before the source is undefined removes
   what was made on the destination and restarts the VM on the source. The stream is not encrypted. Not run on the lab yet; the checks and the
   dry run were exercised against stand-in `orphera`, `virsh` and `zfs` commands.
+- Skyline dashboard on tst13 beside Horizon (http://tst13:9999/). `manifests/skyline_single_node.scala` creates the `skyline` database on Galera and
+  the Keystone user `skyline`, installs PyMySQL into a host directory with the image's own Python, writes `skyline.yaml`, runs the documented
+  `skyline_bootstrap` migrations and runs one container from `docker.io/99cloud/skyline` (`SKYLINE_IMAGE` overrides), restarting it when the
+  Keystone catalog changes because the image writes its nginx file from the catalog at start. The helper `orphera-skyline-api` registers the
+  user and checks the console, the API docs and an admin login. `skyline_teardown.scala` undoes it and `test_skyline.sh` checks it. New secrets:
+  `skyline/db`, `skyline/service`, `skyline/secret-key`. `build_openstack_stack.sh` has a `skyline` step after `telemetry`. Run on the lab: `test_skyline.sh` 10 of 10. The Monitor Center has no
+  menu entry in this Skyline build, but `/monitor-center/physical-node-admin` works and shows the Prometheus data.
+- `manifests/build_openstack_stack.sh` has two more steps: `observability` (observability_stack and observability_extended on tst7, before
+  `telemetry`, which stores its metrics in that Prometheus) and `build` (kolla_build.scala on tst21, then `orphera-kolla-build sources refresh` and
+  `build`; only with the new `--with-build`, or `--from build` / `--only build`; hours the first time, and an existing
+  `/etc/kolla-build/images.txt` is not rewritten). Not run yet.
+- Telemetry (Ceilometer and Aodh) on a new VM, tst24 (`config/tst24.yaml`, 10.10.5.36, on gs3, 2 vCPU, 4096 MiB), with the Prometheus on tst7 as the
+  metrics store. `manifests/telemetry_single_node.scala` runs ceilometer-central, aodh-api (8042, Apache),
+  aodh-evaluator and aodh-notifier as containers on tst24, and ceilometer-compute on tst17 and tst18 (libvirt through `/run/libvirt`). Each polling agent
+  exposes its samples itself on port 9101 (`[polling] enable_prometheus_exporter`; no notification agent or pipeline.yaml); Prometheus scrapes the three exporters through `/etc/prometheus/scrape.d/openstack-telemetry.yml`. The helper
+  `orphera-telemetry-api` registers Aodh (`alarming`), Prometheus (`prometheus`) and the users `aodh` and `ceilometer` in Keystone, and checks
+  that Ceilometer series reach Prometheus and that two PromQL alarms reach the states alarm and ok. `telemetry_teardown.scala` undoes it and
+  `test_telemetry.sh` checks it. New secrets: `aodh/db`, `aodh/service`, `aodh/rabbit`, `ceilometer/service`, `ceilometer/rabbit`. The images are
+  in the Kolla build list. The notification agent and the Aodh listener are not run (no service publishes notifications yet). The playbook
+  The Aodh configuration sets `[database] connection_recycle_time = 20`, because haproxy on the Galera VIP closes connections idle for 30 s
+  and the evaluator's pooled connection otherwise dies between cycles (oslo.db then fails in its error handler and never reconnects).
+  The Aodh containers get `PROMETHEUS_HOST` and `PROMETHEUS_PORT`: python-observabilityclient reads the Prometheus address only from those
+  (or a `prometheus.yaml`), and without them the evaluator does not load its `prometheus` type and skips the alarms.
+  and its test have not been run.
+- `observability_stack.scala` and `observability_extended.scala` write `scrape_config_files: /etc/prometheus/scrape.d/*.yml` into
+  `prometheus.yml` (and make the directory), so a scrape job kept in a separate file survives their whole-file rewrites; this needs Prometheus 2.43
+  or later. `test_observability_stack.sh` ignores the `ceilometer` job.
 - `utils/scan-vm-sizes.sh` compares every VM's CPU and memory three ways: the config file (`cpu:` and `memory:`), libvirt on the hypervisor
   (`virsh dominfo`, with the VM's state) and the running guest (`nproc` and `MemTotal`, accepted from `GUEST_MEM_MIN_PCT`, default 88, up to the
   configured size). It prints one row per VM with totals, lists VMs that libvirt has but no config file describes, and exits 1 on any
