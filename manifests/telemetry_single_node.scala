@@ -244,7 +244,7 @@ object telemetry_single_node extends OrpheraClusterPlaybook:
        |  echo "prometheus did not come back healthy - see 'journalctl -xeu prometheus'" >&2
        |  exit 1
        |fi
-       |echo "prometheus scrapes the pushgateway at $fqdn:$pushPort""""
+       |echo "prometheus scrapes the pushgateway at $fqdn:$pushPort"""".stripMargin
 
   // ---- the nodes -------------------------------------------------------
 
