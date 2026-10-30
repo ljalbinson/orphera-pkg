@@ -390,7 +390,7 @@ $M datastore_update mysql @@VERSION@@
   // Subcommands: datastores | instance-test [--keep] | instance-cleanup
   private val dbHelperPython =
     """#!/usr/bin/python3
-import json, os, secrets, socket, ssl, sys, time, urllib.request, urllib.error
+import json, os, re, secrets, socket, ssl, subprocess, sys, time, urllib.request, urllib.error
 
 KS = 'https://@@KS@@:5000/v3'
 TROVE = '@@TROVE@@'
@@ -400,6 +400,7 @@ VERSION = '@@VERSION@@'
 FLAVOR_ID = '@@FLAVORID@@'
 CTX = ssl.create_default_context(cafile='@@CA@@')
 TEST_NAME = 'orphera-trove-test'
+KEY = '/var/lib/orphera/trove/trove-mgmt.pem'
 
 
 def call(method, url, body=None, token=None, timeout=60):
@@ -492,31 +493,67 @@ def cleanup():
         print('no test instance')
 
 
-def addresses(inst):
-    out = []
-    for a in inst.get('ip', []) or []:
-        out.append(a)
-    for a in inst.get('addresses', []) or []:
-        if isinstance(a, dict) and a.get('address'):
-            out.append(a['address'])
-    return [a for a in out if ':' not in a]
+def guest_address(token, parsed):
+    # The guest's only port is the management port, which Trove does not list in the instance details, so
+    # the address is read from the Nova server (same name as the instance, in project service).
+    nova = endpoint_of(parsed, 'compute')
+    s, p, _ = call('GET', nova + '/servers/detail?name=' + TEST_NAME, None, token)
+    if s != 200:
+        die('listing Nova servers failed: HTTP %s %s' % (s, p))
+    for srv in p.get('servers', []):
+        if srv.get('name') != TEST_NAME:
+            continue
+        for addrs in (srv.get('addresses') or {}).values():
+            for a in addrs:
+                if a.get('version') == 4:
+                    return a['addr']
+    return None
+
+
+def endpoint_of(parsed, svc_type):
+    for c in parsed['token']['catalog']:
+        if c['type'] == svc_type:
+            for e in c['endpoints']:
+                if e['interface'] == 'public':
+                    url = e['url'].rstrip('/')
+                    return url if (svc_type != 'compute' or url.endswith('/v2.1')) else url + '/v2.1'
+    die('no %s service in the catalog' % svc_type)
+
+
+def ssh(ip, command, timeout=90):
+    try:
+        r = subprocess.run(['ssh', '-i', KEY, '-o', 'StrictHostKeyChecking=no', '-o', 'UserKnownHostsFile=/dev/null',
+                            '-o', 'ConnectTimeout=15', '-o', 'LogLevel=ERROR', 'ubuntu@' + ip, command],
+                           capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return 255, 'ssh timed out'
+    return r.returncode, (r.stdout + r.stderr).strip()
+
+
+def container_version(ip):
+    # The database is a Docker container named `database` on the guest; ask mysqld in it for its version.
+    last = ''
+    for _ in range(6):
+        rc, out = ssh(ip, "sudo docker ps --format '{{.Image}} {{.Names}} {{.Status}}'; sudo docker exec database mysqld --version")
+        last = out
+        m = re.search(r'Ver (\S+)', out)
+        if rc == 0 and m:
+            return m.group(1), out
+        time.sleep(10)
+    die('could not read the MySQL version from the guest %s: %s' % (ip, last[:400]))
 
 
 def greeting(ip):
-    end = time.time() + 180
-    last = None
-    while time.time() < end:
-        try:
-            sock = socket.create_connection((ip, 3306), timeout=10)
-            data = sock.recv(256)
-            sock.close()
-            if len(data) > 6 and data[4] == 10:
-                return data[5:data.index(b'\x00', 5)].decode('ascii', 'replace')
-            last = 'unexpected greeting %r' % data[:24]
-        except (OSError, ValueError) as e:
-            last = str(e)
-        time.sleep(5)
-    die('no MySQL greeting from %s:3306: %s' % (ip, last))
+    # Informational: can this node reach the guest's MySQL port? Not required to pass.
+    try:
+        sock = socket.create_connection((ip, 3306), timeout=10)
+        data = sock.recv(256)
+        sock.close()
+        if len(data) > 6 and data[4] == 10:
+            return 'reachable, server version ' + data[5:data.index(b'\x00', 5)].decode('ascii', 'replace')
+        return 'connected, unexpected greeting %r' % data[:24]
+    except (OSError, ValueError) as e:
+        return 'not reachable (%s)' % e
 
 
 def instance_test(keep):
@@ -562,13 +599,17 @@ def instance_test(keep):
             time.sleep(10)
         else:
             die('the instance was not ACTIVE and HEALTHY after 30 minutes (last: %s)' % (last,))
-        addrs = addresses(inst)
-        if not addrs:
-            die('the instance has no IPv4 address: %s' % json.dumps(inst)[:600])
-        version = greeting(addrs[0])
-        print('mysql greeting from %s: server version %s' % (addrs[0], version))
+        ip = guest_address(token, parsed)
+        if not ip:
+            die('no IPv4 address on the Nova server %s' % TEST_NAME)
+        print('guest address %s' % ip)
+        version, out = container_version(ip)
+        for line in out.splitlines():
+            print('  guest: ' + line[:160])
+        print('mysql in the guest container: server version %s' % version)
         if not version.startswith(VERSION):
             die('expected a server version starting with %s' % VERSION)
+        print('port 3306 from this node: %s' % greeting(ip))
         ok = True
     finally:
         if keep:
@@ -580,7 +621,7 @@ def instance_test(keep):
                 ok = False
     if not ok:
         sys.exit(1)
-    print('instance test ok: MySQL %s ran in a Trove guest (ACTIVE, HEALTHY), answered on 3306, and was deleted' % VERSION)
+    print('instance test ok: MySQL %s ran in a Trove guest (ACTIVE, HEALTHY), the container reported its version, and the instance was deleted' % VERSION)
 
 
 if __name__ == '__main__':

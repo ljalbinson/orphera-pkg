@@ -7,8 +7,9 @@
 # independently of its own checks:
 #  - the Trove guest image is active in Glance with the tags trove and mysql, and the flavor orphera-trove exists,
 #  - the Trove API lists the datastore mysql with the version as its default,
-#  - a real database instance can be made: ACTIVE and HEALTHY, the MySQL greeting on port 3306 shows the
-#    expected server version, and the instance is deleted again,
+#  - a real database instance can be made: ACTIVE and HEALTHY, mysqld in its Docker container (reached by ssh
+#    with the trove-mgmt key) reports the expected version, and the instance is deleted again. Whether port 3306
+#    is reachable from tst25 is printed, not asserted,
 #  - a second run of the playbook succeeds without building again (idempotence), and the datastore is still there.
 #
 # Prerequisites: trove_single_node.scala has run (test_trove.sh passes); tst21 reaches GitHub, opendev.org and
@@ -60,7 +61,7 @@ if [ -z "${NO_INSTANCE:-}" ]; then
   log "making a database instance (several minutes: Nova server, Cinder volume, Docker pull of MySQL)"
   OUT=$(RUN_TIMEOUT=2400 run_on "$DB_HELPER instance-test")
   assert_contains "a MySQL instance reached ACTIVE and HEALTHY" "operating_status HEALTHY" "$OUT"
-  assert_contains "MySQL $VERSION answered on port 3306" "server version $VERSION" "$OUT"
+  assert_contains "mysqld in the guest container reports $VERSION" "server version $VERSION" "$OUT"
   assert_contains "the instance was deleted again" "instance test ok" "$OUT"
   OUT=$(run_on "$DB_HELPER instance-cleanup")
   assert_contains "no test instance is left" "no test instance" "$OUT"

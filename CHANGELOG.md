@@ -21,7 +21,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (`TROVE_MYSQL_VERSION`) with `trove-manage` in a one-off container; `TROVE_REBUILD_IMAGE=1` builds the image again. The helpers
   `orphera-trove-image` (tst21) and `orphera-trove-db` (tst25) upload, check and test. `trove_guest_image_teardown.scala` undoes it
   (`TROVE_REMOVE_BUILD=1` also removes the built image). `test_trove_guest.sh` makes a real MySQL instance, waits for ACTIVE and HEALTHY, reads the
-  MySQL greeting on port 3306 and deletes the instance. `build_openstack_stack.sh` runs it in the `trove` step. Not run on the lab yet.
+  version of mysqld in the guest's container over ssh (and reports whether port 3306 is reachable) and deletes the instance. `build_openstack_stack.sh` runs it in the `trove` step. Not run on the lab yet.
 - IPMI control of VMs through VirtualBMC. `manifests/virtualbmc.scala` installs it on the hypervisors (default gs1, gs2, gs3, st0; `VBMC_HOSTS`
   chooses): a virtualenv in `/opt/virtualbmc` (the libvirt bindings from apt), the unit `orphera-vbmcd.service`, and `/etc/orphera-vbmc.conf`
   (root only) with user `admin` and the first 16 characters of the new secret `vbmc/password` (IPMI 2.0 passwords are at most 20 bytes). `utils/vbmc-vm.sh` makes, starts, stops and removes the
