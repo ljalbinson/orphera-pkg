@@ -693,12 +693,15 @@ if __name__ == '__main__':
           Task.RunCommand(List("sh", "-c", dbHelperScript))
         )
         .task(s"register the mysql datastore version $mysqlVersion")(
-          Task.RunCommand(List("sh", "-c", registerScript), timeoutSeconds = 600)
+          Task
+            .RunCommand(List("sh", "-c", registerScript), timeoutSeconds = 600)
         )
         .build,
 
       stage("confirm-trove-datastore", troveNode)
-        .task("the Trove API lists the mysql datastore and its default version")(
+        .task(
+          "the Trove API lists the mysql datastore and its default version"
+        )(
           Task.RunCommand(
             List("sh", "-c", s"$dbHelperPath datastores"),
             timeoutSeconds = 120

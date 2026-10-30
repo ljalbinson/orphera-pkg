@@ -826,7 +826,10 @@ if __name__ == '__main__':
           Task.RunCommand(List("sh", "-c", libvirtScript), timeoutSeconds = 120)
         )
         .task("define the libvirt secret for the Ceph volumes")(
-          Task.RunCommand(List("sh", "-c", cephSecretScript), timeoutSeconds = 60)
+          Task.RunCommand(
+            List("sh", "-c", cephSecretScript),
+            timeoutSeconds = 60
+          )
         )
         .task(s"make $providerNic an address-less layer-2 port")(
           Task.RunCommand(
