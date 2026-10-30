@@ -201,11 +201,12 @@ object keystone_single_node extends OrpheraClusterPlaybook:
   private val keystoneCatalogue: Catalogue =
     Catalogues.load("keystone", Set.empty[String])
 
-  // Federation with Keycloak on tst26 (keycloak_single_node.scala). Keystone only
-  // checks the bearer token Keycloak issued: mod_auth_openidc, in the vhost below,
-  // verifies its signature against the realm's published keys (OAuth 2.0 resource
-  // server mode, no client secret here) and passes its claims on with the prefix
-  // OIDC-. The identity provider `keycloak`, its protocol `openid` and the mapping
+  // Federation with Keycloak on tst26 (keycloak_single_node.scala). For the CLI,
+  // Keystone checks the bearer token Keycloak issued: mod_auth_openidc, in the vhost
+  // below, verifies its signature against the realm's published keys (OAuth 2.0
+  // resource server mode) and passes its claims on with the prefix OIDC- (groups
+  // with ";" between values). For the dashboards it is also an OpenID Connect client
+  // of Keycloak (WebSSO, below), which needs the client secret. The identity provider `keycloak`, its protocol `openid` and the mapping
   // are made through the API by keycloak_single_node.scala. Until that has run, the
   // federation path answers 404 and nothing else changes. Keep in step with
   // keycloak_single_node.scala (fqdn, port, realm).

@@ -2024,11 +2024,12 @@ temporary admin; it is made only on an empty database, so rotating the secret la
 The Keystone half is in `keystone_single_node.scala`: its vhost loads mod_auth_openidc from the Kolla image and checks bearer tokens on
 `/v3/OS-FEDERATION/identity_providers/keycloak/protocols/openid/auth` against the realm's keys, and `[auth] methods` includes `openid`. Run it
 again before the first Keycloak build (the Keycloak playbook's first stage stops, saying so, if tst6 does not have it yet). The helper
-`orphera-keycloak-api` on tst26 makes the rest: in Keycloak the confidential client `keystone` (direct access grants on) and the test user
-`kcdemo` (`keycloak/demo-user`); in Keystone the domain `keycloak`, the group `keycloak-users` with `member` on project `keycloak-demo`, the
-identity provider `keycloak` (remote id = the realm's issuer), the mapping `keycloak-mapping` (`preferred_username` becomes the user name, every
-user joins `keycloak-users`) and the protocol `openid`. `sudo orphera-keycloak-api check` logs `kcdemo` in end to end; `sudo
-orphera-keycloak-api openrc` prints the environment for the CLI's `v3oidcpassword` plugin.
+`orphera-keycloak-api` on tst26 makes the rest: in Keycloak the confidential client `keystone` (direct access grants on, a `groups` claim),
+the three groups and the test users below; in Keystone the domain `keycloak`, the project `keycloak-demo`, the groups the mapping uses,
+the identity provider `keycloak` (remote id = the realm's issuer), the mapping `keycloak-mapping` (`preferred_username` becomes the user
+name; the Keycloak groups decide the Keystone groups, see below) and the protocol `openid`. `sudo orphera-keycloak-api check` logs every
+test user in end to end; `sudo orphera-keycloak-api openrc [kcdemo|kcadmin|kcreader]` prints the environment for the CLI's
+`v3oidcpassword` plugin.
 
 Single sign-on (WebSSO): Horizon's login page offers "Keycloak (realm openstack)" beside Keystone credentials, and Skyline's offers
 OpenID. The dashboard sends the browser to Keystone's websso path; mod_auth_openidc in Keystone's vhost (an OpenID Connect client of

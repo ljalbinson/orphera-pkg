@@ -5,7 +5,7 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 import orphera.orchestrator.kolla.*
 
 // DRAFT. OpenStack Horizon (the web dashboard), Kolla image under podman,
-// Apache + mod_wsgi, plain HTTP. Modelled on the other *_single_node.scala
+// Apache + mod_wsgi, HTTPS (a certificate from Keystone's test CA). Modelled on the other *_single_node.scala
 // playbooks; read cinder_single_node.scala's header for the conventions.
 //
 // Where it runs: tst13, next to Glance and Placement, on port 8080 over HTTPS
