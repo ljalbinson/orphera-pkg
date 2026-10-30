@@ -36,7 +36,7 @@ set -uo pipefail
 
 NAMES=(
   galera/sst galera/clustercheck galera/vrrp
-  keystone/admin keystone/db
+  keystone/admin keystone/db keystone/oidc-crypto
   placement/db placement/service
   glance/db glance/service
   cinder/db cinder/service cinder/rabbit

@@ -87,6 +87,9 @@ object keycloak_single_node extends OrpheraClusterPlaybook:
   private val ksCaDir = "/etc/kolla/keystone-ca"
   private val ksConfDir = "/etc/kolla/keystone"
   private val vip = "10.10.5.100"
+  // The dashboards that sign in through Keycloak (WebSSO); keystone_single_node.scala trusts exactly these names.
+  private val horizonUrl = "http://tst13.ljalbinson.com:8080"
+  private val skylineUrl = "http://tst13.ljalbinson.com:9999"
 
   private val keycloakImage = ExternalImage(
     sys.env.getOrElse("KEYCLOAK_IMAGE", "quay.io/keycloak/keycloak:26.8.1")
@@ -290,10 +293,10 @@ object keycloak_single_node extends OrpheraClusterPlaybook:
   // ---- the helper ----------------------------------------------------------
 
   // Standard-library Python, as in the other service playbooks. Plain string filled in with replace().
-  // Subcommands: realm | federate | check | unfederate | openrc
+  // Subcommands: realm | federate | check | sso-check [horizon|skyline|all] | unfederate | openrc
   private val apiHelperPython =
     """#!/usr/bin/python3
-import json, ssl, sys, urllib.error, urllib.parse, urllib.request
+import html, http.cookiejar, json, re, ssl, sys, urllib.error, urllib.parse, urllib.request
 
 KC = 'https://@@FQDN@@:@@PORT@@'
 REALM = '@@REALM@@'
@@ -313,6 +316,8 @@ FED_GROUP = 'keycloak-users'
 FED_PROJECT = 'keycloak-demo'
 FED_ROLE = 'member'
 FED_AUTH = '%s/OS-FEDERATION/identity_providers/%s/protocols/%s/auth' % (KS, IDP, PROTOCOL)
+HORIZON = '@@HORIZON@@'
+SKYLINE = '@@SKYLINE@@'
 CTX = ssl.create_default_context(cafile='@@CA@@')
 # The test CA (keystone_single_node.scala) has no keyUsage extension, which Python 3.13 and later reject by
 # default; noble's 3.12 does not check it.
@@ -540,6 +545,125 @@ def check():
     print('federation ok: %s logged in at Keycloak, got a Keystone token for %s/%s with roles %s' % (DEMO_USER, FED_DOMAIN, FED_PROJECT, ','.join(roles)))
 
 
+# ---- single sign-on, as a browser does it ----
+# Each check starts with an empty cookie jar, follows the redirects, fills in Keycloak's login form and posts the
+# token Keystone hands back to the dashboard, then asks the dashboard who is signed in.
+
+def browser():
+    jar = http.cookiejar.CookieJar()
+    return urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar), urllib.request.HTTPSHandler(context=CTX))
+
+
+def go(op, url, form=None):
+    data = urllib.parse.urlencode(form).encode() if form is not None else None
+    try:
+        r = op.open(urllib.request.Request(url, data=data), timeout=60)
+        return r.status, r.geturl(), r.read().decode('utf-8', 'replace')
+    except urllib.error.HTTPError as e:
+        return e.code, e.geturl(), e.read().decode('utf-8', 'replace')
+
+
+def short(body):
+    text = re.sub(r'<[^>]+>', ' ', body)
+    return re.sub(r'\s+', ' ', html.unescape(text)).strip()[:300]
+
+
+def hidden_fields(body):
+    fields = {}
+    for tag in re.findall(r'<input[^>]*>', body):
+        if 'type="hidden"' in tag:
+            n = re.search(r'name="([^"]+)"', tag)
+            v = re.search(r'value="([^"]*)"', tag)
+            if n:
+                fields[n.group(1)] = html.unescape(v.group(1)) if v else ''
+    return fields
+
+
+def through_keycloak(op, where, s, url, body):
+    # The browser should now be at Keycloak's login page: log in as the test user. Keycloak sends it back to
+    # Keystone's /redirect_uri, which sends it to the websso path, which answers with the page that posts the
+    # token to the dashboard: post it, as that page's script would.
+    if not url.startswith(KC) or 'kc-form-login' not in body:
+        die('%s: expected Keycloak\'s login page, got HTTP %s at %s: %s' % (where, s, url, short(body)))
+    m = re.search(r'<form[^>]*id="kc-form-login"[^>]*>', body)
+    a = re.search(r'action="([^"]+)"', m.group(0)) if m else None
+    if not a:
+        die('%s: no action on Keycloak\'s login form' % where)
+    s, url, body = go(op, html.unescape(a.group(1)), {'username': DEMO_USER, 'password': DEMO_PW, 'credentialId': ''})
+    if url.startswith(KC):
+        die('%s: Keycloak did not accept the login (HTTP %s at %s): %s' % (where, s, url, short(body)))
+    if s != 200 or 'name="token"' not in body:
+        die('%s: expected Keystone\'s page that posts the token, got HTTP %s at %s: %s (an untrusted origin is refused here: see trusted_dashboard in keystone_single_node.scala)' % (where, s, url, short(body)))
+    form = re.search(r'<form[^>]*action="([^"]+)"', body)
+    token = re.search(r'name="token"[^>]*value="([^"]+)"', body)
+    if not form or not token:
+        die('%s: Keystone\'s page has no form or token: %s' % (where, short(body)))
+    origin = html.unescape(form.group(1))
+    print('%s: Keycloak login ok; Keystone posts the token to %s' % (where, origin))
+    return go(op, origin, {'token': token.group(1)})
+
+
+def sso_horizon():
+    op = browser()
+    s, url, body = go(op, HORIZON + '/auth/login/')
+    if s != 200:
+        die('horizon: login page HTTP %s at %s' % (s, url))
+    if 'keycloak_openid' not in body:
+        die('horizon: the login page offers no Keycloak choice (WEBSSO in horizon_single_node.scala; run it again)')
+    form = hidden_fields(body)
+    if 'csrfmiddlewaretoken' not in form:
+        die('horizon: login page has no CSRF field')
+    form['auth_type'] = 'keycloak_openid'
+    s, url, body = go(op, HORIZON + '/auth/login/', form)
+    s, url, body = through_keycloak(op, 'horizon', s, url, body)
+    if s != 200 or 'auth/logout' not in body:
+        die('horizon: the token post did not sign in (HTTP %s at %s): %s' % (s, url, short(body)))
+    if DEMO_USER not in body:
+        die('horizon: signed in, but not as %s (at %s)' % (DEMO_USER, url))
+    print('horizon sso ok: signed in as %s through Keycloak (landed on %s)' % (DEMO_USER, url))
+
+
+def find_urls(obj):
+    if isinstance(obj, str):
+        return [obj] if 'OS-FEDERATION/' in obj and 'websso' in obj else []
+    if isinstance(obj, dict):
+        obj = list(obj.values())
+    if isinstance(obj, list):
+        return [u for o in obj for u in find_urls(o)]
+    return []
+
+
+def sso_skyline():
+    op = browser()
+    api = SKYLINE + '/api/openstack/skyline/api/v1'
+    s, url, body = go(op, api + '/sso')
+    try:
+        info = json.loads(body)
+    except ValueError:
+        info = {}
+    urls = find_urls(info)
+    if s != 200 or not urls:
+        die('skyline: %s/sso offers no websso address (HTTP %s): %s (sso_enabled in skyline_single_node.scala; run it again)' % (api, s, body[:300]))
+    print('skyline: offers %s' % urls[0])
+    s, url, body = go(op, urls[0])
+    s, url, body = through_keycloak(op, 'skyline', s, url, body)
+    if s >= 400:
+        die('skyline: the token post failed (HTTP %s at %s): %s' % (s, url, short(body)))
+    s, url, body = go(op, api + '/profile')
+    if s != 200 or DEMO_USER not in body:
+        die('skyline: no session for %s after the token post (profile: HTTP %s %s)' % (DEMO_USER, s, body[:300]))
+    print('skyline sso ok: signed in as %s through Keycloak' % DEMO_USER)
+
+
+def sso_check(which):
+    if which in ('horizon', 'all'):
+        sso_horizon()
+    if which in ('skyline', 'all'):
+        sso_skyline()
+    if which not in ('horizon', 'skyline', 'all'):
+        die('usage: orphera-keycloak-api sso-check [horizon | skyline | all]')
+
+
 def openrc():
     print('''# Keycloak user %(u)s through Keystone federation (source this file; it holds secrets: chmod 600)
 export OS_AUTH_TYPE=v3oidcpassword
@@ -565,9 +689,12 @@ if [ -d "$HOME/.venvs/openstack/bin" ]; then case ":$PATH:" in *":$HOME/.venvs/o
 if __name__ == '__main__':
     cmd = sys.argv[1] if len(sys.argv) > 1 else ''
     actions = {'realm': realm, 'federate': federate, 'check': check, 'unfederate': unfederate, 'openrc': openrc}
-    if cmd not in actions:
-        die('usage: orphera-keycloak-api realm | federate | check | unfederate | openrc')
-    actions[cmd]()
+    if cmd == 'sso-check':
+        sso_check(sys.argv[2] if len(sys.argv) > 2 else 'all')
+    elif cmd in actions:
+        actions[cmd]()
+    else:
+        die('usage: orphera-keycloak-api realm | federate | check | sso-check [horizon|skyline|all] | unfederate | openrc')
 """
 
   private val helperScript =
@@ -582,7 +709,9 @@ if __name__ == '__main__':
         .replace("@@CLIENTSECRET@@", clientSecret.reveal)
         .replace("@@DEMOUSER@@", demoUser)
         .replace("@@DEMOPW@@", demoPassword.reveal)
-        .replace("@@CA@@", s"$tlsDir/ca.crt") +
+        .replace("@@CA@@", s"$tlsDir/ca.crt")
+        .replace("@@HORIZON@@", horizonUrl)
+        .replace("@@SKYLINE@@", skylineUrl) +
       s"\nPYEOF\nchmod 700 $helper\necho wrote $helper\n"
 
   // --resolve: the name on the certificate, the address of this host, whatever DNS says.

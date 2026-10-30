@@ -2028,8 +2028,20 @@ again before the first Keycloak build (the Keycloak playbook's first stage stops
 `kcdemo` (`keycloak/demo-user`); in Keystone the domain `keycloak`, the group `keycloak-users` with `member` on project `keycloak-demo`, the
 identity provider `keycloak` (remote id = the realm's issuer), the mapping `keycloak-mapping` (`preferred_username` becomes the user name, every
 user joins `keycloak-users`) and the protocol `openid`. `sudo orphera-keycloak-api check` logs `kcdemo` in end to end; `sudo
-orphera-keycloak-api openrc` prints the environment for the CLI's `v3oidcpassword` plugin. Not set up: browser single sign-on for Horizon
-and Skyline (WebSSO), group or role mapping from Keycloak claims, and a second Keycloak node. Run on the lab: `test_keycloak.sh` 12 of 12, and
+orphera-keycloak-api openrc` prints the environment for the CLI's `v3oidcpassword` plugin.
+
+Single sign-on (WebSSO): Horizon's login page offers "Keycloak (realm openstack)" beside Keystone credentials, and Skyline's offers
+OpenID. The dashboard sends the browser to Keystone's websso path; mod_auth_openidc in Keystone's vhost (an OpenID Connect client of
+Keycloak, client `keystone`, `OIDCRedirectURI https://tst6.ljalbinson.com:5000/redirect_uri`, the new secret `keystone/oidc-crypto`)
+sends it to Keycloak's login page and back, and Keystone posts the token to the dashboard, but only to an address in
+`[federation] trusted_dashboard`: `http://tst13.ljalbinson.com:8080/auth/websso/` and
+`http://tst13.ljalbinson.com:9999/api/openstack/skyline/api/v1/websso`. So open the dashboards by those names (not by address or short
+name), and make the browser trust the test CA (`~/.config/openstack/keystone-ca.crt` on scala0), since it now visits tst6 and tst26 over
+HTTPS. Keystone writes its own `sso_callback_template.html`. Skyline 8.x uses the protocol-wide websso path, for which Keystone finds the
+identity provider from `[federation] remote_id_attribute`. `sudo orphera-keycloak-api sso-check [horizon|skyline|all]` on tst26 does
+the whole browser flow (a fresh cookie jar, the redirects, Keycloak's login form, the token post) and asks the dashboard who is signed in.
+Order: keystone_single_node, horizon_single_node, skyline_single_node, keycloak_single_node (for the helper), then test_keycloak.sh.
+Not set up: logout from Keycloak when leaving the dashboard, group or role mapping from Keycloak claims, and a second Keycloak node. Run on the lab: `test_keycloak.sh` 12 of 12, and
 `openstack token issue` as `kcdemo` from scala0 with the rc file from `openrc` (`ssh localadmin@tst26 sudo /usr/local/sbin/orphera-keycloak-api
 openrc > ~/keycloak-openrc.sh`, mode 600). Keycloak 26.8 refuses a wrong password with HTTP 400 and `invalid_grant`, not 401. A federated
 user's id in Keystone is a 64-character hash of the identity provider and the user name, not a UUID.

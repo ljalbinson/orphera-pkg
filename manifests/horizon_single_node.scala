@@ -184,6 +184,19 @@ object horizon_single_node extends OrpheraClusterPlaybook:
        |    'identity': 3,
        |    'volume': 3,
        |}
+       |
+       |# Single sign-on through Keycloak (keycloak_single_node.scala). The login page offers both; Keystone sends
+       |# the token back only to http://$fqdn:$port/auth/websso/ (trusted_dashboard in keystone_single_node.scala),
+       |# so open Horizon by that name.
+       |WEBSSO_ENABLED = True
+       |WEBSSO_CHOICES = (
+       |    ('credentials', _('Keystone Credentials')),
+       |    ('keycloak_openid', _('Keycloak (realm openstack)')),
+       |)
+       |WEBSSO_IDP_MAPPING = {
+       |    'keycloak_openid': ('keycloak', 'openid'),
+       |}
+       |WEBSSO_INITIAL_CHOICE = 'credentials'
        |SETTINGS
        |chmod 640 $srcDir/local_settings.py
        |echo "local_settings.py written"""".stripMargin
@@ -303,6 +316,8 @@ def login():
         die('login page has no CSRF field')
     fields['username'] = USER
     fields['password'] = PASSWORD
+    # With single sign-on on, the form also has a choice of method; this is the password login.
+    fields['auth_type'] = 'credentials'
     s, url, body = fetch(op, BASE + '/auth/login/', urllib.parse.urlencode(fields).encode())
     if s != 200:
         flags = ', '.join('%s%s' % (c.name, ' [Secure]' if c.secure else '') for c in sorted(JAR, key=lambda c: c.name)) or 'none'

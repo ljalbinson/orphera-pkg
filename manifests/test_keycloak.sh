@@ -14,6 +14,7 @@
 #  - the keycloak database has tables,
 #  - Keystone refuses the federation path without a token (401),
 #  - a federated login works end to end (Keycloak password grant -> Keystone token scoped to keycloak-demo),
+#  - single sign-on: Horizon and Skyline each sign kcdemo in through Keycloak's login page (SKIP_SSO=1 skips),
 #  - a second run of the playbook succeeds (idempotence), and the federated login still works afterwards.
 #
 # Prerequisites: Galera + VIP and Keystone up (keystone_single_node.scala run with federation, after this change);
@@ -95,6 +96,15 @@ assert_contains "Keystone refuses the federation path without a token" "http=401
 
 OUT=$(RUN_TIMEOUT=120 run_on "sudo $HELPER check")
 assert_contains "a Keycloak user gets a scoped Keystone token" "federation ok" "$OUT"
+
+# Single sign-on, as a browser does it (needs keystone, horizon and skyline playbooks run with WebSSO).
+# SKIP_SSO=1 leaves these out.
+if [ -z "${SKIP_SSO:-}" ]; then
+  OUT=$(RUN_TIMEOUT=120 run_on "sudo $HELPER sso-check horizon")
+  assert_contains "Horizon signs kcdemo in through Keycloak" "horizon sso ok" "$OUT"
+  OUT=$(RUN_TIMEOUT=120 run_on "sudo $HELPER sso-check skyline")
+  assert_contains "Skyline signs kcdemo in through Keycloak" "skyline sso ok" "$OUT"
+fi
 
 if [ -z "${NO_APPLY:-}" ]; then
   log "re-apply (idempotence)"

@@ -200,7 +200,6 @@ object keystone_single_node extends OrpheraClusterPlaybook:
   // files below is checked against them when this manifest is built.
   private val keystoneCatalogue: Catalogue =
     Catalogues.load("keystone", Set.empty[String])
-  private val confResource = summon[Resource[ConfFile]]
 
   // Federation with Keycloak on tst26 (keycloak_single_node.scala). Keystone only
   // checks the bearer token Keycloak issued: mod_auth_openidc, in the vhost below,
@@ -215,6 +214,23 @@ object keystone_single_node extends OrpheraClusterPlaybook:
   private val federationIdp = "keycloak"
   private val federationProtocol = "openid"
 
+  // Browser single sign-on (WebSSO). A dashboard sends the browser to Keystone's websso path; mod_auth_openidc,
+  // here as an OpenID Connect client of Keycloak (client `keystone`, its secret from keycloak/keystone-client),
+  // sends it on to Keycloak's login page, takes the code back on /redirect_uri, and Keystone then posts a token
+  // to the dashboard through sso_callback_template, but only to an address listed in trusted_dashboard. Horizon
+  // uses the path for identity provider keycloak; Skyline (8.x) uses the protocol-wide path, for which Keystone
+  // finds the identity provider from [federation] remote_id_attribute. Keep the two dashboard addresses in step
+  // with horizon_single_node.scala and skyline_single_node.scala; users must open the dashboards by these names.
+  private val keycloakClientSecret = Secrets.secret("keycloak/keystone-client")
+  private val oidcCryptoPassphrase = Secrets.secret("keystone/oidc-crypto")
+  private val trustedDashboards = List(
+    "http://tst13.ljalbinson.com:8080/auth/websso/",
+    "http://tst13.ljalbinson.com:9999/api/openstack/skyline/api/v1/websso"
+  )
+  private val ssoTemplatePath = "/etc/keystone/sso_callback_template.html"
+
+  // [federation] is the last section, so the other trusted_dashboard lines (a multi-valued option, which
+  // ConfFile holds once) can follow it in the written file; the first one is still checked by the catalogue.
   private val keystoneConf: ConfFile =
     ConfFile.text(s"$confDir/keystone.conf", keystoneCatalogue)(
       ("DEFAULT", "log_dir", "/var/log/kolla/keystone"),
@@ -227,8 +243,46 @@ object keystone_single_node extends OrpheraClusterPlaybook:
       ("token", "provider", "fernet"),
       // `openid` is the federation method (the mapped plugin under that name); the
       // default list's external, oauth1 and mapped are not used here.
-      ("auth", "methods", "password,token,openid,application_credential")
+      ("auth", "methods", "password,token,openid,application_credential"),
+      ("federation", "remote_id_attribute", "HTTP_OIDC_ISS"),
+      ("federation", "sso_callback_template", ssoTemplatePath),
+      ("federation", "trusted_dashboard", trustedDashboards.head)
     )
+  private val keystoneConfText: String =
+    val base = keystoneConf.render
+    require(
+      base.split("\n\n").last.startsWith("[federation]"),
+      "keystone.conf: [federation] must be the last section"
+    )
+    base + trustedDashboards.tail.map(d => s"trusted_dashboard = $d\n").mkString
+
+  // The page Keystone answers the websso path with: it posts the token to the dashboard. The same as the one in
+  // Keystone's source tree ($host and $token are filled in by Keystone), written here so it does not depend on
+  // where the image keeps its copy.
+  private val ssoCallbackTemplate =
+    """<!DOCTYPE html>
+      |<html xmlns="http://www.w3.org/1999/xhtml">
+      |  <head>
+      |    <title>Keystone WebSSO redirect</title>
+      |  </head>
+      |  <body>
+      |     <form id="sso" name="sso" action="$host" method="post">
+      |       Please wait...
+      |       <br/>
+      |       <input type="hidden" name="token" id="token" value="$token"/>
+      |       <noscript>
+      |         <input type="submit" name="submit_no_javascript" id="submit_no_javascript"
+      |            value="If your JavaScript is disabled, please click to continue"/>
+      |       </noscript>
+      |     </form>
+      |     <script type="text/javascript">
+      |       window.onload = function() {
+      |         document.forms['sso'].submit();
+      |       }
+      |     </script>
+      |  </body>
+      |</html>
+      |""".stripMargin
 
   // Inspects the image for the two things that differ between builds: where
   // keystone-wsgi-public lives (a venv under /var/lib/kolla in recent images),
@@ -268,6 +322,26 @@ object keystone_single_node extends OrpheraClusterPlaybook:
        |        AuthType oauth20
        |        Require valid-user
        |    </Location>
+       |    # WebSSO: Keystone as an OpenID Connect client of Keycloak, for the dashboards.
+       |    OIDCProviderMetadataURL "$keycloakIssuer/.well-known/openid-configuration"
+       |    OIDCClientID "keystone"
+       |    OIDCClientSecret "${keycloakClientSecret.reveal}"
+       |    OIDCCryptoPassphrase "${oidcCryptoPassphrase.reveal}"
+       |    OIDCRedirectURI "https://$fqdn:5000/redirect_uri"
+       |    OIDCResponseType "code"
+       |    OIDCScope "openid email profile"
+       |    <Location /redirect_uri>
+       |        AuthType openid-connect
+       |        Require valid-user
+       |    </Location>
+       |    <Location ~ "/v3/auth/OS-FEDERATION/websso/$federationProtocol">
+       |        AuthType openid-connect
+       |        Require valid-user
+       |    </Location>
+       |    <Location ~ "/v3/auth/OS-FEDERATION/identity_providers/$federationIdp/protocols/$federationProtocol/websso">
+       |        AuthType openid-connect
+       |        Require valid-user
+       |    </Location>
        |OIDC
        |)
        |  echo "mod_auth_openidc: $$OIDCMOD (federation with $keycloakIssuer)"
@@ -305,6 +379,8 @@ object keystone_single_node extends OrpheraClusterPlaybook:
        |    </Directory>
        |</VirtualHost>
        |WSGICONF
+       |# It holds the OIDC client secret and passphrase.
+       |chmod 600 $confDir/wsgi-keystone.conf
        |cat > $confDir/config.json <<JSON
        |{
        |  "command": "$$APACHE_CMD",
@@ -313,7 +389,8 @@ object keystone_single_node extends OrpheraClusterPlaybook:
        |    {"source": "/var/lib/kolla/config_files/wsgi-keystone.conf", "dest": "$$APACHE_CONF", "owner": "keystone", "perm": "0600"},
        |    {"source": "/var/lib/kolla/config_files/ssl/server-chain.crt", "dest": "/etc/keystone/ssl/server.crt", "owner": "keystone", "perm": "0644"},
        |    {"source": "/var/lib/kolla/config_files/ssl/server.key", "dest": "/etc/keystone/ssl/server.key", "owner": "keystone", "perm": "0600"},
-       |    {"source": "/var/lib/kolla/config_files/ssl/ca.crt", "dest": "/etc/keystone/ssl/ca.crt", "owner": "keystone", "perm": "0644"}
+       |    {"source": "/var/lib/kolla/config_files/ssl/ca.crt", "dest": "/etc/keystone/ssl/ca.crt", "owner": "keystone", "perm": "0644"},
+       |    {"source": "/var/lib/kolla/config_files/sso_callback_template.html", "dest": "$ssoTemplatePath", "owner": "keystone", "perm": "0644"}
        |  ],
        |  "permissions": [
        |    {"path": "/var/log/kolla/keystone", "owner": "keystone:kolla", "recurse": true},
@@ -402,7 +479,24 @@ object keystone_single_node extends OrpheraClusterPlaybook:
         .task("create the Keystone directories")(
           Task.RunCommand(List("sh", "-c", keystoneDirsScript))
         )
-        .task("write keystone.conf")(confResource.write(keystoneConf))
+        .task("write keystone.conf")(
+          Task.WriteFile(
+            content = keystoneConfText,
+            dest = s"$confDir/keystone.conf",
+            owner = "root",
+            group = "root",
+            mode = 416 // 0640: it holds the database password
+          )
+        )
+        .task("write the WebSSO callback page")(
+          Task.WriteFile(
+            content = ssoCallbackTemplate,
+            dest = s"$confDir/sso_callback_template.html",
+            owner = "root",
+            group = "root",
+            mode = 420 // 0644
+          )
+        )
         .task("write the Apache vhost and Kolla config.json")(
           Task.RunCommand(
             List("sh", "-c", kollaConfigScript),

@@ -203,6 +203,14 @@ object skyline_single_node extends OrpheraClusterPlaybook:
        |  system_user_name: skyline
        |  system_user_domain: Default
        |  system_user_password: ${skylinePassword.reveal}
+       |  # Single sign-on through Keycloak (keycloak_single_node.scala). Skyline 8.x offers one choice per
+       |  # protocol and sends the browser to Keystone's protocol-wide websso path; Keystone posts the token back
+       |  # only to http://$fqdn:$port/api/openstack/skyline/api/v1/websso (trusted_dashboard in
+       |  # keystone_single_node.scala), so open Skyline by that name.
+       |  sso_enabled: true
+       |  sso_protocols:
+       |    - openid
+       |  sso_region: $region
        |""".stripMargin
 
   // The documented bootstrap: the image's start script runs the migrations when KOLLA_BOOTSTRAP is set (even

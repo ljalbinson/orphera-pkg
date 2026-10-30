@@ -7,6 +7,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- Single sign-on (WebSSO) through Keycloak for Horizon and Skyline. `keystone_single_node.scala` makes mod_auth_openidc also an OpenID
+  Connect client of Keycloak (client `keystone`, `/redirect_uri`, new secret `keystone/oidc-crypto`) on the two websso paths, writes its
+  own `sso_callback_template.html`, and sets `[federation] remote_id_attribute`, `sso_callback_template` and two `trusted_dashboard` lines
+  (the file is now written as text, so the multi-valued option can repeat; the first value is still checked by the catalogue; the vhost is
+  now mode 600). `horizon_single_node.scala` offers "Keycloak (realm openstack)" (`WEBSSO_*`), and its own login check names the password
+  method. `skyline_single_node.scala` sets `sso_enabled`, `sso_protocols: [openid]` and `sso_region`. The Keycloak helper's
+  `sso-check [horizon|skyline|all]` does the browser flow end to end; `test_keycloak.sh` (unless `SKIP_SSO=1`) and the `keycloak` step of
+  `build_openstack_stack.sh` run it. The dashboards must be opened by the names Keystone trusts, and the browser must trust the test CA.
+  Not run yet; the flow was checked against stand-in Keycloak, Keystone, Horizon and Skyline servers.
 - Keycloak with Keystone federation. `manifests/keycloak_single_node.scala` runs Keycloak (`quay.io/keycloak/keycloak:26.8.1`, `KEYCLOAK_IMAGE`
   overrides) as one container on a new VM, tst26 (`config/tst26.yaml`, 10.10.5.38, on gs1, 2 vCPU, 4096 MiB): HTTPS on 8443 with a certificate
   signed by Keystone's test CA on tst6 (the request travels to tst6 and the certificate back with `DistributeFile`), health on 9000, the database

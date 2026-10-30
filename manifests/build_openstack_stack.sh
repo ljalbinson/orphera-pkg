@@ -46,7 +46,7 @@
 #                        from the project's own image; run after every service is registered, it writes its
 #                        nginx file from the catalog)
 #   keycloak tst26       keycloak_single_node (Keycloak, the OIDC identity provider, https://tst26:8443/; Keystone
-#                        federates its realm `openstack` and a test user logs in through it)
+#                        federates its realm `openstack`; a test user logs in through it on the CLI, Horizon and Skyline)
 #   designate tst16      designate_single_node (DNS as a service: API, central, worker, producer, mdns and
 #                        a BIND9 name server; RabbitMQ vhost on tst10)
 #   clients  scala0      utils/openstack-client-setup.sh
@@ -462,6 +462,8 @@ step_keycloak() {
   check "the Keycloak realm answers over TLS from tst6" contains '"issuer":"https://tst26.ljalbinson.com:8443/realms/openstack"' "$out"
   out=$(orphera run sh -c "sudo /usr/local/sbin/orphera-keycloak-api check" --nodes tst26 --timeout 120 2>&1)
   check "a Keycloak user gets a scoped Keystone token" contains "federation ok" "$out"
+  out=$(orphera run sh -c "sudo /usr/local/sbin/orphera-keycloak-api sso-check" --nodes tst26 --timeout 180 2>&1)
+  check "Horizon and Skyline sign a Keycloak user in (single sign-on)" contains "skyline sso ok" "$out"
 }
 
 step_clients() {
