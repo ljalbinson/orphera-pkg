@@ -541,7 +541,7 @@ def check():
 
 
 def openrc():
-    print('''# Keycloak user %(u)s through Keystone federation (source this file)
+    print('''# Keycloak user %(u)s through Keystone federation (source this file; it holds secrets: chmod 600)
 export OS_AUTH_TYPE=v3oidcpassword
 export OS_AUTH_URL=%(ks)s
 export OS_IDENTITY_PROVIDER=%(idp)s
@@ -554,7 +554,11 @@ export OS_USERNAME=%(u)s
 export OS_PASSWORD=%(pw)s
 export OS_PROJECT_NAME=%(proj)s
 export OS_PROJECT_DOMAIN_NAME=%(dom)s
-export OS_IDENTITY_API_VERSION=3''' % {'u': DEMO_USER, 'ks': KS, 'idp': IDP, 'proto': PROTOCOL, 'iss': ISSUER, 'cid': CLIENT_ID,
+export OS_IDENTITY_API_VERSION=3
+# Keystone and Keycloak both have certificates from the test CA, which utils/openstack-client-setup.sh copies here,
+# and that script's virtualenv holds the openstack command.
+export OS_CACERT="${OS_CACERT:-$HOME/.config/openstack/keystone-ca.crt}"
+if [ -d "$HOME/.venvs/openstack/bin" ]; then case ":$PATH:" in *":$HOME/.venvs/openstack/bin:"*) ;; *) export PATH="$HOME/.venvs/openstack/bin:$PATH" ;; esac; fi''' % {'u': DEMO_USER, 'ks': KS, 'idp': IDP, 'proto': PROTOCOL, 'iss': ISSUER, 'cid': CLIENT_ID,
                                         'cs': CLIENT_SECRET, 'pw': DEMO_PW, 'proj': FED_PROJECT, 'dom': FED_DOMAIN})
 
 

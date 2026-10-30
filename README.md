@@ -2029,7 +2029,10 @@ again before the first Keycloak build (the Keycloak playbook's first stage stops
 identity provider `keycloak` (remote id = the realm's issuer), the mapping `keycloak-mapping` (`preferred_username` becomes the user name, every
 user joins `keycloak-users`) and the protocol `openid`. `sudo orphera-keycloak-api check` logs `kcdemo` in end to end; `sudo
 orphera-keycloak-api openrc` prints the environment for the CLI's `v3oidcpassword` plugin. Not set up: browser single sign-on for Horizon
-and Skyline (WebSSO), group or role mapping from Keycloak claims, and a second Keycloak node. The playbook has not been run.
+and Skyline (WebSSO), group or role mapping from Keycloak claims, and a second Keycloak node. Run on the lab: `test_keycloak.sh` 12 of 12, and
+`openstack token issue` as `kcdemo` from scala0 with the rc file from `openrc` (`ssh localadmin@tst26 sudo /usr/local/sbin/orphera-keycloak-api
+openrc > ~/keycloak-openrc.sh`, mode 600). Keycloak 26.8 refuses a wrong password with HTTP 400 and `invalid_grant`, not 401. A federated
+user's id in Keystone is a 64-character hash of the identity provider and the user name, not a UUID.
 
 **Skyline** (`manifests/skyline_single_node.scala`, undone by `skyline_teardown.scala`, checked by `test_skyline.sh`) is the Skyline dashboard on tst13,
 beside Horizon: `http://tst13.ljalbinson.com:9999/`, log in as `admin` with domain `Default`. It is one container from the image the Skyline project

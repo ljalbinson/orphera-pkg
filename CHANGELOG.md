@@ -13,7 +13,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `keycloak` on Galera. The helper `orphera-keycloak-api` makes the realm `openstack`, the client `keystone` and the test user `kcdemo` in
   Keycloak, and the domain, project, group, identity provider, mapping and protocol in Keystone, and `check` logs the user in end to end.
   `keycloak_teardown.scala` undoes it and `test_keycloak.sh` checks it. New secrets: `keycloak/db`, `keycloak/admin`, `keycloak/keystone-client`,
-  `keycloak/demo-user` (in `utils/rotate-lab-secrets.sh`). `build_openstack_stack.sh` has a `keycloak` step after `skyline`. Not run yet.
+  `keycloak/demo-user` (in `utils/rotate-lab-secrets.sh`). `build_openstack_stack.sh` has a `keycloak` step after `skyline`. The unit is written by the playbook with `start` added
+  to the ExecStart line, because manifests compile against the installed orchestrator jar, which does not have `Container.args` until
+  the next build. `openrc` prints the environment for the CLI, with the test CA and the client virtualenv. Run on the lab:
+  `test_keycloak.sh` 12 of 12 (a wrong password is refused with HTTP 400 in Keycloak 26.8; the test accepts 400 or 401), and
+  `openstack token issue` as `kcdemo`.
 - `keystone_single_node.scala` loads mod_auth_openidc when the image has it (a warning and no federation when it does not), checks Keycloak
   bearer tokens on the federation path of identity provider `keycloak`, copies the CA into the container for that, and sets `[auth] methods =
   password,token,openid,application_credential`. Run it again before keycloak_single_node.scala. Nothing changes for password logins.
