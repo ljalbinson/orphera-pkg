@@ -11,7 +11,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   list) came to over 4096 bytes, browsers dropped the cookie without a message, and the user came straight back to the login
   page. Sessions are now files in the container's /tmp (`SESSION_ENGINE` file), shared by both WSGI processes; they do not
   outlive a restart of the container. The Keycloak helper's `sso-check` now fails on any cookie over 4096 bytes, as a browser
-  would (Python keeps such a cookie, so the check had passed).
+  would (Python keeps such a cookie, so the check had passed). Run on the lab: the browser login then reached Horizon.
 
 ### Added
 - Horizon and Skyline on HTTPS (same ports, 8080 and 9999), so the WebSSO login stays on HTTPS: Safari refused, without a message,
@@ -21,7 +21,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   its check helper and health check on https. Skyline: the image's `SSL_CERTFILE` and `SSL_KEYFILE` with a copy of the key owned by the
   image's user, `ssl_enabled: true`, helper and health check on https. Keystone's `trusted_dashboard` addresses, the Keycloak helper's
   `sso-check`, `test_horizon.sh`, `test_skyline.sh` and `build_openstack_stack.sh` follow. Browsers must trust the test CA.
-  Not run yet.
+  Run on the lab: `test_horizon.sh` 7 of 7 and `test_keycloak.sh` 12 of 12 (with `NO_APPLY=1`); single sign-on into Horizon works
+  from Chrome and Safari on a Mac that trusts the test CA. `sso-check` sends a `Referer` with Horizon's login form, as browsers do:
+  Django refuses an HTTPS form post without one.
 - Single sign-on (WebSSO) through Keycloak for Horizon and Skyline. `keystone_single_node.scala` makes mod_auth_openidc also an OpenID
   Connect client of Keycloak (client `keystone`, `/redirect_uri`, new secret `keystone/oidc-crypto`) on the two websso paths, writes its
   own `sso_callback_template.html`, and sets `[federation] remote_id_attribute`, `sso_callback_template` and two `trusted_dashboard` lines
