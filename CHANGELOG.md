@@ -6,20 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-### Fixed
-- Logging out of Horizon left the Keycloak session (and mod_auth_openidc's on Keystone), so the next single sign-on went straight
-  through without the password. Horizon's vhost now rewrites its logout redirect (mod_headers, `Header edit Location` on
-  `/auth/logout/`) to Keystone's `/redirect_uri?logout=<Horizon's login page>`; mod_auth_openidc ends its session and Keycloak's
-  (end-session endpoint with the id token) and Keycloak returns the browser to Horizon. Keystone's vhost has
-  `OIDCRedirectURLsAllowed` for tst13's dashboards, and the Keycloak client `post.logout.redirect.uris` for the same. `sso-check
-  horizon` now logs out and checks that Horizon's session is gone and that the next single sign-on asks for the password. Skyline's
-  logout still ends only Skyline's session. Run on the lab: `sso-check horizon` logs in, logs out, and the next single sign-on asks
-  for the password. `test_keycloak.sh` checks the logout line on its own (it had passed on the login line alone), so it has 13 checks.
-- Horizon kept its sessions in signed cookies; after a single sign-on login the session (the federated token and its project
-  list) came to over 4096 bytes, browsers dropped the cookie without a message, and the user came straight back to the login
-  page. Sessions are now files in the container's /tmp (`SESSION_ENGINE` file), shared by both WSGI processes; they do not
-  outlive a restart of the container. The Keycloak helper's `sso-check` now fails on any cookie over 4096 bytes, as a browser
-  would (Python keeps such a cookie, so the check had passed). Run on the lab: the browser login then reached Horizon.
+## [0.1.207] - 2026-10-30
+
+The agent's code is unchanged from 0.1.206; the orchestrator's `Container` takes `args`. New playbooks: Keycloak with Keystone federation, single sign-on into Horizon and Skyline (both now on HTTPS) with Keycloak groups deciding roles, Trove, Telemetry, Skyline, Magnum, Octavia, tenant networking, the Kolla image builder, RGW, Manila, Barbican, Heat and Designate; VirtualBMC and `move-vm.sh`.
 
 ### Added
 - Keycloak groups decide a federated user's access. The Keycloak client `keystone` puts a `groups` claim (group names) in its
@@ -223,6 +212,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   not set up. Not yet run: the first run on scala0 is the first compile.
 
 ### Fixed
+- Logging out of Horizon left the Keycloak session (and mod_auth_openidc's on Keystone), so the next single sign-on went straight
+  through without the password. Horizon's vhost now rewrites its logout redirect (mod_headers, `Header edit Location` on
+  `/auth/logout/`) to Keystone's `/redirect_uri?logout=<Horizon's login page>`; mod_auth_openidc ends its session and Keycloak's
+  (end-session endpoint with the id token) and Keycloak returns the browser to Horizon. Keystone's vhost has
+  `OIDCRedirectURLsAllowed` for tst13's dashboards, and the Keycloak client `post.logout.redirect.uris` for the same. `sso-check
+  horizon` now logs out and checks that Horizon's session is gone and that the next single sign-on asks for the password. Skyline's
+  logout still ends only Skyline's session. Run on the lab: `sso-check horizon` logs in, logs out, and the next single sign-on asks
+  for the password. `test_keycloak.sh` checks the logout line on its own (it had passed on the login line alone), so it has 13 checks.
+- Horizon kept its sessions in signed cookies; after a single sign-on login the session (the federated token and its project
+  list) came to over 4096 bytes, browsers dropped the cookie without a message, and the user came straight back to the login
+  page. Sessions are now files in the container's /tmp (`SESSION_ENGINE` file), shared by both WSGI processes; they do not
+  outlive a restart of the container. The Keycloak helper's `sso-check` now fails on any cookie over 4096 bytes, as a browser
+  would (Python keeps such a cookie, so the check had passed). Run on the lab: the browser login then reached Horizon.
 - `build_openstack_stack.sh`: the telemetry step looked for the old Pushgateway wording ("ceilometer series in prometheus") and now looks for
   "ceilometer exporters up". The README's telemetry section no longer says Aodh finds Prometheus through the Keystone catalog.
 - `nova_single_node.scala` and `nova_compute.scala` write a `[cinder]` section (`cafile`, `os_region_name`). Without it, a server with a Cinder volume
