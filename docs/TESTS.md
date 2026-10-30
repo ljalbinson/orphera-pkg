@@ -834,3 +834,45 @@ on 2026-10-21: `orphera version` reports 0.1.199 on all 25 nodes (tst0-tst20, gs
 `ls -l /etc/orphera-agent/never-reboot` on gs1, gs2, gs3 and st0 shows the empty marker file on each (created by
 `utils/sync-never-reboot.py --apply`; gs1 lists the time in UTC, an hour behind the others). Not recorded: a refused
 reboot or shutdown on one of the hypervisors themselves (the refusal was tested on tst20 only), and the pipeline results.
+
+### K38. Keycloak on tst26 and Keystone federation - PASSED (2026-10-30), `test_keycloak.sh` 12/12 (d8ce67d, 8852865, eb043df)
+    manifests/par-mk-new-and-empty.sh 26
+    orphera cluster-playbook manifests/keystone_single_node.scala
+    manifests/test_keycloak.sh
+New VM tst26 (`config/tst26.yaml`, 10.10.5.38, on gs1). The first run stopped at compilation: `Container` has no parameter
+`args`. A manifest is compiled against the installed orchestrator jar, not the repository source, so a field added to
+`Container` in the same commit is not there yet; the playbook now writes the unit itself, with `start` added to the ExecStart
+line (8852865), and `Container.args` waits for the next jar. The next run completed and passed 11 of 12: Keycloak 26.8 refuses
+a wrong password with HTTP 400 and `invalid_grant`, not 401; the test accepts either as long as no token comes back (eb043df),
+then 12 of 12, including the second run of the playbook. From scala0, `openstack token issue` as `kcdemo` with the rc file from
+`orphera-keycloak-api openrc` (`v3oidcpassword`) gave a token scoped to keycloak-demo; the federated user's id is a 64-character
+hash, the same on every login. Teardown: `orphera cluster-playbook manifests/keycloak_teardown.scala`.
+
+### K39. Single sign-on into Horizon and Skyline; dashboards on HTTPS; logout - PASSED (2026-10-30), `test_keycloak.sh` 13/13
+    orphera cluster-playbook manifests/keystone_single_node.scala   # then horizon, skyline, keycloak
+    NO_APPLY=1 manifests/test_keycloak.sh
+    sudo /usr/local/sbin/orphera-keycloak-api sso-check horizon     # on tst26
+Commits 74928cd, 2e720cc, dee6db4, 6a86754, 388ba78, 5c33abb, 0236bb2. Each failure on the way, and its cause:
+- `sso-check` got HTTP 401 from Keystone's websso path: mod_auth_openidc sends only browser-like requests (`Accept: text/html`)
+  on to Keycloak and answers the rest with 401; Python's urllib sends no Accept header. The check now sends a browser's headers.
+- Safari stopped at Keystone's "Please wait..." page: it posts the token from https://tst6 to the dashboard, then on plain HTTP,
+  and the browser refused the insecure form post without a message. Horizon (8080) and Skyline (9999) moved to HTTPS with a
+  certificate for tst13 from the test CA; Skyline's origin came out as https, so its nginx passes the scheme on.
+- `sso-check horizon` then got `csrf_failure=Referer checking failed - no Referer`: Django checks the Referer on every HTTPS form
+  post; browsers send it, the check did not. It does now.
+- Chrome then came straight back to the login page. Horizon's access log showed `POST /auth/websso/` 302 (5360 bytes) and then
+  `GET /` 302 to the login page: the session, kept in a signed cookie, was over 4096 bytes after a federated login and the browser
+  dropped it. Horizon now keeps sessions in files, and `sso-check` fails on any cookie over 4096 bytes. The browser login worked.
+- Logging out of Horizon left the Keycloak session, so the next login went straight through. The logout now passes through
+  Keystone's `/redirect_uri?logout=` and Keycloak's end-session endpoint; `sso-check horizon` printed `horizon logout ok`. The
+  test had passed on the login line alone; it now checks the logout line too (13 checks).
+The Mac used for the browser checks trusts the test CA (`sudo security add-trusted-cert -d -r trustRoot -k
+/Library/Keychains/System.keychain` on `~/.config/openstack/keystone-ca.crt` from scala0). `test_horizon.sh` 7/7 over HTTPS.
+Not done: Skyline's logout ends only Skyline's session (its console logs out in the page's script).
+
+### K40. Keycloak groups decide OpenStack roles - PASSED (2026-10-30), `test_keycloak.sh` 13/13 (22442a7)
+    orphera cluster-playbook manifests/keystone_single_node.scala   # OIDCClaimDelimiter ";"
+    orphera cluster-playbook manifests/keycloak_single_node.scala
+`check`, first run: kcadmin (openstack-admins) admin, manager, member and reader on Default/admin; kcdemo (openstack-members)
+member and reader on keycloak/keycloak-demo; kcreader (openstack-readers) reader only; kcnogroup (no group) refused; only kcadmin
+may list users; kcdemo cannot scope to the admin project. `federate` removed the earlier catch-all group `keycloak-users`.
