@@ -318,6 +318,8 @@ object keystone_single_node extends OrpheraClusterPlaybook:
        |    # Federation: a Keycloak access token (Authorization: Bearer) is checked
        |    # against the realm's keys; its claims reach Keystone as OIDC-<claim>.
        |    OIDCClaimPrefix "OIDC-"
+       |    # A claim with several values (groups) reaches Keystone as one string; Keystone's mapping splits on ";".
+       |    OIDCClaimDelimiter ";"
        |    OIDCOAuthVerifyJwksUri "$keycloakIssuer/protocol/openid-connect/certs"
        |    OIDCCABundlePath /etc/keystone/ssl/ca.crt
        |    <Location ~ "/v3/OS-FEDERATION/identity_providers/$federationIdp/protocols/$federationProtocol/auth">

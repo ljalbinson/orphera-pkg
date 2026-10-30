@@ -24,14 +24,18 @@ import orphera.orchestrator.kolla.*
 //     cache (one node, no cluster discovery) and the first admin;
 //   - the admin user `admin` of the master realm, made by Keycloak at its first start from bootstrap-admin-* (it
 //     then says the account is temporary; that is expected here). Changing keycloak/admin later does not change it;
-//   - through the helper `orphera-keycloak-api` (realm, federate, check, unfederate, openrc):
+//   - through the helper `orphera-keycloak-api` (realm, federate, check, sso-check, unfederate, openrc):
 //       Keycloak: realm `openstack`, confidential client `keystone` (direct access grants on, for the CLI and the
-//         check), test user `kcdemo` with a password, email and names (a user without them is held at "update
-//         profile" and cannot log in by password);
-//       Keystone: domain `keycloak`, group `keycloak-users` in it with role `member` on project `keycloak-demo`,
-//         identity provider `keycloak` (remote id = the realm's issuer, users in domain `keycloak`), mapping
-//         `keycloak-mapping` (preferred_username -> user name, everyone -> keycloak-users) and protocol `openid`
-//         (remote_id_attribute HTTP_OIDC_ISS).
+//         check) with a `groups` claim (group names) in its tokens, the groups openstack-admins,
+//         openstack-members and openstack-readers, and test users kcadmin, kcdemo and kcreader (one in each) and
+//         kcnogroup (in none), each with a password, email and names (a user without them is held at "update
+//         profile" and cannot log in by password); a user's groups are set to exactly these on every run;
+//       Keystone: domain `keycloak`, project `keycloak-demo`, and in the domain the groups keycloak-admins (admin on
+//         project admin, domain Default: cloud admin), keycloak-members (member on keycloak-demo) and
+//         keycloak-readers (reader on keycloak-demo); identity provider `keycloak` (remote id = the realm's issuer,
+//         users in domain `keycloak`), mapping `keycloak-mapping` (preferred_username -> user name; each Keycloak
+//         group in OIDC-groups -> its Keystone group; a user in none of them is not mapped, so Keystone refuses
+//         them) and protocol `openid` (remote_id_attribute HTTP_OIDC_ISS). GROUP_MAP in the helper is the table.
 //
 // The Keystone half: keystone_single_node.scala loads mod_auth_openidc and checks bearer tokens on
 // /v3/OS-FEDERATION/identity_providers/keycloak/protocols/openid/auth against the realm's published keys, and has
@@ -40,8 +44,10 @@ import orphera.orchestrator.kolla.*
 //
 // How a login works (what `check` does, and what the CLI's v3oidcpassword plugin does): password grant at Keycloak
 // for client `keystone` -> access token -> POST it as a bearer token to the federation path above -> an unscoped
-// Keystone token for user kcdemo -> a token scoped to project keycloak-demo (domain keycloak) with role member.
-// `sudo orphera-keycloak-api openrc` on tst26 prints the environment for the CLI.
+// Keystone token for the user, in the Keystone groups its Keycloak groups map to -> a token scoped to the project
+// those groups have a role on. `check` does it for each test user, and checks that only kcadmin may list users and
+// that kcnogroup is refused. `sudo orphera-keycloak-api openrc [kcdemo|kcadmin|kcreader]` on tst26 prints the
+// environment for the CLI.
 //
 // Prerequisites, not checked here: Galera + VIP healthy; Keystone up on tst6 with its CA at
 // /etc/kolla/keystone-ca; tst26 provisioned with an agent, its name in DNS; quay.io (or the cache) reachable.
@@ -101,6 +107,9 @@ object keycloak_single_node extends OrpheraClusterPlaybook:
   private val kcAdminPassword = Secrets.secret("keycloak/admin")
   private val clientSecret = Secrets.secret("keycloak/keystone-client")
   private val demoPassword = Secrets.secret("keycloak/demo-user")
+  private val kcAdminUserPassword = Secrets.secret("keycloak/kcadmin")
+  private val kcReaderPassword = Secrets.secret("keycloak/kcreader")
+  private val kcNogroupPassword = Secrets.secret("keycloak/kcnogroup")
   private val ksAdminPassword = Secrets.secret("keystone/admin")
   private val demoUser = "kcdemo"
 
@@ -312,9 +321,25 @@ IDP = 'keycloak'
 PROTOCOL = 'openid'
 MAPPING = 'keycloak-mapping'
 FED_DOMAIN = 'keycloak'
-FED_GROUP = 'keycloak-users'
 FED_PROJECT = 'keycloak-demo'
-FED_ROLE = 'member'
+# Keycloak group -> Keystone group (in FED_DOMAIN) -> role on a project. The groups claim in Keycloak's tokens decides a
+# user's access; a user in none of these groups is not mapped at all, so Keystone refuses them.
+GROUP_MAP = [
+    # Keycloak group,     Keystone group,     role,     project,     project's domain
+    ('openstack-admins', 'keycloak-admins', 'admin', 'admin', 'Default'),
+    ('openstack-members', 'keycloak-members', 'member', FED_PROJECT, FED_DOMAIN),
+    ('openstack-readers', 'keycloak-readers', 'reader', FED_PROJECT, FED_DOMAIN),
+]
+# Keystone groups an earlier version of this helper made, removed by federate.
+OLD_GROUPS = ['keycloak-users']
+# Test users: one per group, and one in no group, who must get no access.
+USERS = [
+    # name, password, Keycloak group (or None), last name
+    ('kcadmin', '@@KCADMINUSERPW@@', 'openstack-admins', 'Admin'),
+    (DEMO_USER, DEMO_PW, 'openstack-members', 'Demo'),
+    ('kcreader', '@@KCREADERPW@@', 'openstack-readers', 'Reader'),
+    ('kcnogroup', '@@KCNOGROUPPW@@', None, 'Nogroup'),
+]
 FED_AUTH = '%s/OS-FEDERATION/identity_providers/%s/protocols/%s/auth' % (KS, IDP, PROTOCOL)
 HORIZON = '@@HORIZON@@'
 SKYLINE = '@@SKYLINE@@'
@@ -373,6 +398,30 @@ class KcAdmin:
         return call(method, KC + '/admin/realms' + path, body, self.h)
 
 
+def ensure_user(kc, name, password, last):
+    user = {
+        'username': name, 'enabled': True, 'email': name + '@ljalbinson.com', 'emailVerified': True,
+        'firstName': 'Keycloak', 'lastName': last, 'requiredActions': [],
+    }
+    s, found, _ = kc('GET', '/%s/users?username=%s&exact=true' % (REALM, name))
+    if s != 200:
+        die('listing users: HTTP %s %s' % (s, found))
+    if found:
+        uid = found[0]['id']
+        s, p, _ = kc('PUT', '/%s/users/%s' % (REALM, uid), user)
+        if s != 204:
+            die('updating user %s: HTTP %s %s' % (name, s, p))
+    else:
+        s, p, h = kc('POST', '/%s/users' % REALM, user)
+        if s != 201:
+            die('creating user %s: HTTP %s %s' % (name, s, p))
+        uid = h['Location'].rstrip('/').rsplit('/', 1)[1]
+    s, p, _ = kc('PUT', '/%s/users/%s/reset-password' % (REALM, uid), {'type': 'password', 'value': password, 'temporary': False})
+    if s != 204:
+        die('setting the password of %s: HTTP %s %s' % (name, s, p))
+    return uid
+
+
 def realm():
     kc = KcAdmin()
     s, p, _ = kc('GET', '/' + REALM)
@@ -402,27 +451,57 @@ def realm():
         s, p, _ = kc('POST', '/%s/clients' % REALM, client)
         if s != 201:
             die('creating client %s: HTTP %s %s' % (CLIENT_ID, s, p))
-    user = {
-        'username': DEMO_USER, 'enabled': True, 'email': DEMO_USER + '@ljalbinson.com', 'emailVerified': True,
-        'firstName': 'Keycloak', 'lastName': 'Demo', 'requiredActions': [],
+        s, found, _ = kc('GET', '/%s/clients?clientId=%s' % (REALM, CLIENT_ID))
+    cid = found[0]['id']
+    # The groups claim: the user's group names (not paths), in the ID token, the access token and userinfo, which is
+    # what Keystone's mapping reads (through mod_auth_openidc, as OIDC-groups).
+    mapper = {
+        'name': 'groups', 'protocol': 'openid-connect', 'protocolMapper': 'oidc-group-membership-mapper',
+        'config': {'claim.name': 'groups', 'full.path': 'false', 'id.token.claim': 'true',
+                   'access.token.claim': 'true', 'userinfo.token.claim': 'true'},
     }
-    s, found, _ = kc('GET', '/%s/users?username=%s&exact=true' % (REALM, DEMO_USER))
+    s, mappers, _ = kc('GET', '/%s/clients/%s/protocol-mappers/models' % (REALM, cid))
     if s != 200:
-        die('listing users: HTTP %s %s' % (s, found))
-    if found:
-        uid = found[0]['id']
-        s, p, _ = kc('PUT', '/%s/users/%s' % (REALM, uid), user)
-        if s != 204:
-            die('updating user %s: HTTP %s %s' % (DEMO_USER, s, p))
+        die('listing the client\'s mappers: HTTP %s %s' % (s, mappers))
+    old = [m for m in mappers if m.get('name') == 'groups']
+    if old:
+        s, p, _ = kc('PUT', '/%s/clients/%s/protocol-mappers/models/%s' % (REALM, cid, old[0]['id']), dict(mapper, id=old[0]['id']))
+        ok = 204
     else:
-        s, p, h = kc('POST', '/%s/users' % REALM, user)
-        if s != 201:
-            die('creating user %s: HTTP %s %s' % (DEMO_USER, s, p))
-        uid = h['Location'].rstrip('/').rsplit('/', 1)[1]
-    s, p, _ = kc('PUT', '/%s/users/%s/reset-password' % (REALM, uid), {'type': 'password', 'value': DEMO_PW, 'temporary': False})
-    if s != 204:
-        die('setting the password of %s: HTTP %s %s' % (DEMO_USER, s, p))
-    print('realm %s: client %s (confidential, direct grants) and user %s ready' % (REALM, CLIENT_ID, DEMO_USER))
+        s, p, _ = kc('POST', '/%s/clients/%s/protocol-mappers/models' % (REALM, cid), mapper)
+        ok = 201
+    if s != ok:
+        die('the groups claim mapper: HTTP %s %s' % (s, p))
+    gids = {}
+    for kc_group, _, _, _, _ in GROUP_MAP:
+        s, found, _ = kc('GET', '/%s/groups?search=%s&exact=true' % (REALM, kc_group))
+        if s != 200:
+            die('listing groups: HTTP %s %s' % (s, found))
+        match = [g for g in found if g.get('name') == kc_group]
+        if not match:
+            s, p, _ = kc('POST', '/%s/groups' % REALM, {'name': kc_group})
+            if s != 201:
+                die('creating group %s: HTTP %s %s' % (kc_group, s, p))
+            s, found, _ = kc('GET', '/%s/groups?search=%s&exact=true' % (REALM, kc_group))
+            match = [g for g in found if g.get('name') == kc_group]
+        gids[kc_group] = match[0]['id']
+    for name, password, group, last in USERS:
+        uid = ensure_user(kc, name, password, last)
+        s, current, _ = kc('GET', '/%s/users/%s/groups' % (REALM, uid))
+        if s != 200:
+            die('groups of %s: HTTP %s %s' % (name, s, current))
+        have = set(g['name'] for g in current)
+        for kc_group, gid in gids.items():
+            if kc_group == group and kc_group not in have:
+                s, p, _ = kc('PUT', '/%s/users/%s/groups/%s' % (REALM, uid, gid))
+            elif kc_group != group and kc_group in have:
+                s, p, _ = kc('DELETE', '/%s/users/%s/groups/%s' % (REALM, uid, gid))
+            else:
+                continue
+            if s != 204:
+                die('group %s for %s: HTTP %s %s' % (kc_group, name, s, p))
+    print('realm %s: client %s (confidential, direct grants, groups claim), groups %s, users %s' % (
+        REALM, CLIENT_ID, ', '.join(gids), ', '.join('%s (%s)' % (n, g or 'no group') for n, _, g, _ in USERS)))
 
 
 # ---- Keystone ----
@@ -475,27 +554,39 @@ def put_or_patch(t, path, key, create, update):
 def federate():
     t = ks_token()
     dom = ensure(t, '/domains', '?name=' + FED_DOMAIN, 'domain', {'name': FED_DOMAIN, 'enabled': True, 'description': 'Users federated from Keycloak realm ' + REALM})
-    proj = ensure(t, '/projects', '?name=%s&domain_id=%s' % (FED_PROJECT, dom['id']), 'project', {'name': FED_PROJECT, 'domain_id': dom['id'], 'description': 'For users who log in through Keycloak'})
-    grp = ensure(t, '/groups', '?name=%s&domain_id=%s' % (FED_GROUP, dom['id']), 'group', {'name': FED_GROUP, 'domain_id': dom['id'], 'description': 'Every Keycloak user, by the mapping ' + MAPPING})
-    role = find(t, '/roles?name=' + FED_ROLE, 'roles')
-    if role is None:
-        die('role %s not found (keystone-manage bootstrap makes it)' % FED_ROLE)
-    s, p, _ = ks('PUT', '/projects/%s/groups/%s/roles/%s' % (proj['id'], grp['id'], role['id']), t)
-    if s not in (200, 204):
-        die('granting %s to group %s: HTTP %s %s' % (FED_ROLE, FED_GROUP, s, p))
+    ensure(t, '/projects', '?name=%s&domain_id=%s' % (FED_PROJECT, dom['id']), 'project', {'name': FED_PROJECT, 'domain_id': dom['id'], 'description': 'For users who log in through Keycloak'})
+    rules = []
+    for kc_group, ks_group, role_name, project, project_domain in GROUP_MAP:
+        grp = ensure(t, '/groups', '?name=%s&domain_id=%s' % (ks_group, dom['id']), 'group', {'name': ks_group, 'domain_id': dom['id'], 'description': 'Members of Keycloak group %s, by the mapping %s' % (kc_group, MAPPING)})
+        pdom = find(t, '/domains?name=' + project_domain, 'domains')
+        proj = find(t, '/projects?name=%s&domain_id=%s' % (project, pdom['id']), 'projects') if pdom else None
+        if proj is None:
+            die('project %s in domain %s not found' % (project, project_domain))
+        role = find(t, '/roles?name=' + role_name, 'roles')
+        if role is None:
+            die('role %s not found (keystone-manage bootstrap makes it)' % role_name)
+        s, p, _ = ks('PUT', '/projects/%s/groups/%s/roles/%s' % (proj['id'], grp['id'], role['id']), t)
+        if s not in (200, 204):
+            die('granting %s on %s to group %s: HTTP %s %s' % (role_name, project, ks_group, s, p))
+        rules.append({
+            'local': [{'user': {'name': '{0}'}}, {'group': {'name': ks_group, 'domain': {'name': FED_DOMAIN}}}],
+            'remote': [{'type': 'OIDC-preferred_username'}, {'type': 'OIDC-groups', 'any_one_of': [kc_group]}],
+        })
+    for old in OLD_GROUPS:
+        grp = find(t, '/groups?name=%s&domain_id=%s' % (old, dom['id']), 'groups')
+        if grp is not None:
+            ks('DELETE', '/groups/' + grp['id'], t)
+            print('removed the old group %s' % old)
     idp = put_or_patch(t, '/OS-FEDERATION/identity_providers/' + IDP, 'identity_provider',
                        {'enabled': True, 'remote_ids': [ISSUER], 'domain_id': dom['id'], 'description': 'Keycloak on @@FQDN@@'},
                        {'enabled': True, 'remote_ids': [ISSUER]})
     if idp.get('domain_id') != dom['id']:
         die('identity provider %s puts its users in domain %s, not %s: run "%s unfederate", then federate' % (IDP, idp.get('domain_id'), FED_DOMAIN, sys.argv[0]))
-    rules = [{
-        'local': [{'user': {'name': '{0}'}}, {'group': {'name': FED_GROUP, 'domain': {'name': FED_DOMAIN}}}],
-        'remote': [{'type': 'OIDC-preferred_username'}],
-    }]
     put_or_patch(t, '/OS-FEDERATION/mappings/' + MAPPING, 'mapping', {'rules': rules}, {'rules': rules})
     proto = {'mapping_id': MAPPING, 'remote_id_attribute': 'HTTP_OIDC_ISS'}
     put_or_patch(t, '/OS-FEDERATION/identity_providers/%s/protocols/%s' % (IDP, PROTOCOL), 'protocol', proto, proto)
-    print('keystone: identity provider %s (%s), protocol %s, mapping %s, group %s with %s on %s/%s' % (IDP, ISSUER, PROTOCOL, MAPPING, FED_GROUP, FED_ROLE, FED_DOMAIN, FED_PROJECT))
+    print('keystone: identity provider %s (%s), protocol %s, mapping %s: %s' % (IDP, ISSUER, PROTOCOL, MAPPING, '; '.join(
+        '%s -> %s (%s on %s/%s)' % (k, g, r, pd, pr) for k, g, r, pr, pd in GROUP_MAP)))
 
 
 def unfederate():
@@ -506,7 +597,8 @@ def unfederate():
             print('DELETE %s: HTTP %s %s (continuing)' % (path, s, p))
     dom = find(t, '/domains?name=' + FED_DOMAIN, 'domains')
     if dom is not None:
-        for path, key, name in (('/projects', 'projects', FED_PROJECT), ('/groups', 'groups', FED_GROUP)):
+        names = [('/projects', 'projects', FED_PROJECT)] + [('/groups', 'groups', g) for g in [m[1] for m in GROUP_MAP] + OLD_GROUPS]
+        for path, key, name in names:
             obj = find(t, '%s?name=%s&domain_id=%s' % (path, name, dom['id']), key)
             if obj is not None:
                 ks('DELETE', '%s/%s' % (path, obj['id']), t)
@@ -519,32 +611,66 @@ def unfederate():
 
 # ---- the end-to-end check ----
 
+def federated_login(name, password):
+    # Keycloak password grant, then the access token as a bearer token at Keystone. Returns (status, body, token).
+    access = kc_token(REALM, CLIENT_ID, name, password, CLIENT_SECRET)
+    s, p, h = call('POST', FED_AUTH, headers={'Authorization': 'Bearer ' + access})
+    return s, p, h.get('X-Subject-Token') if s == 201 else None
+
+
+def scoped(unscoped, project, domain):
+    body = {'auth': {'identity': {'methods': ['token'], 'token': {'id': unscoped}}, 'scope': {'project': {'name': project, 'domain': {'name': domain}}}}}
+    s, p, h = call('POST', KS + '/auth/tokens', body)
+    if s != 201:
+        return s, [], None
+    return s, sorted(r['name'] for r in p['token'].get('roles', [])), h['X-Subject-Token']
+
+
 def check():
     s, p, _ = call('GET', ISSUER + '/.well-known/openid-configuration')
     if s != 200 or p.get('issuer') != ISSUER:
         die('discovery document of %s: HTTP %s, issuer %s' % (ISSUER, s, p.get('issuer')))
     kc_token('master', 'admin-cli', 'admin', KC_ADMIN_PW)
-    access = kc_token(REALM, CLIENT_ID, DEMO_USER, DEMO_PW, CLIENT_SECRET)
     s, p, _ = call('POST', FED_AUTH, headers={'Authorization': 'Bearer not-a-token'})
     if s != 401:
         die('a bad bearer token at %s gave HTTP %s, not 401 (is the OIDC <Location> in the Keystone vhost?) %s' % (FED_AUTH, s, p))
-    s, p, h = call('POST', FED_AUTH, headers={'Authorization': 'Bearer ' + access})
-    if s != 201:
-        hint = {404: 'the identity provider or protocol is missing: run "%s federate"' % sys.argv[0],
-                401: 'Keystone refused the token: see keystone-apache-public-error.log and keystone.log on @@KS@@ (mapping, remote id %s)' % ISSUER}.get(s, '')
-        die('federated login at Keystone: HTTP %s %s %s' % (s, p, hint))
-    unscoped = h['X-Subject-Token']
-    name = p.get('token', {}).get('user', {}).get('name')
-    if name != DEMO_USER:
-        die('the federated token is for %r, not %s' % (name, DEMO_USER))
-    body = {'auth': {'identity': {'methods': ['token'], 'token': {'id': unscoped}}, 'scope': {'project': {'name': FED_PROJECT, 'domain': {'name': FED_DOMAIN}}}}}
-    s, p, _ = call('POST', KS + '/auth/tokens', body)
-    if s != 201:
-        die('scoping the federated token to %s/%s: HTTP %s %s' % (FED_DOMAIN, FED_PROJECT, s, p))
-    roles = sorted(r['name'] for r in p['token'].get('roles', []))
-    if FED_ROLE not in roles:
-        die('the scoped token has roles %s, not %s' % (roles, FED_ROLE))
-    print('federation ok: %s logged in at Keycloak, got a Keystone token for %s/%s with roles %s' % (DEMO_USER, FED_DOMAIN, FED_PROJECT, ','.join(roles)))
+    where = {g[0]: g for g in GROUP_MAP}
+    results = []
+    for name, password, group, _ in USERS:
+        s, p, unscoped = federated_login(name, password)
+        if group is None:
+            if s != 401:
+                die('%s is in no Keycloak group, yet Keystone answered HTTP %s, not 401: %s' % (name, s, p))
+            results.append('%s refused (no group)' % name)
+            continue
+        if s != 201:
+            hint = {404: 'the identity provider or protocol is missing: run "%s federate"' % sys.argv[0],
+                    401: 'Keystone refused the token: see keystone-apache-public-error.log and keystone.log on @@KS@@ (mapping; the groups claim must reach Keystone as OIDC-groups, ";"-separated)'}.get(s, '')
+            die('federated login of %s at Keystone: HTTP %s %s %s' % (name, s, p, hint))
+        got = p.get('token', {}).get('user', {}).get('name')
+        if got != name:
+            die('the federated token is for %r, not %s' % (got, name))
+        _, _, role, project, domain = where[group]
+        s, roles, token = scoped(unscoped, project, domain)
+        if s != 201:
+            die('%s could not scope to %s/%s: HTTP %s' % (name, domain, project, s))
+        if role not in roles:
+            die('%s has roles %s on %s/%s, not %s' % (name, roles, domain, project, role))
+        if role == 'reader' and 'member' in roles:
+            die('%s is only a reader but has member on %s/%s' % (name, domain, project))
+        # Listing users is for cloud admins only: the admin group can, the others cannot.
+        s, p, _ = call('GET', KS + '/users?limit=1', headers={'X-Auth-Token': token})
+        if role == 'admin' and s != 200:
+            die('%s (admin on %s) could not list users: HTTP %s %s' % (name, project, s, p))
+        if role != 'admin' and s != 403:
+            die('%s (%s) was not refused an admin request: HTTP %s' % (name, role, s))
+        results.append('%s %s on %s/%s' % (name, ','.join(roles), domain, project))
+    # kcadmin's group gives no role on keycloak-demo, and kcdemo's none on admin.
+    s, _, unscoped = federated_login(DEMO_USER, DEMO_PW)
+    s, _, _ = scoped(unscoped, 'admin', 'Default')
+    if s == 201:
+        die('%s could scope to the admin project' % DEMO_USER)
+    print('federation ok: ' + '; '.join(results))
 
 
 # ---- single sign-on, as a browser does it ----
@@ -717,7 +843,12 @@ def sso_check(which):
         die('usage: orphera-keycloak-api sso-check [horizon | skyline | all]')
 
 
-def openrc():
+def openrc(name=DEMO_USER):
+    users = {u[0]: u for u in USERS}
+    if name not in users or users[name][2] is None:
+        die('openrc: one of %s' % ', '.join(u[0] for u in USERS if u[2]))
+    _, password, group, _ = users[name]
+    _, _, _, project, domain = {g[0]: g for g in GROUP_MAP}[group]
     print('''# Keycloak user %(u)s through Keystone federation (source this file; it holds secrets: chmod 600)
 export OS_AUTH_TYPE=v3oidcpassword
 export OS_AUTH_URL=%(ks)s
@@ -735,8 +866,8 @@ export OS_IDENTITY_API_VERSION=3
 # Keystone and Keycloak both have certificates from the test CA, which utils/openstack-client-setup.sh copies here,
 # and that script's virtualenv holds the openstack command.
 export OS_CACERT="${OS_CACERT:-$HOME/.config/openstack/keystone-ca.crt}"
-if [ -d "$HOME/.venvs/openstack/bin" ]; then case ":$PATH:" in *":$HOME/.venvs/openstack/bin:"*) ;; *) export PATH="$HOME/.venvs/openstack/bin:$PATH" ;; esac; fi''' % {'u': DEMO_USER, 'ks': KS, 'idp': IDP, 'proto': PROTOCOL, 'iss': ISSUER, 'cid': CLIENT_ID,
-                                        'cs': CLIENT_SECRET, 'pw': DEMO_PW, 'proj': FED_PROJECT, 'dom': FED_DOMAIN})
+if [ -d "$HOME/.venvs/openstack/bin" ]; then case ":$PATH:" in *":$HOME/.venvs/openstack/bin:"*) ;; *) export PATH="$HOME/.venvs/openstack/bin:$PATH" ;; esac; fi''' % {'u': name, 'ks': KS, 'idp': IDP, 'proto': PROTOCOL, 'iss': ISSUER, 'cid': CLIENT_ID,
+                                        'cs': CLIENT_SECRET, 'pw': password, 'proj': project, 'dom': domain})
 
 
 if __name__ == '__main__':
@@ -744,10 +875,12 @@ if __name__ == '__main__':
     actions = {'realm': realm, 'federate': federate, 'check': check, 'unfederate': unfederate, 'openrc': openrc}
     if cmd == 'sso-check':
         sso_check(sys.argv[2] if len(sys.argv) > 2 else 'all')
+    elif cmd == 'openrc' and len(sys.argv) > 2:
+        openrc(sys.argv[2])
     elif cmd in actions:
         actions[cmd]()
     else:
-        die('usage: orphera-keycloak-api realm | federate | check | sso-check [horizon|skyline|all] | unfederate | openrc')
+        die('usage: orphera-keycloak-api realm | federate | check | sso-check [horizon|skyline|all] | unfederate | openrc [kcdemo|kcadmin|kcreader]')
 """
 
   private val helperScript =
@@ -762,6 +895,9 @@ if __name__ == '__main__':
         .replace("@@CLIENTSECRET@@", clientSecret.reveal)
         .replace("@@DEMOUSER@@", demoUser)
         .replace("@@DEMOPW@@", demoPassword.reveal)
+        .replace("@@KCADMINUSERPW@@", kcAdminUserPassword.reveal)
+        .replace("@@KCREADERPW@@", kcReaderPassword.reveal)
+        .replace("@@KCNOGROUPPW@@", kcNogroupPassword.reveal)
         .replace("@@CA@@", s"$tlsDir/ca.crt")
         .replace("@@KSNODE@@", ksNode)
         .replace("@@HORIZON@@", horizonUrl)
@@ -908,7 +1044,7 @@ if __name__ == '__main__':
         )
         .task("keycloak confirmed")(
           Task.Debug(
-            s"Keycloak up at https://$fqdn:$httpsPort/ ($nodeIp) from ${keycloakImage.ref}, database $dbName via $vip:3306. Admin console: https://$fqdn:$httpsPort/admin/ (user admin, secret keycloak/admin). Keystone federates realm $realm as identity provider keycloak: user $demoUser (secret keycloak/demo-user) gets member on keycloak/keycloak-demo. CLI environment: sudo $helper openrc on $node. Test: manifests/test_keycloak.sh"
+            s"Keycloak up at https://$fqdn:$httpsPort/ ($nodeIp) from ${keycloakImage.ref}, database $dbName via $vip:3306. Admin console: https://$fqdn:$httpsPort/admin/ (user admin, secret keycloak/admin). Keystone federates realm $realm as identity provider keycloak: Keycloak groups openstack-admins, openstack-members and openstack-readers map to admin on Default/admin, member and reader on keycloak/keycloak-demo; test users kcadmin, $demoUser and kcreader (secrets keycloak/kcadmin, keycloak/demo-user, keycloak/kcreader). CLI environment: sudo $helper openrc [user] on $node. Test: manifests/test_keycloak.sh"
           )
         )
         .build

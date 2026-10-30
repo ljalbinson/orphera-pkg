@@ -2046,12 +2046,28 @@ Order: keystone_single_node, horizon_single_node, skyline_single_node, keycloak_
 Run on the lab: both dashboards sign `kcdemo` in through Keycloak (`sso-check all`, and from Chrome and Safari on a Mac that
 trusts the test CA). Horizon keeps its sessions in files on the server: a single sign-on session is too big for a cookie. mod_auth_openidc sends only browser-like
 requests (`Accept: text/html`) on to Keycloak and answers others with 401, so a script that follows the flow must send those headers.
+Keycloak groups decide what a federated user may do: the token carries a `groups` claim (group names), mod_auth_openidc
+passes it to Keystone as `OIDC-groups` with `;` between values (`OIDCClaimDelimiter`, as Keystone's mapping splits on it), and the
+mapping puts the user in the matching Keystone groups of domain `keycloak`:
+
+| Keycloak group | Keystone group | Role |
+|---|---|---|
+| `openstack-admins` | `keycloak-admins` | `admin` on project `admin` (domain Default): cloud admin |
+| `openstack-members` | `keycloak-members` | `member` on `keycloak-demo` |
+| `openstack-readers` | `keycloak-readers` | `reader` on `keycloak-demo` |
+
+A user in none of them is not mapped and Keystone refuses them. Add a user to a group in Keycloak's admin console (realm
+`openstack`, Users, Groups) and their next login has the access; a change to the table is `GROUP_MAP` in the helper, then the
+playbook again. Test users: `kcadmin`, `kcdemo`, `kcreader` and `kcnogroup` (secrets `keycloak/kcadmin`, `keycloak/demo-user`,
+`keycloak/kcreader`, `keycloak/kcnogroup`); `sudo orphera-keycloak-api openrc kcadmin` gives the CLI environment for one of them.
+`check` logs each in and checks the roles, that only `kcadmin` may list users, and that `kcnogroup` is refused.
+
 Logging out of Horizon ends the Keycloak session too: Horizon's Apache sends the browser from its logout to
 `https://tst6.ljalbinson.com:5000/redirect_uri?logout=<Horizon's login page>`, where mod_auth_openidc ends its own session and then
 Keycloak's (its end-session endpoint, with the id token), and Keycloak returns the browser to the login page, so the next single
 sign-on asks for the password again. Keystone accepts only tst13's dashboard addresses there (`OIDCRedirectURLsAllowed`), and the
 Keycloak client lists them as `post.logout.redirect.uris`. Skyline's logout ends only Skyline's session (its console logs out in the
-browser's script, which has no place to send the browser on). Not set up: Skyline's logout of Keycloak, group or role mapping from Keycloak claims, and a second Keycloak node. Run on the lab: `test_keycloak.sh` 12 of 12, and
+browser's script, which has no place to send the browser on). Not set up: Skyline's logout of Keycloak, mapping Keycloak groups to projects made on demand from Keycloak claims, and a second Keycloak node. Run on the lab: `test_keycloak.sh` 12 of 12, and
 `openstack token issue` as `kcdemo` from scala0 with the rc file from `openrc` (`ssh localadmin@tst26 sudo /usr/local/sbin/orphera-keycloak-api
 openrc > ~/keycloak-openrc.sh`, mode 600). Keycloak 26.8 refuses a wrong password with HTTP 400 and `invalid_grant`, not 401. A federated
 user's id in Keystone is a 64-character hash of the identity provider and the user name, not a UUID.
