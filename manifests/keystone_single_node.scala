@@ -221,11 +221,13 @@ object keystone_single_node extends OrpheraClusterPlaybook:
   // uses the path for identity provider keycloak; Skyline (8.x) uses the protocol-wide path, for which Keystone
   // finds the identity provider from [federation] remote_id_attribute. Keep the two dashboard addresses in step
   // with horizon_single_node.scala and skyline_single_node.scala; users must open the dashboards by these names.
+  // Both are HTTPS: the page Keystone answers with is HTTPS, and browsers (Safari silently) refuse to post a form
+  // from it to a plain-HTTP address.
   private val keycloakClientSecret = Secrets.secret("keycloak/keystone-client")
   private val oidcCryptoPassphrase = Secrets.secret("keystone/oidc-crypto")
   private val trustedDashboards = List(
-    "http://tst13.ljalbinson.com:8080/auth/websso/",
-    "http://tst13.ljalbinson.com:9999/api/openstack/skyline/api/v1/websso"
+    "https://tst13.ljalbinson.com:8080/auth/websso/",
+    "https://tst13.ljalbinson.com:9999/api/openstack/skyline/api/v1/websso"
   )
   private val ssoTemplatePath = "/etc/keystone/sso_callback_template.html"
 

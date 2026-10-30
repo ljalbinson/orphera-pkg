@@ -5,7 +5,7 @@
 #
 # Applies the playbook, then checks independently of its own health check:
 #  - the unit orphera-skyline is active on tst13,
-#  - the console page answers on 9999 (HTTP 200) and Horizon on 8080 still answers,
+#  - the console page answers on 9999 over HTTPS (HTTP 200, certificate verified with the test CA) and Horizon on 8080 still answers,
 #  - the API docs at /api/openstack/skyline/docs answer,
 #  - an unauthenticated call to a protected Skyline API path is refused (401 or 403),
 #  - the admin user logs in through the login API (HTTP 200),
@@ -22,6 +22,9 @@ set -uo pipefail
 
 NODE="tst13"
 PORT=9999
+FQDN="tst13.ljalbinson.com"
+# The dashboards are on HTTPS with a certificate from the test CA; on tst13 the CA is in /etc/orphera/tls.
+CURL="curl -s --cacert /etc/orphera/tls/ca.crt --resolve $FQDN:$PORT:127.0.0.1 --resolve $FQDN:8080:127.0.0.1"
 HELPER="/usr/local/sbin/orphera-skyline-api"
 
 PASS=0
@@ -51,20 +54,20 @@ fi
 OUT=$(run_on "echo state=\$(systemctl is-active orphera-skyline)")
 assert_contains "orphera-skyline is active on $NODE" "state=active" "$OUT"
 
-OUT=$(run_on "curl -s -o /dev/null -w 'http=%{http_code}' http://localhost:$PORT/")
-assert_contains "the console page answers on $PORT" "http=200" "$OUT"
+OUT=$(run_on "$CURL -o /dev/null -w 'http=%{http_code}' https://$FQDN:$PORT/")
+assert_contains "the console page answers on $PORT over HTTPS" "http=200" "$OUT"
 
-OUT=$(run_on "curl -s -o /dev/null -w 'http=%{http_code}' http://localhost:8080/")
+OUT=$(run_on "$CURL -o /dev/null -w 'http=%{http_code}' https://$FQDN:8080/")
 if printf '%s' "$OUT" | grep -qE 'http=(200|301|302)'; then
   log "PASS: Horizon still answers on 8080"; PASS=$((PASS + 1))
 else
   log "FAIL: Horizon does not answer on 8080"; printf '%s\n' "$OUT" | sed 's/^/    /'; FAIL=$((FAIL + 1))
 fi
 
-OUT=$(run_on "curl -s -o /dev/null -w 'http=%{http_code}' http://localhost:$PORT/api/openstack/skyline/docs")
+OUT=$(run_on "$CURL -o /dev/null -w 'http=%{http_code}' https://$FQDN:$PORT/api/openstack/skyline/docs")
 assert_contains "the API docs answer" "http=200" "$OUT"
 
-OUT=$(run_on "curl -s -o /dev/null -w 'http=%{http_code}' http://localhost:$PORT/api/openstack/skyline/api/v1/profile")
+OUT=$(run_on "$CURL -o /dev/null -w 'http=%{http_code}' https://$FQDN:$PORT/api/openstack/skyline/api/v1/profile")
 if printf '%s' "$OUT" | grep -qE 'http=(401|403)'; then
   log "PASS: a protected path refuses a request without a session"; PASS=$((PASS + 1))
 else

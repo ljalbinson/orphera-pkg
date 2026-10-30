@@ -88,8 +88,8 @@ object keycloak_single_node extends OrpheraClusterPlaybook:
   private val ksConfDir = "/etc/kolla/keystone"
   private val vip = "10.10.5.100"
   // The dashboards that sign in through Keycloak (WebSSO); keystone_single_node.scala trusts exactly these names.
-  private val horizonUrl = "http://tst13.ljalbinson.com:8080"
-  private val skylineUrl = "http://tst13.ljalbinson.com:9999"
+  private val horizonUrl = "https://tst13.ljalbinson.com:8080"
+  private val skylineUrl = "https://tst13.ljalbinson.com:9999"
 
   private val keycloakImage = ExternalImage(
     sys.env.getOrElse("KEYCLOAK_IMAGE", "quay.io/keycloak/keycloak:26.8.1")
@@ -653,6 +653,9 @@ def sso_skyline():
     if s != 200 or not urls:
         die('skyline: %s/sso offers no websso address (HTTP %s): %s (sso_enabled in skyline_single_node.scala; run it again)' % (api, s, body[:300]))
     print('skyline: offers %s' % urls[0])
+    origin = urllib.parse.parse_qs(urllib.parse.urlparse(urls[0]).query).get('origin', [''])[0]
+    if origin.startswith('http://'):
+        die('skyline: it asks Keystone to post the token to %s, a plain-HTTP address (behind its nginx it may not see that the request came over HTTPS); browsers will not post there from HTTPS' % origin)
     s, url, body = go(op, urls[0])
     s, url, body = through_keycloak(op, 'skyline', s, url, body)
     if s >= 400:

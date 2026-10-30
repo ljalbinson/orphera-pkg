@@ -8,8 +8,8 @@ import orphera.orchestrator.kolla.*
 // Apache + mod_wsgi, plain HTTP. Modelled on the other *_single_node.scala
 // playbooks; read cinder_single_node.scala's header for the conventions.
 //
-// Where it runs: tst13, next to Glance and Placement, on port 8080
-// (http://tst13.ljalbinson.com:8080/). Horizon is a stateless web front end:
+// Where it runs: tst13, next to Glance and Placement, on port 8080 over HTTPS
+// (https://tst13.ljalbinson.com:8080/; certificate from Keystone's test CA, shared with Skyline). Horizon is a stateless web front end:
 // it keeps no database (sessions live in signed cookies) and talks to the other
 // services through the Keystone catalog. To move it, change `node`, `fqdn`,
 // `nodeIp` and `port` below (and the teardown's `node`).
@@ -144,6 +144,107 @@ object horizon_single_node extends OrpheraClusterPlaybook:
        |fi
        |echo "Keystone CA installed: $$SUBJ"""".stripMargin
 
+  // ---- TLS for the dashboards on tst13 ------------------------------------
+  // One certificate for the node, shared by horizon_single_node.scala and skyline_single_node.scala (both make it
+  // when missing; the same steps as keycloak_single_node.scala): the key is made once on the node and stays there,
+  // the request goes to tst6 and is signed by Keystone's test CA, and the certificate comes back. Browsers that
+  // trust that CA trust the dashboards, and the WebSSO login stays on HTTPS from start to end.
+  private val ksNode = "tst6"
+  private val ksCaDir = "/etc/kolla/keystone-ca"
+  private val tlsDir = "/etc/orphera/tls"
+  private val signDir = s"$ksCaDir/issued/$node"
+
+  private val tlsRequestScript =
+    s"""set -e
+       |mkdir -p $tlsDir
+       |chmod 750 $tlsDir
+       |cd $tlsDir
+       |if [ ! -f server.key ] || [ ! -f server.csr ]; then
+       |  openssl req -newkey rsa:2048 -nodes -keyout server.key -out server.csr -subj "/CN=$fqdn"
+       |fi
+       |chown root:root server.key server.csr
+       |chmod 600 server.key
+       |chmod 644 server.csr
+       |echo "key and certificate request ready in $tlsDir"""".stripMargin
+
+  private val signDirScript =
+    s"""set -e
+       |[ -f $ksCaDir/ca.key ] || { echo "no CA key in $ksCaDir: keystone_single_node.scala makes it" >&2; exit 1; }
+       |mkdir -p $signDir
+       |chmod 700 $signDir
+       |echo "$signDir ready"""".stripMargin
+
+  // Signs only when needed: no certificate yet, one for another key, one that does not verify against the CA,
+  // lacks the name, or expires within 30 days.
+  private val signScript =
+    s"""set -e
+       |cd $signDir
+       |openssl req -in server.csr -noout -verify
+       |NEED=1
+       |if [ -f server.crt ] \\
+       |   && [ "$$(openssl x509 -in server.crt -noout -pubkey)" = "$$(openssl req -in server.csr -noout -pubkey)" ] \\
+       |   && openssl verify -CAfile $ksCaDir/ca.crt server.crt >/dev/null 2>&1 \\
+       |   && openssl x509 -in server.crt -noout -checkend 2592000 >/dev/null \\
+       |   && openssl x509 -in server.crt -noout -ext subjectAltName | grep -q "DNS:$fqdn"; then
+       |  NEED=0
+       |fi
+       |if [ "$$NEED" = "1" ]; then
+       |  cat > server.ext <<EXT
+       |subjectAltName=DNS:$fqdn,DNS:$node,IP:$nodeIp
+       |basicConstraints=CA:FALSE
+       |keyUsage=digitalSignature,keyEncipherment
+       |extendedKeyUsage=serverAuth
+       |EXT
+       |  openssl x509 -req -in server.csr -CA $ksCaDir/ca.crt -CAkey $ksCaDir/ca.key -CAcreateserial -out server.crt -days 825 -sha256 -extfile server.ext
+       |  echo "signed a new certificate for $fqdn"
+       |else
+       |  echo "the certificate for $fqdn is still good"
+       |fi
+       |cp $ksCaDir/ca.crt ca.crt
+       |openssl x509 -in server.crt -noout -subject -enddate""".stripMargin
+
+  private val tlsInstallScript =
+    s"""set -e
+       |cd $tlsDir
+       |if [ "$$(openssl x509 -in server.crt -noout -pubkey)" != "$$(openssl pkey -in server.key -pubout)" ]; then
+       |  echo "the certificate from $ksNode is not for the key in $tlsDir" >&2; exit 1
+       |fi
+       |openssl verify -CAfile ca.crt server.crt
+       |cat server.crt ca.crt > server-chain.crt
+       |chown root:root server.crt server-chain.crt ca.crt
+       |chmod 644 server.crt ca.crt server-chain.crt
+       |echo "TLS ready: $$(openssl x509 -in server.crt -noout -subject -enddate | tr '\\n' ' ')"""".stripMargin
+
+  private def tlsStages: List[Stage] = List(
+    stage("horizon-tls-request", node)
+      .task("make the TLS key and certificate request")(
+        Task.RunCommand(List("sh", "-c", tlsRequestScript), timeoutSeconds = 60)
+      )
+      .build,
+    stage("horizon-tls-sign", ksNode)
+      .task(s"prepare $signDir")(
+        Task.RunCommand(List("sh", "-c", signDirScript))
+      )
+      .task(s"fetch the certificate request from $node")(
+        Task.DistributeFile(node, s"$tlsDir/server.csr", s"$signDir/server.csr", "root", "root", 420)
+      )
+      .task(s"sign the certificate for $fqdn with the test CA")(
+        Task.RunCommand(List("sh", "-c", signScript), timeoutSeconds = 60)
+      )
+      .build,
+    stage("horizon-tls-install", node)
+      .task(s"fetch the certificate from $ksNode")(
+        Task.DistributeFile(ksNode, s"$signDir/server.crt", s"$tlsDir/server.crt", "root", "root", 420)
+      )
+      .task(s"fetch the CA certificate from $ksNode")(
+        Task.DistributeFile(ksNode, s"$signDir/ca.crt", s"$tlsDir/ca.crt", "root", "root", 420)
+      )
+      .task("check the certificate and write the chain")(
+        Task.RunCommand(List("sh", "-c", tlsInstallScript), timeoutSeconds = 60)
+      )
+      .build
+  )
+
   // Sessions are signed cookies and the cache is per process, so several Apache
   // worker processes need no shared session store. COMPRESS_OFFLINE matches how
   // the Kolla image prepared its static files at build time.
@@ -162,11 +263,10 @@ object horizon_single_node extends OrpheraClusterPlaybook:
        |
        |SESSION_ENGINE = 'django.contrib.sessions.backends.signed_cookies'
        |SESSION_COOKIE_HTTPONLY = True
-       |# Plain HTTP on this test deployment: Secure-flagged cookies would never be
-       |# sent back by a client, which fails the CSRF check on every login.
-       |CSRF_COOKIE_SECURE = False
-       |SESSION_COOKIE_SECURE = False
-       |CSRF_TRUSTED_ORIGINS = ['http://localhost:$port', 'http://127.0.0.1:$port', 'http://$node.ljalbinson.com:$port']
+       |# HTTPS (a certificate from the test CA), so the cookies are Secure-flagged.
+       |CSRF_COOKIE_SECURE = True
+       |SESSION_COOKIE_SECURE = True
+       |CSRF_TRUSTED_ORIGINS = ['https://$fqdn:$port', 'https://$node:$port', 'https://$nodeIp:$port']
        |CACHES = {
        |    'default': {
        |        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
@@ -186,7 +286,7 @@ object horizon_single_node extends OrpheraClusterPlaybook:
        |}
        |
        |# Single sign-on through Keycloak (keycloak_single_node.scala). The login page offers both; Keystone sends
-       |# the token back only to http://$fqdn:$port/auth/websso/ (trusted_dashboard in keystone_single_node.scala),
+       |# the token back only to https://$fqdn:$port/auth/websso/ (trusted_dashboard in keystone_single_node.scala),
        |# so open Horizon by that name.
        |WEBSSO_ENABLED = True
        |WEBSSO_CHOICES = (
@@ -218,8 +318,16 @@ object horizon_single_node extends OrpheraClusterPlaybook:
        |  APACHE_CONF=/etc/httpd/conf.d/horizon.conf
        |  APACHE_CMD="/usr/sbin/httpd -DFOREGROUND"
        |fi
-       |echo "site-packages: $$SITE; apache config: $$APACHE_CONF"
+       |SSLMOD=$$(podman run --rm --entrypoint sh $webImage -c 'ls /usr/lib/apache2/modules/mod_ssl.so /etc/httpd/modules/mod_ssl.so /usr/lib64/httpd/modules/mod_ssl.so 2>/dev/null | head -n 1')
+       |if [ -z "$$SSLMOD" ]; then echo "mod_ssl.so not found in $webImage" >&2; exit 1; fi
+       |cp $tlsDir/server-chain.crt $confRoot/horizon-web/server-chain.crt
+       |cp $tlsDir/server.key $confRoot/horizon-web/server.key
+       |chmod 600 $confRoot/horizon-web/server.key
+       |echo "site-packages: $$SITE; apache config: $$APACHE_CONF; mod_ssl: $$SSLMOD"
        |cat > $confRoot/horizon-web/horizon.conf <<WSGICONF
+       |<IfModule !ssl_module>
+       |LoadModule ssl_module $$SSLMOD
+       |</IfModule>
        |Listen 0.0.0.0:$port
        |ServerSignature Off
        |ServerTokens Prod
@@ -235,6 +343,10 @@ object horizon_single_node extends OrpheraClusterPlaybook:
        |    WSGIScriptAlias / $$SITE/openstack_dashboard/wsgi.py
        |    WSGIPassAuthorization On
        |
+       |    SSLEngine on
+       |    SSLCertificateFile /etc/openstack-dashboard/horizon-server-chain.crt
+       |    SSLCertificateKeyFile /etc/openstack-dashboard/horizon-server.key
+       |
        |    <Directory $$SITE/openstack_dashboard>
        |        Require all granted
        |    </Directory>
@@ -249,7 +361,7 @@ object horizon_single_node extends OrpheraClusterPlaybook:
        |</VirtualHost>
        |WSGICONF
        |cat > $confRoot/horizon-web/config.json <<JSON
-       |{"command": "$$APACHE_CMD", "config_files": [{"source": "/var/lib/kolla/config_files/local_settings.py", "dest": "/etc/openstack-dashboard/local_settings.py", "owner": "horizon", "perm": "0600"}, {"source": "/var/lib/kolla/config_files/ca.crt", "dest": "/etc/openstack-dashboard/ca.crt", "owner": "horizon", "perm": "0644"}, {"source": "/var/lib/kolla/config_files/horizon.conf", "dest": "$$APACHE_CONF", "owner": "horizon", "perm": "0600"}], "permissions": [{"path": "/var/log/kolla/horizon", "owner": "horizon:kolla", "recurse": true}]}
+       |{"command": "$$APACHE_CMD", "config_files": [{"source": "/var/lib/kolla/config_files/local_settings.py", "dest": "/etc/openstack-dashboard/local_settings.py", "owner": "horizon", "perm": "0600"}, {"source": "/var/lib/kolla/config_files/ca.crt", "dest": "/etc/openstack-dashboard/ca.crt", "owner": "horizon", "perm": "0644"}, {"source": "/var/lib/kolla/config_files/horizon.conf", "dest": "$$APACHE_CONF", "owner": "horizon", "perm": "0600"}, {"source": "/var/lib/kolla/config_files/server-chain.crt", "dest": "/etc/openstack-dashboard/horizon-server-chain.crt", "owner": "horizon", "perm": "0644"}, {"source": "/var/lib/kolla/config_files/server.key", "dest": "/etc/openstack-dashboard/horizon-server.key", "owner": "horizon", "perm": "0600"}], "permissions": [{"path": "/var/log/kolla/horizon", "owner": "horizon:kolla", "recurse": true}]}
        |JSON
        |echo "kolla config written under $confRoot/horizon-web"""".stripMargin
 
@@ -260,7 +372,7 @@ object horizon_single_node extends OrpheraClusterPlaybook:
   // it lands on is a signed-in page; static fetches one collected static file.
   private val checkHelperPython =
     """#!/usr/bin/python3
-import http.cookiejar, re, sys, urllib.parse, urllib.request, urllib.error
+import http.cookiejar, re, ssl, sys, urllib.parse, urllib.request, urllib.error
 
 BASE = '@@BASE@@'
 USER = 'admin'
@@ -275,8 +387,13 @@ def die(msg):
 JAR = http.cookiejar.CookieJar()
 
 
+CTX = ssl.create_default_context(cafile='@@CA@@')
+# The test CA has no keyUsage extension, which Python 3.13 and later reject by default.
+CTX.verify_flags &= ~getattr(ssl, 'VERIFY_X509_STRICT', 0)
+
+
 def opener():
-    return urllib.request.build_opener(urllib.request.HTTPCookieProcessor(JAR))
+    return urllib.request.build_opener(urllib.request.HTTPCookieProcessor(JAR), urllib.request.HTTPSHandler(context=CTX))
 
 
 def why(body):
@@ -365,18 +482,20 @@ if __name__ == '__main__':
   private val helperScript =
     "cat > /usr/local/sbin/orphera-horizon-check <<'PYEOF'\n" +
       checkHelperPython
-        .replace("@@BASE@@", s"http://localhost:$port")
+        .replace("@@BASE@@", s"https://$fqdn:$port")
+        .replace("@@CA@@", s"$tlsDir/ca.crt")
         .replace("@@LOGDIR@@", logDir)
         .replace("@@ADMINPW@@", adminPassword.reveal) +
       "\nPYEOF\nchmod 700 /usr/local/sbin/orphera-horizon-check\necho wrote /usr/local/sbin/orphera-horizon-check\n"
 
   // The root redirects to the login page; the login page itself answers 200.
   private val webHealthScript =
-    s"""CODE=$$(curl -s -o /dev/null -w '%{http_code}' http://localhost:$port/auth/login/)
+    s"""CODE=$$(curl -s --cacert $tlsDir/ca.crt --resolve $fqdn:$port:127.0.0.1 -o /dev/null -w '%{http_code}' https://$fqdn:$port/auth/login/)
        |[ "$$CODE" = "200" ]""".stripMargin
 
   val playbook: ClusterPlaybook =
     clusterPlaybook("horizon-single-node")(
+      (tlsStages ++ List[Stage](
       stage("install-horizon", node)
         .task("wait until apt and dpkg are idle")(
           Task.RunCommand(
@@ -429,8 +548,9 @@ if __name__ == '__main__':
         )
         .task("horizon confirmed")(
           Task.Debug(
-            s"Horizon up at http://$fqdn:$port/ ($nodeIp): sign in as admin (domain Default) with the Keystone admin password from keystone_single_node.scala. Identity from $ksUrl. Test: manifests/test_horizon.sh"
+            s"Horizon up at https://$fqdn:$port/ ($nodeIp, certificate from the test CA): sign in as admin (domain Default) with the Keystone admin password from keystone_single_node.scala. Identity from $ksUrl. Test: manifests/test_horizon.sh"
           )
         )
         .build
+      ))*
     )

@@ -7,6 +7,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- Horizon and Skyline on HTTPS (same ports, 8080 and 9999), so the WebSSO login stays on HTTPS: Safari refused, without a message,
+  to post the token from Keystone's HTTPS page to the plain-HTTP dashboard and stopped at "Please wait...". tst13 gets one certificate
+  from Keystone's test CA, in `/etc/orphera/tls` (key made on tst13, signed on tst6, as for Keycloak); horizon_single_node.scala and
+  skyline_single_node.scala each make it when missing. Horizon: mod_ssl in its vhost, Secure cookies, `CSRF_TRUSTED_ORIGINS` on https,
+  its check helper and health check on https. Skyline: the image's `SSL_CERTFILE` and `SSL_KEYFILE` with a copy of the key owned by the
+  image's user, `ssl_enabled: true`, helper and health check on https. Keystone's `trusted_dashboard` addresses, the Keycloak helper's
+  `sso-check`, `test_horizon.sh`, `test_skyline.sh` and `build_openstack_stack.sh` follow. Browsers must trust the test CA.
+  Not run yet.
 - Single sign-on (WebSSO) through Keycloak for Horizon and Skyline. `keystone_single_node.scala` makes mod_auth_openidc also an OpenID
   Connect client of Keycloak (client `keystone`, `/redirect_uri`, new secret `keystone/oidc-crypto`) on the two websso paths, writes its
   own `sso_callback_template.html`, and sets `[federation] remote_id_attribute`, `sso_callback_template` and two `trusted_dashboard` lines

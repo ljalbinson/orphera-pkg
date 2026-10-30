@@ -23,8 +23,10 @@ import orphera.orchestrator.kolla.*
 //   - the Keystone user `skyline` (project `service`, role admin), made by the helper's `register`; Skyline
 //     itself has no service entry in the catalog;
 //   - skyline.yaml (database, Keystone URL, the service password, a secret key from the secret store, the
-//     Prometheus on tst7 for the monitoring pages, `ssl_enabled: false` because the console is served over
-//     plain HTTP; with it true the browser drops the session cookie and every login fails);
+//     Prometheus on tst7 for the monitoring pages, `ssl_enabled: true` because the console is served over
+//     HTTPS: the image's nginx gets the node's certificate (signed by Keystone's test CA, shared with Horizon)
+//     through SSL_CERTFILE and SSL_KEYFILE; ssl_enabled marks the session cookie Secure, which breaks logins
+//     over plain HTTP but is right over HTTPS);
 //   - a PyMySQL driver, which the image lacks, installed with the image's own Python into
 //     /var/lib/orphera/skyline/pylib and put on PYTHONPATH (as for the Magnum driver);
 //   - `skyline_bootstrap` (the image's KOLLA_BOOTSTRAP mode: the Alembic migrations), then the unit
@@ -90,6 +92,8 @@ object skyline_single_node extends OrpheraClusterPlaybook:
   private val stateDir = "/var/lib/orphera/skyline"
   private val pylibDir = "/var/lib/orphera/skyline/pylib"
   private val socketDir = "/var/lib/orphera/skyline/run"
+  // A copy of the node's certificate chain and key, owned by the image's user (the shared files are root's).
+  private val skylineTlsDir = "/var/lib/orphera/skyline/tls"
   private val ksUrl = s"https://$ksFqdn:5000"
 
   // Defined after the directories above, which they read; a val used before its definition is null in an
@@ -102,6 +106,7 @@ object skyline_single_node extends OrpheraClusterPlaybook:
       Mount(logDir, "/var/log/skyline", Access.ReadWrite),
       Mount(socketDir, "/var/lib/skyline", Access.ReadWrite),
       Mount(pylibDir, pylibDir),
+      Mount(skylineTlsDir, "/etc/skyline/tls"),
       Mount(
         "/etc/ssl/certs/ca-certificates.crt",
         "/etc/ssl/certs/ca-certificates.crt",
@@ -111,7 +116,10 @@ object skyline_single_node extends OrpheraClusterPlaybook:
     env = List(
       "PYTHONPATH" -> pylibDir,
       "REQUESTS_CA_BUNDLE" -> "/etc/ssl/certs/ca-certificates.crt",
-      "SSL_CERT_FILE" -> "/etc/ssl/certs/ca-certificates.crt"
+      "SSL_CERT_FILE" -> "/etc/ssl/certs/ca-certificates.crt",
+      // The image's nginx serves HTTPS when these are set (Skyline's container install documents them).
+      "SSL_CERTFILE" -> "/etc/skyline/tls/server-chain.crt",
+      "SSL_KEYFILE" -> "/etc/skyline/tls/server.key"
     ),
     description = Some("OpenStack Skyline dashboard"),
     startTimeoutSeconds = 300,
@@ -132,6 +140,107 @@ object skyline_single_node extends OrpheraClusterPlaybook:
       |done
       |echo "apt/dpkg still busy after 15 minutes (unattended-upgrades?)" >&2
       |exit 1""".stripMargin
+
+  // ---- TLS for the dashboards on tst13 ------------------------------------
+  // One certificate for the node, shared by horizon_single_node.scala and skyline_single_node.scala (both make it
+  // when missing; the same steps as keycloak_single_node.scala): the key is made once on the node and stays there,
+  // the request goes to tst6 and is signed by Keystone's test CA, and the certificate comes back. Browsers that
+  // trust that CA trust the dashboards, and the WebSSO login stays on HTTPS from start to end.
+  private val ksNode = "tst6"
+  private val ksCaDir = "/etc/kolla/keystone-ca"
+  private val tlsDir = "/etc/orphera/tls"
+  private val signDir = s"$ksCaDir/issued/$node"
+
+  private val tlsRequestScript =
+    s"""set -e
+       |mkdir -p $tlsDir
+       |chmod 750 $tlsDir
+       |cd $tlsDir
+       |if [ ! -f server.key ] || [ ! -f server.csr ]; then
+       |  openssl req -newkey rsa:2048 -nodes -keyout server.key -out server.csr -subj "/CN=$fqdn"
+       |fi
+       |chown root:root server.key server.csr
+       |chmod 600 server.key
+       |chmod 644 server.csr
+       |echo "key and certificate request ready in $tlsDir"""".stripMargin
+
+  private val signDirScript =
+    s"""set -e
+       |[ -f $ksCaDir/ca.key ] || { echo "no CA key in $ksCaDir: keystone_single_node.scala makes it" >&2; exit 1; }
+       |mkdir -p $signDir
+       |chmod 700 $signDir
+       |echo "$signDir ready"""".stripMargin
+
+  // Signs only when needed: no certificate yet, one for another key, one that does not verify against the CA,
+  // lacks the name, or expires within 30 days.
+  private val signScript =
+    s"""set -e
+       |cd $signDir
+       |openssl req -in server.csr -noout -verify
+       |NEED=1
+       |if [ -f server.crt ] \\
+       |   && [ "$$(openssl x509 -in server.crt -noout -pubkey)" = "$$(openssl req -in server.csr -noout -pubkey)" ] \\
+       |   && openssl verify -CAfile $ksCaDir/ca.crt server.crt >/dev/null 2>&1 \\
+       |   && openssl x509 -in server.crt -noout -checkend 2592000 >/dev/null \\
+       |   && openssl x509 -in server.crt -noout -ext subjectAltName | grep -q "DNS:$fqdn"; then
+       |  NEED=0
+       |fi
+       |if [ "$$NEED" = "1" ]; then
+       |  cat > server.ext <<EXT
+       |subjectAltName=DNS:$fqdn,DNS:$node,IP:$nodeIp
+       |basicConstraints=CA:FALSE
+       |keyUsage=digitalSignature,keyEncipherment
+       |extendedKeyUsage=serverAuth
+       |EXT
+       |  openssl x509 -req -in server.csr -CA $ksCaDir/ca.crt -CAkey $ksCaDir/ca.key -CAcreateserial -out server.crt -days 825 -sha256 -extfile server.ext
+       |  echo "signed a new certificate for $fqdn"
+       |else
+       |  echo "the certificate for $fqdn is still good"
+       |fi
+       |cp $ksCaDir/ca.crt ca.crt
+       |openssl x509 -in server.crt -noout -subject -enddate""".stripMargin
+
+  private val tlsInstallScript =
+    s"""set -e
+       |cd $tlsDir
+       |if [ "$$(openssl x509 -in server.crt -noout -pubkey)" != "$$(openssl pkey -in server.key -pubout)" ]; then
+       |  echo "the certificate from $ksNode is not for the key in $tlsDir" >&2; exit 1
+       |fi
+       |openssl verify -CAfile ca.crt server.crt
+       |cat server.crt ca.crt > server-chain.crt
+       |chown root:root server.crt server-chain.crt ca.crt
+       |chmod 644 server.crt ca.crt server-chain.crt
+       |echo "TLS ready: $$(openssl x509 -in server.crt -noout -subject -enddate | tr '\\n' ' ')"""".stripMargin
+
+  private def tlsStages: List[Stage] = List(
+    stage("skyline-tls-request", node)
+      .task("make the TLS key and certificate request")(
+        Task.RunCommand(List("sh", "-c", tlsRequestScript), timeoutSeconds = 60)
+      )
+      .build,
+    stage("skyline-tls-sign", ksNode)
+      .task(s"prepare $signDir")(
+        Task.RunCommand(List("sh", "-c", signDirScript))
+      )
+      .task(s"fetch the certificate request from $node")(
+        Task.DistributeFile(node, s"$tlsDir/server.csr", s"$signDir/server.csr", "root", "root", 420)
+      )
+      .task(s"sign the certificate for $fqdn with the test CA")(
+        Task.RunCommand(List("sh", "-c", signScript), timeoutSeconds = 60)
+      )
+      .build,
+    stage("skyline-tls-install", node)
+      .task(s"fetch the certificate from $ksNode")(
+        Task.DistributeFile(ksNode, s"$signDir/server.crt", s"$tlsDir/server.crt", "root", "root", 420)
+      )
+      .task(s"fetch the CA certificate from $ksNode")(
+        Task.DistributeFile(ksNode, s"$signDir/ca.crt", s"$tlsDir/ca.crt", "root", "root", 420)
+      )
+      .task("check the certificate and write the chain")(
+        Task.RunCommand(List("sh", "-c", tlsInstallScript), timeoutSeconds = 60)
+      )
+      .build
+  )
 
   // ---- tst3 (Galera) ---------------------------------------------------
 
@@ -169,6 +278,19 @@ object skyline_single_node extends OrpheraClusterPlaybook:
        |update-ca-certificates
        |echo "Keystone CA installed: $$SUBJ"""".stripMargin
 
+  // The key goes to a directory of Skyline's own, owned by the user the image runs as, whoever that is.
+  private val skylineTlsScript =
+    s"""set -e
+       |mkdir -p $skylineTlsDir
+       |chmod 750 $skylineTlsDir
+       |cp $tlsDir/server-chain.crt $tlsDir/server.key $skylineTlsDir/
+       |U=$$(podman run --rm --entrypoint id ${skylineImage.ref} -u)
+       |G=$$(podman run --rm --entrypoint id ${skylineImage.ref} -g)
+       |chown -R $$U:$$G $skylineTlsDir
+       |chmod 600 $skylineTlsDir/server.key
+       |chmod 644 $skylineTlsDir/server-chain.crt
+       |echo "certificate and key for Skyline in $skylineTlsDir (uid $$U)"""".stripMargin
+
   private val dirsScript =
     s"""mkdir -p $confDir $caDir $logDir $stateDir $pylibDir $socketDir
        |echo "directories ready"""".stripMargin
@@ -191,7 +313,7 @@ object skyline_single_node extends OrpheraClusterPlaybook:
        |  debug: false
        |  log_dir: /var/log/skyline
        |  secret_key: ${secretKey.reveal}
-       |  ssl_enabled: false
+       |  ssl_enabled: true
        |  prometheus_endpoint: $promUrl
        |  prometheus_enable_basic_auth: false
        |openstack:
@@ -205,7 +327,7 @@ object skyline_single_node extends OrpheraClusterPlaybook:
        |  system_user_password: ${skylinePassword.reveal}
        |  # Single sign-on through Keycloak (keycloak_single_node.scala). Skyline 8.x offers one choice per
        |  # protocol and sends the browser to Keystone's protocol-wide websso path; Keystone posts the token back
-       |  # only to http://$fqdn:$port/api/openstack/skyline/api/v1/websso (trusted_dashboard in
+       |  # only to https://$fqdn:$port/api/openstack/skyline/api/v1/websso (trusted_dashboard in
        |  # keystone_single_node.scala), so open Skyline by that name.
        |  sso_enabled: true
        |  sso_protocols:
@@ -247,11 +369,13 @@ object skyline_single_node extends OrpheraClusterPlaybook:
 import hashlib, json, ssl, sys, urllib.error, urllib.request
 
 KS = 'https://@@KS@@:5000/v3'
-SKY = 'http://localhost:@@PORT@@'
+SKY = 'https://@@FQDN@@:@@PORT@@'
 REGION = '@@REGION@@'
 ADMIN_PW = '@@ADMINPW@@'
 SKYLINE_PW = '@@SKYLINEPW@@'
 CTX = ssl.create_default_context(cafile='@@CA@@')
+# The test CA has no keyUsage extension, which Python 3.13 and later reject by default.
+CTX.verify_flags &= ~getattr(ssl, 'VERIFY_X509_STRICT', 0)
 
 
 def call(method, url, body=None, token=None):
@@ -368,6 +492,7 @@ if __name__ == '__main__':
       apiHelperPython
         .replace("@@KS@@", ksFqdn)
         .replace("@@PORT@@", port.toString)
+        .replace("@@FQDN@@", fqdn)
         .replace("@@REGION@@", region)
         .replace("@@ADMINPW@@", adminPassword.reveal)
         .replace("@@SKYLINEPW@@", skylinePassword.reveal)
@@ -375,7 +500,7 @@ if __name__ == '__main__':
       "\nPYEOF\nchmod 700 /usr/local/sbin/orphera-skyline-api\necho wrote /usr/local/sbin/orphera-skyline-api\n"
 
   private val healthScript =
-    s"""CODE=$$(curl -s -o /dev/null -w '%{http_code}' http://localhost:$port/)
+    s"""CODE=$$(curl -s --cacert $tlsDir/ca.crt --resolve $fqdn:$port:127.0.0.1 -o /dev/null -w '%{http_code}' https://$fqdn:$port/)
        |[ "$$CODE" = "200" ]""".stripMargin
 
   // ORPHERA_CHECK=1 turns the run into a check: it changes nothing on the node and fails, with a diff, if the
@@ -397,6 +522,7 @@ if __name__ == '__main__':
 
   private def applyPlaybook: ClusterPlaybook =
     clusterPlaybook("skyline-single-node")(
+      (tlsStages ++ List[Stage](
       stage("skyline-database", "tst3")
         .task(s"create $dbName database and $dbUser on the Galera cluster")(
           Task.RunCommand(List("sh", "-c", createDatabaseScript))
@@ -418,6 +544,9 @@ if __name__ == '__main__':
         )
         .task("create the Skyline directories")(
           Task.RunCommand(List("sh", "-c", dirsScript))
+        )
+        .task("give Skyline its copy of the certificate and key")(
+          Task.RunCommand(List("sh", "-c", skylineTlsScript), timeoutSeconds = 120)
         )
         .task("fetch Keystone's CA from its TLS handshake")(
           Task.RunCommand(List("sh", "-c", fetchCaScript), timeoutSeconds = 60)
@@ -477,8 +606,9 @@ if __name__ == '__main__':
         )
         .task("skyline confirmed")(
           Task.Debug(
-            s"Skyline up at http://$fqdn:$port/ ($nodeIp): one container (apiserver + nginx) from ${skylineImage.ref}, database $dbName via $vip:3306, identity from $ksUrl, monitoring pages read $promUrl. Log in as admin (domain Default); the monitoring pages are not in the menu in this build, open /monitor-center/physical-node-admin. Test: manifests/test_skyline.sh"
+            s"Skyline up at https://$fqdn:$port/ ($nodeIp): one container (apiserver + nginx) from ${skylineImage.ref}, database $dbName via $vip:3306, identity from $ksUrl, monitoring pages read $promUrl. Log in as admin (domain Default); the monitoring pages are not in the menu in this build, open /monitor-center/physical-node-admin. Test: manifests/test_skyline.sh"
           )
         )
         .build
+      ))*
     )

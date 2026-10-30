@@ -2034,8 +2034,10 @@ Single sign-on (WebSSO): Horizon's login page offers "Keycloak (realm openstack)
 OpenID. The dashboard sends the browser to Keystone's websso path; mod_auth_openidc in Keystone's vhost (an OpenID Connect client of
 Keycloak, client `keystone`, `OIDCRedirectURI https://tst6.ljalbinson.com:5000/redirect_uri`, the new secret `keystone/oidc-crypto`)
 sends it to Keycloak's login page and back, and Keystone posts the token to the dashboard, but only to an address in
-`[federation] trusted_dashboard`: `http://tst13.ljalbinson.com:8080/auth/websso/` and
-`http://tst13.ljalbinson.com:9999/api/openstack/skyline/api/v1/websso`. So open the dashboards by those names (not by address or short
+`[federation] trusted_dashboard`: `https://tst13.ljalbinson.com:8080/auth/websso/` and
+`https://tst13.ljalbinson.com:9999/api/openstack/skyline/api/v1/websso`. Both dashboards are on HTTPS for this: the page Keystone
+answers with is HTTPS, and browsers refuse to post a form from it to a plain-HTTP address (Safari stops at "Please wait..." without
+saying why). So open the dashboards by those names (not by address or short
 name), and make the browser trust the test CA (`~/.config/openstack/keystone-ca.crt` on scala0), since it now visits tst6 and tst26 over
 HTTPS. Keystone writes its own `sso_callback_template.html`. Skyline 8.x uses the protocol-wide websso path, for which Keystone finds the
 identity provider from `[federation] remote_id_attribute`. `sudo orphera-keycloak-api sso-check [horizon|skyline|all]` on tst26 does
@@ -2049,15 +2051,16 @@ openrc > ~/keycloak-openrc.sh`, mode 600). Keycloak 26.8 refuses a wrong passwor
 user's id in Keystone is a 64-character hash of the identity provider and the user name, not a UUID.
 
 **Skyline** (`manifests/skyline_single_node.scala`, undone by `skyline_teardown.scala`, checked by `test_skyline.sh`) is the Skyline dashboard on tst13,
-beside Horizon: `http://tst13.ljalbinson.com:9999/`, log in as `admin` with domain `Default`. It is one container from the image the Skyline project
+beside Horizon: `https://tst13.ljalbinson.com:9999/`, log in as `admin` with domain `Default`. It is one container from the image the Skyline project
 documents (`docker.io/99cloud/skyline:latest`; `SKYLINE_IMAGE` sets another reference), not a Kolla image, so tst21 does not build it and tst13 needs
 Docker Hub. The image runs the API server and the nginx in front of it, and writes nginx's configuration from the Keystone catalog each time it starts,
 so run the playbook again after registering a new service (it restarts the container when the catalog's public endpoints changed). The database
 `skyline` is on Galera, the Keystone user `skyline` (role admin, project `service`) is made for you, and the monitoring pages read the Prometheus on
 tst7. The image has no MySQL driver, so PyMySQL is installed into `/var/lib/orphera/skyline/pylib` with the image's own Python. The console is served
-over plain HTTP, so `ssl_enabled` is false in `skyline.yaml`; TLS is not set up. Run on the lab: `test_skyline.sh` 10 of 10. In this build
+over HTTPS by the image's own nginx (`SSL_CERTFILE`, `SSL_KEYFILE`) with the node's certificate, which Horizon shares, so `ssl_enabled` is
+true in `skyline.yaml` (over plain HTTP it would drop the session cookie). Run on the lab: `test_skyline.sh` 10 of 10. In this build
 (skyline-console 8.1.0.dev39) the Monitor Center has no entry in the left menu, but its pages work when opened by address, with the Administrator
-view on: `http://tst13.ljalbinson.com:9999/monitor-center/physical-node-admin` shows the node_exporter data from tst7 (CPU, memory, disk and
+view on: `https://tst13.ljalbinson.com:9999/monitor-center/physical-node-admin` shows the node_exporter data from tst7 (CPU, memory, disk and
 file systems per node); `/monitor-center/overview-admin` expects other exporters and shows zeros here.
 
 **Object storage** (`manifests/rgw_single_node.scala`, undone by `rgw_teardown.scala`, checked by `test_rgw.sh`) is the Ceph RADOS Gateway with
@@ -2154,8 +2157,9 @@ Worth knowing:
   message bus. Its teardown also removes it from Keystone.
 - **Placement** shares tst13 with Glance (a small stateless Apache + mod_wsgi API with its own
   database); `test_placement.sh` creates and deletes a resource provider.
-- **Horizon** (the dashboard) is at `http://tst13.ljalbinson.com:8080/` after
-  `manifests/test_horizon.sh`; sign in as `admin` (domain Default) with the Keystone admin
+- **Horizon** (the dashboard) is at `https://tst13.ljalbinson.com:8080/` after
+  `manifests/test_horizon.sh` (HTTPS with a certificate for tst13 from Keystone's test CA, in `/etc/orphera/tls` there,
+  shared with Skyline; the browser must trust that CA); sign in as `admin` (domain Default) with the Keystone admin
   password. It keeps no database; sessions are signed cookies. The test performs a real login.
   The Project dashboard needs a compute service in the Keystone catalog, so it works once Nova
   (`test_nova.sh`) is registered, and Overview and Network need Neutron (`test_neutron.sh`).

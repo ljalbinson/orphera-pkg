@@ -22,7 +22,7 @@
 #                        network on tst19's second NIC; its address is removed)
 #   compute  tst17,tst18 nova_compute (nova-compute on KVM + Neutron Open vSwitch agent, config drive;
 #                        the second NIC becomes the provider port, its address is removed)
-#   horizon  tst13       horizon_single_node (the dashboard, http://tst13:8080/)
+#   horizon  tst13       horizon_single_node (the dashboard, https://tst13:8080/)
 #   heat     tst20       heat_single_node (orchestration: API, CloudFormation API, engine; RabbitMQ vhost on tst10)
 #   barbican tst20       barbican_single_node (key manager: API and worker, on the Heat node; RabbitMQ vhost on tst10)
 #   manila   tst22       manila_single_node (shared file systems: API, scheduler, share service on CephFS over NFS;
@@ -42,7 +42,7 @@
 #   trove    tst25       trove_single_node (database as a service: API, taskmanager and conductor, guests on the
 #                        provider network), then trove_guest_image (builds the guest image on tst21, 10 to 30
 #                        minutes the first time, and registers the MySQL datastore)
-#   skyline  tst13       skyline_single_node (the Skyline dashboard, http://tst13:9999/, beside Horizon; one container
+#   skyline  tst13       skyline_single_node (the Skyline dashboard, https://tst13:9999/, beside Horizon; one container
 #                        from the project's own image; run after every service is registered, it writes its
 #                        nginx file from the catalog)
 #   keycloak tst26       keycloak_single_node (Keycloak, the OIDC identity provider, https://tst26:8443/; Keystone
@@ -449,7 +449,7 @@ step_trove() {
 step_skyline() {
   playbook skyline_single_node.scala
   local out
-  out=$(run_on tst13 "curl -s -o /dev/null -w 'http=%{http_code}' http://localhost:9999/")
+  out=$(run_on tst13 "curl -s --cacert /etc/orphera/tls/ca.crt --resolve tst13.ljalbinson.com:9999:127.0.0.1 -o /dev/null -w 'http=%{http_code}' https://tst13.ljalbinson.com:9999/")
   check "the Skyline console answers on 9999" contains "http=200" "$out"
   out=$(orphera run sh -c "sudo /usr/local/sbin/orphera-skyline-api login-check" --nodes tst13 --timeout 120 2>&1)
   check "the admin user logs in to Skyline" contains "login ok" "$out"
@@ -572,6 +572,6 @@ done
 
 log "=== finished in $(( $(date +%s) - T0 ))s: passed=$PASS failed=$FAIL ==="
 if [ "$FAIL" -eq 0 ]; then
-  log "done. Dashboard: http://tst13.ljalbinson.com:8080/ (admin, domain Default). CLI: source ~/.config/openstack/admin-openrc.sh (see README)"
+  log "done. Dashboard: https://tst13.ljalbinson.com:8080/ (admin, domain Default). CLI: source ~/.config/openstack/admin-openrc.sh (see README)"
 fi
 [ "$FAIL" -eq 0 ]

@@ -111,4 +111,4 @@ fi
 
 log "=== finished in $(( $(date +%s) - T0 ))s ==="
 [ -z "$FAILED" ] || die "failed:$FAILED"
-log "done. Dashboard: http://tst13.ljalbinson.com:8080/ (admin, domain Default). CLI: source ~/.config/openstack/admin-openrc.sh"
+log "done. Dashboard: https://tst13.ljalbinson.com:8080/ (admin, domain Default). CLI: source ~/.config/openstack/admin-openrc.sh"

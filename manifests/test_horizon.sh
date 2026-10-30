@@ -11,7 +11,8 @@
 #  - a real login as admin succeeds (reads the form's CSRF field, posts the
 #    credentials, lands on a signed-in page) - this exercises Keystone over TLS
 #    with the test CA from inside the container,
-#  - the dashboard is reachable from this machine (scala0), not just on tst13,
+#  - the dashboard is reachable from this machine (scala0) over HTTPS, its certificate verified with the test CA,
+#  - plain HTTP on the same port gets no dashboard,
 #  - Glance and Placement on the same node still answer,
 #  - a second run of the playbook succeeds (idempotence).
 #
@@ -63,11 +64,21 @@ assert_contains "a static file is served" "static ok" "$OUT"
 OUT=$(run_on "sudo $HELPER login")
 assert_contains "admin can sign in" "login ok as admin" "$OUT"
 
-CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "http://$FQDN:$PORT/auth/login/" || true)
+# HTTPS with the test CA (utils/openstack-client-setup.sh copies it to ~/.config/openstack/keystone-ca.crt; CA_FILE
+# names another copy).
+CA_FILE="${CA_FILE:-$HOME/.config/openstack/keystone-ca.crt}"
+CODE=$(curl -s --cacert "$CA_FILE" -o /dev/null -w '%{http_code}' --max-time 20 "https://$FQDN:$PORT/auth/login/" || true)
 if [ "$CODE" = "200" ]; then
-  log "PASS: the dashboard is reachable from this machine at http://$FQDN:$PORT/"; PASS=$((PASS + 1))
+  log "PASS: the dashboard is reachable from this machine at https://$FQDN:$PORT/ (certificate verified with $CA_FILE)"; PASS=$((PASS + 1))
 else
-  log "FAIL: http://$FQDN:$PORT/auth/login/ from this machine returned '$CODE' (firewall or DNS?)"; FAIL=$((FAIL + 1))
+  log "FAIL: https://$FQDN:$PORT/auth/login/ from this machine returned '$CODE' (firewall, DNS, or the certificate against $CA_FILE?)"; FAIL=$((FAIL + 1))
+fi
+
+OUT=$(run_on "curl -s -o /dev/null -w 'http=%{http_code}' --max-time 5 http://localhost:$PORT/auth/login/")
+if printf '%s' "$OUT" | grep -qE 'http=(000|400)'; then
+  log "PASS: plain HTTP on $PORT gets no dashboard"; PASS=$((PASS + 1))
+else
+  log "FAIL: plain HTTP on $PORT still answers"; printf '%s\n' "$OUT" | sed 's/^/    /'; FAIL=$((FAIL + 1))
 fi
 
 OUT=$(run_on "curl -s -o /dev/null -w 'g=%{http_code}' http://localhost:9292/; curl -s -o /dev/null -w ' p=%{http_code}' http://localhost:8780/")
