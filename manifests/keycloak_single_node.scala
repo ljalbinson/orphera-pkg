@@ -549,9 +549,25 @@ def check():
 # Each check starts with an empty cookie jar, follows the redirects, fills in Keycloak's login form and posts the
 # token Keystone hands back to the dashboard, then asks the dashboard who is signed in.
 
+BIG_COOKIES = []
+
+
+class BrowserCookies(urllib.request.HTTPCookieProcessor):
+    # Browsers drop a cookie whose name and value come to more than 4096 bytes, without a word; Python keeps it.
+    # Note any such cookie, so the check fails where a browser would.
+    def http_response(self, request, response):
+        for header in response.headers.get_all('Set-Cookie') or []:
+            pair = header.split(';', 1)[0]
+            if len(pair) > 4096:
+                BIG_COOKIES.append('%s (%d bytes, from %s)' % (pair.split('=', 1)[0], len(pair), request.full_url.split('?', 1)[0]))
+        return urllib.request.HTTPCookieProcessor.http_response(self, request, response)
+
+    https_response = http_response
+
+
 def browser():
     jar = http.cookiejar.CookieJar()
-    op = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar), urllib.request.HTTPSHandler(context=CTX))
+    op = urllib.request.build_opener(BrowserCookies(jar), urllib.request.HTTPSHandler(context=CTX))
     # mod_auth_openidc sends only what looks like a browser on to the login page; anything else (no Accept:
     # text/html) gets a plain 401.
     op.addheaders = [('User-Agent', 'Mozilla/5.0 (X11; Linux x86_64) orphera-keycloak-api sso-check'),
@@ -630,6 +646,8 @@ def sso_horizon():
     form['auth_type'] = 'keycloak_openid'
     s, url, body = go(op, HORIZON + '/auth/login/', form, referer=HORIZON + '/auth/login/')
     s, url, body = through_keycloak(op, 'horizon', s, url, body)
+    if BIG_COOKIES:
+        die('horizon: a browser would drop %s and come back to the login page (SESSION_ENGINE in horizon_single_node.scala)' % ', '.join(BIG_COOKIES))
     if s != 200 or 'auth/logout' not in body:
         die('horizon: the token post did not sign in (HTTP %s at %s): %s' % (s, url, short(body)))
     if DEMO_USER not in body:
@@ -666,6 +684,8 @@ def sso_skyline():
     s, url, body = through_keycloak(op, 'skyline', s, url, body)
     if s >= 400:
         die('skyline: the token post failed (HTTP %s at %s): %s' % (s, url, short(body)))
+    if BIG_COOKIES:
+        die('skyline: a browser would drop %s' % ', '.join(BIG_COOKIES))
     s, url, body = go(op, api + '/profile')
     if s != 200 or DEMO_USER not in body:
         die('skyline: no session for %s after the token post (profile: HTTP %s %s)' % (DEMO_USER, s, body[:300]))

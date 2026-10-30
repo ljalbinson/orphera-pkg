@@ -245,9 +245,11 @@ object horizon_single_node extends OrpheraClusterPlaybook:
       .build
   )
 
-  // Sessions are signed cookies and the cache is per process, so several Apache
-  // worker processes need no shared session store. COMPRESS_OFFLINE matches how
-  // the Kolla image prepared its static files at build time.
+  // Sessions are files in the container's /tmp, which both WSGI processes share; the browser holds only the
+  // session id. They used to be signed cookies, but a session made by a single sign-on login (the federated
+  // token and its project list) is over 4096 bytes, and browsers silently drop such a cookie, so the user came
+  // straight back to the login page. Sessions do not outlive a restart of the container. The cache is per
+  // process. COMPRESS_OFFLINE matches how the Kolla image prepared its static files at build time.
   private val settingsScript =
     s"""mkdir -p $srcDir $logDir
        |cat > $srcDir/local_settings.py <<'SETTINGS'
@@ -261,7 +263,8 @@ object horizon_single_node extends OrpheraClusterPlaybook:
        |SECRET_KEY = '${secretKey.reveal}'
        |TIME_ZONE = 'UTC'
        |
-       |SESSION_ENGINE = 'django.contrib.sessions.backends.signed_cookies'
+       |SESSION_ENGINE = 'django.contrib.sessions.backends.file'
+       |SESSION_FILE_PATH = '/tmp'
        |SESSION_COOKIE_HTTPONLY = True
        |# HTTPS (a certificate from the test CA), so the cookies are Secure-flagged.
        |CSRF_COOKIE_SECURE = True

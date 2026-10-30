@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+- Horizon kept its sessions in signed cookies; after a single sign-on login the session (the federated token and its project
+  list) came to over 4096 bytes, browsers dropped the cookie without a message, and the user came straight back to the login
+  page. Sessions are now files in the container's /tmp (`SESSION_ENGINE` file), shared by both WSGI processes; they do not
+  outlive a restart of the container. The Keycloak helper's `sso-check` now fails on any cookie over 4096 bytes, as a browser
+  would (Python keeps such a cookie, so the check had passed).
+
 ### Added
 - Horizon and Skyline on HTTPS (same ports, 8080 and 9999), so the WebSSO login stays on HTTPS: Safari refused, without a message,
   to post the token from Keystone's HTTPS page to the plain-HTTP dashboard and stopped at "Please wait...". tst13 gets one certificate
