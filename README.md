@@ -2009,7 +2009,7 @@ chooses another MySQL 8.0 version; the name is also the tag of the Docker image 
 `TROVE_REBUILD_IMAGE=1` builds it again. A database is then `openstack database instance create NAME orphera-trove --size 1 --datastore mysql
 --datastore-version 8.0.29`. Backups to Swift, replication and the dashboard are not set up. The Trove images need `orphera-kolla-build sources refresh` and a build of
 `trove-api trove-conductor trove-taskmanager` on tst21 (an existing `/etc/kolla-build/images.txt` is not rewritten; add them by hand), or they come
-from quay.io. `python-troveclient` is in `utils/openstack-client-setup.sh`. Run on the lab: `test_trove.sh` 12 of 12; `test_trove_guest.sh` not run yet.
+from quay.io. `python-troveclient` is in `utils/openstack-client-setup.sh`. Run on the lab: `test_trove.sh` 12 of 12; `test_trove_guest.sh` 6 of 6 with `NO_APPLY=1`.
 
 **Skyline** (`manifests/skyline_single_node.scala`, undone by `skyline_teardown.scala`, checked by `test_skyline.sh`) is the Skyline dashboard on tst13,
 beside Horizon: `http://tst13.ljalbinson.com:9999/`, log in as `admin` with domain `Default`. It is one container from the image the Skyline project
