@@ -464,6 +464,7 @@ step_keycloak() {
   check "a Keycloak user gets a scoped Keystone token" contains "federation ok" "$out"
   out=$(orphera run sh -c "sudo /usr/local/sbin/orphera-keycloak-api sso-check" --nodes tst26 --timeout 180 2>&1)
   check "Horizon and Skyline sign a Keycloak user in (single sign-on)" contains "skyline sso ok" "$out"
+  check "Horizon's logout ends the Keycloak session" contains "horizon logout ok" "$out"
 }
 
 step_clients() {

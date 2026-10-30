@@ -13,8 +13,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (end-session endpoint with the id token) and Keycloak returns the browser to Horizon. Keystone's vhost has
   `OIDCRedirectURLsAllowed` for tst13's dashboards, and the Keycloak client `post.logout.redirect.uris` for the same. `sso-check
   horizon` now logs out and checks that Horizon's session is gone and that the next single sign-on asks for the password. Skyline's
-  logout still ends only Skyline's session. Not run yet; checked against stand-in servers, including one whose logout leaves the
-  Keycloak session (caught).
+  logout still ends only Skyline's session. Run on the lab: `sso-check horizon` logs in, logs out, and the next single sign-on asks
+  for the password. `test_keycloak.sh` checks the logout line on its own (it had passed on the login line alone), so it has 13 checks.
 - Horizon kept its sessions in signed cookies; after a single sign-on login the session (the federated token and its project
   list) came to over 4096 bytes, browsers dropped the cookie without a message, and the user came straight back to the login
   page. Sessions are now files in the container's /tmp (`SESSION_ENGINE` file), shared by both WSGI processes; they do not

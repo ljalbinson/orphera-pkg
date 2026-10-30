@@ -103,6 +103,7 @@ assert_contains "a Keycloak user gets a scoped Keystone token" "federation ok" "
 if [ -z "${SKIP_SSO:-}" ]; then
   OUT=$(RUN_TIMEOUT=120 run_on "sudo $HELPER sso-check horizon")
   assert_contains "Horizon signs kcdemo in through Keycloak" "horizon sso ok" "$OUT"
+  assert_contains "Horizon's logout ends the Keycloak session (the next single sign-on asks for the password)" "horizon logout ok" "$OUT"
   OUT=$(RUN_TIMEOUT=120 run_on "sudo $HELPER sso-check skyline")
   assert_contains "Skyline signs kcdemo in through Keycloak" "skyline sso ok" "$OUT"
 fi
