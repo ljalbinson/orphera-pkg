@@ -116,11 +116,21 @@ object keycloak_single_node extends OrpheraClusterPlaybook:
       Mount(tlsDir, "/opt/keycloak/conf/tls")
     ),
     description = Some("Keycloak (OpenID Connect provider) managed by Orphera"),
-    args = List("start"),
     stopGraceSeconds = 30,
     startTimeoutSeconds = 300,
     settleSeconds = 20
   )
+
+  // The image's entrypoint (kc.sh) needs the command `start` after the image. Container has an `args` field for
+  // this from d8ce67d on, but a manifest is compiled against the installed orchestrator jar, which may be older;
+  // so the word is added to the ExecStart line here. Once every jar in use has `args`, use
+  // `args = List("start")` above and keycloakContainer.writeUnit / unitResource.check instead.
+  private val unitPath = keycloakContainer.unitPath
+  private val unitText: String =
+    keycloakContainer.render
+      .split("\n", -1)
+      .map(l => if l.startsWith("ExecStart=") then l + " start" else l)
+      .mkString("\n")
 
   private val hostPackages =
     List("podman", "openssl", "curl", "ca-certificates", "python3")
@@ -578,14 +588,12 @@ if __name__ == '__main__':
 
   private val checkMode = sys.env.get("ORPHERA_CHECK").contains("1")
 
-  private val unitResource = summon[Resource[Container]]
-
   val playbook: ClusterPlaybook =
     if checkMode then
       clusterPlaybook("keycloak-single-node-check")(
         stage("check-keycloak", node)
           .task(s"check ${keycloakContainer.unitName}")(
-            unitResource.check(keycloakContainer)
+            Resource.checkTask(keycloakContainer.unitName, unitPath, unitText, Nil)
           )
           .build
       )
@@ -678,7 +686,15 @@ if __name__ == '__main__':
             mode = 416 // 0640: the container's user is in group 0
           )
         )
-        .task(s"write ${keycloakContainer.unitName}")(keycloakContainer.writeUnit)
+        .task(s"write ${keycloakContainer.unitName}")(
+          Task.WriteFile(
+            content = unitText,
+            dest = unitPath,
+            owner = "root",
+            group = "root",
+            mode = 420 // 0644
+          )
+        )
         .task(s"start ${keycloakContainer.unitName}")(keycloakContainer.start)
         .task("write the Keycloak API helper")(
           Task.RunCommand(List("sh", "-c", helperScript))
