@@ -2041,6 +2041,8 @@ HTTPS. Keystone writes its own `sso_callback_template.html`. Skyline 8.x uses th
 identity provider from `[federation] remote_id_attribute`. `sudo orphera-keycloak-api sso-check [horizon|skyline|all]` on tst26 does
 the whole browser flow (a fresh cookie jar, the redirects, Keycloak's login form, the token post) and asks the dashboard who is signed in.
 Order: keystone_single_node, horizon_single_node, skyline_single_node, keycloak_single_node (for the helper), then test_keycloak.sh.
+Run on the lab: both dashboards sign `kcdemo` in through Keycloak (`sso-check all`). mod_auth_openidc sends only browser-like
+requests (`Accept: text/html`) on to Keycloak and answers others with 401, so a script that follows the flow must send those headers.
 Not set up: logout from Keycloak when leaving the dashboard, group or role mapping from Keycloak claims, and a second Keycloak node. Run on the lab: `test_keycloak.sh` 12 of 12, and
 `openstack token issue` as `kcdemo` from scala0 with the rc file from `openrc` (`ssh localadmin@tst26 sudo /usr/local/sbin/orphera-keycloak-api
 openrc > ~/keycloak-openrc.sh`, mode 600). Keycloak 26.8 refuses a wrong password with HTTP 400 and `invalid_grant`, not 401. A federated
