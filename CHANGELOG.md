@@ -166,6 +166,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   stayed in `scheduling` for ever: the conductor's Cinder client fetches its service token through a session built from `[cinder]`, found no CA
   for Keystone's TLS certificate and failed in `attachment_get` (`CERTIFICATE_VERIFY_FAILED`). Found with Trove, the first service to attach a
   volume at boot. Re-run `nova_single_node.scala` and `nova_compute.scala` to apply it.
+- Servers with a Cinder (Ceph RBD) volume could not start on the compute nodes: libvirt had no secret for the `client.cinder` key
+  (`Secret not found: no secret with matching uuid`). `cinder_single_node.scala` now sets `rbd_secret_uuid` (a fixed UUID) in its `[ceph]`
+  backend, and `nova_compute.scala` defines the libvirt secret under that UUID with the key, installs `qemu-block-extra` (QEMU's RBD driver)
+  and sets `rbd_user` and `rbd_secret_uuid` in `[libvirt]`. Re-run `cinder_single_node.scala` (restarts cinder-volume) and `nova_compute.scala`.
 
 ## [0.1.206] - 2026-10-25
 

@@ -38,7 +38,8 @@ import orphera.orchestrator.kolla.*
 //
 // Stages:
 //   - install-compute (tst17, tst18): wait for apt, check /dev/kvm, packages
-//     (podman, Open vSwitch, libvirt, QEMU), libvirtd, provider NIC and bridge, cache
+//     (podman, Open vSwitch, libvirt, QEMU with its RBD driver), libvirtd, the libvirt
+//     secret for Cinder's Ceph volumes, provider NIC and bridge, cache
 //     mirror, image pulls, Keystone's CA, nova.conf and the Neutron agent config
 //     (host name and IP filled in per node), Kolla config, units, helper.
 //   - discover-compute-hosts (tst14): `nova-manage cell_v2 discover_hosts`, so the
@@ -57,6 +58,13 @@ object nova_compute extends OrpheraClusterPlaybook:
   private val nodes = List("tst17", "tst18")
   private val controlNode = "tst14"
   private val mgmtNic = "enp1s0"
+
+  // Cinder's volumes are Ceph RBD images. QEMU on the node opens them with the cephx key of
+  // client.cinder, which libvirt keeps as a secret named by this UUID; Cinder tells Nova the
+  // UUID when a volume is attached (rbd_secret_uuid in cinder_single_node.scala: keep the two
+  // in step) and the key is the one cinder_single_node.scala puts in Ceph.
+  private val rbdSecretUuid = "8c256f90-1c37-4fb6-b8be-cedcf0fffd3c"
+  private val cephKey = Secrets.secret("cinder/ceph-key")
 
   private val physnet = "provider"
   private val providerBridge = "br-provider"
@@ -166,8 +174,27 @@ object nova_compute extends OrpheraClusterPlaybook:
       "libvirt-daemon-system",
       "libvirt-clients",
       "qemu-system-x86",
+      "qemu-block-extra",
       "qemu-utils"
     )
+
+  // The libvirt secret that holds the client.cinder key (see rbdSecretUuid). Safe to repeat: it
+  // changes nothing when the secret already holds the key.
+  private val cephSecretScript =
+    s"""set -e
+       |V="virsh -c qemu:///system"
+       |if ! $$V secret-get-value $rbdSecretUuid 2>/dev/null | grep -qx '${cephKey.reveal}'; then
+       |  cat > /tmp/orphera-ceph-secret.xml <<'XML'
+       |<secret ephemeral='no' private='no'>
+       |  <uuid>$rbdSecretUuid</uuid>
+       |  <usage type='ceph'><name>client.cinder secret</name></usage>
+       |</secret>
+       |XML
+       |  $$V secret-define --file /tmp/orphera-ceph-secret.xml
+       |  rm -f /tmp/orphera-ceph-secret.xml
+       |  $$V secret-set-value --secret $rbdSecretUuid --base64 '${cephKey.reveal}'
+       |fi
+       |echo "libvirt secret $rbdSecretUuid holds the client.cinder key"""".stripMargin
 
   private val waitAptIdleScript =
     """for i in $(seq 1 180); do
@@ -431,6 +458,8 @@ object nova_compute extends OrpheraClusterPlaybook:
        |virt_type = kvm
        |cpu_mode = host-passthrough
        |connection_uri = qemu:///system
+       |rbd_user = cinder
+       |rbd_secret_uuid = $rbdSecretUuid
        |
        |[vnc]
        |enabled = true
@@ -795,6 +824,9 @@ if __name__ == '__main__':
         )
         .task("start libvirtd")(
           Task.RunCommand(List("sh", "-c", libvirtScript), timeoutSeconds = 120)
+        )
+        .task("define the libvirt secret for the Ceph volumes")(
+          Task.RunCommand(List("sh", "-c", cephSecretScript), timeoutSeconds = 60)
         )
         .task(s"make $providerNic an address-less layer-2 port")(
           Task.RunCommand(

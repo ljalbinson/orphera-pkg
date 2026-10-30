@@ -556,7 +556,7 @@ def instance_test(keep):
                 print('  status %s operating_status %s' % state)
                 last = state
             if inst.get('status') in ('ERROR', 'FAILED'):
-                die('the instance went to %s: %s' % (inst.get('status'), json.dumps(inst)[:600]))
+                die('the instance went to %s: fault %s' % (inst.get('status'), json.dumps(inst.get('fault') or {k: inst.get(k) for k in ('status', 'operating_status', 'task')})[:800]))
             if inst.get('status') == 'ACTIVE' and inst.get('operating_status', 'HEALTHY') == 'HEALTHY':
                 break
             time.sleep(10)

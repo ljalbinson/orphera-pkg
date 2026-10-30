@@ -70,6 +70,10 @@ object cinder_single_node extends OrpheraClusterPlaybook:
   private val rabbitUser = "openstack"
   private val rabbitPassword = Secrets.secret("cinder/rabbit")
 
+  // The UUID of the libvirt secret that holds this key on the compute nodes (rbd_secret_uuid below).
+  // Cinder gives it to Nova when a volume is attached; nova_compute.scala defines the secret under
+  // the same UUID. Keep the two in step.
+
   // A valid cephx key (base64 of a type/timestamp/length header plus 16 random
   // bytes), generated once and committed on purpose: test infrastructure only.
   // Rotate it with `ceph auth import` / `ceph auth del client.cinder` if this
@@ -315,6 +319,7 @@ object cinder_single_node extends OrpheraClusterPlaybook:
       ("ceph", "rbd_pool", s"$cephPool"),
       ("ceph", "rbd_ceph_conf", "/etc/ceph/ceph.conf"),
       ("ceph", "rbd_user", "cinder"),
+      ("ceph", "rbd_secret_uuid", "8c256f90-1c37-4fb6-b8be-cedcf0fffd3c"),
       ("ceph", "rbd_flatten_volume_from_snapshot", "false"),
       ("ceph", "rbd_max_clone_depth", "5"),
       ("ceph", "rados_connect_timeout", "-1")
