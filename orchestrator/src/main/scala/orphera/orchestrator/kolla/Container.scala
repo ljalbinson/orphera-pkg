@@ -119,12 +119,24 @@ final case class Container(
     stopGraceSeconds: Int = 30,
     restartSeconds: Int = 5,
     startTimeoutSeconds: Int = 300,
-    settleSeconds: Int = 8
+    settleSeconds: Int = 8,
+    // Arguments after the image, for an image whose entrypoint needs a command
+    // (Keycloak's kc.sh needs `start`). Kolla images take none: kolla_start reads
+    // config.json. One word each; systemd splits ExecStart on spaces.
+    args: List[String] = Nil
 ):
   require(
     (network == Network.Host && ports.isEmpty) ||
       (network == Network.Published && ports.nonEmpty),
     "ports go with Network.Published; the host network publishes nothing"
+  )
+  require(
+    args.forall(a =>
+      a.nonEmpty && !a.exists(c =>
+        c.isWhitespace || c == '"' || c == '\'' || c == '\\' || c == '$' || c == '%'
+      )
+    ),
+    "container args are single words with no quotes, backslashes, $ or % (systemd would split or expand them)"
   )
 
   def unitName: String = s"orphera-${name.value}.service"
@@ -139,7 +151,8 @@ final case class Container(
       List("--privileged").filter(_ => privileged) ++
       List("--pid host").filter(_ => hostPid) ++
       capabilities.map(c => s"--cap-add=$c") ++
-      env.map((k, v) => s"-e $k=$v") ++ mounts.map(_.flag) :+ image.ref)
+      env.map((k, v) => s"-e $k=$v") ++ mounts.map(_.flag) ++
+      (image.ref :: args))
       .mkString(" ")
 
   /** The systemd unit, exactly as it is written to the node. Pure: it can be

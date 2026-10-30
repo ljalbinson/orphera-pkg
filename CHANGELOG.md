@@ -7,6 +7,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- Keycloak with Keystone federation. `manifests/keycloak_single_node.scala` runs Keycloak (`quay.io/keycloak/keycloak:26.8.1`, `KEYCLOAK_IMAGE`
+  overrides) as one container on a new VM, tst26 (`config/tst26.yaml`, 10.10.5.38, on gs1, 2 vCPU, 4096 MiB): HTTPS on 8443 with a certificate
+  signed by Keystone's test CA on tst6 (the request travels to tst6 and the certificate back with `DistributeFile`), health on 9000, the database
+  `keycloak` on Galera. The helper `orphera-keycloak-api` makes the realm `openstack`, the client `keystone` and the test user `kcdemo` in
+  Keycloak, and the domain, project, group, identity provider, mapping and protocol in Keystone, and `check` logs the user in end to end.
+  `keycloak_teardown.scala` undoes it and `test_keycloak.sh` checks it. New secrets: `keycloak/db`, `keycloak/admin`, `keycloak/keystone-client`,
+  `keycloak/demo-user` (in `utils/rotate-lab-secrets.sh`). `build_openstack_stack.sh` has a `keycloak` step after `skyline`. Not run yet.
+- `keystone_single_node.scala` loads mod_auth_openidc when the image has it (a warning and no federation when it does not), checks Keycloak
+  bearer tokens on the federation path of identity provider `keycloak`, copies the CA into the container for that, and sets `[auth] methods =
+  password,token,openid,application_credential`. Run it again before keycloak_single_node.scala. Nothing changes for password logins.
+- `Container` takes `args`, the words after the image (Keycloak's entrypoint needs `start`); Kolla containers have none, so their units are
+  unchanged. Checked in `ContainerCheck`.
 - Trove (database as a service), part one: the service. `manifests/trove_single_node.scala` runs trove-api (8779), trove-taskmanager and
   trove-conductor as containers on a new VM, tst25 (`config/tst25.yaml`, 10.10.5.37, on gs3, 2 vCPU, 4096 MiB), with the `trove` database on Galera and
   the RabbitMQ vhost `trove` on tst10. The helper `orphera-trove-api` registers the user `trove` and the service type `database` in Keystone, makes

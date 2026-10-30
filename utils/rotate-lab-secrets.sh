@@ -52,6 +52,7 @@ NAMES=(
   aodh/db aodh/service aodh/rabbit ceilometer/service ceilometer/rabbit
   trove/db trove/service trove/rabbit
   skyline/db skyline/service skyline/secret-key
+  keycloak/db keycloak/keystone-client keycloak/demo-user keycloak/admin  # NB: keycloak/admin only takes effect on a new Keycloak database (bootstrap admin)
   wordpress/db
   observability/mysqld-exporter observability/grafana-admin
   horizon/secret-key

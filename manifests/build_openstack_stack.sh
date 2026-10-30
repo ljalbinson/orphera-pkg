@@ -45,6 +45,8 @@
 #   skyline  tst13       skyline_single_node (the Skyline dashboard, http://tst13:9999/, beside Horizon; one container
 #                        from the project's own image; run after every service is registered, it writes its
 #                        nginx file from the catalog)
+#   keycloak tst26       keycloak_single_node (Keycloak, the OIDC identity provider, https://tst26:8443/; Keystone
+#                        federates its realm `openstack` and a test user logs in through it)
 #   designate tst16      designate_single_node (DNS as a service: API, central, worker, producer, mdns and
 #                        a BIND9 name server; RabbitMQ vhost on tst10)
 #   clients  scala0      utils/openstack-client-setup.sh
@@ -70,7 +72,7 @@
 #   --with-build    set up the Kolla image builder on tst21 and build every image from source
 #                   (hours the first time; needs the caches: use it with --with-caches or after it)
 #   --from STEP     start at STEP (prep caches ceph galera keystone cinder glance
-#                   placement nova neutron compute horizon designate heat barbican manila rgw octavia magnum observability telemetry trove skyline clients smoke boot) - for resuming
+#                   placement nova neutron compute horizon designate heat barbican manila rgw octavia magnum observability telemetry trove skyline keycloak clients smoke boot) - for resuming
 #                   after a failure
 #   --only STEP     run just that one step
 #   --list          print the plan and exit
@@ -85,7 +87,7 @@ cd "$(dirname "$0")/.." || exit 1
 . utils/orphera-sources.sh
 CONF_DIR=$(config_dir) || exit 1
 
-ALL_STEPS=(prep caches build ceph galera keystone cinder glance placement nova neutron compute horizon designate heat barbican manila rgw octavia magnum observability telemetry trove skyline clients smoke boot)
+ALL_STEPS=(prep caches build ceph galera keystone cinder glance placement nova neutron compute horizon designate heat barbican manila rgw octavia magnum observability telemetry trove skyline keycloak clients smoke boot)
 WITH_CACHES=""
 WITH_BUILD=""
 FROM=""
@@ -451,6 +453,15 @@ step_skyline() {
   check "the Skyline console answers on 9999" contains "http=200" "$out"
   out=$(orphera run sh -c "sudo /usr/local/sbin/orphera-skyline-api login-check" --nodes tst13 --timeout 120 2>&1)
   check "the admin user logs in to Skyline" contains "login ok" "$out"
+}
+
+step_keycloak() {
+  playbook keycloak_single_node.scala
+  local out
+  out=$(run_on tst6 "curl -s https://tst26.ljalbinson.com:8443/realms/openstack/.well-known/openid-configuration")
+  check "the Keycloak realm answers over TLS from tst6" contains '"issuer":"https://tst26.ljalbinson.com:8443/realms/openstack"' "$out"
+  out=$(orphera run sh -c "sudo /usr/local/sbin/orphera-keycloak-api check" --nodes tst26 --timeout 120 2>&1)
+  check "a Keycloak user gets a scoped Keystone token" contains "federation ok" "$out"
 }
 
 step_clients() {

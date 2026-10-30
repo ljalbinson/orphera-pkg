@@ -606,6 +606,42 @@ object ContainerCheck:
       placement.render.linesIterator.contains("Wants=network-online.target")
     )
 
+    // args go after the image, in order; a Kolla container has none.
+    {
+      val kc = Container(
+        name = ContainerName("keycloak"),
+        image = ExternalImage("quay.io/keycloak/keycloak:26.8.1"),
+        args = List("start", "--verbose")
+      )
+      check(
+        "args follow the image reference",
+        kc.render.linesIterator.exists(
+          _ == "ExecStart=/usr/bin/podman run --rm --name keycloak --network host quay.io/keycloak/keycloak:26.8.1 start --verbose"
+        ),
+        kc.render
+      )
+      check(
+        "a container without args ends at the image reference",
+        placement.runArguments.endsWith(
+          "quay.io/openstack.kolla/placement-api:2025.1-ubuntu-noble"
+        )
+      )
+      check(
+        "an argument with a space, quote, $ or % is rejected",
+        List("a b", "a\"b", "a'b", "a$b", "a%b", "").forall(a =>
+          scala.util
+            .Try(
+              Container(
+                name = ContainerName("x"),
+                image = ExternalImage("img"),
+                args = List(a)
+              )
+            )
+            .isFailure
+        )
+      )
+    }
+
     if failures > 0 then
       println(s"$failures check(s) failed")
       sys.exit(1)

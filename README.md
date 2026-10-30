@@ -1857,6 +1857,7 @@ Fleet layout used by these manifests (see `inventory.yaml`):
 | tst16 | Designate (API on 9001, central, worker, producer, mdns on 5354) and a BIND9 name server on port 53; RabbitMQ vhost `designate` on tst10 |
 | tst22 | Manila (API on 8786, scheduler, share service) with CephFS exported over NFS-Ganesha (on tst0) as the backend; RabbitMQ vhost `manila` on tst10 |
 | tst25 | Trove (database as a service): API on 8779, taskmanager and conductor; the guests are Nova servers on the `provider` network; RabbitMQ vhost `trove` on tst10 |
+| tst26 | Keycloak (OpenID Connect identity provider, HTTPS on 8443, health on 9000); Keystone on tst6 federates its realm `openstack` |
 | tst24 | Telemetry: Ceilometer central agent (exporter on 9101) and Aodh (API on 8042, evaluator, notifier); the compute agents run on tst17 and tst18; metrics are stored by the Prometheus on tst7; RabbitMQ vhosts `aodh` and `ceilometer` on tst10 |
 | tst21 | Kolla image builder: builds the images from source, with a source tarball cache, a pip cache, and a writable registry on port 5000 |
 | tst17, tst18 | Compute nodes (nova-compute on KVM, Neutron Open vSwitch agent; second NIC is the provider port); VMs on gs2 with nested KVM |
@@ -2010,6 +2011,25 @@ chooses another MySQL 8.0 version; the name is also the tag of the Docker image 
 --datastore-version 8.0.29`. Backups to Swift, replication and the dashboard are not set up. The Trove images need `orphera-kolla-build sources refresh` and a build of
 `trove-api trove-conductor trove-taskmanager` on tst21 (an existing `/etc/kolla-build/images.txt` is not rewritten; add them by hand), or they come
 from quay.io. `python-troveclient` is in `utils/openstack-client-setup.sh`. Run on the lab: `test_trove.sh` 12 of 12; `test_trove_guest.sh` 9 of 9.
+
+**Keycloak** (`manifests/keycloak_single_node.scala`, undone by `keycloak_teardown.scala`, checked by `test_keycloak.sh`) is an OpenID Connect
+identity provider on a new VM, tst26 (`config/tst26.yaml`, 10.10.5.38), with Keystone federated to it: a user in Keycloak's realm `openstack` gets
+an OpenStack token. One container from `quay.io/keycloak/keycloak:26.8.1` (`KEYCLOAK_IMAGE` sets another reference; it is pulled through the
+Kolla cache), HTTPS on 8443 with a certificate signed by Keystone's test CA (the request goes to tst6 and the certificate comes back; the key stays
+on tst26), the management interface with `/health/ready` on 9000, plain HTTP off, the database `keycloak` on Galera (`db-pool-max-lifetime` 20 s,
+below haproxy's 30 s idle timeout). It runs `kc.sh start`, which rebuilds for MariaDB at each start (about half a minute; no image build).
+Admin console: `https://tst26.ljalbinson.com:8443/admin/`, user `admin`, password `orphera secrets get keycloak/admin` (Keycloak calls it a
+temporary admin; it is made only on an empty database, so rotating the secret later does not change it).
+
+The Keystone half is in `keystone_single_node.scala`: its vhost loads mod_auth_openidc from the Kolla image and checks bearer tokens on
+`/v3/OS-FEDERATION/identity_providers/keycloak/protocols/openid/auth` against the realm's keys, and `[auth] methods` includes `openid`. Run it
+again before the first Keycloak build (the Keycloak playbook's first stage stops, saying so, if tst6 does not have it yet). The helper
+`orphera-keycloak-api` on tst26 makes the rest: in Keycloak the confidential client `keystone` (direct access grants on) and the test user
+`kcdemo` (`keycloak/demo-user`); in Keystone the domain `keycloak`, the group `keycloak-users` with `member` on project `keycloak-demo`, the
+identity provider `keycloak` (remote id = the realm's issuer), the mapping `keycloak-mapping` (`preferred_username` becomes the user name, every
+user joins `keycloak-users`) and the protocol `openid`. `sudo orphera-keycloak-api check` logs `kcdemo` in end to end; `sudo
+orphera-keycloak-api openrc` prints the environment for the CLI's `v3oidcpassword` plugin. Not set up: browser single sign-on for Horizon
+and Skyline (WebSSO), group or role mapping from Keycloak claims, and a second Keycloak node. The playbook has not been run.
 
 **Skyline** (`manifests/skyline_single_node.scala`, undone by `skyline_teardown.scala`, checked by `test_skyline.sh`) is the Skyline dashboard on tst13,
 beside Horizon: `http://tst13.ljalbinson.com:9999/`, log in as `admin` with domain `Default`. It is one container from the image the Skyline project

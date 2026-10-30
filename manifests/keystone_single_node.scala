@@ -202,6 +202,19 @@ object keystone_single_node extends OrpheraClusterPlaybook:
     Catalogues.load("keystone", Set.empty[String])
   private val confResource = summon[Resource[ConfFile]]
 
+  // Federation with Keycloak on tst26 (keycloak_single_node.scala). Keystone only
+  // checks the bearer token Keycloak issued: mod_auth_openidc, in the vhost below,
+  // verifies its signature against the realm's published keys (OAuth 2.0 resource
+  // server mode, no client secret here) and passes its claims on with the prefix
+  // OIDC-. The identity provider `keycloak`, its protocol `openid` and the mapping
+  // are made through the API by keycloak_single_node.scala. Until that has run, the
+  // federation path answers 404 and nothing else changes. Keep in step with
+  // keycloak_single_node.scala (fqdn, port, realm).
+  private val keycloakIssuer =
+    "https://tst26.ljalbinson.com:8443/realms/openstack"
+  private val federationIdp = "keycloak"
+  private val federationProtocol = "openid"
+
   private val keystoneConf: ConfFile =
     ConfFile.text(s"$confDir/keystone.conf", keystoneCatalogue)(
       ("DEFAULT", "log_dir", "/var/log/kolla/keystone"),
@@ -211,7 +224,10 @@ object keystone_single_node extends OrpheraClusterPlaybook:
         "connection",
         s"mysql+pymysql://$dbUser:${dbPassword.reveal}@$vip:3306/$dbName"
       ),
-      ("token", "provider", "fernet")
+      ("token", "provider", "fernet"),
+      // `openid` is the federation method (the mapped plugin under that name); the
+      // default list's external, oauth1 and mapped are not used here.
+      ("auth", "methods", "password,token,openid,application_credential")
     )
 
   // Inspects the image for the two things that differ between builds: where
@@ -233,11 +249,37 @@ object keystone_single_node extends OrpheraClusterPlaybook:
        |# the image, so load it explicitly from wherever the image keeps it.
        |SSLMOD=$$(podman run --rm --entrypoint sh $image -c 'ls /usr/lib/apache2/modules/mod_ssl.so /etc/httpd/modules/mod_ssl.so /usr/lib64/httpd/modules/mod_ssl.so 2>/dev/null | head -n 1')
        |if [ -z "$$SSLMOD" ]; then echo "mod_ssl.so not found in $image" >&2; exit 1; fi
+       |# mod_auth_openidc, for federation with Keycloak. Kolla's keystone image ships it;
+       |# if this build does not, Keystone is set up without federation and says so.
+       |OIDCMOD=$$(podman run --rm --entrypoint sh $image -c 'ls /usr/lib/apache2/modules/mod_auth_openidc.so /etc/httpd/modules/mod_auth_openidc.so /usr/lib64/httpd/modules/mod_auth_openidc.so 2>/dev/null | head -n 1')
+       |OIDC_LOAD=""
+       |OIDC_VHOST=""
+       |if [ -n "$$OIDCMOD" ]; then
+       |  OIDC_LOAD="<IfModule !auth_openidc_module>
+       |LoadModule auth_openidc_module $$OIDCMOD
+       |</IfModule>"
+       |  OIDC_VHOST=$$(cat <<'OIDC'
+       |    # Federation: a Keycloak access token (Authorization: Bearer) is checked
+       |    # against the realm's keys; its claims reach Keystone as OIDC-<claim>.
+       |    OIDCClaimPrefix "OIDC-"
+       |    OIDCOAuthVerifyJwksUri "$keycloakIssuer/protocol/openid-connect/certs"
+       |    OIDCCABundlePath /etc/keystone/ssl/ca.crt
+       |    <Location ~ "/v3/OS-FEDERATION/identity_providers/$federationIdp/protocols/$federationProtocol/auth">
+       |        AuthType oauth20
+       |        Require valid-user
+       |    </Location>
+       |OIDC
+       |)
+       |  echo "mod_auth_openidc: $$OIDCMOD (federation with $keycloakIssuer)"
+       |else
+       |  echo "WARNING: mod_auth_openidc not found in $image; Keystone is set up without federation" >&2
+       |fi
        |echo "wsgi script: $$WSGI; apache config: $$APACHE_CONF; mod_ssl: $$SSLMOD"
        |cat > $confDir/wsgi-keystone.conf <<WSGICONF
        |<IfModule !ssl_module>
        |LoadModule ssl_module $$SSLMOD
        |</IfModule>
+       |$$OIDC_LOAD
        |Listen 0.0.0.0:5000
        |ServerSignature Off
        |ServerTokens Prod
@@ -256,6 +298,8 @@ object keystone_single_node extends OrpheraClusterPlaybook:
        |    SSLCertificateFile /etc/keystone/ssl/server.crt
        |    SSLCertificateKeyFile /etc/keystone/ssl/server.key
        |
+       |$$OIDC_VHOST
+       |
        |    <Directory "$$(dirname "$$WSGI")">
        |        Require all granted
        |    </Directory>
@@ -268,7 +312,8 @@ object keystone_single_node extends OrpheraClusterPlaybook:
        |    {"source": "/var/lib/kolla/config_files/keystone.conf", "dest": "/etc/keystone/keystone.conf", "owner": "keystone", "perm": "0600"},
        |    {"source": "/var/lib/kolla/config_files/wsgi-keystone.conf", "dest": "$$APACHE_CONF", "owner": "keystone", "perm": "0600"},
        |    {"source": "/var/lib/kolla/config_files/ssl/server-chain.crt", "dest": "/etc/keystone/ssl/server.crt", "owner": "keystone", "perm": "0644"},
-       |    {"source": "/var/lib/kolla/config_files/ssl/server.key", "dest": "/etc/keystone/ssl/server.key", "owner": "keystone", "perm": "0600"}
+       |    {"source": "/var/lib/kolla/config_files/ssl/server.key", "dest": "/etc/keystone/ssl/server.key", "owner": "keystone", "perm": "0600"},
+       |    {"source": "/var/lib/kolla/config_files/ssl/ca.crt", "dest": "/etc/keystone/ssl/ca.crt", "owner": "keystone", "perm": "0644"}
        |  ],
        |  "permissions": [
        |    {"path": "/var/log/kolla/keystone", "owner": "keystone:kolla", "recurse": true},
