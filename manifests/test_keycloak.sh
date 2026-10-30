@@ -71,8 +71,14 @@ assert_contains "the certificate on 8443 verifies against the test CA and names 
 OUT=$(run_on "curl -s -o /dev/null -w 'http=%{http_code}' --max-time 5 http://localhost:8080/")
 assert_contains "plain HTTP on 8080 is not served" "http=000" "$OUT"
 
-OUT=$(run_on "curl -s -o /dev/null -w 'http=%{http_code}' -d grant_type=password -d client_id=admin-cli -d username=admin -d password=wrong-password $KC/realms/master/protocol/openid-connect/token")
-assert_contains "a wrong admin password is refused" "http=401" "$OUT"
+# Keycloak 26.8 answers a wrong password with 400 (seen on the lab), earlier releases with 401; either is a
+# refusal as long as no token comes back. The body is printed so the error Keycloak gave is in the log.
+OUT=$(run_on "curl -s -w ' http=%{http_code}' -d grant_type=password -d client_id=admin-cli -d username=admin -d password=wrong-password $KC/realms/master/protocol/openid-connect/token")
+if printf '%s' "$OUT" | grep -qE 'http=40[01]' && ! printf '%s' "$OUT" | grep -q 'access_token'; then
+  log "PASS: a wrong admin password is refused ($(printf '%s' "$OUT" | grep -oE '"error":"[^"]*"|http=[0-9]+' | tr '\n' ' '))"; PASS=$((PASS + 1))
+else
+  log "FAIL: a wrong admin password is not refused"; printf '%s\n' "$OUT" | sed 's/^/    /'; FAIL=$((FAIL + 1))
+fi
 
 OUT=$(run_on "runuser -u localadmin -- cat /etc/keycloak/keycloak.conf >/dev/null 2>&1 && echo readable || echo not-readable")
 assert_contains "keycloak.conf is not readable by localadmin" "not-readable" "$OUT"
