@@ -559,10 +559,14 @@ def browser():
     return op
 
 
-def go(op, url, form=None):
+def go(op, url, form=None, referer=None):
     data = urllib.parse.urlencode(form).encode() if form is not None else None
+    req = urllib.request.Request(url, data=data)
+    if referer:
+        # Django checks it on every HTTPS form post, as browsers send it.
+        req.add_header('Referer', referer)
     try:
-        r = op.open(urllib.request.Request(url, data=data), timeout=60)
+        r = op.open(req, timeout=60)
         return r.status, r.geturl(), r.read().decode('utf-8', 'replace')
     except urllib.error.HTTPError as e:
         return e.code, e.geturl(), e.read().decode('utf-8', 'replace')
@@ -590,6 +594,8 @@ def through_keycloak(op, where, s, url, body):
     # token to the dashboard: post it, as that page's script would.
     if not url.startswith(KC) or 'kc-form-login' not in body:
         hint = ''
+        if 'csrf_failure' in url:
+            hint = ' (the dashboard refused the form post: %s)' % urllib.parse.unquote(url.split('csrf_failure=', 1)[1])
         if s == 401 and url.startswith(KS.rsplit('/v3', 1)[0]):
             hint = ' (mod_auth_openidc in Keystone did not send the browser to Keycloak: see keystone-apache-public-error.log on @@KSNODE@@)'
         die('%s: expected Keycloak\'s login page, got HTTP %s at %s: %s%s' % (where, s, url, short(body), hint))
@@ -622,7 +628,7 @@ def sso_horizon():
     if 'csrfmiddlewaretoken' not in form:
         die('horizon: login page has no CSRF field')
     form['auth_type'] = 'keycloak_openid'
-    s, url, body = go(op, HORIZON + '/auth/login/', form)
+    s, url, body = go(op, HORIZON + '/auth/login/', form, referer=HORIZON + '/auth/login/')
     s, url, body = through_keycloak(op, 'horizon', s, url, body)
     if s != 200 or 'auth/logout' not in body:
         die('horizon: the token post did not sign in (HTTP %s at %s): %s' % (s, url, short(body)))
