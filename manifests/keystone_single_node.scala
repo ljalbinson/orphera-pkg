@@ -332,6 +332,10 @@ object keystone_single_node extends OrpheraClusterPlaybook:
        |    OIDCRedirectURI "https://$fqdn:5000/redirect_uri"
        |    OIDCResponseType "code"
        |    OIDCScope "openid email profile"
+       |    # Logout: a dashboard sends the browser to /redirect_uri?logout=<its login page>; mod_auth_openidc ends its own
+       |    # session, then Keycloak's (end_session_endpoint with the id token), and Keycloak sends the browser back. Only
+       |    # these return addresses are accepted.
+       |    OIDCRedirectURLsAllowed ^https://tst13[.]ljalbinson[.]com:(8080|9999)/
        |    <Location /redirect_uri>
        |        AuthType openid-connect
        |        Require valid-user

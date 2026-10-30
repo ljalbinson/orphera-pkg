@@ -322,12 +322,17 @@ object horizon_single_node extends OrpheraClusterPlaybook:
        |  APACHE_CMD="/usr/sbin/httpd -DFOREGROUND"
        |fi
        |SSLMOD=$$(podman run --rm --entrypoint sh $webImage -c 'ls /usr/lib/apache2/modules/mod_ssl.so /etc/httpd/modules/mod_ssl.so /usr/lib64/httpd/modules/mod_ssl.so 2>/dev/null | head -n 1')
+       |HDRMOD=$$(podman run --rm --entrypoint sh $webImage -c 'ls /usr/lib/apache2/modules/mod_headers.so /etc/httpd/modules/mod_headers.so /usr/lib64/httpd/modules/mod_headers.so 2>/dev/null | head -n 1')
+       |if [ -z "$$HDRMOD" ]; then echo "mod_headers.so not found in $webImage" >&2; exit 1; fi
        |if [ -z "$$SSLMOD" ]; then echo "mod_ssl.so not found in $webImage" >&2; exit 1; fi
        |cp $tlsDir/server-chain.crt $confRoot/horizon-web/server-chain.crt
        |cp $tlsDir/server.key $confRoot/horizon-web/server.key
        |chmod 600 $confRoot/horizon-web/server.key
        |echo "site-packages: $$SITE; apache config: $$APACHE_CONF; mod_ssl: $$SSLMOD"
        |cat > $confRoot/horizon-web/horizon.conf <<WSGICONF
+       |<IfModule !headers_module>
+       |LoadModule headers_module $$HDRMOD
+       |</IfModule>
        |<IfModule !ssl_module>
        |LoadModule ssl_module $$SSLMOD
        |</IfModule>
@@ -349,6 +354,14 @@ object horizon_single_node extends OrpheraClusterPlaybook:
        |    SSLEngine on
        |    SSLCertificateFile /etc/openstack-dashboard/horizon-server-chain.crt
        |    SSLCertificateKeyFile /etc/openstack-dashboard/horizon-server.key
+       |
+       |    # Logout also ends the single sign-on sessions: Horizon's own logout sends the browser to its login page;
+       |    # that redirect goes instead through Keystone's mod_auth_openidc logout, which ends its session and
+       |    # Keycloak's and comes back to the login page. For a password login there is nothing to end there and
+       |    # Keystone sends the browser straight back.
+       |    <Location "/auth/logout/">
+       |        Header edit Location "^(https://[^/]+)?/auth/login/([?].*)?$$" "$ksUrl/redirect_uri?logout=https://$fqdn:$port/auth/login/"
+       |    </Location>
        |
        |    <Directory $$SITE/openstack_dashboard>
        |        Require all granted

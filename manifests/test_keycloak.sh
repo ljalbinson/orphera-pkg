@@ -14,7 +14,8 @@
 #  - the keycloak database has tables,
 #  - Keystone refuses the federation path without a token (401),
 #  - a federated login works end to end (Keycloak password grant -> Keystone token scoped to keycloak-demo),
-#  - single sign-on: Horizon and Skyline each sign kcdemo in through Keycloak's login page (SKIP_SSO=1 skips),
+#  - single sign-on: Horizon and Skyline each sign kcdemo in through Keycloak's login page, and Horizon's logout ends the
+#    Keycloak session too, so the next single sign-on asks for the password (SKIP_SSO=1 skips),
 #  - a second run of the playbook succeeds (idempotence), and the federated login still works afterwards.
 #
 # Prerequisites: Galera + VIP and Keystone up (keystone_single_node.scala run with federation, after this change);

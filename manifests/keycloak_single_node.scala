@@ -388,6 +388,8 @@ def realm():
         'publicClient': False, 'clientAuthenticatorType': 'client-secret', 'secret': CLIENT_SECRET,
         'standardFlowEnabled': True, 'directAccessGrantsEnabled': True, 'serviceAccountsEnabled': False,
         'redirectUris': ['https://@@KS@@:5000/*'], 'webOrigins': [],
+        # Where Keycloak may send the browser after a logout started by Keystone (the dashboards' login pages).
+        'attributes': {'post.logout.redirect.uris': '@@HORIZON@@/*##@@SKYLINE@@/*'},
     }
     s, found, _ = kc('GET', '/%s/clients?clientId=%s' % (REALM, CLIENT_ID))
     if s != 200:
@@ -653,6 +655,20 @@ def sso_horizon():
     if DEMO_USER not in body:
         die('horizon: signed in, but not as %s (at %s)' % (DEMO_USER, url))
     print('horizon sso ok: signed in as %s through Keycloak (landed on %s)' % (DEMO_USER, url))
+    # Logout must end the Keystone and Keycloak sessions too, so the next single sign-on asks for the password.
+    s, url, body = go(op, HORIZON + '/auth/logout/', referer=HORIZON + '/project/')
+    if s != 200 or not url.startswith(HORIZON + '/auth/login'):
+        die('horizon: logout ended at %s (HTTP %s), not Horizon\'s login page: %s' % (url, s, short(body)))
+    s, url, body = go(op, HORIZON + '/project/')
+    if '/auth/login' not in url:
+        die('horizon: still signed in after logout (at %s)' % url)
+    s, url, body = go(op, HORIZON + '/auth/login/')
+    form = hidden_fields(body)
+    form['auth_type'] = 'keycloak_openid'
+    s, url, body = go(op, HORIZON + '/auth/login/', form, referer=HORIZON + '/auth/login/')
+    if not url.startswith(KC) or 'kc-form-login' not in body:
+        die('horizon: after logout, single sign-on did not ask for the password again (HTTP %s at %s): the Keycloak or Keystone session survived the logout' % (s, url))
+    print('horizon logout ok: the Horizon, Keystone and Keycloak sessions ended; the next single sign-on asks for the password')
 
 
 def find_urls(obj):

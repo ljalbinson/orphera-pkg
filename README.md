@@ -2046,7 +2046,12 @@ Order: keystone_single_node, horizon_single_node, skyline_single_node, keycloak_
 Run on the lab: both dashboards sign `kcdemo` in through Keycloak (`sso-check all`, and from Chrome and Safari on a Mac that
 trusts the test CA). Horizon keeps its sessions in files on the server: a single sign-on session is too big for a cookie. mod_auth_openidc sends only browser-like
 requests (`Accept: text/html`) on to Keycloak and answers others with 401, so a script that follows the flow must send those headers.
-Not set up: logout from Keycloak when leaving the dashboard, group or role mapping from Keycloak claims, and a second Keycloak node. Run on the lab: `test_keycloak.sh` 12 of 12, and
+Logging out of Horizon ends the Keycloak session too: Horizon's Apache sends the browser from its logout to
+`https://tst6.ljalbinson.com:5000/redirect_uri?logout=<Horizon's login page>`, where mod_auth_openidc ends its own session and then
+Keycloak's (its end-session endpoint, with the id token), and Keycloak returns the browser to the login page, so the next single
+sign-on asks for the password again. Keystone accepts only tst13's dashboard addresses there (`OIDCRedirectURLsAllowed`), and the
+Keycloak client lists them as `post.logout.redirect.uris`. Skyline's logout ends only Skyline's session (its console logs out in the
+browser's script, which has no place to send the browser on). Not set up: Skyline's logout of Keycloak, group or role mapping from Keycloak claims, and a second Keycloak node. Run on the lab: `test_keycloak.sh` 12 of 12, and
 `openstack token issue` as `kcdemo` from scala0 with the rc file from `openrc` (`ssh localadmin@tst26 sudo /usr/local/sbin/orphera-keycloak-api
 openrc > ~/keycloak-openrc.sh`, mode 600). Keycloak 26.8 refuses a wrong password with HTTP 400 and `invalid_grant`, not 401. A federated
 user's id in Keystone is a 64-character hash of the identity provider and the user name, not a UUID.
