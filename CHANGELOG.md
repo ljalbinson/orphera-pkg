@@ -170,6 +170,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (`Secret not found: no secret with matching uuid`). `cinder_single_node.scala` now sets `rbd_secret_uuid` (a fixed UUID) in its `[ceph]`
   backend, and `nova_compute.scala` defines the libvirt secret under that UUID with the key, installs `qemu-block-extra` (QEMU's RBD driver)
   and sets `rbd_user` and `rbd_secret_uuid` in `[libvirt]`. Re-run `cinder_single_node.scala` (restarts cinder-volume) and `nova_compute.scala`.
+- Guests on Neutron networks could not resolve outside names (a Trove guest could not reach Docker Hub: `lookup registry-1.docker.io ...
+  server misbehaving`). The DHCP agent's dnsmasq runs in a network namespace with no resolver behind it. `neutron_single_node.scala` now sets
+  `dnsmasq_dns_servers` in `dhcp_agent.ini` to the lab's resolvers, 192.168.1.70 and 192.168.1.71 (`NEUTRON_DNS_SERVERS` overrides). Re-run it to apply.
 
 ## [0.1.206] - 2026-10-25
 

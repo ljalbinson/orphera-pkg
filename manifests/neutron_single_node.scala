@@ -395,11 +395,22 @@ object neutron_single_node extends OrpheraClusterPlaybook:
       ("agent", "l2_population", "true")
     )
 
+  // The DHCP agent's dnsmasq runs in a network namespace, where the host's resolver stub
+  // (127.0.0.53) does not exist, so without upstream servers the guests' DNS (the DHCP port) answers
+  // nothing for outside names. These are the lab's resolvers (the dns1 and dns2 of config/*.yaml);
+  // NEUTRON_DNS_SERVERS (comma-separated) overrides them.
+  private val dnsServers = sys.env
+    .get("NEUTRON_DNS_SERVERS")
+    .map(_.trim)
+    .filter(_.nonEmpty)
+    .getOrElse("192.168.1.70,192.168.1.71")
+
   private val dhcpAgentIni: ConfFile =
     ConfFile.text(s"$srcDir/dhcp_agent.ini", neutronCatalogue)(
       ("DEFAULT", "interface_driver", "openvswitch"),
       ("DEFAULT", "dhcp_driver", "neutron.agent.linux.dhcp.Dnsmasq"),
-      ("DEFAULT", "enable_isolated_metadata", "false")
+      ("DEFAULT", "enable_isolated_metadata", "false"),
+      ("DEFAULT", "dnsmasq_dns_servers", dnsServers)
     )
 
   // Routers and floating IPs: legacy (centralised) routers in namespaces on this node. No
