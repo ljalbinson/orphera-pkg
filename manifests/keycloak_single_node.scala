@@ -551,7 +551,12 @@ def check():
 
 def browser():
     jar = http.cookiejar.CookieJar()
-    return urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar), urllib.request.HTTPSHandler(context=CTX))
+    op = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar), urllib.request.HTTPSHandler(context=CTX))
+    # mod_auth_openidc sends only what looks like a browser on to the login page; anything else (no Accept:
+    # text/html) gets a plain 401.
+    op.addheaders = [('User-Agent', 'Mozilla/5.0 (X11; Linux x86_64) orphera-keycloak-api sso-check'),
+                     ('Accept', 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8')]
+    return op
 
 
 def go(op, url, form=None):
@@ -584,7 +589,10 @@ def through_keycloak(op, where, s, url, body):
     # Keystone's /redirect_uri, which sends it to the websso path, which answers with the page that posts the
     # token to the dashboard: post it, as that page's script would.
     if not url.startswith(KC) or 'kc-form-login' not in body:
-        die('%s: expected Keycloak\'s login page, got HTTP %s at %s: %s' % (where, s, url, short(body)))
+        hint = ''
+        if s == 401 and url.startswith(KS.rsplit('/v3', 1)[0]):
+            hint = ' (mod_auth_openidc in Keystone did not send the browser to Keycloak: see keystone-apache-public-error.log on @@KSNODE@@)'
+        die('%s: expected Keycloak\'s login page, got HTTP %s at %s: %s%s' % (where, s, url, short(body), hint))
     m = re.search(r'<form[^>]*id="kc-form-login"[^>]*>', body)
     a = re.search(r'action="([^"]+)"', m.group(0)) if m else None
     if not a:
@@ -710,6 +718,7 @@ if __name__ == '__main__':
         .replace("@@DEMOUSER@@", demoUser)
         .replace("@@DEMOPW@@", demoPassword.reveal)
         .replace("@@CA@@", s"$tlsDir/ca.crt")
+        .replace("@@KSNODE@@", ksNode)
         .replace("@@HORIZON@@", horizonUrl)
         .replace("@@SKYLINE@@", skylineUrl) +
       s"\nPYEOF\nchmod 700 $helper\necho wrote $helper\n"
