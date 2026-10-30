@@ -30,8 +30,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   removed. New test users `kcadmin`, `kcreader` and `kcnogroup` beside `kcdemo` (now in `openstack-members`), with the secrets
   `keycloak/kcadmin`, `keycloak/kcreader`, `keycloak/kcnogroup`. `check` logs each in and checks roles, that only `kcadmin` can list
   users, and that `kcnogroup` is refused; `openrc` takes a user name. Run `keystone_single_node.scala` (for the delimiter), then
-  `keycloak_single_node.scala`. Not run yet; checked against stand-in Keycloak and Keystone servers that apply the mapping as
-  Keystone does.
+  `keycloak_single_node.scala`. Run on the lab: `check` gives kcadmin admin (with the implied manager, member and reader) on
+  Default/admin, kcdemo member and reader and kcreader reader on keycloak/keycloak-demo, refuses kcnogroup; `test_keycloak.sh` 13
+  of 13.
 - Horizon and Skyline on HTTPS (same ports, 8080 and 9999), so the WebSSO login stays on HTTPS: Safari refused, without a message,
   to post the token from Keystone's HTTPS page to the plain-HTTP dashboard and stopped at "Please wait...". tst13 gets one certificate
   from Keystone's test CA, in `/etc/orphera/tls` (key made on tst13, signed on tst6, as for Keycloak); horizon_single_node.scala and
