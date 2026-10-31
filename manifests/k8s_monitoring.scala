@@ -348,7 +348,8 @@ print('client %s in realm %s ready: redirect %s/login/generic_oauth' % (CLIENT_I
         .build,
       stage("install-kube-prometheus-stack", node)
         .task("helm install kube-prometheus-stack")(
-          Task.RunCommand(List("sh", "-c", installScript), timeoutSeconds = 1500)
+          Task
+            .RunCommand(List("sh", "-c", installScript), timeoutSeconds = 1500)
         )
         .build,
       stage("publish-grafana", node)
