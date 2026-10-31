@@ -54,8 +54,14 @@ object k8s_cluster extends OrpheraClusterPlaybook:
 
   // kubeadm token: 6 + 16 lowercase letters or digits.
   private val token =
-    val raw = Secrets.get("k8s/bootstrap-token").toLowerCase.filter(c => c.isLetterOrDigit && c < 128)
-    require(raw.length >= 22, "k8s/bootstrap-token is too short to make a kubeadm token")
+    val raw = Secrets
+      .get("k8s/bootstrap-token")
+      .toLowerCase
+      .filter(c => c.isLetterOrDigit && c < 128)
+    require(
+      raw.length >= 22,
+      "k8s/bootstrap-token is too short to make a kubeadm token"
+    )
     val t = s"${raw.take(6)}.${raw.slice(6, 22)}"
     Secrets.register(t)
     t
@@ -221,12 +227,16 @@ object k8s_cluster extends OrpheraClusterPlaybook:
         .build,
       stage("etcd-disk", cpNodes*)
         .task("format and mount the etcd disk")(
-          Task.RunCommand(List("sh", "-c", etcdDiskScript), timeoutSeconds = 180)
+          Task
+            .RunCommand(List("sh", "-c", etcdDiskScript), timeoutSeconds = 180)
         )
         .build,
       stage("pull-control-plane-images", cpNodes*)
         .task("kubeadm config images pull")(
-          Task.RunCommand(List("sh", "-c", pullImagesScript), timeoutSeconds = 900)
+          Task.RunCommand(
+            List("sh", "-c", pullImagesScript),
+            timeoutSeconds = 900
+          )
         )
         .build,
       stage("kubeadm-init", "tst30")
@@ -236,22 +246,38 @@ object k8s_cluster extends OrpheraClusterPlaybook:
         .build,
       stage("distribute-ca-hash", otherNodes*)
         .task("copy the CA hash from tst30")(
-          Task.DistributeFile("tst30", s"$stateDir/ca-hash", s"$stateDir/ca-hash", "root", "root", 420)
+          Task.DistributeFile(
+            "tst30",
+            s"$stateDir/ca-hash",
+            s"$stateDir/ca-hash",
+            "root",
+            "root",
+            420
+          )
         )
         .build,
       stage("join-control-plane-tst31", "tst31")
         .task("kubeadm join --control-plane")(
-          Task.RunCommand(List("sh", "-c", joinScript(true)), timeoutSeconds = 900)
+          Task.RunCommand(
+            List("sh", "-c", joinScript(true)),
+            timeoutSeconds = 900
+          )
         )
         .build,
       stage("join-control-plane-tst32", "tst32")
         .task("kubeadm join --control-plane")(
-          Task.RunCommand(List("sh", "-c", joinScript(true)), timeoutSeconds = 900)
+          Task.RunCommand(
+            List("sh", "-c", joinScript(true)),
+            timeoutSeconds = 900
+          )
         )
         .build,
       stage("join-workers", (infraNodes ++ workloadNodes)*)
         .task("kubeadm join")(
-          Task.RunCommand(List("sh", "-c", joinScript(false)), timeoutSeconds = 600)
+          Task.RunCommand(
+            List("sh", "-c", joinScript(false)),
+            timeoutSeconds = 600
+          )
         )
         .build,
       stage("confirm-nodes-registered", "tst30")

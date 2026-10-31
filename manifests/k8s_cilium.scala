@@ -207,7 +207,10 @@ object k8s_cilium extends OrpheraClusterPlaybook:
         .build,
       stage("gateway-api-crds", node)
         .task("install the Gateway API CRDs")(
-          Task.RunCommand(List("sh", "-c", gatewayCrdsScript), timeoutSeconds = 120)
+          Task.RunCommand(
+            List("sh", "-c", gatewayCrdsScript),
+            timeoutSeconds = 120
+          )
         )
         .build,
       stage("install-cilium", node)
