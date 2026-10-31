@@ -2231,6 +2231,9 @@ Worth knowing:
   shut down in time); `reboot-vm.sh [--soft | --hard] <vm>...` reboots a VM from the hypervisor, for a
   guest whose agent or SSH is not answering (`--soft`, the default, is `virsh reboot`; `--hard` shuts the VM down,
   waits, and starts it again, with `--wait` and `--force` as for `stop-vm.sh`);
+  `manifests/kvm_vm_stop.scala` and `manifests/kvm_vm_reboot.scala` do the same as playbooks, for one VM per run
+  (`--config config/<vm>.yaml`; `ORPHERA_VM_WAIT`, `ORPHERA_VM_FORCE=1`, and `ORPHERA_VM_MODE=soft|hard` for the
+  reboot); the scripts stay, and are the way to do several VMs in one command;
   `vbmc-vm.sh add|remove|start|stop|list|power|bootdev` gives each VM an IPMI endpoint through VirtualBMC
   (installed on the hypervisors by `manifests/virtualbmc.scala`, undone by `virtualbmc_teardown.scala`, checked by `test_virtualbmc.sh`):
   the hypervisor's address, UDP port 6230 plus the VM's number, user `admin`, password in the secret `vbmc/password`. `vbmc-vm.sh

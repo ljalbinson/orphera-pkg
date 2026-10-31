@@ -7,6 +7,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- `manifests/kvm_vm_stop.scala` and `manifests/kvm_vm_reboot.scala`: playbook forms of `utils/stop-vm.sh` and `utils/reboot-vm.sh` (one VM per run,
+  `--config config/<vm>.yaml`; options through `ORPHERA_VM_WAIT`, `ORPHERA_VM_FORCE`, `ORPHERA_VM_MODE`). Not yet run; the scripts stay.
 - `Task.RunCommand` takes `register` (YAML `register:`): the command's output is stored as a fact on the node, readable by later tasks and
   stages, including other nodes' as `{{{nodes.<node>.<name>}}}`. This is what lets a playbook decide on one node from what another reported.
 - `manifests/galera_cold_start.scala`: the playbook form of `utils/galera-cold-start.sh` (read each node's committed position, bootstrap from the
