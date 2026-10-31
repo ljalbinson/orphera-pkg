@@ -374,8 +374,21 @@ yaml.safe_dump(d, open('/etc/kubernetes/manifests/.kube-apiserver.yaml.new', 'w'
        |exit 1
        |""".stripMargin
 
+  // After the last API server restarts, haproxy needs a few seconds to stop
+  // sending requests to it, so wait for five successful answers in a row.
+  private val waitApiScript =
+    s"""for I in $$(seq 1 40); do
+       |  OKS=0
+       |  for J in 1 2 3 4 5; do $kc get --raw /readyz >/dev/null 2>&1 && OKS=$$((OKS+1)); done
+       |  [ "$$OKS" -eq 5 ] && break
+       |  sleep 3
+       |done
+       |[ "$$OKS" -eq 5 ] || { echo "the API server behind the VIP is not stable" >&2; exit 1; }
+       |""".stripMargin
+
   private val rbacScript =
     s"""set -e
+       |$waitApiScript
        |cat <<EOF | $kc apply -f -
        |apiVersion: rbac.authorization.k8s.io/v1
        |kind: ClusterRoleBinding
@@ -406,6 +419,7 @@ yaml.safe_dump(d, open('/etc/kubernetes/manifests/.kube-apiserver.yaml.new', 'w'
   // Rewrites every Secret so it is stored encrypted, then reads one from etcd.
   private val encryptScript =
     s"""set -e
+       |$waitApiScript
        |$kc get secrets -A -o json | $kc replace -f - >/dev/null
        |RAW=$$($kc -n kube-system exec etcd-tst30 -- etcdctl --endpoints=https://127.0.0.1:2379 \\
        |  --cacert=/etc/kubernetes/pki/etcd/ca.crt --cert=/etc/kubernetes/pki/etcd/server.crt \\
