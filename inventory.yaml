@@ -253,6 +253,14 @@ nodes:
     host: tst39.ljalbinson.com
     vars:
       cluster_ip: "10.10.3.39"
+  - name: tst40
+    host: tst40.ljalbinson.com
+    vars:
+      cluster_ip: "10.10.3.40"
+  - name: tst41
+    host: tst41.ljalbinson.com
+    vars:
+      cluster_ip: "10.10.3.41"
 
   - name: gs1
     host: gs1.ljalbinson.com

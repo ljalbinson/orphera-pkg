@@ -58,6 +58,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   their metrics on the node address (one node at a time, with rollback), checks with `kubeadm upgrade diff`, and switches on their
   Prometheus scrape jobs. It also gives kubelet a resolver file with each DNS server once (systemd-resolved lists them twice, so pods warned
   "Nameserver limits were exceeded"). New clusters get the metrics settings from `k8s_cluster.scala`; `k8s_monitoring.scala` now scrapes the three.
+- Kubernetes cluster, step 15: DNS for the zone `k8s.ljalbinson.com`. `config/tst40.yaml` and `config/tst41.yaml` define two small VMs
+  (10.10.3.40 and 10.10.3.41, on st0 and gs2) and `manifests/k8s_dns.scala` runs BIND on them: tst40 primary, tst41 secondary, the zone
+  seeded with `api` and the `*` wildcard, dynamic updates only with the TSIG key `external-dns`. The parent zone `ljalbinson.com` needs a
+  delegation to them (the playbook says which records to add and which to remove).
 
 ## [0.1.207] - 2026-10-30
 
