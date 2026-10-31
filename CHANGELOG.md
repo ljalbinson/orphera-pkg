@@ -25,6 +25,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   10.244.0.0/16, service network 10.96.0.0/12), tst31 and tst32 join as control-plane nodes one after the other, the seven workers
   join and are labelled `pool=infra` or `pool=workload`. The join token and certificate key are the secrets `k8s/bootstrap-token`
   and `k8s/certificate-key`. `k8s_cluster_teardown.scala` resets all ten nodes.
+- Kubernetes cluster, step 5: `manifests/k8s_cilium.scala` installs Cilium with Helm from tst30: kube-proxy replacement, VXLAN
+  tunnels, pod addresses 10.244.0.0/16, LoadBalancer addresses 10.10.3.100-119 announced with ARP by the infra nodes, the
+  Gateway API CRDs and GatewayClass `cilium`, Hubble. It ends by creating an nginx Service of type LoadBalancer and requesting it.
 
 ## [0.1.207] - 2026-10-30
 
