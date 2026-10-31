@@ -42,6 +42,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   Gateway `public` (HTTP redirecting to HTTPS, HTTPS with that certificate) at 10.10.3.100 and tests it with a published
   application. `manifests/test_k8s.sh` checks the whole cluster from scala0: nodes, etcd, the API VIP, Cilium, storage,
   certificates, Secret encryption, the Gateway; `FAILOVER=1` also moves the API VIP.
+- Kubernetes cluster, step 11: `manifests/k8s_etcd_backup.scala` installs `orphera-etcd-backup` and an hourly timer on tst30-tst32:
+  an etcd snapshot (checked with `etcdutl snapshot status`) and an archive of `/etc/kubernetes/pki`, kept locally (48) and
+  uploaded to the bucket `etcd-backups` on the Ceph object gateway (168 per node) with a native RGW user that does not depend on
+  Keystone. It also runs a first backup on every node and a restore test of the newest snapshot.
 
 ## [0.1.207] - 2026-10-30
 
