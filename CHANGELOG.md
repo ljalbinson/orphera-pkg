@@ -50,6 +50,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   node-exporter, kube-state-metrics) on the infra nodes with Ceph volumes, publishes Grafana at `grafana.k8s.ljalbinson.com`
   through the Gateway with Keycloak login (client `grafana` in the realm `k8s`, the group decides the Grafana role), and checks
   Prometheus and Grafana. The etcd, scheduler and controller-manager metrics are not scraped yet.
+- Kubernetes cluster, step 13: `manifests/k8s_logging.scala` installs Loki (single binary, 30 GiB Ceph volume, 7 days) and Alloy on
+  every node, which sends container logs to Loki labelled by namespace, pod, container, node and app, and adds Loki to Grafana as
+  a data source. It checks that logs from kube-system arrive from all 10 nodes.
 
 ## [0.1.207] - 2026-10-30
 
