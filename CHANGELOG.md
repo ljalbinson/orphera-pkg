@@ -62,6 +62,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (10.10.3.40 and 10.10.3.41, on st0 and gs2) and `manifests/k8s_dns.scala` runs BIND on them: tst40 primary, tst41 secondary, the zone
   seeded with `api` and the `*` wildcard, dynamic updates only with the TSIG key `external-dns`. The parent zone `ljalbinson.com` needs a
   delegation to them (the playbook says which records to add and which to remove).
+  Resolvers that use `forwarders` also need a `forward` zone for `k8s.ljalbinson.com` pointing at the two servers.
 
 ## [0.1.207] - 2026-10-30
 

@@ -30,6 +30,11 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 // api.k8s and *.k8s that were added to the parent zone by hand must be removed from it
 // (they sit below the zone cut). Add the delegation AFTER this playbook has
 // passed, so the new servers already answer when the cut is made.
+// A lab resolver that has `forwarders` set (dns2, dns3) sends names below the
+// delegation to the forwarders, which answer NXDOMAIN. Each such resolver also
+// needs, in named.conf.local:
+//   zone "k8s.ljalbinson.com" { type forward; forward only;
+//                               forwarders { 10.10.3.40; 10.10.3.41; }; };
 //
 // The last stage checks both servers directly: the seed records, a signed update
 // accepted, an unsigned one refused, the secondary receiving the change.
