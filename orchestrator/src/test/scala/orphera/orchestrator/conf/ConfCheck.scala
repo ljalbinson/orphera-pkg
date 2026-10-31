@@ -327,7 +327,7 @@ object ConfCheck:
     check(
       "a ConfFile is checked against its path",
       r.check(file) match
-        case Task.RunCommand(List("sh", "-c", script), _) =>
+        case Task.RunCommand(List("sh", "-c", script), _, _) =>
           script.contains(
             """diff -u --label "node: /etc/placement/placement.conf""""
           )
@@ -414,7 +414,7 @@ object ConfCheck:
         wf.secretValues.toSet == Set(secretPw, dbUrl, memKey)
       )
       val chk = r.check(wf) match
-        case Task.RunCommand(List("sh", "-c", script), _) => script
+        case Task.RunCommand(List("sh", "-c", script), _, _) => script
         case other                                        => other.toString
       check(
         "the check command contains no secret value",

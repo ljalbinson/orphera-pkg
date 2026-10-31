@@ -51,7 +51,24 @@ enum Task:
       group: String = "",
       mode: Int = 0
   )
-  case RunCommand(command: List[String], timeoutSeconds: Int = 60)
+
+  /** Runs `command` on the agent. With a non-empty `register`, the command's
+    * output (stdout and stderr lines, in the order they arrive, joined with
+    * newlines, trailing whitespace removed) is stored as the fact `register` on
+    * that node once the command has succeeded, like a SetFact whose value
+    * comes from the command. Later tasks and later stages read it as
+    * `{{register}}` on the same node or `{{{nodes.<node>.<register>}}}` for
+    * any node (the triple braces matter: plain `{{ }}` HTML-escapes `=`, quotes
+    * and `<`). Because stderr is captured too, a command that must produce an
+    * exact value should send everything else to /dev/null. Nodes of one stage
+    * run in parallel, so another node's value is only reliable from a later
+    * stage. A failed command stores nothing.
+    */
+  case RunCommand(
+      command: List[String],
+      timeoutSeconds: Int = 60,
+      register: String = ""
+  )
   case DumpFacts()
   case DistributeFile(
       sourceNode: String,

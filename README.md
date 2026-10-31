@@ -684,6 +684,14 @@ command: `delay`, `wait`, `wait_timeout` in YAML.
   a YAML list, `timeout:` in seconds), streaming stdout/stderr and
   reporting the real exit code — no shell interpretation (pipes,
   redirects) unless the command list itself is `["sh", "-c", "..."]`.
+  `register:` (a name) stores the command's output (stdout and stderr
+  lines, joined, trailing whitespace removed) as that fact on the node once
+  the command has succeeded; later tasks read it as `{{{name}}}` on the same
+  node and any later stage reads it as `{{{nodes.<node>.name}}}`. Use triple
+  braces: plain `{{ }}` HTML-escapes `=`, quotes and `<`. In Scala:
+  `Task.RunCommand(cmd, timeoutSeconds = 60, register = "name")`. Nodes of
+  one stage run in parallel, so another node's value is only reliable from a
+  later stage. `manifests/galera_cold_start.scala` is the example.
 - `set_fact` (`key:`, `value:`) stores a value for the rest of that
   node's run. `value` is rendered through Mustache first if it
   contains `{{...}}`, so a later task can build on an earlier
@@ -2240,6 +2248,10 @@ Worth knowing:
   after every node was stopped, bootstrapping from the node with the highest committed seqno
   (`--check` to see what it would do, `--bootstrap <node>` to override). The master build script
   runs it in its preflight.
+  `manifests/galera_cold_start.scala` does the same as a playbook (`ORPHERA_GALERA_CHECK=1` to only
+  report the plan, `ORPHERA_GALERA_BOOTSTRAP=<node>` to override), using `register:` on `run_command`
+  to carry each node's state to the decision; the script stays until the playbook has been run on
+  the lab.
 
 ## Example: parallel network throughput test (iperf3)
 

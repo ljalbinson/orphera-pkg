@@ -7,6 +7,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- `Task.RunCommand` takes `register` (YAML `register:`): the command's output is stored as a fact on the node, readable by later tasks and
+  stages, including other nodes' as `{{{nodes.<node>.<name>}}}`. This is what lets a playbook decide on one node from what another reported.
+- `manifests/galera_cold_start.scala`: the playbook form of `utils/galera-cold-start.sh` (read each node's committed position, bootstrap from the
+  highest, start the others, wait for size 3; refuses on split brain, no position or diverged UUIDs). Not yet run; the script stays.
 - `manifests/build_k8s_stack.sh`: builds the whole Kubernetes stack in dependency order (DNS, registry mirrors, node preparation, API VIP, kubeadm cluster,
   Cilium, cert-manager, ceph-csi, metrics, OIDC, Gateway, etcd backups, monitoring, logging, kubeadm-config, external-dns, Argo CD, Pod Security,
   network policies and lockdowns) and ends with `test_k8s.sh`. Options `--with-vms`, `--from STEP`, `--only STEP`, `--list`. It only applies playbooks,

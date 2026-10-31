@@ -397,15 +397,37 @@ object ClusterPlaybookRunner:
           line => IO.println(s"[${node.name}] ${namedTask.name}: $line")
         )
 
-      case Task.RunCommand(command, timeoutSeconds) =>
+      case Task.RunCommand(command, timeoutSeconds, register) =>
         buildTemplateVars(facts, context, node, setFacts).flatMap { vars =>
           val renderedCommand = command.map { token =>
             if token.contains("{{") then Templating.render(token, vars)
             else token
           }
-          requireStreamedSuccess(render)(r =>
-            NodeClient.executeCommand(node, renderedCommand, timeoutSeconds, r)
-          )
+          for
+            lines <- Ref.of[IO, Vector[String]](Vector.empty)
+            capture = (event: orphera.common.Event) =>
+              if event.kind == orphera.common.Event.Kind.OUTPUT then
+                lines.update(_ :+ event.message)
+              else IO.unit
+            _ <- requireStreamedSuccess(event => render(event) >> capture(event))(
+              r =>
+                NodeClient.executeCommand(
+                  node,
+                  renderedCommand,
+                  timeoutSeconds,
+                  r
+                )
+            )
+            captured <- lines.get
+            value = captured.mkString("\n").stripTrailing()
+            _ <-
+              if register.nonEmpty then
+                setFacts.set(node.name, register, value) >>
+                  IO.println(
+                    s"[${node.name}] ${namedTask.name}: registered $register"
+                  )
+              else IO.unit
+          yield ()
         }
 
       case Task.WriteFile(content, dest, owner, group, mode) =>

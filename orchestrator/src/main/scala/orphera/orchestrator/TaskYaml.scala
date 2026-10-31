@@ -92,7 +92,8 @@ object TaskYaml:
         for
           command <- body.get[List[String]]("command")
           timeout <- body.getOrElse[Int]("timeout")(60)
-        yield Task.RunCommand(command, timeout)
+          register <- body.getOrElse[String]("register")("")
+        yield Task.RunCommand(command, timeout, register)
 
       case "dump_facts" =>
         Right(Task.DumpFacts())

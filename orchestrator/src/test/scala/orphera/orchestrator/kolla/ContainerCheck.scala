@@ -107,7 +107,7 @@ object ContainerCheck:
       case other => check("writeUnit is a WriteFile", false, other.toString)
 
     placement.start match
-      case Task.RunCommand(List("sh", "-c", script), timeout) =>
+      case Task.RunCommand(List("sh", "-c", script), timeout, _) =>
         check(
           "start has an explicit timeout above its settle time",
           timeout == 300
@@ -142,7 +142,7 @@ object ContainerCheck:
     check(
       "a container without a read-write mount gives no log hint",
       scala.util.Try(placement.copy(mounts = Nil).start).toOption.exists {
-        case Task.RunCommand(List(_, _, s), _) => !s.contains(" and /");
+        case Task.RunCommand(List(_, _, s), _, _) => !s.contains(" and /");
         case _                                 => false
       }
     )
@@ -307,7 +307,7 @@ object ContainerCheck:
       keystone.render
     )
     keystone.start match
-      case Task.RunCommand(List(_, _, script), _) =>
+      case Task.RunCommand(List(_, _, script), _, _) =>
         check(
           "a failed start prints the last journal lines before the hint",
           script.contains(
@@ -493,7 +493,7 @@ object ContainerCheck:
         written == placement.writeUnit
       )
       val checked = r.check(placement) match
-        case Task.RunCommand(List("sh", "-c", script), _) => script
+        case Task.RunCommand(List("sh", "-c", script), _, _) => script
         case other                                        => other.toString
       check(
         "the check command diffs the unit path against the rendered unit",
