@@ -167,7 +167,14 @@ object k8s_ceph_csi extends OrpheraClusterPlaybook:
         .build,
       stage("send-key", node)
         .task("copy the key to tst30")(
-          Task.DistributeFile(cephNode, s"/etc/ceph/ceph.client.$cephUser.key", keyFile, "root", "root", 384)
+          Task.DistributeFile(
+            cephNode,
+            s"/etc/ceph/ceph.client.$cephUser.key",
+            keyFile,
+            "root",
+            "root",
+            384
+          )
         )
         .build,
       stage("rbd-module", allNodes*)

@@ -128,7 +128,14 @@ object k8s_cert_manager extends OrpheraClusterPlaybook:
         .build,
       stage("send-request", caNode)
         .task("copy the request to the CA host")(
-          Task.DistributeFile(node, s"$stateDir/subca.csr", s"$caDir/k8s-subca.csr", "root", "root", 420)
+          Task.DistributeFile(
+            node,
+            s"$stateDir/subca.csr",
+            s"$caDir/k8s-subca.csr",
+            "root",
+            "root",
+            420
+          )
         )
         .build,
       stage("sign-sub-ca", caNode)
@@ -138,10 +145,24 @@ object k8s_cert_manager extends OrpheraClusterPlaybook:
         .build,
       stage("fetch-certificates", node)
         .task("copy the signed sub-CA certificate back")(
-          Task.DistributeFile(caNode, s"$caDir/k8s-subca.crt", s"$stateDir/subca.crt", "root", "root", 420)
+          Task.DistributeFile(
+            caNode,
+            s"$caDir/k8s-subca.crt",
+            s"$stateDir/subca.crt",
+            "root",
+            "root",
+            420
+          )
         )
         .task("copy the root CA certificate")(
-          Task.DistributeFile(caNode, s"$caDir/ca.crt", s"$stateDir/ca.crt", "root", "root", 420)
+          Task.DistributeFile(
+            caNode,
+            s"$caDir/ca.crt",
+            s"$stateDir/ca.crt",
+            "root",
+            "root",
+            420
+          )
         )
         .build,
       stage("install-cert-manager", node)
