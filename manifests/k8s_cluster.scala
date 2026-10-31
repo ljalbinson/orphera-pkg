@@ -54,7 +54,7 @@ object k8s_cluster extends OrpheraClusterPlaybook:
 
   // kubeadm token: 6 + 16 lowercase letters or digits.
   private val token =
-    val raw = Secrets.get("k8s/bootstrap-token").toLowerCase.filter(c => c.isLetterOrDigit && c < '\u0080')
+    val raw = Secrets.get("k8s/bootstrap-token").toLowerCase.filter(c => c.isLetterOrDigit && c < 128)
     require(raw.length >= 22, "k8s/bootstrap-token is too short to make a kubeadm token")
     val t = s"${raw.take(6)}.${raw.slice(6, 22)}"
     Secrets.register(t)
