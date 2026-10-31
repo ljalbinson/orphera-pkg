@@ -173,7 +173,10 @@ object k8s_dns extends OrpheraClusterPlaybook:
     clusterPlaybook("k8s-dns")(
       stage("install-bind", primary, secondary)
         .task("install bind9")(
-          Task.Install(packages = List("bind9", "bind9-utils", "dnsutils"), updateCache = true)
+          Task.Install(
+            packages = List("bind9", "bind9-utils", "dnsutils"),
+            updateCache = true
+          )
         )
         .build,
       stage("configure-primary", primary)
@@ -183,7 +186,8 @@ object k8s_dns extends OrpheraClusterPlaybook:
         .build,
       stage("configure-secondary", secondary)
         .task("secondary zone, named")(
-          Task.RunCommand(List("sh", "-c", secondaryScript), timeoutSeconds = 120)
+          Task
+            .RunCommand(List("sh", "-c", secondaryScript), timeoutSeconds = 120)
         )
         .build,
       stage("test-dns", primary)
