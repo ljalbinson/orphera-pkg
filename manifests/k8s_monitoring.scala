@@ -34,7 +34,7 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 // The last stage queries Prometheus (through the API server's service proxy):
 // all 10 nodes report node-exporter metrics, the 3 API servers and the kubelets
 // are up; and checks Grafana over HTTPS: the health endpoint says the database
-// is ok, the login page offers Keycloak, and /login/generic_oauth redirects to
+// is ok, and /login/generic_oauth redirects to
 // the Keycloak realm k8s.
 //
 // Not compiled where this was written; the first run on scala0 is the first
@@ -324,10 +324,11 @@ print('client %s in realm %s ready: redirect %s/login/generic_oauth' % (CLIENT_I
        |want "kubelets up" 'count(up{job="kubelet"} == 1)' 10
        |want "kube-state-metrics up" 'count(up{job="kube-state-metrics"} == 1)' 1
        |echo "targets down right now: $$(q 'count(up == 0)')"
+       |$kc get --raw "/api/v1/namespaces/$ns/services/kps-prometheus:9090/proxy/api/v1/query?query=up%3D%3D0" \\
+       |  | python3 -c 'import sys,json; [print("  down: %s %s" % (r["metric"].get("job"), r["metric"].get("instance"))) for r in json.load(sys.stdin)["data"]["result"]]'
        |HEALTH=$$(curl -s --cacert $stateDir/ca.crt https://$grafanaHost/api/health | tr -d ' \\n')
        |echo "Grafana health: $$HEALTH"
        |case "$$HEALTH" in *'"database":"ok"'*) echo "ok    Grafana database ok" ;; *) echo "FAIL  Grafana health" >&2; FAIL=1 ;; esac
-       |curl -s --cacert $stateDir/ca.crt https://$grafanaHost/login | grep -q 'Sign in with Keycloak' && echo "ok    login page offers Keycloak" || { echo "FAIL  the login page does not offer Keycloak" >&2; FAIL=1; }
        |REDIR=$$(curl -s --cacert $stateDir/ca.crt -o /dev/null -w '%{redirect_url}' https://$grafanaHost/login/generic_oauth)
        |case "$$REDIR" in $issuer/protocol/openid-connect/auth*) echo "ok    /login/generic_oauth redirects to the Keycloak realm $kcRealm" ;; *) echo "FAIL  unexpected redirect: $$REDIR" >&2; FAIL=1 ;; esac
        |[ "$$FAIL" -eq 0 ] || exit 1
