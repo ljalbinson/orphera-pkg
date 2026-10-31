@@ -16,7 +16,8 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 // So a node uses the cache whenever it is up and quietly works without it when
 // it is not; nothing breaks if tst11 is rebuilt or switched off.
 //
-// Which nodes: Ubuntu nodes on the 10.10.5.0/24 test network. tst11 itself is
+// Which nodes: Ubuntu nodes on the 10.10.5.0/24 test network and the
+// Kubernetes nodes tst30-tst39 on 10.10.3.0/24. tst11 itself is
 // left out (the cache must not fetch through itself) and so is tst8 (Rocky,
 // uses dnf). Edit `clients` to add or remove nodes; every listed node must be
 // reachable and have a running agent.
@@ -36,7 +37,17 @@ object apt_cache_clients extends OrpheraClusterPlaybook:
       "tst6",
       "tst7",
       "tst9",
-      "tst10"
+      "tst10",
+      "tst30",
+      "tst31",
+      "tst32",
+      "tst33",
+      "tst34",
+      "tst35",
+      "tst36",
+      "tst37",
+      "tst38",
+      "tst39"
     )
 
   private val cacheHost = "tst11.ljalbinson.com"

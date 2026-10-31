@@ -2294,6 +2294,19 @@ or `smb://fs0.example.com/files` in the file manager.
 Not done: the disk (`/srv` is on the root filesystem unless a volume is mounted there first), quotas, backup of the share itself, and
 hosts that use `dnf` (the package and service names differ).
 
+## Example: a Kubernetes cluster on VMs (tst30-tst39)
+
+A kubeadm cluster with no OpenStack underneath: three control-plane nodes
+(tst30-tst32), three infra workers (tst33-tst35) and four workload workers
+(tst36-tst39) on 10.10.3.0/24, API address 10.10.3.20
+(`api.k8s.ljalbinson.com`), load-balancer pool 10.10.3.100-119. Built in steps;
+so far:
+
+    manifests/par-mk-new-and-empty.sh -q -j 5 tst30 tst31 tst32 tst33 tst34 tst35 tst36 tst37 tst38 tst39
+    orphera cluster-playbook manifests/k8s_registry_mirrors.scala   # tst9: registry.k8s.io, Docker Hub, ghcr.io caches
+    orphera cluster-playbook manifests/apt_cache_clients.scala      # includes tst30-tst39
+    orphera cluster-playbook manifests/k8s_node_prep.scala          # swap, sysctls, containerd, kubeadm packages
+
 ## Known gaps / not yet built
 
 - `when:` conditions can only check the *executing* node's own facts —

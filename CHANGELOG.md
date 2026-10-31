@@ -6,16 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-## [0.1.207] - 2026-10-30
-
-The agent's code is unchanged from 0.1.206; the orchestrator's `Container` takes `args`. New playbooks: Keycloak with Keystone federation, single sign-on into Horizon and Skyline (both now on HTTPS) with Keycloak groups deciding roles, Trove, Telemetry, Skyline, Magnum, Octavia, tenant networking, the Kolla image builder, RGW, Manila, Barbican, Heat and Designate; VirtualBMC and `move-vm.sh`.
-
 ### Added
 - Kubernetes cluster, step 1: the VMs. `config/tst30.yaml` to `config/tst39.yaml` and `inventory.yaml` define ten VMs on VLAN 103 (10.10.3.0/24, bridge
   `br-net103`, gateway 10.10.3.1, addresses 10.10.3.30-39): three control-plane nodes (tst30-tst32: 4 vCPU, 8 GiB, 40 GB plus a separate 20 GB disk
   for etcd), three infra workers (tst33-tst35: 4 vCPU, 12 GiB, 80 GB) and four workload workers (tst36-tst39: 4 vCPU, 16 GiB, 80 GB), spread over
   gs1, gs2, gs3 and st0 so that no host holds more than one control-plane node. Design: kubeadm and containerd, Cilium, ceph-csi on the existing Ceph
   cluster, cert-manager, Keycloak login (a new realm). The playbooks come in the next steps. The DNS records for the nodes are not in this repository.
+- Kubernetes cluster, step 2: node preparation. `manifests/k8s_registry_mirrors.scala` adds pull-through registry mirrors on tst9
+  for registry.k8s.io (:5001), Docker Hub (:5002) and ghcr.io (:5003) beside the quay.io one (:5000). `manifests/k8s_node_prep.scala`
+  prepares tst30-tst39: swap off, kernel modules and sysctls, containerd (systemd cgroups, the four mirrors with the upstream registries
+  as fallback), kubeadm, kubelet and kubectl from pkgs.k8s.io held at one minor version, kubelet `--node-ip`. `apt_cache_clients.scala`
+  now includes tst30-tst39.
+
+## [0.1.207] - 2026-10-30
+
+The agent's code is unchanged from 0.1.206; the orchestrator's `Container` takes `args`. New playbooks: Keycloak with Keystone federation, single sign-on into Horizon and Skyline (both now on HTTPS) with Keycloak groups deciding roles, Trove, Telemetry, Skyline, Magnum, Octavia, tenant networking, the Kolla image builder, RGW, Manila, Barbican, Heat and Designate; VirtualBMC and `move-vm.sh`.
+
+### Added
 - Keycloak groups decide a federated user's access. The Keycloak client `keystone` puts a `groups` claim (group names) in its
   tokens; Keystone's vhost passes several values with `;` between them (`OIDCClaimDelimiter`), which is what the mapping splits on;
   the mapping puts users of `openstack-admins`, `openstack-members` and `openstack-readers` in the Keystone groups
