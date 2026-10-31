@@ -17,6 +17,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   prepares tst30-tst39: swap off, kernel modules and sysctls, containerd (systemd cgroups, the four mirrors with the upstream registries
   as fallback), kubeadm, kubelet and kubectl from pkgs.k8s.io held at one minor version, kubelet `--node-ip`. `apt_cache_clients.scala`
   now includes tst30-tst39.
+- Kubernetes cluster, step 3: `manifests/k8s_api_vip.scala` puts haproxy and keepalived on tst30-tst32 and holds 10.10.3.20
+  (`api.k8s.ljalbinson.com`), forwarding port 6443 to the three API servers. haproxy binds the VIP only, so the API servers
+  must bind their node address (set by the cluster playbook).
 
 ## [0.1.207] - 2026-10-30
 
