@@ -298,14 +298,15 @@ object PlaybookRunner:
               if event.kind == orphera.common.Event.Kind.OUTPUT then
                 lines.update(_ :+ event.message)
               else IO.unit
-            _ <- requireStreamedSuccess(event => render(event) >> capture(event))(
-              r =>
-                NodeClient.executeCommand(
-                  node,
-                  renderedCommand,
-                  timeoutSeconds,
-                  r
-                )
+            _ <- requireStreamedSuccess(event =>
+              render(event) >> capture(event)
+            )(r =>
+              NodeClient.executeCommand(
+                node,
+                renderedCommand,
+                timeoutSeconds,
+                r
+              )
             )
             captured <- lines.get
             value = captured.mkString("\n").stripTrailing()
