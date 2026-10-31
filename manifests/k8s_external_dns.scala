@@ -139,27 +139,30 @@ object k8s_external_dns extends OrpheraClusterPlaybook:
        |    - name: none
        |      port: 80
        |EOF
-       |GOT=""
+       |# The wildcard answers the A query for any name, so presence is judged by the
+       |# ownership TXT record external-dns writes next to the A record.
+       |TXT=""
        |for I in $$(seq 1 36); do
-       |  GOT=$$(dig +short +norecurse @$primaryIp A $$HOST)
-       |  [ -n "$$GOT" ] && break
+       |  TXT=$$(dig +short +norecurse @$primaryIp TXT a-$$HOST)
+       |  [ -n "$$TXT" ] && break
        |  sleep 5
        |done
-       |chk "the route's hostname appears on the primary" $gatewayIp "$$GOT"
-       |[ -n "$$GOT" ] || $kc -n extdns-test get httproute $$NAME -o jsonpath='{.status.parents[*].conditions}' >&2 || true
-       |TXT=$$(dig +short +norecurse @$primaryIp TXT $$HOST a-$$HOST | grep -c orphera-k8s || true)
-       |[ "$$TXT" -ge 1 ] && echo "ok    the ownership TXT record names orphera-k8s" || { echo "FAIL  no ownership TXT record for $$HOST" >&2; FAIL=1; }
-       |GOT2=""
-       |for I in $$(seq 1 15); do GOT2=$$(dig +short +norecurse @$secondaryIp A $$HOST); [ -n "$$GOT2" ] && break; sleep 2; done
-       |chk "the record reaches the secondary" $gatewayIp "$$GOT2"
+       |if echo "$$TXT" | grep -q orphera-k8s; then echo "ok    the ownership TXT record for $$HOST names orphera-k8s"; else
+       |  echo "FAIL  no ownership TXT record for $$HOST on the primary: '$$TXT'" >&2; FAIL=1
+       |  $kc -n extdns-test get httproute $$NAME -o jsonpath='{.status.parents[*].conditions}' >&2 || true
+       |fi
+       |chk "the hostname resolves to the Gateway on the primary" $gatewayIp "$$(dig +short +norecurse @$primaryIp A $$HOST)"
+       |TXT2=""
+       |for I in $$(seq 1 15); do TXT2=$$(dig +short +norecurse @$secondaryIp TXT a-$$HOST); [ -n "$$TXT2" ] && break; sleep 2; done
+       |if echo "$$TXT2" | grep -q orphera-k8s; then echo "ok    the records reach the secondary"; else echo "FAIL  the secondary has no TXT record for $$HOST" >&2; FAIL=1; fi
        |$kc delete namespace extdns-test --wait=false >/dev/null
-       |GONE=""
+       |GONE="x"
        |for I in $$(seq 1 48); do
-       |  GONE=$$(dig +short +norecurse @$primaryIp A $$HOST)
+       |  GONE=$$(dig +short +norecurse @$primaryIp TXT a-$$HOST)
        |  [ -z "$$GONE" ] && break
        |  sleep 5
        |done
-       |chk "the record is removed after the route is deleted" "" "$$GONE"
+       |chk "the ownership record is removed after the route is deleted" "" "$$GONE"
        |chk "api is untouched" $apiVip "$$(dig +short +norecurse @$primaryIp A api.$zone)"
        |chk "the wildcard is untouched" $gatewayIp "$$(dig +short +norecurse @$primaryIp A never-registered.$zone)"
        |[ "$$FAIL" -eq 0 ] || { $kc -n $ns logs deploy/external-dns --tail=30 >&2 || true; exit 1; }
