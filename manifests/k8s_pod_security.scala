@@ -142,6 +142,18 @@ yaml.safe_dump(d, open('/etc/kubernetes/manifests/.kube-apiserver.yaml.new', 'w'
        |exit 1
        |""".stripMargin
 
+  // After the last API server restarts, haproxy needs a few seconds to stop
+  // sending requests to it, so wait for five successful answers in a row.
+  private val waitApiScript =
+    s"""for I in $$(seq 1 40); do
+       |  OKS=0
+       |  for J in 1 2 3 4 5; do $kc get --raw /readyz >/dev/null 2>&1 && OKS=$$((OKS+1)); done
+       |  [ "$$OKS" -eq 5 ] && break
+       |  sleep 3
+       |done
+       |[ "$$OKS" -eq 5 ] || { echo "the API server behind the VIP is not stable" >&2; exit 1; }
+       |""".stripMargin
+
   private val configMapPython =
     """import sys, json, yaml
 cm = json.load(sys.stdin)
@@ -163,6 +175,7 @@ print(json.dumps(cm))
 
   private val persistScript =
     s"""set -e
+       |$waitApiScript
        |$kc -n kube-system get configmap kubeadm-config -o json > $stateDir/kubeadm-config.before-pod-security.json
        |cat > /tmp/kubeadm-config-edit.py <<'PYEOF'
        |${configMapPython.replace("@@DIR@@", stateDir).replace("@@FLAG@@", flag)}
@@ -178,13 +191,7 @@ print(json.dumps(cm))
   private val testScript =
     s"""set -e
        |FAIL=0
-       |for I in $$(seq 1 40); do
-       |  OKS=0
-       |  for J in 1 2 3 4 5; do $kc get --raw /readyz >/dev/null 2>&1 && OKS=$$((OKS+1)); done
-       |  [ "$$OKS" -eq 5 ] && break
-       |  sleep 3
-       |done
-       |[ "$$OKS" -eq 5 ] || { echo "the API server behind the VIP is not stable" >&2; exit 1; }
+       |$waitApiScript
        |chk() {  # description, wanted, got
        |  if [ "$$2" = "$$3" ]; then echo "ok    $$1"; else echo "FAIL  $$1: wanted '$$2', got '$$3'" >&2; FAIL=1; fi
        |}
