@@ -1196,6 +1196,16 @@ orphera cluster-playbook manifests/kvm_vm_start.scala --config config/tst0.yaml
 A failed start, resume or reset is tried again after 5 s, up to 3 more times by default;
 `ORPHERA_VM_RETRIES=<n>` sets the number (0 turns it off). An undefined domain is not retried.
 
+`utils/vmctl.sh start|stop|reboot <vm>...` runs these three playbooks without the playbook path and
+`--config`, and prints one line per step instead of the echoed script (`--retries N` for start, `--wait S` and
+`--force` for stop and reboot, `--hard` / `--soft` for reboot; the full output of a failed VM is kept in
+`/tmp/vmctl.<vm>.log`):
+
+```bash
+utils/vmctl.sh start tst41
+utils/vmctl.sh start --retries 5 tst3 tst4 tst5
+```
+
 `manifests/gen_packages.scala` installs the config's `pre_basic_packages`, then
 `basic_packages`, on that VM once it has the agent and an `inventory.yaml`
 entry (either list may be absent or empty):
