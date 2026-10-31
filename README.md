@@ -1193,6 +1193,9 @@ still reports `running`) and waits for SSH; `--config` is mandatory there, with 
 orphera cluster-playbook manifests/kvm_vm_start.scala --config config/tst0.yaml
 ```
 
+A failed start, resume or reset is tried again after 5 s, up to 3 more times by default;
+`ORPHERA_VM_RETRIES=<n>` sets the number (0 turns it off). An undefined domain is not retried.
+
 `manifests/gen_packages.scala` installs the config's `pre_basic_packages`, then
 `basic_packages`, on that VM once it has the agent and an `inventory.yaml`
 entry (either list may be absent or empty):
