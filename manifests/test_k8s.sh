@@ -93,8 +93,8 @@ assert_contains "ClusterIssuer orphera-ca is Ready" "True" "$out"
 log "security"
 out=$(run_on "$CP" "echo ENC=\$($KC -n kube-system exec etcd-tst30 -- etcdctl --endpoints=https://127.0.0.1:2379 --cacert=/etc/kubernetes/pki/etcd/ca.crt --cert=/etc/kubernetes/pki/etcd/server.crt --key=/etc/kubernetes/pki/etcd/server.key get /registry/secrets/cert-manager/orphera-sub-ca | grep -a -c 'k8s:enc:secretbox:v1:key1')")
 assert_contains "Secrets are encrypted in etcd" "ENC=1" "$out"
-out=$(run_on "$CP" "sudo /usr/local/sbin/orphera-keycloak-k8s check 2>&1 || true; $KC get clusterrolebinding oidc-k8s-admins oidc-k8s-developers oidc-k8s-viewers --no-headers | wc -l")
-assert_contains "the three group role bindings exist" "3" "$out"
+out=$(run_on "$CP" "echo BINDINGS=\$($KC get clusterrolebinding oidc-k8s-admins oidc-k8s-developers oidc-k8s-viewers --no-headers | wc -l)")
+assert_contains "the three group role bindings exist" "BINDINGS=3" "$out"
 
 log "gateway"
 out=$(run_on "$CP" "$KC -n gateway get gateway public -o jsonpath='{.status.addresses[0].value}'; echo")
