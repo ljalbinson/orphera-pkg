@@ -7,7 +7,7 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 // (tst0-tst2) with ceph-csi (RBD). Needs k8s_cilium.scala.
 //
 // On tst0: the pool `k8s-rbd` and the Ceph user `client.k8s` (a pool-scoped
-// RBD user; the key is made by Ceph and copied to tst30 as a root-only file,
+// RBD user; the key is made on tst0 and copied to tst30 as a root-only file,
 // never written in this repository). On all ten nodes: the `rbd` kernel
 // module (ceph-csi maps volumes with it). On tst30: the Helm chart
 // ceph-csi-rbd in the namespace ceph-csi-rbd with the three monitors, the
@@ -37,13 +37,36 @@ object k8s_ceph_csi extends OrpheraClusterPlaybook:
   private val keyFile = s"$stateDir/ceph-k8s.key"
   private val kc = "kubectl --kubeconfig /etc/kubernetes/admin.conf"
 
+  // The kernel RBD client (`rbd map`, which ceph-csi uses on the nodes) cannot
+  // load an `aes256k` key, the default since Ceph 19.2.6 ("failed to add secret
+  // to kernel", error 524). So, as for Cinder and Glance, the user gets a
+  // legacy `aes` key: base64 of a header (type 1, timestamp, length 16) plus 16
+  // random bytes, made here on tst0 and imported with `ceph auth import`. The
+  // monitors accept it while `auth_allowed_ciphers` still lists `aes`, which
+  // the Cinder playbook already arranges (set again here). An existing user
+  // whose key is already of type 1 is kept, so a re-run changes nothing.
+  // TEST CLUSTER COMPROMISE, as noted in cinder_single_node.scala.
   private val cephScript =
     s"""set -e
+       |cephadm shell -- ceph mon set auth_allowed_ciphers aes,aes256k
        |cephadm shell -- ceph osd pool create $pool
        |cephadm shell -- rbd pool init $pool
-       |cephadm shell -- ceph auth get-or-create client.$cephUser mon 'profile rbd' mgr 'allow rw' osd 'profile rbd pool=$pool' >/dev/null
-       |KEY=$$(cephadm shell -- ceph auth get-key client.$cephUser 2>/dev/null | tail -n 1)
-       |[ -n "$$KEY" ] || { echo "could not read the key of client.$cephUser" >&2; exit 1; }
+       |KEY=$$(cephadm shell -- ceph auth get-key client.$cephUser 2>/dev/null | tail -n 1 || true)
+       |TYPE=$$(printf '%s' "$$KEY" | base64 -d 2>/dev/null | head -c 1 | od -An -tu1 | tr -d ' ')
+       |if [ "$$TYPE" != "1" ]; then
+       |  KEY=$$(python3 -c "import os,struct,base64,time;print(base64.b64encode(struct.pack('<HIIH',1,int(time.time()),0,16)+os.urandom(16)).decode())")
+       |  umask 077
+       |  cat > /tmp/$cephUser.keyring <<KEYRING
+       |[client.$cephUser]
+       |    key = $$KEY
+       |    caps mon = "profile rbd"
+       |    caps mgr = "allow rw"
+       |    caps osd = "profile rbd pool=$pool"
+       |KEYRING
+       |  cephadm shell --mount /tmp/$cephUser.keyring -- ceph auth import -i /mnt/$cephUser.keyring
+       |  rm -f /tmp/$cephUser.keyring
+       |  echo "client.$cephUser given a new key of the legacy aes type"
+       |fi
        |umask 077
        |printf '%s' "$$KEY" > /etc/ceph/ceph.client.$cephUser.key
        |echo "pool $pool and client.$cephUser ready"
