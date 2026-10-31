@@ -46,6 +46,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   an etcd snapshot (checked with `etcdutl snapshot status`) and an archive of `/etc/kubernetes/pki`, kept locally (48) and
   uploaded to the bucket `etcd-backups` on the Ceph object gateway (168 per node) with a native RGW user that does not depend on
   Keystone. It also runs a first backup on every node and a restore test of the newest snapshot.
+- Kubernetes cluster, step 12: `manifests/k8s_monitoring.scala` installs kube-prometheus-stack (Prometheus, Alertmanager, Grafana,
+  node-exporter, kube-state-metrics) on the infra nodes with Ceph volumes, publishes Grafana at `grafana.k8s.ljalbinson.com`
+  through the Gateway with Keycloak login (client `grafana` in the realm `k8s`, the group decides the Grafana role), and checks
+  Prometheus and Grafana. The etcd, scheduler and controller-manager metrics are not scraped yet.
 
 ## [0.1.207] - 2026-10-30
 
