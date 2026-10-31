@@ -471,15 +471,32 @@ yaml.safe_dump(d, open('/etc/kubernetes/manifests/.kube-apiserver.yaml.new', 'w'
         .build,
       stage("write-config-files", "tst30")
         .task("write authn.yaml and encryption.yaml")(
-          Task.RunCommand(List("sh", "-c", configFilesScript), timeoutSeconds = 60)
+          Task.RunCommand(
+            List("sh", "-c", configFilesScript),
+            timeoutSeconds = 60
+          )
         )
         .build,
       stage("distribute-config-files", "tst31", "tst32")
         .task("copy authn.yaml")(
-          Task.DistributeFile("tst30", s"$stateDir/authn.yaml", s"$stateDir/authn.yaml", "root", "root", 384)
+          Task.DistributeFile(
+            "tst30",
+            s"$stateDir/authn.yaml",
+            s"$stateDir/authn.yaml",
+            "root",
+            "root",
+            384
+          )
         )
         .task("copy encryption.yaml")(
-          Task.DistributeFile("tst30", s"$stateDir/encryption.yaml", s"$stateDir/encryption.yaml", "root", "root", 384)
+          Task.DistributeFile(
+            "tst30",
+            s"$stateDir/encryption.yaml",
+            s"$stateDir/encryption.yaml",
+            "root",
+            "root",
+            384
+          )
         )
         .build,
       stage("apiserver-tst30", "tst30")
@@ -507,7 +524,8 @@ yaml.safe_dump(d, open('/etc/kubernetes/manifests/.kube-apiserver.yaml.new', 'w'
         .build,
       stage("login-test", "tst30")
         .task("log in as each test user and check permissions")(
-          Task.RunCommand(List("sh", "-c", loginTestScript), timeoutSeconds = 180)
+          Task
+            .RunCommand(List("sh", "-c", loginTestScript), timeoutSeconds = 180)
         )
         .task("login ready")(
           Task.Debug(
