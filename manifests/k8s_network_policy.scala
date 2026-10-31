@@ -209,7 +209,21 @@ echo "network policies for $NS: base $*"
        |  rules:
        |  - backendRefs: [{name: web, port: 80}]
        |EOF
-       |$kc -n np-test wait --for=jsonpath='{.status.parents[0].conditions[?(@.type=="Accepted")].status}'=True httproute/web --timeout=120s >/dev/null
+       |ACC=""
+       |for I in $$(seq 1 60); do
+       |  ACC=$$($kc -n np-test get httproute web -o jsonpath='{.status.parents[0].conditions[?(@.type=="Accepted")].status}' 2>/dev/null || true)
+       |  [ "$$ACC" = "True" ] && break
+       |  sleep 3
+       |done
+       |if [ "$$ACC" != "True" ]; then
+       |  echo "FAIL  the HTTPRoute in np-test was not accepted; its status:" >&2
+       |  $kc -n np-test get httproute web -o jsonpath='{.status}' >&2 || true
+       |  echo >&2
+       |  $kc -n gateway get gateway public -o jsonpath='{.status.conditions}' >&2 || true
+       |  echo >&2
+       |  $kc -n kube-system logs deploy/cilium-operator --tail=15 >&2 || true
+       |  exit 1
+       |fi
        |want "no gateway rule: the Gateway cannot reach np-test" '^(000|50[0-9])$$' c_gw
        |$$NP apply np-test api world gateway
        |want "gateway: the route works through the Gateway" '^200$$' c_gw
