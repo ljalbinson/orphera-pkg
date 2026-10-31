@@ -18,8 +18,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   as fallback), kubeadm, kubelet and kubectl from pkgs.k8s.io held at one minor version, kubelet `--node-ip`. `apt_cache_clients.scala`
   now includes tst30-tst39.
 - Kubernetes cluster, step 3: `manifests/k8s_api_vip.scala` puts haproxy and keepalived on tst30-tst32 and holds 10.10.3.20
-  (`api.k8s.ljalbinson.com`), forwarding port 6443 to the three API servers. haproxy binds the VIP only, so the API servers
-  must bind their node address (set by the cluster playbook).
+  (`api.k8s.ljalbinson.com`), forwarding port 8443 to port 6443 of the three API servers (a different port, because the API servers listen
+  on 6443 on the same hosts).
+- Kubernetes cluster, step 4: `manifests/k8s_cluster.scala` runs kubeadm: the etcd disk of each control-plane node is mounted at
+  /var/lib/etcd, `kubeadm init` on tst30 (endpoint `api.k8s.ljalbinson.com:8443`, kube-proxy skipped for Cilium, pod network
+  10.244.0.0/16, service network 10.96.0.0/12), tst31 and tst32 join as control-plane nodes one after the other, the seven workers
+  join and are labelled `pool=infra` or `pool=workload`. The join token and certificate key are the secrets `k8s/bootstrap-token`
+  and `k8s/certificate-key`. `k8s_cluster_teardown.scala` resets all ten nodes.
 
 ## [0.1.207] - 2026-10-30
 

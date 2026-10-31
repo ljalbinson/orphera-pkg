@@ -5,23 +5,23 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 
 // Kubernetes cluster, step 3: one stable address for the API server.
 // haproxy and keepalived on the three control-plane nodes (tst30, tst31, tst32)
-// hold 10.10.3.20 (DNS name api.k8s.ljalbinson.com) and forward TCP port 6443
-// to the three kube-apiservers. kubeadm (k8s_cluster.scala) then uses
-// api.k8s.ljalbinson.com:6443 as the control-plane endpoint, so a node can
+// hold 10.10.3.20 (DNS name api.k8s.ljalbinson.com) and forward TCP port 8443
+// to port 6443 of the three kube-apiservers. kubeadm (k8s_cluster.scala) then
+// uses api.k8s.ljalbinson.com:8443 as the control-plane endpoint, so a node can
 // fail without any kubeconfig changing.
 //
-// Same pattern as mariadb_haproxy_keepalived.scala, including the lesson it
-// learned: haproxy binds the VIP address only, never a wildcard, because the
-// kube-apiserver on the same host also listens on 6443. That works only if
-// the API server binds its own node address and not 0.0.0.0, so
-// k8s_cluster.scala sets the API server's `bind-address` to the node IP.
-// `net.ipv4.ip_nonlocal_bind=1` lets haproxy bind the VIP on the nodes that
-// do not hold it yet.
+// The VIP's port is 8443, not 6443, because haproxy and the kube-apiserver
+// run on the same three hosts: the API server listens on 0.0.0.0:6443, and
+// on Linux a second bind of the same port on a specific address (the VIP)
+// collides with a wildcard bind (the lesson of mariadb_haproxy_keepalived.scala,
+// seen the other way round). haproxy binds the VIP address only, never a
+// wildcard, and `net.ipv4.ip_nonlocal_bind=1` lets it bind the VIP on the nodes
+// that do not hold it yet.
 //
 // Before kubeadm has run nothing listens on 6443, so every backend is down and
 // the VIP answers connection-refused. That is expected at this step; the final
-// check here only proves that exactly one node holds the VIP and that the
-// address answers ping.
+// check here only proves that one node holds the VIP and that the address
+// answers ping.
 //
 // Not compiled where this was written; the first run on scala0 is the first
 // compile.
@@ -87,7 +87,7 @@ object k8s_api_vip extends OrpheraClusterPlaybook:
        |# kube-apiserver health: a TLS handshake plus GET /livez would need the
        |# client CA; a plain TCP check is enough to take a dead node out.
        |listen kube_apiserver
-       |    bind $vip:6443
+       |    bind $vip:8443
        |    balance roundrobin
        |    default-server inter 3s fall 3 rise 2 on-marked-down shutdown-sessions
        |    server tst30 {{nodes.tst30.cluster_ip}}:6443 check
@@ -99,7 +99,7 @@ object k8s_api_vip extends OrpheraClusterPlaybook:
        |systemctl restart haproxy
        |sleep 1
        |systemctl is-active --quiet haproxy || { echo "haproxy failed to start; see journalctl -xeu haproxy" >&2; exit 1; }
-       |echo "haproxy forwards $vip:6443 to the three API servers"""".stripMargin
+       |echo "haproxy forwards $vip:8443 to port 6443 of the three API servers"""".stripMargin
 
   private def keepalivedScript(host: String): String =
     val (priority, state) = priorityAndState(host)
@@ -214,7 +214,7 @@ object k8s_api_vip extends OrpheraClusterPlaybook:
         )
         .task("api vip ready")(
           Task.Debug(
-            s"$vip (api.k8s.ljalbinson.com) is held by one control-plane node; haproxy forwards 6443 " +
+            s"$vip (api.k8s.ljalbinson.com) is held by one control-plane node; haproxy forwards 8443 " +
               "to the API servers, which do not exist until k8s_cluster.scala runs."
           )
         )
