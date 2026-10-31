@@ -215,12 +215,14 @@ object k8s_logging extends OrpheraClusterPlaybook:
         .build,
       stage("install-loki-and-alloy", node)
         .task("helm install Loki and Alloy")(
-          Task.RunCommand(List("sh", "-c", installScript), timeoutSeconds = 2000)
+          Task
+            .RunCommand(List("sh", "-c", installScript), timeoutSeconds = 2000)
         )
         .build,
       stage("grafana-datasource", node)
         .task("add Loki to Grafana")(
-          Task.RunCommand(List("sh", "-c", datasourceScript), timeoutSeconds = 60)
+          Task
+            .RunCommand(List("sh", "-c", datasourceScript), timeoutSeconds = 60)
         )
         .build,
       stage("test-logging", node)
