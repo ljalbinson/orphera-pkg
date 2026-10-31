@@ -7,6 +7,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- `manifests/build_k8s_stack.sh`: builds the whole Kubernetes stack in dependency order (DNS, registry mirrors, node preparation, API VIP, kubeadm cluster,
+  Cilium, cert-manager, ceph-csi, metrics, OIDC, Gateway, etcd backups, monitoring, logging, kubeadm-config, external-dns, Argo CD, Pod Security,
+  network policies and lockdowns) and ends with `test_k8s.sh`. Options `--with-vms`, `--from STEP`, `--only STEP`, `--list`. It only applies playbooks,
+  stops at the first failure and prints the resume command. Not yet run.
 - Kubernetes cluster, step 1: the VMs. `config/tst30.yaml` to `config/tst39.yaml` and `inventory.yaml` define ten VMs on VLAN 103 (10.10.3.0/24, bridge
   `br-net103`, gateway 10.10.3.1, addresses 10.10.3.30-39): three control-plane nodes (tst30-tst32: 4 vCPU, 8 GiB, 40 GB plus a separate 20 GB disk
   for etcd), three infra workers (tst33-tst35: 4 vCPU, 12 GiB, 80 GB) and four workload workers (tst36-tst39: 4 vCPU, 16 GiB, 80 GB), spread over

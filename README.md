@@ -2358,6 +2358,12 @@ Notes:
 - `manifests/test_k8s.sh` checks the whole cluster (13 checks; `NO_APPLY=1` skips
   the changes, `FAILOVER=1` also stops the VIP holder and checks the API
   still answers).
+- `manifests/build_k8s_stack.sh` builds all of the above in dependency order, from the
+  DNS servers to the network lockdown, and ends with `test_k8s.sh`. `--with-vms`
+  provisions the 12 VMs first, `--from STEP` resumes after a failure, `--only STEP`
+  runs one step, `--list` shows the plan. It only applies playbooks, so it can be
+  re-run on a built cluster. The parent-zone delegation and the Ceph, Keycloak
+  and test CA hosts must exist beforehand (the header lists them).
 - `manifests/k8s_cluster_teardown.scala` removes the cluster again (the VMs stay).
 - Every playbook says in its header what it needs and what it does not do.
 
