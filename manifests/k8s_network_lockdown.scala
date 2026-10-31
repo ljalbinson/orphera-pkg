@@ -173,7 +173,10 @@ object k8s_network_lockdown extends OrpheraClusterPlaybook:
     clusterPlaybook("k8s-network-lockdown")(
       stage("lock-external-dns", node)
         .task("default deny for external-dns, then test it")(
-          Task.RunCommand(List("sh", "-c", externalDnsScript), timeoutSeconds = 900)
+          Task.RunCommand(
+            List("sh", "-c", externalDnsScript),
+            timeoutSeconds = 900
+          )
         )
         .build,
       stage("lock-argocd", node)
