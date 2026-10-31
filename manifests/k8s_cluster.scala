@@ -194,11 +194,17 @@ object k8s_cluster extends OrpheraClusterPlaybook:
        |$$K get nodes -o wide
        |""".stripMargin
 
+  // The pods of the nodes that joined last appear a few seconds after
+  // `kubeadm join` returns, so the counts are retried for two minutes.
   private val checkScript =
-    s"""set -e
-       |K="kubectl --kubeconfig /etc/kubernetes/admin.conf"
-       |ETCD=$$($$K -n kube-system get pods -l component=etcd --no-headers | grep -c ' Running ' || true)
-       |API=$$($$K -n kube-system get pods -l component=kube-apiserver --no-headers | grep -c ' Running ' || true)
+    s"""K="kubectl --kubeconfig /etc/kubernetes/admin.conf"
+       |ETCD=0; API=0
+       |for I in $$(seq 1 24); do
+       |  ETCD=$$($$K -n kube-system get pods -l component=etcd --no-headers | grep -c ' Running ' || true)
+       |  API=$$($$K -n kube-system get pods -l component=kube-apiserver --no-headers | grep -c ' Running ' || true)
+       |  [ "$$ETCD" -eq 3 ] && [ "$$API" -eq 3 ] && break
+       |  sleep 5
+       |done
        |echo "etcd pods running: $$ETCD, kube-apiserver pods running: $$API"
        |[ "$$ETCD" -eq 3 ] && [ "$$API" -eq 3 ] || { echo "expected 3 etcd and 3 kube-apiserver pods running" >&2; exit 1; }
        |LIVEZ=$$(curl -sk https://$vip:8443/livez)
@@ -261,7 +267,7 @@ object k8s_cluster extends OrpheraClusterPlaybook:
           Task.RunCommand(List("sh", "-c", labelScript), timeoutSeconds = 120)
         )
         .task("check etcd, the API servers and the VIP")(
-          Task.RunCommand(List("sh", "-c", checkScript), timeoutSeconds = 60)
+          Task.RunCommand(List("sh", "-c", checkScript), timeoutSeconds = 180)
         )
         .task("cluster created")(
           Task.Debug(
