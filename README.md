@@ -2294,18 +2294,54 @@ or `smb://fs0.example.com/files` in the file manager.
 Not done: the disk (`/srv` is on the root filesystem unless a volume is mounted there first), quotas, backup of the share itself, and
 hosts that use `dnf` (the package and service names differ).
 
-## Example: a Kubernetes cluster on VMs (tst30-tst39)
+## Example: a Kubernetes cluster on VMs (tst30-tst41)
 
 A kubeadm cluster with no OpenStack underneath: three control-plane nodes
 (tst30-tst32), three infra workers (tst33-tst35) and four workload workers
 (tst36-tst39) on 10.10.3.0/24, API address 10.10.3.20
-(`api.k8s.ljalbinson.com`), load-balancer pool 10.10.3.100-119. Built in steps;
-so far:
+(`api.k8s.ljalbinson.com`, port 8443 through haproxy and keepalived),
+load-balancer pool 10.10.3.100-119, and two DNS servers (tst40, tst41) for the
+zone `k8s.ljalbinson.com`. Built in steps; each is one playbook and can be
+repeated:
 
     manifests/par-mk-new-and-empty.sh -q -j 5 tst30 tst31 tst32 tst33 tst34 tst35 tst36 tst37 tst38 tst39
-    orphera cluster-playbook manifests/k8s_registry_mirrors.scala   # tst9: registry.k8s.io, Docker Hub, ghcr.io caches
-    orphera cluster-playbook manifests/apt_cache_clients.scala      # includes tst30-tst39
-    orphera cluster-playbook manifests/k8s_node_prep.scala          # swap, sysctls, containerd, kubeadm packages
+    orphera cluster-playbook manifests/k8s_registry_mirrors.scala   # 1  tst9: registry.k8s.io, Docker Hub, ghcr.io caches
+    orphera cluster-playbook manifests/apt_cache_clients.scala      #    includes tst30-tst39
+    orphera cluster-playbook manifests/k8s_node_prep.scala          # 2  swap, sysctls, containerd, kubeadm packages
+    orphera cluster-playbook manifests/k8s_api_vip.scala            # 3  haproxy + keepalived, 10.10.3.20
+    orphera cluster-playbook manifests/k8s_cluster.scala            # 4  kubeadm init and join, stacked etcd on its own disk
+    orphera cluster-playbook manifests/k8s_cilium.scala             # 5  Cilium (kube-proxy replacement, L2 announcements, Gateway API, Hubble)
+    orphera cluster-playbook manifests/k8s_cert_manager.scala       # 6  cert-manager with a sub-CA of the lab's test CA
+    orphera cluster-playbook manifests/k8s_ceph_csi.scala           # 7  ceph-csi RBD, default StorageClass ceph-rbd
+    orphera cluster-playbook manifests/k8s_metrics_server.scala     # 8  kubectl top, autoscaling
+    orphera cluster-playbook manifests/k8s_oidc.scala               # 9  Keycloak sign-in to the API, RBAC by group, secrets encrypted at rest
+    orphera cluster-playbook manifests/k8s_gateway.scala            # 10 Gateway `public`: wildcard certificate, HTTP to HTTPS redirect
+    orphera cluster-playbook manifests/k8s_etcd_backup.scala        # 11 hourly etcd snapshots and PKI archives to the Ceph object store
+    orphera cluster-playbook manifests/k8s_monitoring.scala         # 12 Prometheus, Alertmanager, Grafana (Keycloak sign-in)
+    orphera cluster-playbook manifests/k8s_logging.scala            # 13 Loki and Alloy, 7 days of logs
+    orphera cluster-playbook manifests/k8s_kubeadm_config.scala     # 14 kubeadm's records match the hand changes; control-plane metrics
+    manifests/par-mk-new-and-empty.sh -q -j 2 tst40 tst41           # 15 two small VMs for DNS ...
+    orphera cluster-playbook manifests/k8s_dns.scala                #    ... BIND primary and secondary for k8s.ljalbinson.com
+    orphera cluster-playbook manifests/k8s_external_dns.scala       # 16 hostnames of HTTPRoutes and Services appear in the zone
+    orphera cluster-playbook manifests/k8s_argocd.scala             # 17 Argo CD at https://argocd.k8s.ljalbinson.com (Keycloak sign-in)
+
+Notes:
+
+- The Keycloak realm is `k8s`; the groups `k8s-admins`, `k8s-developers` and
+  `k8s-viewers` decide the role in the API (cluster-admin, edit, view), Grafana
+  (Admin, Editor, Viewer) and Argo CD (admin, view and sync, read-only). Passwords
+  are in the secret store (`orphera secrets get keycloak/k8sadmin`).
+- DNS needs the parent zone `ljalbinson.com` to delegate: `k8s IN NS
+  tst40.ljalbinson.com.` and `tst41`, plus A records for both. A resolver that has
+  `forwarders` also needs a `forward` zone for `k8s.ljalbinson.com` pointing at
+  10.10.3.40 and 10.10.3.41, otherwise its answers for the zone are NXDOMAIN.
+  external-dns owns only the records it creates (TXT registry); `api` and the `*`
+  wildcard stay.
+- `manifests/test_k8s.sh` checks the whole cluster (13 checks; `NO_APPLY=1` skips
+  the changes, `FAILOVER=1` also stops the VIP holder and checks the API
+  still answers).
+- `manifests/k8s_cluster_teardown.scala` removes the cluster again (the VMs stay).
+- Every playbook says in its header what it needs and what it does not do.
 
 ## Known gaps / not yet built
 

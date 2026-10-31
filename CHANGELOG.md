@@ -72,6 +72,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `https://argocd.k8s.ljalbinson.com`, signing in with Keycloak (client `argocd`; k8s-admins admin, k8s-developers view and sync, k8s-viewers
   read-only) and keeping the local `admin` account. The test syncs a one-ConfigMap Application from `k8s/argocd-test` in this repository and removes it again.
   Argo CD does not request an OIDC scope `groups` (the realm has none; the client's mapper supplies the claim).
+- README: the Kubernetes example now lists all steps, 1 to 17, with the notes on Keycloak groups, DNS delegation and the tests.
 
 ## [0.1.207] - 2026-10-30
 
