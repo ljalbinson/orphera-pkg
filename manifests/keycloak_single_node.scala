@@ -916,7 +916,8 @@ if __name__ == '__main__':
       clusterPlaybook("keycloak-single-node-check")(
         stage("check-keycloak", node)
           .task(s"check ${keycloakContainer.unitName}")(
-            Resource.checkTask(keycloakContainer.unitName, unitPath, unitText, Nil)
+            Resource
+              .checkTask(keycloakContainer.unitName, unitPath, unitText, Nil)
           )
           .build
       )
@@ -947,7 +948,8 @@ if __name__ == '__main__':
           Task.Install(packages = hostPackages, updateCache = true)
         )
         .task("make the TLS key and certificate request")(
-          Task.RunCommand(List("sh", "-c", tlsRequestScript), timeoutSeconds = 60)
+          Task
+            .RunCommand(List("sh", "-c", tlsRequestScript), timeoutSeconds = 60)
         )
         .build,
 
@@ -992,7 +994,10 @@ if __name__ == '__main__':
           )
         )
         .task("install the certificate chain and trust the CA")(
-          Task.RunCommand(List("sh", "-c", tlsInstallScript), timeoutSeconds = 60)
+          Task.RunCommand(
+            List("sh", "-c", tlsInstallScript),
+            timeoutSeconds = 60
+          )
         )
         .task("use the Kolla cache as a mirror for quay.io")(
           Task.RunCommand(List("sh", "-c", useCacheScript))
@@ -1034,13 +1039,24 @@ if __name__ == '__main__':
           )
         )
         .task(s"realm $realm, client keystone and user $demoUser")(
-          Task.RunCommand(List("sh", "-c", s"$helper realm"), timeoutSeconds = 120)
+          Task.RunCommand(
+            List("sh", "-c", s"$helper realm"),
+            timeoutSeconds = 120
+          )
         )
         .task("identity provider, mapping and protocol in Keystone")(
-          Task.RunCommand(List("sh", "-c", s"$helper federate"), timeoutSeconds = 120)
+          Task.RunCommand(
+            List("sh", "-c", s"$helper federate"),
+            timeoutSeconds = 120
+          )
         )
-        .task(s"a federated login: $demoUser through Keycloak to a Keystone token")(
-          Task.RunCommand(List("sh", "-c", s"$helper check"), timeoutSeconds = 120)
+        .task(
+          s"a federated login: $demoUser through Keycloak to a Keystone token"
+        )(
+          Task.RunCommand(
+            List("sh", "-c", s"$helper check"),
+            timeoutSeconds = 120
+          )
         )
         .task("keycloak confirmed")(
           Task.Debug(

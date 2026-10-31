@@ -42,7 +42,9 @@ object keycloak_teardown extends OrpheraClusterPlaybook:
   val playbook: ClusterPlaybook =
     clusterPlaybook("keycloak-teardown")(
       stage("teardown-keycloak-node", node)
-        .task("remove the federation from Keystone, the container, unit and files")(
+        .task(
+          "remove the federation from Keystone, the container, unit and files"
+        )(
           Task.RunCommand(List("sh", "-c", nodeScript), timeoutSeconds = 240)
         )
         .build,

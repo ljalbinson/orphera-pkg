@@ -48,8 +48,9 @@ object k8s_registry_mirrors extends OrpheraClusterPlaybook:
     ),
     network = Network.Published,
     ports = List(Port(m.port, 5000)),
-    description =
-      Some(s"Pull-through cache of ${m.remote} for the Kubernetes cluster, managed by Orphera"),
+    description = Some(
+      s"Pull-through cache of ${m.remote} for the Kubernetes cluster, managed by Orphera"
+    ),
     settleSeconds = 5
   )
 
@@ -75,7 +76,10 @@ object k8s_registry_mirrors extends OrpheraClusterPlaybook:
         Task.Install(packages = List("podman", "curl"), updateCache = true)
       )
       .task("pull the registry image")(
-        Task.RunCommand(List("sh", "-c", pullRegistryScript), timeoutSeconds = 600)
+        Task.RunCommand(
+          List("sh", "-c", pullRegistryScript),
+          timeoutSeconds = 600
+        )
       )
       .task("create the data directories")(
         Task.RunCommand(List("sh", "-c", mkdirScript))

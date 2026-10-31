@@ -223,7 +223,14 @@ object skyline_single_node extends OrpheraClusterPlaybook:
         Task.RunCommand(List("sh", "-c", signDirScript))
       )
       .task(s"fetch the certificate request from $node")(
-        Task.DistributeFile(node, s"$tlsDir/server.csr", s"$signDir/server.csr", "root", "root", 420)
+        Task.DistributeFile(
+          node,
+          s"$tlsDir/server.csr",
+          s"$signDir/server.csr",
+          "root",
+          "root",
+          420
+        )
       )
       .task(s"sign the certificate for $fqdn with the test CA")(
         Task.RunCommand(List("sh", "-c", signScript), timeoutSeconds = 60)
@@ -231,10 +238,24 @@ object skyline_single_node extends OrpheraClusterPlaybook:
       .build,
     stage("skyline-tls-install", node)
       .task(s"fetch the certificate from $ksNode")(
-        Task.DistributeFile(ksNode, s"$signDir/server.crt", s"$tlsDir/server.crt", "root", "root", 420)
+        Task.DistributeFile(
+          ksNode,
+          s"$signDir/server.crt",
+          s"$tlsDir/server.crt",
+          "root",
+          "root",
+          420
+        )
       )
       .task(s"fetch the CA certificate from $ksNode")(
-        Task.DistributeFile(ksNode, s"$signDir/ca.crt", s"$tlsDir/ca.crt", "root", "root", 420)
+        Task.DistributeFile(
+          ksNode,
+          s"$signDir/ca.crt",
+          s"$tlsDir/ca.crt",
+          "root",
+          "root",
+          420
+        )
       )
       .task("check the certificate and write the chain")(
         Task.RunCommand(List("sh", "-c", tlsInstallScript), timeoutSeconds = 60)
@@ -523,92 +544,107 @@ if __name__ == '__main__':
   private def applyPlaybook: ClusterPlaybook =
     clusterPlaybook("skyline-single-node")(
       (tlsStages ++ List[Stage](
-      stage("skyline-database", "tst3")
-        .task(s"create $dbName database and $dbUser on the Galera cluster")(
-          Task.RunCommand(List("sh", "-c", createDatabaseScript))
-        )
-        .build,
+        stage("skyline-database", "tst3")
+          .task(s"create $dbName database and $dbUser on the Galera cluster")(
+            Task.RunCommand(List("sh", "-c", createDatabaseScript))
+          )
+          .build,
 
-      stage("install-skyline", node)
-        .task("wait for apt and dpkg to be idle")(
-          Task.RunCommand(
-            List("sh", "-c", waitAptIdleScript),
-            timeoutSeconds = 960
+        stage("install-skyline", node)
+          .task("wait for apt and dpkg to be idle")(
+            Task.RunCommand(
+              List("sh", "-c", waitAptIdleScript),
+              timeoutSeconds = 960
+            )
           )
-        )
-        .task("install podman and tools")(
-          Task.Install(packages = hostPackages, updateCache = true)
-        )
-        .task("pull the Skyline image")(
-          Task.RunCommand(List("sh", "-c", pullScript), timeoutSeconds = 1800)
-        )
-        .task("create the Skyline directories")(
-          Task.RunCommand(List("sh", "-c", dirsScript))
-        )
-        .task("give Skyline its copy of the certificate and key")(
-          Task.RunCommand(List("sh", "-c", skylineTlsScript), timeoutSeconds = 120)
-        )
-        .task("fetch Keystone's CA from its TLS handshake")(
-          Task.RunCommand(List("sh", "-c", fetchCaScript), timeoutSeconds = 60)
-        )
-        .task("write the Skyline API helper")(
-          Task.RunCommand(List("sh", "-c", helperScript))
-        )
-        .task("register the Skyline user in Keystone")(
-          Task.RunCommand(
-            List("sh", "-c", "/usr/local/sbin/orphera-skyline-api register"),
-            timeoutSeconds = 120
+          .task("install podman and tools")(
+            Task.Install(packages = hostPackages, updateCache = true)
           )
-        )
-        .task("install the PyMySQL driver with the image's Python")(
-          Task.RunCommand(
-            List("sh", "-c", installDriverScript),
-            timeoutSeconds = 300
+          .task("pull the Skyline image")(
+            Task.RunCommand(List("sh", "-c", pullScript), timeoutSeconds = 1800)
           )
-        )
-        .task("write skyline.yaml")(
-          Task.WriteFile(
-            content = skylineYaml,
-            dest = s"$confDir/skyline.yaml",
-            owner = "root",
-            group = "root",
-            mode = 384 // 0600
+          .task("create the Skyline directories")(
+            Task.RunCommand(List("sh", "-c", dirsScript))
           )
-        )
-        .task("skyline_bootstrap (database migrations)")(
-          Task
-            .RunCommand(List("sh", "-c", bootstrapScript), timeoutSeconds = 600)
-        )
-        .task(s"write ${skylineContainer.unitName}")(skylineContainer.writeUnit)
-        .task(s"start ${skylineContainer.unitName}")(skylineContainer.start)
-        .task("restart skyline if the Keystone catalog changed")(
-          Task.RunCommand(
-            List("sh", "-c", catalogRestartScript),
-            timeoutSeconds = 180
+          .task("give Skyline its copy of the certificate and key")(
+            Task.RunCommand(
+              List("sh", "-c", skylineTlsScript),
+              timeoutSeconds = 120
+            )
           )
-        )
-        .build,
+          .task("fetch Keystone's CA from its TLS handshake")(
+            Task.RunCommand(
+              List("sh", "-c", fetchCaScript),
+              timeoutSeconds = 60
+            )
+          )
+          .task("write the Skyline API helper")(
+            Task.RunCommand(List("sh", "-c", helperScript))
+          )
+          .task("register the Skyline user in Keystone")(
+            Task.RunCommand(
+              List("sh", "-c", "/usr/local/sbin/orphera-skyline-api register"),
+              timeoutSeconds = 120
+            )
+          )
+          .task("install the PyMySQL driver with the image's Python")(
+            Task.RunCommand(
+              List("sh", "-c", installDriverScript),
+              timeoutSeconds = 300
+            )
+          )
+          .task("write skyline.yaml")(
+            Task.WriteFile(
+              content = skylineYaml,
+              dest = s"$confDir/skyline.yaml",
+              owner = "root",
+              group = "root",
+              mode = 384 // 0600
+            )
+          )
+          .task("skyline_bootstrap (database migrations)")(
+            Task
+              .RunCommand(
+                List("sh", "-c", bootstrapScript),
+                timeoutSeconds = 600
+              )
+          )
+          .task(s"write ${skylineContainer.unitName}")(
+            skylineContainer.writeUnit
+          )
+          .task(s"start ${skylineContainer.unitName}")(skylineContainer.start)
+          .task("restart skyline if the Keystone catalog changed")(
+            Task.RunCommand(
+              List("sh", "-c", catalogRestartScript),
+              timeoutSeconds = 180
+            )
+          )
+          .build,
 
-      stage("confirm-skyline-healthy", node)
-        .waitFor(
-          HealthCheck.Command(
-            onNode = node,
-            command = List("sh", "-c", healthScript),
-            pollIntervalSeconds = 5,
-            timeoutSeconds = 180
+        stage("confirm-skyline-healthy", node)
+          .waitFor(
+            HealthCheck.Command(
+              onNode = node,
+              command = List("sh", "-c", healthScript),
+              pollIntervalSeconds = 5,
+              timeoutSeconds = 180
+            )
           )
-        )
-        .task("the console, the API docs and an admin login answer")(
-          Task.RunCommand(
-            List("sh", "-c", "/usr/local/sbin/orphera-skyline-api login-check"),
-            timeoutSeconds = 120
+          .task("the console, the API docs and an admin login answer")(
+            Task.RunCommand(
+              List(
+                "sh",
+                "-c",
+                "/usr/local/sbin/orphera-skyline-api login-check"
+              ),
+              timeoutSeconds = 120
+            )
           )
-        )
-        .task("skyline confirmed")(
-          Task.Debug(
-            s"Skyline up at https://$fqdn:$port/ ($nodeIp): one container (apiserver + nginx) from ${skylineImage.ref}, database $dbName via $vip:3306, identity from $ksUrl, monitoring pages read $promUrl. Log in as admin (domain Default); the monitoring pages are not in the menu in this build, open /monitor-center/physical-node-admin. Test: manifests/test_skyline.sh"
+          .task("skyline confirmed")(
+            Task.Debug(
+              s"Skyline up at https://$fqdn:$port/ ($nodeIp): one container (apiserver + nginx) from ${skylineImage.ref}, database $dbName via $vip:3306, identity from $ksUrl, monitoring pages read $promUrl. Log in as admin (domain Default); the monitoring pages are not in the menu in this build, open /monitor-center/physical-node-admin. Test: manifests/test_skyline.sh"
+            )
           )
-        )
-        .build
+          .build
       ))*
     )

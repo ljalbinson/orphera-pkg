@@ -226,7 +226,14 @@ object horizon_single_node extends OrpheraClusterPlaybook:
         Task.RunCommand(List("sh", "-c", signDirScript))
       )
       .task(s"fetch the certificate request from $node")(
-        Task.DistributeFile(node, s"$tlsDir/server.csr", s"$signDir/server.csr", "root", "root", 420)
+        Task.DistributeFile(
+          node,
+          s"$tlsDir/server.csr",
+          s"$signDir/server.csr",
+          "root",
+          "root",
+          420
+        )
       )
       .task(s"sign the certificate for $fqdn with the test CA")(
         Task.RunCommand(List("sh", "-c", signScript), timeoutSeconds = 60)
@@ -234,10 +241,24 @@ object horizon_single_node extends OrpheraClusterPlaybook:
       .build,
     stage("horizon-tls-install", node)
       .task(s"fetch the certificate from $ksNode")(
-        Task.DistributeFile(ksNode, s"$signDir/server.crt", s"$tlsDir/server.crt", "root", "root", 420)
+        Task.DistributeFile(
+          ksNode,
+          s"$signDir/server.crt",
+          s"$tlsDir/server.crt",
+          "root",
+          "root",
+          420
+        )
       )
       .task(s"fetch the CA certificate from $ksNode")(
-        Task.DistributeFile(ksNode, s"$signDir/ca.crt", s"$tlsDir/ca.crt", "root", "root", 420)
+        Task.DistributeFile(
+          ksNode,
+          s"$signDir/ca.crt",
+          s"$tlsDir/ca.crt",
+          "root",
+          "root",
+          420
+        )
       )
       .task("check the certificate and write the chain")(
         Task.RunCommand(List("sh", "-c", tlsInstallScript), timeoutSeconds = 60)
@@ -512,61 +533,62 @@ if __name__ == '__main__':
   val playbook: ClusterPlaybook =
     clusterPlaybook("horizon-single-node")(
       (tlsStages ++ List[Stage](
-      stage("install-horizon", node)
-        .task("wait until apt and dpkg are idle")(
-          Task.RunCommand(
-            List("sh", "-c", waitAptIdleScript),
-            timeoutSeconds = 960
+        stage("install-horizon", node)
+          .task("wait until apt and dpkg are idle")(
+            Task.RunCommand(
+              List("sh", "-c", waitAptIdleScript),
+              timeoutSeconds = 960
+            )
           )
-        )
-        .task("install podman and tools")(
-          Task.Install(packages = hostPackages, updateCache = true)
-        )
-        .task("use the Kolla cache as a mirror for quay.io")(
-          Task.RunCommand(List("sh", "-c", useCacheScript))
-        )
-        .task("pull the Horizon image")(
-          Task.RunCommand(List("sh", "-c", pullScript), timeoutSeconds = 1800)
-        )
-        .task("fetch Keystone's CA from its TLS handshake")(
-          Task.RunCommand(List("sh", "-c", fetchCaScript), timeoutSeconds = 60)
-        )
-        .task("write local_settings.py")(
-          Task.RunCommand(List("sh", "-c", settingsScript))
-        )
-        .task("write the Kolla config and the Apache vhost")(
-          Task.RunCommand(
-            List("sh", "-c", kollaConfigScript),
-            timeoutSeconds = 120
+          .task("install podman and tools")(
+            Task.Install(packages = hostPackages, updateCache = true)
           )
-        )
-        .task("write the Horizon check helper")(
-          Task.RunCommand(List("sh", "-c", helperScript))
-        )
-        .task(s"write ${horizonWeb.unitName}")(horizonWeb.writeUnit)
-        .task(s"start ${horizonWeb.unitName}")(horizonWeb.start)
-        .build,
+          .task("use the Kolla cache as a mirror for quay.io")(
+            Task.RunCommand(List("sh", "-c", useCacheScript))
+          )
+          .task("pull the Horizon image")(
+            Task.RunCommand(List("sh", "-c", pullScript), timeoutSeconds = 1800)
+          )
+          .task("fetch Keystone's CA from its TLS handshake")(
+            Task
+              .RunCommand(List("sh", "-c", fetchCaScript), timeoutSeconds = 60)
+          )
+          .task("write local_settings.py")(
+            Task.RunCommand(List("sh", "-c", settingsScript))
+          )
+          .task("write the Kolla config and the Apache vhost")(
+            Task.RunCommand(
+              List("sh", "-c", kollaConfigScript),
+              timeoutSeconds = 120
+            )
+          )
+          .task("write the Horizon check helper")(
+            Task.RunCommand(List("sh", "-c", helperScript))
+          )
+          .task(s"write ${horizonWeb.unitName}")(horizonWeb.writeUnit)
+          .task(s"start ${horizonWeb.unitName}")(horizonWeb.start)
+          .build,
 
-      stage("confirm-horizon-healthy", node)
-        .waitFor(
-          HealthCheck.Command(
-            onNode = node,
-            command = List("sh", "-c", webHealthScript),
-            pollIntervalSeconds = 5,
-            timeoutSeconds = 120
+        stage("confirm-horizon-healthy", node)
+          .waitFor(
+            HealthCheck.Command(
+              onNode = node,
+              command = List("sh", "-c", webHealthScript),
+              pollIntervalSeconds = 5,
+              timeoutSeconds = 120
+            )
           )
-        )
-        .task("sign in as admin like a browser would")(
-          Task.RunCommand(
-            List("sh", "-c", "/usr/local/sbin/orphera-horizon-check login"),
-            timeoutSeconds = 120
+          .task("sign in as admin like a browser would")(
+            Task.RunCommand(
+              List("sh", "-c", "/usr/local/sbin/orphera-horizon-check login"),
+              timeoutSeconds = 120
+            )
           )
-        )
-        .task("horizon confirmed")(
-          Task.Debug(
-            s"Horizon up at https://$fqdn:$port/ ($nodeIp, certificate from the test CA): sign in as admin (domain Default) with the Keystone admin password from keystone_single_node.scala. Identity from $ksUrl. Test: manifests/test_horizon.sh"
+          .task("horizon confirmed")(
+            Task.Debug(
+              s"Horizon up at https://$fqdn:$port/ ($nodeIp, certificate from the test CA): sign in as admin (domain Default) with the Keystone admin password from keystone_single_node.scala. Identity from $ksUrl. Test: manifests/test_horizon.sh"
+            )
           )
-        )
-        .build
+          .build
       ))*
     )

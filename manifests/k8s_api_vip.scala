@@ -103,7 +103,8 @@ object k8s_api_vip extends OrpheraClusterPlaybook:
 
   private def keepalivedScript(host: String): String =
     val (priority, state) = priorityAndState(host)
-    val peerLines = peers(host).map(p => s"        {{nodes.$p.cluster_ip}}").mkString("\n")
+    val peerLines =
+      peers(host).map(p => s"        {{nodes.$p.cluster_ip}}").mkString("\n")
     s"""IFACE=$$(ip -4 route show default | awk '{print $$5; exit}')
        |cat > /etc/keepalived/keepalived.conf <<EOF
        |vrrp_script chk_haproxy {
@@ -173,17 +174,26 @@ object k8s_api_vip extends OrpheraClusterPlaybook:
         .build,
       stage("write-keepalived-tst30", "tst30")
         .task("write keepalived.conf and (re)start keepalived")(
-          Task.RunCommand(List("sh", "-c", keepalivedScript("tst30")), timeoutSeconds = 60)
+          Task.RunCommand(
+            List("sh", "-c", keepalivedScript("tst30")),
+            timeoutSeconds = 60
+          )
         )
         .build,
       stage("write-keepalived-tst31", "tst31")
         .task("write keepalived.conf and (re)start keepalived")(
-          Task.RunCommand(List("sh", "-c", keepalivedScript("tst31")), timeoutSeconds = 60)
+          Task.RunCommand(
+            List("sh", "-c", keepalivedScript("tst31")),
+            timeoutSeconds = 60
+          )
         )
         .build,
       stage("write-keepalived-tst32", "tst32")
         .task("write keepalived.conf and (re)start keepalived")(
-          Task.RunCommand(List("sh", "-c", keepalivedScript("tst32")), timeoutSeconds = 60)
+          Task.RunCommand(
+            List("sh", "-c", keepalivedScript("tst32")),
+            timeoutSeconds = 60
+          )
         )
         .build,
       stage("confirm-api-vip", "tst31")

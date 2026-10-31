@@ -154,7 +154,10 @@ object k8s_node_prep extends OrpheraClusterPlaybook:
           )
         )
         .task("configure containerd and the registry mirrors")(
-          Task.RunCommand(List("sh", "-c", containerdScript), timeoutSeconds = 120)
+          Task.RunCommand(
+            List("sh", "-c", containerdScript),
+            timeoutSeconds = 120
+          )
         )
         .build,
       stage("install-kubernetes-packages", nodes*)
