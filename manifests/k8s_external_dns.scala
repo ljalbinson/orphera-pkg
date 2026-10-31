@@ -113,6 +113,15 @@ object k8s_external_dns extends OrpheraClusterPlaybook:
        |HOST=$$NAME.$zone
        |$kc create namespace extdns-test --dry-run=client -o yaml | $kc apply -f -
        |cat <<EOF | $kc apply -f -
+       |apiVersion: v1
+       |kind: Service
+       |metadata:
+       |  name: none
+       |  namespace: extdns-test
+       |spec:
+       |  ports:
+       |  - port: 80
+       |---
        |apiVersion: gateway.networking.k8s.io/v1
        |kind: HTTPRoute
        |metadata:
@@ -137,6 +146,7 @@ object k8s_external_dns extends OrpheraClusterPlaybook:
        |  sleep 5
        |done
        |chk "the route's hostname appears on the primary" $gatewayIp "$$GOT"
+       |[ -n "$$GOT" ] || $kc -n extdns-test get httproute $$NAME -o jsonpath='{.status.parents[*].conditions}' >&2 || true
        |TXT=$$(dig +short +norecurse @$primaryIp TXT $$HOST a-$$HOST | grep -c orphera-k8s || true)
        |[ "$$TXT" -ge 1 ] && echo "ok    the ownership TXT record names orphera-k8s" || { echo "FAIL  no ownership TXT record for $$HOST" >&2; FAIL=1; }
        |GOT2=""
