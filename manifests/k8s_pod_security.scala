@@ -294,7 +294,8 @@ print(json.dumps(cm))
         .build,
       stage("restart-cilium-operator", "tst30")
         .task("restart the operator so its Gateway controller reconnects")(
-          Task.RunCommand(List("sh", "-c", operatorScript), timeoutSeconds = 400)
+          Task
+            .RunCommand(List("sh", "-c", operatorScript), timeoutSeconds = 400)
         )
         .build,
       stage("test-pod-security", "tst30")

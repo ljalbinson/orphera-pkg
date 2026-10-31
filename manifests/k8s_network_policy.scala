@@ -259,7 +259,8 @@ echo "network policies for $NS: base $*"
         .build,
       stage("check-cilium-operator", node)
         .task("restart the operator if its Gateway controller gave up")(
-          Task.RunCommand(List("sh", "-c", operatorScript), timeoutSeconds = 400)
+          Task
+            .RunCommand(List("sh", "-c", operatorScript), timeoutSeconds = 400)
         )
         .build,
       stage("test-network-policy", node)
