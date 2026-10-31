@@ -1,0 +1,8 @@
+# Used by manifests/k8s_argocd.scala as the source of its self-test Application.
+# It holds nothing the cluster needs; the test syncs it and removes it again.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: orphera-selftest
+data:
+  purpose: "Argo CD self-test"

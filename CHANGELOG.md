@@ -68,6 +68,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   object goes; it owns only records it created (TXT registry), so `api` and the wildcard stay. `k8s_dns.scala` now also lets the key transfer
   the zone, which external-dns needs to list it; run `k8s_dns` again first. The test creates a route, checks the record and its TXT
   record, deletes the route and checks both are gone.
+- Kubernetes cluster, step 17: Argo CD. `manifests/k8s_argocd.scala` installs Argo CD (Helm chart argo/argo-cd, namespace `argocd`, infra nodes) at
+  `https://argocd.k8s.ljalbinson.com`, signing in with Keycloak (client `argocd`; k8s-admins admin, k8s-developers view and sync, k8s-viewers
+  read-only) and keeping the local `admin` account. The test syncs a one-ConfigMap Application from `k8s/argocd-test` in this repository and removes it again.
 
 ## [0.1.207] - 2026-10-30
 
