@@ -49,7 +49,11 @@ object kvm_vm_reboot extends OrpheraClusterPlaybook:
   )
 
   private val mode: String =
-    sys.env.get("ORPHERA_VM_MODE").map(_.trim).filter(_.nonEmpty).getOrElse("soft")
+    sys.env
+      .get("ORPHERA_VM_MODE")
+      .map(_.trim)
+      .filter(_.nonEmpty)
+      .getOrElse("soft")
 
   require(
     mode == "soft" || mode == "hard",
