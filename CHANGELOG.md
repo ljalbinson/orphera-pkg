@@ -28,6 +28,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Kubernetes cluster, step 5: `manifests/k8s_cilium.scala` installs Cilium with Helm from tst30: kube-proxy replacement, VXLAN
   tunnels, pod addresses 10.244.0.0/16, LoadBalancer addresses 10.10.3.100-119 announced with ARP by the infra nodes, the
   Gateway API CRDs and GatewayClass `cilium`, Hubble. It ends by creating an nginx Service of type LoadBalancer and requesting it.
+- Kubernetes cluster, steps 6 to 8: `k8s_cert_manager.scala` installs cert-manager and the ClusterIssuer `orphera-ca`, which signs
+  with a sub-CA of the Orphera Test CA (key made on tst30, request signed on tst6); `k8s_ceph_csi.scala` installs ceph-csi (RBD)
+  against the lab Ceph cluster with the pool `k8s-rbd`, the user `client.k8s` and the default StorageClass `ceph-rbd`;
+  `k8s_metrics_server.scala` installs metrics-server. Each ends with a test that uses the feature (a certificate issued and
+  verified, a pod writing to a volume, `kubectl top nodes`).
 
 ## [0.1.207] - 2026-10-30
 
