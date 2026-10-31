@@ -56,7 +56,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Kubernetes cluster, step 14: `manifests/k8s_kubeadm_config.scala` adds the hand-made API server settings (Keycloak login, Secret
   encryption) to the `kubeadm-config` ConfigMap so `kubeadm upgrade` keeps them, makes the controller manager, scheduler and etcd serve
   their metrics on the node address (one node at a time, with rollback), checks with `kubeadm upgrade diff`, and switches on their
-  Prometheus scrape jobs. New clusters get the metrics settings from `k8s_cluster.scala`; `k8s_monitoring.scala` now scrapes the three.
+  Prometheus scrape jobs. It also gives kubelet a resolver file with each DNS server once (systemd-resolved lists them twice, so pods warned
+  "Nameserver limits were exceeded"). New clusters get the metrics settings from `k8s_cluster.scala`; `k8s_monitoring.scala` now scrapes the three.
 
 ## [0.1.207] - 2026-10-30
 

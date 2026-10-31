@@ -26,7 +26,17 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 // 3. `kubeadm upgrade diff` is run on each node for the version it already has:
 //    it shows what an upgrade would change in the manifests, and the playbook
 //    fails if the diff still touches any of the settings above.
-// 4. The Helm release kps is upgraded (same chart version, other values kept)
+// 4. Pods got the warning "Nameserver limits were exceeded": systemd-resolved lists
+//    192.168.1.70 and .71 twice (once from gen_set_dns.scala's global setting, once
+//    from the interface's cloud-init network configuration, true on every lab VM),
+//    and Kubernetes keeps only three. On the ten Kubernetes nodes kubelet is given
+//    its own resolver file, /etc/kubernetes/orphera/resolv.conf, with each
+//    server once (made from systemd-resolved's list; it does not follow later DNS
+//    changes, so re-run this playbook after changing the servers), through
+//    `resolvConf` in /var/lib/kubelet/config.yaml and in the kube-system/kubelet-config
+//    ConfigMap. CoreDNS is restarted to pick it up, and a test pod on the host
+//    network must show exactly the servers once.
+// 5. The Helm release kps is upgraded (same chart version, other values kept)
 //    with the etcd, scheduler and controller-manager scrape jobs on; the last
 //    task asks Prometheus whether all three are up on all three nodes.
 //
@@ -83,6 +93,75 @@ print(json.dumps(cm))
        |rm -f /tmp/kubeadm-config.after.json
        |$kc -n kube-system get configmap kubeadm-config -o jsonpath='{.data.ClusterConfiguration}' | grep -E 'authentication-config|encryption-provider-config|bind-address|listen-metrics-urls|orphera-auth'
        |echo "kubeadm-config now carries the Keycloak login, the Secret encryption and the metrics settings"
+       |""".stripMargin
+
+  private val kubeletConfigPython =
+    """import sys, json, yaml
+cm = json.load(sys.stdin)
+kc = yaml.safe_load(cm['data']['kubelet'])
+kc['resolvConf'] = '@@FILE@@'
+cm['data']['kubelet'] = yaml.safe_dump(kc, default_flow_style=False)
+print(json.dumps(cm))
+"""
+
+  private val resolvFile = s"$stateDir/resolv.conf"
+
+  private val kubeletResolvScript =
+    s"""set -e
+       |SRC=/run/systemd/resolve/resolv.conf
+       |{ grep '^nameserver' $$SRC | awk '!seen[$$2]++' | head -3; grep '^search' $$SRC | head -1; } > $resolvFile.new
+       |grep -q '^nameserver' $resolvFile.new || { echo "no nameserver found in $$SRC" >&2; exit 1; }
+       |mv $resolvFile.new $resolvFile
+       |chmod 644 $resolvFile
+       |if grep -q '^resolvConf:' /var/lib/kubelet/config.yaml; then
+       |  sed -i 's|^resolvConf:.*|resolvConf: $resolvFile|' /var/lib/kubelet/config.yaml
+       |else
+       |  echo 'resolvConf: $resolvFile' >> /var/lib/kubelet/config.yaml
+       |fi
+       |systemctl restart kubelet
+       |for I in $$(seq 1 30); do systemctl is-active --quiet kubelet && break; sleep 2; done
+       |systemctl is-active --quiet kubelet || { echo "kubelet did not restart" >&2; exit 1; }
+       |echo "$$(hostname): kubelet resolver file: $$(grep -c '^nameserver' $resolvFile) nameserver(s)"
+       |""".stripMargin
+
+  private val kubeletConfigScript =
+    s"""set -e
+       |cat > /tmp/kubelet-config-edit.py <<'PYEOF'
+       |${kubeletConfigPython.replace("@@FILE@@", resolvFile)}
+       |PYEOF
+       |$kc -n kube-system get configmap kubelet-config -o json | python3 /tmp/kubelet-config-edit.py > /tmp/kubelet-config.after.json
+       |rm -f /tmp/kubelet-config-edit.py
+       |$kc replace -f /tmp/kubelet-config.after.json >/dev/null
+       |rm -f /tmp/kubelet-config.after.json
+       |$kc -n kube-system get configmap kubelet-config -o jsonpath='{.data.kubelet}' | grep resolvConf
+       |$kc -n kube-system rollout restart deployment/coredns
+       |$kc -n kube-system rollout status deployment/coredns --timeout=180s
+       |""".stripMargin
+
+  private val dnsTestScript =
+    s"""set -e
+       |$kc delete pod dns-probe --ignore-not-found >/dev/null
+       |cat <<EOF | $kc apply -f -
+       |apiVersion: v1
+       |kind: Pod
+       |metadata:
+       |  name: dns-probe
+       |spec:
+       |  hostNetwork: true
+       |  dnsPolicy: Default
+       |  restartPolicy: Never
+       |  nodeSelector:
+       |    pool: workload
+       |  containers:
+       |  - name: probe
+       |    image: docker.io/library/busybox:stable
+       |    command: ["sh", "-c", "grep -c ^nameserver /etc/resolv.conf"]
+       |EOF
+       |$kc wait --for=jsonpath='{.status.phase}'=Succeeded pod/dns-probe --timeout=180s
+       |N=$$($kc logs dns-probe)
+       |$kc delete pod dns-probe --wait=false >/dev/null
+       |[ "$$N" = "2" ] || { echo "a host-network pod sees $$N nameservers, expected 2" >&2; exit 1; }
+       |echo "a host-network pod sees exactly 2 nameservers"
        |""".stripMargin
 
   private val patchPython =
@@ -205,6 +284,19 @@ patch('etcd.yaml', '--listen-metrics-urls=http://127.0.0.1:2381', '--listen-metr
       stage("check-upgrade-diff", cpNodes*)
         .task("kubeadm upgrade diff keeps the settings")(
           Task.RunCommand(List("sh", "-c", diffScript), timeoutSeconds = 300)
+        )
+        .build,
+      stage("kubelet-resolver", (30 to 39).map(n => s"tst$n")*)
+        .task("give kubelet a resolver file with each server once")(
+          Task.RunCommand(List("sh", "-c", kubeletResolvScript), timeoutSeconds = 180)
+        )
+        .build,
+      stage("kubelet-config-and-dns-test", "tst30")
+        .task("record it in kubelet-config, restart CoreDNS")(
+          Task.RunCommand(List("sh", "-c", kubeletConfigScript), timeoutSeconds = 300)
+        )
+        .task("a host-network pod sees two nameservers")(
+          Task.RunCommand(List("sh", "-c", dnsTestScript), timeoutSeconds = 300)
         )
         .build,
       stage("scrape-control-plane", "tst30")
