@@ -2324,6 +2324,10 @@ repeated:
     orphera cluster-playbook manifests/k8s_dns.scala                #    ... BIND primary and secondary for k8s.ljalbinson.com
     orphera cluster-playbook manifests/k8s_external_dns.scala       # 16 hostnames of HTTPRoutes and Services appear in the zone
     orphera cluster-playbook manifests/k8s_argocd.scala             # 17 Argo CD at https://argocd.k8s.ljalbinson.com (Keycloak sign-in)
+    orphera cluster-playbook manifests/k8s_pod_security.scala       # 18 Pod Security: baseline enforced, restricted warned, cluster-wide
+    orphera cluster-playbook manifests/k8s_network_policy.scala     # 19 the orphera-netpol helper, tested on throw-away namespaces
+    orphera cluster-playbook manifests/k8s_network_lockdown.scala   #    default-deny for external-dns, argocd, logging
+    orphera cluster-playbook manifests/k8s_network_lockdown_monitoring.scala   #    default-deny for monitoring
 
 Notes:
 
@@ -2337,6 +2341,19 @@ Notes:
   10.10.3.40 and 10.10.3.41, otherwise its answers for the zone are NXDOMAIN.
   external-dns owns only the records it creates (TXT registry); `api` and the `*`
   wildcard stay.
+- Pod Security is set for the whole cluster in the kube-apiserver (an admission
+  configuration file, kept in the kubeadm-config ConfigMap so `kubeadm upgrade`
+  keeps it): pods that use privileged mode, host namespaces or host paths are
+  refused outside `kube-system`; `ceph-csi-rbd` and `monitoring` are labelled
+  `privileged`. A namespace label overrides the default. The API server restarts
+  make the Cilium operator's Gateway controller give up, so the playbook restarts
+  the operator afterwards.
+- Network policies are Cilium policies applied with
+  `/usr/local/sbin/orphera-netpol apply NAMESPACE [api] [gateway] [world] [scrape] [nodes] [cluster]`
+  on tst30 (`remove` and `show` as well): a namespace may talk to itself and to
+  CoreDNS, plus what the options add. external-dns, argocd, logging and monitoring are
+  locked down; a lockdown playbook removes a namespace's policies again if its test
+  fails. New namespaces are open until someone runs the helper on them.
 - `manifests/test_k8s.sh` checks the whole cluster (13 checks; `NO_APPLY=1` skips
   the changes, `FAILOVER=1` also stops the VIP holder and checks the API
   still answers).
