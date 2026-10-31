@@ -194,7 +194,7 @@ def prune_remote(prefix_kind):
 def backup():
     os.makedirs(DIR, exist_ok=True)
     cid = etcd_container()
-    stamp = datetime.datetime.utcnow().strftime('%Y%m%dT%H%M%SZ')
+    stamp = time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())
     inside = '/var/lib/etcd/orphera-snapshot.db'
     run(['crictl', 'exec', cid, 'etcdctl'] + ETCD_ARGS + ['snapshot', 'save', inside])
     st = snapshot_status(cid, inside)
