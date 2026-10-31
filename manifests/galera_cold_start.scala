@@ -116,7 +116,7 @@ object galera_cold_start extends OrpheraClusterPlaybook:
       |FORCE='@@FORCE@@'
       |NODES="tst3 tst4 tst5"
       |plan() { echo "PLAN verb=$1 best=$2 why=$3"; exit 0; }
-      |kind() { set -- $1; echo "$1"; }
+      |kind() { set -- $1; echo "$2"; }
       |field() { for w in $1; do case "$w" in "$2="*) echo "${w#*=}"; return;; esac; done; }
       |none=0; standalone=0; up=0; down=0; sizes=""
       |for n in $NODES; do
@@ -193,7 +193,7 @@ object galera_cold_start extends OrpheraClusterPlaybook:
   private def joinScript(self: String): String =
     verbOf() +
       s"""S='{{{nodes.$self.galera_state}}}'
-         |case "$$S" in down*) DOWN=1 ;; *) DOWN=0 ;; esac
+         |case "$$S" in "GALERA-STATE down"*) DOWN=1 ;; *) DOWN=0 ;; esac
          |if [ "$$VERB" = "bootstrap" ] && [ "$$BEST" != "$self" ]; then DOWN=1; elif [ "$$VERB" != "join" ]; then DOWN=0; fi
          |if [ "$$DOWN" != "1" ]; then echo "$self: nothing to start"; exit 0; fi
          |systemctl start mariadb || { echo 'starting mariadb failed' >&2; journalctl -xeu mariadb --no-pager -n 15 >&2; exit 1; }
