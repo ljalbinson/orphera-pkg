@@ -37,7 +37,8 @@ object k8s_network_lockdown_monitoring extends OrpheraClusterPlaybook:
   private val kc = "kubectl --kubeconfig /etc/kubernetes/admin.conf"
   private val np = "/usr/local/sbin/orphera-netpol"
   private val domain = "k8s.ljalbinson.com"
-  private val keycloak = "https://tst26.ljalbinson.com:8443/realms/k8s/.well-known/openid-configuration"
+  private val keycloak =
+    "https://tst26.ljalbinson.com:8443/realms/k8s/.well-known/openid-configuration"
   private val grafanaAdminPassword = Secrets.secret("k8s/grafana-admin")
 
   private val script =
