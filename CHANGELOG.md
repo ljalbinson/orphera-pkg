@@ -71,6 +71,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Kubernetes cluster, step 17: Argo CD. `manifests/k8s_argocd.scala` installs Argo CD (Helm chart argo/argo-cd, namespace `argocd`, infra nodes) at
   `https://argocd.k8s.ljalbinson.com`, signing in with Keycloak (client `argocd`; k8s-admins admin, k8s-developers view and sync, k8s-viewers
   read-only) and keeping the local `admin` account. The test syncs a one-ConfigMap Application from `k8s/argocd-test` in this repository and removes it again.
+  Argo CD does not request an OIDC scope `groups` (the realm has none; the client's mapper supplies the claim).
 
 ## [0.1.207] - 2026-10-30
 

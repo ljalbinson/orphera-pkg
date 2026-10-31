@@ -18,6 +18,8 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 // (confidential, secret k8s/argocd-client) with the `groups` claim. The group decides
 // the Argo CD role: k8s-admins -> admin, k8s-developers -> view and sync
 // applications, k8s-viewers -> read-only; a user in none of them has no access.
+// The groups reach Argo CD through the client's mapper (a claim in the ID token); the
+// realm has no client scope called `groups`, so Argo CD must not request one.
 // Argo CD trusts Keycloak's certificate through rootCA in its OIDC settings. The
 // local `admin` account stays for emergencies; its initial password is in the
 // Secret argocd-initial-admin-secret in the namespace argocd.
@@ -203,7 +205,7 @@ print('client %s in realm %s ready: redirect %s/auth/callback' % (CLIENT_ID, REA
        |      issuer: $issuer
        |      clientID: argocd
        |      clientSecret: $$oidc.keycloak.clientSecret
-       |      requestedScopes: ["openid", "profile", "email", "groups"]
+       |      requestedScopes: ["openid", "profile", "email"]
        |      rootCA: |
        |EOF
        |sed 's/^/        /' $stateDir/ca.crt
