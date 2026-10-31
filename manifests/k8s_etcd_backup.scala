@@ -336,7 +336,8 @@ else:
         .build,
       stage("send-credentials", cpNodes*)
         .task("copy the S3 keys from tst0")(
-          Task.DistributeFile(cephNode, credSource, credDest, "root", "root", 384)
+          Task
+            .DistributeFile(cephNode, credSource, credDest, "root", "root", 384)
         )
         .build,
       stage("install-backup", cpNodes*)
@@ -346,7 +347,8 @@ else:
         .build,
       stage("first-backup", cpNodes*)
         .task("take a backup now")(
-          Task.RunCommand(List("sh", "-c", firstRunScript), timeoutSeconds = 300)
+          Task
+            .RunCommand(List("sh", "-c", firstRunScript), timeoutSeconds = 300)
         )
         .build,
       stage("verify-backups", "tst30")
