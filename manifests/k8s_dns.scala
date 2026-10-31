@@ -9,7 +9,8 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 // (k8s_external_dns.scala) adds and removes records with RFC 2136 updates
 // signed by the TSIG key `external-dns` (hmac-sha256, from the secret
 // k8s/dns-tsig). Nobody else may update it. The secondary copies the zone from
-// the primary (NOTIFY, then zone transfer to 10.10.3.41 only).
+// the primary (NOTIFY, then zone transfer to 10.10.3.41 and to holders of the
+// key; external-dns lists the zone with a signed transfer).
 //
 // The zone starts with the SOA, the two NS records (tst40.ljalbinson.com and
 // tst41.ljalbinson.com, which live in the parent zone, so no glue is needed),
@@ -93,7 +94,7 @@ object k8s_dns extends OrpheraClusterPlaybook:
        |    type master;
        |    file "/var/lib/bind/db.$zone";
        |    allow-update { key "$keyName"; };
-       |    allow-transfer { $secondaryIp; };
+       |    allow-transfer { $secondaryIp; key "$keyName"; };
        |    also-notify { $secondaryIp; };
        |    notify yes;
        |};
@@ -156,6 +157,8 @@ object k8s_dns extends OrpheraClusterPlaybook:
        |  chk "a name under the wildcard at $$S" $gatewayIp "$$(dig +short +norecurse @$$S anything.$zone)"
        |  chk "authoritative answer (aa) at $$S" 1 "$$(dig +norecurse @$$S SOA $zone | grep -c 'flags:.* aa')"
        |done
+       |# external-dns lists the zone with a signed zone transfer
+       |chk "a signed zone transfer works (SOA twice)" 2 "$$(dig +noall +answer -k $keyFile @$primaryIp AXFR $zone | grep -c ' SOA ')"
        |# a signed update is accepted
        |printf 'server $primaryIp\\nzone $zone\\nupdate add orphera-test.$zone 60 TXT "ok"\\nsend\\n' | nsupdate -k $keyFile
        |GOT=""

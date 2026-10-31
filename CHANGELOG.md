@@ -63,6 +63,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   seeded with `api` and the `*` wildcard, dynamic updates only with the TSIG key `external-dns`. The parent zone `ljalbinson.com` needs a
   delegation to them (the playbook says which records to add and which to remove).
   Resolvers that use `forwarders` also need a `forward` zone for `k8s.ljalbinson.com` pointing at the two servers.
+- Kubernetes cluster, step 16: external-dns. `manifests/k8s_external_dns.scala` installs external-dns (RFC 2136, TSIG key `external-dns`) so
+  HTTPRoute and annotated Service hostnames under `k8s.ljalbinson.com` are written to the BIND primary on tst40 and removed again when the
+  object goes; it owns only records it created (TXT registry), so `api` and the wildcard stay. `k8s_dns.scala` now also lets the key transfer
+  the zone, which external-dns needs to list it; run `k8s_dns` again first. The test creates a route, checks the record and its TXT
+  record, deletes the route and checks both are gone.
 
 ## [0.1.207] - 2026-10-30
 
