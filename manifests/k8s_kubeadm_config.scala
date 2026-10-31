@@ -216,17 +216,41 @@ patch('etcd.yaml', '--listen-metrics-urls=http://127.0.0.1:2381', '--listen-metr
        |exit 1
        |""".stripMargin
 
+  // kubeadm writes arguments and volume mounts sorted, the hand edits appended them, so the
+  // diff shows each setting once removed and once added at another position. A setting is
+  // kept when it is added as often as it is removed; it is lost when the counts differ.
+  // (kubeadm also drops `host: 127.0.0.1` from the probes of components that no longer
+  // listen on 127.0.0.1 only; that is expected and not checked.)
+  private val diffPython =
+    """import collections, re, sys
+pat = re.compile(r'authentication-config|encryption-provider-config|bind-address|listen-metrics-urls|orphera-auth')
+plus, minus = collections.Counter(), collections.Counter()
+for line in open('/tmp/upgrade-diff.txt'):
+    line = line.rstrip('\n')
+    if line[:3] in ('+++', '---') or not line or line[0] not in '+-':
+        continue
+    text = line[1:].strip()
+    if pat.search(text):
+        (plus if line[0] == '+' else minus)[text] += 1
+bad = [t for t in set(plus) | set(minus) if plus[t] != minus[t]]
+for t in sorted(bad):
+    print('would change: %r (added %d, removed %d)' % (t, plus[t], minus[t]))
+sys.exit(1 if bad else 0)
+"""
+
   private val diffScript =
     s"""set -e
        |VER=$$(kubeadm version -o short)
        |kubeadm upgrade diff "$$VER" > /tmp/upgrade-diff.txt 2>&1 || true
-       |cat /tmp/upgrade-diff.txt | head -60
-       |if grep -E '^[+-].*(authentication-config|encryption-provider-config|bind-address|listen-metrics-urls|orphera-auth)' /tmp/upgrade-diff.txt; then
-       |  echo "$$(hostname): an upgrade would still change the settings above" >&2
-       |  rm -f /tmp/upgrade-diff.txt
+       |cat > /tmp/diff-check.py <<'PYEOF'
+       |$diffPython
+       |PYEOF
+       |if ! python3 /tmp/diff-check.py; then
+       |  echo "$$(hostname): an upgrade would add or remove the settings above" >&2
+       |  rm -f /tmp/upgrade-diff.txt /tmp/diff-check.py
        |  exit 1
        |fi
-       |rm -f /tmp/upgrade-diff.txt
+       |rm -f /tmp/upgrade-diff.txt /tmp/diff-check.py
        |echo "$$(hostname): an upgrade to $$VER would keep the Keycloak login, the encryption and the metrics settings"
        |""".stripMargin
 
