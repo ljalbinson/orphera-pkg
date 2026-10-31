@@ -158,7 +158,9 @@ object k8s_dns extends OrpheraClusterPlaybook:
        |  chk "authoritative answer (aa) at $$S" 1 "$$(dig +norecurse @$$S SOA $zone | grep -c 'flags:.* aa')"
        |done
        |# external-dns lists the zone with a signed zone transfer
-       |chk "a signed zone transfer works (SOA twice)" 2 "$$(dig +noall +answer -k $keyFile @$primaryIp AXFR $zone | grep -c ' SOA ')"
+       |AXFR=$$(dig +noall +answer +comments -k $keyFile @$primaryIp AXFR $zone 2>&1 || true)
+       |chk "a signed zone transfer works (SOA twice)" 2 "$$(echo "$$AXFR" | grep -cw SOA || true)"
+       |[ "$$(echo "$$AXFR" | grep -cw SOA || true)" = 2 ] || echo "$$AXFR" >&2
        |# a signed update is accepted
        |printf 'server $primaryIp\\nzone $zone\\nupdate add orphera-test.$zone 60 TXT "ok"\\nsend\\n' | nsupdate -k $keyFile
        |GOT=""
