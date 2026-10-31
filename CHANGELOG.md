@@ -76,6 +76,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   audit and warn `restricted`, `kube-system` exempt; `ceph-csi-rbd` and `monitoring` labelled `privileged`), checks first that no running pod would be
   refused, changes the three kube-apiserver manifests one at a time, adds the flag to the kubeadm-config ConfigMap, and tests with server-side dry runs.
   `k8s_kubeadm_config.scala` also watches `admission-control-config-file` in its upgrade check.
+  It also restarts the Cilium operator afterwards: the API server restarts make its Gateway controller give up, and new HTTPRoutes are then never accepted.
 - Kubernetes cluster, step 19 (part 1): network policy tooling. `manifests/k8s_network_policy.scala` installs `/usr/local/sbin/orphera-netpol` on tst30
   (`apply NAMESPACE [api] [gateway] [world] [scrape]`, `remove`, `show`: default deny with the namespace's own pods and CoreDNS allowed, plus optional
   CiliumNetworkPolicies for the API server, the Gateway, the Internet and Prometheus) and tests it on two throw-away namespaces. No existing namespace is changed.

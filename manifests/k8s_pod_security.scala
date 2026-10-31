@@ -191,6 +191,17 @@ print(json.dumps(cm))
        |echo "kubeadm-config now carries the Pod Security defaults"
        |""".stripMargin
 
+  // The API server restarts make the Cilium operator's Gateway controller give up
+  // ("timed out waiting for cache to be synced for Kind *v1.Gateway"), after which new
+  // HTTPRoutes are never accepted. Restarting the operator cures it.
+  private val operatorScript =
+    s"""set -e
+       |$kc -n kube-system rollout restart deployment/cilium-operator
+       |$kc -n kube-system rollout status deployment/cilium-operator --timeout=300s
+       |sleep 20
+       |echo "the Cilium operator was restarted after the API server restarts"
+       |""".stripMargin
+
   private val testScript =
     s"""set -e
        |FAIL=0
@@ -279,6 +290,11 @@ print(json.dumps(cm))
       stage("persist-in-kubeadm-config", "tst30")
         .task("add the flag to the kubeadm-config ConfigMap")(
           Task.RunCommand(List("sh", "-c", persistScript), timeoutSeconds = 60)
+        )
+        .build,
+      stage("restart-cilium-operator", "tst30")
+        .task("restart the operator so its Gateway controller reconnects")(
+          Task.RunCommand(List("sh", "-c", operatorScript), timeoutSeconds = 400)
         )
         .build,
       stage("test-pod-security", "tst30")
