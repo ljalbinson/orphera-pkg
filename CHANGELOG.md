@@ -88,6 +88,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   removing the policies again if a test fails. `orphera-netpol` gained the option `cluster` (egress to everything inside the cluster).
 - README: the Kubernetes example now lists all steps, 1 to 17, with the notes on Keycloak groups, DNS delegation and the tests.
 - README: the Kubernetes example also covers Pod Security (step 18) and the network policies (step 19).
+- README: a table of the other playbooks in `manifests/` (teardowns, etcd and Galera maintenance, WordPress, the manual Ceph steps) that were not described anywhere in it.
 
 ## [0.1.207] - 2026-10-30
 

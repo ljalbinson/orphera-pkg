@@ -58,6 +58,7 @@ New to Orphera? [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md) takes you fro
 - [Example: OpenStack Keystone and Cinder from Kolla images](#example-openstack-keystone-and-cinder-from-kolla-images)
 - [Example: parallel network throughput test (iperf3)](#example-parallel-network-throughput-test-iperf3)
 - [Example: a file server for Linux and macOS](#example-a-file-server-for-linux-and-macos)
+- [More playbooks in `manifests/`](#more-playbooks-in-manifests)
 - [Known gaps / not yet built](#known-gaps--not-yet-built)
 
 ## Architecture
@@ -2359,6 +2360,27 @@ Notes:
   still answers).
 - `manifests/k8s_cluster_teardown.scala` removes the cluster again (the VMs stay).
 - Every playbook says in its header what it needs and what it does not do.
+
+## More playbooks in `manifests/`
+
+Playbooks that are not described elsewhere in this file. Each has a header
+comment saying what it needs, what it changes and what it leaves alone; the
+playbooks marked DRAFT there have been written but not all run on the lab.
+
+| Playbook | What it does |
+|---|---|
+| `disable_unattended_upgrades.scala` | Turns off automatic package upgrades on the Ubuntu test VMs (they hold the dpkg lock for minutes after first boot, so package tasks fail or wait) |
+| `etcd_member_rejoin.scala` | Removes, wipes and re-adds a member of the 3-node etcd cluster (run `etcd_cluster.scala` first) |
+| `etcd_grow_cluster.scala` | Grows that etcd cluster from 3 to 5 members by adding tst3 and tst4 as new members |
+| `mariadb_galera_rolling_restart.scala` | Applies a config change to the running Galera cluster one node at a time, waiting for each node to rejoin so quorum is never lost |
+| `mariadb_galera_teardown.scala` | Removes the Galera cluster and the haproxy and keepalived front end on tst3-tst5 |
+| `wordpress_site.scala`, `wordpress_teardown.scala` | A WordPress site (nginx, php-fpm) on tst7 with its database on the Galera cluster, and its removal |
+| `ceph_observability.scala` | Adds Ceph's own metrics to the Prometheus and Grafana stack on tst6 (see `manifests/Ceph-Observability-Lifecycle-Howto.md`) |
+| `ceph_performance_test.scala` | A `rados bench` run as a playbook, with pass or fail checks and cleanup |
+| `ceph_mon_keyring.scala`, `ceph_mon_quorum.scala`, `ceph_mgr.scala`, `ceph_admin_keyring.scala`, `ceph-osd.scala`, `ceph-health-fixes.scala`, `ceph_teardown.scala` | The steps of the manual Ceph path, in the order in `manifests/Ceph-Playbook-Usage.md`, and its teardown |
+| `cephadm_add_mons.scala`, `cephadm_mon_rolling_upgrade.scala` | The cephadm path: adding monitors on tst1 and tst2, and a rolling monitor upgrade with tst0 first |
+| `apt_cache_teardown.scala`, `rpm_cache_teardown.scala`, `kolla_cache_teardown.scala` | Undo the apt cache (tst11) and its clients, the RPM cache (tst12) and its clients, and the Kolla image cache (tst9) |
+| `keystone_teardown.scala`, `glance_teardown.scala`, `placement_teardown.scala`, `cinder_teardown.scala`, `nova_teardown.scala`, `neutron_teardown.scala`, `horizon_teardown.scala` | Undo the matching `*_single_node.scala` playbook (see the OpenStack example below) |
 
 ## Known gaps / not yet built
 
