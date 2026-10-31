@@ -223,7 +223,7 @@ patch('etcd.yaml', '--listen-metrics-urls=http://127.0.0.1:2381', '--listen-metr
   // listen on 127.0.0.1 only; that is expected and not checked.)
   private val diffPython =
     """import collections, re, sys
-pat = re.compile(r'authentication-config|encryption-provider-config|bind-address|listen-metrics-urls|orphera-auth')
+pat = re.compile(r'authentication-config|encryption-provider-config|admission-control-config-file|bind-address|listen-metrics-urls|orphera-auth')
 plus, minus = collections.Counter(), collections.Counter()
 for line in open('/tmp/upgrade-diff.txt'):
     line = line.rstrip('\n')
