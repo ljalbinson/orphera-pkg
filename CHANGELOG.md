@@ -33,6 +33,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   against the lab Ceph cluster with the pool `k8s-rbd`, the user `client.k8s` and the default StorageClass `ceph-rbd`;
   `k8s_metrics_server.scala` installs metrics-server. Each ends with a test that uses the feature (a certificate issued and
   verified, a pod writing to a volume, `kubectl top nodes`).
+- Kubernetes cluster, step 9: `manifests/k8s_oidc.scala` creates the Keycloak realm `k8s` (client `kubernetes`, groups
+  `k8s-admins`, `k8s-developers`, `k8s-viewers` in a `groups` claim, four test users), makes the API servers accept its ID tokens
+  (`--authentication-config`, usernames and groups prefixed `oidc:`), binds the groups to `cluster-admin`, `edit` and `view`,
+  and encrypts Secrets in etcd with secretbox (`--encryption-provider-config`). The API servers are changed one at a time and the
+  old manifest is put back if one does not become healthy. The last stage logs in each test user and checks what they may do.
 
 ## [0.1.207] - 2026-10-30
 
