@@ -187,7 +187,8 @@ object k8s_gateway extends OrpheraClusterPlaybook:
        |      port: 80
        |EOF
        |$kc -n gw-test rollout status deployment/hello --timeout=300s
-       |$kc -n gw-test wait --for=condition=Accepted httproute/hello --timeout=120s
+       |# a route's conditions are per parent, under status.parents
+       |$kc -n gw-test wait --for=jsonpath='{.status.parents[0].conditions[?(@.type=="Accepted")].status}'=True httproute/hello --timeout=120s
        |CODE=""
        |for I in $$(seq 1 30); do
        |  CODE=$$(curl -s -m 5 --cacert $stateDir/ca.crt -o /dev/null -w '%{http_code}' https://hello.$domain/ || true)
