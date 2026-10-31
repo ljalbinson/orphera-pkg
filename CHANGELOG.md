@@ -38,6 +38,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (`--authentication-config`, usernames and groups prefixed `oidc:`), binds the groups to `cluster-admin`, `edit` and `view`,
   and encrypts Secrets in etcd with secretbox (`--encryption-provider-config`). The API servers are changed one at a time and the
   old manifest is put back if one does not become healthy. The last stage logs in each test user and checks what they may do.
+- Kubernetes cluster, step 10: `manifests/k8s_gateway.scala` creates the wildcard certificate for `*.k8s.ljalbinson.com`, the
+  Gateway `public` (HTTP redirecting to HTTPS, HTTPS with that certificate) at 10.10.3.100 and tests it with a published
+  application. `manifests/test_k8s.sh` checks the whole cluster from scala0: nodes, etcd, the API VIP, Cilium, storage,
+  certificates, Secret encryption, the Gateway; `FAILOVER=1` also moves the API VIP.
 
 ## [0.1.207] - 2026-10-30
 
