@@ -199,7 +199,11 @@ object k8s_gateway extends OrpheraClusterPlaybook:
        |$kc delete namespace gw-test --wait=false >/dev/null
        |echo "https://hello.$domain/ -> HTTP $$CODE; http://hello.$domain/ -> $$REDIRECT"
        |[ "$$CODE" = "200" ] || { echo "the HTTPS request did not return 200" >&2; exit 1; }
-       |[ "$$REDIRECT" = "301 https://hello.$domain/" ] || { echo "unexpected redirect: $$REDIRECT" >&2; exit 1; }
+       |# Cilium writes the port into the Location header (https://host:443/); both forms are a redirect to HTTPS
+       |case "$$REDIRECT" in
+       |  "301 https://hello.$domain/"|"301 https://hello.$domain:443/") ;;
+       |  *) echo "unexpected redirect: $$REDIRECT" >&2; exit 1 ;;
+       |esac
        |""".stripMargin
 
   val playbook: ClusterPlaybook =
