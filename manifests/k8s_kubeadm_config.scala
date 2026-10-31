@@ -290,7 +290,9 @@ sys.exit(1 if bad else 0)
 
   private def patchStage(n: String) =
     stage(s"metrics-$n", n)
-      .task("serve controller manager, scheduler and etcd metrics on the node address")(
+      .task(
+        "serve controller manager, scheduler and etcd metrics on the node address"
+      )(
         Task.RunCommand(List("sh", "-c", patchScript), timeoutSeconds = 400)
       )
       .build
@@ -299,7 +301,8 @@ sys.exit(1 if bad else 0)
     clusterPlaybook("k8s-kubeadm-config")(
       stage("persist-in-kubeadm-config", "tst30")
         .task("add the hand-made settings to the kubeadm-config ConfigMap")(
-          Task.RunCommand(List("sh", "-c", configMapScript), timeoutSeconds = 120)
+          Task
+            .RunCommand(List("sh", "-c", configMapScript), timeoutSeconds = 120)
         )
         .build,
       patchStage("tst30"),
@@ -312,12 +315,18 @@ sys.exit(1 if bad else 0)
         .build,
       stage("kubelet-resolver", (30 to 39).map(n => s"tst$n")*)
         .task("give kubelet a resolver file with each server once")(
-          Task.RunCommand(List("sh", "-c", kubeletResolvScript), timeoutSeconds = 180)
+          Task.RunCommand(
+            List("sh", "-c", kubeletResolvScript),
+            timeoutSeconds = 180
+          )
         )
         .build,
       stage("kubelet-config-and-dns-test", "tst30")
         .task("record it in kubelet-config, restart CoreDNS")(
-          Task.RunCommand(List("sh", "-c", kubeletConfigScript), timeoutSeconds = 300)
+          Task.RunCommand(
+            List("sh", "-c", kubeletConfigScript),
+            timeoutSeconds = 300
+          )
         )
         .task("a host-network pod sees two nameservers")(
           Task.RunCommand(List("sh", "-c", dnsTestScript), timeoutSeconds = 300)
