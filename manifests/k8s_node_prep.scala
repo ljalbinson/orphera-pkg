@@ -127,7 +127,7 @@ object k8s_node_prep extends OrpheraClusterPlaybook:
        |echo "kubernetes apt repository $k8sMinor configured"""".stripMargin
 
   private val kubeletScript =
-    """apt-mark hold kubelet kubeadm kubectl
+    """apt-mark hold kubelet kubeadm kubectl cri-tools
       |echo "KUBELET_EXTRA_ARGS=--node-ip={{cluster_ip}}" > /etc/default/kubelet
       |systemctl enable kubelet
       |echo "kubeadm $(kubeadm version -o short), kubelet $(kubelet --version | cut -d' ' -f2), held; node-ip {{cluster_ip}}"""".stripMargin
@@ -161,9 +161,9 @@ object k8s_node_prep extends OrpheraClusterPlaybook:
         .task("add the pkgs.k8s.io repository")(
           Task.RunCommand(List("sh", "-c", repoScript), timeoutSeconds = 180)
         )
-        .task("install kubeadm, kubelet, kubectl")(
+        .task("install kubeadm, kubelet, kubectl, crictl")(
           Task.Install(
-            packages = List("kubelet", "kubeadm", "kubectl"),
+            packages = List("kubelet", "kubeadm", "kubectl", "cri-tools"),
             updateCache = false
           )
         )
