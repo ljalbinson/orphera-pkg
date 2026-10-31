@@ -134,6 +134,22 @@ echo "network policies for $NS: base $*"
        |echo "$helper installed"
        |""".stripMargin
 
+  // After the API servers restart (Pod Security, Keycloak login) the Cilium operator's
+  // Gateway controller can give up ("timed out waiting for cache to be synced for Kind
+  // *v1.Gateway") and routes are never accepted. A restart of the operator cures it.
+  private val operatorScript =
+    s"""set -e
+       |LOGS=$$($kc -n kube-system logs -l name=cilium-operator --tail=500 2>/dev/null || true)
+       |if echo "$$LOGS" | grep -q 'timed out waiting for cache to be synced for Kind'; then
+       |  echo "the Cilium operator's Gateway controller gave up after an API server restart; restarting the operator"
+       |  $kc -n kube-system rollout restart deployment/cilium-operator
+       |  $kc -n kube-system rollout status deployment/cilium-operator --timeout=300s
+       |  sleep 20
+       |else
+       |  echo "the Cilium operator is healthy"
+       |fi
+       |""".stripMargin
+
   private val testScript =
     s"""set -e
        |FAIL=0
@@ -239,6 +255,11 @@ echo "network policies for $NS: base $*"
       stage("install-netpol-helper", node)
         .task("install orphera-netpol")(
           Task.RunCommand(List("sh", "-c", installScript), timeoutSeconds = 60)
+        )
+        .build,
+      stage("check-cilium-operator", node)
+        .task("restart the operator if its Gateway controller gave up")(
+          Task.RunCommand(List("sh", "-c", operatorScript), timeoutSeconds = 400)
         )
         .build,
       stage("test-network-policy", node)
