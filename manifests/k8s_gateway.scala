@@ -36,6 +36,27 @@ object k8s_gateway extends OrpheraClusterPlaybook:
   private val lbIp = "10.10.3.100"
   private val stateDir = "/etc/kubernetes/orphera"
 
+  // The Cilium operator checks for the Gateway API CRDs once, at start. If the
+  // API server was unreachable at that moment (seen after the API servers were
+  // restarted by k8s_oidc.scala) it logs "Required GatewayAPI resources are not
+  // found" and never starts the Gateway controller; the Gateway then sits at
+  // "Waiting for controller". The CRDs are checked here and the operator is
+  // restarted if it gave up.
+  private val controllerScript =
+    s"""set -e
+       |for CRD in gatewayclasses gateways httproutes referencegrants grpcroutes; do
+       |  $kc get crd $$CRD.gateway.networking.k8s.io >/dev/null || { echo "CRD $$CRD.gateway.networking.k8s.io is missing; run k8s_cilium.scala" >&2; exit 1; }
+       |done
+       |if $kc -n kube-system logs -l name=cilium-operator --tail=3000 2>/dev/null | grep -q 'Required GatewayAPI resources are not found'; then
+       |  echo "the Cilium operator started without the Gateway controller; restarting it"
+       |  $kc -n kube-system rollout restart deployment/cilium-operator
+       |  $kc -n kube-system rollout status deployment/cilium-operator --timeout=300s
+       |  sleep 20
+       |else
+       |  echo "the Cilium operator's Gateway controller was not disabled at start"
+       |fi
+       |""".stripMargin
+
   private val gatewayScript =
     s"""set -e
        |$kc create namespace gateway --dry-run=client -o yaml | $kc apply -f -
@@ -182,6 +203,11 @@ object k8s_gateway extends OrpheraClusterPlaybook:
 
   val playbook: ClusterPlaybook =
     clusterPlaybook("k8s-gateway")(
+      stage("gateway-controller", node)
+        .task("make sure Cilium's Gateway controller is running")(
+          Task.RunCommand(List("sh", "-c", controllerScript), timeoutSeconds = 400)
+        )
+        .build,
       stage("create-gateway", node)
         .task("wildcard certificate, Gateway and HTTP redirect")(
           Task.RunCommand(List("sh", "-c", gatewayScript), timeoutSeconds = 600)
