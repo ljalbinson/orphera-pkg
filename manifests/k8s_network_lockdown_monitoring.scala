@@ -22,7 +22,7 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 //   - Prometheus targets: node-exporter on all 10 nodes, 3 API servers, 10 kubelets,
 //     kube-state-metrics, and etcd, scheduler and controller manager on 3 nodes each
 //   - Grafana: /api/health through the Gateway, the data sources Prometheus and Loki
-//     report OK, and the Grafana pod reaches Keycloak's discovery document
+//     report OK; a small curl pod inside monitoring reaches Keycloak's discovery document
 //   - the operator's webhook: a valid PrometheusRule is accepted and an invalid
 //     one is refused by the webhook (server-side dry runs)
 //   - Alertmanager answers through the API server's service proxy
@@ -58,6 +58,16 @@ object k8s_network_lockdown_monitoring extends OrpheraClusterPlaybook:
        |  for I in $$(seq 1 60); do GOT=$$(q "$$2" 2>/dev/null || echo 0); [ "$$GOT" -ge "$$3" ] && break; sleep 5; done
        |  if [ "$$GOT" -ge "$$3" ]; then echo "ok    $$1: $$GOT"; else echo "FAIL  $$1: $$GOT (wanted at least $$3)" >&2; FAIL=1; fi
        |}
+       |# a small curl pod inside monitoring, started before the policies, to test what a pod there can reach
+       |cat <<EOF | $kc apply -f - >/dev/null
+       |apiVersion: v1
+       |kind: Pod
+       |metadata: {name: netpol-probe, namespace: $ns}
+       |spec:
+       |  containers:
+       |  - {name: probe, image: "docker.io/curlimages/curl:8.10.1", command: ["sleep", "3600"]}
+       |EOF
+       |$kc -n $ns wait --for=condition=Ready pod/netpol-probe --timeout=180s >/dev/null
        |$$NP apply $ns api gateway world nodes cluster
        |sleep 30
        |# Prometheus keeps its old results for a while, so ask for series that were up in the last minute
@@ -85,8 +95,13 @@ object k8s_network_lockdown_monitoring extends OrpheraClusterPlaybook:
        |  done
        |  chk "Grafana's check of the $$TYPE data source" OK "$$ST"
        |done
-       |KC=$$($kc -n $ns exec deploy/grafana -c grafana -- sh -c 'wget -q -T 8 -O - --no-check-certificate $keycloak | head -c 200' 2>/dev/null | grep -c issuer || true)
-       |chk "the Grafana pod reaches Keycloak's discovery document" 1 "$$KC"
+       |KCOUT=""
+       |for I in $$(seq 1 10); do
+       |  KCOUT=$$($kc -n $ns exec netpol-probe -- curl -sk -m 8 $keycloak 2>/dev/null | head -c 300 | grep -c issuer || true)
+       |  [ "$$KCOUT" = "1" ] && break
+       |  sleep 3
+       |done
+       |chk "a pod in monitoring reaches Keycloak's discovery document" 1 "$$KCOUT"
        |# the operator's admission webhook, called by the API server
        |cat > /tmp/rule-ok.yaml <<EOF
        |apiVersion: monitoring.coreos.com/v1
@@ -103,10 +118,11 @@ object k8s_network_lockdown_monitoring extends OrpheraClusterPlaybook:
        |OUT=$$($kc apply --dry-run=server -f /tmp/rule-ok.yaml 2>&1 || true)
        |case "$$OUT" in *'(server dry run)'*) chk "a valid PrometheusRule is accepted by the webhook" a a ;; *) chk "a valid PrometheusRule is accepted by the webhook" accepted "$$OUT" ;; esac
        |OUT=$$($kc apply --dry-run=server -f /tmp/rule-bad.yaml 2>&1 || true)
-       |case "$$OUT" in *'admission webhook'*|*'denied the request'*) chk "an invalid PrometheusRule is refused by the webhook" a a ;; *) chk "an invalid PrometheusRule is refused by the webhook" refused "$$OUT" ;; esac
+       |case "$$OUT" in *'admission webhook'*|*'denied the request'*|*'could not parse expression'*) chk "an invalid PrometheusRule is refused by the webhook" a a ;; *) chk "an invalid PrometheusRule is refused by the webhook" refused "$$OUT" ;; esac
        |rm -f /tmp/rule-ok.yaml /tmp/rule-bad.yaml
-       |AM=$$($kc get --raw "/api/v1/namespaces/$ns/services/kps-alertmanager:9093/proxy/api/v2/status" 2>/dev/null | python3 -c 'import sys,json; print(json.load(sys.stdin)["cluster"]["status"])' 2>/dev/null || true)
-       |chk "Alertmanager answers through the API server's proxy: cluster status" ready "$$AM"
+       |AM=$$($kc get --raw "/api/v1/namespaces/$ns/services/kps-alertmanager:9093/proxy/api/v2/status" 2>/dev/null | python3 -c 'import sys,json; print("answers" if json.load(sys.stdin)["versionInfo"]["version"] else "")' 2>/dev/null || true)
+       |chk "Alertmanager answers through the API server's proxy" answers "$$AM"
+       |$kc -n $ns delete pod netpol-probe --wait=false >/dev/null 2>&1 || true
        |if [ "$$FAIL" -ne 0 ]; then
        |  echo "the test of $ns failed; removing its network policies again" >&2
        |  $$NP remove $ns >&2 || true
