@@ -40,7 +40,7 @@ object k8s_registry_mirrors extends OrpheraClusterPlaybook:
 
   private def container(m: Mirror) = Container(
     name = ContainerName(s"k8s-mirror-${m.name}"),
-    image = ExternalImage("docker.io/library/registry:2"),
+    image = ExternalImage(registryImage),
     mounts = List(Mount(dataDir(m), "/var/lib/registry", Access.ReadWrite)),
     env = List(
       "REGISTRY_PROXY_REMOTEURL" -> m.remote,
@@ -57,11 +57,26 @@ object k8s_registry_mirrors extends OrpheraClusterPlaybook:
     s"""CODE=$$(curl -s -o /dev/null -w '%{http_code}' http://localhost:${m.port}/v2/)
        |[ "$$CODE" = "200" ]""".stripMargin
 
+  private val registryImage = "docker.io/library/registry:2"
+
+  private val pullRegistryScript =
+    s"""${Pull.shellFunction(
+        "the registry image name in k8s_registry_mirrors.scala; the pull is from Docker Hub"
+      )}
+       |pull_retry $registryImage || exit 1
+       |echo "registry image ready"""".stripMargin
+
   private val mkdirScript =
     s"mkdir -p ${mirrors.map(dataDir).mkString(" ")}"
 
   private def installStage =
     val base = stage("install-k8s-mirrors", node)
+      .task("install podman")(
+        Task.Install(packages = List("podman", "curl"), updateCache = true)
+      )
+      .task("pull the registry image")(
+        Task.RunCommand(List("sh", "-c", pullRegistryScript), timeoutSeconds = 600)
+      )
       .task("create the data directories")(
         Task.RunCommand(List("sh", "-c", mkdirScript))
       )
