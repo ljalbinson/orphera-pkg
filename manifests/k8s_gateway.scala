@@ -210,7 +210,10 @@ object k8s_gateway extends OrpheraClusterPlaybook:
     clusterPlaybook("k8s-gateway")(
       stage("gateway-controller", node)
         .task("make sure Cilium's Gateway controller is running")(
-          Task.RunCommand(List("sh", "-c", controllerScript), timeoutSeconds = 400)
+          Task.RunCommand(
+            List("sh", "-c", controllerScript),
+            timeoutSeconds = 400
+          )
         )
         .build,
       stage("create-gateway", node)
