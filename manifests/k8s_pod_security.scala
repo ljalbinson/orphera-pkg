@@ -88,7 +88,8 @@ object k8s_pod_security extends OrpheraClusterPlaybook:
        |done
        |BAD=0
        |for N in $$($kc get namespaces -o jsonpath='{.items[*].metadata.name}'); do
-       |  case " ${exemptNamespaces.mkString(" ")} ${privilegedNamespaces.mkString(" ")} " in *" $$N "*) continue ;; esac
+       |  case " ${exemptNamespaces.mkString(" ")} ${privilegedNamespaces
+        .mkString(" ")} " in *" $$N "*) continue ;; esac
        |  # a namespace that already has its own enforce label keeps it
        |  L=$$($kc get namespace "$$N" -o jsonpath='{.metadata.labels.pod-security\\.kubernetes\\.io/enforce}')
        |  [ -z "$$L" ] || continue
@@ -178,7 +179,9 @@ print(json.dumps(cm))
        |$waitApiScript
        |$kc -n kube-system get configmap kubeadm-config -o json > $stateDir/kubeadm-config.before-pod-security.json
        |cat > /tmp/kubeadm-config-edit.py <<'PYEOF'
-       |${configMapPython.replace("@@DIR@@", stateDir).replace("@@FLAG@@", flag)}
+       |${configMapPython
+        .replace("@@DIR@@", stateDir)
+        .replace("@@FLAG@@", flag)}
        |PYEOF
        |python3 /tmp/kubeadm-config-edit.py < $stateDir/kubeadm-config.before-pod-security.json > /tmp/kubeadm-config.after.json
        |rm -f /tmp/kubeadm-config-edit.py
@@ -254,7 +257,8 @@ print(json.dumps(cm))
         .build,
       stage("check-running-pods", "tst30")
         .task("label privileged namespaces, find pods baseline would refuse")(
-          Task.RunCommand(List("sh", "-c", precheckScript), timeoutSeconds = 300)
+          Task
+            .RunCommand(List("sh", "-c", precheckScript), timeoutSeconds = 300)
         )
         .build,
       stage("apiserver-tst30", "tst30")
@@ -278,7 +282,9 @@ print(json.dumps(cm))
         )
         .build,
       stage("test-pod-security", "tst30")
-        .task("try privileged, host-path, host-network, plain and hardened pods")(
+        .task(
+          "try privileged, host-path, host-network, plain and hardened pods"
+        )(
           Task.RunCommand(List("sh", "-c", testScript), timeoutSeconds = 300)
         )
         .task("pod security ready")(
