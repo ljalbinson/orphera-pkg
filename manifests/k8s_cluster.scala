@@ -23,6 +23,10 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 //
 // Pod network 10.244.0.0/16, service network 10.96.0.0/12.
 //
+// The controller manager, the scheduler and etcd are told to serve their metrics on
+// all addresses (kubeadm's default is 127.0.0.1), so Prometheus can scrape them.
+// A cluster made before this was added gets the same through k8s_kubeadm_config.scala.
+//
 // The join token and the certificate key come from the secret store
 // (k8s/bootstrap-token, k8s/certificate-key; made on first use) and are put in
 // the kubeadm configuration, so every node uses the same values. The CA hash
@@ -151,9 +155,20 @@ object k8s_cluster extends OrpheraClusterPlaybook:
        |apiServer:
        |  certSANs:
        |$sans
+       |controllerManager:
+       |  extraArgs:
+       |  - name: bind-address
+       |    value: 0.0.0.0
+       |scheduler:
+       |  extraArgs:
+       |  - name: bind-address
+       |    value: 0.0.0.0
        |etcd:
        |  local:
        |    dataDir: /var/lib/etcd
+       |    extraArgs:
+       |    - name: listen-metrics-urls
+       |      value: http://0.0.0.0:2381
        |EOF
        |chmod 600 $stateDir/kubeadm-init.yaml
        |kubeadm init --config $stateDir/kubeadm-init.yaml --upload-certs \\

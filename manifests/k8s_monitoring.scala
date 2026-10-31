@@ -25,9 +25,9 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 // them with `kubectl -n monitoring port-forward`.
 //
 // Known gaps, on purpose for now:
-//   - kubeadm binds the etcd, scheduler and controller-manager metrics ports to
-//     127.0.0.1, so those three are not scraped (their ServiceMonitors are off);
-//     enabling them means changing the static pod manifests of the control plane.
+//   - The etcd, scheduler and controller-manager metrics are scraped, which needs them
+//     to listen on the node address (set at init by k8s_cluster.scala, or afterwards by
+//     k8s_kubeadm_config.scala); until then those three targets show as down.
 //   - Cilium and Hubble metrics are not enabled.
 //   - Alertmanager has no receivers, so alerts show in its UI and in Grafana only.
 //
@@ -190,11 +190,11 @@ print('client %s in realm %s ready: redirect %s/login/generic_oauth' % (CLIENT_I
        |cat > $stateDir/monitoring-values.yaml <<EOF
        |fullnameOverride: kps
        |kubeEtcd:
-       |  enabled: false
+       |  enabled: true
        |kubeScheduler:
-       |  enabled: false
+       |  enabled: true
        |kubeControllerManager:
-       |  enabled: false
+       |  enabled: true
        |kubeProxy:
        |  enabled: false
        |prometheus:

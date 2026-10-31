@@ -53,6 +53,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Kubernetes cluster, step 13: `manifests/k8s_logging.scala` installs Loki (single binary, 30 GiB Ceph volume, 7 days) and Alloy on
   every node, which sends container logs to Loki labelled by namespace, pod, container, node and app, and adds Loki to Grafana as
   a data source. It checks that logs from kube-system arrive from all 10 nodes.
+- Kubernetes cluster, step 14: `manifests/k8s_kubeadm_config.scala` adds the hand-made API server settings (Keycloak login, Secret
+  encryption) to the `kubeadm-config` ConfigMap so `kubeadm upgrade` keeps them, makes the controller manager, scheduler and etcd serve
+  their metrics on the node address (one node at a time, with rollback), checks with `kubeadm upgrade diff`, and switches on their
+  Prometheus scrape jobs. New clusters get the metrics settings from `k8s_cluster.scala`; `k8s_monitoring.scala` now scrapes the three.
 
 ## [0.1.207] - 2026-10-30
 
