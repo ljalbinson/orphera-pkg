@@ -11,7 +11,7 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 // The helper /usr/local/sbin/orphera-netpol (run as root on tst30) is the one way
 // namespaces are locked down in the following steps:
 //
-//     orphera-netpol apply NAMESPACE [api] [gateway] [world] [scrape] [nodes]
+//     orphera-netpol apply NAMESPACE [api] [gateway] [world] [scrape] [nodes] [cluster]
 //     orphera-netpol remove NAMESPACE
 //     orphera-netpol show NAMESPACE
 //
@@ -26,6 +26,7 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 //   orphera-world    `world`: egress to anything outside the cluster (entity world)
 //   orphera-scrape   `scrape`: ingress from the namespace monitoring (Prometheus, Grafana)
 //   orphera-nodes    `nodes`: ingress from the nodes and the API server (service proxy, webhooks)
+//   orphera-cluster  `cluster`: egress to everything inside the cluster (nodes, other namespaces)
 // Kubelet health probes are not affected (Cilium always lets the node reach its
 // own pods). Pods in kube-system, gateway and ceph-csi-rbd are not to be locked down.
 //
@@ -56,18 +57,18 @@ object k8s_network_policy extends OrpheraClusterPlaybook:
   private val helperText =
     """#!/bin/bash
 # Managed by Orphera (k8s_network_policy.scala).
-# orphera-netpol apply NAMESPACE [api] [gateway] [world] [scrape] [nodes] | remove NAMESPACE | show NAMESPACE
+# orphera-netpol apply NAMESPACE [api] [gateway] [world] [scrape] [nodes] [cluster] | remove NAMESPACE | show NAMESPACE
 set -e
 KC="kubectl --kubeconfig /etc/kubernetes/admin.conf"
 CMD=${1:-}; NS=${2:-}
 [ -n "$CMD" ] && [ -n "$NS" ] || { sed -n '3p' "$0" >&2; exit 2; }
 $KC get namespace "$NS" >/dev/null
 case "$NS" in kube-system|kube-public|kube-node-lease|gateway|ceph-csi-rbd) echo "refusing to lock down $NS" >&2; exit 2 ;; esac
-OPTS="api gateway world scrape nodes"
+OPTS="api gateway world scrape nodes cluster"
 case "$CMD" in
   show) $KC -n "$NS" get ciliumnetworkpolicies; exit 0 ;;
   remove)
-    $KC -n "$NS" delete ciliumnetworkpolicy orphera-base orphera-api orphera-gateway orphera-world orphera-scrape orphera-nodes --ignore-not-found
+    $KC -n "$NS" delete ciliumnetworkpolicy orphera-base orphera-api orphera-gateway orphera-world orphera-scrape orphera-nodes orphera-cluster --ignore-not-found
     exit 0 ;;
   apply) shift 2 ;;
   *) echo "unknown command $CMD" >&2; exit 2 ;;
@@ -126,6 +127,10 @@ policy nodes '  ingress:
     - host
     - remote-node
     - kube-apiserver
+'
+policy cluster '  egress:
+  - toEntities:
+    - cluster
 '
 echo "network policies for $NS: base $*"
 """
@@ -276,7 +281,7 @@ echo "network policies for $NS: base $*"
         )
         .task("network policy tooling ready")(
           Task.Debug(
-            s"$helper apply NAMESPACE [api] [gateway] [world] [scrape] [nodes] locks a namespace down; the next steps use it on argocd, external-dns, logging and monitoring."
+            s"$helper apply NAMESPACE [api] [gateway] [world] [scrape] [nodes] [cluster] locks a namespace down; the next steps use it on argocd, external-dns, logging and monitoring."
           )
         )
         .build

@@ -83,6 +83,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Kubernetes cluster, step 19 (part 2): `manifests/k8s_network_lockdown.scala` gives external-dns, argocd and logging default-deny network
   policies (`orphera-netpol apply`, with only the access each needs), tests each end to end and removes a namespace's policies again if its test fails.
   `orphera-netpol` gained the option `nodes` (ingress from the nodes and the API server).
+- Kubernetes cluster, step 19 (part 3): `manifests/k8s_network_lockdown_monitoring.scala` gives the namespace monitoring default-deny network policies
+  (API server, Gateway, Keycloak, the nodes and the cluster allowed) and tests Prometheus targets, Grafana, the operator's webhook and Alertmanager,
+  removing the policies again if a test fails. `orphera-netpol` gained the option `cluster` (egress to everything inside the cluster).
 - README: the Kubernetes example now lists all steps, 1 to 17, with the notes on Keycloak groups, DNS delegation and the tests.
 
 ## [0.1.207] - 2026-10-30
