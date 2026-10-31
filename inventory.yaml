@@ -65,6 +65,7 @@ nodes:
   #   tst11       apt cache (apt-cacher-ng)
   #   tst12       rpm cache (nginx caching mirror of Rocky/EPEL)
   #   tst26       Keycloak (keycloak_single_node.scala), the OIDC identity provider Keystone federates to
+  #   tst30-tst39 Kubernetes cluster on VLAN 103 (see the entries below)
   # No osd_disks/zap_disks on tst3 and up: no Ceph role there (see the
   # incident note on tst0 above for why disk paths are never guessed).
   - name: tst3
@@ -207,6 +208,51 @@ nodes:
     host: tst26.ljalbinson.com
     vars:
       cluster_ip: "10.10.5.38"
+
+  # tst30-tst39: the Kubernetes cluster (kubeadm), on VLAN 103 (10.10.3.0/24, bridge br-net103):
+  #   tst30-tst32  control plane (stacked etcd, API server VIP 10.10.3.20 via keepalived + haproxy)
+  #   tst33-tst35  infra workers (tainted pool=infra)
+  #   tst36-tst39  workload workers
+  - name: tst30
+    host: tst30.ljalbinson.com
+    vars:
+      cluster_ip: "10.10.3.30"
+  - name: tst31
+    host: tst31.ljalbinson.com
+    vars:
+      cluster_ip: "10.10.3.31"
+  - name: tst32
+    host: tst32.ljalbinson.com
+    vars:
+      cluster_ip: "10.10.3.32"
+  - name: tst33
+    host: tst33.ljalbinson.com
+    vars:
+      cluster_ip: "10.10.3.33"
+  - name: tst34
+    host: tst34.ljalbinson.com
+    vars:
+      cluster_ip: "10.10.3.34"
+  - name: tst35
+    host: tst35.ljalbinson.com
+    vars:
+      cluster_ip: "10.10.3.35"
+  - name: tst36
+    host: tst36.ljalbinson.com
+    vars:
+      cluster_ip: "10.10.3.36"
+  - name: tst37
+    host: tst37.ljalbinson.com
+    vars:
+      cluster_ip: "10.10.3.37"
+  - name: tst38
+    host: tst38.ljalbinson.com
+    vars:
+      cluster_ip: "10.10.3.38"
+  - name: tst39
+    host: tst39.ljalbinson.com
+    vars:
+      cluster_ip: "10.10.3.39"
 
   - name: gs1
     host: gs1.ljalbinson.com
