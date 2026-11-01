@@ -74,7 +74,7 @@ for arg in "$@"; do
   env "${env_args[@]}" orphera cluster-playbook "$playbook" --config "$cfg" >"$log" 2>&1
   rc=$?
   # One line per step: drop the echoed script text and the "Running: ..." lines.
-  grep '^\[' "$log" | grep -v ': Running: ' | grep -v '^\[kvm-vm-[a-z]*\] Starting' | sed 's/^/  /'
+  grep -E '^\[[A-Za-z0-9_-]+\] ' "$log" | grep -v ': Running: ' | grep -v '^\[kvm-vm-[a-z]*\] Starting' | sed 's/^/  /'
   if [ "$rc" -ne 0 ] || grep -qE "aborting remaining stages|Cluster playbook .* failed|FAILED" "$log"; then
     echo "$vm: $action FAILED (full output: $log)" >&2
     failed="$failed $vm"
