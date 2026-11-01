@@ -91,10 +91,16 @@ object gen_set_dns extends OrpheraClusterPlaybook:
       listed <- c.get[Option[List[String]]]("dns_servers").left.map(err)
       dns1 <- c.get[Option[String]]("dns1").left.map(err)
       dns2 <- c.get[Option[String]]("dns2").left.map(err)
-      servers = listed.getOrElse(List(dns1, dns2).flatten).filter(_.nonEmpty)
+      // distinct: dns1 == dns2, or a repeated entry, must not produce a
+      // duplicate `nameserver` line (and must not count twice towards
+      // round_robin's 2-3 server check).
+      servers = listed
+        .getOrElse(List(dns1, dns2).flatten)
+        .filter(_.nonEmpty)
+        .distinct
       search <- c.get[Option[List[String]]]("search_domains").left.map(err)
       domain <- c.get[Option[String]]("domainname").left.map(err)
-      domains = search.getOrElse(domain.toList).filter(_.nonEmpty)
+      domains = search.getOrElse(domain.toList).filter(_.nonEmpty).distinct
       roundRobin <- c.getOrElse[Boolean]("round_robin")(false).left.map(err)
       _ <- Either.cond(nodes.nonEmpty, (), "no nodes given")
       _ <- Either.cond(
