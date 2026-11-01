@@ -114,6 +114,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - README: the Kubernetes example also covers Pod Security (step 18) and the network policies (step 19).
 - README: a table of the other playbooks in `manifests/` (teardowns, etcd and Galera maintenance, WordPress, the manual Ceph steps) that were not described anywhere in it.
 
+### Fixed
+- `manifests/gen_set_dns.scala` drops repeated DNS servers and search domains (e.g. `dns1` equal to `dns2`) before writing, so `resolv.conf` and the resolved drop-in no longer get duplicate entries, and `round_robin` no longer counts a repeat towards its 2-3 server limit. Not yet run on the lab.
+
 ## [0.1.207] - 2026-10-30
 
 The agent's code is unchanged from 0.1.206; the orchestrator's `Container` takes `args`. New playbooks: Keycloak with Keystone federation, single sign-on into Horizon and Skyline (both now on HTTPS) with Keycloak groups deciding roles, Trove, Telemetry, Skyline, Magnum, Octavia, tenant networking, the Kolla image builder, RGW, Manila, Barbican, Heat and Designate; VirtualBMC and `move-vm.sh`.
