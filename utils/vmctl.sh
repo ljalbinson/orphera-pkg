@@ -13,10 +13,15 @@
 #   utils/vmctl.sh reboot <vm>                   # soft: ask the guest to reboot
 #   utils/vmctl.sh reboot --hard --force <vm>    # full power cycle
 #   utils/vmctl.sh start config/<vm>.yaml        # an explicit config file
+#   utils/vmctl.sh shutdown-all <hypervisor>...  # list the running VMs on those hypervisors (nothing is shut down)
+#   utils/vmctl.sh shutdown-all --yes gs2 st0    # shut them all down, gracefully, and wait
+#   utils/vmctl.sh shutdown-all --yes --force --except <vm> gs2   # power off any that do not stop; leave <vm> running
 #
 # Options map to the playbooks' environment variables: --retries to ORPHERA_VM_RETRIES
 # (start and reboot --hard), --wait to ORPHERA_VM_WAIT and --force to ORPHERA_VM_FORCE=1 (stop, reboot --hard),
-# --hard / --soft to ORPHERA_VM_MODE (reboot).
+# --hard / --soft to ORPHERA_VM_MODE (reboot). shutdown-all takes hypervisor names (gs1, gs2, ...), not VMs: it
+# runs manifests/kvm_shutdown_all.scala, which lists the running VMs unless --yes is given, always leaves running the
+# VM named like the machine you run it on, and takes --wait, --force and --except <vm>[,<vm>] (ORPHERA_VM_EXCLUDE).
 #
 # Unlike start-vm.sh, stop-vm.sh and reboot-vm.sh (which only ask the hypervisor), these run
 # the playbooks, so `start` also waits until the guest answers SSH. Prints one line per step;
@@ -34,11 +39,11 @@ case "$1" in -h|--help) usage; exit 0 ;; esac
 action=$1
 shift
 case "$action" in
-  start|stop|reboot) ;;
-  *) echo "unknown action '$action' (start, stop or reboot)" >&2; exit 2 ;;
+  start|stop|reboot|shutdown-all) ;;
+  *) echo "unknown action '$action' (start, stop, reboot or shutdown-all)" >&2; exit 2 ;;
 esac
 
-retries="" wait_s="" force="" mode=""
+retries="" wait_s="" force="" mode="" yes="" except=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --retries) retries=${2:-}; shift 2 || { echo "--retries needs a number" >&2; exit 2; } ;;
@@ -46,6 +51,8 @@ while [ $# -gt 0 ]; do
     --force) force=1; shift ;;
     --hard) mode=hard; shift ;;
     --soft) mode=soft; shift ;;
+    --yes) yes=1; shift ;;
+    --except) except=${2:-}; shift 2 || { echo "--except needs a VM name" >&2; exit 2; } ;;
     -h|--help) usage; exit 0 ;;
     -*) echo "unknown option $1" >&2; exit 2 ;;
     *) break ;;
@@ -55,9 +62,31 @@ for v in "$retries" "$wait_s"; do
   case "$v" in *[!0-9]*) echo "--retries and --wait need a number" >&2; exit 2 ;; esac
 done
 [ -z "$retries" ] || [ "$action" != stop ] || { echo "--retries applies to start and reboot --hard only" >&2; exit 2; }
+[ -z "$yes$except" ] || [ "$action" = shutdown-all ] || { echo "--yes and --except apply to shutdown-all only" >&2; exit 2; }
 [ -z "$wait_s$force" ] || [ "$action" != start ] || { echo "--wait and --force apply to stop and reboot only" >&2; exit 2; }
 [ -z "$mode" ] || [ "$action" = reboot ] || { echo "--hard and --soft apply to reboot only" >&2; exit 2; }
 [ $# -gt 0 ] || { usage; exit 2; }
+
+if [ "$action" = shutdown-all ]; then
+  [ -z "$retries$mode" ] || { echo "--retries, --hard and --soft do not apply to shutdown-all" >&2; exit 2; }
+  playbook="manifests/kvm_shutdown_all.scala"
+  [ -f "$playbook" ] || { echo "$playbook not found" >&2; exit 1; }
+  log="/tmp/vmctl.shutdown-all.log"
+  env_args=("ORPHERA_HYPERVISORS=$*")
+  [ -z "$yes" ] || env_args+=("ORPHERA_VM_CONFIRM=1")
+  [ -z "$wait_s" ] || env_args+=("ORPHERA_VM_WAIT=$wait_s")
+  [ -z "$force" ] || env_args+=("ORPHERA_VM_FORCE=1")
+  [ -z "$except" ] || env_args+=("ORPHERA_VM_EXCLUDE=$except")
+  env "${env_args[@]}" orphera cluster-playbook "$playbook" >"$log" 2>&1
+  rc=$?
+  grep -E '^\[[A-Za-z0-9_-]+\] ' "$log" | grep -v ': Running: ' | grep -v '^\[kvm-shutdown-all\] Starting' | sed 's/^/  /'
+  if [ "$rc" -ne 0 ] || grep -qE "aborting remaining stages|Cluster playbook .* failed|FAILED" "$log"; then
+    echo "shutdown-all FAILED (full output: $log)" >&2
+    exit 1
+  fi
+  [ -n "$yes" ] && echo "shutdown-all done" || echo "shutdown-all: nothing was shut down; add --yes to do it"
+  exit 0
+fi
 
 playbook="manifests/kvm_vm_$action.scala"
 [ -f "$playbook" ] || { echo "$playbook not found" >&2; exit 1; }

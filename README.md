@@ -1207,6 +1207,19 @@ utils/vmctl.sh start <vm>
 utils/vmctl.sh start --retries 5 <vm1> <vm2> <vm3>
 ```
 
+`utils/vmctl.sh shutdown-all <hypervisor>...` empties hypervisors before maintenance
+(`manifests/kvm_shutdown_all.scala`; hypervisors are given by name, none is assumed). Without `--yes` it
+only lists the running VMs on each. With `--yes` it asks them all to shut down (`virsh shutdown`), waits
+(`--wait S`, default 120) and fails if any is still running, or powers those off with `--force`. The VM
+named like the machine you run it on is never touched, and `--except <vm>[,<vm>]` leaves others running.
+VMs that depend on each other go down together; `galera_cold_start.scala` brings Galera back, and
+`vmctl.sh start` brings the VMs back one at a time.
+
+```bash
+utils/vmctl.sh shutdown-all gs2 st0           # list only
+utils/vmctl.sh shutdown-all --yes gs2         # shut them down
+```
+
 `manifests/gen_packages.scala` installs the config's `pre_basic_packages`, then
 `basic_packages`, on that VM once it has the agent and an `inventory.yaml`
 entry (either list may be absent or empty):
