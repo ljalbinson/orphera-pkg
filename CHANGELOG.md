@@ -9,6 +9,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Added
 - `manifests/kvm_shutdown_all.scala` and `utils/vmctl.sh shutdown-all <hypervisor>...`: shut down every running VM on the named hypervisors, gracefully, and wait. Lists
   only unless `--yes`; `--wait`, `--force` (power off the stragglers) and `--except`; the VM named like the orchestrating machine is never touched. Not yet run on the lab.
+- `manifests/kvm_start_all.scala` and `utils/vmctl.sh start-all <hypervisor>...`: start the VMs that `shutdown-all` shut down (recorded in
+  `/var/lib/orphera/shutdown-all.vms` on the hypervisor), or with `--all` every shut-off VM; retries, removes stale Open vSwitch ports first, `--dry-run`, `--except`. Not yet run on the lab.
 - `kvm_vm_start.scala` and the hard mode of `kvm_vm_reboot.scala` remove stale Open vSwitch `vnetN` ports (ports whose network device no longer exists) on the hypervisor before
   starting a VM, so the "vnetN is actually attached to bridge ..." start failure no longer happens; the retry stays as a backstop. Not yet run.
 - `utils/vmctl.sh start|stop|reboot <vm>...`: runs `kvm_vm_start.scala`, `kvm_vm_stop.scala` and `kvm_vm_reboot.scala` by VM name, with `--retries`, `--wait`,

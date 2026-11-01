@@ -1212,12 +1212,20 @@ utils/vmctl.sh start --retries 5 <vm1> <vm2> <vm3>
 only lists the running VMs on each. With `--yes` it asks them all to shut down (`virsh shutdown`), waits
 (`--wait S`, default 120) and fails if any is still running, or powers those off with `--force`. The VM
 named like the machine you run it on is never touched, and `--except <vm>[,<vm>]` leaves others running.
-VMs that depend on each other go down together; `galera_cold_start.scala` brings Galera back, and
-`vmctl.sh start` brings the VMs back one at a time.
+VMs that depend on each other go down together. The names of the VMs it shuts down are recorded on the
+hypervisor (`/var/lib/orphera/shutdown-all.vms`).
+
+`utils/vmctl.sh start-all <hypervisor>...` (`manifests/kvm_start_all.scala`) starts exactly those VMs again, so a VM
+that was off before stays off, and drops each from the record once it is running (`--all`: every shut-off VM on
+the hypervisor instead; `--dry-run` to only list; `--retries N`, default 3; `--except`). It removes stale Open
+vSwitch ports first, as `kvm_vm_start.scala` does, and does not wait for the guests to boot. VMs that depend on each
+other across hypervisors are not ordered: run it for one hypervisor at a time, in the order you need (Ceph first),
+and use `galera_cold_start.scala` for Galera.
 
 ```bash
 utils/vmctl.sh shutdown-all gs2 st0           # list only
 utils/vmctl.sh shutdown-all --yes gs2         # shut them down
+utils/vmctl.sh start-all gs2                   # start them again
 ```
 
 `manifests/gen_packages.scala` installs the config's `pre_basic_packages`, then

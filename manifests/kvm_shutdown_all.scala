@@ -6,7 +6,8 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 // Shuts down every running VM on one or more hypervisors, gracefully (virsh shutdown, an
 // ACPI power-button press), and waits until they are off: the way to empty a hypervisor
 // before maintenance on it. The hypervisors are inventory nodes running the Orphera agent;
-// the VMs do not need theirs. Start them again with utils/vmctl.sh start, one VM at a time.
+// the VMs do not need theirs. The names of the VMs it shuts down are recorded on the
+// hypervisor (/var/lib/orphera/shutdown-all.vms) for kvm_start_all.scala, which starts exactly those again.
 //
 //   ORPHERA_HYPERVISORS="gs2 st0" orphera cluster-playbook manifests/kvm_shutdown_all.scala
 //   ORPHERA_HYPERVISORS=gs2 ORPHERA_VM_CONFIRM=1 orphera cluster-playbook manifests/kvm_shutdown_all.scala
@@ -89,6 +90,10 @@ object kvm_shutdown_all extends OrpheraClusterPlaybook:
       |  echo "dry run: nothing was shut down (set ORPHERA_VM_CONFIRM=1, or use vmctl.sh shutdown-all --yes)"
       |  exit 0
       |fi
+      |# remember what is being shut down, for kvm_start_all.scala (a list from an earlier run is kept)
+      |LIST=/var/lib/orphera/shutdown-all.vms
+      |mkdir -p /var/lib/orphera
+      |{ cat "$LIST" 2>/dev/null; for d in $todo; do echo "$d"; done; } | sort -u > "$LIST.new" && mv "$LIST.new" "$LIST"
       |for d in $todo; do
       |  $V shutdown "$d" >/dev/null 2>&1 || echo "the shutdown request for $d failed" >&2
       |done
