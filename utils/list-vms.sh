@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# Lists every VM on each hypervisor: name, state, vCPUs and memory, with a total
+# Lists every VM on each hypervisor: name, state, vCPUs, memory and whether libvirt starts it
+# when the hypervisor boots (AUTOSTART: yes, no, or ? if it did not say), with a total
 # per hypervisor for the running VMs.
 #
 #   utils/list-vms.sh                 # gs1 gs2 gs3 st0
@@ -20,7 +21,7 @@ else
 fi
 
 # Runs on each hypervisor; one machine-readable line per VM.
-REMOTE='V="virsh --connect qemu:///system"; [ "$(id -u)" -eq 0 ] || V="sudo -n $V"; echo "HV|up"; for v in $($V list --all --name 2>/dev/null); do st=$($V domstate "$v" 2>/dev/null | head -1); info=$($V dominfo "$v" 2>/dev/null); cpu=$(printf "%s\n" "$info" | awk "/^CPU\\(s\\)/{print \$2}"); mem=$(printf "%s\n" "$info" | awk "/^Max memory/{printf \"%d\", \$3/1024}"); echo "VM|$v|$st|$cpu|$mem"; done'
+REMOTE='V="virsh --connect qemu:///system"; [ "$(id -u)" -eq 0 ] || V="sudo -n $V"; echo "HV|up"; for v in $($V list --all --name 2>/dev/null); do st=$($V domstate "$v" 2>/dev/null | head -1); info=$($V dominfo "$v" 2>/dev/null); cpu=$(printf "%s\n" "$info" | awk "/^CPU\\(s\\)/{print \$2}"); mem=$(printf "%s\n" "$info" | awk "/^Max memory/{printf \"%d\", \$3/1024}"); auto=$(printf "%s\n" "$info" | awk "/^Autostart/{print \$2}"); echo "VM|$v|$st|$cpu|$mem|$auto"; done'
 
 NODES=$(printf '%s' "$HV" | tr -s ' ' ',')
 RAW=$(orphera run --nodes "$NODES" --quiet -- sh -c "$REMOTE" 2>&1)
@@ -38,7 +39,9 @@ BEGIN { n = split(want, order, " ") }
   if (rest ~ /^VM\|/) {
     split(rest, f, "|")
     cnt[node]++
-    row[node, cnt[node]] = sprintf("  %-22s %-12s %5s %9s", f[2], trim(f[3]), f[4], f[5] " MiB")
+    auto = trim(f[6])
+    auto = (auto == "enable") ? "yes" : ((auto == "disable") ? "no" : "?")
+    row[node, cnt[node]] = sprintf("  %-22s %-12s %5s %9s  %s", f[2], trim(f[3]), f[4], f[5] " MiB", auto)
     if (trim(f[3]) == "running") { rc[node]++; cpu[node] += f[4]; mem[node] += f[5] }
   }
 }
@@ -48,7 +51,7 @@ END {
     h = order[i]
     if (!(h in up)) { printf "%s: no answer (agent down or host unreachable)\n\n", h; bad = 1; continue }
     printf "%s  (%d VMs, %d running: %d vCPU, %d MiB)\n", h, cnt[h] + 0, rc[h] + 0, cpu[h] + 0, mem[h] + 0
-    printf "  %-22s %-12s %5s %13s\n", "VM", "STATE", "VCPU", "MEMORY"
+    printf "  %-22s %-12s %5s %13s  %s\n", "VM", "STATE", "VCPU", "MEMORY", "AUTOSTART"
     # names are sorted by virsh already; keep its order
     for (j = 1; j <= cnt[h]; j++) print row[h, j]
     print ""

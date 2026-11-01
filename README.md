@@ -1215,6 +1215,11 @@ named like the machine you run it on is never touched, and `--except <vm>[,<vm>]
 VMs that depend on each other go down together. The names of the VMs it shuts down are recorded on the
 hypervisor (`/var/lib/orphera/shutdown-all.vms`).
 
+`utils/vmctl.sh autostart add|remove` (`manifests/kvm_autostart.scala`) turns libvirt's autostart (start the VM when
+its hypervisor boots) on or off for the VMs named, for every VM on the `--hypervisor`s given (repeat the option), or
+for every VM on every hypervisor with `--all`. Running VMs are not started or stopped by it, and a VM already as asked
+is left alone. `vmctl.sh list` shows the AUTOSTART column (`yes`, `no`, or `?` if libvirt did not say).
+
 `utils/vmctl.sh start-all <hypervisor>...` (`manifests/kvm_start_all.scala`) starts exactly those VMs again, so a VM
 that was off before stays off, and drops each from the record once it is running (`--all`: every shut-off VM on
 the hypervisor instead; `--dry-run` to only list; `--retries N`, default 3; `--except`). It removes stale Open
@@ -1226,8 +1231,11 @@ and use `galera_cold_start.scala` for Galera.
 utils/vmctl.sh shutdown-all gs2 st0           # list only
 utils/vmctl.sh shutdown-all --yes gs2         # shut them down
 utils/vmctl.sh start-all gs2                   # start them again
-utils/vmctl.sh list                           # every VM on every hypervisor, with its state
+utils/vmctl.sh list                           # every VM on every hypervisor: state, vCPUs, memory, autostart
 utils/vmctl.sh list gs2 st0                   # just those hypervisors
+utils/vmctl.sh autostart add <vm>...          # libvirt starts the VM when its hypervisor boots
+utils/vmctl.sh autostart remove --hypervisor gs2   # turn it off for every VM on gs2
+utils/vmctl.sh autostart add --all            # every VM on every hypervisor
 ```
 
 `manifests/gen_packages.scala` installs the config's `pre_basic_packages`, then

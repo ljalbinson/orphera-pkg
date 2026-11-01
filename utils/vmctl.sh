@@ -18,8 +18,12 @@
 #   utils/vmctl.sh shutdown-all --yes --force --except <vm> gs2   # power off any that do not stop; leave <vm> running
 #   utils/vmctl.sh start-all gs2 st0             # start the VMs that shutdown-all shut down there (--dry-run to only list)
 #   utils/vmctl.sh start-all --all gs2           # start every shut-off VM on gs2, recorded or not
-#   utils/vmctl.sh list                          # every VM on every hypervisor: state, vCPUs, memory
+#   utils/vmctl.sh list                          # every VM on every hypervisor: state, vCPUs, memory, autostart
 #   utils/vmctl.sh list gs2 st0                  # just those hypervisors
+#   utils/vmctl.sh autostart add <vm>...         # libvirt starts these VMs when their hypervisor boots
+#   utils/vmctl.sh autostart remove <vm>...      # ... no longer does
+#   utils/vmctl.sh autostart add --hypervisor gs2 [--hypervisor st0]   # every VM on those hypervisors
+#   utils/vmctl.sh autostart remove --all        # every VM on every hypervisor
 #
 # Options map to the playbooks' environment variables: --retries to ORPHERA_VM_RETRIES
 # (start and reboot --hard), --wait to ORPHERA_VM_WAIT and --force to ORPHERA_VM_FORCE=1 (stop, reboot --hard),
@@ -28,6 +32,9 @@
 # VM named like the machine you run it on, and takes --wait, --force and --except <vm>[,<vm>] (ORPHERA_VM_EXCLUDE).
 # start-all runs manifests/kvm_start_all.scala: it starts exactly the VMs that shutdown-all recorded on each hypervisor
 # (--all: every shut-off VM there), with --retries (default 3), --except and --dry-run. It does not wait for the guests.
+# autostart add|remove runs manifests/kvm_autostart.scala to turn libvirt's autostart on or off for the named VMs, for
+# every VM on the --hypervisor(s) given, or for every VM on every hypervisor with --all (the running state is not changed;
+# `list` shows the AUTOSTART column).
 #
 # Unlike start-vm.sh, stop-vm.sh and reboot-vm.sh (which only ask the hypervisor), these run
 # the playbooks, so `start` also waits until the guest answers SSH. Prints one line per step;
@@ -48,12 +55,18 @@ shift
 if [ "$action" = list ]; then
   exec utils/list-vms.sh "$@"
 fi
+sub=""
+if [ "$action" = autostart ]; then
+  sub=${1:-}
+  case "$sub" in add|remove) shift ;; *) echo "autostart needs add or remove" >&2; exit 2 ;; esac
+fi
 case "$action" in
-  start|stop|reboot|shutdown-all|start-all) ;;
-  *) echo "unknown action '$action' (start, stop, reboot, shutdown-all, start-all or list)" >&2; exit 2 ;;
+  start|stop|reboot|shutdown-all|start-all|autostart) ;;
+  *) echo "unknown action '$action' (start, stop, reboot, shutdown-all, start-all, autostart or list)" >&2; exit 2 ;;
 esac
 
 retries="" wait_s="" force="" mode="" yes="" except="" all="" dry=""
+hvs=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --retries) retries=${2:-}; shift 2 || { echo "--retries needs a number" >&2; exit 2; } ;;
@@ -64,6 +77,7 @@ while [ $# -gt 0 ]; do
     --yes) yes=1; shift ;;
     --all) all=1; shift ;;
     --dry-run) dry=1; shift ;;
+    --hypervisor) hvs+=("${2:-}"); shift 2 || { echo "--hypervisor needs a name" >&2; exit 2; } ;;
     --except) except=${2:-}; shift 2 || { echo "--except needs a VM name" >&2; exit 2; } ;;
     -h|--help) usage; exit 0 ;;
     -*) echo "unknown option $1" >&2; exit 2 ;;
@@ -76,10 +90,52 @@ done
 [ -z "$retries" ] || [ "$action" != stop ] || { echo "--retries applies to start and reboot --hard only" >&2; exit 2; }
 [ -z "$yes" ] || [ "$action" = shutdown-all ] || { echo "--yes applies to shutdown-all only" >&2; exit 2; }
 [ -z "$except" ] || [ "$action" = shutdown-all ] || [ "$action" = start-all ] || { echo "--except applies to shutdown-all and start-all only" >&2; exit 2; }
-[ -z "$all$dry" ] || [ "$action" = start-all ] || { echo "--all and --dry-run apply to start-all only" >&2; exit 2; }
+[ -z "$dry" ] || [ "$action" = start-all ] || { echo "--dry-run applies to start-all only" >&2; exit 2; }
+[ -z "$all" ] || [ "$action" = start-all ] || [ "$action" = autostart ] || { echo "--all applies to start-all and autostart only" >&2; exit 2; }
+[ "${#hvs[@]}" -eq 0 ] || [ "$action" = autostart ] || { echo "--hypervisor applies to autostart only" >&2; exit 2; }
 [ -z "$wait_s$force" ] || [ "$action" != start ] || { echo "--wait and --force apply to stop and reboot only" >&2; exit 2; }
 [ -z "$mode" ] || [ "$action" = reboot ] || { echo "--hard and --soft apply to reboot only" >&2; exit 2; }
-[ $# -gt 0 ] || { usage; exit 2; }
+[ $# -gt 0 ] || [ "$action" = autostart ] || { usage; exit 2; }
+
+if [ "$action" = autostart ]; then
+  [ -z "$retries$wait_s$force$mode$yes$except$dry" ] || { echo "autostart takes only VM names, --hypervisor and --all" >&2; exit 2; }
+  playbook="manifests/kvm_autostart.scala"
+  [ -f "$playbook" ] || { echo "$playbook not found" >&2; exit 1; }
+  setting=on
+  [ "$sub" != remove ] || setting=off
+  run_autostart() {  # <hypervisors, space separated> <VM names, space separated, or empty for all>
+    local log="/tmp/vmctl.autostart.$(printf '%s' "$1" | tr -c 'A-Za-z0-9\n' '_').log" rc
+    ORPHERA_AUTOSTART=$setting ORPHERA_HYPERVISORS=$1 ORPHERA_VM_NAMES=$2 \
+      orphera cluster-playbook "$playbook" >"$log" 2>&1
+    rc=$?
+    grep -E '^\[[A-Za-z0-9_-]+\] ' "$log" | grep -v ': Running: ' | grep -v '^\[kvm-autostart\] Starting' | sed 's/^/  /'
+    if [ "$rc" -ne 0 ] || grep -qE "aborting remaining stages|Cluster playbook .* failed|FAILED" "$log"; then
+      echo "autostart $sub FAILED on $1 (full output: $log)" >&2
+      return 1
+    fi
+  }
+  fail=0
+  if [ -n "$all" ]; then
+    [ $# -eq 0 ] && [ "${#hvs[@]}" -eq 0 ] || { echo "--all takes no VM names and no --hypervisor" >&2; exit 2; }
+    run_autostart "${HYPERVISORS:-gs1 gs2 gs3 st0}" "" || fail=1
+  elif [ "${#hvs[@]}" -gt 0 ]; then
+    [ $# -eq 0 ] || { echo "give VM names or --hypervisor, not both" >&2; exit 2; }
+    run_autostart "${hvs[*]}" "" || fail=1
+  else
+    [ $# -gt 0 ] || { usage; exit 2; }
+    declare -A groups=()
+    for arg in "$@"; do
+      vm_lookup "$arg" || { fail=1; continue; }
+      groups[$hv]+=" $vm"
+    done
+    for h in "${!groups[@]}"; do
+      run_autostart "$h" "${groups[$h]}" || fail=1
+    done
+  fi
+  [ "$fail" -eq 0 ] || exit 1
+  echo "autostart $sub done"
+  exit 0
+fi
 
 if [ "$action" = shutdown-all ] || [ "$action" = start-all ]; then
   if [ "$action" = shutdown-all ]; then
