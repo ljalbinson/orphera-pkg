@@ -124,6 +124,16 @@ object kvm_vm_reboot extends OrpheraClusterPlaybook:
       |else
       |  how="was already shut off"
       |fi
+      |# libvirt leaves vnetN ports behind in Open vSwitch when a VM stops uncleanly and then fails a start with
+      |# "vnetN is actually attached to bridge ..."; remove the ones whose device is gone (see kvm_vm_start.scala).
+      |if command -v ovs-vsctl >/dev/null 2>&1; then
+      |  for b in $(ovs-vsctl list-br 2>/dev/null); do
+      |    for p in $(ovs-vsctl list-ports "$b" 2>/dev/null); do
+      |      case "$p" in vnet[0-9]*) ;; *) continue ;; esac
+      |      [ -e "/sys/class/net/$p" ] || { ovs-vsctl --if-exists del-port "$b" "$p" && echo "removed stale Open vSwitch port $p from $b"; }
+      |    done
+      |  done
+      |fi
       |n=0
       |while :; do
       |  out=$($V start '@VM@' 2>&1) && break

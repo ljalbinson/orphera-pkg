@@ -7,6 +7,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- `kvm_vm_start.scala` and the hard mode of `kvm_vm_reboot.scala` remove stale Open vSwitch `vnetN` ports (ports whose network device no longer exists) on the hypervisor before
+  starting a VM, so the "vnetN is actually attached to bridge ..." start failure no longer happens; the retry stays as a backstop. Not yet run.
 - `utils/vmctl.sh start|stop|reboot <vm>...`: runs `kvm_vm_start.scala`, `kvm_vm_stop.scala` and `kvm_vm_reboot.scala` by VM name, with `--retries`, `--wait`,
   `--force`, `--hard`/`--soft` mapped to their environment variables, and prints one line per step instead of the echoed script text. Not yet run on the lab.
 - `manifests/kvm_vm_start.scala` retries a failed start, resume or reset (5 s apart), 3 times by default; `ORPHERA_VM_RETRIES=<n>` sets the number, 0 turns it off.

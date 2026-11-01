@@ -26,6 +26,11 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 //   ORPHERA_VM_RETRIES=5 orphera cluster-playbook manifests/kvm_vm_start.scala --config config/tst0.yaml
 // Each attempt looks at the VM's state again. A domain that is not defined is not retried.
 //
+// Before a VM is started, Open vSwitch ports named vnetN whose network device no longer exists
+// are removed from the hypervisor's bridges. libvirt leaves them behind when a VM stops
+// uncleanly, reuses the names, and then fails the start with "vnetN is actually attached to
+// bridge ...". Only vnetN ports with no device are touched; hypervisors without Open vSwitch skip this.
+//
 // One deliberate exception to "leave a running VM alone": libvirt reports a
 // guest that has HALTED (OS stopped, QEMU still alive) or hung as `running`,
 // forever. So if the domain is `running` but the guest answers neither ping nor
@@ -75,6 +80,15 @@ object kvm_vm_start extends OrpheraClusterPlaybook:
   // command substitutions below must reach `sh` untouched.
   private val startVmScript =
     s"""reachable() { ping -c1 -W1 $ipAddress >/dev/null 2>&1 || timeout 3 bash -c 'echo > /dev/tcp/$ipAddress/22' >/dev/null 2>&1; }
+       |prune_ovs() {
+       |  command -v ovs-vsctl >/dev/null 2>&1 || return 0
+       |  for b in $$(ovs-vsctl list-br 2>/dev/null); do
+       |    for p in $$(ovs-vsctl list-ports "$$b" 2>/dev/null); do
+       |      case "$$p" in vnet[0-9]*) ;; *) continue ;; esac
+       |      [ -e "/sys/class/net/$$p" ] || { ovs-vsctl --if-exists del-port "$$b" "$$p" && echo "removed stale Open vSwitch port $$p from $$b"; }
+       |    done
+       |  done
+       |}
        |attempt() {
        |  state=$$(virsh --connect qemu:///system domstate '$vmName' 2>/dev/null) || { echo "ERROR: domain '$vmName' is not defined on this hypervisor - provision it with kvm_zfs_vm_provision.scala" >&2; return 2; }
        |  case "$$state" in
@@ -91,7 +105,7 @@ object kvm_vm_start extends OrpheraClusterPlaybook:
        |        virsh --connect qemu:///system reset '$vmName'
        |      fi ;;
        |    paused) virsh --connect qemu:///system resume '$vmName' && echo "'$vmName' resumed" ;;
-       |    *) virsh --connect qemu:///system start '$vmName' && echo "'$vmName' started (was: $$state)" ;;
+       |    *) prune_ovs; virsh --connect qemu:///system start '$vmName' && echo "'$vmName' started (was: $$state)" ;;
        |  esac
        |}
        |n=0

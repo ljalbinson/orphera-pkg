@@ -1195,6 +1195,7 @@ orphera cluster-playbook manifests/kvm_vm_start.scala --config config/tst0.yaml
 
 A failed start, resume or reset is tried again after 5 s, up to 3 more times by default;
 `ORPHERA_VM_RETRIES=<n>` sets the number (0 turns it off). An undefined domain is not retried.
+Before a start it also removes stale Open vSwitch `vnetN` ports (no network device behind them) from the hypervisor's bridges: libvirt leaves them behind after an unclean stop and then fails a start with "vnetN is actually attached to bridge ...".
 
 `utils/vmctl.sh start|stop|reboot <vm>...` runs these three playbooks without the playbook path and
 `--config`, and prints one line per step instead of the echoed script (`--retries N` for start, `--wait S` and
