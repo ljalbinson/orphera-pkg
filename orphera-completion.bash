@@ -411,3 +411,84 @@ _orphera_completions() {
 }
 
 complete -F _orphera_completions orphera
+
+# --- utils/vmctl.sh -----------------------------------------------------------------------------
+# Completes the actions, options, VM names and hypervisor names of utils/vmctl.sh. VM names are the
+# config files in the config directory (ORPHERA_CONFIG_DIR, a path or a file: URI, else config/);
+# hypervisor names are the `hypervisor:` values in those files, else gs1 gs2 gs3 st0.
+
+_vmctl_config_dir() {
+  local d="${ORPHERA_CONFIG_DIR:-config}"
+  d="${d#file://}"
+  # Only a directory can be read here; another kind of location has no names to offer.
+  case "$d" in *://*) return 1 ;; esac
+  [ -d "$d" ] || return 1
+  printf '%s\n' "${d%/}"
+}
+
+_vmctl_vms() {
+  local d f
+  d=$(_vmctl_config_dir) || return 0
+  for f in "$d"/*.yaml; do
+    [ -e "$f" ] || continue
+    f=${f##*/}
+    printf '%s\n' "${f%.yaml}"
+  done
+}
+
+_vmctl_hypervisors() {
+  local d out=""
+  if d=$(_vmctl_config_dir); then
+    out=$(awk '/^  hypervisor:/ {gsub(/["\x27]/, "", $2); print $2}' "$d"/*.yaml 2>/dev/null | sort -u)
+  fi
+  [ -n "$out" ] || out="gs1 gs2 gs3 st0"
+  printf '%s\n' $out
+}
+
+_vmctl_completions() {
+  local cur prev words cword
+  _init_completion || return
+
+  local actions="start stop reboot shutdown-all start-all autostart list"
+  if [[ $cword -eq 1 ]]; then
+    COMPREPLY=($(compgen -W "$actions" -- "$cur"))
+    return 0
+  fi
+
+  local action="${words[1]}"
+  if [[ "$action" == autostart && $cword -eq 2 ]]; then
+    COMPREPLY=($(compgen -W "add remove" -- "$cur"))
+    return 0
+  fi
+
+  # Values of the options that take one.
+  case "$prev" in
+    --retries|--wait) COMPREPLY=(); return 0 ;;
+    --hypervisor) COMPREPLY=($(compgen -W "$(_vmctl_hypervisors)" -- "$cur")); return 0 ;;
+    --except) COMPREPLY=($(compgen -W "$(_vmctl_vms)" -- "$cur")); return 0 ;;
+  esac
+
+  local opts=""
+  case "$action" in
+    start)        opts="--retries" ;;
+    stop)         opts="--wait --force" ;;
+    reboot)       opts="--hard --soft --wait --force --retries" ;;
+    shutdown-all) opts="--yes --wait --force --except" ;;
+    start-all)    opts="--all --dry-run --retries --except" ;;
+    autostart)    opts="--all --hypervisor" ;;
+  esac
+
+  if [[ "$cur" == -* ]]; then
+    COMPREPLY=($(compgen -W "$opts" -- "$cur"))
+    return 0
+  fi
+
+  # Positional arguments: hypervisors for these, VMs for the rest.
+  case "$action" in
+    shutdown-all|start-all|list) COMPREPLY=($(compgen -W "$(_vmctl_hypervisors)" -- "$cur")) ;;
+    start|stop|reboot|autostart) COMPREPLY=($(compgen -W "$(_vmctl_vms)" -- "$cur")) ;;
+    *) COMPREPLY=() ;;
+  esac
+}
+
+complete -F _vmctl_completions vmctl.sh ./vmctl.sh utils/vmctl.sh ./utils/vmctl.sh
