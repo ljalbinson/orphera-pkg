@@ -21,6 +21,7 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 //                     hard: virsh shutdown, wait until it is off, then start it again, a full
 //                     power cycle; also starts a VM that is shut off.
 //   ORPHERA_VM_WAIT   with hard, seconds to wait for the shutdown (default 120)
+//   ORPHERA_VM_RETRIES with hard, how many times a failed start is tried again, 5 s apart (default 3, 0 = never)
 //   ORPHERA_VM_FORCE  1, with hard: power the VM off at once (virsh destroy) if it has not
 //                     shut down in that time; without it the VM is reported as failed and
 //                     left running
@@ -70,6 +71,20 @@ object kvm_vm_reboot extends OrpheraClusterPlaybook:
           )
         }
 
+  // With hard, how many times a failed start is tried again after the first
+  // failure (5 s apart); ORPHERA_VM_RETRIES, default 3, 0 turns it off. Only the
+  // start is retried: libvirt sometimes fails it with an Open vSwitch port error
+  // that goes away on the next attempt.
+  private val retries: Int =
+    sys.env.get("ORPHERA_VM_RETRIES").map(_.trim).filter(_.nonEmpty) match
+      case None    => 3
+      case Some(s) =>
+        s.toIntOption.filter(_ >= 0).getOrElse {
+          throw new RuntimeException(
+            s"ORPHERA_VM_RETRIES must be a number (0 or more), not '$s'"
+          )
+        }
+
   private val force: Boolean =
     sys.env.get("ORPHERA_VM_FORCE").map(_.trim).contains("1")
 
@@ -109,12 +124,21 @@ object kvm_vm_reboot extends OrpheraClusterPlaybook:
       |else
       |  how="was already shut off"
       |fi
-      |out=$($V start '@VM@' 2>&1) || { echo "$how, but start failed: $out" >&2; exit 1; }
+      |n=0
+      |while :; do
+      |  out=$($V start '@VM@' 2>&1) && break
+      |  if [ $n -ge @RETRIES@ ]; then echo "$how, but start failed after $((n + 1)) attempt(s): $out" >&2; exit 1; fi
+      |  n=$((n + 1))
+      |  echo "start attempt $n failed: $out" >&2
+      |  echo "retry $n of @RETRIES@ in 5s" >&2
+      |  sleep 5
+      |done
       |echo "'@VM@': $how, started"
       |""".stripMargin
       .replace("@VM@", vmName)
       .replace("@WAIT@", waitSeconds.toString)
       .replace("@FORCE@", if force then "1" else "0")
+      .replace("@RETRIES@", retries.toString)
 
   val playbook: ClusterPlaybook =
     clusterPlaybook("kvm-vm-reboot")(
@@ -122,7 +146,7 @@ object kvm_vm_reboot extends OrpheraClusterPlaybook:
         .task(s"reboot $vmName ($mode)")(
           Task.RunCommand(
             List("sh", "-c", if mode == "hard" then hardScript else softScript),
-            timeoutSeconds = waitSeconds + 90
+            timeoutSeconds = waitSeconds + 90 + 65 * retries
           )
         )
         .build

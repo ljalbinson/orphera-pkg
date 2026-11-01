@@ -10,7 +10,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `utils/vmctl.sh start|stop|reboot <vm>...`: runs `kvm_vm_start.scala`, `kvm_vm_stop.scala` and `kvm_vm_reboot.scala` by VM name, with `--retries`, `--wait`,
   `--force`, `--hard`/`--soft` mapped to their environment variables, and prints one line per step instead of the echoed script text. Not yet run on the lab.
 - `manifests/kvm_vm_start.scala` retries a failed start, resume or reset (5 s apart), 3 times by default; `ORPHERA_VM_RETRIES=<n>` sets the number, 0 turns it off.
-  An undefined domain is not retried. Not yet run.
+  An undefined domain is not retried. The start step of `kvm_vm_reboot.scala` (hard mode) retries the same way. libvirt sometimes fails a start with an Open vSwitch port error that clears on the next attempt (seen on gs2 and st0).
 - `manifests/kvm_vm_stop.scala` and `manifests/kvm_vm_reboot.scala`: playbook forms of `utils/stop-vm.sh` and `utils/reboot-vm.sh` (one VM per run,
   `--config config/<vm>.yaml`; options through `ORPHERA_VM_WAIT`, `ORPHERA_VM_FORCE`, `ORPHERA_VM_MODE`). Not yet run; the scripts stay.
 - `Task.RunCommand` takes `register` (YAML `register:`): the command's output is stored as a fact on the node, readable by later tasks and

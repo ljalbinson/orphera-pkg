@@ -1202,8 +1202,8 @@ A failed start, resume or reset is tried again after 5 s, up to 3 more times by 
 `/tmp/vmctl.<vm>.log`):
 
 ```bash
-utils/vmctl.sh start tst41
-utils/vmctl.sh start --retries 5 tst3 tst4 tst5
+utils/vmctl.sh start <vm>
+utils/vmctl.sh start --retries 5 <vm1> <vm2> <vm3>
 ```
 
 `manifests/gen_packages.scala` installs the config's `pre_basic_packages`, then

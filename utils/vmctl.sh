@@ -5,17 +5,17 @@
 # kvm_vm_reboot.scala): no playbook path, no --config, and none of the echoed
 # script text in the output.
 #
-#   utils/vmctl.sh start tst7                    # config/tst7.yaml; a bare number means tst7
-#   utils/vmctl.sh start tst3 tst4 tst5          # several, one after another
-#   utils/vmctl.sh start --retries 5 tst7        # retry a failed start up to 5 times (default 3, 0 = never)
-#   utils/vmctl.sh stop --wait 300 tst7          # wait up to 300 s for the shutdown (default 120)
-#   utils/vmctl.sh stop --force tst7             # power it off if it has not shut down in time
-#   utils/vmctl.sh reboot tst7                   # soft: ask the guest to reboot
-#   utils/vmctl.sh reboot --hard --force tst7    # full power cycle
-#   utils/vmctl.sh start config/tst7.yaml        # an explicit config file
+#   utils/vmctl.sh start <vm>                    # config/<vm>.yaml; a bare number N means tstN
+#   utils/vmctl.sh start <vm1> <vm2> <vm3>       # several, one after another
+#   utils/vmctl.sh start --retries 5 <vm>        # retry a failed start up to 5 times (default 3, 0 = never)
+#   utils/vmctl.sh stop --wait 300 <vm>          # wait up to 300 s for the shutdown (default 120)
+#   utils/vmctl.sh stop --force <vm>             # power it off if it has not shut down in time
+#   utils/vmctl.sh reboot <vm>                   # soft: ask the guest to reboot
+#   utils/vmctl.sh reboot --hard --force <vm>    # full power cycle
+#   utils/vmctl.sh start config/<vm>.yaml        # an explicit config file
 #
 # Options map to the playbooks' environment variables: --retries to ORPHERA_VM_RETRIES
-# (start), --wait to ORPHERA_VM_WAIT and --force to ORPHERA_VM_FORCE=1 (stop, reboot --hard),
+# (start and reboot --hard), --wait to ORPHERA_VM_WAIT and --force to ORPHERA_VM_FORCE=1 (stop, reboot --hard),
 # --hard / --soft to ORPHERA_VM_MODE (reboot).
 #
 # Unlike start-vm.sh, stop-vm.sh and reboot-vm.sh (which only ask the hypervisor), these run
@@ -54,7 +54,7 @@ done
 for v in "$retries" "$wait_s"; do
   case "$v" in *[!0-9]*) echo "--retries and --wait need a number" >&2; exit 2 ;; esac
 done
-[ -z "$retries" ] || [ "$action" = start ] || { echo "--retries applies to start only" >&2; exit 2; }
+[ -z "$retries" ] || [ "$action" != stop ] || { echo "--retries applies to start and reboot --hard only" >&2; exit 2; }
 [ -z "$wait_s$force" ] || [ "$action" != start ] || { echo "--wait and --force apply to stop and reboot only" >&2; exit 2; }
 [ -z "$mode" ] || [ "$action" = reboot ] || { echo "--hard and --soft apply to reboot only" >&2; exit 2; }
 [ $# -gt 0 ] || { usage; exit 2; }
