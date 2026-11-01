@@ -47,7 +47,8 @@ object kvm_shutdown_all extends OrpheraClusterPlaybook:
   )
 
   private val localHost: String =
-    scala.util.Try(java.net.InetAddress.getLocalHost.getHostName)
+    scala.util
+      .Try(java.net.InetAddress.getLocalHost.getHostName)
       .toOption
       .map(_.takeWhile(_ != '.'))
       .getOrElse("")
