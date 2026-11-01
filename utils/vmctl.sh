@@ -18,6 +18,8 @@
 #   utils/vmctl.sh shutdown-all --yes --force --except <vm> gs2   # power off any that do not stop; leave <vm> running
 #   utils/vmctl.sh start-all gs2 st0             # start the VMs that shutdown-all shut down there (--dry-run to only list)
 #   utils/vmctl.sh start-all --all gs2           # start every shut-off VM on gs2, recorded or not
+#   utils/vmctl.sh list                          # every VM on every hypervisor: state, vCPUs, memory
+#   utils/vmctl.sh list gs2 st0                  # just those hypervisors
 #
 # Options map to the playbooks' environment variables: --retries to ORPHERA_VM_RETRIES
 # (start and reboot --hard), --wait to ORPHERA_VM_WAIT and --force to ORPHERA_VM_FORCE=1 (stop, reboot --hard),
@@ -42,9 +44,13 @@ usage() { sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'; }
 case "$1" in -h|--help) usage; exit 0 ;; esac
 action=$1
 shift
+# list: utils/list-vms.sh, for the named hypervisors or, with none, for all of them
+if [ "$action" = list ]; then
+  exec utils/list-vms.sh "$@"
+fi
 case "$action" in
   start|stop|reboot|shutdown-all|start-all) ;;
-  *) echo "unknown action '$action' (start, stop, reboot, shutdown-all or start-all)" >&2; exit 2 ;;
+  *) echo "unknown action '$action' (start, stop, reboot, shutdown-all, start-all or list)" >&2; exit 2 ;;
 esac
 
 retries="" wait_s="" force="" mode="" yes="" except="" all="" dry=""

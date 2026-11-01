@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- `utils/vmctl.sh list [<hypervisor>...]`: runs `list-vms.sh` (every VM with its state, vCPUs and memory) for the named hypervisors, or for all of them when none is given.
 - `manifests/kvm_shutdown_all.scala` and `utils/vmctl.sh shutdown-all <hypervisor>...`: shut down every running VM on the named hypervisors, gracefully, and wait. Lists
   only unless `--yes`; `--wait`, `--force` (power off the stragglers) and `--except`; the VM named like the orchestrating machine is never touched. Not yet run on the lab.
 - `manifests/kvm_start_all.scala` and `utils/vmctl.sh start-all <hypervisor>...`: start the VMs that `shutdown-all` shut down (recorded in

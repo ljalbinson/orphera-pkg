@@ -1226,6 +1226,8 @@ and use `galera_cold_start.scala` for Galera.
 utils/vmctl.sh shutdown-all gs2 st0           # list only
 utils/vmctl.sh shutdown-all --yes gs2         # shut them down
 utils/vmctl.sh start-all gs2                   # start them again
+utils/vmctl.sh list                           # every VM on every hypervisor, with its state
+utils/vmctl.sh list gs2 st0                   # just those hypervisors
 ```
 
 `manifests/gen_packages.scala` installs the config's `pre_basic_packages`, then
