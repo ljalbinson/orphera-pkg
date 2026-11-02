@@ -12,15 +12,28 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 // alert@ljalbinson.com to lawrence@ljalbinson.com. Settings, by environment variable
 // where the playbook is started (the defaults are in brackets):
 //   ORPHERA_ALERT_SMTP_HOST   relay host        [mail.ljalbinson.com]
-//   ORPHERA_ALERT_SMTP_PORT   relay port        [25]
+//   ORPHERA_ALERT_SMTP_PORT   relay port        [587, the submission port; STARTTLS]
 //   ORPHERA_ALERT_SMTP_HELO   name Alertmanager gives in HELO [alertmanager.k8s.ljalbinson.com]
 //                             (the relay refuses "localhost", Alertmanager's default; the
 //                             name should resolve in DNS: *.k8s.ljalbinson.com does)
 //   ORPHERA_ALERT_FROM        sender            [alert@ljalbinson.com]
 //   ORPHERA_ALERT_TO          recipient         [lawrence@ljalbinson.com]
-//   ORPHERA_ALERT_REQUIRE_TLS 1 = refuse a relay that does not offer STARTTLS [0]
-// There is no SMTP login: the relay is expected to accept mail from the cluster nodes'
-// network. (Alertmanager upgrades to TLS by itself when the relay offers STARTTLS.)
+//   ORPHERA_ALERT_AUTH        0 = no SMTP login (the relay must accept the nodes' network,
+//                             and then port 25 is the usual port: set ORPHERA_ALERT_SMTP_PORT=25) [1]
+//   ORPHERA_ALERT_SMTP_USER   login name        [the sender address, as iRedMail wants it]
+//   ORPHERA_ALERT_REQUIRE_TLS 0 = allow a relay without STARTTLS [1 with a login, else 0]
+//   ORPHERA_ALERT_INSECURE_TLS 1 = do not check the relay's certificate (a self-signed
+//                             iRedMail certificate; better: a certificate from a CA the
+//                             Alertmanager image knows) [0]
+//
+// The login password is the secret `alertmanager/smtp` (`printf '%s\n' 'password' |
+// orphera secrets set alertmanager/smtp`, BEFORE the first run: a name that is not in the
+// store yet is filled with a random value, which the mail server will refuse). It goes
+// into the Kubernetes Secret alertmanager-smtp in the namespace monitoring, which is
+// mounted into the Alertmanager pod and read through smtp_auth_password_file; it is not
+// in the Helm values or in alertmanager-values.yaml. The account has to exist on the mail
+// server (iRedMail: a mailbox, made in iRedAdmin), and iRedMail only lets an account
+// send as its own address or an alias of it.
 //
 // Routing: every alert goes to the receiver `email`, grouped by alert name and
 // namespace (first mail after 30 s, more for the same group every 5 min, a reminder
@@ -48,30 +61,49 @@ object k8s_alertmanager extends OrpheraClusterPlaybook:
     sys.env.get(name).map(_.trim).filter(_.nonEmpty).getOrElse(default)
 
   private val smtpHost = env("ORPHERA_ALERT_SMTP_HOST", "mail.ljalbinson.com")
-  private val smtpPort = env("ORPHERA_ALERT_SMTP_PORT", "25")
+  private val useAuth = env("ORPHERA_ALERT_AUTH", "1") != "0"
+  private val smtpPort = env("ORPHERA_ALERT_SMTP_PORT", if useAuth then "587" else "25")
   private val smtpHelo = env("ORPHERA_ALERT_SMTP_HELO", "alertmanager.k8s.ljalbinson.com")
   private val from = env("ORPHERA_ALERT_FROM", "alert@ljalbinson.com")
   private val to = env("ORPHERA_ALERT_TO", "lawrence@ljalbinson.com")
-  private val requireTls = if env("ORPHERA_ALERT_REQUIRE_TLS", "0") == "1" then "true" else "false"
+  private val smtpUser = env("ORPHERA_ALERT_SMTP_USER", from)
+  private val requireTls =
+    if env("ORPHERA_ALERT_REQUIRE_TLS", if useAuth then "1" else "0") == "1" then "true" else "false"
+  private val insecureTls = env("ORPHERA_ALERT_INSECURE_TLS", "0") == "1"
+  private val smtpPassword: Option[Secret] =
+    if useAuth then Some(Secrets.secret("alertmanager/smtp")) else None
 
-  private val applyScript =
-    s"""set -e
-       |export KUBECONFIG=/etc/kubernetes/admin.conf
-       |$kc -n $ns get statefulset alertmanager-kps-alertmanager >/dev/null \\
-       |  || { echo "Alertmanager of the release kps not found in $ns; run k8s_monitoring.scala first" >&2; exit 1; }
-       |CHART=$$(helm list -n $ns --filter '^kps$$' -o json | python3 -c 'import sys,json; print(json.load(sys.stdin)[0]["chart"])')
-       |VER=$${CHART#kube-prometheus-stack-}
-       |echo "release kps uses chart $$VER"
-       |cat > $stateDir/alertmanager-values.yaml <<EOF
-       |alertmanager:
-       |  config:
+  private def shQuote(v: String): String = "'" + v.replace("'", "'\\''") + "'"
+
+  private val secretsPath = "/etc/alertmanager/secrets/alertmanager-smtp/password"
+
+  // The Helm values file (written to alertmanager-values.yaml on tst30). No password in it.
+  private val valuesYaml =
+    val authLines =
+      if useAuth then
+        s"""      smtp_auth_username: '$smtpUser'
+           |      smtp_auth_password_file: $secretsPath
+           |""".stripMargin
+      else ""
+    val secretsLines =
+      if useAuth then
+        """  alertmanagerSpec:
+          |    secrets: [alertmanager-smtp]
+          |""".stripMargin
+      else ""
+    val tlsLines =
+      s"""        tls_config:
+         |          server_name: $smtpHost
+         |""".stripMargin + (if insecureTls then "          insecure_skip_verify: true\n" else "")
+    s"""alertmanager:
+       |${secretsLines}  config:
        |    global:
        |      resolve_timeout: 5m
        |      smtp_smarthost: '$smtpHost:$smtpPort'
        |      smtp_from: '$from'
        |      smtp_hello: '$smtpHelo'
        |      smtp_require_tls: $requireTls
-       |    route:
+       |${authLines}    route:
        |      receiver: email
        |      group_by: [alertname, namespace]
        |      group_wait: 30s
@@ -91,6 +123,26 @@ object k8s_alertmanager extends OrpheraClusterPlaybook:
        |      email_configs:
        |      - to: '$to'
        |        send_resolved: true
+       |$tlsLines""".stripMargin
+
+  // The Kubernetes Secret with the password (a line of the script; empty without a login).
+  private val passwordSecretCmd =
+    smtpPassword match
+      case Some(pw) =>
+        s"$kc -n $ns create secret generic alertmanager-smtp --from-literal=password=${shQuote(pw.reveal)} --dry-run=client -o yaml | $kc apply -f -"
+      case None => "true"
+
+  private val applyScript =
+    s"""set -e
+       |export KUBECONFIG=/etc/kubernetes/admin.conf
+       |$kc -n $ns get statefulset alertmanager-kps-alertmanager >/dev/null \\
+       |  || { echo "Alertmanager of the release kps not found in $ns; run k8s_monitoring.scala first" >&2; exit 1; }
+       |CHART=$$(helm list -n $ns --filter '^kps$$' -o json | python3 -c 'import sys,json; print(json.load(sys.stdin)[0]["chart"])')
+       |VER=$${CHART#kube-prometheus-stack-}
+       |echo "release kps uses chart $$VER"
+       |$passwordSecretCmd
+       |cat > $stateDir/alertmanager-values.yaml <<EOF
+       |$valuesYaml
        |EOF
        |helm upgrade kps prometheus-community/kube-prometheus-stack --version "$$VER" \\
        |  --namespace $ns --reuse-values -f $stateDir/alertmanager-values.yaml --wait --timeout 10m
