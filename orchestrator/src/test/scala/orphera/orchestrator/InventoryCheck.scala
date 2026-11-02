@@ -146,7 +146,7 @@ object InventoryCheck:
 
     // The agent package option: --agent, with --file still accepted
     def agentOf(args: String*): Option[String] = Cli.parse(args.toList) match
-      case Right(Command.DeployAgent(f, _, _))        => f
+      case Right(Command.DeployAgent(f, _, _, _))     => f
       case Right(Command.Bootstrap(f, _, _, _, _, _)) => f
       case _                                          => None
     check(
@@ -161,6 +161,31 @@ object InventoryCheck:
       "--file is still accepted for the same thing",
       agentOf("deploy-agent", "--file", "x.deb").contains("x.deb") &&
         agentOf("bootstrap", "--file", "x.rpm", "--nodes", "a").contains("x.rpm")
+    )
+
+    // --go: the Go agent's packages from agent-go/, never together with --agent
+    check(
+      "deploy-agent --go selects the Go agent",
+      Cli.parse(List("deploy-agent", "--go", "--nodes", "a")) match
+        case Right(Command.DeployAgent(None, _, _, true)) => true
+        case _                                            => false
+    )
+    check(
+      "deploy-agent without --go does not",
+      Cli.parse(List("deploy-agent")) match
+        case Right(Command.DeployAgent(None, _, _, false)) => true
+        case _                                             => false
+    )
+    check(
+      "--go and --agent together are refused",
+      Cli.parse(List("deploy-agent", "--go", "--agent", "x.deb")).isLeft &&
+        Cli.parse(List("deploy-agent", "--agent", "x.deb", "--go")).isLeft
+    )
+    check(
+      "--go with no Go package built says where it looked",
+      AgentPackages.resolve(None, go = true) match
+        case Left(m) => m.contains("agent-go")
+        case Right(_) => java.io.File(AgentPackages.goDir).isDirectory
     )
 
     if failures > 0 then

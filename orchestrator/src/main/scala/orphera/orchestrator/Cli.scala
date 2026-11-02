@@ -60,7 +60,8 @@ enum Command:
   case DeployAgent(
       localPath: Option[String],
       remotePath: String,
-      nodes: Option[List[String]]
+      nodes: Option[List[String]],
+      go: Boolean = false
   )
   case Bootstrap(
       localPath: Option[String],
@@ -283,7 +284,7 @@ object Cli:
         parseWriteFile(rest, dest, None, None, None, "", "", 0)
       case "network-apply" :: rest => parseNetworkApply(rest, None, 60)
       case "deploy-agent" :: rest  =>
-        parseDeployAgent(rest, None, "/tmp/orphera-agent.deb", None)
+        parseDeployAgent(rest, None, "/tmp/orphera-agent.deb", None, false)
       case "bootstrap" :: rest =>
         parseBootstrap(
           rest,
@@ -822,20 +823,26 @@ object Cli:
       args: List[String],
       local: Option[String],
       remotePath: String,
-      nodes: Option[List[String]]
+      nodes: Option[List[String]],
+      go: Boolean
   ): Either[String, Command] =
     args match
-      case Nil => Right(Command.DeployAgent(local, remotePath, nodes))
+      case Nil if go && local.nonEmpty =>
+        Left("deploy-agent: give either --go or --agent, not both")
+      case Nil => Right(Command.DeployAgent(local, remotePath, nodes, go))
       case ("--agent" | "--file") :: value :: rest =>
-        parseDeployAgent(rest, Some(value), remotePath, nodes)
+        parseDeployAgent(rest, Some(value), remotePath, nodes, go)
+      case "--go" :: rest =>
+        parseDeployAgent(rest, local, remotePath, nodes, true)
       case "--remote-path" :: value :: rest =>
-        parseDeployAgent(rest, local, value, nodes)
+        parseDeployAgent(rest, local, value, nodes, go)
       case "--nodes" :: value :: rest =>
         parseDeployAgent(
           rest,
           local,
           remotePath,
-          Some(value.split(",").toList.map(_.trim))
+          Some(value.split(",").toList.map(_.trim)),
+          go
         )
       case other :: _ =>
         Left(s"Unknown argument to deploy-agent: $other")
@@ -1214,11 +1221,13 @@ object Cli:
       |                      multi-line; it still reads that file and sends its bytes,
       |                      same as copy, just under this command's own flags)
       |  network-apply     [--nodes host1,host2] [--timeout 60]
-      |  deploy-agent      [--agent <local.deb|.rpm>] [--remote-path /tmp/orphera-agent.deb] [--nodes host1,host2]
+      |  deploy-agent      [--agent <local.deb|.rpm> | --go] [--remote-path /tmp/orphera-agent.deb] [--nodes host1,host2]
       |                    — installs only the orphera-agent package (verified against
       |                      its control metadata, refused otherwise); auto-discovers
       |                      the freshly built orphera-agent_*.deb in the current
-      |                      directory if --agent is omitted
+      |                      directory if --agent is omitted. --go installs the Go
+      |                      agent instead: the newest package built by `make deb` /
+      |                      `make rpm` in agent-go/ (not with --agent)
       |  bootstrap         [--agent <local.deb|.rpm>] --nodes host1,host2 [--ssh-user root] [--ssh-key ~/.ssh/id_ed25519] [--remote-path /tmp/x.deb] [--forget-host-key]
       |                    — same package check and auto-discovery as deploy-agent;
       |                      also issues the node its own certificate (as issue-certs)

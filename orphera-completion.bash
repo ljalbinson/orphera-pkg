@@ -333,7 +333,7 @@ _orphera_completions() {
         --remote-path) COMPREPLY=() ;;
         --nodes) COMPREPLY=() ;;
         --node-groups) COMPREPLY=($(compgen -W "$(_orphera_groups)" -- "$cur")) ;;
-        *) COMPREPLY=($(compgen -W "--agent --remote-path --nodes --node-groups --exclude-nodes" -- "$cur")) ;;
+        *) COMPREPLY=($(compgen -W "--agent --go --remote-path --nodes --node-groups --exclude-nodes" -- "$cur")) ;;
       esac
       ;;
 
