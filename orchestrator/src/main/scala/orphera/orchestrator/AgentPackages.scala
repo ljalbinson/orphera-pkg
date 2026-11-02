@@ -72,8 +72,7 @@ object AgentPackages:
       latest(dir, "orphera-agent_", "+go_amd64.deb"),
       latest(dir, "orphera-agent-", "+go-1.x86_64.rpm")
     )
-    if explicit.nonEmpty then
-      Left("--go and --agent cannot be used together")
+    if explicit.nonEmpty then Left("--go and --agent cannot be used together")
     else if found.isEmpty then
       Left(
         s"No Go agent package found in $dir/ (orphera-agent_*+go_amd64.deb or orphera-agent-*+go-1.x86_64.rpm). " +

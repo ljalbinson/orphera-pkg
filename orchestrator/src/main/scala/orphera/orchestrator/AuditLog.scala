@@ -82,7 +82,7 @@ object AuditLog:
       case Command.Copy(_, _, _, _, _, _)               => true
       case Command.WriteFile(_, _, _, _, _, _)          => true
       case Command.NetworkApply(_, _)                   => true
-      case Command.DeployAgent(_, _, _, _)               => true
+      case Command.DeployAgent(_, _, _, _)              => true
       case Command.Bootstrap(_, _, _, _, _, _)          => true
       case Command.Teardown(_, _, _, _, _)              => true
       case Command.IssueCerts(_, _, _)                  => true
