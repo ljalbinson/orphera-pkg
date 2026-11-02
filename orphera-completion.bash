@@ -330,10 +330,10 @@ _orphera_completions() {
       # omitted), not a bare path like playbook/bootstrap take.
       case "$prev" in
         --agent|--file) COMPREPLY=($(compgen -f -X '!*.@(deb|rpm)' -- "$cur")) ;;
-        --remote-path) COMPREPLY=() ;;
+        --remote-path|--parallel) COMPREPLY=() ;;
         --nodes) COMPREPLY=() ;;
         --node-groups) COMPREPLY=($(compgen -W "$(_orphera_groups)" -- "$cur")) ;;
-        *) COMPREPLY=($(compgen -W "--agent --go --remote-path --nodes --node-groups --exclude-nodes" -- "$cur")) ;;
+        *) COMPREPLY=($(compgen -W "--agent --go --force --parallel --remote-path --nodes --node-groups --exclude-nodes" -- "$cur")) ;;
       esac
       ;;
 

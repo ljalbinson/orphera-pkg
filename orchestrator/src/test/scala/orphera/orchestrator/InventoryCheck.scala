@@ -146,7 +146,7 @@ object InventoryCheck:
 
     // The agent package option: --agent, with --file still accepted
     def agentOf(args: String*): Option[String] = Cli.parse(args.toList) match
-      case Right(Command.DeployAgent(f, _, _, _))     => f
+      case Right(Command.DeployAgent(f, _, _, _, _, _)) => f
       case Right(Command.Bootstrap(f, _, _, _, _, _)) => f
       case _                                          => None
     check(
@@ -167,13 +167,13 @@ object InventoryCheck:
     check(
       "deploy-agent --go selects the Go agent",
       Cli.parse(List("deploy-agent", "--go", "--nodes", "a")) match
-        case Right(Command.DeployAgent(None, _, _, true)) => true
+        case Right(Command.DeployAgent(None, _, _, true, _, _)) => true
         case _                                            => false
     )
     check(
       "deploy-agent without --go does not",
       Cli.parse(List("deploy-agent")) match
-        case Right(Command.DeployAgent(None, _, _, false)) => true
+        case Right(Command.DeployAgent(None, _, _, false, _, _)) => true
         case _                                             => false
     )
     check(
@@ -186,6 +186,24 @@ object InventoryCheck:
       AgentPackages.resolve(None, go = true) match
         case Left(m) => m.contains("agent-go")
         case Right(_) => java.io.File(AgentPackages.goDir).isDirectory
+    )
+
+    check(
+      "deploy-agent --force and --parallel are parsed",
+      Cli.parse(List("deploy-agent", "--force", "--parallel", "3")) match
+        case Right(Command.DeployAgent(_, _, _, _, true, Some(3))) => true
+        case _                                                     => false
+    )
+    check(
+      "deploy-agent defaults: no force, no parallel limit given",
+      Cli.parse(List("deploy-agent")) match
+        case Right(Command.DeployAgent(_, _, _, _, false, None)) => true
+        case _                                                   => false
+    )
+    check(
+      "deploy-agent --parallel needs a positive number",
+      Cli.parse(List("deploy-agent", "--parallel", "0")).isLeft &&
+        Cli.parse(List("deploy-agent", "--parallel", "x")).isLeft
     )
 
     if failures > 0 then
