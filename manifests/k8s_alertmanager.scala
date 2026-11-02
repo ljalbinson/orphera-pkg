@@ -18,6 +18,9 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 //                             name should resolve in DNS: *.k8s.ljalbinson.com does)
 //   ORPHERA_ALERT_FROM        sender            [alert@ljalbinson.com]
 //   ORPHERA_ALERT_TO          recipient         [lawrence@ljalbinson.com]
+//   ORPHERA_ALERT_LINK        link at the end of each mail [https://grafana.k8s.ljalbinson.com/alerting/list]
+//                             (Alertmanager is not published, so its own link, an internal
+//                             cluster address, is left out of the mail body)
 //   ORPHERA_ALERT_AUTH        0 = no SMTP login (the relay must accept the nodes' network,
 //                             and then port 25 is the usual port: set ORPHERA_ALERT_SMTP_PORT=25) [1]
 //   ORPHERA_ALERT_SMTP_USER   login name        [the sender address, as iRedMail wants it]
@@ -66,6 +69,7 @@ object k8s_alertmanager extends OrpheraClusterPlaybook:
   private val smtpHelo = env("ORPHERA_ALERT_SMTP_HELO", "alertmanager.k8s.ljalbinson.com")
   private val from = env("ORPHERA_ALERT_FROM", "alert@ljalbinson.com")
   private val to = env("ORPHERA_ALERT_TO", "lawrence@ljalbinson.com")
+  private val alertLink = env("ORPHERA_ALERT_LINK", "https://grafana.k8s.ljalbinson.com/alerting/list")
   private val smtpUser = env("ORPHERA_ALERT_SMTP_USER", from)
   private val requireTls =
     if env("ORPHERA_ALERT_REQUIRE_TLS", if useAuth then "1" else "0") == "1" then "true" else "false"
@@ -123,6 +127,11 @@ object k8s_alertmanager extends OrpheraClusterPlaybook:
        |      email_configs:
        |      - to: '$to'
        |        send_resolved: true
+       |        html: |
+       |          <h3>{{ .Status | toUpper }}: {{ .CommonLabels.alertname }}</h3>
+       |          {{ range .Alerts }}<p><b>{{ .Labels.severity }}</b> {{ .Annotations.summary }} {{ .Annotations.description }}<br>
+       |          {{ range .Labels.SortedPairs }}{{ .Name }}={{ .Value }} {{ end }}</p>
+       |          {{ end }}<p><a href="$alertLink">Alerts in Grafana</a></p>
        |$tlsLines""".stripMargin
 
   // The Kubernetes Secret with the password (a line of the script; empty without a login).
