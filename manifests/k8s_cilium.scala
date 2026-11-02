@@ -22,7 +22,9 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 //     GatewayClass `cilium` serves Gateways, which is the ingress of this
 //     cluster (the wildcard *.k8s.ljalbinson.com points at the first pool
 //     address, 10.10.3.100);
-//   - Hubble (flow visibility) with the relay and the UI.
+//   - Hubble (flow visibility) with the relay and the UI. Metrics for Prometheus are
+//     switched on afterwards by k8s_cilium_metrics.scala (this playbook leaves them
+//     off: the ServiceMonitor CRD does not exist yet at this step).
 //
 // The chart version is the newest patch of `ciliumMinor`, found with Helm,
 // and the images come from quay.io through the mirror on tst9. Helm itself
