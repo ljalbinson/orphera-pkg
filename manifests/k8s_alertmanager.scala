@@ -152,7 +152,7 @@ object k8s_alertmanager extends OrpheraClusterPlaybook:
        |VER=$${CHART#kube-prometheus-stack-}
        |echo "release kps uses chart $$VER"
        |$passwordSecretCmd
-       |cat > $stateDir/alertmanager-values.yaml <<EOF
+       |cat > $stateDir/alertmanager-values.yaml <<'EOF'
        |$valuesYaml
        |EOF
        |helm upgrade kps prometheus-community/kube-prometheus-stack --version "$$VER" \\
