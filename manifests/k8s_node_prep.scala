@@ -49,7 +49,7 @@ object k8s_node_prep extends OrpheraClusterPlaybook:
       "tst39"
     )
 
-  private val k8sMinor = "v1.34"
+  private val k8sMinor = "v1.35"
 
   private val mirrorHost = "{{nodes.tst9.cluster_ip}}"
 
