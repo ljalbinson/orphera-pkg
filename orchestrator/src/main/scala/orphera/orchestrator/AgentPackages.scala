@@ -44,39 +44,37 @@ object AgentPackages:
       requested.stripSuffix(".rpm") + ".deb"
     else requested
 
-  /** An explicit `--agent` selects one package (by extension); otherwise the
-    * newest `orphera-agent_*_amd64.deb` and `orphera-agent-*.rpm` in `dir` are
-    * both offered. Whether a file really is the agent package is checked later
+  /** An explicit `--agent` selects one package (by extension). Otherwise the
+    * Go agent is the default: the newest package `make deb` / `make rpm` left
+    * in agent-go/. `useScala = true` offers the Scala agent's newest
+    * `orphera-agent_*_amd64.deb` and `orphera-agent-*.rpm` in `dir` instead.
+    * Whether a file really is the agent package is checked later
     * (Orchestrator.requireOrpheraAgentPackage), not here.
     */
   def resolve(
       explicit: Option[String],
       dir: String = ".",
-      go: Boolean = false
+      useScala: Boolean = false
   ): Either[String, AgentPackages] =
-    if go then resolveGo(explicit, goDir)
-    else resolveScala(explicit, dir)
+    if explicit.nonEmpty || useScala then resolveScala(explicit, dir)
+    else resolveGo(goDir)
 
   /** Where `make deb` / `make rpm` in agent-go/ put the Go agent's packages. */
   val goDir = "agent-go"
 
   /** The Go agent's packages are named `orphera-agent_<version>+go_amd64.deb`
-    * and `orphera-agent-<version>+go-1.x86_64.rpm`. An explicit `--agent`
-    * cannot be combined with `--go` (the Cli refuses that first).
+    * and `orphera-agent-<version>+go-1.x86_64.rpm`.
     */
-  private def resolveGo(
-      explicit: Option[String],
-      dir: String
-  ): Either[String, AgentPackages] =
+  private def resolveGo(dir: String): Either[String, AgentPackages] =
     val found = AgentPackages(
       latest(dir, "orphera-agent_", "+go_amd64.deb"),
       latest(dir, "orphera-agent-", "+go-1.x86_64.rpm")
     )
-    if explicit.nonEmpty then Left("--go and --agent cannot be used together")
-    else if found.isEmpty then
+    if found.isEmpty then
       Left(
         s"No Go agent package found in $dir/ (orphera-agent_*+go_amd64.deb or orphera-agent-*+go-1.x86_64.rpm). " +
-          "Run 'make deb' (and 'make rpm' for Rocky hosts) in agent-go/ first, from the repository directory."
+          "Run 'make deb' (and 'make rpm' for Rocky hosts) in agent-go/ first, from the repository directory, " +
+          "or use --scala (or --agent <path>) for the Scala agent."
       )
     else Right(found)
 

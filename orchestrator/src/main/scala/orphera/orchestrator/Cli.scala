@@ -61,7 +61,7 @@ enum Command:
       localPath: Option[String],
       remotePath: String,
       nodes: Option[List[String]],
-      go: Boolean = false,
+      useScala: Boolean = false,
       force: Boolean = false,
       parallel: Option[Int] = None
   )
@@ -834,36 +834,41 @@ object Cli:
       local: Option[String],
       remotePath: String,
       nodes: Option[List[String]],
-      go: Boolean,
+      useScala: Boolean,
       force: Boolean,
       parallel: Option[Int]
   ): Either[String, Command] =
     args match
-      case Nil if go && local.nonEmpty =>
-        Left("deploy-agent: give either --go or --agent, not both")
+      case Nil if useScala && local.nonEmpty =>
+        Left(
+          "deploy-agent: --scala picks the Scala packages by itself; --agent names a file, so give one or the other"
+        )
       case Nil =>
-        Right(Command.DeployAgent(local, remotePath, nodes, go, force, parallel))
+        Right(Command.DeployAgent(local, remotePath, nodes, useScala, force, parallel))
       case ("--agent" | "--file") :: value :: rest =>
-        parseDeployAgent(rest, Some(value), remotePath, nodes, go, force, parallel)
-      case "--go" :: rest =>
+        parseDeployAgent(rest, Some(value), remotePath, nodes, useScala, force, parallel)
+      case "--scala" :: rest =>
         parseDeployAgent(rest, local, remotePath, nodes, true, force, parallel)
+      // The Go agent is the default now; --go is still accepted.
+      case "--go" :: rest =>
+        parseDeployAgent(rest, local, remotePath, nodes, useScala, force, parallel)
       case "--force" :: rest =>
-        parseDeployAgent(rest, local, remotePath, nodes, go, true, parallel)
+        parseDeployAgent(rest, local, remotePath, nodes, useScala, true, parallel)
       case "--parallel" :: n :: rest =>
         n.toIntOption.filter(_ > 0) match
           case Some(p) =>
-            parseDeployAgent(rest, local, remotePath, nodes, go, force, Some(p))
+            parseDeployAgent(rest, local, remotePath, nodes, useScala, force, Some(p))
           case None =>
             Left(s"--parallel requires a positive number, got '$n'")
       case "--remote-path" :: value :: rest =>
-        parseDeployAgent(rest, local, value, nodes, go, force, parallel)
+        parseDeployAgent(rest, local, value, nodes, useScala, force, parallel)
       case "--nodes" :: value :: rest =>
         parseDeployAgent(
           rest,
           local,
           remotePath,
           Some(value.split(",").toList.map(_.trim)),
-          go,
+          useScala,
           force,
           parallel
         )
@@ -1244,19 +1249,20 @@ object Cli:
       |                      multi-line; it still reads that file and sends its bytes,
       |                      same as copy, just under this command's own flags)
       |  network-apply     [--nodes host1,host2] [--timeout 60]
-      |  deploy-agent      [--agent <local.deb|.rpm> | --go] [--force] [--parallel 8] [--remote-path /tmp/orphera-agent.deb] [--nodes host1,host2]
+      |  deploy-agent      [--agent <local.deb|.rpm> | --scala] [--force] [--parallel 8] [--remote-path /tmp/orphera-agent.deb] [--nodes host1,host2]
       |                    — installs only the orphera-agent package (verified against
-      |                      its control metadata, refused otherwise); auto-discovers
-      |                      the freshly built orphera-agent_*.deb in the current
-      |                      directory if --agent is omitted. --go installs the Go
-      |                      agent instead: the newest package built by `make deb` /
-      |                      `make rpm` in agent-go/ (not with --agent). A node already
+      |                      its control metadata, refused otherwise). Without --agent
+      |                      it uses the Go agent: the newest package built by
+      |                      `make deb` / `make rpm` in agent-go/ (run from the
+      |                      repository directory). --scala uses the Scala agent's
+      |                      newest orphera-agent_*.deb / .rpm in the current
+      |                      directory instead. A node already
       |                      running the package's version is skipped unless --force;
       |                      at most --parallel (default 8) nodes are sent the package
       |                      at a time
       |  bootstrap         [--agent <local.deb|.rpm>] --nodes host1,host2 [--ssh-user root] [--ssh-key ~/.ssh/id_ed25519] [--remote-path /tmp/x.deb] [--forget-host-key]
-      |                    — same package check and auto-discovery as deploy-agent;
-      |                      also issues the node its own certificate (as issue-certs)
+      |                    — same package check and default (the Go agent) as
+      |                      deploy-agent; also issues the node its own certificate (as issue-certs)
       |                      and sets its ORPHERA_TOKEN
       |  issue-certs       [--nodes host1,host2] [--ssh-user root] [--ssh-key ~/.ssh/id_ed25519]
       |                    — gives each node a TLS certificate of its own, signed by

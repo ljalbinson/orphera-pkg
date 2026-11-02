@@ -208,11 +208,12 @@ object AuditLog:
           "nodes" -> nodesField(nodes),
           "timeout_seconds" -> timeoutSeconds
         )
-      case Command.DeployAgent(localPath, remotePath, nodes, go, force, _) =>
+      case Command.DeployAgent(localPath, remotePath, nodes, useScala, force, _) =>
         List(
           "command" -> "deploy-agent",
           "local_path" -> localPath.getOrElse(
-            if go then "(auto-discovered, Go agent)" else "(auto-discovered)"
+            if useScala then "(auto-discovered, Scala agent)"
+            else "(auto-discovered, Go agent)"
           ),
           "nodes" -> nodesField(nodes)
         ) ++ Option
