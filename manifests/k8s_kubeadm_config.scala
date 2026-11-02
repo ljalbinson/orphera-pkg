@@ -140,12 +140,13 @@ print(json.dumps(cm))
 
   private val dnsTestScript =
     s"""set -e
-       |$kc delete pod dns-probe --ignore-not-found >/dev/null
+       |$kc -n kube-system delete pod dns-probe --ignore-not-found >/dev/null
        |cat <<EOF | $kc apply -f -
        |apiVersion: v1
        |kind: Pod
        |metadata:
        |  name: dns-probe
+       |  namespace: kube-system
        |spec:
        |  hostNetwork: true
        |  dnsPolicy: Default
@@ -157,9 +158,9 @@ print(json.dumps(cm))
        |    image: docker.io/library/busybox:stable
        |    command: ["sh", "-c", "grep -c ^nameserver /etc/resolv.conf"]
        |EOF
-       |$kc wait --for=jsonpath='{.status.phase}'=Succeeded pod/dns-probe --timeout=180s
-       |N=$$($kc logs dns-probe)
-       |$kc delete pod dns-probe --wait=false >/dev/null
+       |$kc wait --for=jsonpath='{.status.phase}'=Succeeded -n kube-system pod/dns-probe --timeout=180s
+       |N=$$($kc -n kube-system logs dns-probe)
+       |$kc -n kube-system delete pod dns-probe --wait=false >/dev/null
        |[ "$$N" = "2" ] || { echo "a host-network pod sees $$N nameservers, expected 2" >&2; exit 1; }
        |echo "a host-network pod sees exactly 2 nameservers"
        |""".stripMargin
