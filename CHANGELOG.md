@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- `orphera deploy-agent --go` installs the Go agent: it takes the newest `orphera-agent_*+go_amd64.deb` (apt nodes) or `orphera-agent-*+go-1.x86_64.rpm` (dnf nodes) from `agent-go/`, so the long `--agent agent-go/…` path is no longer needed. Not combinable with `--agent`; completion offers it. Not yet built or run.
 - Tab completion for `utils/vmctl.sh`: the actions, the options of each action, VM names from the config directory and hypervisor names from the `hypervisor:` values in it (installed with the `orphera` completion).
 - `utils/list-vms.sh` (and `vmctl.sh list`) shows an AUTOSTART column: whether libvirt starts the VM when the hypervisor boots.
 - `manifests/kvm_autostart.scala` and `utils/vmctl.sh autostart add|remove`: turn libvirt autostart on or off for named VMs, for every VM on given hypervisors (`--hypervisor`, repeatable), or for every VM on every hypervisor (`--all`). Not yet run on the lab.

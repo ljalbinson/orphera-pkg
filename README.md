@@ -214,8 +214,11 @@ make            # lint (gofmt, go vet, staticcheck), tests, binaries
 make deb        # orphera-agent_<version>+go_amd64.deb
 make rpm        # orphera-agent-<version>+go-1.x86_64.rpm
 cd ..
-orphera deploy-agent --agent agent-go/orphera-agent_<version>+go_amd64.deb --nodes tst0
+orphera deploy-agent --go --nodes tst0
 ```
+
+`--go` takes the newest Go package in `agent-go/` (`.deb` for Ubuntu nodes, `.rpm` for Rocky), so run it from the
+repository directory; `--agent <path>` still names a file explicitly, but the two cannot be combined.
 
 The packages are the same `orphera-agent` package as the Scala ones, with the
 Go binary in place of the jar, so either replaces the other with
@@ -223,8 +226,8 @@ Go binary in place of the jar, so either replaces the other with
 also reports, so `orphera version` shows which agent a node runs.
 
 `make release` builds only the Scala packages, and `deploy-agent` without
-`--agent` picks those, so nodes running the Go agent go back to the Scala one
-at the next release unless the Go package is passed with `--agent`.
+`--agent` or `--go` picks those, so nodes running the Go agent go back to the Scala one
+at the next release unless the Go package is passed with `--go` (or `--agent`).
 
 [`agent-go/README.md`](agent-go/README.md) has the details: layout,
 differences from the Scala agent, how its facts match the JVM's, and trying

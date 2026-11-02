@@ -82,7 +82,7 @@ object AuditLog:
       case Command.Copy(_, _, _, _, _, _)               => true
       case Command.WriteFile(_, _, _, _, _, _)          => true
       case Command.NetworkApply(_, _)                   => true
-      case Command.DeployAgent(_, _, _)                 => true
+      case Command.DeployAgent(_, _, _, _)               => true
       case Command.Bootstrap(_, _, _, _, _, _)          => true
       case Command.Teardown(_, _, _, _, _)              => true
       case Command.IssueCerts(_, _, _)                  => true
@@ -208,10 +208,12 @@ object AuditLog:
           "nodes" -> nodesField(nodes),
           "timeout_seconds" -> timeoutSeconds
         )
-      case Command.DeployAgent(localPath, remotePath, nodes) =>
+      case Command.DeployAgent(localPath, remotePath, nodes, go) =>
         List(
           "command" -> "deploy-agent",
-          "local_path" -> localPath.getOrElse("(auto-discovered)"),
+          "local_path" -> localPath.getOrElse(
+            if go then "(auto-discovered, Go agent)" else "(auto-discovered)"
+          ),
           "nodes" -> nodesField(nodes)
         ) ++ Option
           .when(remotePath != defaultAgentRemotePath)(

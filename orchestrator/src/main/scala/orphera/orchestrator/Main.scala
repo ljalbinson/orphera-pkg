@@ -199,8 +199,8 @@ object Main extends IOApp:
           Orchestrator.applyNetworkConfig(targets, timeoutSeconds)
         }
 
-      case Right(Command.DeployAgent(localOpt, remotePath, nodeNames)) =>
-        AgentPackages.resolve(localOpt) match
+      case Right(Command.DeployAgent(localOpt, remotePath, nodeNames, go)) =>
+        AgentPackages.resolve(localOpt, go = go) match
           case Left(err) =>
             IO.println(s"Error: $err") >> IO.pure(ExitCode.Error)
           case Right(packages) =>

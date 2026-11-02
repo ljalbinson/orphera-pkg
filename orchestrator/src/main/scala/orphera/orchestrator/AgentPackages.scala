@@ -51,7 +51,39 @@ object AgentPackages:
     */
   def resolve(
       explicit: Option[String],
-      dir: String = "."
+      dir: String = ".",
+      go: Boolean = false
+  ): Either[String, AgentPackages] =
+    if go then resolveGo(explicit, goDir)
+    else resolveScala(explicit, dir)
+
+  /** Where `make deb` / `make rpm` in agent-go/ put the Go agent's packages. */
+  val goDir = "agent-go"
+
+  /** The Go agent's packages are named `orphera-agent_<version>+go_amd64.deb`
+    * and `orphera-agent-<version>+go-1.x86_64.rpm`. An explicit `--agent`
+    * cannot be combined with `--go` (the Cli refuses that first).
+    */
+  private def resolveGo(
+      explicit: Option[String],
+      dir: String
+  ): Either[String, AgentPackages] =
+    val found = AgentPackages(
+      latest(dir, "orphera-agent_", "+go_amd64.deb"),
+      latest(dir, "orphera-agent-", "+go-1.x86_64.rpm")
+    )
+    if explicit.nonEmpty then
+      Left("--go and --agent cannot be used together")
+    else if found.isEmpty then
+      Left(
+        s"No Go agent package found in $dir/ (orphera-agent_*+go_amd64.deb or orphera-agent-*+go-1.x86_64.rpm). " +
+          "Run 'make deb' (and 'make rpm' for Rocky hosts) in agent-go/ first, from the repository directory."
+      )
+    else Right(found)
+
+  private def resolveScala(
+      explicit: Option[String],
+      dir: String
   ): Either[String, AgentPackages] =
     explicit match
       case Some(path) if isRpm(path) => Right(AgentPackages(None, Some(path)))
