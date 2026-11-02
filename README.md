@@ -1308,8 +1308,8 @@ saved under `.orphera-build-logs/<time>/<node>.log`. Only the removal of a node'
 old SSH host key (`ssh-keygen -R`, which rewrites `known_hosts`) is serialized;
 everything else, including the rest of `bootstrap`, runs in parallel. Ctrl-C
 stops every node. Don't use `--resume` with it —
-checkpoint state is per playbook name. Both pick the newest
-`orphera-agent_*_amd64.deb` in the current directory unless given `-a`.
+checkpoint state is per playbook name. Both install the Go agent (the newest package in
+`agent-go/`, as `orphera bootstrap` does) unless given `-a <file>`, e.g. the Scala agent's `.deb`.
 
 Both scripts choose the provisioning playbook per hypervisor: `kvm_zfs_vm_provision.scala` when the
 dataset `tank/kvm/<hypervisor>` exists there, otherwise `kvm_native_vm_provision.scala`

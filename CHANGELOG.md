@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Changed
+- `mk-new-and-empty.sh`, `par-mk-new-and-empty.sh` and `rebuild_openstack_from_scratch.sh` no longer look for a Scala `.deb` in the current directory: without `-a` they leave the choice to `orphera bootstrap`, which installs the Go agent from `agent-go/`. `-a <file>` still names a package (for the Scala agent, its `.deb`). Not yet run on the lab.
 - `kvm_zfs_vm_provision.scala` and `kvm_native_vm_provision.scala` no longer mark a new VM for libvirt autostart; set `ORPHERA_VM_AUTOSTART=1` to get the old behaviour (or `utils/vmctl.sh autostart add <vm>` afterwards). Not yet run on the lab.
 - The Go agent is now the default: `deploy-agent` and `bootstrap` install the newest package from `agent-go/` unless given `--agent <path>`; `deploy-agent --scala` uses the Scala agent's newest package in the current directory (`--go` is still accepted and changes nothing). `make release` now builds the Go packages too when Go is installed. If no Go package has been built, the commands say so and name `--scala`. Not yet built or run.
 

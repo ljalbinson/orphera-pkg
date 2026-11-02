@@ -8,7 +8,7 @@
 #   --yes        do not ask for confirmation (otherwise you must type "rebuild")
 #   --dry-run    show the plan (nodes, hypervisors, how each hypervisor stores VMs) and stop
 #   -j N         VMs built at the same time (default 6)
-#   -a FILE      agent package to install (-f also works; default: newest orphera-agent_*_amd64.deb here)
+#   -a FILE      agent package to install (-f also works; default: the Go agent from agent-go/)
 #   --tests      afterwards run the per-service test scripts (keystone ... nova_compute), then the
 #                closing checks again (clients, smoke, CirrOS boot). test_keystone.sh tears Keystone
 #                down (new database, new CA) and the later scripts re-register their services, so
@@ -57,14 +57,14 @@ die() { log "STOPPED: $1"; exit 1; }
 
 # A relative -a is relative to where the script was started, not to the directory it moves into.
 case "$DEB" in /*|"") ;; *) [ -f "$START_DIR/$DEB" ] && DEB="$START_DIR/$DEB" ;; esac
-[ -n "$DEB" ] || DEB=$(ls -t "$START_DIR"/orphera-agent_*_amd64.deb orphera-agent_*_amd64.deb 2>/dev/null | head -n 1)
-[ -f "$DEB" ] || die "no agent package found (orphera-agent_*_amd64.deb in this directory, or -a FILE)"
+[ -z "$DEB" ] || [ -f "$DEB" ] || die "agent package not found: $DEB"
+AGENT_ARGS=(); [ -z "$DEB" ] || AGENT_ARGS=(-a "$DEB")
 for n in "${NODES[@]}"; do [ -f "$CONF_DIR/$n.yaml" ] || die "missing $CONF_DIR/$n.yaml"; done
 
 hypervisor_of() { awk -F: '/^[[:space:]]*hypervisor:/ {gsub(/[[:space:]"'\'']/, "", $2); print $2; exit}' "$CONF_DIR/$1.yaml"; }
 
 log "=== rebuild OpenStack from scratch ==="
-log "agent package: $DEB"
+log "agent package: ${DEB:-default (the Go agent from agent-go/)}"
 printf '%-7s %-11s %s\n' node hypervisor ip
 for n in "${NODES[@]}"; do
   printf '%-7s %-11s %s\n' "$n" "$(hypervisor_of "$n")" "$(awk '/ipaddress:/ {gsub(/[\x27"]/, "", $2); print $2; exit}' "$CONF_DIR/$n.yaml")"
@@ -81,7 +81,7 @@ fi
 
 log "--- step 1: virtual machines (destroy, create, agent, DNS, dist-upgrade, packages) ---"
 S=$(date +%s)
-"$HERE/par-mk-new-and-empty.sh" -q -j "$JOBS" -a "$DEB" "${NODES[@]}" \
+"$HERE/par-mk-new-and-empty.sh" -q -j "$JOBS" ${AGENT_ARGS[@]+"${AGENT_ARGS[@]}"} "${NODES[@]}" \
   || die "building the VMs failed for some nodes (see the list above and .orphera-build-logs/); fix, then re-run with only those nodes: manifests/par-mk-new-and-empty.sh <nodes>, and continue with: manifests/build_openstack_stack.sh"
 log "VMs done in $(( $(date +%s) - S ))s"
 

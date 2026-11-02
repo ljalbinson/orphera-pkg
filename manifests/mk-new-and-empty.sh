@@ -12,8 +12,9 @@
 # Usage: manifests/mk-new-and-empty.sh [-a agent.deb] [node ...]
 #   node   a name (tst3, scala1) or a bare number (3, meaning tst3); default is tst0..tst7.
 #          A name needs its config file (config/<name>.yaml) and an inventory.yaml entry.
-#   -a     agent package to install (-f also works); default is the newest
-#          orphera-agent_*_amd64.deb in the current directory
+#   -a     agent package to install (-f also works); default is `orphera bootstrap`'s own:
+#          the Go agent, the newest package in agent-go/ (.deb for Ubuntu, .rpm for Rocky).
+#          Give -a <file> for another package, e.g. the Scala agent's .deb
 #
 # Run from the repository root (config/ and manifests/ are relative paths).
 # A failed step stops that node and moves on to the next; the script exits
@@ -55,14 +56,16 @@ banner() { printf '%s%s%s\n' "$green" "$*" "$reset"; }
 
 command -v orphera >/dev/null || { echo "orphera not found in PATH" >&2; exit 1; }
 
-if [ -z "$deb" ]; then
-    # newest build wins; a bare glob would pass the literal pattern (or several
-    # files) to --agent when there is no match (or more than one).
-    # shellcheck disable=SC2012
-    deb=$(ls -t orphera-agent_*_amd64.deb 2>/dev/null | head -n 1)
+# Without -a, bootstrap picks its own default (the Go agent from agent-go/) and says
+# so if there is none; with -a the file must exist.
+agent_args=()
+if [ -n "$deb" ]; then
+    [ -f "$deb" ] || { echo "agent package not found: $deb" >&2; exit 1; }
+    agent_args=(--agent "$deb")
+    banner "Agent package: $deb"
+else
+    banner "Agent package: default (the Go agent from agent-go/)"
 fi
-[ -f "$deb" ] || { echo "no agent .deb found (use -a <file>)" >&2; exit 1; }
-banner "Agent package: $deb"
 
 # All config files must exist before anything is created, so a typo in the
 # node list fails now rather than after seven VMs have been built.
@@ -103,7 +106,7 @@ build_node() {
 
     # --forget-host-key: a rebuilt VM has a new SSH host key under the same name.
     step "install agent"
-    orphera bootstrap --agent "$deb" --ssh-user localadmin --nodes "$node" \
+    orphera bootstrap ${agent_args[@]+"${agent_args[@]}"} --ssh-user localadmin --nodes "$node" \
         --forget-host-key || return 1
 
     step "set DNS"
