@@ -30,7 +30,8 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 //     k8s_kubeadm_config.scala); until then those three targets show as down.
 //   - Cilium and Hubble metrics are not enabled; k8s_cilium_metrics.scala turns them on.
 //   - Alertmanager has no receivers, so alerts show in its UI and in Grafana only;
-//     k8s_alertmanager.scala adds the e-mail receiver.
+//     k8s_alertmanager.scala adds the e-mail receiver (its settings are kept in
+//     alertmanager-values.yaml, which this playbook applies again if it exists).
 //
 // The last stage queries Prometheus (through the API server's service proxy):
 // all 10 nodes report node-exporter metrics, the 3 API servers and the kubelets
@@ -278,8 +279,11 @@ print('client %s in realm %s ready: redirect %s/login/generic_oauth' % (CLIENT_I
        |helm repo update >/dev/null
        |VER=$$(helm show chart prometheus-community/kube-prometheus-stack | awk '/^version:/{print $$2}')
        |echo "installing kube-prometheus-stack chart $$VER"
+       |# k8s_alertmanager.scala keeps the e-mail receiver in this file; without it a re-run would drop the receiver
+       |EXTRA=""
+       |[ -s $stateDir/alertmanager-values.yaml ] && EXTRA="-f $stateDir/alertmanager-values.yaml" && echo "keeping the Alertmanager settings from alertmanager-values.yaml"
        |helm upgrade --install kps prometheus-community/kube-prometheus-stack --version "$$VER" \\
-       |  --namespace $ns -f $stateDir/monitoring-values.yaml --wait --timeout 20m
+       |  --namespace $ns -f $stateDir/monitoring-values.yaml $$EXTRA --wait --timeout 20m
        |$kc -n $ns get pods -o wide
        |echo "kube-prometheus-stack $$VER installed"
        |""".stripMargin
