@@ -115,6 +115,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - README: a table of the other playbooks in `manifests/` (teardowns, etcd and Galera maintenance, WordPress, the manual Ceph steps) that were not described anywhere in it.
 
 ### Fixed
+- A command that first reads every node's facts (`deploy-agent`, `facts`) now says which node could not be reached, e.g. `[tst7] unreachable: UNAVAILABLE: io exception`, and lists every failed node, instead of printing a bare `Error: UNAVAILABLE: io exception`. Not yet built or run.
 - `manifests/gen_set_dns.scala` drops repeated DNS servers and search domains (e.g. `dns1` equal to `dns2`) before writing, so `resolv.conf` and the resolved drop-in no longer get duplicate entries, and `round_robin` no longer counts a repeat towards its 2-3 server limit. Not yet run on the lab.
 
 ## [0.1.207] - 2026-10-30

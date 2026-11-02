@@ -426,12 +426,27 @@ object Orchestrator:
       }
     }
 
+  /** Facts from every node. Every node is tried; if any fail, the error names
+    * each of them (`[tst7] unreachable: UNAVAILABLE: io exception`) rather
+    * than passing on the first bare gRPC status, which does not say which
+    * node it came from.
+    */
   def gatherFacts(nodes: List[Node]): IO[Map[String, Facts]] =
     nodes
       .parTraverse { node =>
-        NodeClient.gatherFacts(node).map(facts => node.name -> facts)
+        NodeClient.gatherFacts(node).attempt.map(node -> _)
       }
-      .map(_.toMap)
+      .flatMap { results =>
+        val failed = results.collect { case (node, Left(e)) =>
+          s"[${node.name}] ${NodeError.line(e)}"
+        }
+        if failed.nonEmpty then
+          IO.raiseError(new RuntimeException(failed.mkString("\n")))
+        else
+          IO.pure(results.collect { case (node, Right(facts)) =>
+            node.name -> facts
+          }.toMap)
+      }
 
   def getVersions(nodes: List[Node]): IO[Map[String, String]] =
     nodes
