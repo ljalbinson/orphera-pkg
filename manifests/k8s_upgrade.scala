@@ -91,6 +91,14 @@ object k8s_upgrade extends OrpheraClusterPlaybook:
        |SEMVER=$${PKGVER%%-*}
        |""".stripMargin
 
+  // The API VIP is haproxy with a TCP check every 3 s that takes a backend out after 3
+  // failures, so for up to ~10 s after a kube-apiserver restarts a new connection through
+  // the VIP can end in "Unable to connect to the server: EOF". Every kubectl call after a
+  // control-plane change goes through this retry instead of failing the playbook.
+  private val retry =
+    """k() { for T in 1 2 3 4 5 6 7 8 9 10; do "$@" && return 0; echo "retrying in 6 s: $*" >&2; sleep 6; done; return 1; }
+      |""".stripMargin
+
   private val checkScript =
     s"""set -e
        |FAIL=0
@@ -130,12 +138,18 @@ object k8s_upgrade extends OrpheraClusterPlaybook:
   private def drainScript(n: String) =
     s"""set -e
        |$resolve
-       |CURK=$$($kc get node $n -o jsonpath='{.status.nodeInfo.kubeletVersion}')
+       |$retry
+       |CURK=$$(k $kc get node $n -o jsonpath='{.status.nodeInfo.kubeletVersion}')
        |if [ "$$CURK" = "v$$SEMVER" ]; then echo "$n already runs v$$SEMVER; nothing to drain"; exit 0; fi
        |echo "$n runs $$CURK; draining for v$$SEMVER"
-       |if ! $kc drain $n --ignore-daemonsets --delete-emptydir-data --timeout=600s; then
+       |OK=""
+       |for T in 1 2 3; do
+       |  if $kc drain $n --ignore-daemonsets --delete-emptydir-data --timeout=600s; then OK=1; break; fi
+       |  echo "the drain of $n failed (attempt $$T of 3)" >&2; sleep 10
+       |done
+       |if [ -z "$$OK" ]; then
        |  echo "the drain of $n failed; uncordoning it again" >&2
-       |  $kc uncordon $n || true
+       |  k $kc uncordon $n || true
        |  exit 1
        |fi
        |""".stripMargin
@@ -181,6 +195,7 @@ object k8s_upgrade extends OrpheraClusterPlaybook:
   private def readyScript(n: String) =
     s"""set -e
        |$resolve
+       |$retry
        |OK=""
        |for I in $$(seq 1 120); do
        |  V=$$($kc get node $n -o jsonpath='{.status.nodeInfo.kubeletVersion}' 2>/dev/null || true)
@@ -189,12 +204,18 @@ object k8s_upgrade extends OrpheraClusterPlaybook:
        |  sleep 5
        |done
        |[ -n "$$OK" ] || { echo "$n is not Ready at v$$SEMVER (kubelet $$V, Ready=$$R)" >&2; exit 1; }
-       |$kc uncordon $n
-       |$kc wait --for=condition=Ready node --all --timeout=300s
-       |for I in $$(seq 1 60); do $kc get --raw /readyz >/dev/null 2>&1 && break; sleep 5; done
-       |$kc get --raw /readyz >/dev/null
-       |$kc -n kube-system rollout status daemonset/cilium --timeout=600s
-       |$kc -n kube-system rollout status deployment/coredns --timeout=300s
+       |k $kc uncordon $n
+       |# the VIP must answer five times in a row before the next step
+       |STABLE=0
+       |for I in $$(seq 1 90); do
+       |  if $kc get --raw /readyz >/dev/null 2>&1; then STABLE=$$((STABLE + 1)); else STABLE=0; fi
+       |  [ "$$STABLE" -ge 5 ] && break
+       |  sleep 2
+       |done
+       |[ "$$STABLE" -ge 5 ] || { echo "the API server did not answer steadily through the VIP" >&2; exit 1; }
+       |k $kc wait --for=condition=Ready node --all --timeout=300s
+       |k $kc -n kube-system rollout status daemonset/cilium --timeout=600s
+       |k $kc -n kube-system rollout status deployment/coredns --timeout=300s
        |echo "$n is at v$$SEMVER, uncordoned; the cluster is healthy"
        |""".stripMargin
 
