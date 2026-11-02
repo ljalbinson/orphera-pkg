@@ -7,7 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Fixed
-- `k8s_alertmanager.scala`: the custom mail body arrived empty because the kube-prometheus-stack chart runs Helm templating over the Alertmanager config and replaced the `{{ }}` fields with nothing; the body is now a Helm raw string (the values file is written with a quoted heredoc so the shell leaves the backticks alone), and the test checks the loaded config for a template field. Not yet run on the lab.
+- `k8s_alertmanager.scala`: the custom mail body arrived empty because Orphera renders Mustache in any command text containing `{{`, which removed the `{{ }}` fields before the script ran. The script now writes the body with `@L@`/`@R@` placeholders and turns them into braces on the node (the body is also a Helm raw string, since the chart renders the config with Helm templating); the test checks the loaded config for a template field. Not yet run on the lab.
 
 ### Changed
 - `k8s_alertmanager.scala`: the alert mails have their own short HTML body (alert, severity, summary, labels) ending with a link to the alerts page in Grafana (`ORPHERA_ALERT_LINK`), instead of Alertmanager's default body whose "View in Alertmanager" link is an internal cluster address (`http://kps-alertmanager.monitoring:9093/...`). Not run yet.

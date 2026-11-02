@@ -82,8 +82,9 @@ object k8s_alertmanager extends OrpheraClusterPlaybook:
   private val secretsPath = "/etc/alertmanager/secrets/alertmanager-smtp/password"
 
   // The Helm values file (written to alertmanager-values.yaml on tst30). No password in it.
-  // The chart runs Helm's template engine over the Alertmanager config, so the {{ }} fields of the mail
-  // body are wrapped in a Helm raw string ({{` ... `}}); otherwise Helm replaces them with nothing.
+  // @L@ and @R@ stand for two opening and two closing braces: Orphera renders Mustache in command text, so
+  // the script must not contain them (see alertmanagerScript). The body is also wrapped in a Helm raw
+  // string, because the chart runs Helm's template engine over the Alertmanager config.
   private val valuesYaml =
     val authLines =
       if useAuth then
@@ -130,10 +131,10 @@ object k8s_alertmanager extends OrpheraClusterPlaybook:
        |      - to: '$to'
        |        send_resolved: true
        |        html: |
-       |          {{`<h3>{{ .Status | toUpper }}: {{ .CommonLabels.alertname }}</h3>
-       |          {{ range .Alerts }}<p><b>{{ .Labels.severity }}</b> {{ .Annotations.summary }} {{ .Annotations.description }}<br>
-       |          {{ range .Labels.SortedPairs }}{{ .Name }}={{ .Value }} {{ end }}</p>
-       |          {{ end }}<p><a href="$alertLink">Alerts in Grafana</a></p>`}}
+       |          @L@`<h3>@L@ .Status | toUpper @R@: @L@ .CommonLabels.alertname @R@</h3>
+       |          @L@ range .Alerts @R@<p><b>@L@ .Labels.severity @R@</b> @L@ .Annotations.summary @R@ @L@ .Annotations.description @R@<br>
+       |          @L@ range .Labels.SortedPairs @R@@L@ .Name @R@=@L@ .Value @R@ @L@ end @R@</p>
+       |          @L@ end @R@<p><a href="$alertLink">Alerts in Grafana</a></p>`@R@
        |$tlsLines""".stripMargin
 
   // The Kubernetes Secret with the password (a line of the script; empty without a login).
@@ -155,6 +156,10 @@ object k8s_alertmanager extends OrpheraClusterPlaybook:
        |cat > $stateDir/alertmanager-values.yaml <<'EOF'
        |$valuesYaml
        |EOF
+       |# Orphera renders Mustache in any command that contains two opening braces, so the mail body is written
+       |# with @L@ and @R@ and the braces are put in here, at run time
+       |OB=$$(printf '\\173\\173'); CB=$$(printf '\\175\\175')
+       |sed -i -e "s/@L@/$$OB/g" -e "s/@R@/$$CB/g" $stateDir/alertmanager-values.yaml
        |helm upgrade kps prometheus-community/kube-prometheus-stack --version "$$VER" \\
        |  --namespace $ns --reuse-values -f $stateDir/alertmanager-values.yaml --wait --timeout 10m
        |$kc -n $ns rollout status statefulset/alertmanager-kps-alertmanager --timeout=300s
