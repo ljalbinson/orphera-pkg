@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+- `k8s_alertmanager.scala`: the custom mail body arrived empty because the kube-prometheus-stack chart runs Helm templating over the Alertmanager config and replaced the `{{ }}` fields with nothing; the body is now a Helm raw string, and the test checks the loaded config for a template field. Not yet run on the lab.
+
 ### Changed
 - `k8s_alertmanager.scala`: the alert mails have their own short HTML body (alert, severity, summary, labels) ending with a link to the alerts page in Grafana (`ORPHERA_ALERT_LINK`), instead of Alertmanager's default body whose "View in Alertmanager" link is an internal cluster address (`http://kps-alertmanager.monitoring:9093/...`). Not run yet.
 - `k8s_alertmanager.scala` now logs in to the mail server (iRedMail submission: port 587, STARTTLS required) with the account named by `ORPHERA_ALERT_SMTP_USER` (default: the sender address). The password is the secret `alertmanager/smtp` (set it with `orphera secrets set` before the first run), kept in the Kubernetes Secret `alertmanager-smtp` and read by Alertmanager from a file, not from the Helm values. `ORPHERA_ALERT_AUTH=0` (with `ORPHERA_ALERT_SMTP_PORT=25`) gives the old unauthenticated behaviour; `ORPHERA_ALERT_INSECURE_TLS=1` skips the certificate check for a self-signed mail certificate. Not run yet.

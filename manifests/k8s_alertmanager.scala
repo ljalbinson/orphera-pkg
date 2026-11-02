@@ -82,6 +82,8 @@ object k8s_alertmanager extends OrpheraClusterPlaybook:
   private val secretsPath = "/etc/alertmanager/secrets/alertmanager-smtp/password"
 
   // The Helm values file (written to alertmanager-values.yaml on tst30). No password in it.
+  // The chart runs Helm's template engine over the Alertmanager config, so the {{ }} fields of the mail
+  // body are wrapped in a Helm raw string ({{` ... `}}); otherwise Helm replaces them with nothing.
   private val valuesYaml =
     val authLines =
       if useAuth then
@@ -128,10 +130,10 @@ object k8s_alertmanager extends OrpheraClusterPlaybook:
        |      - to: '$to'
        |        send_resolved: true
        |        html: |
-       |          <h3>{{ .Status | toUpper }}: {{ .CommonLabels.alertname }}</h3>
+       |          {{`<h3>{{ .Status | toUpper }}: {{ .CommonLabels.alertname }}</h3>
        |          {{ range .Alerts }}<p><b>{{ .Labels.severity }}</b> {{ .Annotations.summary }} {{ .Annotations.description }}<br>
        |          {{ range .Labels.SortedPairs }}{{ .Name }}={{ .Value }} {{ end }}</p>
-       |          {{ end }}<p><a href="$alertLink">Alerts in Grafana</a></p>
+       |          {{ end }}<p><a href="$alertLink">Alerts in Grafana</a></p>`}}
        |$tlsLines""".stripMargin
 
   // The Kubernetes Secret with the password (a line of the script; empty without a login).
@@ -175,7 +177,7 @@ object k8s_alertmanager extends OrpheraClusterPlaybook:
        |# the new configuration is loaded
        |CFG=""
        |for I in $$(seq 1 30); do
-       |  CFG=$$($kc get --raw "$$AM/api/v2/status" 2>/dev/null | python3 -c 'import sys,json; c=json.load(sys.stdin)["config"]["original"]; print("loaded" if "$smtpHost:$smtpPort" in c and "$to" in c and "$alertLink" in c else "")' 2>/dev/null || true)
+       |  CFG=$$($kc get --raw "$$AM/api/v2/status" 2>/dev/null | python3 -c 'import sys,json; c=json.load(sys.stdin)["config"]["original"]; print("loaded" if "$smtpHost:$smtpPort" in c and "$to" in c and "$alertLink" in c and ".CommonLabels.alertname" in c else "")' 2>/dev/null || true)
        |  [ "$$CFG" = "loaded" ] && break
        |  sleep 5
        |done
