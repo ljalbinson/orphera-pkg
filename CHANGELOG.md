@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Changed
+- `k8s_alertmanager.scala` now logs in to the mail server (iRedMail submission: port 587, STARTTLS required) with the account named by `ORPHERA_ALERT_SMTP_USER` (default: the sender address). The password is the secret `alertmanager/smtp` (set it with `orphera secrets set` before the first run), kept in the Kubernetes Secret `alertmanager-smtp` and read by Alertmanager from a file, not from the Helm values. `ORPHERA_ALERT_AUTH=0` (with `ORPHERA_ALERT_SMTP_PORT=25`) gives the old unauthenticated behaviour; `ORPHERA_ALERT_INSECURE_TLS=1` skips the certificate check for a self-signed mail certificate. Not run yet.
 - `mk-new-and-empty.sh` and `par-mk-new-and-empty.sh` now reboot each VM (`orphera reboot --wait`) after `dist-upgrade`, so a new VM comes up on the kernel the upgrade installed instead of the one it was built with. Not yet run on the lab.
 - `mk-new-and-empty.sh`, `par-mk-new-and-empty.sh` and `rebuild_openstack_from_scratch.sh` no longer look for a Scala `.deb` in the current directory: without `-a` they leave the choice to `orphera bootstrap`, which installs the Go agent from `agent-go/`. `-a <file>` still names a package (for the Scala agent, its `.deb`). Not yet run on the lab.
 - `kvm_zfs_vm_provision.scala` and `kvm_native_vm_provision.scala` no longer mark a new VM for libvirt autostart; set `ORPHERA_VM_AUTOSTART=1` to get the old behaviour (or `utils/vmctl.sh autostart add <vm>` afterwards). Not yet run on the lab.
