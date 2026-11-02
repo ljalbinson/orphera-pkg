@@ -22,7 +22,7 @@
 # every OpenStack database and every instance and image.
 #
 # What it does:
-#   1. par-mk-new-and-empty.sh: destroy and create each VM, install the agent, DNS, dist-upgrade,
+#   1. par-mk-new-and-empty.sh: destroy and create each VM, install the agent, DNS, dist-upgrade and reboot,
 #      base packages (the provisioning script is chosen per hypervisor: ZFS or plain directory)
 #   2. build_openstack_stack.sh: Ceph, Galera, Keystone, Cinder, Glance, Placement, Nova, Neutron,
 #      compute nodes, Horizon, Designate, Heat, Barbican, Manila, object storage, clients, smoke checks and a CirrOS boot
@@ -79,7 +79,7 @@ if [ -z "$YES" ]; then
   [ "$answer" = "rebuild" ] || die "not confirmed"
 fi
 
-log "--- step 1: virtual machines (destroy, create, agent, DNS, dist-upgrade, packages) ---"
+log "--- step 1: virtual machines (destroy, create, agent, DNS, dist-upgrade, reboot, packages) ---"
 S=$(date +%s)
 "$HERE/par-mk-new-and-empty.sh" -q -j "$JOBS" ${AGENT_ARGS[@]+"${AGENT_ARGS[@]}"} "${NODES[@]}" \
   || die "building the VMs failed for some nodes (see the list above and .orphera-build-logs/); fix, then re-run with only those nodes: manifests/par-mk-new-and-empty.sh <nodes>, and continue with: manifests/build_openstack_stack.sh"

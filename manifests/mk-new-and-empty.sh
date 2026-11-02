@@ -6,7 +6,7 @@
 #                                              kvm_native_vm_provision.scala, chosen per hypervisor)
 #   2. install the orphera agent over SSH     (orphera bootstrap)
 #   3. set DNS                                (gen_set_dns.scala)
-#   4. dist-upgrade                           (orphera dist-upgrade)
+#   4. dist-upgrade, then reboot              (orphera dist-upgrade; orphera reboot --wait)
 #   5. install the config's package lists     (gen_packages.scala)
 #
 # Usage: manifests/mk-new-and-empty.sh [-a agent.deb] [node ...]
@@ -114,6 +114,10 @@ build_node() {
 
     step "dist-upgrade"
     orphera dist-upgrade --nodes "$node" || return 1
+
+    # dist-upgrade usually installs a new kernel; reboot so the VM runs it.
+    step "reboot onto the new kernel"
+    orphera reboot --nodes "$node" --wait || return 1
 
     step "install packages"
     orphera cluster-playbook gen_packages.scala --config "$cfg" || return 1
