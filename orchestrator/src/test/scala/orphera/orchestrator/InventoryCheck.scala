@@ -163,31 +163,40 @@ object InventoryCheck:
         agentOf("bootstrap", "--file", "x.rpm", "--nodes", "a").contains("x.rpm")
     )
 
-    // --go: the Go agent's packages from agent-go/, never together with --agent
+    // The Go agent is the default; --scala selects the Scala agent, never together with --agent
     check(
-      "deploy-agent --go selects the Go agent",
-      Cli.parse(List("deploy-agent", "--go", "--nodes", "a")) match
+      "deploy-agent --scala selects the Scala agent",
+      Cli.parse(List("deploy-agent", "--scala", "--nodes", "a")) match
         case Right(Command.DeployAgent(None, _, _, true, _, _)) => true
-        case _                                            => false
+        case _                                                  => false
     )
     check(
-      "deploy-agent without --go does not",
+      "deploy-agent without --scala uses the default (Go) agent",
       Cli.parse(List("deploy-agent")) match
         case Right(Command.DeployAgent(None, _, _, false, _, _)) => true
-        case _                                             => false
+        case _                                                   => false
     )
     check(
-      "--go and --agent together are refused",
-      Cli.parse(List("deploy-agent", "--go", "--agent", "x.deb")).isLeft &&
-        Cli.parse(List("deploy-agent", "--agent", "x.deb", "--go")).isLeft
+      "--go is still accepted and means the default",
+      Cli.parse(List("deploy-agent", "--go")) match
+        case Right(Command.DeployAgent(None, _, _, false, _, _)) => true
+        case _                                                   => false
     )
     check(
-      "--go with no Go package built says where it looked",
-      AgentPackages.resolve(None, go = true) match
-        case Left(m) => m.contains("agent-go")
+      "--scala and --agent together are refused",
+      Cli.parse(List("deploy-agent", "--scala", "--agent", "x.deb")).isLeft &&
+        Cli.parse(List("deploy-agent", "--agent", "x.deb", "--scala")).isLeft
+    )
+    check(
+      "with no Go package built the default says where it looked and how to use Scala",
+      AgentPackages.resolve(None) match
+        case Left(m)  => m.contains("agent-go") && m.contains("--scala")
         case Right(_) => java.io.File(AgentPackages.goDir).isDirectory
     )
-
+    check(
+      "an explicit --agent is used as given",
+      AgentPackages.resolve(Some("x.deb")) == Right(AgentPackages(Some("x.deb"), None))
+    )
     check(
       "deploy-agent --force and --parallel are parsed",
       Cli.parse(List("deploy-agent", "--force", "--parallel", "3")) match

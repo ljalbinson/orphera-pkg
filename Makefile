@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-.PHONY: all release rpm-if-available bump-patch _build_all clean test assembly pkg-stage deb rpm verify certs certs-clean fmt fmt-manifests scripting lint fix cli-stage cli-deb cli-rpm cli-tar cli-package check-package
+.PHONY: all release rpm-if-available go-agent-if-available bump-patch _build_all clean test assembly pkg-stage deb rpm verify certs certs-clean fmt fmt-manifests scripting lint fix cli-stage cli-deb cli-rpm cli-tar cli-package check-package
 
 VERSION_FILE := VERSION
 VERSION      := $(shell cat $(VERSION_FILE))
@@ -21,7 +21,7 @@ all: clean test assembly deb rpm
 release: bump-patch
 	$(MAKE) _build_all
 
-_build_all: clean test assembly deb rpm-if-available orpheracli scripting cli-package
+_build_all: clean test assembly deb rpm-if-available go-agent-if-available orpheracli scripting cli-package
 	@echo "Released $$(cat $(VERSION_FILE))"
 
 bump-patch:
@@ -257,6 +257,12 @@ rpm: pkg-stage
 	rpmbuild -bb --define "_topdir $(RPM_TOP)" --define "stagedir $(CURDIR)/$(PKG_DIR)" --define "_binary_payload w19.zstdio" $(RPM_TOP)/orphera-agent.spec
 	cp $(RPM_TOP)/RPMS/noarch/$(RPM_FILE) .
 	@echo "Built $(RPM_FILE)"
+
+# The Go agent is the default for deploy-agent and bootstrap, so a release builds
+# its packages too (same version plus +go). A host without Go skips them, with a
+# warning: deploy-agent would then find only a package of an older release.
+go-agent-if-available:
+	@if command -v go >/dev/null; then $(MAKE) -C agent-go deb && { if command -v rpmbuild >/dev/null; then $(MAKE) -C agent-go rpm; fi; }; else echo "WARNING: go not found: the Go agent packages were not built; deploy-agent will use older ones or fail"; fi
 
 rpm-if-available:
 	@if command -v rpmbuild >/dev/null; then $(MAKE) rpm; else echo "rpmbuild not found: skipping the .rpm"; fi

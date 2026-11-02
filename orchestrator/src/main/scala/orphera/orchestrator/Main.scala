@@ -204,12 +204,12 @@ object Main extends IOApp:
               localOpt,
               remotePath,
               nodeNames,
-              go,
+              useScala,
               force,
               parallel
             )
           ) =>
-        AgentPackages.resolve(localOpt, go = go) match
+        AgentPackages.resolve(localOpt, useScala = useScala) match
           case Left(err) =>
             IO.println(s"Error: $err") >> IO.pure(ExitCode.Error)
           case Right(packages) =>

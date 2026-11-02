@@ -333,7 +333,7 @@ _orphera_completions() {
         --remote-path|--parallel) COMPREPLY=() ;;
         --nodes) COMPREPLY=() ;;
         --node-groups) COMPREPLY=($(compgen -W "$(_orphera_groups)" -- "$cur")) ;;
-        *) COMPREPLY=($(compgen -W "--agent --go --force --parallel --remote-path --nodes --node-groups --exclude-nodes" -- "$cur")) ;;
+        *) COMPREPLY=($(compgen -W "--agent --scala --force --parallel --remote-path --nodes --node-groups --exclude-nodes" -- "$cur")) ;;
       esac
       ;;
 

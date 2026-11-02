@@ -214,24 +214,25 @@ make            # lint (gofmt, go vet, staticcheck), tests, binaries
 make deb        # orphera-agent_<version>+go_amd64.deb
 make rpm        # orphera-agent-<version>+go-1.x86_64.rpm
 cd ..
-orphera deploy-agent --go --nodes tst0
+orphera deploy-agent --nodes tst0
 ```
 
 `deploy-agent` skips a node that already reports the package's version (it prints `already running …, skipped`),
 so a repeat run costs a version query per node; `--force` installs on every node regardless, which a rebuilt agent
 with an unchanged version number needs. It sends the package to at most 8 nodes at a time (`--parallel <n>`).
 
-`--go` takes the newest Go package in `agent-go/` (`.deb` for Ubuntu nodes, `.rpm` for Rocky), so run it from the
-repository directory; `--agent <path>` still names a file explicitly, but the two cannot be combined.
+The Go agent is the default for `deploy-agent` and `bootstrap`: they take the newest Go package in `agent-go/`
+(`.deb` for Ubuntu nodes, `.rpm` for Rocky), so run them from the repository directory. `--scala` (deploy-agent)
+uses the Scala agent's newest package in the current directory instead; `--agent <path>` names a file explicitly
+and cannot be combined with `--scala`. `make release` builds the Go packages after the Scala ones.
 
 The packages are the same `orphera-agent` package as the Scala ones, with the
 Go binary in place of the jar, so either replaces the other with
 `deploy-agent`. Their version is `VERSION` with `+go` added, which the agent
 also reports, so `orphera version` shows which agent a node runs.
 
-`make release` builds only the Scala packages, and `deploy-agent` without
-`--agent` or `--go` picks those, so nodes running the Go agent go back to the Scala one
-at the next release unless the Go package is passed with `--go` (or `--agent`).
+The Go agent is what `deploy-agent` and `bootstrap` install unless you pass `--scala`
+(deploy-agent) or `--agent <path>`. `make release` builds the Go packages too, if Go is installed.
 
 [`agent-go/README.md`](agent-go/README.md) has the details: layout,
 differences from the Scala agent, how its facts match the JVM's, and trying
