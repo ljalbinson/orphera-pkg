@@ -83,8 +83,7 @@ object k8s_alertmanager extends OrpheraClusterPlaybook:
 
   // The Helm values file (written to alertmanager-values.yaml on tst30). No password in it.
   // @L@ and @R@ stand for two opening and two closing braces: Orphera renders Mustache in command text, so
-  // the script must not contain them (see alertmanagerScript). The body is also wrapped in a Helm raw
-  // string, because the chart runs Helm's template engine over the Alertmanager config.
+  // the script must not contain them (see alertmanagerScript).
   private val valuesYaml =
     val authLines =
       if useAuth then
@@ -131,10 +130,10 @@ object k8s_alertmanager extends OrpheraClusterPlaybook:
        |      - to: '$to'
        |        send_resolved: true
        |        html: |
-       |          @L@`<h3>@L@ .Status | toUpper @R@: @L@ .CommonLabels.alertname @R@</h3>
+       |          <h3>@L@ .Status | toUpper @R@: @L@ .CommonLabels.alertname @R@</h3>
        |          @L@ range .Alerts @R@<p><b>@L@ .Labels.severity @R@</b> @L@ .Annotations.summary @R@ @L@ .Annotations.description @R@<br>
        |          @L@ range .Labels.SortedPairs @R@@L@ .Name @R@=@L@ .Value @R@ @L@ end @R@</p>
-       |          @L@ end @R@<p><a href="$alertLink">Alerts in Grafana</a></p>`@R@
+       |          @L@ end @R@<p><a href="$alertLink">Alerts in Grafana</a></p>
        |$tlsLines""".stripMargin
 
   // The Kubernetes Secret with the password (a line of the script; empty without a login).
