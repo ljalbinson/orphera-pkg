@@ -58,6 +58,7 @@ New to Orphera? [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md) takes you fro
 - [Example: OpenStack Keystone and Cinder from Kolla images](#example-openstack-keystone-and-cinder-from-kolla-images)
 - [Example: parallel network throughput test (iperf3)](#example-parallel-network-throughput-test-iperf3)
 - [Example: a file server for Linux and macOS](#example-a-file-server-for-linux-and-macos)
+- [Example: a Lustre file system (tst43-tst47)](#example-a-lustre-file-system-tst43-tst47)
 - [More playbooks in `manifests/`](#more-playbooks-in-manifests)
 - [Known gaps / not yet built](#known-gaps--not-yet-built)
 
@@ -1923,6 +1924,7 @@ Fleet layout used by these manifests (see `inventory.yaml`):
 | tst26 | Keycloak (OpenID Connect identity provider, HTTPS on 8443, health on 9000); Keystone on tst6 federates its realm `openstack` |
 | tst24 | Telemetry: Ceilometer central agent (exporter on 9101) and Aodh (API on 8042, evaluator, notifier); the compute agents run on tst17 and tst18; metrics are stored by the Prometheus on tst7; RabbitMQ vhosts `aodh` and `ceilometer` on tst10 |
 | tst21 | Kolla image builder: builds the images from source, with a source tarball cache, a pip cache, and a writable registry on port 5000 |
+| tst43-tst47 | Lustre file system `lfs0` on Rocky Linux 9: tst43 MGS + MDS (and the test client, `/mnt/lfs0`), tst44-tst47 OSS with two OSTs each |
 | tst17, tst18 | Compute nodes (nova-compute on KVM, Neutron Open vSwitch agent; second NIC is the provider port); VMs on gs2 with nested KVM |
 
 Run order, each with its own teardown and an end-to-end test that checks the
@@ -2363,6 +2365,49 @@ or `smb://fs0.example.com/files` in the file manager.
 
 Not done: the disk (`/srv` is on the root filesystem unless a volume is mounted there first), quotas, backup of the share itself, and
 hosts that use `dnf` (the package and service names differ).
+
+## Example: a Lustre file system (tst43-tst47)
+
+A Lustre file system `lfs0` (ldiskfs targets, LNet over TCP) on five Rocky Linux 9 VMs on 10.10.5.0/24,
+each with two data disks:
+
+| Node | Role | Targets |
+|---|---|---|
+| tst43 (10.10.5.55) | MGS + MDS, and the test client (`/mnt/lfs0`) | MGT (16 GB), MDT0 (64 GB) |
+| tst44-tst47 (10.10.5.56-59) | OSS | two OSTs each, OST0000-OST0007 (128 GB each) |
+
+Rocky 9, not 10: Lustre 2.17 builds its servers for EL9 only; EL10 servers come with Lustre 2.18. Which
+disk holds which target is the `lustre_targets` var of each node in `inventory.yaml` (`<role>:<by-id path>`,
+role `mgt`, `mdtN` or `ostN`), so adding an OSS is a config file, an inventory entry and a re-run.
+
+    # once: the Rocky 9 cloud image on the hypervisors the VMs go on
+    orphera run sh -c 'cd /var/lib/libvirt/boot && { [ -e Rocky-9-GenericCloud-Base.latest.x86_64.qcow2 ] || curl -fsSLO https://dl.rockylinux.org/pub/rocky/9/images/x86_64/Rocky-9-GenericCloud-Base.latest.x86_64.qcow2; }' --nodes gs1,gs2,gs3,st0
+    manifests/par-mk-new-and-empty.sh -q -j 5 tst43 tst44 tst45 tst46 tst47
+    orphera cluster-playbook manifests/lustre_cluster.scala     # build (repeatable)
+    manifests/test_lustre.sh                                     # teardown, build, checks (wipes the disks)
+    orphera cluster-playbook manifests/lustre_teardown.scala    # unmount and wipe; packages stay
+
+`lustre_cluster.scala` installs the Lustre server packages from Whamcloud's repository (and its kernel, when
+the repository has one), makes the kernel that has the Lustre modules the default and version-locks it with
+the Lustre packages, reboots only the nodes not already on it, brings up LNet, formats the blank targets and
+mounts them in order: MGT, MDTs, OSTs, then the client. A disk that already carries the expected Lustre label
+is left alone; a disk with any other signature stops the run. Nothing goes into `/etc/fstab`: after the VMs
+have been off, run `lustre_cluster.scala` again, which mounts everything in the right order. SELinux is set
+to permissive on the servers.
+
+| Setting | Meaning | Default |
+|---|---|---|
+| `LUSTRE_FSNAME` | file system name (at most 8 characters) | `lfs0` |
+| `LUSTRE_MGS` | node with the MGT | `tst43` |
+| `LUSTRE_SERVERS` | nodes with targets | `tst43 tst44 tst45 tst46 tst47` |
+| `LUSTRE_CLIENTS` | nodes that mount it; must also be servers for now | `tst43` |
+| `LUSTRE_RELEASE`, `LUSTRE_EL` | Whamcloud repository path, `.../public/lustre/<release>/<el>/server/` | `lustre-2.17.0`, `el9.7` |
+
+The servers need outbound HTTPS to downloads.whamcloud.com (the rpm cache on tst12 mirrors only Rocky and EPEL);
+the preflight stage checks this before anything is changed.
+
+Not done yet: clients that are not servers (Ubuntu or Rocky client packages), a second MDT (DNE), failover
+pairs, quotas, and monitoring.
 
 ## Example: a Kubernetes cluster on VMs (tst30-tst41)
 

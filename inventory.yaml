@@ -262,6 +262,39 @@ nodes:
     vars:
       cluster_ip: "10.10.3.41"
 
+  # tst43-tst47: Lustre file system `lfs0` on Rocky Linux 9 (manifests/lustre_cluster.scala).
+  #   tst43        MGS + MDS: MGT on data1, MDT0 on data2; also the test client (/mnt/lfs0)
+  #   tst44-tst47  OSS: two OSTs each, OST0000-OST0007
+  # lustre_targets: <role>:<disk> pairs, role mgt, mdtN or ostN (N = the target index,
+  # unique across the file system). Disk paths are the fixed-serial by-id names the
+  # provisioning playbooks give the `disks:` in config/<node>.yaml (never /dev/sdX).
+  # lustre_teardown.scala wipes exactly these disks.
+  - name: tst43
+    host: tst43.ljalbinson.com
+    vars:
+      cluster_ip: "10.10.5.55"
+      lustre_targets: "mgt:/dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_tst43-data1,mdt0:/dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_tst43-data2"
+  - name: tst44
+    host: tst44.ljalbinson.com
+    vars:
+      cluster_ip: "10.10.5.56"
+      lustre_targets: "ost0:/dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_tst44-data1,ost1:/dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_tst44-data2"
+  - name: tst45
+    host: tst45.ljalbinson.com
+    vars:
+      cluster_ip: "10.10.5.57"
+      lustre_targets: "ost2:/dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_tst45-data1,ost3:/dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_tst45-data2"
+  - name: tst46
+    host: tst46.ljalbinson.com
+    vars:
+      cluster_ip: "10.10.5.58"
+      lustre_targets: "ost4:/dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_tst46-data1,ost5:/dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_tst46-data2"
+  - name: tst47
+    host: tst47.ljalbinson.com
+    vars:
+      cluster_ip: "10.10.5.59"
+      lustre_targets: "ost6:/dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_tst47-data1,ost7:/dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_tst47-data2"
+
   - name: gs1
     host: gs1.ljalbinson.com
     never-reboot: true
