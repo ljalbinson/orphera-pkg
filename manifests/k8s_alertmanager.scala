@@ -123,8 +123,15 @@ object k8s_alertmanager extends OrpheraClusterPlaybook:
        |  "annotations":{"summary":"Test alert from k8s_alertmanager.scala - nothing is wrong"},
        |  "endsAt":"$$END"}]
        |EOF
-       |$kc create --raw "$$AM/api/v2/alerts" -f /tmp/am-test.json >/dev/null
-       |rm -f /tmp/am-test.json
+       |# kubectl create --raw sends no JSON content type (415), so post through kubectl proxy with curl
+       |$kc proxy --port=18001 >/dev/null 2>&1 &
+       |PROXY=$$!
+       |sleep 3
+       |CODE=$$(curl -s -o /tmp/am-test.out -w '%{http_code}' -X POST -H 'Content-Type: application/json' \\
+       |  --data @/tmp/am-test.json "http://127.0.0.1:18001$$AM/api/v2/alerts" || true)
+       |kill $$PROXY 2>/dev/null || true
+       |if [ "$$CODE" != "200" ]; then echo "FAIL  posting the test alert returned HTTP $$CODE: $$(cat /tmp/am-test.out)" >&2; rm -f /tmp/am-test.json /tmp/am-test.out; exit 1; fi
+       |rm -f /tmp/am-test.json /tmp/am-test.out
        |echo "test alert sent; waiting for the notification (group_wait is 30 s)"
        |SENT=$$SENT0; FAILED=$$FAILED0
        |for I in $$(seq 1 36); do
