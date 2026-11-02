@@ -280,6 +280,12 @@ nodes:
     vars:
       cluster_ip: "192.168.1.49"
 
+  # tst42: throwaway VM for testing the Go agent's bootstrap.
+  - name: tst42
+    host: tst42.ljalbinson.com
+    vars:
+      cluster_ip: "10.10.5.42"
+
   - name: st0
     host: st0.ljalbinson.com
     never-reboot: true
