@@ -18,6 +18,9 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 //                             name should resolve in DNS: *.k8s.ljalbinson.com does)
 //   ORPHERA_ALERT_FROM        sender            [alert@ljalbinson.com]
 //   ORPHERA_ALERT_TO          recipient         [lawrence@ljalbinson.com]
+//   ORPHERA_ALERT_LINK        link at the end of each mail [https://grafana.k8s.ljalbinson.com/alerting/list]
+//                             (Alertmanager is not published, so its own link, an internal
+//                             cluster address, is left out of the mail body)
 //   ORPHERA_ALERT_AUTH        0 = no SMTP login (the relay must accept the nodes' network,
 //                             and then port 25 is the usual port: set ORPHERA_ALERT_SMTP_PORT=25) [1]
 //   ORPHERA_ALERT_SMTP_USER   login name        [the sender address, as iRedMail wants it]
@@ -66,6 +69,7 @@ object k8s_alertmanager extends OrpheraClusterPlaybook:
   private val smtpHelo = env("ORPHERA_ALERT_SMTP_HELO", "alertmanager.k8s.ljalbinson.com")
   private val from = env("ORPHERA_ALERT_FROM", "alert@ljalbinson.com")
   private val to = env("ORPHERA_ALERT_TO", "lawrence@ljalbinson.com")
+  private val alertLink = env("ORPHERA_ALERT_LINK", "https://grafana.k8s.ljalbinson.com/alerting/list")
   private val smtpUser = env("ORPHERA_ALERT_SMTP_USER", from)
   private val requireTls =
     if env("ORPHERA_ALERT_REQUIRE_TLS", if useAuth then "1" else "0") == "1" then "true" else "false"
@@ -78,6 +82,8 @@ object k8s_alertmanager extends OrpheraClusterPlaybook:
   private val secretsPath = "/etc/alertmanager/secrets/alertmanager-smtp/password"
 
   // The Helm values file (written to alertmanager-values.yaml on tst30). No password in it.
+  // @L@ and @R@ stand for two opening and two closing braces: Orphera renders Mustache in command text, so
+  // the script must not contain them (see alertmanagerScript).
   private val valuesYaml =
     val authLines =
       if useAuth then
@@ -123,6 +129,11 @@ object k8s_alertmanager extends OrpheraClusterPlaybook:
        |      email_configs:
        |      - to: '$to'
        |        send_resolved: true
+       |        html: |
+       |          <h3>@L@ .Status | toUpper @R@: @L@ .CommonLabels.alertname @R@</h3>
+       |          @L@ range .Alerts @R@<p><b>@L@ .Labels.severity @R@</b> @L@ .Annotations.summary @R@ @L@ .Annotations.description @R@<br>
+       |          @L@ range .Labels.SortedPairs @R@@L@ .Name @R@=@L@ .Value @R@ @L@ end @R@</p>
+       |          @L@ end @R@<p><a href="$alertLink">Alerts in Grafana</a></p>
        |$tlsLines""".stripMargin
 
   // The Kubernetes Secret with the password (a line of the script; empty without a login).
@@ -141,9 +152,13 @@ object k8s_alertmanager extends OrpheraClusterPlaybook:
        |VER=$${CHART#kube-prometheus-stack-}
        |echo "release kps uses chart $$VER"
        |$passwordSecretCmd
-       |cat > $stateDir/alertmanager-values.yaml <<EOF
+       |cat > $stateDir/alertmanager-values.yaml <<'EOF'
        |$valuesYaml
        |EOF
+       |# Orphera renders Mustache in any command that contains two opening braces, so the mail body is written
+       |# with @L@ and @R@ and the braces are put in here, at run time
+       |OB=$$(printf '\\173\\173'); CB=$$(printf '\\175\\175')
+       |sed -i -e "s/@L@/$$OB/g" -e "s/@R@/$$CB/g" $stateDir/alertmanager-values.yaml
        |helm upgrade kps prometheus-community/kube-prometheus-stack --version "$$VER" \\
        |  --namespace $ns --reuse-values -f $stateDir/alertmanager-values.yaml --wait --timeout 10m
        |$kc -n $ns rollout status statefulset/alertmanager-kps-alertmanager --timeout=300s
@@ -166,7 +181,7 @@ object k8s_alertmanager extends OrpheraClusterPlaybook:
        |# the new configuration is loaded
        |CFG=""
        |for I in $$(seq 1 30); do
-       |  CFG=$$($kc get --raw "$$AM/api/v2/status" 2>/dev/null | python3 -c 'import sys,json; c=json.load(sys.stdin)["config"]["original"]; print("loaded" if "$smtpHost:$smtpPort" in c and "$to" in c else "")' 2>/dev/null || true)
+       |  CFG=$$($kc get --raw "$$AM/api/v2/status" 2>/dev/null | python3 -c 'import sys,json; c=json.load(sys.stdin)["config"]["original"]; print("loaded" if "$smtpHost:$smtpPort" in c and "$to" in c and "$alertLink" in c and ".CommonLabels.alertname" in c else "")' 2>/dev/null || true)
        |  [ "$$CFG" = "loaded" ] && break
        |  sleep 5
        |done
@@ -175,8 +190,10 @@ object k8s_alertmanager extends OrpheraClusterPlaybook:
        |$$(counts)
        |EOF
        |END=$$(date -u -d '+5 minutes' +%Y-%m-%dT%H:%M:%SZ)
+       |# a new alert name each run: the same alert posted again inside its lifetime is not notified again
+       |STAMP=$$(date -u +%H%M%S)
        |cat > /tmp/am-test.json <<EOF
-       |[{"labels":{"alertname":"OrpheraTestAlert","severity":"warning","namespace":"$ns"},
+       |[{"labels":{"alertname":"OrpheraTestAlert$$STAMP","severity":"warning","namespace":"$ns"},
        |  "annotations":{"summary":"Test alert from k8s_alertmanager.scala - nothing is wrong"},
        |  "endsAt":"$$END"}]
        |EOF
@@ -207,7 +224,7 @@ object k8s_alertmanager extends OrpheraClusterPlaybook:
        |  FAIL=1
        |fi
        |[ "$$FAIL" -eq 0 ] || exit 1
-       |echo "ok    the relay accepted the mail; check the inbox of $to for [FIRING:1] OrpheraTestAlert"
+       |echo "ok    the relay accepted the mail; check the inbox of $to for [FIRING:1] OrpheraTestAlert<time>"
        |""".stripMargin
 
   val playbook: ClusterPlaybook =
