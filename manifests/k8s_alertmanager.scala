@@ -175,7 +175,7 @@ object k8s_alertmanager extends OrpheraClusterPlaybook:
        |# the new configuration is loaded
        |CFG=""
        |for I in $$(seq 1 30); do
-       |  CFG=$$($kc get --raw "$$AM/api/v2/status" 2>/dev/null | python3 -c 'import sys,json; c=json.load(sys.stdin)["config"]["original"]; print("loaded" if "$smtpHost:$smtpPort" in c and "$to" in c else "")' 2>/dev/null || true)
+       |  CFG=$$($kc get --raw "$$AM/api/v2/status" 2>/dev/null | python3 -c 'import sys,json; c=json.load(sys.stdin)["config"]["original"]; print("loaded" if "$smtpHost:$smtpPort" in c and "$to" in c and "$alertLink" in c else "")' 2>/dev/null || true)
        |  [ "$$CFG" = "loaded" ] && break
        |  sleep 5
        |done
@@ -184,8 +184,10 @@ object k8s_alertmanager extends OrpheraClusterPlaybook:
        |$$(counts)
        |EOF
        |END=$$(date -u -d '+5 minutes' +%Y-%m-%dT%H:%M:%SZ)
+       |# a new alert name each run: the same alert posted again inside its lifetime is not notified again
+       |STAMP=$$(date -u +%H%M%S)
        |cat > /tmp/am-test.json <<EOF
-       |[{"labels":{"alertname":"OrpheraTestAlert","severity":"warning","namespace":"$ns"},
+       |[{"labels":{"alertname":"OrpheraTestAlert$$STAMP","severity":"warning","namespace":"$ns"},
        |  "annotations":{"summary":"Test alert from k8s_alertmanager.scala - nothing is wrong"},
        |  "endsAt":"$$END"}]
        |EOF
@@ -216,7 +218,7 @@ object k8s_alertmanager extends OrpheraClusterPlaybook:
        |  FAIL=1
        |fi
        |[ "$$FAIL" -eq 0 ] || exit 1
-       |echo "ok    the relay accepted the mail; check the inbox of $to for [FIRING:1] OrpheraTestAlert"
+       |echo "ok    the relay accepted the mail; check the inbox of $to for [FIRING:1] OrpheraTestAlert<time>"
        |""".stripMargin
 
   val playbook: ClusterPlaybook =
