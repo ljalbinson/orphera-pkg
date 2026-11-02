@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+- `k8s_kubeadm_config.scala`: the host-network DNS probe pod now runs in `kube-system`; the `default` namespace enforces the `baseline` PodSecurity level, which rejects `hostNetwork`. Not yet run on the lab.
+
 ### Changed
 - `mk-new-and-empty.sh` and `par-mk-new-and-empty.sh` now reboot each VM (`orphera reboot --wait`) after `dist-upgrade`, so a new VM comes up on the kernel the upgrade installed instead of the one it was built with. Not yet run on the lab.
 - `mk-new-and-empty.sh`, `par-mk-new-and-empty.sh` and `rebuild_openstack_from_scratch.sh` no longer look for a Scala `.deb` in the current directory: without `-a` they leave the choice to `orphera bootstrap`, which installs the Go agent from `agent-go/`. `-a <file>` still names a package (for the Scala agent, its `.deb`). Not yet run on the lab.
