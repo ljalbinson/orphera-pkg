@@ -29,7 +29,8 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 //     to listen on the node address (set at init by k8s_cluster.scala, or afterwards by
 //     k8s_kubeadm_config.scala); until then those three targets show as down.
 //   - Cilium and Hubble metrics are not enabled.
-//   - Alertmanager has no receivers, so alerts show in its UI and in Grafana only.
+//   - Alertmanager has no receivers, so alerts show in its UI and in Grafana only;
+//     k8s_alertmanager.scala adds the e-mail receiver.
 //
 // The last stage queries Prometheus (through the API server's service proxy):
 // all 10 nodes report node-exporter metrics, the 3 API servers and the kubelets

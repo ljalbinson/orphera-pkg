@@ -2399,6 +2399,7 @@ repeated:
     orphera cluster-playbook manifests/k8s_network_lockdown.scala   #    default-deny for external-dns, argocd, logging
     orphera cluster-playbook manifests/k8s_network_lockdown_monitoring.scala   #    default-deny for monitoring
     orphera cluster-playbook manifests/k8s_network_lockdown_cert_manager.scala #    default-deny for cert-manager
+    orphera cluster-playbook manifests/k8s_alertmanager.scala        #    Alertmanager sends alerts by e-mail (one test mail)
 
 Notes:
 
