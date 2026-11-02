@@ -28,7 +28,7 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 //   - The etcd, scheduler and controller-manager metrics are scraped, which needs them
 //     to listen on the node address (set at init by k8s_cluster.scala, or afterwards by
 //     k8s_kubeadm_config.scala); until then those three targets show as down.
-//   - Cilium and Hubble metrics are not enabled.
+//   - Cilium and Hubble metrics are not enabled; k8s_cilium_metrics.scala turns them on.
 //   - Alertmanager has no receivers, so alerts show in its UI and in Grafana only;
 //     k8s_alertmanager.scala adds the e-mail receiver.
 //
