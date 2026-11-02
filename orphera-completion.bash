@@ -267,6 +267,16 @@ _orphera_completions() {
     secrets)
       if [ "$cword" -eq 2 ]; then
         COMPREPLY=($(compgen -W "init list generate set get rm" -- "$cur"))
+      elif [ "$cword" -eq 3 ]; then
+        case "${words[2]}" in
+          get|set|rm|generate)
+            # The names only (never the values), from `orphera secrets list`; the
+            # timeout keeps a missing or locked store from hanging the prompt.
+            local names
+            names=$(timeout 5 orphera secrets list 2>/dev/null)
+            COMPREPLY=($(compgen -W "$names" -- "$cur")) ;;
+          *) COMPREPLY=() ;;
+        esac
       else
         COMPREPLY=()
       fi
