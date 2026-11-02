@@ -462,9 +462,9 @@ object Orchestrator:
     }
 
   /** Facts from every node. Every node is tried; if any fail, the error names
-    * each of them (`[tst7] unreachable: UNAVAILABLE: io exception`) rather
-    * than passing on the first bare gRPC status, which does not say which
-    * node it came from.
+    * each of them (`[tst7] unreachable: UNAVAILABLE: io exception`) rather than
+    * passing on the first bare gRPC status, which does not say which node it
+    * came from.
     */
   def gatherFacts(nodes: List[Node]): IO[Map[String, Facts]] =
     nodes
