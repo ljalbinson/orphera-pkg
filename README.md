@@ -1180,8 +1180,9 @@ Each `disks:` entry (a size in GB, as a bare number, a string, or a one-key
 is ignored with a warning. Every disk gets a fixed QEMU serial (`<vm>-root`,
 `<vm>-swap`, `<vm>-dataN`), so inside the guest it appears at the stable path
 `/dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_<serial>`, which provisioning prints
-for use in `inventory.yaml` (`osd_disks`/`zap_disks`). The VM is also marked
-**autostart** on the hypervisor. After provisioning, run
+for use in `inventory.yaml` (`osd_disks`/`zap_disks`). The VM is not marked
+**autostart** on the hypervisor unless `ORPHERA_VM_AUTOSTART=1` is set (or
+`utils/vmctl.sh autostart add <vm>` afterwards). After provisioning, run
 `orphera bootstrap --forget-host-key` to clear a stale `known_hosts` entry for a
 rebuilt host.
 

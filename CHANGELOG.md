@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Changed
+- `kvm_zfs_vm_provision.scala` and `kvm_native_vm_provision.scala` no longer mark a new VM for libvirt autostart; set `ORPHERA_VM_AUTOSTART=1` to get the old behaviour (or `utils/vmctl.sh autostart add <vm>` afterwards). Not yet run on the lab.
 - The Go agent is now the default: `deploy-agent` and `bootstrap` install the newest package from `agent-go/` unless given `--agent <path>`; `deploy-agent --scala` uses the Scala agent's newest package in the current directory (`--go` is still accepted and changes nothing). `make release` now builds the Go packages too when Go is installed. If no Go package has been built, the commands say so and name `--scala`. Not yet built or run.
 
 ### Added

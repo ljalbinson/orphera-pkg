@@ -373,14 +373,24 @@ object kvm_zfs_vm_provision extends OrpheraClusterPlaybook:
       .map(m => s"rocky${m.group(1)}")
       .getOrElse("ubuntu24.04")
 
+  // Autostart (libvirt starts the VM when its hypervisor boots) is off unless
+  // ORPHERA_VM_AUTOSTART=1; `utils/vmctl.sh autostart add <vm>` sets it later.
+  private val autostart: Boolean =
+    sys.env.get("ORPHERA_VM_AUTOSTART").map(_.trim).contains("1")
+  private val autostartLine: String =
+    if autostart then s"virsh --connect qemu:///system autostart $vmName\n"
+    else ""
+  private val startedNote: String =
+    if autostart then "defined, started, and set to autostart with the hypervisor"
+    else "defined and started (autostart is off; ORPHERA_VM_AUTOSTART=1 turns it on)"
+
   private val defineAndStartVmScript =
     s"""set -e
        |want=$osVariantWanted
        |if virt-install --osinfo list 2>/dev/null | grep -qw -- "$$want"; then variant=$$want; else variant=generic; fi
        |echo "using --os-variant $$variant"
        |virt-install --connect qemu:///system --name $vmName --memory $memoryMB --vcpus $vcpus --cpu $cpuMode --disk $workingDir/$vmName.qcow2,format=qcow2,bus=scsi,serial=$vmName-root --disk $workingDir/$vmName-swap.qcow2,format=qcow2,bus=scsi,serial=$vmName-swap$extraDiskVirtInstallArgs --disk $workingDir/$vmName-cidata.iso,device=cdrom --network bridge=$nicBridge,model=virtio,virtualport_type=openvswitch$extraNicVirtInstallArgs --machine q35 --controller type=scsi,model=virtio-scsi --channel unix,target_type=virtio,name=org.qemu.guest_agent.0 --os-variant $$variant --import --noautoconsole
-       |virsh --connect qemu:///system autostart $vmName
-       |echo "$vmName defined, started, and set to autostart with the hypervisor"""".stripMargin
+       |${autostartLine}echo "$vmName $startedNote"""".stripMargin
 
   val playbook: ClusterPlaybook =
     clusterPlaybook("kvm-zfs-vm-provision")(
@@ -470,7 +480,7 @@ object kvm_zfs_vm_provision extends OrpheraClusterPlaybook:
         .build,
 
       stage("define-and-start-vm", hypervisorNode)
-        .task(s"virt-install $vmName, boot it, and mark it autostart")(
+        .task(s"virt-install $vmName and boot it")(
           Task.RunCommand(
             List("sh", "-c", defineAndStartVmScript),
             timeoutSeconds = 60
