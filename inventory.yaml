@@ -284,7 +284,7 @@ nodes:
   - name: tst42
     host: tst42.ljalbinson.com
     vars:
-      cluster_ip: "10.10.5.42"
+      cluster_ip: "10.10.3.42"
 
   - name: st0
     host: st0.ljalbinson.com
