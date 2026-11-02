@@ -2437,6 +2437,14 @@ Notes:
   re-run on a built cluster. The parent-zone delegation and the Ceph, Keycloak
   and test CA hosts must exist beforehand (the header lists them).
 - `manifests/k8s_cluster_teardown.scala` removes the cluster again (the VMs stay).
+- `manifests/k8s_upgrade.scala` upgrades the cluster with kubeadm, one node at a time (drain,
+  packages, `kubeadm upgrade apply` on tst30 and `upgrade node` elsewhere, kubelet, uncordon,
+  wait for health). `ORPHERA_K8S_TARGET` is `1.35` (newest patch) or `1.35.4`; kubeadm cannot
+  skip a minor, so it is the current minor or the next. `ORPHERA_K8S_SCOPE` is `check` (the
+  default: checks only, nothing changes), `first` (tst30), `controlplane` (tst30-32) or `all`.
+  Run it again with a wider scope to carry on; nodes already at the target are skipped. It
+  takes an etcd backup first. Cilium, cert-manager and the other components are not upgraded
+  by it: check that Cilium supports the target before going on.
 - Every playbook says in its header what it needs and what it does not do.
 
 ## More playbooks in `manifests/`
