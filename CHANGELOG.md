@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- `orphera deploy-agent` skips a node that already runs the package's version (`[tst7] already running 0.1.207, skipped`) and installs on the rest; `--force` installs on every node anyway. At most `--parallel <n>` nodes (default 8) are sent the package at a time, so a 42 MB package no longer goes to every node at once. Not yet built or run.
 - `orphera deploy-agent --go` installs the Go agent: it takes the newest `orphera-agent_*+go_amd64.deb` (apt nodes) or `orphera-agent-*+go-1.x86_64.rpm` (dnf nodes) from `agent-go/`, so the long `--agent agent-go/…` path is no longer needed. Not combinable with `--agent`; completion offers it. Not yet built or run.
 - Tab completion for `utils/vmctl.sh`: the actions, the options of each action, VM names from the config directory and hypervisor names from the `hypervisor:` values in it (installed with the `orphera` completion).
 - `utils/list-vms.sh` (and `vmctl.sh list`) shows an AUTOSTART column: whether libvirt starts the VM when the hypervisor boots.

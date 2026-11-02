@@ -199,7 +199,16 @@ object Main extends IOApp:
           Orchestrator.applyNetworkConfig(targets, timeoutSeconds)
         }
 
-      case Right(Command.DeployAgent(localOpt, remotePath, nodeNames, go)) =>
+      case Right(
+            Command.DeployAgent(
+              localOpt,
+              remotePath,
+              nodeNames,
+              go,
+              force,
+              parallel
+            )
+          ) =>
         AgentPackages.resolve(localOpt, go = go) match
           case Left(err) =>
             IO.println(s"Error: $err") >> IO.pure(ExitCode.Error)
@@ -221,7 +230,13 @@ object Main extends IOApp:
               // ever meant "every install was launched," not "every
               // node actually finished upgrading."
               Orchestrator
-                .deployAgent(targets, packages, remotePath)
+                .deployAgent(
+                  targets,
+                  packages,
+                  remotePath,
+                  force = force,
+                  parallel = parallel.getOrElse(8)
+                )
                 .flatMap { confirmed =>
                   val (ok, failed) =
                     targets.partition(n => confirmed.getOrElse(n.name, false))

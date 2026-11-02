@@ -5,6 +5,7 @@ package orphera.orchestrator
 import java.nio.file.{Files, Paths}
 
 import cats.effect.*
+import cats.effect.implicits.*
 import cats.syntax.all.*
 
 import orphera.common.*
@@ -125,12 +126,15 @@ object Orchestrator:
       nodes: List[Node],
       localDebPath: java.nio.file.Path,
       remoteDebPath: String = "/tmp/orphera-agent.deb",
-      confirmTimeoutSeconds: Int = 60
+      confirmTimeoutSeconds: Int = 60,
+      // At most this many nodes are sent the package at a time: 40 uploads of
+      // a 42 MB package at once saturate the control host's link.
+      parallel: Int = 8
   ): IO[Map[String, Boolean]] =
     for
       _ <- AgentToken.requireConfigured
       expectedVersion <- requireOrpheraAgentPackage(localDebPath.toString)
-      results <- nodes.parTraverse { node =>
+      results <- nodes.parTraverseN(parallel) { node =>
         for
           _ <- NodeClient.deployDeb(
             node,
@@ -147,6 +151,16 @@ object Orchestrator:
         yield node.name -> confirmed
       }
     yield results.toMap
+
+  /** The version each node's agent reports; a node that does not answer is
+    * left out (it is then treated as needing the package).
+    */
+  private def runningVersions(nodes: List[Node]): IO[Map[String, String]] =
+    nodes
+      .parTraverse(node =>
+        NodeClient.getVersion(node).attempt.map(node.name -> _.toOption)
+      )
+      .map(_.collect { case (name, Some(v)) => name -> v }.toMap)
 
   def bootstrapAgent(
       nodes: List[Node],
@@ -317,7 +331,10 @@ object Orchestrator:
       nodes: List[Node],
       packages: AgentPackages,
       remotePath: String = "/tmp/orphera-agent.deb",
-      confirmTimeoutSeconds: Int = 60
+      confirmTimeoutSeconds: Int = 60,
+      // Install even on a node already running the package's version.
+      force: Boolean = false,
+      parallel: Int = 8
   ): IO[Map[String, Boolean]] =
     // Before gatherFacts, which is already a call to every node.
     AgentToken.requireConfigured >> gatherFacts(nodes).flatMap { facts =>
@@ -338,12 +355,30 @@ object Orchestrator:
               IO.println(s"Error: ${group.map(_.name).mkString(", ")}: $reason")
                 .as(group.map(_.name -> false).toMap)
             case Right(path) =>
-              deployDeb(
-                group,
-                Paths.get(path),
-                AgentPackages.remotePathFor(rpm, remotePath),
-                confirmTimeoutSeconds
-              )
+              for
+                expected <- requireOrpheraAgentPackage(path)
+                running <-
+                  if force then IO.pure(Map.empty[String, String])
+                  else runningVersions(group)
+                (current, stale) = group.partition(n =>
+                  running.get(n.name).contains(expected)
+                )
+                _ <- current.traverse_(n =>
+                  IO.println(
+                    s"[${n.name}] already running $expected, skipped (--force installs anyway)"
+                  )
+                )
+                installed <-
+                  if stale.isEmpty then IO.pure(Map.empty[String, Boolean])
+                  else
+                    deployDeb(
+                      stale,
+                      Paths.get(path),
+                      AgentPackages.remotePathFor(rpm, remotePath),
+                      confirmTimeoutSeconds,
+                      parallel
+                    )
+              yield installed ++ current.map(_.name -> true)
 
       for
         debResults <- deployGroup(debNodes, rpm = false)

@@ -217,6 +217,10 @@ cd ..
 orphera deploy-agent --go --nodes tst0
 ```
 
+`deploy-agent` skips a node that already reports the package's version (it prints `already running …, skipped`),
+so a repeat run costs a version query per node; `--force` installs on every node regardless, which a rebuilt agent
+with an unchanged version number needs. It sends the package to at most 8 nodes at a time (`--parallel <n>`).
+
 `--go` takes the newest Go package in `agent-go/` (`.deb` for Ubuntu nodes, `.rpm` for Rocky), so run it from the
 repository directory; `--agent <path>` still names a file explicitly, but the two cannot be combined.
 
