@@ -29,6 +29,7 @@
 #   netpolicy                k8s_network_policy: the orphera-netpol helper, tested on throw-away namespaces
 #   lockdown                 k8s_network_lockdown: default deny for external-dns, argocd, logging
 #   lockdownmon              k8s_network_lockdown_monitoring: default deny for monitoring
+#   lockdowncm               k8s_network_lockdown_cert_manager: default deny for cert-manager
 #   test                     manifests/test_k8s.sh (13 checks), without applying anything
 #
 # It only APPLIES playbooks: nothing is torn down, so it is safe to re-run on a half-built or
@@ -53,7 +54,7 @@
 #   --with-vms      provision the 12 VMs first (they must not exist yet)
 #   --from STEP     start at STEP (vms dns mirrors aptclients nodeprep vip cluster cilium certmanager
 #                   cephcsi metrics oidc gateway etcdbackup monitoring logging kubeadmconfig externaldns
-#                   argocd podsecurity netpolicy lockdown lockdownmon test), for resuming after a failure
+#                   argocd podsecurity netpolicy lockdown lockdownmon lockdowncm test), for resuming after a failure
 #   --only STEP     run just that one step
 #   --list          print the plan and exit
 #   -h, --help      this text
@@ -68,7 +69,7 @@ set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
 . utils/orphera-sources.sh
 
-ALL_STEPS=(vms dns mirrors aptclients nodeprep vip cluster cilium certmanager cephcsi metrics oidc gateway etcdbackup monitoring logging kubeadmconfig externaldns argocd podsecurity netpolicy lockdown lockdownmon test)
+ALL_STEPS=(vms dns mirrors aptclients nodeprep vip cluster cilium certmanager cephcsi metrics oidc gateway etcdbackup monitoring logging kubeadmconfig externaldns argocd podsecurity netpolicy lockdown lockdownmon lockdowncm test)
 K8S_NODES="tst30 tst31 tst32 tst33 tst34 tst35 tst36 tst37 tst38 tst39"
 DNS_NODES="tst40 tst41"
 WITH_VMS=""
@@ -221,6 +222,7 @@ step_podsecurity()   { playbook k8s_pod_security.scala; }
 step_netpolicy()     { playbook k8s_network_policy.scala; }
 step_lockdown()      { playbook k8s_network_lockdown.scala; }
 step_lockdownmon()   { playbook k8s_network_lockdown_monitoring.scala; }
+step_lockdowncm()    { playbook k8s_network_lockdown_cert_manager.scala; }
 
 step_test() {
   NO_APPLY=1 manifests/test_k8s.sh

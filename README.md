@@ -2398,6 +2398,7 @@ repeated:
     orphera cluster-playbook manifests/k8s_network_policy.scala     # 19 the orphera-netpol helper, tested on throw-away namespaces
     orphera cluster-playbook manifests/k8s_network_lockdown.scala   #    default-deny for external-dns, argocd, logging
     orphera cluster-playbook manifests/k8s_network_lockdown_monitoring.scala   #    default-deny for monitoring
+    orphera cluster-playbook manifests/k8s_network_lockdown_cert_manager.scala #    default-deny for cert-manager
 
 Notes:
 
