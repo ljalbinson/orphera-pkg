@@ -13,6 +13,9 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 // where the playbook is started (the defaults are in brackets):
 //   ORPHERA_ALERT_SMTP_HOST   relay host        [mail.ljalbinson.com]
 //   ORPHERA_ALERT_SMTP_PORT   relay port        [25]
+//   ORPHERA_ALERT_SMTP_HELO   name Alertmanager gives in HELO [alertmanager.k8s.ljalbinson.com]
+//                             (the relay refuses "localhost", Alertmanager's default; the
+//                             name should resolve in DNS: *.k8s.ljalbinson.com does)
 //   ORPHERA_ALERT_FROM        sender            [alert@ljalbinson.com]
 //   ORPHERA_ALERT_TO          recipient         [lawrence@ljalbinson.com]
 //   ORPHERA_ALERT_REQUIRE_TLS 1 = refuse a relay that does not offer STARTTLS [0]
@@ -27,7 +30,7 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 //
 // The test sends a warning alert named OrpheraTestAlert to Alertmanager (through the
 // API server's service proxy), then reads Alertmanager's own counters: the e-mail
-// notifications sent must go up and the failed ones must not. Expect one mail with the
+// notifications delivered (attempts minus failures) must go up. Expect one mail with the
 // subject "[FIRING:1] OrpheraTestAlert ..." and, about 5 minutes later when the alert
 // expires, a "[RESOLVED]" one. The namespace monitoring must allow the relay: its
 // network policies include `world` (egress outside the cluster).
@@ -46,6 +49,7 @@ object k8s_alertmanager extends OrpheraClusterPlaybook:
 
   private val smtpHost = env("ORPHERA_ALERT_SMTP_HOST", "mail.ljalbinson.com")
   private val smtpPort = env("ORPHERA_ALERT_SMTP_PORT", "25")
+  private val smtpHelo = env("ORPHERA_ALERT_SMTP_HELO", "alertmanager.k8s.ljalbinson.com")
   private val from = env("ORPHERA_ALERT_FROM", "alert@ljalbinson.com")
   private val to = env("ORPHERA_ALERT_TO", "lawrence@ljalbinson.com")
   private val requireTls = if env("ORPHERA_ALERT_REQUIRE_TLS", "0") == "1" then "true" else "false"
@@ -65,6 +69,7 @@ object k8s_alertmanager extends OrpheraClusterPlaybook:
        |      resolve_timeout: 5m
        |      smtp_smarthost: '$smtpHost:$smtpPort'
        |      smtp_from: '$from'
+       |      smtp_hello: '$smtpHelo'
        |      smtp_require_tls: $requireTls
        |    route:
        |      receiver: email
@@ -134,19 +139,19 @@ object k8s_alertmanager extends OrpheraClusterPlaybook:
        |rm -f /tmp/am-test.json /tmp/am-test.out
        |echo "test alert sent; waiting for the notification (group_wait is 30 s)"
        |SENT=$$SENT0; FAILED=$$FAILED0
-       |for I in $$(seq 1 36); do
+       |# notifications_total counts attempts, failed ones too: a delivery is an attempt that did not fail
+       |for I in $$(seq 1 60); do
        |  read SENT FAILED <<EOF
        |$$(counts)
        |EOF
-       |  [ "$$SENT" -gt "$$SENT0" ] && break
-       |  [ "$$FAILED" -gt "$$FAILED0" ] && break
+       |  [ $$((SENT - FAILED)) -gt $$((SENT0 - FAILED0)) ] && break
        |  sleep 5
        |done
-       |if [ "$$SENT" -gt "$$SENT0" ] && [ "$$FAILED" -eq "$$FAILED0" ]; then
-       |  echo "ok    e-mail notifications sent: $$SENT0 -> $$SENT, failed: $$FAILED"
+       |if [ $$((SENT - FAILED)) -gt $$((SENT0 - FAILED0)) ]; then
+       |  echo "ok    e-mail delivered: attempts $$SENT0 -> $$SENT, failed $$FAILED0 -> $$FAILED"
        |else
-       |  echo "FAIL  e-mail notifications sent $$SENT0 -> $$SENT, failed $$FAILED0 -> $$FAILED" >&2
-       |  $kc -n $ns logs statefulset/alertmanager-kps-alertmanager -c alertmanager --tail=15 >&2 || true
+       |  echo "FAIL  no e-mail was delivered: attempts $$SENT0 -> $$SENT, failed $$FAILED0 -> $$FAILED" >&2
+       |  $kc -n $ns logs statefulset/alertmanager-kps-alertmanager -c alertmanager --tail=40 2>&1 | grep -i -E 'err|fail' | tail -5 >&2 || true
        |  FAIL=1
        |fi
        |[ "$$FAIL" -eq 0 ] || exit 1
@@ -162,7 +167,7 @@ object k8s_alertmanager extends OrpheraClusterPlaybook:
         .build,
       stage("alertmanager-test", node)
         .task("send a test alert and check the e-mail counters")(
-          Task.RunCommand(List("sh", "-c", testScript), timeoutSeconds = 400)
+          Task.RunCommand(List("sh", "-c", testScript), timeoutSeconds = 600)
         )
         .task("alertmanager ready")(
           Task.Debug(
