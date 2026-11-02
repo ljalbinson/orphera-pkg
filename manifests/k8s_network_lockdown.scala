@@ -28,8 +28,8 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 //       the Loki data source says OK.
 //
 // Left alone for now: monitoring (Prometheus scrapes every namespace and node, and the
-// Prometheus operator's webhook is called by the API server: its own step), cert-manager,
-// gateway, kube-system, ceph-csi-rbd.
+// Prometheus operator's webhook is called by the API server: its own step),
+// gateway, kube-system, ceph-csi-rbd. (cert-manager: k8s_network_lockdown_cert_manager.scala.)
 //
 // Not compiled where this was written; the first run on scala0 is the first
 // compile.
