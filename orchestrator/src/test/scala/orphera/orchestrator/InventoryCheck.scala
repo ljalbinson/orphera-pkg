@@ -139,6 +139,32 @@ object InventoryCheck:
       Cli.parse(List("pipeline", "uptime --exclude-nodes a", "--nodes", "a,b")).isLeft
     )
 
+    // orphera nodes: the same expansion, printed
+    val all4 = List("a", "b", "c", "d")
+    check("nodes with no selection is every node", ListNodes.select(Nil, grp, all4) == Right(all4))
+    check(
+      "nodes expands a group",
+      ListNodes.select(List("--node-groups", "osds"), grp, all4) == Right(List("c", "d"))
+    )
+    check(
+      "nodes with a group and an exclusion",
+      ListNodes.select(List("--node-groups", "mons,osds", "--exclude-nodes", "a"), grp, all4) ==
+        Right(List("b", "c", "d"))
+    )
+    check(
+      "nodes --exclude-nodes alone is every node but those",
+      ListNodes.select(List("--exclude-nodes", "a,b"), grp, all4) == Right(List("c", "d"))
+    )
+    check(
+      "nodes refuses a node name that is not in the inventory",
+      ListNodes.select(List("--nodes", "a,zz"), grp, all4).swap.exists(_.contains("zz"))
+    )
+    check(
+      "nodes refuses an unknown group",
+      ListNodes.select(List("--node-groups", "nope"), grp, all4).swap.exists(_.contains("Unknown node group"))
+    )
+    check("nodes refuses a stray argument", ListNodes.select(List("a"), grp, all4).isLeft)
+
     val bad = Files.createTempFile("inventory-check", ".yaml")
     Files.writeString(bad, "nodes:\n  - name: x\n    host: x\n    never-reboot: sometimes\n")
     check("a value that is not true or false is refused", InventoryYaml.load(bad.toString).isLeft)

@@ -493,6 +493,17 @@ out can never point them at the whole fleet. A name that was not selected is an 
 the group expansion, so the audit log records the nodes that were actually targeted. A pipeline's steps cannot give it;
 put it on the pipeline itself.
 
+**The groups defined.** `orphera nodes --groups` lists every group with its members, and `orphera nodes` with the
+same `--nodes`, `--node-groups` and `--exclude-nodes` prints the nodes a selection stands for, one per line, without
+contacting any of them (scripts such as `utils/vmctl.sh` use it). Besides `mons` (which carries the Ceph vars), the
+inventory has groups for targeting only, with no vars and no `never-reboot`: `ceph`, `galera`, `caches`, `openstack`,
+`openstack-compute`, `k8s`, `k8s-control`, `k8s-infra`, `k8s-workers`, `k8s-dns`, `lustre`, `lustre-servers`,
+`lustre-clients` and `hypervisors`.
+
+```
+orphera nodes --node-groups k8s-workers --exclude-nodes tst39
+```
+
 There is no dynamic inventory source (cloud provider API, etc.) —
 static and hand-edited only, for now.
 
@@ -1215,6 +1226,17 @@ Before a start it also removes stale Open vSwitch `vnetN` ports (no network devi
 ```bash
 utils/vmctl.sh start <vm>
 utils/vmctl.sh start --retries 5 <vm1> <vm2> <vm3>
+```
+
+`start`, `stop`, `reboot` and `autostart add|remove` also take `--node-groups g1,g2` and `--exclude-nodes a,b`, which
+work as they do for the `orphera` commands ([Targeting groups](#inventory)): `orphera nodes` expands them, VM names
+given as well are added, and the VMs are then handled one after another in that order. `--exclude-nodes` needs
+`--node-groups` or VM names with it; it never means every VM.
+
+```bash
+utils/vmctl.sh stop --node-groups k8s --wait 300
+utils/vmctl.sh start --node-groups ceph,galera
+utils/vmctl.sh reboot --node-groups k8s-workers --exclude-nodes tst39
 ```
 
 `utils/vmctl.sh shutdown-all <hypervisor>...` empties hypervisors before maintenance

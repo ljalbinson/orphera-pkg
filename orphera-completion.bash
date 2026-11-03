@@ -97,7 +97,7 @@ _orphera_completions() {
 
   local verbs="install remove autoremove dist-upgrade copy write-file network-apply reboot shutdown uptime thread-info run
     playbook cluster-playbook deploy-agent bootstrap issue-certs teardown fetch facts
-    version cert-info log-summary audit-log pipeline secrets show-config init-ca help"
+    version cert-info log-summary audit-log pipeline secrets show-config nodes init-ca help"
 
   # Flags common to most verbs that take --nodes
   local nodes_flag="--nodes"
@@ -244,6 +244,14 @@ _orphera_completions() {
         --nodes) COMPREPLY=() ;;
         --node-groups) COMPREPLY=($(compgen -W "$(_orphera_groups)" -- "$cur")) ;;
         *) COMPREPLY=($(compgen -W "--nodes --node-groups --exclude-nodes" -- "$cur")) ;;
+      esac
+      ;;
+
+    nodes)
+      case "$prev" in
+        --nodes|--exclude-nodes) COMPREPLY=($(compgen -W "$(_orphera_nodes)" -- "$cur")) ;;
+        --node-groups) COMPREPLY=($(compgen -W "$(_orphera_groups)" -- "$cur")) ;;
+        *) COMPREPLY=($(compgen -W "--nodes --node-groups --exclude-nodes --groups" -- "$cur")) ;;
       esac
       ;;
 
@@ -475,17 +483,18 @@ _vmctl_completions() {
   case "$prev" in
     --retries|--wait) COMPREPLY=(); return 0 ;;
     --hypervisor) COMPREPLY=($(compgen -W "$(_vmctl_hypervisors)" -- "$cur")); return 0 ;;
-    --except) COMPREPLY=($(compgen -W "$(_vmctl_vms)" -- "$cur")); return 0 ;;
+    --except|--exclude-nodes) COMPREPLY=($(compgen -W "$(_vmctl_vms)" -- "$cur")); return 0 ;;
+    --node-groups) COMPREPLY=($(compgen -W "$(_orphera_groups)" -- "$cur")); return 0 ;;
   esac
 
   local opts=""
   case "$action" in
-    start)        opts="--retries" ;;
-    stop)         opts="--wait --force" ;;
-    reboot)       opts="--hard --soft --wait --force --retries" ;;
+    start)        opts="--retries --node-groups --exclude-nodes" ;;
+    stop)         opts="--wait --force --node-groups --exclude-nodes" ;;
+    reboot)       opts="--hard --soft --wait --force --retries --node-groups --exclude-nodes" ;;
     shutdown-all) opts="--yes --wait --force --except" ;;
     start-all)    opts="--all --dry-run --retries --except" ;;
-    autostart)    opts="--all --hypervisor" ;;
+    autostart)    opts="--all --hypervisor --node-groups --exclude-nodes" ;;
   esac
 
   if [[ "$cur" == -* ]]; then

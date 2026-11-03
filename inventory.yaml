@@ -361,3 +361,34 @@ groups:
     vars:
       ceph_role: mon
       ceph_version: "19.2.3-0ubuntu0.24.04.3"
+
+  # Groups for targeting only (--node-groups, utils/vmctl.sh): no vars and no never-reboot, so
+  # belonging to one changes nothing a playbook sees. Roles as in the comment above tst3.
+  - name: ceph
+    members: [tst0, tst1, tst2]
+  - name: galera
+    members: [tst3, tst4, tst5]
+  - name: caches
+    members: [tst9, tst11, tst12, tst21]
+  - name: openstack
+    members: [tst6, tst10, tst13, tst14, tst16, tst17, tst18, tst19, tst20, tst22]
+  - name: openstack-compute
+    members: [tst17, tst18]
+  - name: k8s
+    members: [tst30, tst31, tst32, tst33, tst34, tst35, tst36, tst37, tst38, tst39]
+  - name: k8s-control
+    members: [tst30, tst31, tst32]
+  - name: k8s-infra
+    members: [tst33, tst34, tst35]
+  - name: k8s-workers
+    members: [tst36, tst37, tst38, tst39]
+  - name: k8s-dns
+    members: [tst40, tst41]
+  - name: lustre
+    members: [tst43, tst44, tst45, tst46, tst47, tst48, tst49, tst50]
+  - name: lustre-servers
+    members: [tst43, tst44, tst45, tst46, tst47, tst48]
+  - name: lustre-clients
+    members: [tst49, tst50]
+  - name: hypervisors
+    members: [gs1, gs2, gs3, st0]

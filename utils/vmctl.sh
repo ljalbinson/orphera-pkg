@@ -13,6 +13,9 @@
 #   utils/vmctl.sh reboot <vm>                   # soft: ask the guest to reboot
 #   utils/vmctl.sh reboot --hard --force <vm>    # full power cycle
 #   utils/vmctl.sh start config/<vm>.yaml        # an explicit config file
+#   utils/vmctl.sh start --node-groups k8s       # every VM in that inventory group (orphera nodes --groups lists them)
+#   utils/vmctl.sh stop --node-groups k8s-workers,k8s-dns --exclude-nodes tst39   # groups, less some VMs
+#   utils/vmctl.sh start --node-groups lustre-servers 49   # groups and VM names together
 #   utils/vmctl.sh shutdown-all <hypervisor>...  # list the running VMs on those hypervisors (nothing is shut down)
 #   utils/vmctl.sh shutdown-all --yes gs2 st0    # shut them all down, gracefully, and wait
 #   utils/vmctl.sh shutdown-all --yes --force --except <vm> gs2   # power off any that do not stop; leave <vm> running
@@ -24,6 +27,7 @@
 #   utils/vmctl.sh autostart remove <vm>...      # ... no longer does
 #   utils/vmctl.sh autostart add --hypervisor gs2 [--hypervisor st0]   # every VM on those hypervisors
 #   utils/vmctl.sh autostart remove --all        # every VM on every hypervisor
+#   utils/vmctl.sh autostart add --node-groups ceph,galera   # every VM in those groups
 #
 # Options map to the playbooks' environment variables: --retries to ORPHERA_VM_RETRIES
 # (start and reboot --hard), --wait to ORPHERA_VM_WAIT and --force to ORPHERA_VM_FORCE=1 (stop, reboot --hard),
@@ -35,6 +39,11 @@
 # autostart add|remove runs manifests/kvm_autostart.scala to turn libvirt's autostart on or off for the named VMs, for
 # every VM on the --hypervisor(s) given, or for every VM on every hypervisor with --all (the running state is not changed;
 # `list` shows the AUTOSTART column).
+# --node-groups g1,g2 and --exclude-nodes a,b (start, stop, reboot, autostart) work as they do for the orphera commands:
+# the groups come from inventory.yaml, `orphera nodes` expands them (so an unknown group or a bad exclusion is the same
+# error), the result is joined with any VM names given, and --exclude-nodes takes VMs out of that. --exclude-nodes needs
+# --node-groups or VM names as well: it never means every VM. Groups are for VMs; a member with no config/<vm>.yaml
+# (a hypervisor, say) fails like any other unknown VM.
 #
 # Unlike start-vm.sh, stop-vm.sh and reboot-vm.sh (which only ask the hypervisor), these run
 # the playbooks, so `start` also waits until the guest answers SSH. Prints one line per step;
@@ -65,7 +74,7 @@ case "$action" in
   *) echo "unknown action '$action' (start, stop, reboot, shutdown-all, start-all, autostart or list)" >&2; exit 2 ;;
 esac
 
-retries="" wait_s="" force="" mode="" yes="" except="" all="" dry=""
+retries="" wait_s="" force="" mode="" yes="" except="" all="" dry="" ngroups="" nexclude=""
 hvs=()
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -79,6 +88,12 @@ while [ $# -gt 0 ]; do
     --dry-run) dry=1; shift ;;
     --hypervisor) hvs+=("${2:-}"); shift 2 || { echo "--hypervisor needs a name" >&2; exit 2; } ;;
     --except) except=${2:-}; shift 2 || { echo "--except needs a VM name" >&2; exit 2; } ;;
+    --node-groups)
+      [ -n "${2:-}" ] || { echo "--node-groups needs a group name" >&2; exit 2; }
+      ngroups="${ngroups:+$ngroups,}$2"; shift 2 ;;
+    --exclude-nodes)
+      [ -n "${2:-}" ] || { echo "--exclude-nodes needs a VM name" >&2; exit 2; }
+      nexclude="${nexclude:+$nexclude,}$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     -*) echo "unknown option $1" >&2; exit 2 ;;
     *) break ;;
@@ -95,6 +110,35 @@ done
 [ "${#hvs[@]}" -eq 0 ] || [ "$action" = autostart ] || { echo "--hypervisor applies to autostart only" >&2; exit 2; }
 [ -z "$wait_s$force" ] || [ "$action" != start ] || { echo "--wait and --force apply to stop and reboot only" >&2; exit 2; }
 [ -z "$mode" ] || [ "$action" = reboot ] || { echo "--hard and --soft apply to reboot only" >&2; exit 2; }
+if [ -n "$ngroups$nexclude" ]; then
+  case "$action" in
+    start|stop|reboot|autostart) ;;
+    *) echo "--node-groups and --exclude-nodes apply to start, stop, reboot and autostart only" >&2; exit 2 ;;
+  esac
+  [ -z "$all" ] && [ "${#hvs[@]}" -eq 0 ] || { echo "--node-groups and --exclude-nodes do not go with --all or --hypervisor" >&2; exit 2; }
+  [ -n "$ngroups" ] || [ $# -gt 0 ] || { echo "--exclude-nodes takes VMs out of a selection: give --node-groups or VM names as well" >&2; exit 2; }
+  # The VM names given, as inventory node names (a bare number N is tstN, a config file its hostname:).
+  named=""
+  for arg in "$@"; do
+    case "$arg" in
+      *.yaml) [ -f "$arg" ] || { echo "$arg: no such config file" >&2; exit 2; }
+              n=$(config_value "$arg" hostname)
+              [ -n "$n" ] || { echo "$arg has no hostname:" >&2; exit 2; } ;;
+      *[!0-9]*) n=$arg ;;
+      *) n="tst$arg" ;;
+    esac
+    named="${named:+$named,}$n"
+  done
+  sel=()
+  [ -z "$named" ] || sel+=(--nodes "$named")
+  [ -z "$ngroups" ] || sel+=(--node-groups "$ngroups")
+  [ -z "$nexclude" ] || sel+=(--exclude-nodes "$nexclude")
+  expanded=$(orphera nodes "${sel[@]}") || exit 2
+  # shellcheck disable=SC2086  # node names are plain (inventory schema), one per line
+  set -- $expanded
+  [ $# -gt 0 ] || { echo "the selection has no VMs in it" >&2; exit 2; }
+  echo "VMs: $*"
+fi
 [ $# -gt 0 ] || [ "$action" = autostart ] || { usage; exit 2; }
 
 if [ "$action" = autostart ]; then

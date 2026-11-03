@@ -203,7 +203,7 @@ object Cli:
     * here: one needs an explicit target and the other a deliberate override.
     */
   private def defaultsToAll: Set[String] =
-    pipelineVerbs -- Set("reboot", "shutdown")
+    pipelineVerbs -- Set("reboot", "shutdown") + "nodes"
 
   def expandNodeGroups(
       args: List[String],
@@ -1327,6 +1327,11 @@ object Cli:
       |                      duration); node lists and details are cut
       |                      short unless --full; see log-summary for one
       |                      playbook run's task-level detail
+      |  nodes             [--nodes a,b] [--node-groups g1,g2] [--exclude-nodes x,y]
+      |                    — prints the node names the selection stands for, one per
+      |                      line (every node when none is given); `nodes --groups`
+      |                      prints each group and its members; read-only, nothing
+      |                      is sent to a node
       |  show-config       <name>...
       |                    — prints each VM config as orphera reads it, from the
       |                      -c / ORPHERA_CONFIG_DIR location (files or mariadb://);
@@ -1347,6 +1352,7 @@ object Cli:
       |  autoremove --purge
       |  dist-upgrade --nodes tst0,tst1
       |  dist-upgrade --node-groups mons
+      |  nodes --node-groups k8s-workers --exclude-nodes tst39
       |  pipeline "install tree" "dist-upgrade" "reboot --wait" --node-groups mons
       |  copy /tmp/test.txt /etc/orphera-test.txt --owner root --group root --mode 0644
       |  write-file /etc/motd --content "Welcome to tst0" --nodes tst0
