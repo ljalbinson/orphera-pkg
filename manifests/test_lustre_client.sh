@@ -66,7 +66,7 @@ finish() {
 }
 
 log "build and mount the client"
-if ! orphera cluster-playbook manifests/lustre_client.scala; then
+if ! orphera cluster-playbook lustre_client.scala; then
   log "FAIL: lustre_client.scala"
   FAIL=$((FAIL + 1))
   finish
@@ -112,7 +112,7 @@ echo ON1=\$(lfs getstripe -m $DIR/on-mdt1/f)")
 assert_equals "file in a directory on MDT1 has its metadata on MDT1" "1" "$(value_of ON1 "$out")" "$out"
 
 log "re-run (idempotence)"
-rerun=$(orphera cluster-playbook manifests/lustre_client.scala 2>&1)
+rerun=$(orphera cluster-playbook lustre_client.scala 2>&1)
 rc=$?
 assert_equals "lustre_client.scala re-run succeeds" "0" "$rc" "$(printf '%s\n' "$rerun" | tail -20)"
 # The build's own report line names the kernel; the printed script text has $KV there.

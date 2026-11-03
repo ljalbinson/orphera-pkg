@@ -73,10 +73,10 @@ finish() {
 }
 
 log "teardown (wipes the target disks)"
-orphera cluster-playbook manifests/lustre_teardown.scala || true
+orphera cluster-playbook lustre_teardown.scala || true
 
 log "build"
-if ! orphera cluster-playbook manifests/lustre_cluster.scala; then
+if ! orphera cluster-playbook lustre_cluster.scala; then
   log "FAIL: lustre_cluster.scala"
   FAIL=$((FAIL + 1))
   finish
@@ -144,7 +144,7 @@ assert_equals "file in a directory on MDT1 has its metadata on MDT1" "1" "$(valu
 assert_equals "files in a directory striped over $WANT_MDT MDTs use all $WANT_MDT" "$WANT_MDT" "$(value_of SPREAD "$out")" "$out"
 
 log "re-run (idempotence)"
-rerun=$(orphera cluster-playbook manifests/lustre_cluster.scala 2>&1)
+rerun=$(orphera cluster-playbook lustre_cluster.scala 2>&1)
 rc=$?
 assert_equals "lustre_cluster.scala re-run succeeds" "0" "$rc" "$(printf '%s\n' "$rerun" | tail -20)"
 # Count the formatter's own report lines ("<role> on <disk>: already formatted"),

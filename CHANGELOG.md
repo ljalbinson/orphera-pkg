@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+- CI had failed on every push since 2026-11-03 morning: `k8s/argocd-test/configmap.yaml` had no SPDX header, and `test_lustre.sh` and `test_lustre_client.sh` named their playbooks by `manifests/` path instead of by bare name (which `utils/test-shell-sources.sh` requires, so they follow `-m` / `ORPHERA_MANIFESTS`).
+
 ## [0.1.208] - 2026-11-03
 
 The agents' code (Scala and Go) is unchanged from 0.1.207, but the Go agent is now what `deploy-agent` and `bootstrap` install by default. The command-line package now installs in the standard directories (`/usr/bin`, `/usr/lib/orphera`, `/usr/share/orphera`) instead of `/opt/orphera`, with `make install`/`uninstall` for installs without a package. New: `orphera nodes`, node groups for `utils/vmctl.sh` and targeting groups in the inventory, VM power management playbooks, a Lustre file system with Rocky and Ubuntu clients, and the Kubernetes cluster on VMs (kubeadm, Cilium, Ceph storage, Keycloak login, monitoring, logging, Argo CD, Pod Security, network policies, upgrades).
