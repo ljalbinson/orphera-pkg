@@ -60,7 +60,8 @@ object k8s_upgrade extends OrpheraClusterPlaybook:
   private val scope = env("ORPHERA_K8S_SCOPE", "check")
 
   private val cpNodes = List("tst30", "tst31", "tst32")
-  private val workerNodes = List("tst33", "tst34", "tst35", "tst36", "tst37", "tst38", "tst39")
+  private val workerNodes =
+    List("tst33", "tst34", "tst35", "tst36", "tst37", "tst38", "tst39")
   private val firstNode = "tst30"
   private val kc = "kubectl --kubeconfig /etc/kubernetes/admin.conf"
 
@@ -74,7 +75,7 @@ object k8s_upgrade extends OrpheraClusterPlaybook:
     case "first"        => List(firstNode)
     case "controlplane" => cpNodes
     case "all"          => cpNodes ++ workerNodes
-    case other =>
+    case other          =>
       throw new IllegalArgumentException(
         s"ORPHERA_K8S_SCOPE must be check, first, controlplane or all, not '$other'"
       )
@@ -157,8 +158,7 @@ object k8s_upgrade extends OrpheraClusterPlaybook:
   private def nodeScript(n: String) =
     val control = cpNodes.contains(n)
     val apply =
-      if n == firstNode then
-        """kubeadm upgrade apply "v$SEMVER" -y"""
+      if n == firstNode then """kubeadm upgrade apply "v$SEMVER" -y"""
       else "kubeadm upgrade node"
     val skipCheck =
       if control then
@@ -222,16 +222,21 @@ object k8s_upgrade extends OrpheraClusterPlaybook:
   private def nodeStages(n: String): List[Stage] =
     List(
       stage(s"drain-$n", firstNode)
-        .task(s"drain $n")(Task.RunCommand(List("sh", "-c", drainScript(n)), timeoutSeconds = 700))
+        .task(s"drain $n")(
+          Task
+            .RunCommand(List("sh", "-c", drainScript(n)), timeoutSeconds = 700)
+        )
         .build,
       stage(s"upgrade-$n", n)
         .task(s"kubeadm, kubelet and kubectl on $n")(
-          Task.RunCommand(List("sh", "-c", nodeScript(n)), timeoutSeconds = 1200)
+          Task
+            .RunCommand(List("sh", "-c", nodeScript(n)), timeoutSeconds = 1200)
         )
         .build,
       stage(s"ready-$n", firstNode)
         .task(s"$n Ready at the new version, uncordon, cluster healthy")(
-          Task.RunCommand(List("sh", "-c", readyScript(n)), timeoutSeconds = 1500)
+          Task
+            .RunCommand(List("sh", "-c", readyScript(n)), timeoutSeconds = 1500)
         )
         .build
     )
@@ -255,14 +260,20 @@ object k8s_upgrade extends OrpheraClusterPlaybook:
          List(
            stage("etcd-backup", cpNodes*)
              .task("etcd snapshot before the upgrade")(
-               Task.RunCommand(List("sh", "-c", backupScript), timeoutSeconds = 300)
+               Task.RunCommand(
+                 List("sh", "-c", backupScript),
+                 timeoutSeconds = 300
+               )
              )
              .build
          ) ++ upgradeNodes.flatMap(nodeStages) ++
            List(
              stage("upgrade-summary", firstNode)
                .task("nodes after the upgrade")(
-                 Task.RunCommand(List("sh", "-c", summaryScript), timeoutSeconds = 60)
+                 Task.RunCommand(
+                   List("sh", "-c", summaryScript),
+                   timeoutSeconds = 60
+                 )
                )
                .build
            )) ++
@@ -272,7 +283,8 @@ object k8s_upgrade extends OrpheraClusterPlaybook:
             Task.Debug(
               if upgradeNodes.isEmpty then
                 s"Checks for Kubernetes $spec passed; nothing was changed. Run again with ORPHERA_K8S_SCOPE=first (then controlplane, then all) to upgrade."
-              else s"Upgraded ${upgradeNodes.mkString(", ")} to Kubernetes $spec."
+              else
+                s"Upgraded ${upgradeNodes.mkString(", ")} to Kubernetes $spec."
             )
           )
           .build

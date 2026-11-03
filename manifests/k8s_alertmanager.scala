@@ -65,42 +65,50 @@ object k8s_alertmanager extends OrpheraClusterPlaybook:
 
   private val smtpHost = env("ORPHERA_ALERT_SMTP_HOST", "mail.ljalbinson.com")
   private val useAuth = env("ORPHERA_ALERT_AUTH", "1") != "0"
-  private val smtpPort = env("ORPHERA_ALERT_SMTP_PORT", if useAuth then "587" else "25")
-  private val smtpHelo = env("ORPHERA_ALERT_SMTP_HELO", "alertmanager.k8s.ljalbinson.com")
+  private val smtpPort =
+    env("ORPHERA_ALERT_SMTP_PORT", if useAuth then "587" else "25")
+  private val smtpHelo =
+    env("ORPHERA_ALERT_SMTP_HELO", "alertmanager.k8s.ljalbinson.com")
   private val from = env("ORPHERA_ALERT_FROM", "alert@ljalbinson.com")
   private val to = env("ORPHERA_ALERT_TO", "lawrence@ljalbinson.com")
-  private val alertLink = env("ORPHERA_ALERT_LINK", "https://grafana.k8s.ljalbinson.com/alerting/list")
+  private val alertLink = env(
+    "ORPHERA_ALERT_LINK",
+    "https://grafana.k8s.ljalbinson.com/alerting/list"
+  )
   private val smtpUser = env("ORPHERA_ALERT_SMTP_USER", from)
   private val requireTls =
-    if env("ORPHERA_ALERT_REQUIRE_TLS", if useAuth then "1" else "0") == "1" then "true" else "false"
+    if env("ORPHERA_ALERT_REQUIRE_TLS", if useAuth then "1" else "0") == "1"
+    then "true"
+    else "false"
   private val insecureTls = env("ORPHERA_ALERT_INSECURE_TLS", "0") == "1"
   private val smtpPassword: Option[Secret] =
     if useAuth then Some(Secrets.secret("alertmanager/smtp")) else None
 
   private def shQuote(v: String): String = "'" + v.replace("'", "'\\''") + "'"
 
-  private val secretsPath = "/etc/alertmanager/secrets/alertmanager-smtp/password"
+  private val secretsPath =
+    "/etc/alertmanager/secrets/alertmanager-smtp/password"
 
   // The Helm values file (written to alertmanager-values.yaml on tst30). No password in it.
   // @L@ and @R@ stand for two opening and two closing braces: Orphera renders Mustache in command text, so
   // the script must not contain them (see alertmanagerScript).
   private val valuesYaml =
     val authLines =
-      if useAuth then
-        s"""      smtp_auth_username: '$smtpUser'
+      if useAuth then s"""      smtp_auth_username: '$smtpUser'
            |      smtp_auth_password_file: $secretsPath
            |""".stripMargin
       else ""
     val secretsLines =
-      if useAuth then
-        """  alertmanagerSpec:
+      if useAuth then """  alertmanagerSpec:
           |    secrets: [alertmanager-smtp]
           |""".stripMargin
       else ""
     val tlsLines =
       s"""        tls_config:
          |          server_name: $smtpHost
-         |""".stripMargin + (if insecureTls then "          insecure_skip_verify: true\n" else "")
+         |""".stripMargin + (if insecureTls then
+                               "          insecure_skip_verify: true\n"
+                             else "")
     s"""alertmanager:
        |${secretsLines}  config:
        |    global:

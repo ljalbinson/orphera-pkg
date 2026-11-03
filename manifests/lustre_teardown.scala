@@ -26,12 +26,21 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 object lustre_teardown extends OrpheraClusterPlaybook:
 
   private def envList(name: String, default: String): List[String] =
-    sys.env.getOrElse(name, default).split("[ ,]+").map(_.trim).filter(_.nonEmpty).toList
+    sys.env
+      .getOrElse(name, default)
+      .split("[ ,]+")
+      .map(_.trim)
+      .filter(_.nonEmpty)
+      .toList
 
   private val fsName = sys.env.getOrElse("LUSTRE_FSNAME", "lfs0")
-  private val servers = envList("LUSTRE_SERVERS", "tst43 tst44 tst45 tst46 tst47 tst48")
+  private val servers =
+    envList("LUSTRE_SERVERS", "tst43 tst44 tst45 tst46 tst47 tst48")
   private val clients =
-    (envList("LUSTRE_CLIENTS", "tst43 tst50") ++ envList("LUSTRE_UBUNTU_CLIENTS", "tst49")).distinct
+    (envList("LUSTRE_CLIENTS", "tst43 tst50") ++ envList(
+      "LUSTRE_UBUNTU_CLIENTS",
+      "tst49"
+    )).distinct
 
   private val helpers =
     """fail() { echo "FAILED: $(hostname -s): $*"; exit 1; }

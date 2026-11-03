@@ -381,8 +381,10 @@ object kvm_zfs_vm_provision extends OrpheraClusterPlaybook:
     if autostart then s"virsh --connect qemu:///system autostart $vmName\n"
     else ""
   private val startedNote: String =
-    if autostart then "defined, started, and set to autostart with the hypervisor"
-    else "defined and started (autostart is off; ORPHERA_VM_AUTOSTART=1 turns it on)"
+    if autostart then
+      "defined, started, and set to autostart with the hypervisor"
+    else
+      "defined and started (autostart is off; ORPHERA_VM_AUTOSTART=1 turns it on)"
 
   private val defineAndStartVmScript =
     s"""set -e
@@ -781,4 +783,3 @@ object MetaConfigTemplate:
     s"""# instance-id: iid-local24
        |local-hostname: cloudimg
        |""".stripMargin
-

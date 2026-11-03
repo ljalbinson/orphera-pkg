@@ -47,12 +47,18 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 object lustre_client extends OrpheraClusterPlaybook:
 
   private def envList(name: String, default: String): List[String] =
-    sys.env.getOrElse(name, default).split("[ ,]+").map(_.trim).filter(_.nonEmpty).toList
+    sys.env
+      .getOrElse(name, default)
+      .split("[ ,]+")
+      .map(_.trim)
+      .filter(_.nonEmpty)
+      .toList
 
   private val clients = envList("LUSTRE_UBUNTU_CLIENTS", "tst49")
   private val fsName = sys.env.getOrElse("LUSTRE_FSNAME", "lfs0")
   private val mgs = sys.env.getOrElse("LUSTRE_MGS", "tst43")
-  private val servers = envList("LUSTRE_SERVERS", "tst43 tst44 tst45 tst46 tst47 tst48")
+  private val servers =
+    envList("LUSTRE_SERVERS", "tst43 tst44 tst45 tst46 tst47 tst48")
   private val version = sys.env.getOrElse("LUSTRE_VERSION", "2.17.0")
 
   require(clients.nonEmpty, "LUSTRE_UBUNTU_CLIENTS is empty")
@@ -61,10 +67,12 @@ object lustre_client extends OrpheraClusterPlaybook:
     s"a node in LUSTRE_UBUNTU_CLIENTS is also a server: ${clients.filter(servers.contains).mkString(" ")}"
   )
 
-  private val repo = s"https://downloads.whamcloud.com/public/lustre/lustre-$version/ubuntu2404/client/"
+  private val repo =
+    s"https://downloads.whamcloud.com/public/lustre/lustre-$version/ubuntu2404/client/"
   private val srcDeb = s"lustre-source_$version-1_all.deb"
   private val mgsNid = s"{{{nodes.$mgs.cluster_ip}}}@tcp"
-  private val allTargets = servers.map(n => s"{{{nodes.$n.lustre_targets}}}").mkString(",")
+  private val allTargets =
+    servers.map(n => s"{{{nodes.$n.lustre_targets}}}").mkString(",")
 
   private def fill(script: String): String =
     ("""fail() { echo "FAILED: $(hostname -s): $*"; exit 1; }
@@ -83,7 +91,8 @@ object lustre_client extends OrpheraClusterPlaybook:
       |[ "$VERSION_ID" = 24.04 ] || fail "is Ubuntu $VERSION_ID; the Lustre @VERSION@ client source is packaged for 24.04"
       |curl -fsSI -o /dev/null --max-time 30 "@REPO@@SRCDEB@" ||
       |  fail "cannot reach @REPO@@SRCDEB@ (wrong LUSTRE_VERSION, or no route to downloads.whamcloud.com)"
-      |echo "$(hostname -s): Ubuntu $VERSION_ID, kernel $(uname -r), @SRCDEB@ reachable"""".stripMargin)
+      |echo "$(hostname -s): Ubuntu $VERSION_ID, kernel $(uname -r), @SRCDEB@ reachable"""".stripMargin
+  )
 
   private val buildScript = fill(
     """set -e
@@ -130,7 +139,8 @@ object lustre_client extends OrpheraClusterPlaybook:
       |[ -z "$held" ] || apt-mark hold $held >/dev/null
       |mkdir -p /var/lib/orphera
       |echo "@VERSION@ $KV" > "$MARK"
-      |echo "built and installed Lustre @VERSION@ client for $KV; held:${held:- nothing}"""".stripMargin)
+      |echo "built and installed Lustre @VERSION@ client for $KV; held:${held:- nothing}"""".stripMargin
+  )
 
   private val lnetScript = fill(
     """set -e
@@ -146,17 +156,18 @@ object lustre_client extends OrpheraClusterPlaybook:
       |fi
       |modprobe lustre
       |lctl list_nids | grep -qx '{{{cluster_ip}}}@tcp' || fail "LNet NIDs are '$(lctl list_nids | tr '\n' ' ')', expected {{{cluster_ip}}}@tcp"
-      |echo "$(hostname -s): LNet up on $IF, NID {{{cluster_ip}}}@tcp"""".stripMargin)
+      |echo "$(hostname -s): LNet up on $IF, NID {{{cluster_ip}}}@tcp"""".stripMargin
+  )
 
   private val lnetPingScript = fill(
     """for _ in 1 2 3 4 5 6; do
       |  lctl ping @MGSNID@ >/dev/null 2>&1 && { echo "$(hostname -s) reaches the MGS at @MGSNID@"; exit 0; }
       |  sleep 5
       |done
-      |fail "lctl ping @MGSNID@ failed (LNet down on the MGS, or port 988/tcp blocked)"""".stripMargin)
+      |fail "lctl ping @MGSNID@ failed (LNet down on the MGS, or port 988/tcp blocked)"""".stripMargin
+  )
 
-  private val mountScript = fill(
-    """set -e
+  private val mountScript = fill("""set -e
       |MP=/mnt/@FSNAME@
       |# A Lustre mount whose root cannot be read within 15 s is dead (the client was
       |# evicted, or the file system was rebuilt or force-unmounted under it): detach
@@ -187,7 +198,8 @@ object lustre_client extends OrpheraClusterPlaybook:
       |if [ "$mdt" != "$want_mdt" ] || [ "$ost" != "$want_ost" ]; then
       |  fail "the client sees $mdt MDT(s) and $ost OST(s); inventory has $want_mdt and $want_ost"
       |fi
-      |echo "@FSNAME@: $mdt MDT(s), $ost OST(s), mounted at /mnt/@FSNAME@ on $(hostname -s) (Lustre $(lctl get_param -n version 2>/dev/null | head -1))"""".stripMargin)
+      |echo "@FSNAME@: $mdt MDT(s), $ost OST(s), mounted at /mnt/@FSNAME@ on $(hostname -s) (Lustre $(lctl get_param -n version 2>/dev/null | head -1))"""".stripMargin
+  )
 
   private def sh(script: String, timeout: Int = 60): Task =
     Task.RunCommand(List("sh", "-c", script), timeoutSeconds = timeout)

@@ -109,7 +109,9 @@ object k8s_cilium_metrics extends OrpheraClusterPlaybook:
   val playbook: ClusterPlaybook =
     clusterPlaybook("k8s-cilium-metrics")(
       stage("cilium-metrics-config", node)
-        .task("switch on Cilium and Hubble metrics (helm upgrade --reuse-values)")(
+        .task(
+          "switch on Cilium and Hubble metrics (helm upgrade --reuse-values)"
+        )(
           Task.RunCommand(List("sh", "-c", applyScript), timeoutSeconds = 1800)
         )
         .build,

@@ -69,16 +69,25 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 object lustre_cluster extends OrpheraClusterPlaybook:
 
   private def envList(name: String, default: String): List[String] =
-    sys.env.getOrElse(name, default).split("[ ,]+").map(_.trim).filter(_.nonEmpty).toList
+    sys.env
+      .getOrElse(name, default)
+      .split("[ ,]+")
+      .map(_.trim)
+      .filter(_.nonEmpty)
+      .toList
 
   private val fsName = sys.env.getOrElse("LUSTRE_FSNAME", "lfs0")
   private val mgs = sys.env.getOrElse("LUSTRE_MGS", "tst43")
-  private val servers = envList("LUSTRE_SERVERS", "tst43 tst44 tst45 tst46 tst47 tst48")
+  private val servers =
+    envList("LUSTRE_SERVERS", "tst43 tst44 tst45 tst46 tst47 tst48")
   private val clients = envList("LUSTRE_CLIENTS", "tst43 tst50")
   private val release = sys.env.getOrElse("LUSTRE_RELEASE", "lustre-2.17.0")
   private val el = sys.env.getOrElse("LUSTRE_EL", "el9.7")
 
-  require(fsName.matches("[A-Za-z0-9_]{1,8}"), s"LUSTRE_FSNAME '$fsName': 1-8 letters, digits or _")
+  require(
+    fsName.matches("[A-Za-z0-9_]{1,8}"),
+    s"LUSTRE_FSNAME '$fsName': 1-8 letters, digits or _"
+  )
   require(servers.contains(mgs), s"LUSTRE_MGS $mgs is not in LUSTRE_SERVERS")
   require(clients.nonEmpty, "LUSTRE_CLIENTS is empty")
 
@@ -87,15 +96,19 @@ object lustre_cluster extends OrpheraClusterPlaybook:
   // Every node that needs the Lustre kernel, a reboot check and LNet.
   private val allNodes = servers ++ clientOnly
 
-  private val serverRepo = s"https://downloads.whamcloud.com/public/lustre/$release/$el/server/"
-  private val clientRepo = s"https://downloads.whamcloud.com/public/lustre/$release/$el/client/"
-  private val e2fsRepo = "https://downloads.whamcloud.com/public/e2fsprogs/latest/el9/"
+  private val serverRepo =
+    s"https://downloads.whamcloud.com/public/lustre/$release/$el/server/"
+  private val clientRepo =
+    s"https://downloads.whamcloud.com/public/lustre/$release/$el/client/"
+  private val e2fsRepo =
+    "https://downloads.whamcloud.com/public/e2fsprogs/latest/el9/"
 
   // The MGS NID, rendered by the orchestrator. tcp0 is written `@tcp`.
   private val mgsNid = s"{{{nodes.$mgs.cluster_ip}}}@tcp"
 
   // Every server's lustre_targets joined, for counting the expected MDTs and OSTs.
-  private val allTargets = servers.map(n => s"{{{nodes.$n.lustre_targets}}}").mkString(",")
+  private val allTargets =
+    servers.map(n => s"{{{nodes.$n.lustre_targets}}}").mkString(",")
 
   private def fill(script: String): String =
     script
@@ -115,8 +128,9 @@ object lustre_cluster extends OrpheraClusterPlaybook:
       |targets() { printf '%s\n' '{{{lustre_targets}}}' | tr ',' '\n' | sed -n 's/^\([a-z0-9]*\):\(.*\)$/\1 \2/p'; }
       |""".stripMargin
 
-  private val preflightScript = fill(helpers +
-    """set -e
+  private val preflightScript = fill(
+    helpers +
+      """set -e
       |. /etc/os-release
       |case "$ID" in rocky|almalinux|rhel) ;; *) fail "runs $ID; the servers must be Rocky, Alma or RHEL 9" ;; esac
       |[ "${VERSION_ID%%.*}" = 9 ] || fail "is EL $VERSION_ID; Lustre @RELEASE@ servers are built for EL9"
@@ -130,19 +144,23 @@ object lustre_cluster extends OrpheraClusterPlaybook:
       |  curl -fsS -o /dev/null --max-time 30 "${u}repodata/repomd.xml" ||
       |    fail "cannot read ${u}repodata/repomd.xml (wrong LUSTRE_RELEASE/LUSTRE_EL, or no route to downloads.whamcloud.com)"
       |done
-      |echo "$(hostname -s): EL $VERSION_ID, repositories reachable"""".stripMargin)
+      |echo "$(hostname -s): EL $VERSION_ID, repositories reachable"""".stripMargin
+  )
 
-  private val clientPreflightScript = fill(helpers +
-    """set -e
+  private val clientPreflightScript = fill(
+    helpers +
+      """set -e
       |. /etc/os-release
       |case "$ID" in rocky|almalinux|rhel) ;; *) fail "runs $ID; use lustre_client.scala for Ubuntu clients" ;; esac
       |[ "${VERSION_ID%%.*}" = 9 ] || fail "is EL $VERSION_ID; the Lustre @RELEASE@ @EL@ client is built for EL9"
       |curl -fsS -o /dev/null --max-time 30 "@CLIENT_REPO@repodata/repomd.xml" ||
       |  fail "cannot read @CLIENT_REPO@repodata/repomd.xml (wrong LUSTRE_RELEASE/LUSTRE_EL, or no route to downloads.whamcloud.com)"
-      |echo "$(hostname -s): EL $VERSION_ID, client repository reachable"""".stripMargin)
+      |echo "$(hostname -s): EL $VERSION_ID, client repository reachable"""".stripMargin
+  )
 
-  private val clientPackagesScript = fill(helpers +
-    """set -e
+  private val clientPackagesScript = fill(
+    helpers +
+      """set -e
       |cat > /etc/yum.repos.d/orphera-lustre.repo <<'REPO'
       |# Managed by Orphera (lustre_cluster.scala).
       |[orphera-lustre-client]
@@ -175,10 +193,12 @@ object lustre_cluster extends OrpheraClusterPlaybook:
       |  echo "installed kernel $BK"
       |fi
       |dnf -y install lustre-client kmod-lustre-client
-      |echo "installed: $(rpm -q lustre-client kmod-lustre-client | tr '\n' ' ')"""".stripMargin)
+      |echo "installed: $(rpm -q lustre-client kmod-lustre-client | tr '\n' ' ')"""".stripMargin
+  )
 
-  private val packagesScript = fill(helpers +
-    """set -e
+  private val packagesScript = fill(
+    helpers +
+      """set -e
       |cat > /etc/yum.repos.d/orphera-lustre.repo <<'REPO'
       |# Managed by Orphera (lustre_cluster.scala).
       |[orphera-lustre-server]
@@ -207,10 +227,12 @@ object lustre_cluster extends OrpheraClusterPlaybook:
       |rpm -q e2fsprogs | grep -q wc || fail "e2fsprogs is $(rpm -q e2fsprogs), not the Lustre (wc) build"
       |setenforce 0 2>/dev/null || true
       |sed -i 's/^SELINUX=enforcing/SELINUX=permissive/' /etc/selinux/config
-      |echo "installed: $(rpm -q lustre kmod-lustre e2fsprogs | tr '\n' ' ')"""".stripMargin)
+      |echo "installed: $(rpm -q lustre kmod-lustre e2fsprogs | tr '\n' ' ')"""".stripMargin
+  )
 
-  private val bootKernelScript = fill(helpers +
-    """set -e
+  private val bootKernelScript = fill(
+    helpers +
+      """set -e
       |# Kernels with the Lustre module (built for them, or linked in by weak-modules).
       |cands=$(for d in /lib/modules/*; do
       |  find "$d" -name 'lustre.ko*' -print -quit 2>/dev/null | grep -q . && echo "${d##*/}"
@@ -241,14 +263,16 @@ object lustre_cluster extends OrpheraClusterPlaybook:
       |locks=$(rpm -qa 'kernel*' --qf '%{name}-%{version}-%{release}\n' | grep -F -- "-$N")
       |locks="$locks $(rpm -qa 'kmod-lustre*' 'lustre*' --qf '%{name}-%{version}-%{release}\n')"
       |dnf -q versionlock add $locks >/dev/null
-      |echo "default kernel: $K (running $(uname -r)); kernel and Lustre packages version-locked"""".stripMargin)
+      |echo "default kernel: $K (running $(uname -r)); kernel and Lustre packages version-locked"""".stripMargin
+  )
 
   // Registered as `lustre_reboot`: exactly "yes" or "no", nothing else.
   private val needsRebootScript =
     """[ "$(grubby --default-kernel 2>/dev/null)" = "/boot/vmlinuz-$(uname -r)" ] && echo no || echo yes"""
 
-  private val lnetScript = fill(helpers +
-    """set -e
+  private val lnetScript = fill(
+    helpers +
+      """set -e
       |[ "$(grubby --default-kernel)" = "/boot/vmlinuz-$(uname -r)" ] ||
       |  fail "running $(uname -r), not the Lustre kernel $(grubby --default-kernel)"
       |IF=$(ip -o -4 addr show | awk -v ip='{{{cluster_ip}}}' '{ split($4, a, "/"); if (a[1] == ip) print $2 }' | head -1)
@@ -265,20 +289,24 @@ object lustre_cluster extends OrpheraClusterPlaybook:
       |modprobe lustre
       |systemctl enable -q lnet.service 2>/dev/null || true
       |lctl list_nids | grep -qx '{{{cluster_ip}}}@tcp' || fail "LNet NIDs are '$(lctl list_nids | tr '\n' ' ')', expected {{{cluster_ip}}}@tcp"
-      |echo "$(hostname -s): LNet up on $IF, NID {{{cluster_ip}}}@tcp"""".stripMargin)
+      |echo "$(hostname -s): LNet up on $IF, NID {{{cluster_ip}}}@tcp"""".stripMargin
+  )
 
-  private val lnetPingScript = fill(helpers +
-    """for i in 1 2 3 4 5 6; do
+  private val lnetPingScript = fill(
+    helpers +
+      """for i in 1 2 3 4 5 6; do
       |  lctl ping @MGSNID@ >/dev/null 2>&1 && { echo "$(hostname -s) reaches the MGS at @MGSNID@"; exit 0; }
       |  sleep 5
       |done
-      |fail "lctl ping @MGSNID@ failed (LNet down on the MGS, or port 988/tcp blocked)"""".stripMargin)
+      |fail "lctl ping @MGSNID@ failed (LNet down on the MGS, or port 988/tcp blocked)"""".stripMargin
+  )
 
   // Formats each listed target that is blank. The ldiskfs label is MGS for the
   // MGT and <fsname>:<TYPE><index hex> until the target first registers with
   // the MGS, <fsname>-<TYPE><index hex> after; either means "already done".
-  private val formatScript = fill(helpers +
-    """set -e
+  private val formatScript = fill(
+    helpers +
+      """set -e
       |targets | while read -r role dev; do
       |  case "$role" in
       |    mgt)  want=MGS; alt=MGS; set -- --mgs ;;
@@ -297,12 +325,14 @@ object lustre_cluster extends OrpheraClusterPlaybook:
       |  echo "$role on $dev: mkfs.lustre $*"
       |  out=$(mkfs.lustre "$@" "$dev" 2>&1) || { printf '%s\n' "$out"; fail "mkfs.lustre failed for $role on $dev"; }
       |  echo "$role on $dev: formatted ($(blkid -p -s LABEL -o value "$dev"))"
-      |done""".stripMargin)
+      |done""".stripMargin
+  )
 
   // Mounts this node's targets whose role starts with one of `roles`, in that
   // order, at /lustre/<fsname>-<role> (/lustre/mgs for the MGT).
-  private def mountScript(roles: String): String = fill(helpers +
-    """set -e
+  private def mountScript(roles: String): String = fill(
+    helpers +
+      """set -e
       |for want in @ROLES@; do
       |  targets | while read -r role dev; do
       |    case "$role" in "$want"*) ;; *) continue ;; esac
@@ -312,10 +342,12 @@ object lustre_cluster extends OrpheraClusterPlaybook:
       |    mount -t lustre "$dev" "$mp" || fail "mount -t lustre $dev $mp failed (dmesg | tail)"
       |    echo "$role: mounted at $mp"
       |  done
-      |done""".stripMargin.replace("@ROLES@", roles))
+      |done""".stripMargin.replace("@ROLES@", roles)
+  )
 
-  private val clientMountScript = fill(helpers +
-    """set -e
+  private val clientMountScript = fill(
+    helpers +
+      """set -e
       |MP=/mnt/@FSNAME@
       |# A Lustre mount whose root cannot be read within 15 s is dead (the client was
       |# evicted, or the file system was rebuilt or force-unmounted under it): detach
@@ -328,11 +360,13 @@ object lustre_cluster extends OrpheraClusterPlaybook:
       |fi
       |mkdir -p "$MP"
       |mount -t lustre @MGSNID@:/@FSNAME@ "$MP" || fail "client mount of @MGSNID@:/@FSNAME@ failed"
-      |echo "mounted @MGSNID@:/@FSNAME@ at /mnt/@FSNAME@"""".stripMargin)
+      |echo "mounted @MGSNID@:/@FSNAME@ at /mnt/@FSNAME@"""".stripMargin
+  )
 
   // Waits up to two minutes for every inventory target to show in `lfs df`.
-  private val verifyScript = fill(helpers +
-    """ALL='@ALL_TARGETS@'
+  private val verifyScript = fill(
+    helpers +
+      """ALL='@ALL_TARGETS@'
       |want_mdt=$(printf '%s\n' "$ALL" | tr ',' '\n' | grep -c '^mdt')
       |want_ost=$(printf '%s\n' "$ALL" | tr ',' '\n' | grep -c '^ost')
       |for i in $(seq 1 24); do
@@ -345,32 +379,53 @@ object lustre_cluster extends OrpheraClusterPlaybook:
       |lfs df -h /mnt/@FSNAME@
       |[ "$mdt" = "$want_mdt" ] && [ "$ost" = "$want_ost" ] ||
       |  fail "the client sees $mdt MDT(s) and $ost OST(s); inventory has $want_mdt and $want_ost"
-      |echo "@FSNAME@: $mdt MDT(s), $ost OST(s), mounted at /mnt/@FSNAME@ on $(hostname -s)"""".stripMargin)
+      |echo "@FSNAME@: $mdt MDT(s), $ost OST(s), mounted at /mnt/@FSNAME@ on $(hostname -s)"""".stripMargin
+  )
 
-  private def sh(script: String, timeout: Int = 60, register: String = ""): Task =
-    Task.RunCommand(List("sh", "-c", script), timeoutSeconds = timeout, register = register)
+  private def sh(
+      script: String,
+      timeout: Int = 60,
+      register: String = ""
+  ): Task =
+    Task.RunCommand(
+      List("sh", "-c", script),
+      timeoutSeconds = timeout,
+      register = register
+    )
 
   private val stages: List[Stage] =
     List(
       stage("preflight", servers*)
-        .task("check OS, target disks and repositories")(sh(preflightScript, 120))
+        .task("check OS, target disks and repositories")(
+          sh(preflightScript, 120)
+        )
         .build,
       stage("packages", servers*)
-        .task("Lustre repositories, kernel and server packages")(sh(packagesScript, 1800))
+        .task("Lustre repositories, kernel and server packages")(
+          sh(packagesScript, 1800)
+        )
         .build
     ) ++ (if clientOnly.isEmpty then Nil
-    else
-      List(
-        stage("preflight-clients", clientOnly*)
-          .task("check OS and the client repository")(sh(clientPreflightScript, 120))
-          .build,
-        stage("packages-clients", clientOnly*)
-          .task("Lustre client repository and packages")(sh(clientPackagesScript, 1800))
-          .build
-      )) ++ List(
+          else
+            List(
+              stage("preflight-clients", clientOnly*)
+                .task("check OS and the client repository")(
+                  sh(clientPreflightScript, 120)
+                )
+                .build,
+              stage("packages-clients", clientOnly*)
+                .task("Lustre client repository and packages")(
+                  sh(clientPackagesScript, 1800)
+                )
+                .build
+            )) ++ List(
       stage("boot-kernel", allNodes*)
-        .task("default to the Lustre kernel and lock the packages")(sh(bootKernelScript, 300))
-        .task("is a reboot needed")(sh(needsRebootScript, register = "lustre_reboot"))
+        .task("default to the Lustre kernel and lock the packages")(
+          sh(bootKernelScript, 300)
+        )
+        .task("is a reboot needed")(
+          sh(needsRebootScript, register = "lustre_reboot")
+        )
         .build,
       stage("reboot", allNodes*)
         .task("reboot into the Lustre kernel")(
@@ -400,7 +455,9 @@ object lustre_cluster extends OrpheraClusterPlaybook:
         .task(s"mount $fsName at /mnt/$fsName")(sh(clientMountScript, 300))
         .build,
       stage("verify", clients*)
-        .task("every MDT and OST is visible to the client")(sh(verifyScript, 300))
+        .task("every MDT and OST is visible to the client")(
+          sh(verifyScript, 300)
+        )
         .build
     )
 
