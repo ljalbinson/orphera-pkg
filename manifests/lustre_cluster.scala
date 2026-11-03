@@ -166,8 +166,9 @@ object lustre_cluster extends OrpheraClusterPlaybook:
       |if [ ! -e "/boot/vmlinuz-$BK" ]; then
       |  M=$(rpm -E %rhel)
       |  V=@EL@; V=${V#el}
+      |  echo "installing kernel $BK (about 100 MB; from the Rocky vault if it is no longer current)"
       |  dnf -y -q install "kernel-$BK" 2>/dev/null ||
-      |    dnf -y -q --repofrompath="orphera-rocky-vault,https://dl.rockylinux.org/vault/rocky/$V/BaseOS/x86_64/os/" \
+      |    dnf -y --repofrompath="orphera-rocky-vault,https://dl.rockylinux.org/vault/rocky/$V/BaseOS/x86_64/os/" \
       |      --setopt=orphera-rocky-vault.gpgcheck=1 --setopt="orphera-rocky-vault.gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-Rocky-$M" \
       |      install "kernel-$BK" ||
       |    fail "kernel $BK is in neither the enabled repositories nor the Rocky $V vault"
