@@ -1229,9 +1229,11 @@ utils/vmctl.sh start --retries 5 <vm1> <vm2> <vm3>
 ```
 
 `start`, `stop`, `reboot` and `autostart add|remove` also take `--node-groups g1,g2` and `--exclude-nodes a,b`, which
-work as they do for the `orphera` commands ([Targeting groups](#inventory)): `orphera nodes` expands them, VM names
-given as well are added, and the VMs are then handled one after another in that order. `--exclude-nodes` needs
-`--node-groups` or VM names with it; it never means every VM.
+work as they do for the `orphera` commands ([Targeting groups](#inventory)). Groups and VM names are handled one after
+another in the order they are given on the command line (a VM named twice keeps its first place), so
+`--node-groups lustre-servers 49 50` starts the servers before the clients and `49 50 --node-groups lustre-servers`
+the reverse. Options may come before or after the names. `--exclude-nodes` needs `--node-groups` or VM names with it;
+it never means every VM.
 
 ```bash
 utils/vmctl.sh stop --node-groups k8s --wait 300

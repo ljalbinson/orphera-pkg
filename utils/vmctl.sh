@@ -15,7 +15,7 @@
 #   utils/vmctl.sh start config/<vm>.yaml        # an explicit config file
 #   utils/vmctl.sh start --node-groups k8s       # every VM in that inventory group (orphera nodes --groups lists them)
 #   utils/vmctl.sh stop --node-groups k8s-workers,k8s-dns --exclude-nodes tst39   # groups, less some VMs
-#   utils/vmctl.sh start --node-groups lustre-servers 49   # groups and VM names together
+#   utils/vmctl.sh start --node-groups lustre-servers 49 50   # groups and VM names together, started in that order
 #   utils/vmctl.sh shutdown-all <hypervisor>...  # list the running VMs on those hypervisors (nothing is shut down)
 #   utils/vmctl.sh shutdown-all --yes gs2 st0    # shut them all down, gracefully, and wait
 #   utils/vmctl.sh shutdown-all --yes --force --except <vm> gs2   # power off any that do not stop; leave <vm> running
@@ -40,8 +40,10 @@
 # every VM on the --hypervisor(s) given, or for every VM on every hypervisor with --all (the running state is not changed;
 # `list` shows the AUTOSTART column).
 # --node-groups g1,g2 and --exclude-nodes a,b (start, stop, reboot, autostart) work as they do for the orphera commands:
-# the groups come from inventory.yaml, `orphera nodes` expands them (so an unknown group or a bad exclusion is the same
-# error), the result is joined with any VM names given, and --exclude-nodes takes VMs out of that. --exclude-nodes needs
+# the groups come from inventory.yaml (`orphera nodes --groups`), and they and any VM names are handled in the order they
+# were given on the command line (a VM named twice keeps its first place); --exclude-nodes takes VMs out of that, and
+# `orphera nodes` checks the names and the exclusions as it does for every command. Options may come before or after
+# the VM names. --exclude-nodes needs
 # --node-groups or VM names as well: it never means every VM. Groups are for VMs; a member with no config/<vm>.yaml
 # (a hypervisor, say) fails like any other unknown VM.
 #
@@ -76,6 +78,8 @@ esac
 
 retries="" wait_s="" force="" mode="" yes="" except="" all="" dry="" ngroups="" nexclude=""
 hvs=()
+pos=()     # the positional arguments (VM names, hypervisors), in order
+order=()   # VM names and --node-groups values as given, "n:<vm>" or "g:<g1,g2>", to keep the command-line order
 while [ $# -gt 0 ]; do
   case "$1" in
     --retries) retries=${2:-}; shift 2 || { echo "--retries needs a number" >&2; exit 2; } ;;
@@ -90,15 +94,16 @@ while [ $# -gt 0 ]; do
     --except) except=${2:-}; shift 2 || { echo "--except needs a VM name" >&2; exit 2; } ;;
     --node-groups)
       [ -n "${2:-}" ] || { echo "--node-groups needs a group name" >&2; exit 2; }
-      ngroups="${ngroups:+$ngroups,}$2"; shift 2 ;;
+      ngroups="${ngroups:+$ngroups,}$2"; order+=("g:$2"); shift 2 ;;
     --exclude-nodes)
       [ -n "${2:-}" ] || { echo "--exclude-nodes needs a VM name" >&2; exit 2; }
       nexclude="${nexclude:+$nexclude,}$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     -*) echo "unknown option $1" >&2; exit 2 ;;
-    *) break ;;
+    *) pos+=("$1"); order+=("n:$1"); shift ;;
   esac
 done
+set -- ${pos[@]+"${pos[@]}"}
 for v in "$retries" "$wait_s"; do
   case "$v" in *[!0-9]*) echo "--retries and --wait need a number" >&2; exit 2 ;; esac
 done
@@ -117,21 +122,42 @@ if [ -n "$ngroups$nexclude" ]; then
   esac
   [ -z "$all" ] && [ "${#hvs[@]}" -eq 0 ] || { echo "--node-groups and --exclude-nodes do not go with --all or --hypervisor" >&2; exit 2; }
   [ -n "$ngroups" ] || [ $# -gt 0 ] || { echo "--exclude-nodes takes VMs out of a selection: give --node-groups or VM names as well" >&2; exit 2; }
-  # The VM names given, as inventory node names (a bare number N is tstN, a config file its hostname:).
-  named=""
-  for arg in "$@"; do
-    case "$arg" in
-      *.yaml) [ -f "$arg" ] || { echo "$arg: no such config file" >&2; exit 2; }
-              n=$(config_value "$arg" hostname)
-              [ -n "$n" ] || { echo "$arg has no hostname:" >&2; exit 2; } ;;
-      *[!0-9]*) n=$arg ;;
-      *) n="tst$arg" ;;
+  # Groups and VM names in the order they were given, each group as its members (from `orphera nodes --groups`),
+  # a bare number N as tstN and a config file as its hostname:. Duplicates keep their first place.
+  declare -A members=()
+  if [ -n "$ngroups" ]; then
+    listing=$(orphera nodes --groups) || exit 2
+    while IFS= read -r line; do
+      [ -n "$line" ] && members[${line%%:*}]=${line#*: }
+    done <<<"$listing"
+  fi
+  wanted=()
+  for item in "${order[@]}"; do
+    case "$item" in
+      g:*)
+        IFS=, read -r -a gl <<<"${item#g:}"
+        for g in "${gl[@]}"; do
+          [ -n "$g" ] || continue
+          if [ -z "${members[$g]+x}" ]; then
+            echo "Error: Unknown node group(s): $g. Defined in inventory: $(printf '%s\n' "${!members[@]}" | sort | paste -sd, - | sed 's/,/, /g')" >&2
+            exit 2
+          fi
+          # shellcheck disable=SC2206  # member names are plain (inventory schema)
+          wanted+=(${members[$g]})
+        done ;;
+      n:*.yaml)
+        f=${item#n:}
+        [ -f "$f" ] || { echo "$f: no such config file" >&2; exit 2; }
+        n=$(config_value "$f" hostname)
+        [ -n "$n" ] || { echo "$f has no hostname:" >&2; exit 2; }
+        wanted+=("$n") ;;
+      n:*[!0-9]*) wanted+=("${item#n:}") ;;
+      n:*) wanted+=("tst${item#n:}") ;;
     esac
-    named="${named:+$named,}$n"
   done
-  sel=()
-  [ -z "$named" ] || sel+=(--nodes "$named")
-  [ -z "$ngroups" ] || sel+=(--node-groups "$ngroups")
+  [ "${#wanted[@]}" -gt 0 ] || { echo "the selection has no VMs in it" >&2; exit 2; }
+  # orphera nodes checks every name is in the inventory, drops repeats (keeping the order) and applies --exclude-nodes.
+  sel=(--nodes "$(IFS=,; printf '%s' "${wanted[*]}")")
   [ -z "$nexclude" ] || sel+=(--exclude-nodes "$nexclude")
   expanded=$(orphera nodes "${sel[@]}") || exit 2
   # shellcheck disable=SC2086  # node names are plain (inventory schema), one per line
