@@ -266,6 +266,7 @@ nodes:
   #   tst43        MGS + MDS: MGT on data1, MDT0 on data2; also the test client (/mnt/lfs0)
   #   tst44-tst47  OSS: two OSTs each, OST0000-OST0007
   #   tst48        MDS: MDT1 on data1 (the second metadata target, DNE)
+  #   tst49        Ubuntu 24.04 client (no targets; lustre_client.scala)
   # lustre_targets: <role>:<disk> pairs, role mgt, mdtN or ostN (N = the target index,
   # unique across the file system). Disk paths are the fixed-serial by-id names the
   # provisioning playbooks give the `disks:` in config/<node>.yaml (never /dev/sdX).
@@ -300,6 +301,11 @@ nodes:
     vars:
       cluster_ip: "10.10.5.60"
       lustre_targets: "mdt1:/dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_tst48-data1"
+  # tst49: Lustre client on Ubuntu 24.04 (manifests/lustre_client.scala), /mnt/lfs0.
+  - name: tst49
+    host: tst49.ljalbinson.com
+    vars:
+      cluster_ip: "10.10.5.61"
 
   - name: gs1
     host: gs1.ljalbinson.com

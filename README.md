@@ -1924,7 +1924,7 @@ Fleet layout used by these manifests (see `inventory.yaml`):
 | tst26 | Keycloak (OpenID Connect identity provider, HTTPS on 8443, health on 9000); Keystone on tst6 federates its realm `openstack` |
 | tst24 | Telemetry: Ceilometer central agent (exporter on 9101) and Aodh (API on 8042, evaluator, notifier); the compute agents run on tst17 and tst18; metrics are stored by the Prometheus on tst7; RabbitMQ vhosts `aodh` and `ceilometer` on tst10 |
 | tst21 | Kolla image builder: builds the images from source, with a source tarball cache, a pip cache, and a writable registry on port 5000 |
-| tst43-tst48 | Lustre file system `lfs0` on Rocky Linux 9: tst43 MGS + MDS (and the test client, `/mnt/lfs0`), tst44-tst47 OSS with two OSTs each, tst48 second MDS (MDT1) |
+| tst43-tst49 | Lustre file system `lfs0` on Rocky Linux 9: tst43 MGS + MDS (and the test client, `/mnt/lfs0`), tst44-tst47 OSS with two OSTs each, tst48 second MDS (MDT1); tst49 an Ubuntu 24.04 client |
 | tst17, tst18 | Compute nodes (nova-compute on KVM, Neutron Open vSwitch agent; second NIC is the provider port); VMs on gs2 with nested KVM |
 
 Run order, each with its own teardown and an end-to-end test that checks the
@@ -2375,6 +2375,7 @@ A Lustre file system `lfs0` (ldiskfs targets, LNet over TCP) on six Rocky Linux 
 | tst43 (10.10.5.55) | MGS + MDS, and the test client (`/mnt/lfs0`) | MGT, MDT0 (128 GB each) |
 | tst44-tst47 (10.10.5.56-59) | OSS | two OSTs each, OST0000-OST0007 (128 GB each) |
 | tst48 (10.10.5.60) | MDS | MDT1 (128 GB) |
+| tst49 (10.10.5.61) | Ubuntu 24.04 client (`/mnt/lfs0`), `lustre_client.scala` | none |
 
 Rocky 9, not 10: Lustre 2.17 builds its servers for EL9 only; EL10 servers come with Lustre 2.18. Which
 disk holds which target is the `lustre_targets` var of each node in `inventory.yaml` (`<role>:<by-id path>`,
@@ -2390,6 +2391,20 @@ need root on the client. MDT0 is mounted before the other MDTs.
     orphera cluster-playbook manifests/lustre_cluster.scala     # build (repeatable)
     manifests/test_lustre.sh                                     # teardown, build, checks (wipes the disks)
     orphera cluster-playbook manifests/lustre_teardown.scala    # unmount and wipe; packages stay
+
+    # Ubuntu client, once the servers are built
+    manifests/par-mk-new-and-empty.sh -q tst49
+    orphera cluster-playbook manifests/lustre_client.scala      # build the client, mount (repeatable)
+    manifests/test_lustre_client.sh                              # client checks; servers left alone
+
+Whamcloud's Ubuntu client modules are built for one Ubuntu kernel, not the one an up-to-date VM runs, so
+`lustre_client.scala` builds the client on the node from Whamcloud's `lustre-source` package against the
+running kernel (TCP only, no server parts, gcc-12; a few minutes, log in `/var/log/lustre-client-build.log`)
+and installs it under `/usr`. It then holds the kernel metapackages with `apt-mark hold`; if the kernel changes
+anyway, re-running the playbook rebuilds. Settings: `LUSTRE_UBUNTU_CLIENTS` (default `tst49`) and
+`LUSTRE_VERSION` (default `2.17.0`, keep it equal to the servers'), plus `LUSTRE_FSNAME`, `LUSTRE_MGS` and
+`LUSTRE_SERVERS` as below. `lustre_teardown.scala` unmounts tst49 first (`LUSTRE_UBUNTU_CLIENTS=""` when it
+is down); after a teardown and rebuild of the servers, run `lustre_client.scala` again to remount it.
 
 `lustre_cluster.scala` installs the Lustre server packages from Whamcloud's repository (and its kernel, when
 the repository has one), makes the kernel that has the Lustre modules the default and version-locks it with
@@ -2410,7 +2425,7 @@ to permissive on the servers.
 The servers need outbound HTTPS to downloads.whamcloud.com (the rpm cache on tst12 mirrors only Rocky and EPEL);
 the preflight stage checks this before anything is changed.
 
-Not done yet: clients that are not servers (Ubuntu or Rocky client packages), failover
+Not done yet: Rocky clients that are not servers, failover
 pairs, quotas, and monitoring.
 
 ## Example: a Kubernetes cluster on VMs (tst30-tst41)

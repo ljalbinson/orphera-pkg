@@ -15,7 +15,10 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 //
 // Run:   orphera cluster-playbook manifests/lustre_teardown.scala
 // Uses the same LUSTRE_FSNAME, LUSTRE_SERVERS and LUSTRE_CLIENTS settings as
-// lustre_cluster.scala. A disk that is still mounted after the unmounts (or is
+// lustre_cluster.scala, and unmounts the Ubuntu clients of lustre_client.scala
+// first too (LUSTRE_UBUNTU_CLIENTS, default tst49; set it to "" when that node is
+// down, or the first stage fails there and nothing is wiped). The clients keep
+// their Lustre build. A disk that is still mounted after the unmounts (or is
 // not a block device) stops the run rather than being wiped.
 //
 // Not compiled where this was written; the first run on scala0 is the first
@@ -27,7 +30,8 @@ object lustre_teardown extends OrpheraClusterPlaybook:
 
   private val fsName = sys.env.getOrElse("LUSTRE_FSNAME", "lfs0")
   private val servers = envList("LUSTRE_SERVERS", "tst43 tst44 tst45 tst46 tst47 tst48")
-  private val clients = envList("LUSTRE_CLIENTS", "tst43")
+  private val clients =
+    (envList("LUSTRE_CLIENTS", "tst43") ++ envList("LUSTRE_UBUNTU_CLIENTS", "tst49")).distinct
 
   private val helpers =
     """fail() { echo "FAILED: $(hostname -s): $*"; exit 1; }
