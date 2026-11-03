@@ -2,7 +2,8 @@
 #
 # The defaults of an installed Orphera, for the orphera command and for the shell scripts of the
 # package (utils/orphera-sources.sh sources this when it finds it). Sourced, not run, with
-# ORPHERA_PREFIX set to the installation directory (/opt/orphera).
+# ORPHERA_PREFIX set to the installation prefix (/usr for the packages): the jars are in
+# PREFIX/lib/orphera, the playbooks and scripts in PREFIX/share/orphera.
 #
 # Each setting is only a default: a value already in the environment wins, and so do the
 # options -I, -c and -m of the orphera command. Site data (the inventory, the per-VM configs
@@ -10,7 +11,7 @@
 # it is the user's own ~/.config/orphera (next to the secret store, so two users of one machine do not
 # share a CA key or an inventory), or the system-wide /etc/orphera when that holds a site and the user's
 # directory does not (see below); ORPHERA_ROOT is where the playbooks' relative files (files/motd) are found when
-# they are not in the current directory; run state goes under the user's home, not under /opt.
+# they are not in the current directory; run state goes under the user's home, not under the prefix.
 
 # The site directory, when ORPHERA_SITE_DIR is not set: the user's own if it holds an inventory, configs or
 # certificates; else the system-wide one if that holds an inventory or a CA (a machine whose site is shared,
@@ -31,11 +32,11 @@ fi
 : "${ORPHERA_INVENTORY:=$ORPHERA_SITE_DIR/inventory.yaml}"
 : "${ORPHERA_CONFIG_DIR:=$ORPHERA_SITE_DIR/config}"
 : "${ORPHERA_CERTS_DIR:=$ORPHERA_SITE_DIR/certs}"
-: "${ORPHERA_ROOT:=$ORPHERA_PREFIX}"
-: "${ORPHERA_MANIFESTS:=$ORPHERA_PREFIX/manifests}"
-: "${ORPHERA_CATALOGUES:=$ORPHERA_PREFIX/catalogues}"
+: "${ORPHERA_ROOT:=$ORPHERA_PREFIX/share/orphera}"
+: "${ORPHERA_MANIFESTS:=$ORPHERA_ROOT/manifests}"
+: "${ORPHERA_CATALOGUES:=$ORPHERA_ROOT/catalogues}"
 : "${ORPHERA_STATE_DIR:=${XDG_STATE_HOME:-$HOME/.local/state}/orphera}"
-: "${ORPHERA_ORCHESTRATOR_JAR:=$ORPHERA_PREFIX/lib/orphera-orchestrator.jar}"
-: "${ORPHERA_SCRIPTING_JAR:=$ORPHERA_PREFIX/lib/orphera-scripting.jar}"
+: "${ORPHERA_ORCHESTRATOR_JAR:=$ORPHERA_PREFIX/lib/orphera/orphera-orchestrator.jar}"
+: "${ORPHERA_SCRIPTING_JAR:=$ORPHERA_PREFIX/lib/orphera/orphera-scripting.jar}"
 export ORPHERA_ROOT ORPHERA_SITE_DIR ORPHERA_INVENTORY ORPHERA_CONFIG_DIR ORPHERA_CERTS_DIR ORPHERA_MANIFESTS \
   ORPHERA_CATALOGUES ORPHERA_STATE_DIR ORPHERA_ORCHESTRATOR_JAR ORPHERA_SCRIPTING_JAR

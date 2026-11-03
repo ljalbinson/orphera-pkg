@@ -1,51 +1,80 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# Stages the orphera command-line package: the tree that `make cli-deb`, `make cli-rpm` and
-# `make cli-tar` turn into a .deb, an .rpm and a .tar.gz.
+# Stages the orphera command-line package: the tree that `make cli-deb`, `make cli-rpm`, `make cli-tar`
+# and `make install` turn into a .deb, an .rpm, a .tar.gz and an installation.
 #
-#   packaging/cli/stage.sh STAGE_DIR VERSION ORCHESTRATOR_JAR SCRIPTING_JAR
+#   packaging/cli/stage.sh [--prefix PREFIX] [--no-deb] STAGE_DIR VERSION ORCHESTRATOR_JAR SCRIPTING_JAR
 #
-#   STAGE_DIR/opt/orphera/   bin/orphera, lib/ (the two jars and orphera-env.sh), manifests/ (playbooks
-#                            and their scripts), utils/, catalogues/, schemas/, files/, docs/, examples/
-#   STAGE_DIR/etc/orphera/   empty config/ and certs/: the site's own data goes here
-#   STAGE_DIR/usr/bin/orphera, STAGE_DIR/etc/bash_completion.d/orphera, STAGE_DIR/DEBIAN/control
+# The standard (FHS) layout, under PREFIX (default /usr):
+#   PREFIX/bin/orphera                       the launcher
+#   PREFIX/lib/orphera/                      the two jars and orphera-env.sh (the site defaults)
+#   PREFIX/share/orphera/                    manifests/ (playbooks and their scripts), utils/, catalogues/,
+#                                            schemas/, files/, examples/, VERSION
+#   PREFIX/share/doc/orphera/                README.md, CHANGELOG.md, LICENSE, docs/
+#   PREFIX/share/bash-completion/completions/orphera
+#   /etc/orphera/                            empty config/ and certs/: a shared site's data goes here
+#   DEBIAN/control                           unless --no-deb
+# The launcher finds the rest from where it is (PREFIX = its bin/..), so the tree also works when it
+# is moved, as the tarball is. /etc/orphera is the same whatever the prefix.
 #
 # It takes the jars as arguments, so a test can stage with stand-ins and no build.
 set -euo pipefail
 
 die() { echo "stage.sh: $1" >&2; exit 1; }
-[ $# -eq 4 ] || die "usage: stage.sh STAGE_DIR VERSION ORCHESTRATOR_JAR SCRIPTING_JAR"
+prefix=/usr deb=1
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --prefix) prefix=${2:-}; shift 2 || die "--prefix needs a directory" ;;
+    --no-deb) deb=""; shift ;;
+    -*) die "unknown option $1" ;;
+    *) break ;;
+  esac
+done
+case "$prefix" in
+  /*) prefix=${prefix%/} ;;
+  *) die "--prefix must be an absolute path: $prefix" ;;
+esac
+[ $# -eq 4 ] || die "usage: stage.sh [--prefix PREFIX] [--no-deb] STAGE_DIR VERSION ORCHESTRATOR_JAR SCRIPTING_JAR"
 stage=$1 version=$2 orch=$3 scripting=$4
+[ -n "$stage" ] && [ "$stage" != / ] || die "refusing to stage into '$stage'"
 [ -f "$orch" ] || die "no such file: $orch (build it: sbt orchestrator/assembly)"
 [ -f "$scripting" ] || die "no such file: $scripting (build it: sbt scripting/assembly)"
 
 root=$(cd "$(dirname "$0")/../.." && pwd)
-p="$stage/opt/orphera"
+p="$stage$prefix"
+lib="$p/lib/orphera"
+share="$p/share/orphera"
+doc="$p/share/doc/orphera"
 
 rm -rf "$stage"
-mkdir -p "$stage/DEBIAN" "$p/bin" "$p/lib" "$stage/etc/orphera/config" "$stage/etc/orphera/certs" \
-  "$stage/usr/bin" "$stage/etc/bash_completion.d" "$p/examples"
+mkdir -p "$p/bin" "$lib" "$share/examples" "$doc" "$p/share/bash-completion/completions" \
+  "$stage/etc/orphera/config" "$stage/etc/orphera/certs"
 
 install -m 755 "$root/packaging/cli/orphera" "$p/bin/orphera"
-install -m 644 "$root/packaging/cli/orphera-env.sh" "$p/lib/orphera-env.sh"
-install -m 644 "$orch" "$p/lib/orphera-orchestrator.jar"
-install -m 644 "$scripting" "$p/lib/orphera-scripting.jar"
+install -m 644 "$root/packaging/cli/orphera-env.sh" "$lib/orphera-env.sh"
+install -m 644 "$orch" "$lib/orphera-orchestrator.jar"
+install -m 644 "$scripting" "$lib/orphera-scripting.jar"
 
-for d in manifests utils catalogues schemas files docs; do
-  cp -a "$root/$d" "$p/$d"
+for d in manifests utils catalogues schemas files; do
+  cp -a "$root/$d" "$share/$d"
 done
 # The checkout's launcher is not part of the package, and neither is a Python cache.
-rm -f "$p/utils/orphera"
-find "$p" -name __pycache__ -prune -exec rm -rf {} +
+rm -f "$share/utils/orphera"
+find "$share" -name __pycache__ -prune -exec rm -rf {} +
 
 # The lab's own inventory and configs are examples of the format, not defaults.
-cp "$root/inventory.yaml" "$p/examples/inventory.yaml"
-cp -a "$root/config" "$p/examples/config"
-cp "$root/README.md" "$root/CHANGELOG.md" "$root/LICENSE" "$p/"
-printf '%s\n' "$version" > "$p/VERSION"
+cp "$root/inventory.yaml" "$share/examples/inventory.yaml"
+cp -a "$root/config" "$share/examples/config"
+printf '%s\n' "$version" > "$share/VERSION"
 
-install -m 644 "$root/orphera-completion.bash" "$stage/etc/bash_completion.d/orphera"
-ln -s /opt/orphera/bin/orphera "$stage/usr/bin/orphera"
-sed "s/@VERSION@/$version/" "$root/packaging/cli/control.template" > "$stage/DEBIAN/control"
+cp "$root/README.md" "$root/CHANGELOG.md" "$root/LICENSE" "$doc/"
+cp -a "$root/docs" "$doc/docs"
 
-echo "Staged orphera $version in $stage"
+install -m 644 "$root/orphera-completion.bash" "$p/share/bash-completion/completions/orphera"
+
+if [ -n "$deb" ]; then
+  mkdir -p "$stage/DEBIAN"
+  sed "s/@VERSION@/$version/" "$root/packaging/cli/control.template" > "$stage/DEBIAN/control"
+fi
+
+echo "Staged orphera $version in $stage (prefix $prefix)"

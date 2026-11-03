@@ -23,25 +23,43 @@ echo orchestrator >"$tmp/o.jar"
 echo scripting >"$tmp/s.jar"
 stage="$tmp/stage"
 packaging/cli/stage.sh "$stage" 9.9.9 "$tmp/o.jar" "$tmp/s.jar" >/dev/null || { echo "staging failed"; exit 1; }
-p="$stage/opt/orphera"
+p="$stage/usr"            # the prefix
+lib="$p/lib/orphera"
+share="$p/share/orphera"
 
 # The layout
-[ -x "$p/bin/orphera" ] && ok "bin/orphera is executable" || bad "bin/orphera is executable"
-eq "the jars are the ones given" "$(cat "$p/lib/orphera-orchestrator.jar" "$p/lib/orphera-scripting.jar" | tr '\n' ' ')" "orchestrator scripting "
-for f in lib/orphera-env.sh manifests/build_openstack_stack.sh manifests/rebuild_openstack_from_scratch.sh \
-  utils/orphera-sources.sh utils/sql-to-yaml.py schemas/inventory.schema.json catalogues examples/inventory.yaml \
-  examples/config README.md LICENSE; do
+[ -x "$p/bin/orphera" ] && [ ! -h "$p/bin/orphera" ] && ok "bin/orphera is the launcher itself" || bad "bin/orphera is the launcher itself"
+eq "the jars are the ones given" "$(cat "$lib/orphera-orchestrator.jar" "$lib/orphera-scripting.jar" | tr '\n' ' ')" "orchestrator scripting "
+for f in lib/orphera/orphera-env.sh share/orphera/manifests/build_openstack_stack.sh \
+  share/orphera/manifests/rebuild_openstack_from_scratch.sh share/orphera/utils/orphera-sources.sh \
+  share/orphera/utils/sql-to-yaml.py share/orphera/schemas/inventory.schema.json share/orphera/catalogues \
+  share/orphera/examples/inventory.yaml share/orphera/examples/config share/doc/orphera/README.md \
+  share/doc/orphera/LICENSE share/doc/orphera/docs/GETTING_STARTED.md share/bash-completion/completions/orphera; do
   [ -e "$p/$f" ] && ok "has $f" || bad "has $f"
 done
-[ ! -e "$p/utils/orphera" ] && ok "the checkout's launcher is not in the package" || bad "the checkout's launcher is not in the package"
+[ -z "$(ls -A "$stage" | grep -vxE 'usr|etc|DEBIAN')" ] && ok "nothing outside usr/ and etc/" || bad "nothing outside usr/ and etc/: $(ls -A "$stage")"
+[ -z "$(ls -A "$p/bin" | grep -vx orphera)" ] && ok "bin/ holds only orphera" || bad "bin/ holds only orphera: $(ls -A "$p/bin")"
+[ ! -e "$share/utils/orphera" ] && ok "the checkout's launcher is not in the package" || bad "the checkout's launcher is not in the package"
 [ -z "$(find "$p" -name __pycache__)" ] && ok "no Python cache" || bad "no Python cache"
-eq "VERSION" "$(cat "$p/VERSION")" "9.9.9"
+eq "VERSION" "$(cat "$share/VERSION")" "9.9.9"
 has "control: version" "$(cat "$stage/DEBIAN/control")" "Version: 9.9.9"
 has "control: architecture" "$(cat "$stage/DEBIAN/control")" "Architecture: all"
-eq "/usr/bin/orphera points at the installed launcher" "$(readlink "$stage/usr/bin/orphera")" "/opt/orphera/bin/orphera"
 eq "the site config directory is empty" "$(ls -A "$stage/etc/orphera/config")" ""
 eq "the site certs directory is empty" "$(ls -A "$stage/etc/orphera/certs")" ""
-[ -f "$stage/etc/bash_completion.d/orphera" ] && ok "completion is installed" || bad "completion is installed"
+# Every file the rpm lists is in the tree, and the tree has nothing the rpm leaves out
+listed=$(sed -n '/^%files/,$p' packaging/cli/orphera.spec.template | sed 's/^%dir //' | grep '^/' | sort)
+missing=$(while read -r f; do [ -e "$stage$f" ] || echo "$f"; done <<<"$listed")
+eq "rpm %files are all staged" "$missing" ""
+unlisted=$(cd "$stage" && find usr etc -mindepth 2 -maxdepth 3 \( -type f -o -type d \) | sed 's,^,/,' | while read -r f; do
+  grep -qxF "$f" <<<"$listed" || grep -q "^${f}/" <<<"$listed" || { f2=$f; while [ "$f2" != / ] && ! grep -qxF "$f2" <<<"$listed"; do f2=$(dirname "$f2"); done; [ "$f2" != / ] || echo "$f"; }; done)
+eq "nothing staged is left out of the rpm" "$unlisted" ""
+
+# --prefix and --no-deb, as `make install` uses them
+packaging/cli/stage.sh --prefix /usr/local --no-deb "$tmp/st2" 9.9.9 "$tmp/o.jar" "$tmp/s.jar" >/dev/null
+[ -x "$tmp/st2/usr/local/bin/orphera" ] && [ -f "$tmp/st2/usr/local/lib/orphera/orphera-env.sh" ] && [ ! -e "$tmp/st2/DEBIAN" ] &&
+  ok "--prefix /usr/local --no-deb" || bad "--prefix /usr/local --no-deb"
+packaging/cli/stage.sh --prefix usr "$tmp/st3" 9.9.9 "$tmp/o.jar" "$tmp/s.jar" >/dev/null 2>&1 &&
+  bad "a relative --prefix is refused" || ok "a relative --prefix is refused"
 
 # The launcher, with a `java` that prints its arguments and the ORPHERA_ environment
 mkdir -p "$tmp/fakebin" "$tmp/home"
@@ -59,23 +77,23 @@ sys="$tmp/system-site"   # stands in for /etc/orphera, so the host's own does no
 run() { env -i PATH="$tmp/fakebin:/usr/bin:/bin" HOME="$tmp/home" ORPHERA_SYSTEM_SITE_DIR="$sys" "$@"; }
 
 out=$(run "$p/bin/orphera" version --nodes tst0)
-has "launcher: runs the orchestrator jar" "$out" "ARGS -cp $p/lib/orphera-orchestrator.jar orphera.orchestrator.Main version --nodes tst0"
+has "launcher: runs the orchestrator jar" "$out" "ARGS -cp $lib/orphera-orchestrator.jar orphera.orchestrator.Main version --nodes tst0"
 has "launcher: inventory default" "$out" "ORPHERA_INVENTORY=$tmp/home/.config/orphera/inventory.yaml"
 has "launcher: config default" "$out" "ORPHERA_CONFIG_DIR=$tmp/home/.config/orphera/config"
 has "launcher: certs default" "$out" "ORPHERA_CERTS_DIR=$tmp/home/.config/orphera/certs"
-has "launcher: manifests default" "$out" "ORPHERA_MANIFESTS=$p/manifests"
-has "launcher: root default" "$out" "ORPHERA_ROOT=$p"
-has "launcher: catalogues default" "$out" "ORPHERA_CATALOGUES=$p/catalogues"
+has "launcher: manifests default" "$out" "ORPHERA_MANIFESTS=$share/manifests"
+has "launcher: root default" "$out" "ORPHERA_ROOT=$share"
+has "launcher: catalogues default" "$out" "ORPHERA_CATALOGUES=$share/catalogues"
 has "launcher: state under the home" "$out" "ORPHERA_STATE_DIR=$tmp/home/.local/state/orphera"
-has "launcher: scripting jar default" "$out" "ORPHERA_SCRIPTING_JAR=$p/lib/orphera-scripting.jar"
+has "launcher: scripting jar default" "$out" "ORPHERA_SCRIPTING_JAR=$lib/orphera-scripting.jar"
 
 # JVM options by Java version: none on an older JDK (which would refuse them), the warnings' options on a newer one
 out=$(run FAKE_JAVA_VERSION=21.0.4 "$p/bin/orphera" help)
-has "java 21: no extra options" "$out" "ARGS -cp $p/lib/orphera-orchestrator.jar"
+has "java 21: no extra options" "$out" "ARGS -cp $lib/orphera-orchestrator.jar"
 out=$(run FAKE_JAVA_VERSION=24.0.1 "$p/bin/orphera" help)
-has "java 24: native access" "$out" "ARGS --enable-native-access=ALL-UNNAMED --sun-misc-unsafe-memory-access=allow -cp $p/lib/orphera-orchestrator.jar"
+has "java 24: native access" "$out" "ARGS --enable-native-access=ALL-UNNAMED --sun-misc-unsafe-memory-access=allow -cp $lib/orphera-orchestrator.jar"
 out=$(run FAKE_JAVA_VERSION=22.0.1 "$p/bin/orphera" help)
-has "java 22: native access only" "$out" "ARGS --enable-native-access=ALL-UNNAMED -cp $p/lib/orphera-orchestrator.jar"
+has "java 22: native access only" "$out" "ARGS --enable-native-access=ALL-UNNAMED -cp $lib/orphera-orchestrator.jar"
 
 out=$(run ORPHERA_INVENTORY=/x/inv.yaml ORPHERA_SITE_DIR=/srv/o XDG_STATE_HOME=/var/st "$p/bin/orphera" help)
 has "environment wins over the default" "$out" "ORPHERA_INVENTORY=/x/inv.yaml"
@@ -96,27 +114,30 @@ rm -rf "$tmp/home/.config/orphera/certs" "$sys"
 
 mkdir -p "$tmp/usrbin" && ln -s "$p/bin/orphera" "$tmp/usrbin/orphera"
 out=$(run "$tmp/usrbin/orphera" help)
-has "found through a symlink" "$out" "ARGS -cp $p/lib/orphera-orchestrator.jar"
+has "found through a symlink" "$out" "ARGS -cp $lib/orphera-orchestrator.jar"
 
 cp -a "$p" "$tmp/moved"
 out=$(run "$tmp/moved/bin/orphera" help)
-has "a moved tree finds itself" "$out" "ARGS -cp $tmp/moved/lib/orphera-orchestrator.jar"
+has "a moved tree finds itself" "$out" "ARGS -cp $tmp/moved/lib/orphera/orphera-orchestrator.jar"
 
 out=$(run JAVA_HOME="$tmp/jh" "$p/bin/orphera" help 2>&1); rc=$?
 [ "$rc" -ne 0 ] && ok "a JAVA_HOME without java is an error" || bad "a JAVA_HOME without java is an error: $out"
 
-rm "$tmp/moved/lib/orphera-orchestrator.jar"
+rm "$tmp/moved/lib/orphera/orphera-orchestrator.jar"
 out=$(run "$tmp/moved/bin/orphera" help 2>&1); rc=$?
 if [ "$rc" -ne 0 ] && grep -q "incomplete" <<<"$out"; then ok "a missing jar says the installation is incomplete"; else bad "a missing jar says the installation is incomplete: $out"; fi
+rm "$tmp/moved/lib/orphera/orphera-env.sh"
+out=$(run "$tmp/moved/bin/orphera" help 2>&1); rc=$?
+if [ "$rc" -ne 0 ] && grep -q "incomplete" <<<"$out"; then ok "a missing orphera-env.sh says the installation is incomplete"; else bad "a missing orphera-env.sh says the installation is incomplete: $out"; fi
 
 # The shell scripts of the package
-got=$(cd "$p" && env -i PATH=/usr/bin:/bin HOME="$tmp/home" ORPHERA_SYSTEM_SITE_DIR="$sys" bash -c '. utils/orphera-sources.sh; config_dir; inventory_file; echo "$PATH"')
+got=$(cd "$share" && env -i PATH=/usr/bin:/bin HOME="$tmp/home" ORPHERA_SYSTEM_SITE_DIR="$sys" bash -c '. utils/orphera-sources.sh; config_dir; inventory_file; echo "$PATH"')
 eq "scripts: config directory" "$(sed -n 1p <<<"$got")" "$tmp/home/.config/orphera/config"
 eq "scripts: inventory" "$(sed -n 2p <<<"$got")" "$tmp/home/.config/orphera/inventory.yaml"
 eq "scripts: orphera is on PATH" "$(sed -n 3p <<<"$got")" "$p/bin:/usr/bin:/bin"
-got=$(cd "$p" && env -i PATH=/usr/bin:/bin HOME="$tmp/home" ORPHERA_SYSTEM_SITE_DIR="$sys" ORPHERA_CONFIG_DIR=/y/cfg bash -c '. utils/orphera-sources.sh; config_dir')
+got=$(cd "$share" && env -i PATH=/usr/bin:/bin HOME="$tmp/home" ORPHERA_SYSTEM_SITE_DIR="$sys" ORPHERA_CONFIG_DIR=/y/cfg bash -c '. utils/orphera-sources.sh; config_dir')
 eq "scripts: the environment still wins" "$got" "/y/cfg"
-got=$(cd "$p/manifests" && env -i PATH=/usr/bin:/bin HOME="$tmp/home" ORPHERA_SYSTEM_SITE_DIR="$sys" bash -c '. ../utils/orphera-sources.sh; config_dir')
+got=$(cd "$share/manifests" && env -i PATH=/usr/bin:/bin HOME="$tmp/home" ORPHERA_SYSTEM_SITE_DIR="$sys" bash -c '. ../utils/orphera-sources.sh; config_dir')
 eq "scripts: found from another directory" "$got" "$tmp/home/.config/orphera/config"
 
 # A checkout is unchanged: no lib/orphera-env.sh beside utils/

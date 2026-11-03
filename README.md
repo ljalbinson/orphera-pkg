@@ -551,7 +551,7 @@ database, export it first (`utils/sql-to-yaml.py --out DIR`) and point both vari
 this without a lab. See [docs/MARIADB.md](docs/MARIADB.md).
 
 The scripts name playbooks by bare file name (`orphera cluster-playbook gen_set_dns.scala`), not `manifests/gen_set_dns.scala`, so
-`orphera` finds them in `-m` / `ORPHERA_MANIFESTS` (default `manifests`), and a script run with `ORPHERA_MANIFESTS=/opt/orphera/manifests`
+`orphera` finds them in `-m` / `ORPHERA_MANIFESTS` (default `manifests`), and a script run with `ORPHERA_MANIFESTS=/usr/share/orphera/manifests`
 applies the playbooks from there. The scripts call each other relative to their own location. They need an `orphera` that has the
 `-m` option: 0.1.201 or later (0.1.200 does not have it).
 
@@ -1688,12 +1688,15 @@ auto-updated; remove the entry manually.
 ## Installing the command line
 
 `make cli-package` builds a package of the `orphera` command, separate from the agent package. It needs the same tools as
-`make release` (`sbt`, `dpkg-deb`; `rpmbuild` for the `.rpm`).
+`make release` (`sbt`, `dpkg-deb`; `rpmbuild` for the `.rpm`). It installs in the standard (FHS) directories:
 
 | Where | What |
 |---|---|
-| `/opt/orphera` | the program, read-only: `bin/`, `lib/` (both jars), `manifests/`, `utils/`, `catalogues/`, `schemas/`, `files/`, `docs/`, `examples/` |
-| `/usr/bin/orphera` | link to `/opt/orphera/bin/orphera`; bash completion is in `/etc/bash_completion.d/orphera` |
+| `/usr/bin/orphera` | the command |
+| `/usr/lib/orphera` | the two jars and `orphera-env.sh` (the defaults below) |
+| `/usr/share/orphera` | read-only: `manifests/` (playbooks and their scripts), `utils/`, `catalogues/`, `schemas/`, `files/`, `examples/` |
+| `/usr/share/doc/orphera` | `README.md`, `CHANGELOG.md`, `LICENSE`, `docs/` |
+| `/usr/share/bash-completion/completions/orphera` | bash completion |
 | `~/.config/orphera` | your site, one per user: `inventory.yaml`, `config/` (per-VM configs) and `certs/` (`ca.crt`, `ca.key`), beside the secret store (`secrets.age`, `age.key`). `orphera init-ca` creates `certs/` here |
 | `/etc/orphera` | a site shared by everyone on the machine, used only when the user has none of their own (see below). The package creates the directories empty and never overwrites what is in them |
 | `~/.local/state/orphera` | run state per user (`.orphera-state`, `.orphera-logs`, `.orphera-audit`, `.orphera-build-logs`); `$XDG_STATE_HOME` moves it |
@@ -1701,26 +1704,41 @@ auto-updated; remove the entry manually.
 ```sh
 sudo apt install ./orphera_<version>_all.deb         # or: sudo dnf install ./orphera-<version>-1.noarch.rpm
 mkdir -p ~/.config/orphera/config
-cp /opt/orphera/examples/inventory.yaml ~/.config/orphera/      # starting points: edit both
-cp -r /opt/orphera/examples/config/. ~/.config/orphera/config/
+cp /usr/share/orphera/examples/inventory.yaml ~/.config/orphera/      # starting points: edit both
+cp -r /usr/share/orphera/examples/config/. ~/.config/orphera/config/
 ${EDITOR:-nano} ~/.config/orphera/inventory.yaml
 orphera version
 ```
 
-The packaged launcher sets `ORPHERA_INVENTORY`, `ORPHERA_CONFIG_DIR`, `ORPHERA_CERTS_DIR`, `ORPHERA_MANIFESTS`, `ORPHERA_CATALOGUES`,
-`ORPHERA_STATE_DIR` and the two jar variables to those places only when they are not already set, so the environment, `-I`, `-c` and
-`-m` all still win. Set `ORPHERA_SITE_DIR` to move the three site paths together. Without it the site directory is
-`~/.config/orphera` when that holds an `inventory.yaml`, a `config/` or a `certs/`; otherwise `/etc/orphera` when that holds an
-`inventory.yaml` or `certs/ca.crt`; otherwise `~/.config/orphera` again (a new user, whose `orphera init-ca` creates it). To share one
-inventory and one CA on a machine, put them in `/etc/orphera` (group-readable for the people who use them) and give those users no
-site of their own. The shell scripts in `/opt/orphera/manifests`
-read the same defaults, and `orphera` is on their `PATH`.
+Upgrading from a package of 0.1.207 or earlier, which installed under `/opt/orphera`, needs nothing special: the package
+manager removes the old files, and the site and run state were never under `/opt`.
 
-The tarball unpacks as `orphera-<version>/`. Without root, unpack it anywhere, set `ORPHERA_SITE_DIR` to a directory of your own, and
-run `<dir>/bin/orphera`.
+The launcher works out the installation from where it is (`bin/..`), and sets `ORPHERA_INVENTORY`, `ORPHERA_CONFIG_DIR`,
+`ORPHERA_CERTS_DIR`, `ORPHERA_MANIFESTS`, `ORPHERA_CATALOGUES`, `ORPHERA_STATE_DIR`, `ORPHERA_ROOT` and the two jar variables
+to those places only when they are not already set, so the environment, `-I`, `-c` and `-m` all still win. Set
+`ORPHERA_SITE_DIR` to move the three site paths together. Without it the site directory is `~/.config/orphera` when that
+holds an `inventory.yaml`, a `config/` or a `certs/`; otherwise `/etc/orphera` when that holds an `inventory.yaml` or
+`certs/ca.crt`; otherwise `~/.config/orphera` again (a new user, whose `orphera init-ca` creates it). To share one inventory
+and one CA on a machine, put them in `/etc/orphera` (group-readable for the people who use them) and give those users no
+site of their own. The shell scripts in `/usr/share/orphera/manifests` read the same defaults, and `orphera` is on their
+`PATH`.
+
+**Without a package.** `make install` puts the same layout under `PREFIX` (default `/usr/local`) from jars already built:
+build as yourself first, then install. `DESTDIR` stages it for a distribution's own packaging, and `make uninstall` removes
+it (never `/etc/orphera` or anyone's `~/.config/orphera`). `make install` refuses to overwrite the checkout launcher that
+`make orpheracli` puts in `/usr/local/bin`; on a development machine like scala0 use one or the other, not both.
+
+```sh
+make cli-stage                       # builds the jars (and stages the package tree)
+sudo make install                    # /usr/local/bin/orphera, /usr/local/lib/orphera, /usr/local/share/orphera
+make install PREFIX=$HOME/.local     # no root; add ~/.local/bin to PATH
+```
+
+The tarball unpacks as `orphera-<version>/` with `bin/`, `lib/orphera/` and `share/orphera/` in it. Without root, unpack it
+anywhere, set `ORPHERA_SITE_DIR` to a directory of your own, and run `<dir>/bin/orphera`.
 
 A file a playbook names with a relative path (`src = "files/motd"`) is read from the current directory when it is there, as before,
-and otherwise from `$ORPHERA_ROOT` (`/opt/orphera` in the package), so the packaged playbooks work from any directory.
+and otherwise from `$ORPHERA_ROOT` (`/usr/share/orphera` in the package), so the packaged playbooks work from any directory.
 
 Known limit: `rebuild_openstack_from_scratch.sh` needs the agent `.deb` named with `-a` (or in the directory you run it from), as the
 command-line package does not contain it.

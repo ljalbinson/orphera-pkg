@@ -66,7 +66,9 @@ orphera version
 It prints a warning that it has no inventory, and its own version. That is right: you have not made
 one yet.
 
-The program lives in `/opt/orphera` and is read-only. Your own files (inventory, configs, certificate
+The program is installed in the standard places and is read-only: the command in `/usr/bin`, its jars in
+`/usr/lib/orphera`, the playbooks and scripts in `/usr/share/orphera`, the documentation in
+`/usr/share/doc/orphera`. Your own files (inventory, configs, certificate
 authority) go in `~/.config/orphera`, next to your secret store, so two people using one machine each have
 their own. What `orphera` writes as it runs goes in `~/.local/state/orphera`. A team that shares one
 inventory and one authority can use `/etc/orphera` instead: see *Where the inventory, configs and playbooks
@@ -205,7 +207,7 @@ finished. The other task types are `copy`, `remove`, `dist_upgrade`, `reboot`, `
 
 For anything more than a list of tasks (loops, computed values, passwords from the secret store), write
 the playbook in Scala and give `orphera playbook` the `.scala` file. It is compiled when it runs, and no
-build tree is needed. The package ships a library of working examples in `/opt/orphera/manifests`: name
+build tree is needed. The package ships a library of working examples in `/usr/share/orphera/manifests`: name
 one without its directory, for instance `orphera playbook arithmetic_demo.scala`. See *Run-time-compiled
 Scala scripts*.
 
