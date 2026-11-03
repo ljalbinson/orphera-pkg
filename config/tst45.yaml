@@ -8,7 +8,7 @@ params:
   - tree
   - iperf3
   nic0:
-    nic: enp1s0
+    nic: eth0
     ipaddress: '10.10.5.57'
     gateway: '10.10.5.1'
     bridge: br-net105

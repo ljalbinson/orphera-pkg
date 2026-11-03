@@ -8,7 +8,7 @@ params:
   - tree
   - iperf3
   nic0:
-    nic: enp1s0
+    nic: eth0
     ipaddress: '10.10.5.55'
     gateway: '10.10.5.1'
     bridge: br-net105
@@ -28,7 +28,7 @@ params:
   host_type: host-passthrough
   dns2: '192.168.1.71'
   disks:
-  - disk: 16
-  - disk: 64
+  - disk: 128
+  - disk: 128
   cpu: '4'
   pdisks: []
