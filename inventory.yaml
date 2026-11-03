@@ -267,6 +267,7 @@ nodes:
   #   tst44-tst47  OSS: two OSTs each, OST0000-OST0007
   #   tst48        MDS: MDT1 on data1 (the second metadata target, DNE)
   #   tst49        Ubuntu 24.04 client (no targets; lustre_client.scala)
+  #   tst50        Rocky 9 client (no targets; lustre_cluster.scala)
   # lustre_targets: <role>:<disk> pairs, role mgt, mdtN or ostN (N = the target index,
   # unique across the file system). Disk paths are the fixed-serial by-id names the
   # provisioning playbooks give the `disks:` in config/<node>.yaml (never /dev/sdX).
@@ -306,6 +307,11 @@ nodes:
     host: tst49.ljalbinson.com
     vars:
       cluster_ip: "10.10.5.61"
+  # tst50: Lustre client on Rocky Linux 9, no targets (manifests/lustre_cluster.scala, LUSTRE_CLIENTS), /mnt/lfs0.
+  - name: tst50
+    host: tst50.ljalbinson.com
+    vars:
+      cluster_ip: "10.10.5.62"
 
   - name: gs1
     host: gs1.ljalbinson.com

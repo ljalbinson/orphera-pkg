@@ -9,18 +9,27 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 //   tst43        MGS + MDS: MGT on data1, MDT0 on data2; also the test client
 //   tst44-tst47  OSS: two OSTs each (OST0000-OST0007)
 //   tst48        MDS: MDT1, the second metadata target (DNE)
-// The client mount is /mnt/<fsname> on the client nodes (default tst43).
+// The client mount is /mnt/<fsname> on the client nodes (default tst43 and
+// tst50). A client that is not a server (tst50, Rocky 9, no targets) gets the
+// Lustre client packages instead of the server ones, and the same kernel,
+// reboot and LNet stages. Ubuntu clients: lustre_client.scala.
 //
 // Run:   orphera cluster-playbook manifests/lustre_cluster.scala
 //
 // Stages, in order:
 //   preflight        every server: EL9, its target disks exist, the Lustre and
 //                    e2fsprogs repositories answer. Nothing is changed.
+//   preflight-clients  every client that is not a server: EL9, the Lustre
+//                    client repository answers. Nothing is changed.
 //   packages         repository file, the Lustre server packages and, when the
 //                    Lustre repository has one, its own kernel; SELinux set to
 //                    permissive (Lustre servers are not run enforcing)
-//   boot-kernel      makes the newest kernel that has the Lustre modules the
-//                    default, and locks the kernel and Lustre packages with dnf
+//   packages-clients the client repository and lustre-client, kmod-lustre-client
+//                    (SELinux left as it is: the client supports enforcing)
+//   boot-kernel      makes the newest installed kernel that has the Lustre
+//                    modules the default (when none has, installs the kernel the
+//                    modules were built for, from the Rocky vault if it is no
+//                    longer in the current repositories), and locks the kernel and Lustre packages with dnf
 //                    versionlock so a later `dnf upgrade` cannot move them apart
 //   reboot           only on the nodes not already running that kernel
 //   lnet             LNet on tcp0, on the interface that holds cluster_ip; port
@@ -44,8 +53,8 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 //   LUSTRE_FSNAME    file system name, at most 8 characters      default lfs0
 //   LUSTRE_MGS       the node with the MGT                        default tst43
 //   LUSTRE_SERVERS   every node with targets (space separated)    default tst43-tst48
-//   LUSTRE_CLIENTS   nodes that mount the file system; each must also be a
-//                    server here (they have the packages)         default tst43
+//   LUSTRE_CLIENTS   nodes that mount the file system: servers, or Rocky 9
+//                    nodes with no targets                       default tst43 tst50
 //   LUSTRE_RELEASE   directory under .../public/lustre/           default lustre-2.17.0
 //   LUSTRE_EL        EL build directory of that release            default el9.7
 //
@@ -63,18 +72,21 @@ object lustre_cluster extends OrpheraClusterPlaybook:
   private val fsName = sys.env.getOrElse("LUSTRE_FSNAME", "lfs0")
   private val mgs = sys.env.getOrElse("LUSTRE_MGS", "tst43")
   private val servers = envList("LUSTRE_SERVERS", "tst43 tst44 tst45 tst46 tst47 tst48")
-  private val clients = envList("LUSTRE_CLIENTS", "tst43")
+  private val clients = envList("LUSTRE_CLIENTS", "tst43 tst50")
   private val release = sys.env.getOrElse("LUSTRE_RELEASE", "lustre-2.17.0")
   private val el = sys.env.getOrElse("LUSTRE_EL", "el9.7")
 
   require(fsName.matches("[A-Za-z0-9_]{1,8}"), s"LUSTRE_FSNAME '$fsName': 1-8 letters, digits or _")
   require(servers.contains(mgs), s"LUSTRE_MGS $mgs is not in LUSTRE_SERVERS")
-  require(
-    clients.forall(servers.contains),
-    s"LUSTRE_CLIENTS must be servers too (no client-only playbook yet): ${clients.filterNot(servers.contains).mkString(" ")}"
-  )
+  require(clients.nonEmpty, "LUSTRE_CLIENTS is empty")
+
+  // Clients that are not servers: they get the client packages.
+  private val clientOnly = clients.filterNot(servers.contains)
+  // Every node that needs the Lustre kernel, a reboot check and LNet.
+  private val allNodes = servers ++ clientOnly
 
   private val serverRepo = s"https://downloads.whamcloud.com/public/lustre/$release/$el/server/"
+  private val clientRepo = s"https://downloads.whamcloud.com/public/lustre/$release/$el/client/"
   private val e2fsRepo = "https://downloads.whamcloud.com/public/e2fsprogs/latest/el9/"
 
   // The MGS NID, rendered by the orchestrator. tcp0 is written `@tcp`.
@@ -88,6 +100,7 @@ object lustre_cluster extends OrpheraClusterPlaybook:
       .replace("@FSNAME@", fsName)
       .replace("@MGSNID@", mgsNid)
       .replace("@SERVER_REPO@", serverRepo)
+      .replace("@CLIENT_REPO@", clientRepo)
       .replace("@E2FS_REPO@", e2fsRepo)
       .replace("@RELEASE@", release)
       .replace("@EL@", el)
@@ -116,6 +129,30 @@ object lustre_cluster extends OrpheraClusterPlaybook:
       |    fail "cannot read ${u}repodata/repomd.xml (wrong LUSTRE_RELEASE/LUSTRE_EL, or no route to downloads.whamcloud.com)"
       |done
       |echo "$(hostname -s): EL $VERSION_ID, repositories reachable"""".stripMargin)
+
+  private val clientPreflightScript = fill(helpers +
+    """set -e
+      |. /etc/os-release
+      |case "$ID" in rocky|almalinux|rhel) ;; *) fail "runs $ID; use lustre_client.scala for Ubuntu clients" ;; esac
+      |[ "${VERSION_ID%%.*}" = 9 ] || fail "is EL $VERSION_ID; the Lustre @RELEASE@ @EL@ client is built for EL9"
+      |curl -fsS -o /dev/null --max-time 30 "@CLIENT_REPO@repodata/repomd.xml" ||
+      |  fail "cannot read @CLIENT_REPO@repodata/repomd.xml (wrong LUSTRE_RELEASE/LUSTRE_EL, or no route to downloads.whamcloud.com)"
+      |echo "$(hostname -s): EL $VERSION_ID, client repository reachable"""".stripMargin)
+
+  private val clientPackagesScript = fill(helpers +
+    """set -e
+      |cat > /etc/yum.repos.d/orphera-lustre.repo <<'REPO'
+      |# Managed by Orphera (lustre_cluster.scala).
+      |[orphera-lustre-client]
+      |name=Lustre @RELEASE@ client (@EL@)
+      |baseurl=@CLIENT_REPO@
+      |enabled=1
+      |gpgcheck=0
+      |REPO
+      |dnf -y -q makecache
+      |dnf -y -q install python3-dnf-plugin-versionlock
+      |dnf -y install lustre-client kmod-lustre-client
+      |echo "installed: $(rpm -q lustre-client kmod-lustre-client | tr '\n' ' ')"""".stripMargin)
 
   private val packagesScript = fill(helpers +
     """set -e
@@ -155,10 +192,25 @@ object lustre_cluster extends OrpheraClusterPlaybook:
       |cands=$(for d in /lib/modules/*; do
       |  find "$d" -name 'lustre.ko*' -print -quit 2>/dev/null | grep -q . && echo "${d##*/}"
       |done | sort -rV)
-      |K=$(printf '%s\n' "$cands" | grep _lustre | head -1)
-      |[ -n "$K" ] || K=$(printf '%s\n' "$cands" | head -1)
-      |[ -n "$K" ] || fail "no installed kernel has the Lustre module"
-      |[ -e "/boot/vmlinuz-$K" ] || fail "/boot/vmlinuz-$K is missing"
+      |[ -n "$cands" ] || fail "no kernel directory under /lib/modules has the Lustre module"
+      |# Prefer kernels that are installed (a kmod package leaves its modules under the
+      |# kernel it was built for even when that kernel is not installed).
+      |inst=$(printf '%s\n' "$cands" | while read -r k; do [ -e "/boot/vmlinuz-$k" ] && echo "$k"; done)
+      |K=$(printf '%s\n' "$inst" | grep _lustre | head -1)
+      |[ -n "$K" ] || K=$(printf '%s\n' "$inst" | head -1)
+      |if [ -z "$K" ]; then
+      |  K=$(printf '%s\n' "$cands" | head -1)
+      |  echo "the Lustre modules are built for $K, which is not installed: installing it"
+      |  M=$(rpm -E %rhel)
+      |  V=@EL@; V=${V#el}
+      |  dnf -y -q install "kernel-$K" 2>/dev/null ||
+      |    dnf -y -q --repofrompath="orphera-rocky-vault,https://dl.rockylinux.org/vault/rocky/$V/BaseOS/x86_64/os/" \
+      |      --setopt=orphera-rocky-vault.gpgcheck=1 --setopt="orphera-rocky-vault.gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-Rocky-$M" \
+      |      install "kernel-$K" ||
+      |    fail "kernel $K is in neither the enabled repositories nor the Rocky $V vault"
+      |  depmod -a "$K"
+      |  [ -e "/boot/vmlinuz-$K" ] || fail "/boot/vmlinuz-$K is missing after installing kernel-$K"
+      |fi
       |grubby --set-default "/boot/vmlinuz-$K" >/dev/null
       |# Lock the kernel packages of K and the Lustre packages at what is installed.
       |N=$(rpm -qf "/boot/vmlinuz-$K" --qf '%{version}-%{release}\n' | head -1)
@@ -266,28 +318,38 @@ object lustre_cluster extends OrpheraClusterPlaybook:
   private def sh(script: String, timeout: Int = 60, register: String = ""): Task =
     Task.RunCommand(List("sh", "-c", script), timeoutSeconds = timeout, register = register)
 
-  val playbook: ClusterPlaybook =
-    clusterPlaybook("lustre-cluster")(
+  private val stages: List[Stage] =
+    List(
       stage("preflight", servers*)
         .task("check OS, target disks and repositories")(sh(preflightScript, 120))
         .build,
       stage("packages", servers*)
         .task("Lustre repositories, kernel and server packages")(sh(packagesScript, 1800))
-        .build,
-      stage("boot-kernel", servers*)
+        .build
+    ) ++ (if clientOnly.isEmpty then Nil
+    else
+      List(
+        stage("preflight-clients", clientOnly*)
+          .task("check OS and the client repository")(sh(clientPreflightScript, 120))
+          .build,
+        stage("packages-clients", clientOnly*)
+          .task("Lustre client repository and packages")(sh(clientPackagesScript, 1800))
+          .build
+      )) ++ List(
+      stage("boot-kernel", allNodes*)
         .task("default to the Lustre kernel and lock the packages")(sh(bootKernelScript, 300))
         .task("is a reboot needed")(sh(needsRebootScript, register = "lustre_reboot"))
         .build,
-      stage("reboot", servers*)
+      stage("reboot", allNodes*)
         .task("reboot into the Lustre kernel")(
           Task.Reboot(waitForReturn = true, waitTimeoutSeconds = 600)
         )
         .when("lustre_reboot" === "yes")
         .build,
-      stage("lnet", servers*)
+      stage("lnet", allNodes*)
         .task("LNet on tcp0")(sh(lnetScript, 120))
         .build,
-      stage("lnet-ping", servers*)
+      stage("lnet-ping", allNodes*)
         .task("reach the MGS over LNet")(sh(lnetPingScript, 120))
         .build,
       stage("format", servers*)
@@ -305,7 +367,9 @@ object lustre_cluster extends OrpheraClusterPlaybook:
       stage("mount-client", clients*)
         .task(s"mount $fsName at /mnt/$fsName")(sh(clientMountScript, 300))
         .build,
-      stage("verify", clients.head)
+      stage("verify", clients*)
         .task("every MDT and OST is visible to the client")(sh(verifyScript, 300))
         .build
     )
+
+  val playbook: ClusterPlaybook = clusterPlaybook("lustre-cluster")(stages*)

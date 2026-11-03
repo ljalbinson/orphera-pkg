@@ -12,11 +12,15 @@
 #     cache is dropped, and has objects on all 8 OSTs;
 #   - DNE: a directory placed on MDT1 (tst48) keeps its files' metadata there,
 #     and a directory striped over both MDTs spreads its files over both;
+#   - the Rocky client tst50 (no targets): EL9, its NID, the Lustre client
+#     packages version-locked, 2 MDTs and 8 OSTs, and files written on tst43
+#     and tst50 read back identically on the other;
 #   - lustre_cluster.scala run again changes nothing: the targets are reported
 #     as already formatted and the file is still there, unchanged.
 # The file system is left built; the test file is removed at the end.
 #
-# Prerequisites: tst43-tst48 exist with an agent each (Rocky Linux 9), and
+# Prerequisites: tst43-tst50 exist (tst49, the Ubuntu client, is unmounted by
+# the teardown; run lustre_client.scala afterwards to remount it) with an agent each (Rocky Linux 9), and
 # reach downloads.whamcloud.com. THE TEARDOWN WIPES THE TARGET DISKS.
 #
 # Run from scala0, in orphera-pkg:   manifests/test_lustre.sh
@@ -28,6 +32,7 @@ cd "$(dirname "$0")/.." || exit 1
 
 FS="lfs0"
 CLIENT="tst43"
+ROCKY_CLIENT="tst50"
 SERVERS="tst43 tst44 tst45 tst46 tst47 tst48"
 WANT_MDT=2
 WANT_OST=8
@@ -105,6 +110,27 @@ written=$(value_of WRITE "$out")
 assert_equals "data read back after dropping the cache matches" "$written" "$(value_of READ "$out")" "$out"
 assert_equals "file striped over $WANT_OST OSTs" "$WANT_OST" "$(value_of STRIPES "$out")" "$out"
 assert_equals "file has objects on $WANT_OST distinct OSTs" "$WANT_OST" "$(value_of OSTS "$out")" "$out"
+
+log "Rocky client $ROCKY_CLIENT"
+ip=$(grep -A3 "name: $ROCKY_CLIENT\$" inventory.yaml | grep -o 'cluster_ip: "[^"]*"' | cut -d'"' -f2)
+out=$(run_on "$ROCKY_CLIENT" '. /etc/os-release; echo "EL=${VERSION_ID%%.*}"
+echo "NIDS=$(lctl list_nids | tr "\n" ",")"
+echo "LOCKED=$(dnf -q versionlock list 2>/dev/null | grep -c kmod-lustre-client)"
+echo "MDT=$(lfs df /mnt/'"$FS"' | grep -c "\[MDT:") OST=$(lfs df /mnt/'"$FS"' | grep -c "\[OST:")"')
+assert_equals "$ROCKY_CLIENT runs EL9" "9" "$(value_of EL "$out")" "$out"
+assert_equals "$ROCKY_CLIENT NID is $ip@tcp" "$ip@tcp," "$(value_of NIDS "$out")" "$out"
+assert_equals "$ROCKY_CLIENT has kmod-lustre-client version-locked" "1" "$(value_of LOCKED "$out")" "$out"
+assert_equals "$ROCKY_CLIENT sees $WANT_MDT MDTs" "$WANT_MDT" "$(value_of MDT "$out")" "$out"
+assert_equals "$ROCKY_CLIENT sees $WANT_OST OSTs" "$WANT_OST" "$(value_of OST "$out")" "$out"
+out=$(run_on "$ROCKY_CLIENT" "echo SUM=\$(md5sum < $DIR/data | cut -d' ' -f1)")
+assert_equals "file written on $CLIENT reads back on $ROCKY_CLIENT" "$written" "$(value_of SUM "$out")" "$out"
+out=$(run_on "$ROCKY_CLIENT" "set -e
+dd if=/dev/urandom of=$DIR/from-$ROCKY_CLIENT bs=1M count=64 status=none
+sync
+echo SUM=\$(md5sum < $DIR/from-$ROCKY_CLIENT | cut -d' ' -f1)")
+rsum=$(value_of SUM "$out")
+other=$(run_on "$CLIENT" "echo SUM=\$(md5sum < $DIR/from-$ROCKY_CLIENT | cut -d' ' -f1)")
+assert_equals "file written on $ROCKY_CLIENT reads back on $CLIENT" "$rsum" "$(value_of SUM "$other")" "$out$other"
 
 log "metadata on both MDTs (DNE)"
 out=$(run_on "$CLIENT" "set -e
