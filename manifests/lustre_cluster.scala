@@ -294,12 +294,14 @@ object lustre_cluster extends OrpheraClusterPlaybook:
   private val clientMountScript = fill(helpers +
     """set -e
       |MP=/mnt/@FSNAME@
-      |# A Lustre mount whose root cannot be read is dead (the client was evicted, or
-      |# the file system was rebuilt or force-unmounted under it): clear it and remount.
+      |# A Lustre mount whose root cannot be read within 15 s is dead (the client was
+      |# evicted, or the file system was rebuilt or force-unmounted under it): detach
+      |# it and remount. stat on such a mount can block instead of failing, hence the
+      |# timeout; and the lazy unmount, which does not wait for the servers.
       |if grep -q " $MP lustre " /proc/mounts; then
-      |  if stat -t "$MP" >/dev/null 2>&1; then echo "$MP already mounted"; exit 0; fi
-      |  echo "$MP is a dead Lustre mount ($(stat -t "$MP" 2>&1 | sed 's/.*: //')): unmounting it"
-      |  umount -f "$MP" 2>/dev/null || umount -l "$MP" || fail "cannot unmount the dead mount at $MP"
+      |  if timeout 15 stat -t "$MP" >/dev/null 2>&1; then echo "$MP already mounted"; exit 0; fi
+      |  echo "$MP is a dead Lustre mount: detaching it (umount -l)"
+      |  umount -l "$MP" || fail "cannot detach the dead mount at $MP"
       |fi
       |mkdir -p "$MP"
       |mount -t lustre @MGSNID@:/@FSNAME@ "$MP" || fail "client mount of @MGSNID@:/@FSNAME@ failed"
