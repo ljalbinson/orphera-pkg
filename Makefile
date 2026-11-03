@@ -99,9 +99,11 @@ reload:
 
 # Counts the source in the repository: files git tracks, plus new ones not yet added, and never what .gitignore
 # excludes (the package staging trees pkg/, pkg-cli/ and pkg-cli-rpm/ hold copies of the manifests, and build output
-# is elsewhere). The protobuf-generated Go in internal/pb/ is left out.
+# is elsewhere). The protobuf-generated Go in internal/pb/ is left out. Prints the raw line counts, then a table of
+# the Scala without comments and blank lines (utils/count-scala-lines.py).
 lines:
 	git ls-files -co --exclude-standard '*.scala' | xargs wc -l | tail -1
+	git ls-files -co --exclude-standard '*.scala' | python3 utils/count-scala-lines.py
 	git ls-files -co --exclude-standard '*.go' | grep -v '/internal/pb/' | xargs wc -l | tail -1
 
 deploy-agents:
