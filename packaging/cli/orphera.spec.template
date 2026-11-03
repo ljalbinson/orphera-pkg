@@ -13,9 +13,9 @@ AutoReqProv:    no
 %global __os_install_post %{nil}
 
 %description
-The orphera command, its playbooks (manifests) and helper scripts. Installs under
-/opt/orphera; the inventory, per-VM configs and the certificate authority belong in
-~/.config/orphera (or /etc/orphera).
+The orphera command, its playbooks (manifests) and helper scripts. Installs in
+/usr/bin, /usr/lib/orphera and /usr/share/orphera; the inventory, per-VM configs and the
+certificate authority belong in ~/.config/orphera (or /etc/orphera).
 
 %prep
 
@@ -28,9 +28,11 @@ rm -rf %{buildroot}/DEBIAN
 
 %files
 %defattr(-,root,root,-)
-/opt/orphera
 /usr/bin/orphera
-/etc/bash_completion.d/orphera
+/usr/lib/orphera
+/usr/share/orphera
+/usr/share/doc/orphera
+/usr/share/bash-completion/completions/orphera
 %dir /etc/orphera
 %dir /etc/orphera/config
 %dir /etc/orphera/certs

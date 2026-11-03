@@ -7,13 +7,17 @@
 # `utils/sql-to-yaml.py --mariadb "..." --out DIR` and point both variables at DIR.
 # Sourced, not run.
 
-# In an installed package (lib/orphera-env.sh beside utils/) the site defaults, and the orphera
-# command on PATH, come from the installation; in a checkout there is no such file and nothing changes.
+# In an installation (utils/ is PREFIX/share/orphera/utils, and PREFIX/lib/orphera/orphera-env.sh exists) the
+# site defaults, and the orphera command on PATH, come from the installation; in a checkout there is no such
+# file and nothing changes.
 _orphera_utils_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-if [ -f "$_orphera_utils_dir/../lib/orphera-env.sh" ]; then
-  ORPHERA_PREFIX=$(cd "$_orphera_utils_dir/.." && pwd)
+if [ "${_orphera_utils_dir%/share/orphera/utils}" != "$_orphera_utils_dir" ] &&
+  [ -f "${_orphera_utils_dir%/share/orphera/utils}/lib/orphera/orphera-env.sh" ]; then
+  ORPHERA_PREFIX=${_orphera_utils_dir%/share/orphera/utils}
+  [ -n "$ORPHERA_PREFIX" ] || ORPHERA_PREFIX=/
   export ORPHERA_PREFIX
-  . "$_orphera_utils_dir/../lib/orphera-env.sh"
+  # shellcheck disable=SC1091
+  . "$ORPHERA_PREFIX/lib/orphera/orphera-env.sh"
   case ":$PATH:" in
     *":$ORPHERA_PREFIX/bin:"*) ;;
     *) PATH="$ORPHERA_PREFIX/bin:$PATH"; export PATH ;;

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-.PHONY: all release rpm-if-available go-agent-if-available bump-patch _build_all clean test assembly pkg-stage deb rpm verify certs certs-clean fmt fmt-manifests scripting lint fix cli-stage cli-deb cli-rpm cli-tar cli-package check-package
+.PHONY: all release rpm-if-available go-agent-if-available bump-patch _build_all clean test assembly pkg-stage deb rpm verify certs certs-clean fmt fmt-manifests scripting lint fix cli-stage cli-deb cli-rpm cli-tar cli-package check-package install uninstall
 
 VERSION_FILE := VERSION
 VERSION      := $(shell cat $(VERSION_FILE))
@@ -164,7 +164,8 @@ scripting:
 sleep30:
 	sleep 30
 
-# The orphera command-line package (/opt/orphera): deb, rpm and tarball. Separate from the
+# The orphera command-line package (standard directories under /usr: bin, lib/orphera, share/orphera,
+# share/doc/orphera; see packaging/cli/stage.sh): deb, rpm and tarball. Separate from the
 # agent package above; staged in $(CLI_STAGE) so the two never touch each other.
 CLI_STAGE := pkg-cli
 CLI_DEB := orphera_$(VERSION)_all.deb
@@ -189,10 +190,31 @@ cli-rpm: cli-stage
 	cp $(CLI_STAGE)-rpm/RPMS/noarch/$(CLI_RPM) .
 	@echo "Built $(CLI_RPM)"
 
-# Unpacks as orphera-<version>/ (bin, lib, manifests, ...). Set ORPHERA_SITE_DIR to run it without root.
+# Unpacks as orphera-<version>/ (bin, lib/orphera, share/orphera, ...). Set ORPHERA_SITE_DIR to run it without root.
 cli-tar: cli-stage
-	tar --owner=0 --group=0 --transform 's,^orphera,orphera-$(VERSION),' -C $(CLI_STAGE)/opt -czf $(CLI_TAR) orphera
+	tar --owner=0 --group=0 --transform 's,^,orphera-$(VERSION)/,' -C $(CLI_STAGE)/usr -czf $(CLI_TAR) bin lib share
 	@echo "Built $(CLI_TAR)"
+
+# Installs the command line from the jars already built (it does not build: run `make cli-stage` or
+# `sbt orchestrator/assembly scripting/assembly` first, as yourself), in the same layout as the packages:
+#   sudo make install                          # PREFIX=/usr/local
+#   make install PREFIX=$$HOME/.local          # no root; /etc/orphera is then not created
+#   make install DESTDIR=/tmp/root PREFIX=/usr # staged, for a distribution's own packaging
+# It refuses to replace a checkout launcher that `make orpheracli` put at the same place.
+PREFIX ?= /usr/local
+CLI_ORCH_JAR := orchestrator/target/scala-3.8.4/orchestrator-assembly-$(VERSION).jar
+CLI_SCRIPTING_JAR := scripting/target/scala-3.8.4/scripting-assembly-$(VERSION).jar
+
+install:
+	@[ -f $(CLI_ORCH_JAR) ] && [ -f $(CLI_SCRIPTING_JAR) ] || { echo "the $(VERSION) jars are not built: run 'make cli-stage' (not as root) first" >&2; exit 1; }
+	@if grep -qs 'Runs the orchestrator directly from its assembled jar' "$(DESTDIR)$(PREFIX)/bin/orphera"; then 	  echo "$(DESTDIR)$(PREFIX)/bin/orphera is the checkout launcher from 'make orpheracli': choose another PREFIX, or remove it first" >&2; exit 1; fi
+	@tmp=$$(mktemp -d) && trap 'rm -rf "$$tmp"' EXIT && 	  packaging/cli/stage.sh --prefix $(PREFIX) --no-deb "$$tmp/s" $(VERSION) $(CLI_ORCH_JAR) $(CLI_SCRIPTING_JAR) >/dev/null && 	  rm -rf "$(DESTDIR)$(PREFIX)/lib/orphera" "$(DESTDIR)$(PREFIX)/share/orphera" "$(DESTDIR)$(PREFIX)/share/doc/orphera" && 	  mkdir -p "$(DESTDIR)$(PREFIX)" && cp -R "$$tmp/s$(PREFIX)/." "$(DESTDIR)$(PREFIX)/" && 	  if mkdir -p "$(DESTDIR)/etc/orphera/config" "$(DESTDIR)/etc/orphera/certs" 2>/dev/null; then :; 	  else echo "note: could not create $(DESTDIR)/etc/orphera (no matter for a per-user install)"; fi
+	@echo "Installed orphera $(VERSION) under $(DESTDIR)$(PREFIX)"
+
+# Removes what `make install` put under PREFIX. Never touches /etc/orphera or anyone's ~/.config/orphera.
+uninstall:
+	rm -f "$(DESTDIR)$(PREFIX)/bin/orphera" "$(DESTDIR)$(PREFIX)/share/bash-completion/completions/orphera"
+	rm -rf "$(DESTDIR)$(PREFIX)/lib/orphera" "$(DESTDIR)$(PREFIX)/share/orphera" "$(DESTDIR)$(PREFIX)/share/doc/orphera"
 
 cli-package: cli-deb cli-tar
 	@if command -v rpmbuild >/dev/null 2>&1; then $(MAKE) cli-rpm; else echo "rpmbuild not installed: skipping $(CLI_RPM)"; fi

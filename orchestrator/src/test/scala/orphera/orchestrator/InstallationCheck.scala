@@ -125,7 +125,7 @@ object InstallationCheck:
 
     // Files named by a playbook
     import java.nio.file.Paths
-    val rootEnv = Map(Installation.RootEnv -> "/opt/orphera").get
+    val rootEnv = Map(Installation.RootEnv -> "/usr/share/orphera").get
     val none: java.nio.file.Path => Boolean = _ => false
     check(
       "a file in the current directory is used as given",
@@ -136,9 +136,9 @@ object InstallationCheck:
       "a file missing here is taken from ORPHERA_ROOT",
       Installation.sourceOf(
         rootEnv,
-        p => p == Paths.get("/opt/orphera/files/motd"),
+        p => p == Paths.get("/usr/share/orphera/files/motd"),
         "files/motd"
-      ).toString == "/opt/orphera/files/motd"
+      ).toString == "/usr/share/orphera/files/motd"
     )
     check(
       "a file in both places is the one in the current directory",

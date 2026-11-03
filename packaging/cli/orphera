@@ -1,10 +1,10 @@
 #!/bin/sh
 # SPDX-License-Identifier: Apache-2.0
-# The orphera command of an installed package (/opt/orphera/bin/orphera, usually reached as
-# /usr/bin/orphera). It works out where it is installed from where this file is, so the same
-# tree works under /opt/orphera or anywhere a tarball is unpacked, takes the site defaults from
-# lib/orphera-env.sh (inventory, configs, certificates and playbooks; each can be overridden by
-# the environment or by -I, -c and -m), and runs from the current directory.
+# The orphera command of an installed package (/usr/bin/orphera, or <prefix>/bin/orphera). It works
+# out the installation prefix from where this file is (its bin/..), so the same tree works under /usr,
+# /usr/local or wherever a tarball is unpacked; takes the site defaults from lib/orphera/orphera-env.sh
+# (inventory, configs, certificates and playbooks; each can be overridden by the environment or by -I,
+# -c and -m); and runs from the current directory.
 #
 # Not the launcher of a checkout (utils/orphera), which runs from the repository.
 
@@ -22,8 +22,12 @@ done
 ORPHERA_PREFIX=$(cd "$(dirname "$self")/.." && pwd)
 export ORPHERA_PREFIX
 
+if [ ! -f "$ORPHERA_PREFIX/lib/orphera/orphera-env.sh" ]; then
+  echo "Error: $ORPHERA_PREFIX/lib/orphera/orphera-env.sh not found: the installation at $ORPHERA_PREFIX is incomplete" >&2
+  exit 1
+fi
 # shellcheck disable=SC1091
-. "$ORPHERA_PREFIX/lib/orphera-env.sh"
+. "$ORPHERA_PREFIX/lib/orphera/orphera-env.sh"
 
 if [ ! -f "$ORPHERA_ORCHESTRATOR_JAR" ]; then
   echo "Error: $ORPHERA_ORCHESTRATOR_JAR not found: the installation at $ORPHERA_PREFIX is incomplete" >&2
