@@ -293,9 +293,16 @@ object lustre_cluster extends OrpheraClusterPlaybook:
 
   private val clientMountScript = fill(helpers +
     """set -e
-      |mkdir -p /mnt/@FSNAME@
-      |if mountpoint -q /mnt/@FSNAME@; then echo "/mnt/@FSNAME@ already mounted"; exit 0; fi
-      |mount -t lustre @MGSNID@:/@FSNAME@ /mnt/@FSNAME@ || fail "client mount of @MGSNID@:/@FSNAME@ failed"
+      |MP=/mnt/@FSNAME@
+      |# A Lustre mount whose root cannot be read is dead (the client was evicted, or
+      |# the file system was rebuilt or force-unmounted under it): clear it and remount.
+      |if grep -q " $MP lustre " /proc/mounts; then
+      |  if stat -t "$MP" >/dev/null 2>&1; then echo "$MP already mounted"; exit 0; fi
+      |  echo "$MP is a dead Lustre mount ($(stat -t "$MP" 2>&1 | sed 's/.*: //')): unmounting it"
+      |  umount -f "$MP" 2>/dev/null || umount -l "$MP" || fail "cannot unmount the dead mount at $MP"
+      |fi
+      |mkdir -p "$MP"
+      |mount -t lustre @MGSNID@:/@FSNAME@ "$MP" || fail "client mount of @MGSNID@:/@FSNAME@ failed"
       |echo "mounted @MGSNID@:/@FSNAME@ at /mnt/@FSNAME@"""".stripMargin)
 
   // Waits up to two minutes for every inventory target to show in `lfs df`.

@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Fixed
+- `lustre_client.scala` and `lustre_cluster.scala`: the client mount stage failed on a dead Lustre mount (the client evicted, or the file system rebuilt or force-unmounted under it): `mkdir` and `mountpoint` on it return "Cannot send after transport endpoint shutdown". A Lustre mount whose root cannot be read is now unmounted (`umount -f`, then `umount -l`) and mounted again. Seen on tst49 after a teardown and rebuild of the servers on 2026-11-03.
 - `k8s_alertmanager.scala`: the custom mail body arrived empty because Orphera renders Mustache in any command text containing `{{`, which removed the `{{ }}` fields before the script ran. The script now writes the body with `@L@`/`@R@` placeholders and turns them into braces on the node; the test checks the loaded config for a template field. Run on the lab 2026-11-02: the mail arrives with the heading, severity, summary, labels and the Grafana link.
 - `k8s_kubeadm_config.scala`: the host-network DNS probe pod now runs in `kube-system`; the `default` namespace enforces the `baseline` PodSecurity level, which rejects `hostNetwork`. Run on the lab 2026-11-02: the DNS check passes and the playbook completes (the Keycloak login, Secret encryption and metrics settings are kept by `kubeadm upgrade diff`; etcd, scheduler and controller manager scraped on all three nodes).
 
