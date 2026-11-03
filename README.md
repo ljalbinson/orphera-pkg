@@ -59,6 +59,7 @@ New to Orphera? [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md) takes you fro
 - [Example: parallel network throughput test (iperf3)](#example-parallel-network-throughput-test-iperf3)
 - [Example: a file server for Linux and macOS](#example-a-file-server-for-linux-and-macos)
 - [Example: a Lustre file system (tst43-tst50)](#example-a-lustre-file-system-tst43-tst50)
+- [Example: a Kubernetes cluster on VMs (tst30-tst41)](#example-a-kubernetes-cluster-on-vms-tst30-tst41)
 - [More playbooks in `manifests/`](#more-playbooks-in-manifests)
 - [Known gaps / not yet built](#known-gaps--not-yet-built)
 
@@ -600,6 +601,8 @@ Verbs that act on nodes (`install`, `remove`, `dist-upgrade`, `run`, `copy`, `wr
 | `facts [--nodes ...]` | Gather and print basic host facts (OS, kernel, CPU/memory, disks, interfaces) from one or more agents |
 | `shutdown --nodes ... --yes [--delay 5]` | Power hosts **off** (`shutdown -P now`, detached via `systemd-run` like `reboot`). Refuses to run without `--yes` or without explicit `--nodes`/`--node-groups` (never defaults to everything), because nothing here can power a host back on. Returns once the agent acknowledges scheduling it — it does not confirm the host actually went down |
 | `uptime [--nodes ...]` | Report each agent's host uptime and 1-minute load average — the concrete way to confirm a `reboot` genuinely rebooted the host, not just that the agent came back |
+| `nodes [--nodes ...] [--node-groups ...] [--exclude-nodes ...]` | Print the node names a selection stands for, one per line (every node when none is given), expanded exactly as for every other command; `nodes --groups` prints each group with its members. Reads the inventory only and contacts no node; `utils/vmctl.sh` uses it for `--node-groups` |
+| `show-config <name>...` | Print each per-VM config as Orphera reads it, one line per config, from the `-c` / `ORPHERA_CONFIG_DIR` location (a directory or a `mariadb://` location), to compare two sources; read-only, contacts no node |
 | `cert-info [--nodes ...]` | Show the TLS certificate each agent presents, read from the TLS handshake (no SSH or token needed): per-node or wildcard, the names it covers, whether it names the host and is signed by `certs/ca.crt`, expiry and days left, serial, SHA-256 fingerprint. Exits non-zero if any node has a problem or cannot be reached — see [Per-node certificates](#per-node-certificates) |
 | `issue-certs [--nodes ...] [--ssh-user] [--ssh-key]` | Give each node a TLS certificate of its own over SSH: the node generates its key (it never leaves the node), the orchestrator signs the request with `certs/ca.key`, and the agent is restarted. A failure changes nothing. Also the way to renew (825 days) or to re-issue after replacing the CA — see [Replacing the CA](#replacing-the-ca) |
 | `audit-log [--limit 20] [--full]` | List recent invocations of mutating commands (install, copy, bootstrap, teardown, playbooks, ...) from `.orphera-audit/audit.jsonl`: the command, its nodes, outcome and duration. Node lists are shown as runs (`tst0-7,tst9-20`), and a `run` script is put on one line; both are cut at 40 and 100 characters unless `--full`. The status is OK, FAILED (exit n, with the error when the command threw), INTERRUPTED (Ctrl-C), RUNNING (its process is still alive), or NO END RECORD (the process ended without writing one: killed, or a record from before 0.1.204). Read-only commands are not recorded, and there is no per-operator identity — only that someone holding the token ran it from this host. The file rotates by size |
@@ -1834,16 +1837,23 @@ patch number.
 
 ## Testing
 
-**What runs today.** `make test` runs `sbt test` and four check programs
-that need no cluster: `ContainerCheck` (49 checks: typed containers and
-`Resource`), `ConfCheck` (49: typed configuration files and catalogues),
-`SecretsCheck` (44: the secret store, `Secret`, masking, the agent
-token and when an agent will start, how a failed call is labelled; the
-checks that use real `age` are skipped when it is not installed) and
-`ThreadInfoCheck` (16: `thread-info`'s counting, report and command
-line), `InventoryCheck` (12: reading `never-reboot`, which nodes it protects, and that `shutdown` refuses and skips them) and `LocationsCheck`
-(25: `-I`/`-c`, the environment variables, config names, reading through a URI) and `DbDocumentsCheck` (the `mariadb://` locations and the rows-to-documents conversion, with no database) and `AgentGuardCheck` (9: the agent refuses a reboot and a
-shutdown on a host with the marker; it never calls the unprotected path, which would really reboot the test machine). Each exits non-zero on a failure.
+**What runs today.** `make test` runs `sbt test` and these check programs, which need no cluster; each prints how
+many checks passed and exits non-zero on a failure:
+
+- `ContainerCheck`: typed containers and `Resource`
+- `ConfCheck`: typed configuration files and catalogues
+- `SecretsCheck`: the secret store, `Secret`, masking, the agent token and when an agent will start, how a failed
+  call is labelled (the checks that use real `age` are skipped when it is not installed)
+- `ThreadInfoCheck`: `thread-info`'s counting, report and command line
+- `AuditLogCheck`: how `audit-log` shortens its Nodes and Detail columns
+- `InventoryCheck`: reading `never-reboot`, which nodes it protects, that `shutdown` refuses and skips them,
+  `--node-groups` and `--exclude-nodes`, `orphera nodes`, and the `deploy-agent`/`bootstrap` agent options
+- `LocationsCheck`: `-I`/`-c`, the environment variables, config names, reading through a URI
+- `InstallationCheck`: where the scripting jar is looked for
+- `CaInitCheck`: `init-ca`
+- `DbDocumentsCheck`: the `mariadb://` locations and the rows-to-documents conversion, with no database
+- `AgentGuardCheck`: the agent refuses a reboot and a shutdown on a host with the marker; it never calls the
+  unprotected path, which would really reboot the test machine
 
 The scripts `manifests/test_*.sh` apply a playbook to the lab and check the
 result independently of the playbook's own health check. They print a
