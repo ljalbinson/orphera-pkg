@@ -253,10 +253,9 @@ object SecretsCheck:
       )
       check(
         "the age file is armoured text without the secret in it",
-        pw.exists(p => {
-          val t = Files.readString(dir.resolve("real.age"));
+        pw.exists: p =>
+          val t = Files.readString(dir.resolve("real.age"))
           t.startsWith("-----BEGIN AGE ENCRYPTED FILE-----") && !t.contains(p)
-        })
       )
       check(
         "a store cannot read a file made for another identity",

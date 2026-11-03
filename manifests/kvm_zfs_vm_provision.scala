@@ -554,7 +554,7 @@ object kvm_zfs_vm_provision extends OrpheraClusterPlaybook:
         .build
     )
 
-object CloudConfigTemplate {
+object CloudConfigTemplate:
 
   def render(
       hostname: String,
@@ -637,9 +637,8 @@ object CloudConfigTemplate {
        |
        |# EOF
        |""".stripMargin
-}
 
-object NetworkConfigTemplate {
+object NetworkConfigTemplate:
 
   /** VLAN settings for nic0. When given, the netplan v2 form is used. */
   final case class Vlan(name: String, id: Int, mtu: Int)
@@ -667,7 +666,7 @@ object NetworkConfigTemplate {
         domainname,
         extraNics
       )
-    vlan match {
+    vlan match
       case Some(v) =>
         s"""network:
            |  version: 2
@@ -711,7 +710,6 @@ object NetworkConfigTemplate {
            |     search:
            |        - $domainname
            |""".stripMargin
-    }
 
   /** netplan v2 form, used only when the VM has extra NICs (a VM without them
     * keeps the original v1 form byte for byte). nic0 is matched by name as
@@ -776,13 +774,11 @@ object NetworkConfigTemplate {
        |        search:
        |        - $domainname
        |""".stripMargin + extraBlocks
-}
 
-object MetaConfigTemplate {
+object MetaConfigTemplate:
 
   def render(): String =
     s"""# instance-id: iid-local24
        |local-hostname: cloudimg
        |""".stripMargin
 
-}
