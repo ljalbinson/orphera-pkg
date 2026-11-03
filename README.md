@@ -2373,7 +2373,7 @@ each with two data disks:
 
 | Node | Role | Targets |
 |---|---|---|
-| tst43 (10.10.5.55) | MGS + MDS, and the test client (`/mnt/lfs0`) | MGT (16 GB), MDT0 (64 GB) |
+| tst43 (10.10.5.55) | MGS + MDS, and the test client (`/mnt/lfs0`) | MGT, MDT0 (128 GB each) |
 | tst44-tst47 (10.10.5.56-59) | OSS | two OSTs each, OST0000-OST0007 (128 GB each) |
 
 Rocky 9, not 10: Lustre 2.17 builds its servers for EL9 only; EL10 servers come with Lustre 2.18. Which
