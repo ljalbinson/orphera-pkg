@@ -24,7 +24,9 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 //   packages         repository file, the Lustre server packages and, when the
 //                    Lustre repository has one, its own kernel; SELinux set to
 //                    permissive (Lustre servers are not run enforcing)
-//   packages-clients the client repository and lustre-client, kmod-lustre-client
+//   packages-clients the client repository, the kernel kmod-lustre-client is built
+//                    for (from the Rocky vault if it has left the current
+//                    repositories), lustre-client and kmod-lustre-client
 //                    (SELinux left as it is: the client supports enforcing)
 //   boot-kernel      makes the newest installed kernel that has the Lustre
 //                    modules the default (when none has, installs the kernel the
@@ -150,7 +152,27 @@ object lustre_cluster extends OrpheraClusterPlaybook:
       |gpgcheck=0
       |REPO
       |dnf -y -q makecache
-      |dnf -y -q install python3-dnf-plugin-versionlock
+      |dnf -y -q install python3-dnf-plugin-versionlock dnf-plugins-core
+      |# kmod-lustre-client is built for one EL9 kernel, and dnf installs it only next
+      |# to a kernel with the same symbol versions (kernel(...) requires). Find that
+      |# kernel from the package's own file list and install it first: from the
+      |# enabled repositories, else from the Rocky vault for @EL@.
+      |D=$(mktemp -d)
+      |trap 'rm -rf "$D"' EXIT
+      |dnf -q download --repo orphera-lustre-client --destdir "$D" kmod-lustre-client >/dev/null
+      |BK=$(rpm -qlp "$D"/kmod-lustre-client-*.rpm 2>/dev/null | sed -n 's|^/lib/modules/\([^/]*\)/.*|\1|p' | head -1)
+      |[ -n "$BK" ] || fail "cannot tell which kernel kmod-lustre-client is built for"
+      |echo "kmod-lustre-client is built for kernel $BK"
+      |if [ ! -e "/boot/vmlinuz-$BK" ]; then
+      |  M=$(rpm -E %rhel)
+      |  V=@EL@; V=${V#el}
+      |  dnf -y -q install "kernel-$BK" 2>/dev/null ||
+      |    dnf -y -q --repofrompath="orphera-rocky-vault,https://dl.rockylinux.org/vault/rocky/$V/BaseOS/x86_64/os/" \
+      |      --setopt=orphera-rocky-vault.gpgcheck=1 --setopt="orphera-rocky-vault.gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-Rocky-$M" \
+      |      install "kernel-$BK" ||
+      |    fail "kernel $BK is in neither the enabled repositories nor the Rocky $V vault"
+      |  echo "installed kernel $BK"
+      |fi
       |dnf -y install lustre-client kmod-lustre-client
       |echo "installed: $(rpm -q lustre-client kmod-lustre-client | tr '\n' ' ')"""".stripMargin)
 
