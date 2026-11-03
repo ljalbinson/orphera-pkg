@@ -58,14 +58,14 @@ object kvm_autostart extends OrpheraClusterPlaybook:
       |names="@NAMES@"
       |if [ -z "$names" ]; then names=$($V list --all --name 2>/dev/null | tr -s '\n ' ' '); fi
       |if [ -z "$names" ]; then echo "no VMs defined on this hypervisor"; exit 0; fi
-      |if [ "@MODE@" = "on" ]; then want=enable; else want=disable; fi
+      |if [ "@MODE@" = "on" ]; then want=enable word=on; else want=disable word=off; fi
       |failed=""
       |for d in $names; do
       |  cur=$($V dominfo "$d" 2>/dev/null | awk '/^Autostart:/ {print $2}')
       |  if [ -z "$cur" ]; then echo "$d is not defined on this hypervisor" >&2; failed="$failed $d"; continue; fi
-      |  if [ "$cur" = "$want" ]; then echo "$d: autostart is already $cur"; continue; fi
+      |  if [ "$cur" = "$want" ]; then echo "$d: autostart is already $word"; continue; fi
       |  if [ "$want" = "enable" ]; then out=$($V autostart "$d" 2>&1); else out=$($V autostart --disable "$d" 2>&1); fi
-      |  if [ $? -eq 0 ]; then echo "$d: autostart $want"; else echo "$d: $out" >&2; failed="$failed $d"; fi
+      |  if [ $? -eq 0 ]; then echo "$d: autostart turned $word"; else echo "$d: $out" >&2; failed="$failed $d"; fi
       |done
       |if [ -n "$failed" ]; then echo "failed:$failed" >&2; exit 1; fi
       |""".stripMargin
