@@ -2,19 +2,21 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # End-to-end test for the Lustre file system (lustre_cluster.scala,
-# lustre_teardown.scala) on tst43-tst47.
+# lustre_teardown.scala) on tst43-tst48.
 #
 # Lifecycle: lustre_teardown -> lustre_cluster, then independent checks run
 # over `orphera run`:
 #   - every server's LNet NID is its cluster_ip on tcp;
-#   - the client (tst43) sees 1 MDT and 8 OSTs;
+#   - the client (tst43) sees 2 MDTs and 8 OSTs;
 #   - a file striped over every OST is written, read back after the client's
 #     cache is dropped, and has objects on all 8 OSTs;
+#   - DNE: a directory placed on MDT1 (tst48) keeps its files' metadata there,
+#     and a directory striped over both MDTs spreads its files over both;
 #   - lustre_cluster.scala run again changes nothing: the targets are reported
 #     as already formatted and the file is still there, unchanged.
 # The file system is left built; the test file is removed at the end.
 #
-# Prerequisites: tst43-tst47 exist with an agent each (Rocky Linux 9), and
+# Prerequisites: tst43-tst48 exist with an agent each (Rocky Linux 9), and
 # reach downloads.whamcloud.com. THE TEARDOWN WIPES THE TARGET DISKS.
 #
 # Run from scala0, in orphera-pkg:   manifests/test_lustre.sh
@@ -26,8 +28,8 @@ cd "$(dirname "$0")/.." || exit 1
 
 FS="lfs0"
 CLIENT="tst43"
-SERVERS="tst43 tst44 tst45 tst46 tst47"
-WANT_MDT=1
+SERVERS="tst43 tst44 tst45 tst46 tst47 tst48"
+WANT_MDT=2
 WANT_OST=8
 DIR="/mnt/$FS/orphera-test"
 
@@ -84,7 +86,7 @@ done
 
 log "targets seen by the client"
 out=$(run_on "$CLIENT" "lfs df /mnt/$FS; echo MDT=\$(lfs df /mnt/$FS | grep -c '\[MDT:') OST=\$(lfs df /mnt/$FS | grep -c '\[OST:')")
-assert_equals "client sees $WANT_MDT MDT" "$WANT_MDT" "$(value_of MDT "$out")" "$out"
+assert_equals "client sees $WANT_MDT MDTs" "$WANT_MDT" "$(value_of MDT "$out")" "$out"
 assert_equals "client sees $WANT_OST OSTs" "$WANT_OST" "$(value_of OST "$out")" "$out"
 
 log "striped write and read"
@@ -103,6 +105,17 @@ written=$(value_of WRITE "$out")
 assert_equals "data read back after dropping the cache matches" "$written" "$(value_of READ "$out")" "$out"
 assert_equals "file striped over $WANT_OST OSTs" "$WANT_OST" "$(value_of STRIPES "$out")" "$out"
 assert_equals "file has objects on $WANT_OST distinct OSTs" "$WANT_OST" "$(value_of OSTS "$out")" "$out"
+
+log "metadata on both MDTs (DNE)"
+out=$(run_on "$CLIENT" "set -e
+lfs mkdir -i 1 $DIR/on-mdt1
+touch $DIR/on-mdt1/f
+echo ON1=\$(lfs getstripe -m $DIR/on-mdt1/f)
+lfs mkdir -c $WANT_MDT $DIR/striped
+for i in \$(seq 1 64); do touch $DIR/striped/f\$i; done
+echo SPREAD=\$(for i in \$(seq 1 64); do lfs getstripe -m $DIR/striped/f\$i; done | sort -u | wc -l)")
+assert_equals "file in a directory on MDT1 has its metadata on MDT1" "1" "$(value_of ON1 "$out")" "$out"
+assert_equals "files in a directory striped over $WANT_MDT MDTs use all $WANT_MDT" "$WANT_MDT" "$(value_of SPREAD "$out")" "$out"
 
 log "re-run (idempotence)"
 rerun=$(orphera cluster-playbook manifests/lustre_cluster.scala 2>&1)

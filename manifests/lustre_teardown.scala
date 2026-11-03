@@ -26,7 +26,7 @@ object lustre_teardown extends OrpheraClusterPlaybook:
     sys.env.getOrElse(name, default).split("[ ,]+").map(_.trim).filter(_.nonEmpty).toList
 
   private val fsName = sys.env.getOrElse("LUSTRE_FSNAME", "lfs0")
-  private val servers = envList("LUSTRE_SERVERS", "tst43 tst44 tst45 tst46 tst47")
+  private val servers = envList("LUSTRE_SERVERS", "tst43 tst44 tst45 tst46 tst47 tst48")
   private val clients = envList("LUSTRE_CLIENTS", "tst43")
 
   private val helpers =

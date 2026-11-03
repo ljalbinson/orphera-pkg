@@ -1,0 +1,33 @@
+# tst48: Lustre MDS: data1 is MDT1, the second metadata target (lustre_cluster.scala).
+# Rocky Linux 9 (Lustre 2.17 servers are built for EL9; EL10 servers need Lustre 2.18).
+params:
+  # Rocky package names (the Ubuntu-only ones are left out).
+  pre_basic_packages:
+  - qemu-guest-agent
+  basic_packages:
+  - tree
+  - iperf3
+  nic0:
+    nic: eth0
+    ipaddress: '10.10.5.60'
+    gateway: '10.10.5.1'
+    bridge: br-net105
+    netmask: '255.255.255.0'
+    table: 1
+    priority: 101
+    cidr: '10.10.5.0/24'
+    mtu: 1500
+  hypervisor: gs3
+  hostname: tst48
+  disk: '32'
+  dns1: '192.168.1.70'
+  memory: '8192'
+  os: Rocky-9-GenericCloud-Base.latest.x86_64.qcow2
+  nics: []
+  domainname: ljalbinson.com
+  host_type: host-passthrough
+  dns2: '192.168.1.71'
+  disks:
+  - disk: 128
+  cpu: '4'
+  pdisks: []

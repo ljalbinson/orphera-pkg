@@ -8,6 +8,7 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 // Layout (inventory.yaml, var `lustre_targets` on each server):
 //   tst43        MGS + MDS: MGT on data1, MDT0 on data2; also the test client
 //   tst44-tst47  OSS: two OSTs each (OST0000-OST0007)
+//   tst48        MDS: MDT1, the second metadata target (DNE)
 // The client mount is /mnt/<fsname> on the client nodes (default tst43).
 //
 // Run:   orphera cluster-playbook manifests/lustre_cluster.scala
@@ -26,7 +27,8 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 //                    988/tcp opened when firewalld is running
 //   lnet-ping        every node reaches the MGS over LNet
 //   format           mkfs.lustre of each target that is still blank (see below)
-//   mount-mgs-mdt    MGT, then the MDTs (on whichever nodes have them)
+//   mount-mgs-mdt0   the MGT, then MDT0
+//   mount-mdt        the other MDTs (MDT0 first, so they register behind it)
 //   mount-ost        the OSTs
 //   mount-client     the client mount
 //   verify           the client sees every MDT and OST in the inventory
@@ -41,7 +43,7 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 // Settings (environment variables):
 //   LUSTRE_FSNAME    file system name, at most 8 characters      default lfs0
 //   LUSTRE_MGS       the node with the MGT                        default tst43
-//   LUSTRE_SERVERS   every node with targets (space separated)    default tst43-tst47
+//   LUSTRE_SERVERS   every node with targets (space separated)    default tst43-tst48
 //   LUSTRE_CLIENTS   nodes that mount the file system; each must also be a
 //                    server here (they have the packages)         default tst43
 //   LUSTRE_RELEASE   directory under .../public/lustre/           default lustre-2.17.0
@@ -60,7 +62,7 @@ object lustre_cluster extends OrpheraClusterPlaybook:
 
   private val fsName = sys.env.getOrElse("LUSTRE_FSNAME", "lfs0")
   private val mgs = sys.env.getOrElse("LUSTRE_MGS", "tst43")
-  private val servers = envList("LUSTRE_SERVERS", "tst43 tst44 tst45 tst46 tst47")
+  private val servers = envList("LUSTRE_SERVERS", "tst43 tst44 tst45 tst46 tst47 tst48")
   private val clients = envList("LUSTRE_CLIENTS", "tst43")
   private val release = sys.env.getOrElse("LUSTRE_RELEASE", "lustre-2.17.0")
   private val el = sys.env.getOrElse("LUSTRE_EL", "el9.7")
@@ -291,8 +293,11 @@ object lustre_cluster extends OrpheraClusterPlaybook:
       stage("format", servers*)
         .task("mkfs.lustre the blank targets")(sh(formatScript, 1800))
         .build,
-      stage("mount-mgs-mdt", servers*)
-        .task("mount the MGT, then the MDTs")(sh(mountScript("mgt mdt"), 600))
+      stage("mount-mgs-mdt0", servers*)
+        .task("mount the MGT, then MDT0")(sh(mountScript("mgt mdt0"), 600))
+        .build,
+      stage("mount-mdt", servers*)
+        .task("mount the other MDTs")(sh(mountScript("mdt"), 600))
         .build,
       stage("mount-ost", servers*)
         .task("mount the OSTs")(sh(mountScript("ost"), 600))
