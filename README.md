@@ -2432,6 +2432,71 @@ to permissive on the servers.
 The servers need outbound HTTPS to downloads.whamcloud.com (the rpm cache on tst12 mirrors only Rocky and EPEL);
 the preflight stage checks this before anything is changed.
 
+
+### Lustre client commands
+
+Run on a client (tst43, tst49, tst50). Commands marked `sudo` need root; the rest work as a normal user.
+
+Space and health:
+
+```bash
+lfs df -h /mnt/lfs0              # space on each MDT and OST, and the total
+lfs df -i /mnt/lfs0              # inodes (number of files) on each target
+sudo lfs check servers           # every MDT and OST reports "active"
+lctl get_param version           # Lustre version on this node
+lctl list_nids                   # this node's LNet address
+sudo lctl ping 10.10.5.55@tcp    # reach the MGS over LNet
+lctl dl                          # the client's connections to each target
+```
+
+File layout (striping over OSTs). `setstripe` on a directory only affects files created after it;
+`lfs migrate` re-stripes an existing file:
+
+```bash
+lfs getstripe /mnt/lfs0/dir/file       # which OSTs hold the file, stripe count and size
+lfs getstripe -d /mnt/lfs0/dir         # the default layout new files in dir get
+lfs setstripe -c 4 -S 4M /mnt/lfs0/dir # new files in dir: 4 OSTs, 4 MB stripes
+lfs setstripe -c -1 /mnt/lfs0/dir      # new files: all OSTs (large sequential files)
+lfs setstripe -c 1 /mnt/lfs0/dir       # new files: one OST (many small files)
+lfs migrate -c 2 /mnt/lfs0/dir/file    # re-stripe an existing file
+```
+
+Metadata placement (the two MDTs):
+
+```bash
+lfs getstripe -m /mnt/lfs0/dir/file     # the MDT that holds the file's metadata (0 or 1)
+lfs getdirstripe /mnt/lfs0/dir          # the MDT(s) a directory is on
+sudo lfs mkdir -i 1 /mnt/lfs0/projects  # new directory on MDT1
+sudo lfs mkdir -c 2 /mnt/lfs0/shared    # directory spread over both MDTs
+```
+
+Finding files (`lfs find` reads only metadata, so it is much faster than `find` on large trees):
+
+```bash
+lfs find /mnt/lfs0 -size +1G              # files over 1 GB
+lfs find /mnt/lfs0 --ost 3                # files with data on OST0003
+lfs find /mnt/lfs0 --mdt 1 -type f        # files whose metadata is on MDT1
+lfs find /mnt/lfs0 --stripe-count 1       # files on a single OST
+lfs path2fid /mnt/lfs0/dir/file           # the file's Lustre ID (FID)
+sudo lfs fid2path /mnt/lfs0 '[0x200000401:0x1:0x0]'   # FID back to a path
+```
+
+Mounting by hand (the playbooks normally do this):
+
+```bash
+sudo mount -t lustre 10.10.5.55@tcp:/lfs0 /mnt/lfs0
+sudo umount /mnt/lfs0
+sudo lustre_rmmod                # unload the Lustre and LNet modules after unmounting
+```
+
+Client statistics:
+
+```bash
+lctl get_param llite.*.stats             # this client's file operations (reads, writes, opens)
+lctl get_param osc.*.stats               # traffic to each OST
+sudo lctl set_param llite.*.stats=clear  # reset the counters before a test
+```
+
 Not done yet: failover
 pairs, quotas, and monitoring.
 
