@@ -16,9 +16,13 @@ It talks to the iLO's REST interface with the Python standard library, nothing e
 API (/redfish/v1) and, for iLO 4 firmware that predates it, the HP REST API (/rest/v1). The iLO's web
 service must be on (it is by default); IPMI over LAN is not needed.
 
-  Login     --user NAME (or ILO_USER; default Administrator) and one of: ILO_PASSWORD in the environment,
-            --password-file FILE, --secret NAME (the Orphera secret, read with `orphera secrets get NAME`),
-            or a prompt when run from a terminal. The password is never taken from the command line.
+  Login     --user NAME (or ILO_USER; default Administrator). The password of each iLO is the Orphera secret
+            named after the iLO, as typed on the command line (`ilo-tst50` is the secret `ilo-tst50`,
+            `ilo-tst50.example.com` the secret `ilo-tst50.example.com`; for a URL, its host name), read with
+            `orphera secrets get`. Store it once with `echo 'the password' | orphera secrets set ilo-tst50`.
+            To override: ILO_PASSWORD in the environment, --password-file FILE, or --secret NAME (one secret
+            for all the iLOs named). With none of these and no such secret, a terminal gets a prompt. The
+            password is never taken from the command line.
   TLS       an iLO has a self-signed certificate until a real one is installed: --insecure (or ILO_INSECURE=1)
             skips the check, --cacert FILE checks against that certificate.
   Safety    off, shutdown, reset and soft-reset ask for confirmation (type yes); --yes skips it, and is
@@ -39,6 +43,7 @@ import subprocess
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 POLL_SECONDS = 3.0
@@ -268,7 +273,27 @@ OPS = {
 
 
 # ---- command line ----
-def password_from(a):
+def secret_key(target):
+    """The secret that holds an iLO's password: its address or name as given, or the host of a URL."""
+    t = target.strip().rstrip("/")
+    if "://" in t:
+        return urllib.parse.urlsplit(t).hostname or t
+    return t
+
+
+def read_secret(name):
+    """The value of an Orphera secret; None when there is none (or the store cannot be read: message in .err)."""
+    try:
+        r = subprocess.run(["orphera", "secrets", "get", name], capture_output=True, text=True)
+    except FileNotFoundError:
+        return None, "`orphera` is not installed here"
+    if r.returncode != 0 or not r.stdout.strip():
+        return None, (r.stderr.strip() or "no value")
+    return r.stdout.rstrip("\r\n"), ""
+
+
+def password_for(a, target):
+    """The password for one iLO: ILO_PASSWORD, --password-file, --secret NAME, or the secret named after the iLO."""
     if os.environ.get("ILO_PASSWORD"):
         return os.environ["ILO_PASSWORD"]
     if a.password_file:
@@ -276,15 +301,15 @@ def password_from(a):
             with open(a.password_file) as f:
                 return f.read().rstrip("\r\n")
         except OSError as e:
-            sys.exit("ilo.py: cannot read %s: %s" % (a.password_file, e))
-    if a.secret:
-        r = subprocess.run(["orphera", "secrets", "get", a.secret], capture_output=True, text=True)
-        if r.returncode != 0 or not r.stdout.strip():
-            sys.exit("ilo.py: `orphera secrets get %s` failed: %s" % (a.secret, r.stderr.strip() or "no value"))
-        return r.stdout.rstrip("\r\n")
+            raise IloError("cannot read %s: %s" % (a.password_file, e))
+    name = a.secret or secret_key(target)
+    value, why = read_secret(name)
+    if value is not None:
+        return value
     if sys.stdin.isatty():
-        return getpass.getpass("iLO password for %s: " % a.user)
-    sys.exit("ilo.py: no password: set ILO_PASSWORD, or give --password-file or --secret")
+        return getpass.getpass("iLO password for %s (no secret %s: %s): " % (target, name, why))
+    raise IloError("no password for %s: no secret `%s` (%s); store it with: echo 'the password' | orphera secrets set %s"
+                   % (target, name, why, name))
 
 
 def parser():
@@ -294,8 +319,8 @@ def parser():
     p.add_argument("action", choices=list(OPS))
     p.add_argument("ilo", nargs="+", help="iLO address or DNS name (or a full http(s):// URL)")
     p.add_argument("-u", "--user", default=os.environ.get("ILO_USER", "Administrator"))
-    p.add_argument("--password-file", metavar="FILE")
-    p.add_argument("--secret", metavar="NAME", help="read the password with `orphera secrets get NAME`")
+    p.add_argument("--password-file", metavar="FILE", help="read the password from this file, for every iLO named")
+    p.add_argument("--secret", metavar="NAME", help="use this Orphera secret for every iLO named (default: a secret named after each iLO)")
     p.add_argument("-k", "--insecure", action="store_true", default=os.environ.get("ILO_INSECURE") == "1",
                    help="do not check the iLO's certificate (self-signed)")
     p.add_argument("--cacert", metavar="FILE", help="check the iLO's certificate against this file")
@@ -329,12 +354,11 @@ def confirm(a):
 def main(argv=None):
     a = parser().parse_args(argv)
     confirm(a)
-    password = password_from(a)
     ctx = tls_context(a)
     failed = 0
     for target in a.ilo:
-        ilo = Ilo(target, a.user, password, ctx, dry_run=a.dry_run)
         try:
+            ilo = Ilo(target, a.user, password_for(a, target), ctx, dry_run=a.dry_run)
             OPS[a.action][0](ilo, a)
         except IloError as e:
             print("FAIL  %s" % e, file=sys.stderr)

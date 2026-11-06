@@ -2351,8 +2351,9 @@ Worth knowing:
   off, and resets it, through its iLO, with nothing to install (Python standard library, the iLO's Redfish API, or its older
   HP REST API on iLO 4 firmware that has no Redfish). `off` and `reset` are the hard ones (power cut, restart at once);
   `shutdown` and `soft-reset` ask the OS to shut down (ACPI), `soft-reset` then powering the server on again, and neither
-  ever cuts the power if the OS does not answer. Login: `--user` (default `Administrator`) and `ILO_PASSWORD`, `--password-file`
-  or `--secret NAME` (an Orphera secret); an iLO's self-signed certificate needs `--insecure` or `--cacert`. The destructive
+  ever cuts the power if the OS does not answer. Login: `--user` (default `Administrator`); the password of each iLO is the Orphera secret
+  named after it as typed (`ilo.py status ilo-tst50` reads the secret `ilo-tst50`; store it with `echo 'password' | orphera secrets set
+  ilo-tst50`), or `ILO_PASSWORD`, `--password-file` or `--secret NAME` instead; an iLO's self-signed certificate needs `--insecure` or `--cacert`. The destructive
   actions ask for `yes` (`--yes` skips it); `--dry-run` shows the request and sends nothing; it waits for the new state
   (`--timeout`, `--no-wait`). `make check-ilo` tests it against a mock iLO;
   `move-vm.sh [--dry-run] [--yes] [--delete-source] <vm> <hypervisor>` moves a VM that was provisioned on ZFS

@@ -207,5 +207,38 @@ if shutil.which("openssl"):
 else:
     print("  skip  openssl is not installed")
 
+print("Password from the secret store")
+d2 = tempfile.mkdtemp()
+fake = d2 + "/orphera"
+with open(fake, "w") as f:
+    f.write("#!/bin/sh\n"
+            'echo "$3" >> "%s/asked"\n'
+            '[ "$1 $2" = "secrets get" ] || exit 2\n'
+            'case "$3" in 127.0.0.1) echo secret;; *) echo "Error: no secret called $3" >&2; exit 1;; esac\n' % d2)
+os.chmod(fake, 0o755)
+saved_path = os.environ["PATH"]
+os.environ["PATH"] = d2 + os.pathsep + saved_path
+del os.environ["ILO_PASSWORD"]
+check("the secret is named after the iLO as typed", ilo.secret_key("ilo-tst50") == "ilo-tst50"
+      and ilo.secret_key("ilo-tst50.example.com/") == "ilo-tst50.example.com"
+      and ilo.secret_key("https://ilo-tst50.example.com:8443/") == "ilo-tst50.example.com")
+m = Mock(); c, o, e = run("status", m.url)
+asked = open(d2 + "/asked").read().split()
+check("with no password variable, `orphera secrets get <ilo>` supplies it", c == 0 and "On" in o and asked == ["127.0.0.1"], "%s %s %s" % (c, asked, e))
+m = Mock(); c, o, e = run("status", m.url, "--secret", "other/name")
+check("--secret NAME names another secret (here one that does not exist)", c == 1 and "other/name" in e and "orphera secrets set other/name" in e, e)
+check("a missing secret fails before any request and says how to store it", m.requests == 0 and "echo 'the password' | orphera secrets set" in e, e)
+os.environ["ILO_PASSWORD"] = "secret"
+open(d2 + "/asked", "w").close()
+m = Mock(); c, o, e = run("status", m.url)
+check("ILO_PASSWORD overrides the store (the store is not asked)", c == 0 and open(d2 + "/asked").read() == "", "")
+del os.environ["ILO_PASSWORD"]
+a_, b_ = Mock(), Mock()
+c, o, e = run("status", a_.url, "http://localhost:%d" % b_.server.server_address[1])
+check("each iLO has its own secret: one found, the other not, exit 1", c == 1 and "On" in o and "no secret `localhost`" in e, "%s %s" % (o, e))
+os.environ["PATH"] = saved_path
+os.environ["ILO_PASSWORD"] = "secret"
+shutil.rmtree(d2)
+
 print("%s" % ("all passed" if not fail else "%d FAILED" % fail))
 sys.exit(1 if fail else 0)
