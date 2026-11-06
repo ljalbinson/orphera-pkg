@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-.PHONY: all release rpm-if-available go-agent-if-available bump-patch _build_all clean test assembly pkg-stage deb rpm verify certs certs-clean fmt fmt-manifests scripting lint fix cli-stage cli-deb cli-rpm cli-tar cli-package check-package install uninstall
+.PHONY: all release rpm-if-available go-agent-if-available bump-patch _build_all clean test assembly pkg-stage deb rpm verify certs certs-clean fmt fmt-manifests scripting lint fix cli-stage cli-deb cli-rpm cli-tar cli-package check-package install uninstall check-ilo
 
 VERSION_FILE := VERSION
 VERSION      := $(shell cat $(VERSION_FILE))
@@ -127,6 +127,10 @@ check-roundtrip:
 # Checks that the shell scripts read the inventory and VM configs from ORPHERA_INVENTORY and ORPHERA_CONFIG_DIR (no lab needed).
 check-scripts:
 	utils/test-shell-sources.sh
+
+# Tests utils/ilo.py against a mock iLO on localhost (no iLO and no lab needed).
+check-ilo:
+	python3 utils/test-ilo.py
 
 # Fails if a tracked source file has no SPDX-License-Identifier header and is not listed in utils/spdx-exempt.txt.
 check-spdx:
