@@ -178,6 +178,12 @@ os.environ["ILO_PASSWORD"] = "wrong"
 m = Mock(); c, o, e = run("status", m.url)
 check("a refused login is one request, not retried", c == 1 and m.requests == 1 and "refused the login" in e, "%d requests: %s" % (m.requests, e))
 os.environ["ILO_PASSWORD"] = "secret"
+os.environ["ILO_USER"] = "operator"
+m = Mock(); c, o, e = run("status", m.url)
+check("ILO_USER sets the user (the mock only accepts Administrator)", c == 1 and "user operator" in e, e)
+m = Mock(); c, o, e = run("status", m.url, "--user", "Administrator")
+check("--user overrides ILO_USER", c == 0 and "On" in o, o + e)
+del os.environ["ILO_USER"]
 c, o, e = run("status", "http://127.0.0.1:9")
 check("an unreachable iLO fails with a message", c == 1 and "cannot reach" in e, e)
 m = Mock(); c, o, e = run("off", m.url)
