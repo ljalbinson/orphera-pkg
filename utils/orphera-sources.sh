@@ -58,3 +58,24 @@ inventory_file() {
   esac
   printf '%s\n' "$f"
 }
+
+# The hypervisors, as one line of names separated by spaces: the members of the inventory group named
+# `hypervisors` (read with `orphera nodes --groups`, so a database inventory works too); if there is no such
+# group, or it is empty, or `orphera` cannot be run, the environment variable HYPERVISORS; if that is empty
+# too, gs1 gs2 gs3 st0. The group comes first, so HYPERVISORS only counts while the inventory has none.
+hypervisor_list() {
+  local line members=""
+  if command -v orphera >/dev/null 2>&1; then
+    while IFS= read -r line; do
+      [ "${line%%:*}" = hypervisors ] && members=${line#*:}
+    done < <(orphera nodes --groups 2>/dev/null)
+  fi
+  members=$(printf '%s' "$members" | tr -s ' \t,' ' ' | sed 's/^ //; s/ $//')
+  if [ -n "$members" ]; then
+    printf '%s\n' "$members"
+  elif [ -n "${HYPERVISORS:-}" ]; then
+    printf '%s\n' "$HYPERVISORS"
+  else
+    printf '%s\n' "gs1 gs2 gs3 st0"
+  fi
+}

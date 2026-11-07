@@ -1275,6 +1275,13 @@ utils/vmctl.sh autostart remove --hypervisor gs2   # turn it off for every VM on
 utils/vmctl.sh autostart add --all            # every VM on every hypervisor
 ```
 
+"Every hypervisor" (in `list` and `autostart ... --all`) is the members of the inventory group named `hypervisors`
+(`orphera nodes --groups`, so a database inventory works too). If the inventory has no such group, or it is empty, the
+environment variable `HYPERVISORS` (names separated by spaces) is used, and if that is empty too, `gs1 gs2 gs3 st0`. The
+group comes first: while it exists, `HYPERVISORS` has no effect, and a hypervisor not in the group (add `gs9` to it) is
+left out of `list` and `--all`; name hypervisors on the command line (`list gs9`, `--hypervisor gs9`) to pick them
+yourself. Tab completion offers the same names, reading the group from the inventory file.
+
 `manifests/gen_packages.scala` installs the config's `pre_basic_packages`, then
 `basic_packages`, on that VM once it has the agent and an `inventory.yaml`
 entry (either list may be absent or empty):

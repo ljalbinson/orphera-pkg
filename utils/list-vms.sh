@@ -5,19 +5,21 @@
 # when the hypervisor boots (AUTOSTART: yes, no, or ? if it did not say), with a total
 # per hypervisor for the running VMs.
 #
-#   utils/list-vms.sh                 # gs1 gs2 gs3 st0
+#   utils/list-vms.sh                 # the hypervisors: the inventory group `hypervisors`, else $HYPERVISORS, else gs1 gs2 gs3 st0
 #   utils/list-vms.sh gs1 st0         # just those hypervisors
-#   HYPERVISORS="gs1 gs2" utils/list-vms.sh
+#   HYPERVISORS="gs1 gs2" utils/list-vms.sh   # used only while the inventory has no group `hypervisors`
 #
 # Run from scala0, in orphera-pkg (needs `orphera` and an agent on each
 # hypervisor). Read-only. Exit code 1 if a hypervisor did not answer.
 
 set -uo pipefail
 
+. "$(dirname "${BASH_SOURCE[0]}")/orphera-sources.sh"
+
 if [ $# -gt 0 ]; then
   HV="$*"
 else
-  HV="${HYPERVISORS:-gs1 gs2 gs3 st0}"
+  HV=$(hypervisor_list)
 fi
 
 # Runs on each hypervisor; one machine-readable line per VM.
