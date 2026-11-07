@@ -397,13 +397,20 @@ if [ "$ready" -ne 1 ]; then
   abort "the receiver on $dst did not start listening"
 fi
 step "$src" "DST_ADDR='$DST_ADDR'"$'\n'"$(pre)"$'\n'"$(send_body)" "$XFER_TIMEOUT" || { kill "$recv_pid" 2>/dev/null; wait "$recv_pid" 2>/dev/null; rm -f "$recv_out"; abort "the send failed"; }
-wait "$recv_pid"
+wait "$recv_pid"; recv_rc=$?
 recv_result=$(sed -n 's/^\[[^]]*\] *RESULT|//p; s/^RESULT|//p' "$recv_out" | head -1)
-rm -f "$recv_out"
 case "$recv_result" in
-  ok\|*) log "  ${recv_result#ok|}" ;;
-  error\|*) abort "receive on $dst: ${recv_result#error|}" ;;
-  *) abort "no answer from the receiver on $dst" ;;
+  ok\|*) rm -f "$recv_out"; log "  ${recv_result#ok|}" ;;
+  *)
+    # Show what the receiver's `orphera run` printed, and keep it.
+    recv_log="${TMPDIR:-/tmp}/move-vm-$vm-receive.log"
+    cp "$recv_out" "$recv_log" 2>/dev/null; rm -f "$recv_out"
+    echo "  receiver on $dst: orphera run exited $recv_rc; its output (also in $recv_log):" >&2
+    if [ -s "$recv_log" ]; then tail -15 "$recv_log" | sed 's/^/    /' >&2; else echo "    (nothing)" >&2; fi
+    case "$recv_result" in
+      error\|*) abort "receive on $dst: ${recv_result#error|}" ;;
+      *) abort "no answer from the receiver on $dst" ;;
+    esac ;;
 esac
 
 # 4. verify
