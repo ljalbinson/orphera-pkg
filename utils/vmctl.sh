@@ -29,6 +29,10 @@
 #   utils/vmctl.sh autostart remove --all        # every VM on every hypervisor
 #   utils/vmctl.sh autostart add --node-groups ceph,galera   # every VM in those groups
 #
+# "Every hypervisor" (list, autostart --all) is the members of the inventory group `hypervisors`; if the inventory has no
+# such group, the environment variable HYPERVISORS (names separated by spaces); if that is empty, gs1 gs2 gs3 st0. So
+# while the group exists, HYPERVISORS does nothing: name hypervisors on the command line to pick some.
+#
 # Options map to the playbooks' environment variables: --retries to ORPHERA_VM_RETRIES
 # (start and reboot --hard), --wait to ORPHERA_VM_WAIT and --force to ORPHERA_VM_FORCE=1 (stop, reboot --hard),
 # --hard / --soft to ORPHERA_VM_MODE (reboot). shutdown-all takes hypervisor names (gs1, gs2, ...), not VMs: it
@@ -187,7 +191,7 @@ if [ "$action" = autostart ]; then
   fail=0
   if [ -n "$all" ]; then
     [ $# -eq 0 ] && [ "${#hvs[@]}" -eq 0 ] || { echo "--all takes no VM names and no --hypervisor" >&2; exit 2; }
-    run_autostart "${HYPERVISORS:-gs1 gs2 gs3 st0}" "" || fail=1
+    run_autostart "$(hypervisor_list)" "" || fail=1
   elif [ "${#hvs[@]}" -gt 0 ]; then
     [ $# -eq 0 ] || { echo "give VM names or --hypervisor, not both" >&2; exit 2; }
     run_autostart "${hvs[*]}" "" || fail=1

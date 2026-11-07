@@ -433,7 +433,8 @@ complete -F _orphera_completions orphera
 # --- utils/vmctl.sh -----------------------------------------------------------------------------
 # Completes the actions, options, VM names and hypervisor names of utils/vmctl.sh. VM names are the
 # config files in the config directory (ORPHERA_CONFIG_DIR, a path or a file: URI, else config/);
-# hypervisor names are the `hypervisor:` values in those files, else gs1 gs2 gs3 st0.
+# hypervisor names are the members of the inventory group `hypervisors` (read from the inventory file,
+# ORPHERA_INVENTORY, else inventory.yaml), else $HYPERVISORS, else gs1 gs2 gs3 st0.
 
 _vmctl_config_dir() {
   local d="${ORPHERA_CONFIG_DIR:-config}"
@@ -456,11 +457,22 @@ _vmctl_vms() {
 }
 
 _vmctl_hypervisors() {
-  local d out=""
-  if d=$(_vmctl_config_dir); then
-    out=$(awk '/^  hypervisor:/ {gsub(/["\x27]/, "", $2); print $2}' "$d"/*.yaml 2>/dev/null | sort -u)
-  fi
-  [ -n "$out" ] || out="gs1 gs2 gs3 st0"
+  local inv="${ORPHERA_INVENTORY:-inventory.yaml}" out=""
+  inv="${inv#file://}"
+  # Only a file can be read here (not a database); there the group is not looked for, and the next source is used.
+  case "$inv" in
+    *://*) ;;
+    *) [ -f "$inv" ] && out=$(awk '
+         /^[[:space:]]*-[[:space:]]*name:/ { ingroup = ($0 ~ /name:[[:space:]]*["\x27]?hypervisors["\x27]?[[:space:]]*(#.*)?$/); inlist = 0; next }
+         ingroup && /^[[:space:]]*members:/ {
+           v = $0; sub(/^[[:space:]]*members:[[:space:]]*/, "", v)
+           if (v ~ /^\[/) { gsub(/[\[\],"\x27]/, " ", v); print v; exit }
+           inlist = 1; next }
+         ingroup && inlist && /^[[:space:]]*-[[:space:]]/ { v = $0; sub(/^[[:space:]]*-[[:space:]]*/, "", v); gsub(/["\x27]/, "", v); printf "%s ", v; next }
+         ingroup && inlist && /^[[:space:]]*[A-Za-z]/ { inlist = 0 }
+       ' "$inv" 2>/dev/null) ;;
+  esac
+  [ -n "${out//[[:space:]]/}" ] || out="${HYPERVISORS:-gs1 gs2 gs3 st0}"
   printf '%s\n' $out
 }
 
