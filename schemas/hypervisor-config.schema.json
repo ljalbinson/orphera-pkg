@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/ljalbinson/orphera-pkg/main/schemas/hypervisor-config.schema.json",
+  "title": "Orphera hypervisor config",
+  "description": "The config of a hypervisor (a physical KVM host such as gs1), config/<hostname>.yaml: the same top-level `params:` as a per-VM config, with far fewer keys, and `is_hypervisor: true` to say what it is. gen_set_dns.scala can be pointed at it (--config config/gs1.yaml) and then takes its one node from hostname and its resolvers from dns1, dns2 and domainname. A playbook that provisions a VM refuses it.",
+  "type": "object",
+  "required": ["params"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": 1 },
+    "params": {
+      "type": "object",
+      "required": ["is_hypervisor", "hostname"],
+      "additionalProperties": false,
+      "patternProperties": { "^x-": {} },
+      "properties": {
+        "is_hypervisor": {
+          "description": "Marks the file as a hypervisor's config; always true. Its presence is how Orphera tells this kind of config from a VM config (which has `hypervisor:`) and a DNS config (which has `dns_servers:`).",
+          "const": true
+        },
+        "hostname": {
+          "description": "The hypervisor's node name in the inventory. By convention also the config file's name (config/<hostname>.yaml).",
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$"
+        },
+        "domainname": {
+          "type": "string",
+          "format": "hostname"
+        },
+        "dns1": {
+          "description": "The first resolver: an IPv4 or IPv6 literal.",
+          "type": "string",
+          "anyOf": [{ "format": "ipv4" }, { "format": "ipv6" }]
+        },
+        "dns2": {
+          "description": "The second resolver: an IPv4 or IPv6 literal.",
+          "type": "string",
+          "anyOf": [{ "format": "ipv4" }, { "format": "ipv6" }]
+        }
+      }
+    }
+  }
+}

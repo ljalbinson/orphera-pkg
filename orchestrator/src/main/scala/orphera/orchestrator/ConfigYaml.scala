@@ -212,6 +212,12 @@ object ConfigYaml:
         .get[Json]("params")
         .left
         .map(e => s"missing top-level 'params:' key (${e.getMessage})")
+      _ <- Either.cond(
+        paramsJson.hcursor.downField("is_hypervisor").focus.isEmpty,
+        (),
+        s"$path is a hypervisor config (it has 'is_hypervisor:'), not a VM config; " +
+          "this playbook provisions or configures a VM"
+      )
       params <- decodeParams(paramsJson.hcursor).left.map(_.getMessage)
     yield params
 

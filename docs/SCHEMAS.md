@@ -9,10 +9,12 @@ validate against the same schema.
 |---|---|---|
 | `schemas/inventory.schema.json` | `inventory.yaml`: nodes, groups, their vars, `never-reboot` | `InventoryYaml.scala` |
 | `schemas/vm-config.schema.json` | a per-VM config, `config/<vm>.yaml` | `ConfigYaml.scala`: the KVM playbooks, `gen_packages`, `gen_dist_upgrade`, the bootstrap step |
+| `schemas/hypervisor-config.schema.json` | a hypervisor's config, `config/<hostname>.yaml` with `is_hypervisor: true` | `gen_set_dns.scala` (`--config config/gs1.yaml`); a VM playbook refuses it |
 | `schemas/dns-config.schema.json` | `config/dns.yaml`, the parameters of `gen_set_dns.scala` | `gen_set_dns.scala` |
 
 All config files have a top-level `params:` map, but what is in it depends on who reads it, so a config is checked
-against the schema of its reader, not one schema for "config". `disable_unattended_upgrades.scala` reads a `nodes:` list
+against the schema of its reader, not one schema for "config". The key that says which: `is_hypervisor` (a hypervisor's
+config), `hypervisor` (a VM's) or `dns_servers` (the DNS config). `disable_unattended_upgrades.scala` reads a `nodes:` list
 from a config too, and has no schema yet.
 
 ## What the schemas say, and where they are stricter than Orphera
@@ -50,6 +52,8 @@ These are checked by `utils/validate-schemas.py`, after the schema passes:
 | a VM config's file name is its `hostname` (`config/tst7.yaml`) | warning |
 | two configs do not have the same `hostname` or `nic0.ipaddress` | error |
 | a NIC's `ipaddress` is inside its `cidr`, `netmask` agrees with `cidr`, `gateway` is inside the subnet | error |
+| a hypervisor config's `hostname` is a node of the inventory | error |
+| a hypervisor config's file name is its `hostname` (`config/gs1.yaml`); no two configs share a `hostname` | warning; error |
 | a DNS config's `nodes` are in the inventory | error |
 
 ## Using them

@@ -449,6 +449,7 @@ _vmctl_vms() {
   d=$(_vmctl_config_dir) || return 0
   for f in "$d"/*.yaml; do
     [ -e "$f" ] || continue
+    grep -q '^  is_hypervisor:[[:space:]]*true' "$f" && continue  # a hypervisor's config, not a VM's
     f=${f##*/}
     printf '%s\n' "${f%.yaml}"
   done
