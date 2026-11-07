@@ -407,4 +407,4 @@ groups:
   - name: lustre-clients
     members: [tst49, tst50]
   - name: hypervisors
-    members: [gs1, gs2, gs3, st0]
+    members: [gs1, gs2, gs3, gs9, st0]
