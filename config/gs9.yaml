@@ -1,0 +1,6 @@
+params:
+  is_hypervisor: true
+  hostname: gs9
+  domainname: ljalbinson.com
+  dns1: 192.168.1.70
+  dns2: 192.168.1.71
