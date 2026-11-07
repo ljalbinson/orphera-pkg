@@ -168,9 +168,10 @@ CREATE TABLE vm_package (
   CONSTRAINT vm_package_not_empty CHECK (package_name <> '')
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
--- A config of any other kind (the DNS config of gen_set_dns, and whatever a
--- playbook of your own reads): its `params` as a JSON document. `kind` says
--- which schema it follows (dns -> dns-config.schema.json).
+-- A config of any other kind (the DNS config of gen_set_dns, a hypervisor's
+-- config, and whatever a playbook of your own reads): its `params` as a JSON
+-- document. `kind` says which schema it follows (dns -> dns-config.schema.json,
+-- hypervisor -> hypervisor-config.schema.json).
 CREATE TABLE config_document (
   kind        VARCHAR(32) NOT NULL,
   name        VARCHAR(63) NOT NULL,

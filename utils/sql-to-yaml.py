@@ -211,11 +211,13 @@ def canon_vm(params):
 
 
 def canon_configs(docs):
-    """{('vm', hostname) | ('dns', stem): canonical params}"""
+    """{('vm', hostname) | ('hypervisor', stem) | ('dns', stem): canonical params}"""
     out = {}
     for stem, doc in docs.items():
         params = doc["params"]
-        if "hypervisor" in params:
+        if "is_hypervisor" in params:
+            out[("hypervisor", stem)] = params
+        elif "hypervisor" in params:
             out[("vm", params["hostname"])] = canon_vm(params)
         elif "dns_servers" in params:
             out[("dns", stem)] = params

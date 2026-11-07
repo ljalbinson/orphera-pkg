@@ -129,7 +129,10 @@ def main():
     statements = inventory_sql(inv)
     for path in files:
         params = vs.load_yaml(path)["params"]
-        if "hypervisor" in params:
+        if "is_hypervisor" in params:
+            statements.append(insert("config_document", kind="hypervisor", name=Path(path).stem,
+                                     document=json.dumps(params, sort_keys=True)))
+        elif "hypervisor" in params:
             statements += vm_sql(params)
         elif "dns_servers" in params:
             statements.append(insert("config_document", kind="dns", name=Path(path).stem,

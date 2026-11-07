@@ -160,6 +160,17 @@ def check_vm_config(path, params, inventory_names, seen):
         check_nic(path, nic, f"nics[{i - 1}]")
 
 
+def check_hypervisor_config(path, params, inventory_names, seen):
+    host = params["hostname"]
+    if Path(path).stem != host:
+        report(path, "warning", f"file name does not match hostname '{host}' (config/<hostname>.yaml is the convention)")
+    if host in seen["hostnames"]:
+        report(path, "error", f"hostname '{host}' is also in {seen['hostnames'][host]}")
+    seen["hostnames"][host] = path
+    if inventory_names is not None and host not in inventory_names:
+        report(path, "error", f"hostname '{host}' is not a node of the inventory")
+
+
 def main():
     ap = argparse.ArgumentParser(description="Check the inventory and config files against their schemas.")
     ap.add_argument("-I", "--inventory", default=os.environ.get("ORPHERA_INVENTORY") or "inventory.yaml")
@@ -178,6 +189,7 @@ def main():
 
     files = args.files or sorted(str(p) for p in Path(cfg_dir).glob("*.y*ml"))
     vm_schema, dns_schema = load_schema("vm-config.schema.json"), load_schema("dns-config.schema.json")
+    hv_schema = load_schema("hypervisor-config.schema.json")
     seen = {"hostnames": {}, "ips": {}}
     checked = 0
     for path in files:
@@ -188,7 +200,11 @@ def main():
         if not isinstance(params, dict):
             report(path, "error", "no top-level params: map")
             continue
-        if "hypervisor" in params:
+        if "is_hypervisor" in params:
+            checked += 1
+            if check_schema(path, doc, hv_schema):
+                check_hypervisor_config(path, params, inventory_names, seen)
+        elif "hypervisor" in params:
             checked += 1
             if check_schema(path, doc, vm_schema):
                 check_vm_config(path, params, inventory_names, seen)
@@ -199,7 +215,7 @@ def main():
                     if n not in inventory_names:
                         report(path, "error", f"node '{n}' is not in the inventory")
         else:
-            report(path, "warning", "neither a VM config (params.hypervisor) nor a DNS config (params.dns_servers); not checked")
+            report(path, "warning", "neither a hypervisor config (params.is_hypervisor), a VM config (params.hypervisor) nor a DNS config (params.dns_servers); not checked")
 
     print(f"checked the inventory and {checked} config file(s): {errors} error(s), {warnings} warning(s)")
     sys.exit(1 if errors else 0)

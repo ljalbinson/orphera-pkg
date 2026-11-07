@@ -1,0 +1,7 @@
+# yaml-language-server: $schema=../schemas/hypervisor-config.schema.json
+params:
+  is_hypervisor: true
+  hostname: gs2
+  domainname: ljalbinson.com
+  dns1: '192.168.1.70'
+  dns2: '192.168.1.71'

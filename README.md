@@ -1291,6 +1291,29 @@ back to tst0-tst5):
 orphera cluster-playbook manifests/gen_set_dns.scala --config config/tst0.yaml
 ```
 
+### Hypervisor configs
+
+A hypervisor has a config file of its own, much shorter than a VM's: `config/<hostname>.yaml` with `is_hypervisor: true`
+and the keys `hostname`, `domainname`, `dns1` and `dns2` (see `config/gs1.yaml`, and
+[`schemas/hypervisor-config.schema.json`](schemas/hypervisor-config.schema.json)):
+
+```yaml
+params:
+  is_hypervisor: true
+  hostname: gs1
+  domainname: ljalbinson.com
+  dns1: '192.168.1.70'
+  dns2: '192.168.1.71'
+```
+
+`is_hypervisor` is how Orphera tells it from the other kinds (a VM config has `hypervisor:`, the DNS config `dns_servers:`).
+`gen_set_dns.scala` takes it as `--config`, as it does a VM's (`orphera cluster-playbook manifests/gen_set_dns.scala --config
+config/gs1.yaml`: the node is `hostname`, the resolvers `dns1` and `dns2`, the search domain `domainname`). A playbook that
+provisions or configures a VM refuses a hypervisor config with a message saying so, the VM scripts that scan `config/` skip it
+(they look for `hypervisor:`), and `vmctl` tab completion does not offer it as a VM. `utils/validate-schemas.py` checks it
+(the `hostname` must be a node of the inventory); `yaml-to-sql.py` and `sql-to-yaml.py` carry it as a `config_document` of kind
+`hypervisor`. More keys (the NICs and bridges, the storage) can be added to the schema as playbooks need them.
+
 ### One chain, many configs, in parallel
 
 `cluster-playbook` already runs several playbooks in order. Give `--config` several
