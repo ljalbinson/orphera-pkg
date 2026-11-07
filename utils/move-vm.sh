@@ -192,7 +192,22 @@ send_body() {
 NCOPT=""
 nc -h 2>&1 | grep -q -e ' -N' && NCOPT="-N"
 DSTIP="$DST_ADDR"
-if zfs send "$SNAP" | nc $NCOPT "$DSTIP" "$PORT"; then echo "RESULT|ok|stream sent"; else echo "RESULT|error|zfs send | nc failed"; fi
+E=/tmp/move-vm.send.$$
+if zfs send "$SNAP" 2>"$E.zfs" | nc $NCOPT "$DSTIP" "$PORT" 2>"$E.nc"; then
+  echo "RESULT|ok|stream sent"
+else
+  MSG=$(cat "$E.zfs" "$E.nc" 2>/dev/null | tr '\n' ' ' | cut -c1-300)
+  echo "RESULT|error|zfs send | nc $NCOPT $DSTIP $PORT failed: ${MSG:-no message}"
+fi
+rm -f "$E.zfs" "$E.nc"
+SH
+}
+
+resolve_body() {
+  cat <<'SH'
+A=$(getent ahostsv4 "$DST_ADDR" 2>/dev/null | awk 'NR==1{print $1}')
+[ -n "$A" ] || A=$(getent hosts "$DST_ADDR" 2>/dev/null | awk 'NR==1{print $1}')
+if [ -n "$A" ]; then echo "RESULT|ok|$DST_ADDR is $A"; else echo "RESULT|error|$DST_ADDR does not resolve on this host (DNS or /etc/hosts)"; fi
 SH
 }
 
@@ -247,6 +262,8 @@ SH
 cleanup_dst_body() {
   cat <<'SH'
 V="virsh --connect qemu:///system"
+pkill -f "^nc -l $PORT\$" 2>/dev/null || true   # a receiver left listening after a failed send
+sleep 1
 $V destroy "$VM" >/dev/null 2>&1 || true
 $V undefine "$VM" >/dev/null 2>&1 || true
 zfs destroy -r "tank/kvm/$DST/$VM" 2>/dev/null || true
@@ -315,6 +332,10 @@ fi
 DST_ADDR=$(awk -v n="$dst" '$1 == "-" && $2 == "name:" { hit = ($3 == n) } hit && $1 == "host:" { gsub(/"/, "", $2); print $2; exit }' "$(inventory_file 2>/dev/null)" 2>/dev/null || true)
 [ -n "$DST_ADDR" ] || DST_ADDR="$dst"
 case "$DST_ADDR" in ''|*[!A-Za-z0-9._-]*) echo "unusual destination address '$DST_ADDR'" >&2; exit 1 ;; esac
+
+# The source sends to that address, so it must resolve there (not only on scala0).
+log "checking that $src can resolve $DST_ADDR"
+step "$src" "DST_ADDR='$DST_ADDR'"$'\n'"$(resolve_body)" 30 || exit 1
 
 cat <<PLAN
 
