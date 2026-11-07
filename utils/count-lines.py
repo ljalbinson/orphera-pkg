@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
-"""Counts the Scala, Go and Python source by part: raw lines (as `wc -l` counts them) and code lines.
+"""Counts the Scala, Go, Python and shell source by part: raw lines (as `wc -l` counts them) and code lines.
 
 Reads the file names (one per line) from stdin; `make lines` feeds it the files git tracks plus new ones
 not yet added, minus what .gitignore excludes and the protobuf-generated Go in internal/pb/. Code lines are
 the lines that are neither blank nor only a comment (`//`, or inside a `/* ... */` block; `#` in Python, where
-docstrings count as comments too). Scripts embedded in Scala strings count as code.
+docstrings count as comments too; `#` in shell, shebang line included). Scripts embedded in Scala strings and heredoc
+text in shell scripts count as code. A file is a shell script when it is named *.sh or *.bash, or has no extension and
+starts with a #! line naming sh, bash or dash.
 """
 import os
 import sys
@@ -37,6 +39,9 @@ def count(path):
     raw = data.count(b"\n")
     if path.endswith(".py"):
         return raw, python_code_lines(data.decode("utf-8", errors="replace"))
+    if part(path) in ORDER[7:]:
+        return raw, sum(1 for line in data.decode("utf-8", errors="replace").split("\n")
+                        if line.strip() and not line.lstrip().startswith("#"))
     code = 0
     in_block = False
     for line in data.decode("utf-8", errors="replace").split("\n"):
@@ -59,6 +64,21 @@ def count(path):
     return raw, code
 
 
+def is_extensionless_shell(path):
+    """A file with no extension whose first line is a #! naming sh, bash or dash."""
+    if "." in os.path.basename(path):
+        return False
+    try:
+        with open(path, "rb") as f:
+            first = f.readline(200).decode("utf-8", errors="replace")
+    except OSError:
+        return False
+    words = first[2:].split() if first.startswith("#!") else []
+    if words and os.path.basename(words[0]) == "env":
+        words = words[1:]
+    return bool(words) and os.path.basename(words[0]) in ("sh", "bash", "dash")
+
+
 def part(path):
     if path.endswith((".scala", ".sc")):
         if path.startswith("manifests/"):
@@ -70,11 +90,13 @@ def part(path):
         return "Go tests" if path.endswith("_test.go") else "Go agent and tools"
     if path.endswith(".py"):
         return "Python tests" if os.path.basename(path).startswith("test") else "Python tools"
+    if path.endswith((".sh", ".bash")) or is_extensionless_shell(path):
+        return "Shell tests" if os.path.basename(path).startswith("test") else "Shell scripts"
     return None
 
 
 ORDER = ["Scala framework", "Scala playbooks (manifests/)", "Scala tests", "Go agent and tools", "Go tests",
-         "Python tools", "Python tests"]
+         "Python tools", "Python tests", "Shell scripts", "Shell tests"]
 
 
 def main():
@@ -89,7 +111,7 @@ def main():
         tot[k][2] += code
     fmt = "%-30s %6s %9s %9s"
     print(fmt % ("Part", "Files", "Raw", "Code"))
-    for title, keys in (("Scala", ORDER[:3]), ("Go", ORDER[3:5]), ("Python", ORDER[5:])):
+    for title, keys in (("Scala", ORDER[:3]), ("Go", ORDER[3:5]), ("Python", ORDER[5:7]), ("Shell", ORDER[7:])):
         for k in keys:
             if tot[k][0]:
                 print(fmt % (k, tot[k][0], tot[k][1], tot[k][2]))
