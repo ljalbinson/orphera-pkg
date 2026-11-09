@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-.PHONY: all release rpm-if-available go-agent-if-available bump-patch _build_all clean test assembly pkg-stage deb rpm verify certs certs-clean fmt fmt-manifests scripting lint fix cli-stage cli-deb cli-rpm cli-tar cli-package check-package install uninstall check-ilo
+.PHONY: all release rpm-if-available go-agent-if-available bump-patch _build_all clean test assembly pkg-stage deb rpm verify certs certs-clean fmt fmt-manifests scripting lint fix cli-stage cli-deb cli-rpm cli-tar cli-package check-package install uninstall check-ilo check-os10
 
 VERSION_FILE := VERSION
 VERSION      := $(shell cat $(VERSION_FILE))
@@ -131,6 +131,10 @@ check-scripts:
 # Tests utils/ilo.py against a mock iLO on localhost (no iLO and no lab needed).
 check-ilo:
 	python3 utils/test-ilo.py
+
+# Tests utils/os10.py against a mock Dell OS10 RESTCONF server on localhost (no switch and no lab needed).
+check-os10:
+	python3 utils/test-os10.py
 
 # Fails if a tracked source file has no SPDX-License-Identifier header and is not listed in utils/spdx-exempt.txt.
 check-spdx:

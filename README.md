@@ -2386,6 +2386,11 @@ Worth knowing:
   ilo-tst50`), or `ILO_PASSWORD`, `--password-file` or `--secret NAME` instead; an iLO's self-signed certificate needs `--insecure` or `--cacert`. The destructive
   actions ask for `yes` (`--yes` skips it); `--dry-run` shows the request and sends nothing; it waits for the new state
   (`--timeout`, `--no-wait`). `make check-ilo` tests it against a mock iLO;
+  `os10.py {interfaces|vlans|vlan N|port NAME|get PATH|operations|backup [FILE]} <switch>` reads a Dell OS10 switch (S5148F-ON and
+  others) through its RESTCONF API and never changes anything (only GET requests are sent). RESTCONF must be enabled on the switch
+  (`rest api restconf` in configuration mode, then `write memory`). Login: `--user` or `OS10_USER` (default `admin`); the password is
+  `OS10_PASSWORD`, `--password-file`, `--secret NAME`, or the Orphera secret named after the switch as typed; `--insecure`/`--cacert`
+  for its self-signed certificate; `--json` for machine-readable output. `make check-os10` tests it against a mock switch.
   `move-vm.sh [--dry-run] [--yes] [--delete-source] <vm> <hypervisor>` moves a VM that was provisioned on ZFS
   (`kvm_zfs_vm_provision.scala`) to another hypervisor: it checks both ends, shuts the guest down, sends a ZFS snapshot of
   `tank/kvm/<hypervisor>/<vm>` with `zfs send | nc | zfs receive`, compares file names and sizes, defines the domain on the
