@@ -526,6 +526,10 @@ orphera -c /srv/vms cluster-playbook manifests/gen_set_dns.scala --config tst7
 orphera -m /usr/share/orphera/manifests cluster-playbook gen_set_dns.scala gen_packages.scala --config tst7
 ```
 
+A playbook that cannot start (a `--config` file that does not load, such as a hypervisor config given to a VM playbook, or a
+missing `--config`) prints one line, `Error: ...`, and exits 1; a failed stage ends with `Cluster playbook '...' failed (see
+output above)`. `ORPHERA_DEBUG=1` prints the full Java stack trace for a start-up error.
+
 A playbook given as a bare file name ending in `.scala`, `.yaml` or `.yml` is looked for in the manifests directory first and,
 if it is not there, taken as it is (so a file in the current directory still works). A name with a `/`
 (`manifests/gen_set_dns.scala`, `/srv/pb/x.yaml`), the `@bootstrap` step and the name of a compiled playbook are never looked
@@ -1844,7 +1848,8 @@ Afterwards both hosts hold the same CA key, secret store and SSH key, and either
 |---|---|
 | `make` / `make all` | clean → test → assembly → deb |
 | `make clean` | `sbt clean`, removes `pkg/` and any built `.deb` / `.rpm` |
-| `make test` | `sbt test`, then the check programs `ContainerCheck`, `ConfCheck`, `SecretsCheck`, `ThreadInfoCheck`, `InventoryCheck`, `LocationsCheck`, `InstallationCheck`, `CaInitCheck` and `DbDocumentsCheck` (set `CHECK_VERBOSE=1` to print every passing check) |
+| `make test` | `sbt test`, then the check programs `ContainerCheck`, `ConfCheck`, `SecretsCheck`, `ThreadInfoCheck`, `InventoryCheck`, `LocationsCheck`, `InstallationCheck`, `CaInitCheck`, `DbDocumentsCheck` and `Os10Check` (set `CHECK_VERBOSE=1` to print every passing check) |
+| `make check-ilo`, `make check-os10` | `utils/ilo.py` and `utils/os10.py` against a mock iLO and a mock OS10 switch on localhost (no hardware needed) |
 | `make assembly` | `sbt agent/assembly` |
 | `make deb` | stages package contents, runs `dpkg-deb --build` |
 | `make rpm` | stages the same contents, runs `rpmbuild` to produce `orphera-agent-<version>-1.noarch.rpm` for Rocky/Red Hat hosts. Needs `rpmbuild` |

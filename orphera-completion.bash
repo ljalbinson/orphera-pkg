@@ -290,6 +290,19 @@ _orphera_completions() {
       fi
       ;;
 
+    os10)
+      # orphera os10 <command> <switch> ...: the commands, then the options
+      if [ "$cword" -eq 2 ]; then
+        COMPREPLY=($(compgen -W "interfaces vlans vlan port get operations schema backup set-description set-mtu set-speed set-mode vlan-create vlan-delete vlan-add vlan-remove save help" -- "$cur"))
+      else
+        case "$prev" in
+          -u|--user|--secret) COMPREPLY=() ;;
+          --password-file|--cacert) COMPREPLY=($(compgen -f -- "$cur")) ;;
+          *) COMPREPLY=($(compgen -W "--user --password-file --secret --insecure --cacert --json --yes --dry-run --untagged" -- "$cur")) ;;
+        esac
+      fi
+      ;;
+
     thread-info)
       case "$prev" in
         --nodes) COMPREPLY=() ;;
