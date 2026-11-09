@@ -91,6 +91,10 @@ class Mock:
                     return self.reply(401, {})
                 p = self.path
                 base = "/restconf/data/ietf-interfaces:interfaces/interface"
+                if self.command == "POST" and p == "/restconf/operations/ietf-netconf-monitoring:get-schema":
+                    n = int(self.headers.get("Content-Length") or 0)
+                    mock.bodies.append(json.loads(self.rfile.read(n)))
+                    return self.reply(200, {"ietf-netconf-monitoring:output": {"data": "module yuma-netconf { }"}})
                 if self.command in ("PATCH", "DELETE"):
                     n = int(self.headers.get("Content-Length") or 0)
                     body = json.loads(self.rfile.read(n)) if n else None
@@ -192,6 +196,10 @@ check("backup writes the data tree to the file", c == 0 and "interfaces" in open
 shutil.rmtree(d)
 m = Mock(); run("interfaces", m.url); run("vlans", m.url); run("port", m.url, "1/1/1"); run("get", m.url, "x"); run("operations", m.url)
 check("only GET is ever sent", {meth for meth, _ in m.requests} == {"GET"}, str(m.requests))
+
+m = Mock(); c, o, e = run("schema", m.url, "yuma-netconf")
+check("schema prints the module text (a POST of get-schema, nothing written)", c == 0 and o.strip() == "module yuma-netconf { }"
+      and m.bodies[0]["ietf-netconf-monitoring:input"]["identifier"] == "yuma-netconf", o + e)
 
 print("Changes")
 def port_of(m, name):

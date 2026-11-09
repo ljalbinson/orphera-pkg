@@ -8,6 +8,7 @@
   utils/os10.py port        swt4 1/1/49:1   # one port: its settings and its VLANs (ethernet1/1/49:1 works too)
   utils/os10.py get         swt4 ietf-interfaces:interfaces/interface=vlan228   # any path under /restconf/data
   utils/os10.py operations  swt4            # the actions the switch offers (/restconf/operations)
+  utils/os10.py schema      swt4 yuma-netconf   # a YANG module's source, from the switch (read-only POST of get-schema)
   utils/os10.py backup      swt4 [FILE]     # saves the whole RESTCONF data tree as JSON (default swt4-<time>.json)
 
   utils/os10.py set-description swt4 1/1/5 "gs1 eth0"   # a port's description ("" removes it)
@@ -237,6 +238,23 @@ def cmd_operations(sw, a):
         print(name)
 
 
+def cmd_schema(sw, a):
+    body = {"ietf-netconf-monitoring:input": {"identifier": a.arg, "format": "yang"}}
+    doc = sw.request("POST", "/operations/ietf-netconf-monitoring:get-schema", body)
+
+    def first_text(x):
+        if isinstance(x, str):
+            return x
+        for v in (x.values() if isinstance(x, dict) else x if isinstance(x, list) else []):
+            t = first_text(v)
+            if t:
+                return t
+    text = first_text(doc)
+    if not text:
+        raise IloError("%s: no schema text for %s in the reply" % (sw.name, a.arg))
+    print(text)
+
+
 def cmd_backup(sw, a):
     path = a.extra or "%s-%s.json" % (sw.name.replace(":", "_"), time.strftime("%Y%m%d-%H%M%S"))
     doc = sw.get("/data")
@@ -318,7 +336,7 @@ def cmd_set_speed(sw, a):
 COMMANDS = {
     "interfaces": (cmd_interfaces, None), "vlans": (cmd_vlans, None), "vlan": (cmd_vlan, "VLAN number"),
     "port": (cmd_port, "port, e.g. 1/1/49:1"), "get": (cmd_get, "path under /restconf/data"),
-    "operations": (cmd_operations, None), "backup": (cmd_backup, None),
+    "operations": (cmd_operations, None), "schema": (cmd_schema, "module name, e.g. yuma-netconf"), "backup": (cmd_backup, None),
     "set-description": (cmd_set_description, "port, e.g. 1/1/5"), "set-mtu": (cmd_set_mtu, "port, e.g. 1/1/5"),
     "set-speed": (cmd_set_speed, "port, e.g. 1/1/5"),
 }
