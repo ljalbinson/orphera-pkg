@@ -14,6 +14,7 @@
 
   utils/os10.py set-description swt4 1/1/5 "gs1 eth0"   # a port's description ("" removes it)
   utils/os10.py set-mtu         swt4 1/1/5 9216          # a port's MTU
+  utils/os10.py set-mode        swt4 1/1/5 trunk        # trunk (needed before a port can carry tagged VLANs) or access
   utils/os10.py set-speed       swt4 1/1/5 25G           # a port's speed (10G 25G 40G 50G 100G, or auto)
 
   utils/os10.py vlan-create swt4 600                    # a new VLAN (2-4093)
@@ -384,6 +385,15 @@ def cmd_set_speed(sw, a):
     _change(sw, a, "speed", "dell-interface:speed", raw)
 
 
+def cmd_set_mode(sw, a):
+    v = _value(a).lower()
+    if v not in ("trunk", "access"):
+        raise IloError("a mode is trunk (several VLANs, tagged) or access (one untagged VLAN), not %r" % a.extra)
+    # trunk is MODE_L2HYBRID (what the trunk ports on the switch show); access is no mode leaf at all
+    _change(sw, a, "mode", "dell-interface:mode", "MODE_L2HYBRID" if v == "trunk" else None,
+            shown_new="trunk (MODE_L2HYBRID)" if v == "trunk" else "access (no mode set)")
+
+
 # ---- VLANs (running configuration only) ----
 IFACES = "/data/ietf-interfaces:interfaces/interface"
 TAGGED, UNTAGGED = "dell-interface:tagged-ports", "dell-interface:untagged-ports"
@@ -508,21 +518,35 @@ def cmd_vlan_add(sw, a):
     if port in (v.get(kind) or []):
         return print("%s: %s is already %s in VLAN %d, nothing to do" % (sw.name, port, word, vid))
     other = TAGGED if a.untagged else UNTAGGED
-    note = ""
     if port in (v.get(other) or []):
         raise IloError("%s: %s is %s in VLAN %d: take it out first with vlan-remove" % (sw.name, port, "tagged" if a.untagged else "untagged", vid))
-    steps = []
-    if a.untagged:
-        for ovid, odoc in sorted(split(all_interfaces(sw))[0].items()):
-            if ovid != vid and port in (odoc.get(UNTAGGED) or []):
-                note = " (moving it out of VLAN %d, where it is untagged)" % ovid
-                steps.append({"method": "DELETE", "url": IFACES + "=" + _q("vlan%d" % ovid) + "/" + UNTAGGED + "=" + _q(port),
-                              "undo": {"method": "PATCH", "url": IFACES + "=" + _q("vlan%d" % ovid),
-                                       "body": {"ietf-interfaces:interface": [{"name": "vlan%d" % ovid, UNTAGGED: [port]}]}}})
-    steps.append({"method": "PATCH", "url": IFACES + "=" + _q("vlan%d" % vid),
-                  "body": {"ietf-interfaces:interface": [{"name": "vlan%d" % vid, kind: [port]}]}})
-    if not _run(sw, a, "put %s in VLAN %d %s%s" % (port, vid, word, note), steps):
+    patch = {"method": "PATCH", "url": IFACES + "=" + _q("vlan%d" % vid),
+             "body": {"ietf-interfaces:interface": [{"name": "vlan%d" % vid, kind: [port]}]}}
+    olds = [ovid for ovid, odoc in sorted(split(all_interfaces(sw))[0].items())
+            if a.untagged and ovid != vid and port in (odoc.get(UNTAGGED) or [])]
+    try:
+        ran = _run(sw, a, "put %s in VLAN %d %s" % (port, vid, word), [patch])
+        if not ran and olds:
+            print("%s: if the switch refuses because the port is untagged in VLAN %s, it is retried after taking the port out of that VLAN"
+                  % (sw.name, ", ".join(map(str, olds))))
+    except IloError as first:
+        if not olds:
+            raise
+        print("%s: the switch refused (%s)" % (sw.name, first))
+        old_list = ", ".join(map(str, olds))
+        a.yes = True  # already confirmed for this change
+        steps = [{"method": "DELETE", "url": IFACES + "=" + _q("vlan%d" % o) + "/" + UNTAGGED + "=" + _q(port),
+                  "undo": {"method": "PATCH", "url": IFACES + "=" + _q("vlan%d" % o),
+                           "body": {"ietf-interfaces:interface": [{"name": "vlan%d" % o, UNTAGGED: [port]}]}}} for o in olds]
+        ran = _run(sw, a, "put %s in VLAN %d untagged, moving it out of VLAN %s first, where it is untagged" % (port, vid, old_list),
+                   steps + [patch])
+    if not ran:
         return
+    # the switch may leave the port untagged in its old VLAN too: take it out
+    for o in olds:
+        if port in _members_now(sw, o)[0]:
+            print("%s: %s is still untagged in VLAN %d: taking it out" % (sw.name, port, o))
+            sw.request("DELETE", IFACES + "=" + _q("vlan%d" % o) + "/" + UNTAGGED + "=" + _q(port), text_ok=True)
     un, tg = _members_now(sw, vid)
     if port not in (un if a.untagged else tg):
         raise IloError("%s: sent, but %s is not %s in VLAN %d afterwards" % (sw.name, port, word, vid))
@@ -551,7 +575,7 @@ COMMANDS = {
     "port": (cmd_port, "port, e.g. 1/1/49:1"), "get": (cmd_get, "path under /restconf/data"),
     "operations": (cmd_operations, None), "schema": (cmd_schema, "module name, e.g. yuma-netconf"), "save": (cmd_save, None), "backup": (cmd_backup, None),
     "set-description": (cmd_set_description, "port, e.g. 1/1/5"), "set-mtu": (cmd_set_mtu, "port, e.g. 1/1/5"),
-    "set-speed": (cmd_set_speed, "port, e.g. 1/1/5"),
+    "set-speed": (cmd_set_speed, "port, e.g. 1/1/5"), "set-mode": (cmd_set_mode, "port, e.g. 1/1/5"),
     "vlan-create": (cmd_vlan_create, "VLAN number"), "vlan-delete": (cmd_vlan_delete, "VLAN number"),
     "vlan-add": (cmd_vlan_add, "VLAN number and a port"), "vlan-remove": (cmd_vlan_remove, "VLAN number and a port"),
 }

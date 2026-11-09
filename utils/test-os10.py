@@ -74,6 +74,7 @@ class Mock:
         self.schema_as = None
         self.saved = False
         self.put_405 = False
+        self.auto_move = False
         self.writes = []
         mock = self
 
@@ -168,7 +169,11 @@ class Mock:
                                     return err(400, "no such port " + port)
                                 if k.endswith("tagged-ports") and k.startswith("dell-interface:tagged") and pd[0].get("dell-interface:mode") != "MODE_L2HYBRID":
                                     return err(400, "port %s is not in trunk mode" % port)
-                                if k == "dell-interface:untagged-ports" and any(
+                                if k == "dell-interface:untagged-ports" and mock.auto_move:
+                                    for i in mock.ifaces:
+                                        if i["name"] != name and port in i.get(k, []) and mock.auto_move == "move":
+                                            i[k] = [x for x in i[k] if x != port]
+                                elif k == "dell-interface:untagged-ports" and any(
                                         port in i.get(k, []) for i in mock.ifaces if i["name"] != name):
                                     return err(400, "port %s is already untagged in another VLAN" % port)
                             hit[0][k] = sorted(set(hit[0].get(k, [])) | set(v))
@@ -405,6 +410,25 @@ c, o, e = run("vlan-add", m.url, "600", "1/1/5", "--untagged", "--yes")
 v1 = [i for i in m.ifaces if i["name"] == "vlan1"][0]
 check("when the second step fails the first is taken back, and it says so", c == 1 and "internal error" in e and "took back" in o
       and "ethernet1/1/5" in v1["dell-interface:untagged-ports"], o + e)
+
+m = Mock(); m.auto_move = "move"; run("vlan-create", m.url, "600", "--yes"); w0 = len(m.writes)
+c, o, e = run("vlan-add", m.url, "600", "1/1/5", "--untagged", "--yes")
+v1 = [i for i in m.ifaces if i["name"] == "vlan1"][0]
+check("when the switch moves the port itself, one request is enough", c == 0 and [x[0] for x in m.writes[w0:]] == ["PATCH"] and "ethernet1/1/5" not in v1["dell-interface:untagged-ports"], str(m.writes) + o + e)
+m = Mock(); m.auto_move = "keep"; run("vlan-create", m.url, "600", "--yes")
+c, o, e = run("vlan-add", m.url, "600", "1/1/5", "--untagged", "--yes")
+v1 = [i for i in m.ifaces if i["name"] == "vlan1"][0]
+check("when the switch leaves the port untagged in the old VLAN as well, it is taken out of it", c == 0 and "still untagged in VLAN 1" in o and "ethernet1/1/5" not in v1["dell-interface:untagged-ports"], o + e)
+m = Mock(); run("vlan-create", m.url, "600", "--yes"); c, o, e = run("vlan-add", m.url, "600", "1/1/5", "--untagged", "--dry-run")
+check("--dry-run of an untagged add says what the retry would be", c == 0 and "retried after taking the port out of that VLAN" in o and [w[0] for w in m.writes] == ["PUT"], o + e)
+
+print("Mode")
+m = Mock(); c, o, e = run("set-mode", m.url, "1/1/5", "trunk", "--yes")
+check("set-mode trunk sets MODE_L2HYBRID", c == 0 and port_of(m, "ethernet1/1/5")["dell-interface:mode"] == "MODE_L2HYBRID" and "trunk (MODE_L2HYBRID)" in o, o + e)
+c, o, e = run("set-mode", m.url, "1/1/5", "access", "--yes")
+check("set-mode access removes the mode leaf", c == 0 and "dell-interface:mode" not in port_of(m, "ethernet1/1/5") and m.writes[-1][0] == "DELETE", str(m.writes) + o + e)
+m = Mock(); c, o, e = run("set-mode", m.url, "1/1/5", "hybrid", "--yes")
+check("an unknown mode is refused", c == 1 and "trunk" in e and m.requests == [], e)
 
 print("Errors")
 os.environ["OS10_PASSWORD"] = "wrong"
