@@ -2386,13 +2386,12 @@ Worth knowing:
   ilo-tst50`), or `ILO_PASSWORD`, `--password-file` or `--secret NAME` instead; an iLO's self-signed certificate needs `--insecure` or `--cacert`. The destructive
   actions ask for `yes` (`--yes` skips it); `--dry-run` shows the request and sends nothing; it waits for the new state
   (`--timeout`, `--no-wait`). `make check-ilo` tests it against a mock iLO;
-  `os10.py {interfaces|vlans|vlan N|port NAME|get PATH|operations|backup [FILE]} <switch>` reads a Dell OS10 switch (S5148F-ON and
-  others) through its RESTCONF API (GET only), and `os10.py set-description|set-mtu|set-speed <switch> <port> <value>` changes one setting of a port
-  in the running configuration (not saved until `os10.py save <switch>` copies the running to the startup configuration, or `write memory` on the switch): it shows old and new, asks for `yes` (`--yes`, `--dry-run`) and reads the port back.
-  `os10.py vlan-create|vlan-delete <switch> <vlan>` and `vlan-add|vlan-remove <switch> <vlan> <port> [--untagged]` create and delete VLANs (a VLAN with ports is not deleted) and put ports in and out of them, tagged unless `--untagged` (the switch is asked to add it directly; if it refuses because the port is untagged in another VLAN, the port is taken out of that VLAN first, and put back if the second step fails). `os10.py set-mode <switch> <port> trunk|access` is needed before a port can carry tagged VLANs; same confirmation, `--dry-run` and read-back; running configuration only. RESTCONF must be enabled on the switch
-  (`rest api restconf` in configuration mode, then `write memory`). Login: `--user` or `OS10_USER` (default `admin`); the password is
-  `OS10_PASSWORD`, `--password-file`, `--secret NAME`, or the Orphera secret named after the switch as typed; `--insecure`/`--cacert`
-  for its self-signed certificate; `--json` for machine-readable output. `make check-os10` tests it against a mock switch.
+  `os10.py` reads and changes a Dell OS10 switch (S5148F-ON and others) through its RESTCONF API, with nothing to install:
+  `interfaces`, `vlans`, `vlan`, `port`, `get`, `operations`, `schema` and `backup` only read; `set-description`, `set-mtu`,
+  `set-speed`, `set-mode`, `vlan-create`, `vlan-delete`, `vlan-add`, `vlan-remove` change the running configuration (each shows
+  old and new, asks for `yes`, has `--dry-run` and reads the result back) and `save` copies it to the startup configuration.
+  The password is the Orphera secret named after the switch as typed. How to enable RESTCONF, every command, login,
+  certificate options and what was learned on a real switch: [docs/OS10.md](docs/OS10.md). `make check-os10` tests it against a mock switch.
   `move-vm.sh [--dry-run] [--yes] [--delete-source] <vm> <hypervisor>` moves a VM that was provisioned on ZFS
   (`kvm_zfs_vm_provision.scala`) to another hypervisor: it checks both ends, shuts the guest down, sends a ZFS snapshot of
   `tank/kvm/<hypervisor>/<vm>` with `zfs send | nc | zfs receive`, compares file names and sizes, defines the domain on the
