@@ -61,7 +61,7 @@ final class Os10Switch(
     else "https://" + t
 
   /** What the switch is called in messages. */
-  val name: String = base.split("://", 2).last
+  val name: String = base.split("://", 2).lastOption.getOrElse(base)
 
   private val auth: String =
     "Basic " + Base64.getEncoder.encodeToString(s"$user:$password".getBytes(UTF_8))
@@ -260,7 +260,7 @@ object Os10:
     chunkRe
       .findAllIn(s)
       .toList
-      .map(c => if c.head.isDigit then (0, c.toLong, "") else (1, 0L, c))
+      .map(c => if c.headOption.exists(_.isDigit) then (0, c.toLong, "") else (1, 0L, c))
 
   private def compareKeys(x: List[Key], y: List[Key]): Int =
     (x, y) match
@@ -290,7 +290,7 @@ object Os10:
 
   def table(header: List[String], rows: List[List[String]]): String =
     val all = header :: rows
-    val widths = header.indices.map(i => all.map(_(i).length).max)
+    val widths = header.indices.map(i => all.map(_(i).length).foldLeft(0)(math.max))
     all
       .map(r =>
         r.zip(widths).map((c, w) => c.padTo(w, ' ')).mkString("  ").stripTrailing()
