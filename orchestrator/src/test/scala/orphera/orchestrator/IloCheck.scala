@@ -137,85 +137,85 @@ object IloCheck:
 
     // ---- Redfish ----
     var m = Mock()
-    var (c, o, e) = go("status", m.url)
+    var set(go("status", m.url))
     check("status shows On", c == 0 && o.contains("On"), o + e)
     m.stop()
 
-    m = Mock(); (c, o, e) = go("on", m.url)
+    m = Mock(); set(go("on", m.url))
     check("on when on: nothing sent", c == 0 && m.posts.isEmpty && o.contains("already on"), o + e)
     m.stop()
 
-    m = Mock(power = "Off"); (c, o, e) = go("on", m.url)
+    m = Mock(power = "Off"); set(go("on", m.url))
     check("on when off: POST On, now On", c == 0 && m.resets == List("On") && m.power == "On", m.posts.toString + e)
     check("the POST goes to the action target", m.posts.headOption.map(_._1).contains("/redfish/v1/Systems/1/Actions/ComputerSystem.Reset/"))
     m.stop()
 
-    m = Mock(); (c, o, e) = go(("off" :: m.url :: Y)*)
+    m = Mock(); set(go(("off" :: m.url :: Y)*))
     check("off: ForceOff, now Off", c == 0 && m.resets == List("ForceOff") && m.power == "Off", m.posts.toString + e)
     m.stop()
 
-    m = Mock(power = "Off"); (c, o, e) = go(("off" :: m.url :: Y)*)
+    m = Mock(power = "Off"); set(go(("off" :: m.url :: Y)*))
     check("off when off: nothing sent", c == 0 && m.posts.isEmpty, m.posts.toString)
     m.stop()
 
-    m = Mock(); (c, o, e) = go(("shutdown" :: m.url :: Y)*)
+    m = Mock(); set(go(("shutdown" :: m.url :: Y)*))
     check("shutdown on iLO 4 (no GracefulShutdown): PushPowerButton", c == 0 && m.resets == List("PushPowerButton") && m.power == "Off", m.posts.toString + e)
     m.stop()
 
-    m = Mock(allowed = List("On", "GracefulShutdown", "ForceOff")); (c, o, e) = go(("shutdown" :: m.url :: Y)*)
+    m = Mock(allowed = List("On", "GracefulShutdown", "ForceOff")); set(go(("shutdown" :: m.url :: Y)*))
     check("shutdown uses GracefulShutdown when offered", c == 0 && m.resets == List("GracefulShutdown"), m.posts.toString)
     m.stop()
 
-    m = Mock(power = "Off"); (c, o, e) = go(("shutdown" :: m.url :: Y)*)
+    m = Mock(power = "Off"); set(go(("shutdown" :: m.url :: Y)*))
     check("shutdown when off never presses the button", c == 0 && m.posts.isEmpty, m.posts.toString)
     m.stop()
 
-    m = Mock(shutdownWorks = false); (c, o, e) = go("shutdown", m.url, "--yes", "--timeout", "1")
+    m = Mock(shutdownWorks = false); set(go("shutdown", m.url, "--yes", "--timeout", "1"))
     check("shutdown that does not complete fails and does not force", c == 1 && m.resets == List("PushPowerButton") && e.contains("`off`"), m.posts.toString + e)
     m.stop()
 
-    m = Mock(); (c, o, e) = go(("reset" :: m.url :: Y)*)
+    m = Mock(); set(go(("reset" :: m.url :: Y)*))
     check("reset: ForceRestart, still On", c == 0 && m.resets == List("ForceRestart") && m.power == "On", m.posts.toString + e)
     m.stop()
 
-    m = Mock(power = "Off"); (c, o, e) = go(("reset" :: m.url :: Y)*)
+    m = Mock(power = "Off"); set(go(("reset" :: m.url :: Y)*))
     check("reset when off fails, nothing sent", c == 1 && m.posts.isEmpty && e.contains("not on"), m.posts.toString + e)
     m.stop()
 
-    m = Mock(); (c, o, e) = go(("soft-reset" :: m.url :: Y)*)
+    m = Mock(); set(go(("soft-reset" :: m.url :: Y)*))
     check("soft-reset on iLO 4: button, then On", c == 0 && m.resets == List("PushPowerButton", "On") && m.power == "On", m.posts.toString + e)
     m.stop()
 
-    m = Mock(allowed = List("On", "GracefulRestart", "ForceOff")); (c, o, e) = go(("soft-reset" :: m.url :: Y)*)
+    m = Mock(allowed = List("On", "GracefulRestart", "ForceOff")); set(go(("soft-reset" :: m.url :: Y)*))
     check("soft-reset uses GracefulRestart when offered", c == 0 && m.resets == List("GracefulRestart"), m.posts.toString + e)
     m.stop()
 
-    m = Mock(shutdownWorks = false); (c, o, e) = go("soft-reset", m.url, "--yes", "--timeout", "1")
+    m = Mock(shutdownWorks = false); set(go("soft-reset", m.url, "--yes", "--timeout", "1"))
     check("soft-reset whose shutdown stalls fails before powering on", c == 1 && m.resets == List("PushPowerButton"), m.posts.toString + e)
     m.stop()
 
-    m = Mock(power = "Off"); (c, o, e) = go(("soft-reset" :: m.url :: Y)*)
+    m = Mock(power = "Off"); set(go(("soft-reset" :: m.url :: Y)*))
     check("soft-reset when off fails, nothing sent", c == 1 && m.posts.isEmpty, m.posts.toString + e)
     m.stop()
 
-    m = Mock(); (c, o, e) = go("reset", m.url, "--yes", "--dry-run")
+    m = Mock(); set(go("reset", m.url, "--yes", "--dry-run"))
     check("--dry-run sends nothing and says what it would", c == 0 && m.posts.isEmpty && o.contains("would send") && o.contains("ForceRestart"), o + e)
     m.stop()
 
-    m = Mock(); (c, o, e) = go("off", m.url, "--yes", "--no-wait")
+    m = Mock(); set(go("off", m.url, "--yes", "--no-wait"))
     check("--no-wait returns after the request", c == 0 && m.resets == List("ForceOff") && o.contains("requested"), o + e)
     m.stop()
 
-    m = Mock(); (c, o, e) = go("soft-reset", m.url, "--yes", "--no-wait")
+    m = Mock(); set(go("soft-reset", m.url, "--yes", "--no-wait"))
     check("soft-reset --no-wait leaves the power on to the user", c == 0 && m.resets == List("PushPowerButton") && o.contains("--no-wait"), o + e)
     m.stop()
 
     // ---- HP REST API ----
-    m = Mock(legacy = true); (c, o, e) = go("status", m.url)
+    m = Mock(legacy = true); set(go("status", m.url))
     check("status through /rest/v1", c == 0 && o.contains("On"), o + e)
     m.stop()
 
-    m = Mock(legacy = true); (c, o, e) = go(("off" :: m.url :: Y)*)
+    m = Mock(legacy = true); set(go(("off" :: m.url :: Y)*))
     check(
       "off: POST Action Reset ForceOff to the system",
       c == 0 && m.posts.toList == List(("/rest/v1/Systems/1", Json.obj("Action" -> Json.fromString("Reset"), "ResetType" -> Json.fromString("ForceOff")))),
@@ -223,46 +223,46 @@ object IloCheck:
     )
     m.stop()
 
-    m = Mock(legacy = true, power = "Off"); (c, o, e) = go("on", m.url)
+    m = Mock(legacy = true, power = "Off"); set(go("on", m.url))
     check("on through /rest/v1", c == 0 && m.power == "On", m.posts.toString + e)
     m.stop()
 
     // ---- errors and safety ----
-    m = Mock(); (c, o, e) = run(Map("ILO_PASSWORD" -> "wrong"), "status", m.url)
+    m = Mock(); set(run(Map("ILO_PASSWORD" -> "wrong"), "status", m.url))
     check("a refused login is one request, not retried", c == 1 && m.requests == 1 && e.contains("refused the login"), s"${m.requests} requests: $e")
     m.stop()
 
-    m = Mock(); (c, o, e) = run(Env + ("ILO_USER" -> "operator"), "status", m.url)
+    m = Mock(); set(run(Env + ("ILO_USER" -> "operator"), "status", m.url))
     check("ILO_USER sets the user (the mock only accepts Administrator)", c == 1 && e.contains("user operator"), e)
     m.stop()
 
-    m = Mock(); (c, o, e) = run(Env + ("ILO_USER" -> "operator"), "status", m.url, "--user", "Administrator")
+    m = Mock(); set(run(Env + ("ILO_USER" -> "operator"), "status", m.url, "--user", "Administrator"))
     check("--user overrides ILO_USER", c == 0 && o.contains("On"), o + e)
     m.stop()
 
-    (c, o, e) = go("status", "http://127.0.0.1:9")
+    set(go("status", "http://127.0.0.1:9"))
     check("an unreachable iLO fails with a message", c == 1 && e.contains("cannot reach"), e)
 
     if noTerminal then
-      m = Mock(); (c, o, e) = go("off", m.url)
+      m = Mock(); set(go("off", m.url))
       check("off without --yes and without a terminal is refused", c == 2 && m.posts.isEmpty, s"$c $e")
       m.stop()
 
     val a = Mock()
     val b = Mock(power = "Off")
-    (c, o, e) = go(("reset" :: b.url :: a.url :: Y)*)
+    set(go(("reset" :: b.url :: a.url :: Y)*))
     check("several iLOs: one fails, the next still done, exit 1", c == 1 && a.resets == List("ForceRestart") && b.posts.isEmpty, s"$c $e")
     a.stop(); b.stop()
 
-    m = Mock(); (c, o, e) = go("on", m.url + "/", "--no-wait")
+    m = Mock(); set(go("on", m.url + "/", "--no-wait"))
     check("a trailing slash in the URL is fine", c == 0, e)
     m.stop()
 
-    (c, o, e) = go("status")
+    set(go("status"))
     check("no iLO named is a usage error", c == 2 && e.contains("needs an iLO"), s"$c $e")
-    (c, o, e) = go("frobnicate", "x")
+    set(go("frobnicate", "x"))
     check("an unknown action is a usage error", c == 2 && e.contains("unknown action"), s"$c $e")
-    (c, o, e) = go("status", "x", "--timeout", "soon")
+    set(go("status", "x", "--timeout", "soon"))
     check("a bad --timeout is a usage error", c == 2 && e.contains("--timeout"), s"$c $e")
 
     // ---- passwords ----
