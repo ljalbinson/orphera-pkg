@@ -45,7 +45,7 @@ object IloTool:
       cacert: Option[String],
       yes: Boolean,
       dryRun: Boolean,
-      wait: Boolean,
+      waits: Boolean,
       timeout: Int,
       positional: List[String]
   )
@@ -86,7 +86,7 @@ object IloTool:
             case "-k" | "--insecure" => go(tail, o.copy(insecure = true))
             case "-y" | "--yes"      => go(tail, o.copy(yes = true))
             case "-n" | "--dry-run"  => go(tail, o.copy(dryRun = true))
-            case _                   => go(tail, o.copy(wait = false))
+            case _                   => go(tail, o.copy(waits = false))
         case f :: _ if f.startsWith("-") && f.length > 1 => Left(s"unknown option $f")
         case p :: tail => go(tail, o.copy(positional = p :: o.positional))
     go(
@@ -101,16 +101,16 @@ object IloTool:
   def secretKey(target: String): String = DeviceAccess.secretKey(target)
 
   private def done(ilo: Ilo, sent: Boolean, o: Opts, text: String): Unit =
-    if sent then ilo.log(s"${ilo.name}: $text${if o.wait then "" else " requested"}")
+    if sent then ilo.log(s"${ilo.name}: $text${if o.waits then "" else " requested"}")
 
   private val ok: Either[IloError, Unit] = Right(())
 
   private def waitIf(ilo: Ilo, sent: Boolean, o: Opts, want: String): Either[IloError, Unit] =
-    if sent && o.wait then ilo.waitFor(want, o.timeout) else ok
+    if sent && o.waits then ilo.waitFor(want, o.timeout) else ok
 
   /** After a restart request: give the server a moment to go down, then wait for it to be on. */
   private def waitRestart(ilo: Ilo, sent: Boolean, o: Opts): Either[IloError, Unit] =
-    if sent && o.wait then
+    if sent && o.waits then
       Thread.sleep(math.min(ilo.pollMillis, 5000L))
       ilo.waitFor("On", o.timeout)
     else ok
@@ -190,7 +190,7 @@ object IloTool:
           gracefulOff(ilo, o, doc).flatMap { sent =>
             if !sent then
               Right(ilo.log(s"${ilo.name}: would then wait for the shutdown and send POST On"))
-            else if !o.wait then
+            else if !o.waits then
               Right(ilo.log(s"${ilo.name}: shutdown requested; --no-wait leaves the power on to you"))
             else
               for
