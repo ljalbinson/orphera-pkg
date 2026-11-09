@@ -136,7 +136,7 @@ object IloTool:
         .map(_ => sent)
     }
 
-  private def opStatus(ilo: Ilo, o: Opts): Either[IloError, Unit] =
+  private def opStatus(ilo: Ilo): Either[IloError, Unit] =
     ilo.powerState().map(s => ilo.log(s"${ilo.name}: $s"))
 
   private def opOn(ilo: Ilo, o: Opts): Either[IloError, Unit] =
@@ -203,7 +203,7 @@ object IloTool:
 
   private def operate(action: String, ilo: Ilo, o: Opts): Either[IloError, Unit] =
     action match
-      case "status"     => opStatus(ilo, o)
+      case "status"     => opStatus(ilo)
       case "on"         => opOn(ilo, o)
       case "off"        => opOff(ilo, o)
       case "shutdown"   => opShutdown(ilo, o)
