@@ -2388,7 +2388,7 @@ Worth knowing:
   (`--timeout`, `--no-wait`). `make check-ilo` tests it against a mock iLO;
   `os10.py {interfaces|vlans|vlan N|port NAME|get PATH|operations|backup [FILE]} <switch>` reads a Dell OS10 switch (S5148F-ON and
   others) through its RESTCONF API (GET only), and `os10.py set-description|set-mtu|set-speed <switch> <port> <value>` changes one setting of a port
-  in the running configuration (not saved; `write memory` on the switch keeps it): it shows old and new, asks for `yes` (`--yes`, `--dry-run`) and reads the port back. RESTCONF must be enabled on the switch
+  in the running configuration (not saved until `os10.py save <switch>` copies the running to the startup configuration, or `write memory` on the switch): it shows old and new, asks for `yes` (`--yes`, `--dry-run`) and reads the port back. RESTCONF must be enabled on the switch
   (`rest api restconf` in configuration mode, then `write memory`). Login: `--user` or `OS10_USER` (default `admin`); the password is
   `OS10_PASSWORD`, `--password-file`, `--secret NAME`, or the Orphera secret named after the switch as typed; `--insecure`/`--cacert`
   for its self-signed certificate; `--json` for machine-readable output. `make check-os10` tests it against a mock switch.

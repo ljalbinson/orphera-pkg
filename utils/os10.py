@@ -9,14 +9,15 @@
   utils/os10.py get         swt4 ietf-interfaces:interfaces/interface=vlan228   # any path under /restconf/data
   utils/os10.py operations  swt4            # the actions the switch offers (/restconf/operations)
   utils/os10.py schema      swt4 yuma-netconf   # a YANG module's source, from the switch (read-only POST of get-schema)
+  utils/os10.py save        swt4              # copy running-configuration startup-configuration (asks for yes; --yes, --dry-run)
   utils/os10.py backup      swt4 [FILE]     # saves the whole RESTCONF data tree as JSON (default swt4-<time>.json)
 
   utils/os10.py set-description swt4 1/1/5 "gs1 eth0"   # a port's description ("" removes it)
   utils/os10.py set-mtu         swt4 1/1/5 9216          # a port's MTU
   utils/os10.py set-speed       swt4 1/1/5 25G           # a port's speed (10G 25G 40G 50G 100G, or auto)
 
-The set-* commands change the switch's RUNNING configuration only; nothing is saved to the startup configuration, so a
-reload undoes them (save on the switch with `write memory`). Each shows the old and the new value and asks for `yes`
+The set-* commands change the switch's RUNNING configuration only; nothing is saved to the startup configuration (verified on
+an S5148F-ON), so a reload undoes them until `os10.py save` (or `write memory` on the switch) is run. Each shows the old and the new value and asks for `yes`
 (--yes skips it, --dry-run sends nothing), then reads the port back to check the switch took it. Only ports (ethernet...)
 can be changed. Changing a port's speed or MTU can drop its link: do not do it to the port you are connected through.
 
@@ -257,10 +258,31 @@ def cmd_schema(sw, a):
             t = first_text(v)
             if t:
                 return t
+    if isinstance(doc, str) and doc.startswith('{"ietf-netconf-monitoring:output":{"data":'):
+        # the switch sends the text inside JSON that is not valid JSON: strip the wrapper
+        doc = doc[len('{"ietf-netconf-monitoring:output":{"data":'):].rstrip().rstrip("}").rstrip()
+    if isinstance(doc, str) and "&lt;" in doc:
+        import html
+        doc = html.unescape(doc)
     text = first_text(doc)
     if not text:
         raise IloError("%s: no schema text for %s in the reply" % (sw.name, a.arg))
     print(text)
+
+
+def cmd_save(sw, a):
+    """copy running-configuration startup-configuration, as yuma-netconf:copy-config (source running, target startup)."""
+    body = {"yuma-netconf:input": {"source": {"running": [None]}, "target": {"startup": [None]}}}
+    print("%s: save the running configuration to the startup configuration (copy-config running -> startup)" % sw.name)
+    if a.dry_run:
+        return print("dry run, would send: POST /restconf/operations/yuma-netconf:copy-config %s" % json.dumps(body))
+    if not a.yes:
+        if not sys.stdin.isatty():
+            raise IloError("save needs --yes when there is no terminal")
+        if input("type yes to go on: ").strip() != "yes":
+            raise IloError("not confirmed, nothing sent")
+    sw.request("POST", "/operations/yuma-netconf:copy-config", body, text_ok=True)
+    print("%s: saved. Check on the switch with `show startup-configuration`." % sw.name)
 
 
 def cmd_backup(sw, a):
@@ -312,7 +334,7 @@ def _change(sw, a, label, key, new, shown_new=None):
     got = _port_doc(sw, name).get(key)
     if got != new:
         raise IloError("%s: sent, but %s now reads %s, not %s" % (sw.name, label, "(none)" if got is None else got, shown_new))
-    print("%s: %s %s is now %s. Not saved to the startup configuration: `write memory` on the switch keeps it." % (sw.name, name, label, shown_new))
+    print("%s: %s %s is now %s. Not saved to the startup configuration: `os10.py save` or `write memory` keeps it." % (sw.name, name, label, shown_new))
 
 
 def _value(a):
@@ -344,7 +366,7 @@ def cmd_set_speed(sw, a):
 COMMANDS = {
     "interfaces": (cmd_interfaces, None), "vlans": (cmd_vlans, None), "vlan": (cmd_vlan, "VLAN number"),
     "port": (cmd_port, "port, e.g. 1/1/49:1"), "get": (cmd_get, "path under /restconf/data"),
-    "operations": (cmd_operations, None), "schema": (cmd_schema, "module name, e.g. yuma-netconf"), "backup": (cmd_backup, None),
+    "operations": (cmd_operations, None), "schema": (cmd_schema, "module name, e.g. yuma-netconf"), "save": (cmd_save, None), "backup": (cmd_backup, None),
     "set-description": (cmd_set_description, "port, e.g. 1/1/5"), "set-mtu": (cmd_set_mtu, "port, e.g. 1/1/5"),
     "set-speed": (cmd_set_speed, "port, e.g. 1/1/5"),
 }

@@ -72,6 +72,7 @@ class Mock:
         self.ifaces = copy.deepcopy(IFACES)
         self.ignore_patch = False
         self.schema_as = None
+        self.saved = False
         mock = self
 
         class H(BaseHTTPRequestHandler):
@@ -92,6 +93,14 @@ class Mock:
                     return self.reply(401, {})
                 p = self.path
                 base = "/restconf/data/ietf-interfaces:interfaces/interface"
+                if self.command == "POST" and p == "/restconf/operations/yuma-netconf:copy-config":
+                    n = int(self.headers.get("Content-Length") or 0)
+                    mock.bodies.append(json.loads(self.rfile.read(n)))
+                    mock.saved = True
+                    self.send_response(204)
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return
                 if self.command == "POST" and p == "/restconf/operations/ietf-netconf-monitoring:get-schema":
                     n = int(self.headers.get("Content-Length") or 0)
                     mock.bodies.append(json.loads(self.rfile.read(n)))
@@ -212,6 +221,18 @@ m = Mock(); m.schema_as = "module yuma-netconf { rpc copy-config; }"; c, o, e = 
 check("schema also takes a plain-text reply", c == 0 and "rpc copy-config" in o, o + e)
 m = Mock(); m.schema_as = '<data xmlns="x">module a { leaf b; }</data>'; c, o, e = run("schema", m.url, "a")
 check("schema also takes an XML reply", c == 0 and o.strip() == "module a { leaf b; }", o + e)
+
+m = Mock(); m.schema_as = '{"ietf-netconf-monitoring:output":{"data":\nmodule a { type string; // x &lt;running/&gt;\n}\n}}'
+c, o, e = run("schema", m.url, "a")
+check("schema strips the switch's broken JSON wrapper and unescapes &lt; &gt;", c == 0 and o.startswith("\nmodule a") and "<running/>" in o and "output" not in o, repr(o) + e)
+
+print("Save")
+m = Mock(); c, o, e = run("save", m.url, "--yes")
+check("save sends copy-config running -> startup", c == 0 and m.saved and m.bodies[0] == {"yuma-netconf:input": {"source": {"running": [None]}, "target": {"startup": [None]}}} and "saved" in o, o + e)
+m = Mock(); c, o, e = run("save", m.url, "--dry-run")
+check("save --dry-run sends nothing", c == 0 and not m.saved and m.requests == [] and "would send" in o, o + e)
+m = Mock(); c, o, e = run("save", m.url)
+check("save without a terminal and without --yes sends nothing", c == 1 and not m.saved and "--yes" in e, o + e)
 
 print("Changes")
 def port_of(m, name):
