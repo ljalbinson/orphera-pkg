@@ -262,6 +262,7 @@ object Os10Check:
     val (c6, o6, e6) = run("port", m.url, "1/1/49:1")
     check("port 1/1/49:1 asks for the encoded name and shows its VLANs",
       c6 == 0 && m.requests.exists(_._2.endsWith("interface=ethernet1%2F1%2F49%3A1")) && o6.contains("tagged VLANs:   228,230") && o6.contains("untagged VLANs: -"), o6 + e6)
+    check("JSON is printed as \"name\": \"x\", with no space before the colon", o6.contains("\"name\": \"ethernet1/1/49:1\"") && !o6.contains("\" :"), o6)
     val (c7, _, e7) = run("port", m.url, "1/1/99")
     check("an unknown port is reported as no port", c7 == 1 && e7.contains("no port ethernet1/1/99"), e7)
     val (c8, o8, _) = run("operations", m.url)

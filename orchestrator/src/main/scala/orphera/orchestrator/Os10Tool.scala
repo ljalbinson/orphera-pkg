@@ -4,7 +4,7 @@ package orphera.orchestrator
 
 import java.nio.file.{Files, Paths}
 
-import io.circe.Json
+import io.circe.{Json, Printer}
 
 /** `orphera os10 <command> <switch> ...`: read, and change, a Dell OS10 switch
   * through its RESTCONF API. The same commands as utils/os10.py, on the Os10
@@ -181,7 +181,10 @@ object Os10Tool:
           )
     }
 
-  private def printJson(j: Json): Unit = println(j.spaces2)
+  /** Two-space indent and `"name": "x"`, as utils/os10.py prints it (circe's own spaces2 puts a space before the colon). */
+  private val printer: Printer = Printer.spaces2.copy(colonLeft = "")
+
+  private def printJson(j: Json): Unit = println(printer.print(j))
 
   private def command(sw: Os10Switch, o: Opts, cmd: String, args: List[String]): Either[Os10Error, Unit] =
     val a1 = args.headOption
@@ -298,7 +301,7 @@ object Os10Tool:
         )
         sw.json("/data").flatMap { doc =>
           try
-            Files.writeString(Paths.get(path), doc.spaces2)
+            Files.writeString(Paths.get(path), printer.print(doc))
             println(s"${sw.name}: saved ${Files.size(Paths.get(path))} bytes to $path")
             Right(())
           catch case e: Exception => Left(Os10Error(s"cannot write $path: ${e.getMessage}"))

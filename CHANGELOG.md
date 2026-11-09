@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Fixed
+- `orphera os10` prints JSON as `"name": "x"` (no space before the colon), like `utils/os10.py`.
 - A playbook that cannot start (a `--config` file that does not load, a missing `--config`) or that fails now reports one line (`Error: ...`, or just the message for a failed stage) instead of a Java stack trace. `ORPHERA_DEBUG=1` brings the stack trace back for start-up errors. Playbook scripts are now started through `orphera.orchestrator.PlaybookLauncher` (not yet compiled).
 - CI had failed on every push since 2026-11-03 morning: `k8s/argocd-test/configmap.yaml` had no SPDX header, and `test_lustre.sh` and `test_lustre_client.sh` named their playbooks by `manifests/` path instead of by bare name (which `utils/test-shell-sources.sh` requires, so they follow `-m` / `ORPHERA_MANIFESTS`).
 
