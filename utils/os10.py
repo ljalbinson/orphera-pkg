@@ -120,6 +120,25 @@ def _detail(body):
         return ""
 
 
+def _missing(e):
+    """True when the switch's error says the interface does not exist (it answers 400 'unknown resource instance',
+    other RESTCONF servers 404)."""
+    st = getattr(e, "status", None)
+    return st == 404 or (st == 400 and "unknown resource" in str(e))
+
+
+def get_interface(sw, name):
+    """The interface document, or None if the switch has no interface of that name."""
+    try:
+        doc = sw.data("ietf-interfaces:interfaces/interface=" + urllib.parse.quote(name, safe=""))
+    except IloError as e:
+        if _missing(e):
+            return None
+        raise
+    items = doc.get("ietf-interfaces:interface") or doc.get("interface") or []
+    return items[0] if items else None
+
+
 # ---- what the interfaces document holds ----
 def all_interfaces(sw):
     doc = sw.data("ietf-interfaces:interfaces/interface")
@@ -209,12 +228,9 @@ def cmd_vlans(sw, a):
 def cmd_vlan(sw, a):
     if not a.arg.isdigit():
         raise IloError("a VLAN is given by its number, e.g. 228")
-    name = "vlan" + a.arg
-    doc = sw.data("ietf-interfaces:interfaces/interface=" + urllib.parse.quote(name, safe=""))
-    items = doc.get("ietf-interfaces:interface") or doc.get("interface") or []
-    if not items:
+    v = get_interface(sw, "vlan" + a.arg)
+    if v is None:
         raise IloError("%s: no VLAN %s" % (sw.name, a.arg))
-    v = items[0]
     un, tg = v.get("dell-interface:untagged-ports") or [], v.get("dell-interface:tagged-ports") or []
     if a.json:
         return print(json.dumps({"vlan": int(a.arg), "untagged": un, "tagged": tg}, indent=2))
@@ -225,15 +241,14 @@ def cmd_vlan(sw, a):
 
 def cmd_port(sw, a):
     name = port_name(a.arg)
-    doc = sw.data("ietf-interfaces:interfaces/interface=" + urllib.parse.quote(name, safe=""))
-    items = doc.get("ietf-interfaces:interface") or doc.get("interface") or []
-    if not items:
+    port = get_interface(sw, name)
+    if port is None:
         raise IloError("%s: no port %s" % (sw.name, name))
     vlans, _ = split(all_interfaces(sw))
     un, tg = membership(vlans).get(name, ([], []))
     if a.json:
-        return print(json.dumps({"interface": items[0], "untagged": sorted(un), "tagged": sorted(tg)}, indent=2))
-    print(json.dumps(items[0], indent=2))
+        return print(json.dumps({"interface": port, "untagged": sorted(un), "tagged": sorted(tg)}, indent=2))
+    print(json.dumps(port, indent=2))
     print("untagged VLANs: %s" % (ranges(un) or "-"))
     print("tagged VLANs:   %s" % (ranges(tg) or "-"))
 
@@ -305,11 +320,10 @@ SPEEDS = {"10G": "10GIGE", "25G": "25GIGE", "40G": "40GIGE", "50G": "50GIGE", "1
 
 
 def _port_doc(sw, name):
-    doc = sw.data("ietf-interfaces:interfaces/interface=" + urllib.parse.quote(name, safe=""))
-    items = doc.get("ietf-interfaces:interface") or doc.get("interface") or []
-    if not items:
+    port = get_interface(sw, name)
+    if port is None:
         raise IloError("%s: no port %s" % (sw.name, name))
-    return items[0]
+    return port
 
 
 def _change(sw, a, label, key, new, shown_new=None):
@@ -387,14 +401,7 @@ def _vlan_number(a, member=False):
 
 def _vlan_doc(sw, vid):
     """The VLAN's interface document, or None if the switch has no such VLAN."""
-    try:
-        doc = sw.data("ietf-interfaces:interfaces/interface=" + _q("vlan%d" % vid))
-    except IloError as e:
-        if getattr(e, "status", None) == 404:
-            return None
-        raise
-    items = doc.get("ietf-interfaces:interface") or doc.get("interface") or []
-    return items[0] if items else None
+    return get_interface(sw, "vlan%d" % vid)
 
 
 def _confirm(sw, a):
@@ -602,6 +609,9 @@ def main(argv=None):
     except IloError as e:
         print("FAIL  %s" % e, file=sys.stderr)
         return 1
+    except KeyboardInterrupt:
+        print("\ninterrupted", file=sys.stderr)
+        return 130
     return 0
 
 

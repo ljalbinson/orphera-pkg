@@ -182,7 +182,7 @@ class Mock:
                     hit = [i for i in mock.ifaces if i["name"] == name]
                     if hit:
                         return self.reply(200, {"ietf-interfaces:interface": hit})
-                    return self.reply(404, {"ietf-restconf:errors": {"error": [{"error-type": "application", "error-tag": "invalid-value", "error-message": "no such interface"}]}})
+                    return self.reply(400, {"ietf-restconf:errors": {"error": [{"error-type": "protocol", "error-tag": "invalid-value", "error-message": "unknown resource instance"}]}})
                 if p == "/restconf/operations":
                     return self.reply(200, {"ietf-restconf:operations": {"dell-system-software:boot-system": [None], "yumaworks-system:backup": [None]}})
                 if p == "/restconf/data":
@@ -242,7 +242,7 @@ check("port 1/1/49:1 means ethernet1/1/49:1 and is asked for with the name perce
 m = Mock(); c, o, e = run("port", m.url, "ethernet1/1/1")
 check("port ethernet1/1/1 (full name) works", c == 0 and "25GIGE" in o, o + e)
 m = Mock(); c, o, e = run("port", m.url, "1/1/99")
-check("an unknown port fails with the switch's message", c == 1 and "no such interface" in e, e)
+check("an unknown port is reported as no port (the switch answers HTTP 400 unknown resource instance)", c == 1 and "no port ethernet1/1/99" in e, e)
 m = Mock(); c, o, e = run("get", m.url, "ietf-interfaces:interfaces/interface=vlan228")
 check("get prints the document", c == 0 and "vlan228" in o, o + e)
 m = Mock(); c, o, e = run("operations", m.url)
@@ -306,7 +306,7 @@ check("without a terminal and without --yes nothing is sent", c == 1 and "--yes"
 m = Mock(); c, o, e = run("set-mtu", m.url, "vlan228", "1500", "--yes")
 check("a VLAN or management interface cannot be changed", c == 1 and "only ethernet" in e and m.requests == [], o + e)
 m = Mock(); c, o, e = run("set-mtu", m.url, "1/1/99", "1500", "--yes")
-check("an unknown port is refused with the switch's message", c == 1 and "no such interface" in e, e)
+check("an unknown port is refused", c == 1 and "no port ethernet1/1/99" in e, e)
 m = Mock(); m.ignore_patch = True; c, o, e = run("set-mtu", m.url, "1/1/1", "1500", "--yes")
 check("a change the switch accepts but does not apply is reported", c == 1 and "now reads 9216" in e, o + e)
 m = Mock(); c, o, e = run("set-mtu", m.url, "1/1/1")
@@ -365,7 +365,7 @@ c, o, e = run("vlan-add", m.url, "601", "1/1/5", "--untagged", "--yes")
 check("moving between untagged VLANs works too", c == 0 and "moving it out of VLAN 600" in o, o + e)
 m = Mock(); run("vlan-create", m.url, "600", "--yes")
 c, o, e = run("vlan-add", m.url, "600", "1/1/98", "--untagged", "--yes")
-check("vlan-add of a port the switch does not have is refused before any change", c == 1 and "no such interface" in e and [w[0] for w in m.writes] == ["PUT"], str(m.writes) + e)
+check("vlan-add of a port the switch does not have is refused before any change", c == 1 and "no port ethernet1/1/98" in e and [w[0] for w in m.writes] == ["PUT"], str(m.writes) + e)
 m = Mock(); run("vlan-create", m.url, "600", "--yes"); run("vlan-create", m.url, "601", "--yes")
 v1 = [i for i in m.ifaces if i["name"] == "vlan1"][0]
 other_untag = [i for i in m.ifaces if i["name"] == "vlan601"][0]
