@@ -1341,6 +1341,10 @@ object Cli:
       |                      ORPHERA_CERTS_DIR that signs each node's certificate,
       |                      as 'make certs' does; refuses if one is already there;
       |                      runs on this machine only, nothing is sent to a node
+      |  os10              <command> <switch> ...
+      |                    — reads and changes a Dell OS10 switch through its RESTCONF API
+      |                      (interfaces, vlans, port, set-mtu, vlan-add, save ...; run
+      |                      `orphera os10 --help`); runs on this machine only
       |  secrets           init | list | generate <name> | set <name> | get <name> | rm <name>
       |                    — the encrypted store of passwords and keys that playbooks
       |                      use (~/.config/orphera/secrets.age); runs on this machine
