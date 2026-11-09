@@ -4,6 +4,7 @@
 (OS10 10.4.3.11). Needs no switch and no lab. Run from the repository root: make check-os10"""
 import base64
 import contextlib
+import copy
 import importlib.util
 import io
 import json
@@ -67,6 +68,9 @@ IFACES = [
 class Mock:
     def __init__(self, tls=None):
         self.requests = []  # (method, raw path)
+        self.bodies = []
+        self.ifaces = copy.deepcopy(IFACES)
+        self.ignore_patch = False
         mock = self
 
         class H(BaseHTTPRequestHandler):
@@ -85,22 +89,43 @@ class Mock:
                 mock.requests.append((self.command, self.path))
                 if self.headers.get("Authorization") != "Basic " + base64.b64encode(b"admin:secret").decode():
                     return self.reply(401, {})
-                if self.command != "GET":
-                    return self.reply(405, {})
                 p = self.path
                 base = "/restconf/data/ietf-interfaces:interfaces/interface"
+                if self.command in ("PATCH", "DELETE"):
+                    n = int(self.headers.get("Content-Length") or 0)
+                    body = json.loads(self.rfile.read(n)) if n else None
+                    mock.bodies.append(body)
+                    rest = p[len(base) + 1:] if p.startswith(base + "=") else None
+                    if rest is None:
+                        return self.reply(404, {})
+                    name, _, leaf = rest.partition("/")
+                    name = urllib.parse.unquote(name)
+                    hit = [i for i in mock.ifaces if i["name"] == name]
+                    if not hit:
+                        return self.reply(404, {"ietf-restconf:errors": {"error": [{"error-message": "no such interface"}]}})
+                    if self.command == "PATCH" and body is None:
+                        return self.reply(400, {})
+                    if not mock.ignore_patch:
+                        if self.command == "PATCH":
+                            hit[0].update({k: v for k, v in body["ietf-interfaces:interface"][0].items() if k != "name"})
+                        else:
+                            hit[0].pop(leaf, None)
+                    self.send_response(204)
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return
                 if p == base:
-                    return self.reply(200, {"ietf-interfaces:interface": IFACES})
+                    return self.reply(200, {"ietf-interfaces:interface": mock.ifaces})
                 if p.startswith(base + "="):
                     name = urllib.parse.unquote(p[len(base) + 1:])
-                    hit = [i for i in IFACES if i["name"] == name]
+                    hit = [i for i in mock.ifaces if i["name"] == name]
                     if hit:
                         return self.reply(200, {"ietf-interfaces:interface": hit})
                     return self.reply(404, {"ietf-restconf:errors": {"error": [{"error-type": "application", "error-tag": "invalid-value", "error-message": "no such interface"}]}})
                 if p == "/restconf/operations":
                     return self.reply(200, {"ietf-restconf:operations": {"dell-system-software:boot-system": [None], "yumaworks-system:backup": [None]}})
                 if p == "/restconf/data":
-                    return self.reply(200, {"ietf-interfaces:interfaces": {"interface": IFACES}})
+                    return self.reply(200, {"ietf-interfaces:interfaces": {"interface": mock.ifaces}})
                 self.reply(404, {})
 
             do_GET = do_POST = do_PUT = do_PATCH = do_DELETE = handle_any
@@ -167,6 +192,43 @@ check("backup writes the data tree to the file", c == 0 and "interfaces" in open
 shutil.rmtree(d)
 m = Mock(); run("interfaces", m.url); run("vlans", m.url); run("port", m.url, "1/1/1"); run("get", m.url, "x"); run("operations", m.url)
 check("only GET is ever sent", {meth for meth, _ in m.requests} == {"GET"}, str(m.requests))
+
+print("Changes")
+def port_of(m, name):
+    return [i for i in m.ifaces if i["name"] == name][0]
+
+
+m = Mock(); c, o, e = run("set-description", m.url, "1/1/5", "gs1 eth0", "--yes")
+check("set-description PATCHes the port and reads it back", c == 0 and port_of(m, "ethernet1/1/5").get("description") == "gs1 eth0"
+      and m.requests[-2][0] == "PATCH" and m.requests[-2][1].endswith("interface=ethernet1%2F1%2F5")
+      and m.bodies[0] == {"ietf-interfaces:interface": [{"name": "ethernet1/1/5", "description": "gs1 eth0"}]}
+      and "Not saved" in o and "(none) -> gs1 eth0" in o, str(m.requests) + o + e)
+m = Mock(); run("set-description", m.url, "1/1/5", "x", "--yes"); c, o, e = run("set-description", m.url, "1/1/5", "", "--yes")
+check("an empty description removes it (DELETE of the leaf)", c == 0 and "description" not in port_of(m, "ethernet1/1/5")
+      and m.requests[-2][0] == "DELETE" and m.requests[-2][1].endswith("interface=ethernet1%2F1%2F5/description"), str(m.requests) + o + e)
+m = Mock(); c, o, e = run("set-mtu", m.url, "1/1/1", "1500", "--yes")
+check("set-mtu shows old -> new and sets a number", c == 0 and port_of(m, "ethernet1/1/1")["dell-interface:mtu"] == 1500 and "9216 -> 1500" in o, o + e)
+m = Mock(); c, o, e = run("set-mtu", m.url, "1/1/1", "jumbo", "--yes")
+check("a non-numeric MTU is refused before anything is sent", c == 1 and m.requests == [], e)
+m = Mock(); c, o, e = run("set-speed", m.url, "1/1/1", "10g", "--yes")
+check("set-speed 10g sends 10GIGE", c == 0 and port_of(m, "ethernet1/1/1")["dell-interface:speed"] == "10GIGE" and "25GIGE -> 10GIGE" in o, o + e)
+m = Mock(); c, o, e = run("set-speed", m.url, "1/1/1", "7G", "--yes")
+check("an unknown speed lists the choices and sends nothing", c == 1 and "25G" in e and m.requests == [], e)
+m = Mock(); c, o, e = run("set-mtu", m.url, "1/1/1", "9216", "--yes")
+check("a value already set sends no change", c == 0 and "already" in o and {x for x, _ in m.requests} == {"GET"}, o + e)
+m = Mock(); c, o, e = run("set-mtu", m.url, "1/1/1", "1500", "--dry-run")
+check("--dry-run shows the request and changes nothing", c == 0 and "would send: PATCH" in o and {x for x, _ in m.requests} == {"GET"}
+      and port_of(m, "ethernet1/1/1")["dell-interface:mtu"] == 9216, o + e)
+m = Mock(); c, o, e = run("set-mtu", m.url, "1/1/1", "1500")
+check("without a terminal and without --yes nothing is sent", c == 1 and "--yes" in e and {x for x, _ in m.requests} == {"GET"}, o + e)
+m = Mock(); c, o, e = run("set-mtu", m.url, "vlan228", "1500", "--yes")
+check("a VLAN or management interface cannot be changed", c == 1 and "only ethernet" in e and m.requests == [], o + e)
+m = Mock(); c, o, e = run("set-mtu", m.url, "1/1/99", "1500", "--yes")
+check("an unknown port is refused with the switch's message", c == 1 and "no such interface" in e, e)
+m = Mock(); m.ignore_patch = True; c, o, e = run("set-mtu", m.url, "1/1/1", "1500", "--yes")
+check("a change the switch accepts but does not apply is reported", c == 1 and "now reads 9216" in e, o + e)
+m = Mock(); c, o, e = run("set-mtu", m.url, "1/1/1")
+check("a value is required", c == 1 and "needs a value" in e and m.requests == [], e)
 
 print("Errors")
 os.environ["OS10_PASSWORD"] = "wrong"

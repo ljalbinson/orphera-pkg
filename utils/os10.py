@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
-"""Reads a Dell SmartFabric OS10 switch (S5148F-ON and others) through its RESTCONF API. Changes nothing.
+"""Reads, and changes a little of, a Dell SmartFabric OS10 switch (S5148F-ON and others) through its RESTCONF API.
 
   utils/os10.py interfaces  swt4            # every port: mode, speed, MTU, and the VLANs it carries
   utils/os10.py vlans       swt4            # every VLAN: how many ports carry it, tagged and untagged
@@ -9,6 +9,15 @@
   utils/os10.py get         swt4 ietf-interfaces:interfaces/interface=vlan228   # any path under /restconf/data
   utils/os10.py operations  swt4            # the actions the switch offers (/restconf/operations)
   utils/os10.py backup      swt4 [FILE]     # saves the whole RESTCONF data tree as JSON (default swt4-<time>.json)
+
+  utils/os10.py set-description swt4 1/1/5 "gs1 eth0"   # a port's description ("" removes it)
+  utils/os10.py set-mtu         swt4 1/1/5 9216          # a port's MTU
+  utils/os10.py set-speed       swt4 1/1/5 25G           # a port's speed (10G 25G 40G 50G 100G, or auto)
+
+The set-* commands change the switch's RUNNING configuration only; nothing is saved to the startup configuration, so a
+reload undoes them (save on the switch with `write memory`). Each shows the old and the new value and asks for `yes`
+(--yes skips it, --dry-run sends nothing), then reads the port back to check the switch took it. Only ports (ethernet...)
+can be changed. Changing a port's speed or MTU can drop its link: do not do it to the port you are connected through.
 
 The switch is named by its address or DNS name; `http://host:port` or `https://host:port` gives a full URL.
 --json prints interfaces, vlans, vlan and port as JSON instead of a table.
@@ -55,11 +64,14 @@ class Switch:
         self.context = context
         self.request_timeout = request_timeout
 
-    def get(self, path):
-        """GET a path under /restconf (it starts with /data or /operations); returns the decoded JSON."""
-        req = urllib.request.Request(self.base + "/restconf" + path, method="GET")
+    def request(self, method, path, body=None):
+        """Send a request to a path under /restconf (it starts with /data or /operations); returns the decoded JSON."""
+        payload = json.dumps(body).encode() if body is not None else None
+        req = urllib.request.Request(self.base + "/restconf" + path, data=payload, method=method)
         req.add_header("Authorization", self.auth)
         req.add_header("Accept", ACCEPT)
+        if payload is not None:
+            req.add_header("Content-Type", "application/yang-data+json")
         try:
             with urllib.request.urlopen(req, timeout=self.request_timeout, context=self.context) as r:
                 raw = r.read()
@@ -68,7 +80,7 @@ class Switch:
             if e.code == 401:
                 raise IloError("%s refused the login for user %s (not retried: repeated failures can lock the account)"
                                % (self.name, self.user))
-            raise IloError("%s: GET %s returned HTTP %d%s" % (self.name, path, e.code, _detail(body)))
+            raise IloError("%s: %s %s returned HTTP %d%s" % (self.name, method, path, e.code, _detail(body)))
         except urllib.error.URLError as e:
             if isinstance(e.reason, ssl.SSLCertVerificationError):
                 raise IloError("%s: the certificate is not trusted (%s); use --insecure for the switch's self-signed "
@@ -79,7 +91,10 @@ class Switch:
         try:
             return json.loads(raw) if raw else {}
         except ValueError:
-            raise IloError("%s: the reply to GET %s is not JSON" % (self.name, path))
+            raise IloError("%s: the reply to %s %s is not JSON" % (self.name, method, path))
+
+    def get(self, path):
+        return self.request("GET", path)
 
     def data(self, path):
         return self.get("/data/" + path.lstrip("/"))
@@ -230,10 +245,82 @@ def cmd_backup(sw, a):
     print("%s: saved %d bytes to %s" % (sw.name, os.path.getsize(path), path))
 
 
+# ---- changes (running configuration only) ----
+SPEEDS = {"10G": "10GIGE", "25G": "25GIGE", "40G": "40GIGE", "50G": "50GIGE", "100G": "100GIGE", "AUTO": "auto"}
+
+
+def _port_doc(sw, name):
+    doc = sw.data("ietf-interfaces:interfaces/interface=" + urllib.parse.quote(name, safe=""))
+    items = doc.get("ietf-interfaces:interface") or doc.get("interface") or []
+    if not items:
+        raise IloError("%s: no port %s" % (sw.name, name))
+    return items[0]
+
+
+def _change(sw, a, label, key, new, shown_new=None):
+    """Set one leaf of a port (new None deletes it): show old -> new, confirm, send, read back."""
+    if a.arg[:1].isalpha() and not a.arg.startswith("ethernet"):
+        raise IloError("only ethernet ports can be changed, not %s" % a.arg)
+    name = port_name(a.arg)
+    old = _port_doc(sw, name).get(key)
+    shown_old = "(none)" if old is None else old
+    shown_new = "(none)" if new is None else (new if shown_new is None else shown_new)
+    path = "/data/ietf-interfaces:interfaces/interface=" + urllib.parse.quote(name, safe="")
+    if old == new:
+        print("%s: %s %s is already %s, nothing to do" % (sw.name, name, label, shown_new))
+        return
+    print("%s: %s %s: %s -> %s   (running configuration only)" % (sw.name, name, label, shown_old, shown_new))
+    if new is None:
+        method, url, body = "DELETE", path + "/" + key, None
+    else:
+        method, url, body = "PATCH", path, {"ietf-interfaces:interface": [{"name": name, key: new}]}
+    if a.dry_run:
+        print("dry run, would send: %s /restconf%s %s" % (method, url, json.dumps(body) if body else ""))
+        return
+    if not a.yes:
+        if not sys.stdin.isatty():
+            raise IloError("%s needs --yes when there is no terminal" % a.command)
+        if input("type yes to go on: ").strip() != "yes":
+            raise IloError("not confirmed, nothing sent")
+    sw.request(method, url, body)
+    got = _port_doc(sw, name).get(key)
+    if got != new:
+        raise IloError("%s: sent, but %s now reads %s, not %s" % (sw.name, label, "(none)" if got is None else got, shown_new))
+    print("%s: %s %s is now %s. Not saved to the startup configuration: `write memory` on the switch keeps it." % (sw.name, name, label, shown_new))
+
+
+def _value(a):
+    if a.extra is None:
+        raise IloError("%s needs a value after the port" % a.command)
+    return a.extra
+
+
+def cmd_set_description(sw, a):
+    text = _value(a)
+    _change(sw, a, "description", "description", text if text else None)
+
+
+def cmd_set_mtu(sw, a):
+    v = _value(a)
+    if not v.isdigit() or not 64 <= int(v) <= 65535:
+        raise IloError("an MTU is a number of bytes, e.g. 9216, not %r" % v)
+    _change(sw, a, "MTU", "dell-interface:mtu", int(v))
+
+
+def cmd_set_speed(sw, a):
+    v = _value(a)
+    raw = SPEEDS.get(v.upper())
+    if raw is None:
+        raise IloError("speed %r: use one of %s" % (v, " ".join(sorted(SPEEDS, key=lambda k: (k == "AUTO", len(k), k)))))
+    _change(sw, a, "speed", "dell-interface:speed", raw)
+
+
 COMMANDS = {
     "interfaces": (cmd_interfaces, None), "vlans": (cmd_vlans, None), "vlan": (cmd_vlan, "VLAN number"),
     "port": (cmd_port, "port, e.g. 1/1/49:1"), "get": (cmd_get, "path under /restconf/data"),
     "operations": (cmd_operations, None), "backup": (cmd_backup, None),
+    "set-description": (cmd_set_description, "port, e.g. 1/1/5"), "set-mtu": (cmd_set_mtu, "port, e.g. 1/1/5"),
+    "set-speed": (cmd_set_speed, "port, e.g. 1/1/5"),
 }
 
 
@@ -258,11 +345,13 @@ def password_for(a, target):
 
 
 def parser():
-    p = argparse.ArgumentParser(prog="os10.py", description="Reads a Dell OS10 switch through RESTCONF. Changes nothing.")
+    p = argparse.ArgumentParser(prog="os10.py", description="Reads, and changes ports of, a Dell OS10 switch through RESTCONF.")
     p.add_argument("command", choices=list(COMMANDS))
     p.add_argument("switch", help="the switch's address or DNS name (or a full http(s):// URL)")
     p.add_argument("arg", nargs="?", help="VLAN number, port, or RESTCONF path, for vlan, port and get")
-    p.add_argument("extra", nargs="?", help="backup: the file to write")
+    p.add_argument("extra", nargs="?", help="backup: the file to write; set-*: the new value")
+    p.add_argument("--yes", action="store_true", help="do not ask before a change")
+    p.add_argument("--dry-run", action="store_true", help="show the change and send nothing")
     p.add_argument("-u", "--user", default=os.environ.get("OS10_USER", "admin"))
     p.add_argument("--password-file", metavar="FILE")
     p.add_argument("--secret", metavar="NAME", help="use this Orphera secret (default: the secret named after the switch)")
