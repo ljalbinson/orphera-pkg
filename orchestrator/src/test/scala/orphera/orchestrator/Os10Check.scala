@@ -10,7 +10,8 @@ import java.util.Base64
 import scala.collection.mutable
 
 import com.sun.net.httpserver.{HttpExchange, HttpServer}
-import io.circe.{Json, parser}
+import io.circe.Json
+import io.circe.yaml.parser  // YAML is a superset of JSON, and this is the parser the project has
 
 /** Checks for the OS10 client and `orphera os10`, against a mock switch (the
   * JDK's HTTP server on localhost) whose data is shaped like a real

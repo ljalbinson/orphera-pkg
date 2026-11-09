@@ -19,7 +19,8 @@ import javax.net.ssl.{
   X509ExtendedTrustManager
 }
 
-import io.circe.{Json, parser}
+import io.circe.Json
+import io.circe.yaml.parser  // YAML is a superset of JSON, and this is the parser the project has
 
 /** What went wrong with a request to the switch. */
 final case class Os10Error(message: String, status: Option[Int] = None):
@@ -395,9 +396,18 @@ object Os10:
     )
     sw.request("POST", "/operations/ietf-netconf-monitoring:get-schema", Some(body))
       .flatMap { raw =>
-        val text = parser.parse(raw) match
-          case Right(j) => firstText(j)
-          case Left(_)  => Some(unwrapSchema(raw))
+        val t = raw.trim
+        val wrapper = "{\"ietf-netconf-monitoring:output\":{\"data\":"
+        val text =
+          // OS10 sends the module text unquoted inside the wrapper, which is not JSON; and plain YANG text would
+          // parse as YAML, so only text that starts like JSON is parsed
+          if t.startsWith(wrapper) && !t.drop(wrapper.length).trim.startsWith("\"") then
+            Some(unwrapSchema(raw))
+          else if t.startsWith("{") || t.startsWith("[") then
+            parser.parse(raw) match
+              case Right(j) => firstText(j)
+              case Left(_)  => Some(unwrapSchema(raw))
+          else Some(unwrapSchema(raw))
         text.filter(_.nonEmpty).toRight(Os10Error(s"${sw.name}: no schema text for $module in the reply"))
       }
 
