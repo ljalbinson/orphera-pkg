@@ -64,7 +64,15 @@ object Main:
           compileExit
         else
           val runClasspath = s"$outDir${File.pathSeparator}$orchestratorJar"
-          runProcess(List("java", "-cp", runClasspath, objectName))
+          runProcess(
+            List(
+              "java",
+              "-cp",
+              runClasspath,
+              "orphera.orchestrator.PlaybookLauncher",
+              objectName
+            )
+          )
       finally deleteTree(outDir)
 
     sys.exit(exitCode)

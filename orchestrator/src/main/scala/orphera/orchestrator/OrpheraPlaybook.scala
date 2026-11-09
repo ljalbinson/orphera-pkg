@@ -31,7 +31,7 @@ trait OrpheraPlaybook extends IOApp.Simple:
         if ok then IO.unit
         else
           IO.raiseError(
-            new RuntimeException(
+            new PlaybookFailed(
               s"Playbook '${playbook.name}' failed (see output above)"
             )
           )

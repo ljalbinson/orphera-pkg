@@ -30,7 +30,7 @@ trait OrpheraClusterPlaybook extends IOApp.Simple:
       if ok then IO.unit
       else
         IO.raiseError(
-          new RuntimeException(
+          new PlaybookFailed(
             s"Cluster playbook '${playbook.name}' failed (see output above)"
           )
         )
