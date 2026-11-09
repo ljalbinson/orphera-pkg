@@ -201,9 +201,8 @@ object Ilo:
   /** ": <message>" from a Redfish or HP REST error reply, or "". */
   def detail(doc: Json): String =
     val err = doc.hcursor.downField("error")
-    val ext =
-      err.downField("@Message.ExtendedInfo").downArray
-        .orElse(err.downField("MessageExtendedInfo").downArray)
+    val first = err.downField("@Message.ExtendedInfo").downArray
+    val ext = if first.succeeded then first else err.downField("MessageExtendedInfo").downArray
     val msg =
       ext.get[String]("Message").toOption.filter(_.nonEmpty)
         .orElse(ext.get[String]("MessageId").toOption.filter(_.nonEmpty))
