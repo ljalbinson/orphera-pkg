@@ -136,8 +136,15 @@ object IloCheck:
     val noTerminal = System.console() == null
 
     // ---- Redfish ----
+    var c = 0
+    var o = ""
+    var e = ""
+    def set(r: (Int, String, String)): Unit =
+      c = r._1
+      o = r._2
+      e = r._3
     var m = Mock()
-    var set(go("status", m.url))
+    set(go("status", m.url))
     check("status shows On", c == 0 && o.contains("On"), o + e)
     m.stop()
 
