@@ -73,6 +73,8 @@ class Mock:
         self.ignore_patch = False
         self.schema_as = None
         self.saved = False
+        self.put_405 = False
+        self.writes = []
         mock = self
 
         class H(BaseHTTPRequestHandler):
@@ -111,29 +113,68 @@ class Mock:
                         self.end_headers()
                         return self.wfile.write(raw)
                     return self.reply(200, {"ietf-netconf-monitoring:output": {"data": "module yuma-netconf { }"}})
-                if self.command in ("PATCH", "DELETE"):
+                if self.command in ("PATCH", "DELETE", "PUT", "POST"):
                     n = int(self.headers.get("Content-Length") or 0)
                     body = json.loads(self.rfile.read(n)) if n else None
                     mock.bodies.append(body)
+                    mock.writes.append((self.command, p))
+
+                    def err(code, msg):
+                        return self.reply(code, {"ietf-restconf:errors": {"error": [{"error-message": msg}]}})
+
+                    def done(code=204):
+                        self.send_response(code)
+                        self.send_header("Content-Length", "0")
+                        self.end_headers()
+                    if mock.ignore_patch:
+                        return done()
+                    if self.command == "POST" and p == "/restconf/data/ietf-interfaces:interfaces":
+                        for e in body["ietf-interfaces:interface"]:
+                            mock.ifaces.append(dict(e))
+                        return done(201)
                     rest = p[len(base) + 1:] if p.startswith(base + "=") else None
                     if rest is None:
-                        return self.reply(404, {})
+                        return err(404, "no such resource")
                     name, _, leaf = rest.partition("/")
                     name = urllib.parse.unquote(name)
                     hit = [i for i in mock.ifaces if i["name"] == name]
+                    if self.command == "PUT":
+                        if mock.put_405:
+                            return err(405, "PUT not allowed")
+                        if hit:
+                            hit[0].clear()
+                            hit[0].update(body["ietf-interfaces:interface"][0])
+                        else:
+                            mock.ifaces.append(dict(body["ietf-interfaces:interface"][0]))
+                        return done(201)
                     if not hit:
-                        return self.reply(404, {"ietf-restconf:errors": {"error": [{"error-message": "no such interface"}]}})
-                    if self.command == "PATCH" and body is None:
-                        return self.reply(400, {})
-                    if not mock.ignore_patch:
-                        if self.command == "PATCH":
-                            hit[0].update({k: v for k, v in body["ietf-interfaces:interface"][0].items() if k != "name"})
+                        return err(404, "no such interface")
+                    if self.command == "DELETE":
+                        if not leaf:
+                            mock.ifaces.remove(hit[0])
+                        elif "=" in leaf:
+                            key, _, val = leaf.partition("=")
+                            hit[0][key] = [x for x in hit[0].get(key, []) if x != urllib.parse.unquote(val)]
                         else:
                             hit[0].pop(leaf, None)
-                    self.send_response(204)
-                    self.send_header("Content-Length", "0")
-                    self.end_headers()
-                    return
+                        return done()
+                    for k, v in body["ietf-interfaces:interface"][0].items():
+                        if k == "name":
+                            continue
+                        if k in ("dell-interface:tagged-ports", "dell-interface:untagged-ports"):
+                            for port in v:
+                                pd = [i for i in mock.ifaces if i["name"] == port]
+                                if not pd:
+                                    return err(400, "no such port " + port)
+                                if k.endswith("tagged-ports") and k.startswith("dell-interface:tagged") and pd[0].get("dell-interface:mode") != "MODE_L2HYBRID":
+                                    return err(400, "port %s is not in trunk mode" % port)
+                                if k == "dell-interface:untagged-ports" and any(
+                                        port in i.get(k, []) for i in mock.ifaces if i["name"] != name):
+                                    return err(400, "port %s is already untagged in another VLAN" % port)
+                            hit[0][k] = sorted(set(hit[0].get(k, [])) | set(v))
+                        else:
+                            hit[0][k] = v
+                    return done()
                 if p == base:
                     return self.reply(200, {"ietf-interfaces:interface": mock.ifaces})
                 if p.startswith(base + "="):
@@ -270,6 +311,100 @@ m = Mock(); m.ignore_patch = True; c, o, e = run("set-mtu", m.url, "1/1/1", "150
 check("a change the switch accepts but does not apply is reported", c == 1 and "now reads 9216" in e, o + e)
 m = Mock(); c, o, e = run("set-mtu", m.url, "1/1/1")
 check("a value is required", c == 1 and "needs a value" in e and m.requests == [], e)
+
+print("VLANs")
+m = Mock(); c, o, e = run("vlan-create", m.url, "600", "--yes")
+check("vlan-create PUTs the VLAN interface and reads it back", c == 0 and m.writes == [("PUT", "/restconf/data/ietf-interfaces:interfaces/interface=vlan600")]
+      and any(i["name"] == "vlan600" and i["type"] == "iana-if-type:l2vlan" for i in m.ifaces) and "created" in o, str(m.writes) + o + e)
+m = Mock(); m.put_405 = True; c, o, e = run("vlan-create", m.url, "600", "--yes")
+check("vlan-create falls back to POST when PUT is not allowed", c == 0 and [w[0] for w in m.writes] == ["PUT", "POST"] and any(i["name"] == "vlan600" for i in m.ifaces), str(m.writes) + o + e)
+m = Mock(); c, o, e = run("vlan-create", m.url, "228", "--yes")
+check("an existing VLAN is not created again", c == 0 and "already exists" in o and m.writes == [], o + e)
+for bad in ("1", "4094", "abc"):
+    m = Mock(); c, o, e = run("vlan-create", m.url, bad, "--yes")
+    check("vlan-create %s is refused before anything is sent" % bad, c == 1 and "2 to 4093" in e and m.requests == [], e)
+m = Mock(); c, o, e = run("vlan-create", m.url, "600", "--dry-run")
+check("vlan-create --dry-run sends nothing", c == 0 and m.writes == [] and "would send: PUT" in o, o + e)
+m = Mock(); c, o, e = run("vlan-create", m.url, "600")
+check("vlan-create without a terminal and without --yes sends nothing", c == 1 and m.writes == [] and "--yes" in e, e)
+m = Mock(); run("vlan-create", m.url, "600", "--yes"); c, o, e = run("vlan-delete", m.url, "600", "--yes")
+check("vlan-delete removes an empty VLAN", c == 0 and not any(i["name"] == "vlan600" for i in m.ifaces) and "deleted" in o, o + e)
+m = Mock(); c, o, e = run("vlan-delete", m.url, "228", "--yes")
+check("vlan-delete refuses a VLAN that still has ports, and names the way out", c == 1 and "still has 2 port" in e and "vlan-remove" in e and m.writes == [], e)
+m = Mock(); c, o, e = run("vlan-delete", m.url, "777", "--yes")
+check("vlan-delete of an unknown VLAN is an error", c == 1 and "no VLAN 777" in e, e)
+# a port to test with: 1/1/5 is unconfigured; make 1/1/6 a trunk port
+def trunk(m, name):
+    m.ifaces.append(eth(name))
+m = Mock(); run("vlan-create", m.url, "600", "--yes"); trunk(m, "ethernet1/1/6")
+c, o, e = run("vlan-add", m.url, "600", "1/1/6", "--yes")
+v600 = [i for i in m.ifaces if i["name"] == "vlan600"][0]
+check("vlan-add puts a port in a VLAN tagged by default (PATCH of the VLAN with the port in tagged-ports)",
+      c == 0 and v600.get("dell-interface:tagged-ports") == ["ethernet1/1/6"] and m.writes[-1][0] == "PATCH"
+      and m.bodies[-1]["ietf-interfaces:interface"][0]["dell-interface:tagged-ports"] == ["ethernet1/1/6"] and "now tagged" in o, str(m.writes) + o + e)
+c, o, e = run("vlan-add", m.url, "600", "1/1/6", "--yes")
+check("adding it again changes nothing", c == 0 and "already tagged" in o, o + e)
+c, o, e = run("vlan-remove", m.url, "600", "1/1/6", "--yes")
+check("vlan-remove takes it out (DELETE of the leaf-list entry)", c == 0 and not v600.get("dell-interface:tagged-ports")
+      and m.writes[-1][1].endswith("interface=vlan600/dell-interface:tagged-ports=ethernet1%2F1%2F6"), str(m.writes[-1]) + o + e)
+c, o, e = run("vlan-remove", m.url, "600", "1/1/6", "--yes")
+check("removing a port that is not there changes nothing", c == 0 and "not in VLAN 600" in o, o + e)
+m = Mock(); run("vlan-create", m.url, "600", "--yes")
+c, o, e = run("vlan-add", m.url, "600", "1/1/5", "--yes")
+check("tagging a port the switch will not tag shows the switch's message", c == 1 and "not in trunk mode" in e, e)
+c, o, e = run("vlan-add", m.url, "600", "1/1/5", "--untagged", "--yes")
+v600 = [i for i in m.ifaces if i["name"] == "vlan600"][0]; v1 = [i for i in m.ifaces if i["name"] == "vlan1"][0]
+check("vlan-add --untagged moves the port out of VLAN 1 first, then into the new VLAN",
+      c == 0 and v600.get("dell-interface:untagged-ports") == ["ethernet1/1/5"] and "ethernet1/1/5" not in v1["dell-interface:untagged-ports"]
+      and "moving it out of VLAN 1" in o, o + e)
+check("...in that order (DELETE from VLAN 1, then PATCH VLAN 600)", [w[0] for w in m.writes[-2:]] == ["DELETE", "PATCH"], str(m.writes))
+m = Mock(); run("vlan-create", m.url, "600", "--yes"); run("vlan-create", m.url, "601", "--yes")
+run("vlan-add", m.url, "600", "1/1/5", "--untagged", "--yes")
+v1 = [i for i in m.ifaces if i["name"] == "vlan1"][0]
+c, o, e = run("vlan-add", m.url, "601", "1/1/5", "--untagged", "--yes")
+check("moving between untagged VLANs works too", c == 0 and "moving it out of VLAN 600" in o, o + e)
+m = Mock(); run("vlan-create", m.url, "600", "--yes")
+c, o, e = run("vlan-add", m.url, "600", "1/1/98", "--untagged", "--yes")
+check("vlan-add of a port the switch does not have is refused before any change", c == 1 and "no such interface" in e and [w[0] for w in m.writes] == ["PUT"], str(m.writes) + e)
+m = Mock(); run("vlan-create", m.url, "600", "--yes"); run("vlan-create", m.url, "601", "--yes")
+v1 = [i for i in m.ifaces if i["name"] == "vlan1"][0]
+other_untag = [i for i in m.ifaces if i["name"] == "vlan601"][0]
+other_untag["dell-interface:untagged-ports"] = ["ethernet1/1/5"]  # untagged in 601 only, so the mock's own rule will refuse VLAN 600
+v1["dell-interface:untagged-ports"] = [x for x in v1["dell-interface:untagged-ports"] if x != "ethernet1/1/5"]
+c, o, e = run("vlan-add", m.url, "600", "1/1/5", "--untagged", "--yes")
+check("vlan-add of a port untagged elsewhere moves it (601 -> 600)", c == 0 and "moving it out of VLAN 601" in o, o + e)
+m = Mock(); run("vlan-create", m.url, "600", "--yes"); run("vlan-add", m.url, "600", "1/1/5", "--untagged", "--yes")
+c, o, e = run("vlan-add", m.url, "1", "1/1/5", "--untagged", "--yes")
+v1 = [i for i in m.ifaces if i["name"] == "vlan1"][0]
+check("a port can be put back into VLAN 1 (untagged)", c == 0 and "ethernet1/1/5" in v1["dell-interface:untagged-ports"] and "moving it out of VLAN 600" in o, o + e)
+m = Mock(); c, o, e = run("vlan-delete", m.url, "1", "--yes")
+check("VLAN 1 cannot be deleted", c == 1 and "2 to 4093" in e and m.requests == [], e)
+m = Mock(); c, o, e = run("vlan-add", m.url, "999", "1/1/5", "--yes")
+check("vlan-add to a VLAN that does not exist says to create it", c == 1 and "vlan-create" in e and m.writes == [], e)
+m = Mock(); c, o, e = run("vlan-add", m.url, "228", "vlan105", "--yes")
+check("vlan-add only takes ethernet ports", c == 1 and "only ethernet" in e, e)
+m = Mock(); c, o, e = run("vlan-add", m.url, "228")
+check("vlan-add needs a port", c == 1 and "needs a VLAN and a port" in e, e)
+m = Mock(); run("vlan-create", m.url, "600", "--yes"); trunk(m, "ethernet1/1/6")
+c, o, e = run("vlan-add", m.url, "600", "1/1/6", "--dry-run")
+check("vlan-add --dry-run sends nothing", c == 0 and [w[0] for w in m.writes] == ["PUT"] and "would send: PATCH" in o, str(m.writes) + o + e)
+
+# a failure in the second step takes back the first
+m = Mock(); run("vlan-create", m.url, "600", "--yes")
+v600 = [i for i in m.ifaces if i["name"] == "vlan600"][0]
+real = m.server.RequestHandlerClass.handle_any
+def failing(self):
+    if self.command == "PATCH" and "vlan600" in self.path:
+        mm = m
+        mm.requests.append((self.command, self.path)); mm.writes.append((self.command, self.path))
+        n = int(self.headers.get("Content-Length") or 0); self.rfile.read(n)
+        return self.reply(500, {"ietf-restconf:errors": {"error": [{"error-message": "internal error"}]}})
+    return real(self)
+m.server.RequestHandlerClass.do_PATCH = failing
+c, o, e = run("vlan-add", m.url, "600", "1/1/5", "--untagged", "--yes")
+v1 = [i for i in m.ifaces if i["name"] == "vlan1"][0]
+check("when the second step fails the first is taken back, and it says so", c == 1 and "internal error" in e and "took back" in o
+      and "ethernet1/1/5" in v1["dell-interface:untagged-ports"], o + e)
 
 print("Errors")
 os.environ["OS10_PASSWORD"] = "wrong"

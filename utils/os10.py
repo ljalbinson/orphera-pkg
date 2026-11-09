@@ -16,7 +16,12 @@
   utils/os10.py set-mtu         swt4 1/1/5 9216          # a port's MTU
   utils/os10.py set-speed       swt4 1/1/5 25G           # a port's speed (10G 25G 40G 50G 100G, or auto)
 
-The set-* commands change the switch's RUNNING configuration only; nothing is saved to the startup configuration (verified on
+  utils/os10.py vlan-create swt4 600                    # a new VLAN (2-4093)
+  utils/os10.py vlan-delete swt4 600                    # only a VLAN that has no ports
+  utils/os10.py vlan-add    swt4 600 1/1/44 [--untagged]   # a port into a VLAN, tagged unless --untagged
+  utils/os10.py vlan-remove swt4 600 1/1/44             # a port out of a VLAN
+
+The set-* and vlan-* commands change the switch's RUNNING configuration only; nothing is saved to the startup configuration (verified on
 an S5148F-ON), so a reload undoes them until `os10.py save` (or `write memory` on the switch) is run. Each shows the old and the new value and asks for `yes`
 (--yes skips it, --dry-run sends nothing), then reads the port back to check the switch took it. Only ports (ethernet...)
 can be changed. Changing a port's speed or MTU can drop its link: do not do it to the port you are connected through.
@@ -82,7 +87,9 @@ class Switch:
             if e.code == 401:
                 raise IloError("%s refused the login for user %s (not retried: repeated failures can lock the account)"
                                % (self.name, self.user))
-            raise IloError("%s: %s %s returned HTTP %d%s" % (self.name, method, path, e.code, _detail(body)))
+            err = IloError("%s: %s %s returned HTTP %d%s" % (self.name, method, path, e.code, _detail(body)))
+            err.status = e.code
+            raise err
         except urllib.error.URLError as e:
             if isinstance(e.reason, ssl.SSLCertVerificationError):
                 raise IloError("%s: the certificate is not trusted (%s); use --insecure for the switch's self-signed "
@@ -363,12 +370,183 @@ def cmd_set_speed(sw, a):
     _change(sw, a, "speed", "dell-interface:speed", raw)
 
 
+# ---- VLANs (running configuration only) ----
+IFACES = "/data/ietf-interfaces:interfaces/interface"
+TAGGED, UNTAGGED = "dell-interface:tagged-ports", "dell-interface:untagged-ports"
+
+
+def _q(name):
+    return urllib.parse.quote(name, safe="")
+
+
+def _vlan_number(a, member=False):
+    if not a.arg.isdigit() or not (1 if member else 2) <= int(a.arg) <= 4093:
+        raise IloError("a VLAN is a number from 2 to 4093 (VLAN 1, the default VLAN, can only have ports added or removed)")
+    return int(a.arg)
+
+
+def _vlan_doc(sw, vid):
+    """The VLAN's interface document, or None if the switch has no such VLAN."""
+    try:
+        doc = sw.data("ietf-interfaces:interfaces/interface=" + _q("vlan%d" % vid))
+    except IloError as e:
+        if getattr(e, "status", None) == 404:
+            return None
+        raise
+    items = doc.get("ietf-interfaces:interface") or doc.get("interface") or []
+    return items[0] if items else None
+
+
+def _confirm(sw, a):
+    if not a.yes:
+        if not sys.stdin.isatty():
+            raise IloError("%s needs --yes when there is no terminal" % a.command)
+        if input("type yes to go on: ").strip() != "yes":
+            raise IloError("not confirmed, nothing sent")
+
+
+def _run(sw, a, headline, steps):
+    """steps: dicts with method, url, body, and optionally `undo` (a step to take back this one if a later one fails)
+    and `fallback` (another step to try if the switch answers 405 or 501). Shows them, confirms, sends in order."""
+    print("%s: %s   (running configuration only)" % (sw.name, headline))
+    if a.dry_run:
+        for st in steps:
+            print("dry run, would send: %s /restconf%s %s" % (st["method"], st["url"], json.dumps(st["body"]) if st.get("body") else ""))
+        return False
+    _confirm(sw, a)
+    done = []
+    for st in steps:
+        try:
+            try:
+                sw.request(st["method"], st["url"], st.get("body"), text_ok=True)
+            except IloError as e:
+                if getattr(e, "status", None) in (405, 501) and st.get("fallback"):
+                    st = st["fallback"]
+                    sw.request(st["method"], st["url"], st.get("body"), text_ok=True)
+                else:
+                    raise
+        except IloError as e:
+            for prev in reversed(done):
+                if prev.get("undo"):
+                    try:
+                        sw.request(prev["undo"]["method"], prev["undo"]["url"], prev["undo"].get("body"), text_ok=True)
+                        print("%s: took back the earlier step (%s %s)" % (sw.name, prev["method"], prev["url"]))
+                    except IloError as e2:
+                        print("%s: could NOT take back %s %s: %s" % (sw.name, prev["method"], prev["url"], e2), file=sys.stderr)
+            raise e
+        done.append(st)
+    return True
+
+
+def _saved_note(sw):
+    print("%s: not saved to the startup configuration: `os10.py save` or `write memory` keeps it." % sw.name)
+
+
+def cmd_vlan_create(sw, a):
+    vid = _vlan_number(a)
+    if _vlan_doc(sw, vid) is not None:
+        return print("%s: VLAN %d already exists, nothing to do" % (sw.name, vid))
+    name = "vlan%d" % vid
+    entry = {"ietf-interfaces:interface": [{"name": name, "type": "iana-if-type:l2vlan"}]}
+    put = {"method": "PUT", "url": IFACES + "=" + _q(name), "body": entry,
+           "fallback": {"method": "POST", "url": "/data/ietf-interfaces:interfaces", "body": entry}}
+    if not _run(sw, a, "create VLAN %d" % vid, [put]):
+        return
+    if _vlan_doc(sw, vid) is None:
+        raise IloError("%s: sent, but VLAN %d is not there afterwards" % (sw.name, vid))
+    print("%s: VLAN %d created" % (sw.name, vid))
+    _saved_note(sw)
+
+
+def cmd_vlan_delete(sw, a):
+    vid = _vlan_number(a)
+    v = _vlan_doc(sw, vid)
+    if v is None:
+        raise IloError("%s: no VLAN %d" % (sw.name, vid))
+    members = (v.get(UNTAGGED) or []) + (v.get(TAGGED) or [])
+    if members:
+        raise IloError("%s: VLAN %d still has %d port(s) (%s): take them out first with vlan-remove"
+                       % (sw.name, vid, len(members), " ".join(sorted(members, key=natural)[:6]) + (" ..." if len(members) > 6 else "")))
+    if not _run(sw, a, "delete VLAN %d (it has no ports)" % vid, [{"method": "DELETE", "url": IFACES + "=" + _q("vlan%d" % vid)}]):
+        return
+    if _vlan_doc(sw, vid) is not None:
+        raise IloError("%s: sent, but VLAN %d is still there" % (sw.name, vid))
+    print("%s: VLAN %d deleted" % (sw.name, vid))
+    _saved_note(sw)
+
+
+def _vlan_port(sw, a):
+    vid = _vlan_number(a, member=True)  # VLAN 1 can have ports put back into it
+    if a.extra is None:
+        raise IloError("%s needs a VLAN and a port, e.g. %s swt4 600 1/1/44" % (a.command, a.command))
+    if a.extra[:1].isalpha() and not a.extra.startswith("ethernet"):
+        raise IloError("only ethernet ports can be changed, not %s" % a.extra)
+    port = port_name(a.extra)
+    _port_doc(sw, port)  # the port exists
+    v = _vlan_doc(sw, vid)
+    if v is None:
+        raise IloError("%s: no VLAN %d (create it with vlan-create)" % (sw.name, vid))
+    return vid, port, v
+
+
+def _members_now(sw, vid):
+    v = _vlan_doc(sw, vid) or {}
+    return set(v.get(UNTAGGED) or []), set(v.get(TAGGED) or [])
+
+
+def cmd_vlan_add(sw, a):
+    vid, port, v = _vlan_port(sw, a)
+    kind = UNTAGGED if a.untagged else TAGGED
+    word = "untagged" if a.untagged else "tagged"
+    if port in (v.get(kind) or []):
+        return print("%s: %s is already %s in VLAN %d, nothing to do" % (sw.name, port, word, vid))
+    other = TAGGED if a.untagged else UNTAGGED
+    note = ""
+    if port in (v.get(other) or []):
+        raise IloError("%s: %s is %s in VLAN %d: take it out first with vlan-remove" % (sw.name, port, "tagged" if a.untagged else "untagged", vid))
+    steps = []
+    if a.untagged:
+        for ovid, odoc in sorted(split(all_interfaces(sw))[0].items()):
+            if ovid != vid and port in (odoc.get(UNTAGGED) or []):
+                note = " (moving it out of VLAN %d, where it is untagged)" % ovid
+                steps.append({"method": "DELETE", "url": IFACES + "=" + _q("vlan%d" % ovid) + "/" + UNTAGGED + "=" + _q(port),
+                              "undo": {"method": "PATCH", "url": IFACES + "=" + _q("vlan%d" % ovid),
+                                       "body": {"ietf-interfaces:interface": [{"name": "vlan%d" % ovid, UNTAGGED: [port]}]}}})
+    steps.append({"method": "PATCH", "url": IFACES + "=" + _q("vlan%d" % vid),
+                  "body": {"ietf-interfaces:interface": [{"name": "vlan%d" % vid, kind: [port]}]}})
+    if not _run(sw, a, "put %s in VLAN %d %s%s" % (port, vid, word, note), steps):
+        return
+    un, tg = _members_now(sw, vid)
+    if port not in (un if a.untagged else tg):
+        raise IloError("%s: sent, but %s is not %s in VLAN %d afterwards" % (sw.name, port, word, vid))
+    print("%s: %s is now %s in VLAN %d" % (sw.name, port, word, vid))
+    _saved_note(sw)
+
+
+def cmd_vlan_remove(sw, a):
+    vid, port, v = _vlan_port(sw, a)
+    kind = UNTAGGED if port in (v.get(UNTAGGED) or []) else TAGGED if port in (v.get(TAGGED) or []) else None
+    if kind is None:
+        return print("%s: %s is not in VLAN %d, nothing to do" % (sw.name, port, vid))
+    word = "untagged" if kind == UNTAGGED else "tagged"
+    step = {"method": "DELETE", "url": IFACES + "=" + _q("vlan%d" % vid) + "/" + kind + "=" + _q(port)}
+    if not _run(sw, a, "take %s out of VLAN %d (it is %s there)" % (port, vid, word), [step]):
+        return
+    un, tg = _members_now(sw, vid)
+    if port in un | tg:
+        raise IloError("%s: sent, but %s is still in VLAN %d" % (sw.name, port, vid))
+    print("%s: %s is no longer in VLAN %d" % (sw.name, port, vid))
+    _saved_note(sw)
+
+
 COMMANDS = {
     "interfaces": (cmd_interfaces, None), "vlans": (cmd_vlans, None), "vlan": (cmd_vlan, "VLAN number"),
     "port": (cmd_port, "port, e.g. 1/1/49:1"), "get": (cmd_get, "path under /restconf/data"),
     "operations": (cmd_operations, None), "schema": (cmd_schema, "module name, e.g. yuma-netconf"), "save": (cmd_save, None), "backup": (cmd_backup, None),
     "set-description": (cmd_set_description, "port, e.g. 1/1/5"), "set-mtu": (cmd_set_mtu, "port, e.g. 1/1/5"),
     "set-speed": (cmd_set_speed, "port, e.g. 1/1/5"),
+    "vlan-create": (cmd_vlan_create, "VLAN number"), "vlan-delete": (cmd_vlan_delete, "VLAN number"),
+    "vlan-add": (cmd_vlan_add, "VLAN number and a port"), "vlan-remove": (cmd_vlan_remove, "VLAN number and a port"),
 }
 
 
@@ -399,6 +577,7 @@ def parser():
     p.add_argument("arg", nargs="?", help="VLAN number, port, or RESTCONF path, for vlan, port and get")
     p.add_argument("extra", nargs="?", help="backup: the file to write; set-*: the new value")
     p.add_argument("--yes", action="store_true", help="do not ask before a change")
+    p.add_argument("--untagged", action="store_true", help="vlan-add: put the port in the VLAN untagged (default: tagged)")
     p.add_argument("--dry-run", action="store_true", help="show the change and send nothing")
     p.add_argument("-u", "--user", default=os.environ.get("OS10_USER", "admin"))
     p.add_argument("--password-file", metavar="FILE")
