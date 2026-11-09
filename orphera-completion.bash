@@ -97,7 +97,7 @@ _orphera_completions() {
 
   local verbs="install remove autoremove dist-upgrade copy write-file network-apply reboot shutdown uptime thread-info run
     playbook cluster-playbook deploy-agent bootstrap issue-certs teardown fetch facts
-    version cert-info log-summary audit-log pipeline secrets show-config nodes init-ca os10 help"
+    version cert-info log-summary audit-log pipeline secrets show-config nodes init-ca os10 ilo help"
 
   # Flags common to most verbs that take --nodes
   local nodes_flag="--nodes"
@@ -270,6 +270,14 @@ _orphera_completions() {
           names=$(cd "$cfg" 2>/dev/null && for f in *.yaml; do [ -e "$f" ] && echo "${f%.yaml}"; done)
           COMPREPLY=($(compgen -W "$names" -- "$cur")) ;;
       esac
+      ;;
+
+    ilo)
+      if [ "$cword" -eq 2 ]; then
+        COMPREPLY=($(compgen -W "status on off shutdown reset soft-reset" -- "$cur"))
+      elif [[ "$cur" == -* ]]; then
+        COMPREPLY=($(compgen -W "--user --password-file --secret --insecure --cacert --yes --dry-run --no-wait --timeout" -- "$cur"))
+      fi
       ;;
 
     secrets)

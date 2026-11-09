@@ -1844,7 +1844,7 @@ Afterwards both hosts hold the same CA key, secret store and SSH key, and either
 |---|---|
 | `make` / `make all` | clean → test → assembly → deb |
 | `make clean` | `sbt clean`, removes `pkg/` and any built `.deb` / `.rpm` |
-| `make test` | `sbt test`, then the check programs `ContainerCheck`, `ConfCheck`, `SecretsCheck`, `ThreadInfoCheck`, `InventoryCheck`, `LocationsCheck`, `InstallationCheck`, `CaInitCheck` and `DbDocumentsCheck` (set `CHECK_VERBOSE=1` to print every passing check) |
+| `make test` | `sbt test`, then the check programs `ContainerCheck`, `ConfCheck`, `SecretsCheck`, `ThreadInfoCheck`, `InventoryCheck`, `LocationsCheck`, `InstallationCheck`, `CaInitCheck`, `DbDocumentsCheck`, `Os10Check` and `IloCheck` (set `CHECK_VERBOSE=1` to print every passing check) |
 | `make assembly` | `sbt agent/assembly` |
 | `make deb` | stages package contents, runs `dpkg-deb --build` |
 | `make rpm` | stages the same contents, runs `rpmbuild` to produce `orphera-agent-<version>-1.noarch.rpm` for Rocky/Red Hat hosts. Needs `rpmbuild` |
@@ -2385,7 +2385,7 @@ Worth knowing:
   named after it as typed (`ilo.py status ilo-tst50` reads the secret `ilo-tst50`; store it with `echo 'password' | orphera secrets set
   ilo-tst50`), or `ILO_PASSWORD`, `--password-file` or `--secret NAME` instead; an iLO's self-signed certificate needs `--insecure` or `--cacert`. The destructive
   actions ask for `yes` (`--yes` skips it); `--dry-run` shows the request and sends nothing; it waits for the new state
-  (`--timeout`, `--no-wait`). `make check-ilo` tests it against a mock iLO;
+  (`--timeout`, `--no-wait`). `make check-ilo` tests it against a mock iLO. The same tool is in the command line as `orphera ilo <action> <ilo>...` (`orphera ilo --help`), built on a Scala client that playbooks can use; `make test` runs its `IloCheck`;
   `os10.py` reads and changes a Dell OS10 switch (S5148F-ON and others) through its RESTCONF API, with nothing to install (and as `orphera os10 <command> <switch> ...` in the command line, built on a Scala client that playbooks can use):
   `interfaces`, `vlans`, `vlan`, `port`, `get`, `operations`, `schema` and `backup` only read; `set-description`, `set-mtu`,
   `set-speed`, `set-mode`, `vlan-create`, `vlan-delete`, `vlan-add`, `vlan-remove` change the running configuration (each shows

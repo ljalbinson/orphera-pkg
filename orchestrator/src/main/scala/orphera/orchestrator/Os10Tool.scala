@@ -114,43 +114,17 @@ object Os10Tool:
     )
 
   /** The secret that holds a switch's password: its address or name as given, or the host of a URL. */
-  def secretKey(target: String): String =
-    val t = target.trim.stripSuffix("/")
-    if t.contains("://") then
-      scala.util.Try(java.net.URI(t).getHost).toOption.filter(h => h != null && h.nonEmpty).getOrElse(t)
-    else t
+  def secretKey(target: String): String = DeviceAccess.secretKey(target)
 
   private def password(
       o: Opts,
       target: String,
       env: Map[String, String]
   ): Either[Os10Error, String] =
-    env.get("OS10_PASSWORD").filter(_.nonEmpty) match
-      case Some(p) => Right(p)
-      case None =>
-        o.passwordFile match
-          case Some(f) =>
-            try Right(Files.readString(Paths.get(f)).stripSuffix("\n").stripSuffix("\r"))
-            catch case e: Exception => Left(Os10Error(s"cannot read $f: ${e.getMessage}"))
-          case None =>
-            val name = o.secret.getOrElse(secretKey(target))
-            val (value, why) = SecretStore.default().flatMap(_.get(name)) match
-              case Right(Some(v)) if v.nonEmpty => (Some(v), "")
-              case Right(_)                     => (None, s"no secret called $name")
-              case Left(msg)                    => (None, msg)
-            value match
-              case Some(v) => Right(v)
-              case None if System.console() != null =>
-                val pw = System.console().readPassword(
-                  s"password for ${o.user} on $target (no secret $name: $why): "
-                )
-                if pw == null then Left(Os10Error("no password given")) else Right(String(pw))
-              case None =>
-                Left(
-                  Os10Error(
-                    s"no password for $target: no secret `$name` ($why); store it with: echo 'the password' | orphera secrets set $name"
-                  )
-                )
+    DeviceAccess
+      .password(env, "OS10_PASSWORD", o.passwordFile, o.secret, target, o.user)
+      .left
+      .map(m => Os10Error(m))
 
   private def confirm(o: Opts, command: String): Either[Os10Error, Unit] =
     if o.yes then Right(())

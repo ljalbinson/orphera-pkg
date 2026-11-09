@@ -1345,6 +1345,10 @@ object Cli:
       |                    — reads and changes a Dell OS10 switch through its RESTCONF API
       |                      (interfaces, vlans, port, set-mtu, vlan-add, save ...; run
       |                      `orphera os10 --help`); runs on this machine only
+      |  ilo               <status|on|off|shutdown|reset|soft-reset> <ilo>...
+      |                    — power control of HPE ProLiant servers through the iLO
+      |                      (Redfish, or the HP REST API on older iLO 4 firmware; run
+      |                      `orphera ilo --help`); runs on this machine only
       |  secrets           init | list | generate <name> | set <name> | get <name> | rm <name>
       |                    — the encrypted store of passwords and keys that playbooks
       |                      use (~/.config/orphera/secrets.age); runs on this machine

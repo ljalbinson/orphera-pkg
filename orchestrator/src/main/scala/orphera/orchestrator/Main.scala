@@ -51,6 +51,9 @@ object Main extends IOApp:
       case "os10" :: rest =>
         IO.blocking(Os10Tool.run(rest))
           .map(code => if code == 0 then ExitCode.Success else ExitCode.Error)
+      case "ilo" :: rest =>
+        IO.blocking(IloTool.run(rest))
+          .map(code => if code == 0 then ExitCode.Success else ExitCode.Error)
       case "nodes" :: rest =>
         IO.blocking(ListNodes.run(rest))
           .map(code => if code == 0 then ExitCode.Success else ExitCode.Error)

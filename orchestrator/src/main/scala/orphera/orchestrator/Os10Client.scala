@@ -2,22 +2,13 @@
 
 package orphera.orchestrator
 
-import java.io.{FileInputStream, IOException}
-import java.net.{ConnectException, Socket, URI, URLEncoder}
+import java.io.IOException
+import java.net.{ConnectException, URI, URLEncoder}
 import java.net.http.{HttpClient, HttpRequest, HttpResponse, HttpTimeoutException}
 import java.nio.charset.StandardCharsets.UTF_8
-import java.security.{KeyStore, SecureRandom}
-import java.security.cert.{CertificateFactory, X509Certificate}
 import java.time.Duration
 import java.util.Base64
-import javax.net.ssl.{
-  SSLContext,
-  SSLEngine,
-  SSLHandshakeException,
-  TrustManager,
-  TrustManagerFactory,
-  X509ExtendedTrustManager
-}
+import javax.net.ssl.SSLHandshakeException
 
 import io.circe.Json
 import io.circe.yaml.parser  // YAML is a superset of JSON, and this is the parser the project has
@@ -30,18 +21,6 @@ final case class Os10Error(message: String, status: Option[Int] = None):
   def missing: Boolean =
     status.contains(404) ||
       (status.contains(400) && message.contains("unknown resource"))
-
-/** Accepts any certificate (the switch's own, self-signed). An extended trust
-  * manager, so the JDK does not add its host name check on top.
-  */
-private object Os10TrustAll extends X509ExtendedTrustManager:
-  def checkClientTrusted(c: Array[X509Certificate], a: String): Unit = ()
-  def checkServerTrusted(c: Array[X509Certificate], a: String): Unit = ()
-  def checkClientTrusted(c: Array[X509Certificate], a: String, s: Socket): Unit = ()
-  def checkServerTrusted(c: Array[X509Certificate], a: String, s: Socket): Unit = ()
-  def checkClientTrusted(c: Array[X509Certificate], a: String, e: SSLEngine): Unit = ()
-  def checkServerTrusted(c: Array[X509Certificate], a: String, e: SSLEngine): Unit = ()
-  def getAcceptedIssuers: Array[X509Certificate] = Array.empty
 
 /** One Dell OS10 switch, reached over RESTCONF (RFC 8040): HTTPS port 443,
   * basic authentication with a user of the switch. `target` is an address or
@@ -66,43 +45,11 @@ final class Os10Switch(
   private val auth: String =
     "Basic " + Base64.getEncoder.encodeToString(s"$user:$password".getBytes(UTF_8))
 
-  private def sslContext(): Either[Os10Error, SSLContext] =
-    if insecure then
-      val ctx = SSLContext.getInstance("TLS")
-      ctx.init(null, Array[TrustManager](Os10TrustAll), SecureRandom())
-      Right(ctx)
-    else
-      cacert match
-        case None       => Right(SSLContext.getDefault)
-        case Some(path) =>
-          try
-            val in = FileInputStream(path)
-            val cert =
-              try CertificateFactory.getInstance("X.509").generateCertificate(in)
-              finally in.close()
-            val ks = KeyStore.getInstance(KeyStore.getDefaultType)
-            ks.load(null, null)
-            ks.setCertificateEntry("switch", cert)
-            val tmf = TrustManagerFactory.getInstance(
-              TrustManagerFactory.getDefaultAlgorithm
-            )
-            tmf.init(ks)
-            val ctx = SSLContext.getInstance("TLS")
-            ctx.init(null, tmf.getTrustManagers, SecureRandom())
-            Right(ctx)
-          catch
-            case e: Exception =>
-              Left(Os10Error(s"cannot use the certificate $path: ${e.getMessage}"))
-
   private lazy val client: Either[Os10Error, HttpClient] =
-    sslContext().map(ctx =>
-      HttpClient
-        .newBuilder()
-        .sslContext(ctx)
-        .version(HttpClient.Version.HTTP_1_1)
-        .connectTimeout(Duration.ofSeconds(timeoutSeconds))
-        .build()
-    )
+    DeviceAccess
+      .httpClient(insecure, cacert, timeoutSeconds)
+      .left
+      .map(m => Os10Error(m))
 
   /** Sends a request to a path under /restconf (it starts with /data or
     * /operations) and returns the reply body as text.
