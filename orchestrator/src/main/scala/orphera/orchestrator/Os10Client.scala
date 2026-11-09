@@ -152,7 +152,7 @@ final class Os10Switch(
                 "self-signed certificate or --cacert FILE"
             )
           )
-        case e: HttpTimeoutException =>
+        case _: HttpTimeoutException =>
           Left(Os10Error(s"$name: no answer within $timeoutSeconds s"))
         case e: ConnectException =>
           Left(

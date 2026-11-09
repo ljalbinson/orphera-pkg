@@ -338,7 +338,7 @@ object Os10Tool:
       case Nil | ("help" | "-h" | "--help") :: _ =>
         println(usage)
         if args.isEmpty then 2 else 0
-      case cmd :: rest if !needs.contains(cmd) =>
+      case cmd :: _ if !needs.contains(cmd) =>
         Console.err.println(s"orphera os10: unknown command '$cmd' (orphera os10 --help)")
         2
       case cmd :: rest =>
