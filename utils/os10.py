@@ -65,7 +65,7 @@ class Switch:
         self.context = context
         self.request_timeout = request_timeout
 
-    def request(self, method, path, body=None):
+    def request(self, method, path, body=None, text_ok=False):
         """Send a request to a path under /restconf (it starts with /data or /operations); returns the decoded JSON."""
         payload = json.dumps(body).encode() if body is not None else None
         req = urllib.request.Request(self.base + "/restconf" + path, data=payload, method=method)
@@ -92,6 +92,8 @@ class Switch:
         try:
             return json.loads(raw) if raw else {}
         except ValueError:
+            if text_ok:
+                return raw.decode("utf-8", "replace")
             raise IloError("%s: the reply to %s %s is not JSON" % (self.name, method, path))
 
     def get(self, path):
@@ -240,7 +242,13 @@ def cmd_operations(sw, a):
 
 def cmd_schema(sw, a):
     body = {"ietf-netconf-monitoring:input": {"identifier": a.arg, "format": "yang"}}
-    doc = sw.request("POST", "/operations/ietf-netconf-monitoring:get-schema", body)
+    doc = sw.request("POST", "/operations/ietf-netconf-monitoring:get-schema", body, text_ok=True)
+    if isinstance(doc, str) and doc.lstrip().startswith("<"):  # XML: the module text is the element's text
+        try:
+            import xml.etree.ElementTree as ET
+            doc = "".join(ET.fromstring(doc).itertext())
+        except ET.ParseError:
+            pass
 
     def first_text(x):
         if isinstance(x, str):

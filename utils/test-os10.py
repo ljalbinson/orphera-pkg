@@ -71,6 +71,7 @@ class Mock:
         self.bodies = []
         self.ifaces = copy.deepcopy(IFACES)
         self.ignore_patch = False
+        self.schema_as = None
         mock = self
 
         class H(BaseHTTPRequestHandler):
@@ -94,6 +95,12 @@ class Mock:
                 if self.command == "POST" and p == "/restconf/operations/ietf-netconf-monitoring:get-schema":
                     n = int(self.headers.get("Content-Length") or 0)
                     mock.bodies.append(json.loads(self.rfile.read(n)))
+                    if mock.schema_as:
+                        raw = mock.schema_as.encode()
+                        self.send_response(200)
+                        self.send_header("Content-Length", str(len(raw)))
+                        self.end_headers()
+                        return self.wfile.write(raw)
                     return self.reply(200, {"ietf-netconf-monitoring:output": {"data": "module yuma-netconf { }"}})
                 if self.command in ("PATCH", "DELETE"):
                     n = int(self.headers.get("Content-Length") or 0)
@@ -200,6 +207,11 @@ check("only GET is ever sent", {meth for meth, _ in m.requests} == {"GET"}, str(
 m = Mock(); c, o, e = run("schema", m.url, "yuma-netconf")
 check("schema prints the module text (a POST of get-schema, nothing written)", c == 0 and o.strip() == "module yuma-netconf { }"
       and m.bodies[0]["ietf-netconf-monitoring:input"]["identifier"] == "yuma-netconf", o + e)
+
+m = Mock(); m.schema_as = "module yuma-netconf { rpc copy-config; }"; c, o, e = run("schema", m.url, "yuma-netconf")
+check("schema also takes a plain-text reply", c == 0 and "rpc copy-config" in o, o + e)
+m = Mock(); m.schema_as = '<data xmlns="x">module a { leaf b; }</data>'; c, o, e = run("schema", m.url, "a")
+check("schema also takes an XML reply", c == 0 and o.strip() == "module a { leaf b; }", o + e)
 
 print("Changes")
 def port_of(m, name):
