@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-.PHONY: all release rpm-if-available go-agent-if-available bump-patch _build_all clean test assembly pkg-stage deb rpm verify certs certs-clean fmt fmt-manifests scripting lint fix cli-stage cli-deb cli-rpm cli-tar cli-package check-package install uninstall check-ilo check-os10
+.PHONY: all release rpm-if-available go-agent-if-available bump-patch _build_all clean test assembly pkg-stage deb rpm verify certs certs-clean fmt fmt-manifests scripting lint fix cli-stage cli-deb cli-rpm cli-tar cli-package check-package install uninstall check-ilo check-os10 vmctl check-vmctl
 
 VERSION_FILE := VERSION
 VERSION      := $(shell cat $(VERSION_FILE))
@@ -135,6 +135,19 @@ check-ilo:
 # Tests utils/os10.py against a mock Dell OS10 RESTCONF server on localhost (no switch and no lab needed).
 check-os10:
 	python3 utils/test-os10.py
+
+# utils/vmctl.sh in Scala, compiled to a native executable with Scala Native: a build of its own in vmctl/
+# (it needs sbt, clang and the libunwind headers to build, and no JVM to run). Installs it as utils/vmctl,
+# beside utils/vmctl.sh, which stays. `print nativeLink` links it and prints where the executable is.
+vmctl:
+	@out=$$(cd vmctl && sbt -batch -Dsbt.supershell=false -Dsbt.color=false "print nativeLink" | tee /dev/stderr | grep -E '^/.*/vmctl$$' | tail -1) && \
+	  { [ -n "$$out" ] || { echo "make vmctl: no executable path in sbt's output" >&2; exit 1; }; } && \
+	  install -m 755 "$$out" utils/vmctl && echo "Installed utils/vmctl"
+
+# Runs utils/vmctl (make vmctl) and utils/vmctl.sh with the same arguments against a stand-in orphera and
+# checks they print the same and exit the same (no lab needed).
+check-vmctl:
+	utils/test-vmctl.sh
 
 # Fails if a tracked source file has no SPDX-License-Identifier header and is not listed in utils/spdx-exempt.txt.
 check-spdx:

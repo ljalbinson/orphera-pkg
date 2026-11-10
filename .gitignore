@@ -44,3 +44,7 @@ certs/*.srl
 certs/*.csr
 __pycache__/
 github-files/
+
+# The Scala Native vmctl (make vmctl) and its sbt build's own working files
+/utils/vmctl
+vmctl/project/project/

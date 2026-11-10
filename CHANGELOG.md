@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- `utils/vmctl`: `utils/vmctl.sh` in Scala, compiled to a native executable with Scala Native (0.5.12), from a build of its own in `vmctl/` so the main build, `make test` and CI do not need the Scala Native toolchain. Same actions, options, messages, `/tmp/vmctl.*.log` files, playbook environment variables and exit codes; it finds the checkout from its own location, as the shell version does, and in an installation takes the site defaults from `orphera-env.sh` (sourced by bash). The usage text is read from the top of `utils/vmctl.sh`, which stays. `make vmctl` builds it and installs it as `utils/vmctl`; `make check-vmctl` (`utils/test-vmctl.sh`) runs both versions with the same arguments in 64 cases against a stand-in `orphera` and checks standard output, standard error and exit code are the same. The test passes with the shell version against itself; the Scala was not compiled here (no sbt or Scala Native toolchain), so `make vmctl` and `make check-vmctl` have not been run.
+
 ### Fixed
 - A from-scratch OpenStack build stopped at Magnum (`no external network`): nothing made the persistent flat network that Magnum (its external network) and Trove (its guests' management network, by the name `provider`) need; on the old lab it had come from `utils/openstack-minimal-env.sh`. The Neutron helper has a new command `provider-net` that makes the network `provider` (flat, shared, external, 10.10.6.0/24 with DHCP, gateway .1, pool .200-.220) or marks an existing one shared and external, and `build_openstack_stack.sh` runs it at the end of the `neutron` step. The compute boot test (`orphera-compute-api boot-test`, used by the `boot` step and `test_nova_compute.sh`) now uses that network and leaves it in place instead of failing because a flat network already exists. Not yet run on the lab.
 
