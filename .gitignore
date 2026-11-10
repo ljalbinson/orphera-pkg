@@ -45,6 +45,7 @@ certs/*.csr
 __pycache__/
 github-files/
 
-# The Scala Native vmctl (make vmctl) and its sbt build's own working files
+# The Scala Native executables (make native-utils) and their sbt build's own working files
 /utils/vmctl
-vmctl/project/project/
+/utils/move-vm
+utils-native/project/project/

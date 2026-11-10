@@ -10,11 +10,11 @@ utils/spdx-exempt.txt
 .gitmessage
 .scalafix.conf
 .scalafmt.conf
-vmctl/.scalafmt.conf
+utils-native/.scalafmt.conf
 LICENSE
 VERSION
 project/build.properties
-vmctl/project/build.properties
+utils-native/project/build.properties
 
 # documentation
 README.md

@@ -10,6 +10,8 @@ import java.util.regex.Pattern
 import scala.annotation.tailrec
 import scala.util.Try
 
+import orphera.nativeutils.{Out, Proc, Sources}
+
 /** utils/vmctl.sh in Scala, for Scala Native: the same actions, options,
   * output, log files and exit codes. The VM playbooks in manifests/ do the
   * work, run with `orphera cluster-playbook`; this is the front end that picks
@@ -49,24 +51,19 @@ object Main:
   )
 
   def main(args: Array[String]): Unit =
-    sys.exit(run(args.toList, Sources.load()))
+    sys.exit(run(args.toList, Sources.load(rootIsCheckout = true)))
 
   private def die(code: Int, msg: String): Nothing =
     Out.err(msg)
     sys.exit(code)
 
-  /** The comment block at the top of utils/vmctl.sh (`sed -n '2,/^$/p'`). */
+  /** The comment block at the top of utils/vmctl.sh. */
   def usage(src: Sources): Unit =
-    Try(Files.readAllBytes(src.path("utils/vmctl.sh"))).toOption match
-      case Some(bytes) =>
-        val lines = new String(bytes, StandardCharsets.UTF_8).split("\n", -1).toVector.drop(1)
-        val (head, rest) = lines.span(_.nonEmpty)
-        (head ++ rest.take(1)).foreach(l => Out.out(l.replaceFirst("^# ?", "")))
-      case None =>
-        Out.out(
-          "Usage: vmctl start|stop|reboot|shutdown-all|start-all|autostart add|remove|list ... " +
-            "(utils/vmctl.sh, not found, describes the options)"
-        )
+    src.usage(
+      "vmctl.sh",
+      "Usage: vmctl start|stop|reboot|shutdown-all|start-all|autostart add|remove|list ... " +
+        "(utils/vmctl.sh, not found, describes the options)"
+    )
 
   @tailrec
   private def parse(args: List[String], o: Opts, src: Sources): Opts =
@@ -198,7 +195,7 @@ object Main:
         0
       // list: utils/list-vms.sh, for the named hypervisors or, with none, for all of them
       case "list" :: rest =>
-        Proc.inherit(src.path("utils/list-vms.sh").toString :: rest, src.env, src.root)
+        Proc.inherit(src.utilsDir.resolve("list-vms.sh").toString :: rest, src.env, src.root)
       case action :: rest0 =>
         val (sub, rest) =
           if action != "autostart" then ("", rest0)

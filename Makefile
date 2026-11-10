@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-.PHONY: all release rpm-if-available go-agent-if-available bump-patch _build_all clean test assembly pkg-stage deb rpm verify certs certs-clean fmt fmt-manifests scripting lint fix cli-stage cli-deb cli-rpm cli-tar cli-package check-package install uninstall check-ilo check-os10 vmctl check-vmctl
+.PHONY: all release rpm-if-available go-agent-if-available bump-patch _build_all clean test assembly pkg-stage deb rpm verify certs certs-clean fmt fmt-manifests scripting lint fix cli-stage cli-deb cli-rpm cli-tar cli-package check-package install uninstall check-ilo check-os10 vmctl move-vm native-utils check-vmctl check-move-vm
 
 VERSION_FILE := VERSION
 VERSION      := $(shell cat $(VERSION_FILE))
@@ -136,18 +136,34 @@ check-ilo:
 check-os10:
 	python3 utils/test-os10.py
 
-# utils/vmctl.sh in Scala, compiled to a native executable with Scala Native: a build of its own in vmctl/
-# (it needs sbt and clang to build, and no JVM to run). Installs it as utils/vmctl,
-# beside utils/vmctl.sh, which stays. `print nativeLink` links it and prints where the executable is.
+# Scripts of utils/ in Scala, compiled to native executables with Scala Native: a build of its own in utils-native/
+# (it needs sbt and clang to build, and no JVM to run). Each is installed in utils/ beside its shell version, which
+# stays: utils/vmctl (vmctl.sh) and utils/move-vm (move-vm.sh). `print <project>/nativeLink` links one and prints
+# where the executable is.
+define native_build
+	@out=$$(cd utils-native && sbt -batch -Dsbt.supershell=false -Dsbt.color=false "print $(1)/nativeLink" | tee /dev/stderr | grep -E '^/.*/$(2)$$' | tail -1) && \
+	  { [ -n "$$out" ] || { echo "make $(2): no executable path in sbt's output" >&2; exit 1; }; } && \
+	  install -m 755 "$$out" utils/$(2) && echo "Installed utils/$(2)"
+endef
+
 vmctl:
-	@out=$$(cd vmctl && sbt -batch -Dsbt.supershell=false -Dsbt.color=false "print nativeLink" | tee /dev/stderr | grep -E '^/.*/vmctl$$' | tail -1) && \
-	  { [ -n "$$out" ] || { echo "make vmctl: no executable path in sbt's output" >&2; exit 1; }; } && \
-	  install -m 755 "$$out" utils/vmctl && echo "Installed utils/vmctl"
+	$(call native_build,vmctl,vmctl)
+
+move-vm:
+	$(call native_build,moveVm,move-vm)
+
+native-utils: vmctl move-vm
 
 # Runs utils/vmctl (make vmctl) and utils/vmctl.sh with the same arguments against a stand-in orphera and
 # checks they print the same and exit the same (no lab needed).
 check-vmctl:
 	utils/test-vmctl.sh
+
+# Runs utils/move-vm (make move-vm) and utils/move-vm.sh with the same arguments against a stand-in orphera and
+# checks they print the same, exit the same, send the same scripts to the hypervisors and leave the same config
+# file (no lab needed; about a minute, for the waits it includes).
+check-move-vm:
+	utils/test-move-vm.sh
 
 # Fails if a tracked source file has no SPDX-License-Identifier header and is not listed in utils/spdx-exempt.txt.
 check-spdx:

@@ -2401,7 +2401,9 @@ Worth knowing:
   (`kvm_zfs_vm_provision.scala`) to another hypervisor: it checks both ends, shuts the guest down, sends a ZFS snapshot of
   `tank/kvm/<hypervisor>/<vm>` with `zfs send | nc | zfs receive`, compares file names and sizes, defines the domain on the
   destination (same UUID and MACs), undefines it on the source, changes `hypervisor:` in the VM's config file, starts it
-  and waits for its agent; a failure before the source is undefined is rolled back;
+  and waits for its agent; a failure before the source is undefined is rolled back (`utils/move-vm`, built by
+  `make move-vm` from `utils-native/`, is the same in Scala Native, as `utils/vmctl` is for `vmctl.sh`;
+  `make check-move-vm` and `make check-vmctl` compare each with its shell version);
   `trace-dhcp.sh` captures DHCP on the provider NICs of tst17, tst18 and tst19
   while a test instance boots, to show where packets are lost; `check-guest-dhcp.sh <ip> <mac>
   <network-id>` proves a guest took its address (it answers ARP from the DHCP namespace on tst19;

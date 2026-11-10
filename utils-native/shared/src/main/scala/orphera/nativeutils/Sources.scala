@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-package orphera.vmctl
+package orphera.nativeutils
 
 import java.nio.charset.StandardCharsets
 import java.nio.file.{Files, Path, Paths}
@@ -8,17 +8,21 @@ import java.nio.file.{Files, Path, Paths}
 import scala.jdk.CollectionConverters.*
 import scala.util.Try
 
-/** What utils/orphera-sources.sh and utils/vm-common.sh give vmctl.sh: the
-  * checkout, the environment (with an installation's site defaults), the
-  * config directory, `config_value`, `hypervisor_list` and `vm_lookup`.
+/** What utils/orphera-sources.sh and utils/vm-common.sh give the shell
+  * scripts: where they are, the environment (with an installation's site
+  * defaults), the config directory and inventory file, `config_value`,
+  * `hypervisor_list` and `vm_lookup`.
   *
   * @param root
-  *   the checkout (or PREFIX/share/orphera): the parent of utils/. Relative
-  *   paths, given or made here, count from it, as after vmctl.sh's `cd`.
+  *   where relative paths, given or made here, count from and where commands
+  *   run: the checkout for vmctl (vmctl.sh does `cd` there), the working
+  *   directory for move-vm (move-vm.sh does not)
+  * @param utilsDir
+  *   the directory of the executable, utils/ (where the shell versions are)
   * @param env
   *   the environment for the commands run and for the variables read here
   */
-final class Sources(val root: Path, val env: Map[String, String]):
+final class Sources(val root: Path, val utilsDir: Path, val env: Map[String, String]):
 
   def get(name: String): String = env.getOrElse(name, "")
 
@@ -49,6 +53,26 @@ final class Sources(val root: Path, val env: Map[String, String]):
     if d.contains("://") then Left(s"ORPHERA_CONFIG_DIR is $d: these scripts read files only")
     else Right(d.stripSuffix("/"))
 
+  /** `inventory_file`: ORPHERA_INVENTORY as a path or a file: URI, else
+    * inventory.yaml.
+    */
+  def inventoryFile: Either[String, String] =
+    val f = env.get("ORPHERA_INVENTORY").filter(_.nonEmpty).getOrElse("inventory.yaml").stripPrefix("file://")
+    if f.contains("://") then Left(s"ORPHERA_INVENTORY is $f: these scripts read files only")
+    else Right(f)
+
+  /** `usage`: the comment block at the top of utils/<script>
+    * (`sed -n '2,/^$/p' | sed 's/^# \{0,1\}//'`), or `fallback` if it cannot be
+    * read.
+    */
+  def usage(script: String, fallback: String): Unit =
+    Try(Files.readAllBytes(utilsDir.resolve(script))).toOption match
+      case Some(bytes) =>
+        val lines = new String(bytes, StandardCharsets.UTF_8).split("\n", -1).toVector.drop(1)
+        val (head, rest) = lines.span(_.nonEmpty)
+        (head ++ rest.take(1)).foreach(l => Out.out(l.replaceFirst("^# ?", "")))
+      case None => Out.out(fallback)
+
   /** `hypervisor_list`: the members of the inventory group `hypervisors`, else
     * HYPERVISORS, else gs1 gs2 gs3 st0; one string, names separated by spaces.
     */
@@ -57,7 +81,7 @@ final class Sources(val root: Path, val env: Map[String, String]):
       if Proc.which("orphera", env, root).isEmpty then ""
       else
         val (_, listing) =
-          Proc.capture(List("orphera", "nodes", "--groups"), env, root, quiet = true)
+          Proc.capture(List("orphera", "nodes", "--groups"), env, root, ErrMode.Discard)
         listing
           .split("\n")
           .filter(l => l.takeWhile(_ != ':') == "hypervisors")
@@ -113,12 +137,11 @@ object Sources:
 
   def plainChar(c: Char): Boolean = alnum(c) || c == '.' || c == '_' || c == '-'
 
-  /** The checkout: the parent of the directory this executable is in. */
-  def findRoot(): Path =
+  /** utils/: the directory this executable is in. */
+  def findUtilsDir(): Path =
     Try(Paths.get("/proc/self/exe").toRealPath()).toOption
       .flatMap(exe => Option(exe.getParent))
-      .flatMap(dir => Option(dir.getParent))
-      .getOrElse(Paths.get("").toAbsolutePath)
+      .getOrElse(Paths.get("utils").toAbsolutePath)
 
   /** The environment orphera-sources.sh would give: this process's own, or,
     * in an installation (utils/ is PREFIX/share/orphera/utils and
@@ -126,10 +149,13 @@ object Sources:
     * orphera-env.sh sourced (by bash, so the file stays the one definition of
     * the site defaults) and PREFIX/bin on PATH.
     */
-  def load(): Sources =
-    val root = findRoot()
+  def load(rootIsCheckout: Boolean): Sources =
+    val utilsDir = findUtilsDir()
+    val root =
+      if rootIsCheckout then Option(utilsDir.getParent).getOrElse(utilsDir)
+      else Paths.get("").toAbsolutePath
     val base = System.getenv().asScala.toMap
-    val utils = root.resolve("utils").toString
+    val utils = utilsDir.toString
     val suffix = "/share/orphera/utils"
     val installed =
       if !utils.endsWith(suffix) then None
@@ -140,11 +166,11 @@ object Sources:
           Some((if prefix0.isEmpty then "/" else prefix0, envFile))
         else None
     installed match
-      case None => new Sources(root, base)
+      case None => new Sources(root, utilsDir, base)
       case Some((prefix, envFile)) =>
         val withPrefix = base + ("ORPHERA_PREFIX" -> prefix)
         val (rc, dump) = Proc.capture(
-          List("bash", "-c", ". \"$1\" >/dev/null; env -0", "vmctl", envFile),
+          List("bash", "-c", ". \"$1\" >/dev/null; env -0", "orphera-env", envFile),
           withPrefix,
           root
         )
@@ -162,7 +188,7 @@ object Sources:
         val withBin =
           if s":$path:".contains(s":$bin:") then sourced
           else sourced + ("PATH" -> s"$bin:$path")
-        new Sources(root, withBin)
+        new Sources(root, utilsDir, withBin)
 
 /** Lines to standard output and error, flushed at once so the two keep their
   * order on a terminal.
@@ -175,6 +201,11 @@ object Out:
   def err(line: String): Unit =
     System.err.println(line)
     System.err.flush()
+
+  /** printf without a newline (a prompt). */
+  def outPart(text: String): Unit =
+    System.out.print(text)
+    System.out.flush()
 
   def outBytes(bytes: Array[Byte]): Unit =
     System.out.write(bytes, 0, bytes.length)
