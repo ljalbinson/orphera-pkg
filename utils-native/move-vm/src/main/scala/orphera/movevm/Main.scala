@@ -176,7 +176,7 @@ final class Move(
   /** `step`: vmRun, and on anything but RESULT|ok print the failure (unless
     * `quiet`, the shell's `>/dev/null 2>&1`) and give false.
     */
-  private def step(hv: String, script: String, timeout: String = "120", quiet: Boolean = false): Boolean =
+  private def step(hv: String, script: String, timeout: String, quiet: Boolean = false): Boolean =
     vmRun(hv, script, timeout)
     if result.startsWith("ok|") then true
     else
