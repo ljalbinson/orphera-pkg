@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+- Ceph on tst0-tst2 has a separate cluster network: each node has a second NIC (`enp2s0`, 10.10.7.12-14/24 on `br-net107`, VLAN 107, MTU 9000) in `config/tst0-2.yaml`, and `cephadm_install.scala` and `cephadm_bootstrap.yaml` bootstrap with `--cluster-network 10.10.7.0/24`, so OSD replication and recovery traffic leaves the public network 10.10.5.0/24. The three VMs were rebuilt with the new NIC and full-size (9000) pings pass on it; the Ceph install with the split has not yet been run.
+
 ### Fixed
 - `orphera os10` prints JSON as `"name": "x"` (no space before the colon), like `utils/os10.py`.
 - A playbook that cannot start (a `--config` file that does not load, a missing `--config`) or that fails now reports one line (`Error: ...`, or just the message for a failed stage) instead of a Java stack trace. `ORPHERA_DEBUG=1` brings the stack trace back for start-up errors. Playbook scripts are now started through `orphera.orchestrator.PlaybookLauncher`. Checked on the lab: a hypervisor config given to `kvm_vm_start.scala` prints the one `Error:` line, and `ORPHERA_DEBUG=1` the stack trace; the one-line report for a failed stage has not yet been seen on the lab.

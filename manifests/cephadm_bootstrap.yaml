@@ -10,7 +10,7 @@ stages:
           command:
             - sh
             - -c
-            - "cephadm bootstrap --mon-ip {{cluster_ip}} --initial-dashboard-user admin --initial-dashboard-password 'ChangeMe123!' --dashboard-password-noupdate --allow-fqdn-hostname"
+            - "cephadm bootstrap --mon-ip {{cluster_ip}} --cluster-network 10.10.7.0/24 --initial-dashboard-user admin --initial-dashboard-password 'ChangeMe123!' --dashboard-password-noupdate --allow-fqdn-hostname"
           timeout: 600
 
       - name: confirm cluster is up

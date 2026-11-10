@@ -38,6 +38,10 @@ object cephadm_install extends OrpheraClusterPlaybook:
               "-c",
               "test -f /etc/ceph/ceph.pub || cephadm bootstrap " +
                 "--mon-ip {{nodes.tst0.cluster_ip}} " +
+                // OSD replication and recovery traffic on its own VLAN (107,
+                // enp2s0 on tst0-tst2, see config/tst0-2.yaml); MONs, MGRs and
+                // clients stay on the public network 10.10.5.0/24.
+                "--cluster-network 10.10.7.0/24 " +
                 "--skip-dashboard --skip-monitoring-stack --allow-fqdn-hostname"
             ),
             timeoutSeconds = 300
