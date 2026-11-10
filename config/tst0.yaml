@@ -30,7 +30,7 @@ params:
   - nic: enp2s0
     ipaddress: '10.10.7.12'
     bridge: br-net107
-    nwtmask: '255.255.255.0'
+    netmask: '255.255.255.0'
     cidr: '10.10.7.0/24'
     mtu: 9000
   domainname: ljalbinson.com
