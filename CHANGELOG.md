@@ -7,7 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Changed
-- Ceph on tst0-tst2 has a separate cluster network: each node has a second NIC (`enp2s0`, 10.10.7.12-14/24 on `br-net107`, VLAN 107, MTU 9000) in `config/tst0-2.yaml`, and `cephadm_install.scala` and `cephadm_bootstrap.yaml` bootstrap with `--cluster-network 10.10.7.0/24`, so OSD replication and recovery traffic leaves the public network 10.10.5.0/24. The three VMs were rebuilt with the new NIC and full-size (9000) pings pass on it; the Ceph install with the split has not yet been run.
+- Ceph on tst0-tst2 has a separate cluster network: each node has a second NIC (`enp2s0`, 10.10.7.12-14/24 on `br-net107`, VLAN 107, MTU 9000) in `config/tst0-2.yaml`, and `cephadm_install.scala` and `cephadm_bootstrap.yaml` bootstrap with `--cluster-network 10.10.7.0/24`, so OSD replication and recovery traffic leaves the public network 10.10.5.0/24. The three VMs were rebuilt with the new NIC and full-size (9000) pings pass on it; `cephadm_install`, `cephadm_add_mons` and `cephadm_add_osds` then built the cluster with the split (2026-11-10): `cluster_network` is 10.10.7.0/24, all six OSDs have their front address on 10.10.5.x and their back address on 10.10.7.x, 3 mons in quorum, 1 pg active+clean. The only health warning is the one the deliberate `aes,aes256k` cipher setting causes.
 
 ### Fixed
 - `orphera os10` prints JSON as `"name": "x"` (no space before the colon), like `utils/os10.py`.
