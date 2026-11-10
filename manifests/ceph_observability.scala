@@ -142,8 +142,12 @@ object ceph_observability extends OrpheraClusterPlaybook:
 
   private val extendedHealthScript =
     s"""TARGETS=$$(curl -s http://localhost:9090/api/v1/targets)
-       |UP=$$(echo "$$TARGETS" | grep -o '"health":"up"' | wc -l)
-       |DOWN=$$(echo "$$TARGETS" | grep -o '"health":"down"' | wc -l)
+       |# Only this playbook's own jobs count: other playbooks add jobs of their own under
+       |# /etc/prometheus/scrape.d (telemetry_single_node.scala's ceilometer job, for one), and
+       |# on a rebuild their targets can be down until those playbooks run again.
+       |COUNTS=$$(echo "$$TARGETS" | python3 -c 'import json,sys; jobs=set(sys.argv[1].split(",")); t=[x for x in json.load(sys.stdin)["data"]["activeTargets"] if x["labels"].get("job") in jobs]; print(sum(x["health"]=="up" for x in t), sum(x["health"]=="down" for x in t))' node_exporter,haproxy,mysqld,ceph,prometheus 2>/dev/null)
+       |UP=$${COUNTS% *}
+       |DOWN=$${COUNTS#* }
        |if [ "$$DOWN" != "0" ] || [ "$$UP" -lt "$expectedTargets" ]; then
        |  echo "prometheus targets not all healthy yet: up=$$UP down=$$DOWN (want $expectedTargets up, 0 down)" >&2
        |  exit 1
