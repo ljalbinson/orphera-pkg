@@ -2,7 +2,7 @@
 //
 // utils/vmctl.sh in Scala, compiled to a native executable with Scala Native. A build of its own, not a
 // project of the main build: the main build, `make test` and CI never need the Scala Native toolchain
-// (clang, libunwind headers), and this one needs no JVM at run time.
+// (clang), and this one needs no JVM at run time.
 //
 //   make vmctl        # sbt nativeLink here, then installs the executable as utils/vmctl
 //

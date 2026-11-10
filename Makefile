@@ -137,7 +137,7 @@ check-os10:
 	python3 utils/test-os10.py
 
 # utils/vmctl.sh in Scala, compiled to a native executable with Scala Native: a build of its own in vmctl/
-# (it needs sbt, clang and the libunwind headers to build, and no JVM to run). Installs it as utils/vmctl,
+# (it needs sbt and clang to build, and no JVM to run). Installs it as utils/vmctl,
 # beside utils/vmctl.sh, which stays. `print nativeLink` links it and prints where the executable is.
 vmctl:
 	@out=$$(cd vmctl && sbt -batch -Dsbt.supershell=false -Dsbt.color=false "print nativeLink" | tee /dev/stderr | grep -E '^/.*/vmctl$$' | tail -1) && \
