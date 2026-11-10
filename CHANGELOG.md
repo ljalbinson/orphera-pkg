@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+- A from-scratch OpenStack build stopped at Magnum (`no external network`): nothing made the persistent flat network that Magnum (its external network) and Trove (its guests' management network, by the name `provider`) need; on the old lab it had come from `utils/openstack-minimal-env.sh`. The Neutron helper has a new command `provider-net` that makes the network `provider` (flat, shared, external, 10.10.6.0/24 with DHCP, gateway .1, pool .200-.220) or marks an existing one shared and external, and `build_openstack_stack.sh` runs it at the end of the `neutron` step. The compute boot test (`orphera-compute-api boot-test`, used by the `boot` step and `test_nova_compute.sh`) now uses that network and leaves it in place instead of failing because a flat network already exists. Not yet run on the lab.
+
 ### Changed
 - Ceph on tst0-tst2 has a separate cluster network: each node has a second NIC (`enp2s0`, 10.10.7.12-14/24 on `br-net107`, VLAN 107, MTU 9000) in `config/tst0-2.yaml`, and `cephadm_install.scala` and `cephadm_bootstrap.yaml` bootstrap with `--cluster-network 10.10.7.0/24`, so OSD replication and recovery traffic leaves the public network 10.10.5.0/24. The three VMs were rebuilt with the new NIC and full-size (9000) pings pass on it; `cephadm_install`, `cephadm_add_mons` and `cephadm_add_osds` then built the cluster with the split (2026-11-10): `cluster_network` is 10.10.7.0/24, all six OSDs have their front address on 10.10.5.x and their back address on 10.10.7.x, 3 mons in quorum, 1 pg active+clean. The only health warning is the one the deliberate `aes,aes256k` cipher setting causes.
 

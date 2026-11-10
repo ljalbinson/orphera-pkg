@@ -19,7 +19,9 @@
 #   nova     tst14       nova_single_node (API, scheduler, conductor, noVNC proxy; RabbitMQ
 #                        vhost on tst10)
 #   neutron  tst19       neutron_single_node (server, Open vSwitch + DHCP agents, flat provider
-#                        network on tst19's second NIC; its address is removed)
+#                        network on tst19's second NIC; its address is removed), then the
+#                        persistent network `provider` (flat, shared, external, 10.10.6.0/24 with
+#                        DHCP) that Magnum, Trove and the boot tests use
 #   compute  tst17,tst18 nova_compute (nova-compute on KVM + Neutron Open vSwitch agent, config drive;
 #                        the second NIC becomes the provider port, its address is removed)
 #   horizon  tst13       horizon_single_node (the dashboard, https://tst13:8080/)
@@ -317,6 +319,8 @@ step_neutron() {
   check "the Neutron API answers its version document" contains "http=" "$out"
   out=$(run_on tst19 "sudo /usr/local/sbin/orphera-neutron-api agents-up")
   check "the Open vSwitch and DHCP agents are alive" contains "are alive" "$out"
+  out=$(run_on tst19 "sudo /usr/local/sbin/orphera-neutron-api provider-net")
+  check "the flat provider network exists, shared and external" contains "provider network ready" "$out"
 }
 
 step_compute() {

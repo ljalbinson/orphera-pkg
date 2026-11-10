@@ -472,7 +472,7 @@ object neutron_single_node extends OrpheraClusterPlaybook:
   // Standard-library Python, as in the other service playbooks. Plain string filled
   // in with replace(). Subcommands:
   //   register | unregister | catalog | agents | agents-up |
-  //   net-list | net-create | net-delete <id> | tenant-cycle
+  //   net-list | net-create | net-delete <id> | tenant-cycle | provider-net
   // (net-create makes a flat network on the physical network `provider` and a
   // subnet with DHCP off, net-delete removes both: that exercises the API, the
   // database and the ML2 flat type driver. Only one flat network can exist per
@@ -481,7 +481,10 @@ object neutron_single_node extends OrpheraClusterPlaybook:
   // external network and the subnet as an interface, and a floating IP, waits for the router
   // and its ports to go ACTIVE, and removes everything. It uses the existing external network,
   // or a temporary flat external one if there is none; it refuses to run if the only flat
-  // network on the physical network is not marked external.)
+  // network on the physical network is not marked external.
+  // provider-net makes the persistent flat network `provider` (shared, external, subnet
+  // 10.10.6.0/24 with DHCP, pool .200-.220) if it is missing, or marks the existing one shared
+  // and external; Magnum, Trove and nova_compute.scala's boot test use it. Idempotent.)
   private val apiHelperPython =
     """#!/usr/bin/python3
 import json, ssl, sys, time, urllib.request, urllib.error
@@ -654,6 +657,52 @@ def net_delete(nid):
     print('deleted ' + nid)
 
 
+PROVIDER_NAME = 'provider'
+PROVIDER_CIDR = '10.10.6.0/24'
+PROVIDER_GATEWAY = '10.10.6.1'
+PROVIDER_POOL = ('10.10.6.200', '10.10.6.220')
+
+
+def provider_net():
+    # The one flat network on PHYSNET, kept for good: shared and external. Magnum takes its
+    # external network from it and Trove its guests' management network (by the name
+    # `provider`); the compute boot test reuses it. Idempotent.
+    token, _ = get_token('admin', ADMIN_PW, 'admin')
+    flat = [n for n in get_json(token, '/networks').get('networks', [])
+            if n.get('provider:network_type') == 'flat' and n.get('provider:physical_network') == PHYSNET]
+    if flat:
+        n = flat[0]
+        if n.get('name') != PROVIDER_NAME:
+            die('a flat network %s (%s) already uses physical network %s; delete it (orphera-neutron-api net-delete %s) and run again' % (n.get('name'), n['id'], PHYSNET, n['id']))
+        change = {}
+        if not n.get('router:external'):
+            change['router:external'] = True
+        if not n.get('shared'):
+            change['shared'] = True
+        if change:
+            s, p, _ = call('PUT', NEUTRON + '/v2.0/networks/' + n['id'], {'network': change}, token)
+            if s != 200:
+                die('network update failed: HTTP %s %s' % (s, p))
+        nid = n['id']
+    else:
+        body = {'network': {'name': PROVIDER_NAME, 'shared': True, 'router:external': True,
+                            'provider:network_type': 'flat', 'provider:physical_network': PHYSNET}}
+        s, p, _ = call('POST', NEUTRON + '/v2.0/networks', body, token)
+        if s not in (200, 201):
+            die('network create failed: HTTP %s %s' % (s, p))
+        nid = p['network']['id']
+    subs = get_json(token, '/subnets?network_id=' + nid).get('subnets', [])
+    if not subs:
+        body = {'subnet': {'network_id': nid, 'ip_version': 4, 'name': PROVIDER_NAME, 'cidr': PROVIDER_CIDR,
+                           'gateway_ip': PROVIDER_GATEWAY, 'enable_dhcp': True,
+                           'allocation_pools': [{'start': PROVIDER_POOL[0], 'end': PROVIDER_POOL[1]}]}}
+        s, p, _ = call('POST', NEUTRON + '/v2.0/subnets', body, token)
+        if s not in (200, 201):
+            die('subnet create failed: HTTP %s %s' % (s, p))
+        subs = [p['subnet']]
+    print('provider network ready: %s (%s), flat on %s, shared, external, subnet %s' % (PROVIDER_NAME, nid, PHYSNET, subs[0].get('cidr')))
+
+
 def get_json(token, path):
     s, p, _ = call('GET', NEUTRON + '/v2.0' + path, None, token)
     if s != 200:
@@ -759,8 +808,10 @@ if __name__ == '__main__':
         net_delete(sys.argv[2])
     elif cmd == 'tenant-cycle':
         tenant_cycle()
+    elif cmd == 'provider-net':
+        provider_net()
     else:
-        die('usage: orphera-neutron-api register | unregister | catalog | agents | agents-up | net-list | net-create | net-delete <id> | tenant-cycle')
+        die('usage: orphera-neutron-api register | unregister | catalog | agents | agents-up | net-list | net-create | net-delete <id> | tenant-cycle | provider-net')
 """
 
   private val helperScript =

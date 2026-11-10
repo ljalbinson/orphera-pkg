@@ -541,8 +541,9 @@ object nova_compute extends OrpheraClusterPlaybook:
   //   hypervisors             one line per hypervisor (state, vCPUs, memory)
   //   ovs-up <host> ...       every named host has an alive neutron-openvswitch-agent
   //   boot-cleanup           delete what an earlier boot-test --keep left behind
-  //   boot-test <qcow2-file> [--keep]  upload an image, create a flavor and a flat provider
-  //                           network with DHCP, boot an instance with a config drive,
+  //   boot-test <qcow2-file> [--keep]  upload an image, create a flavor, use the existing flat
+  //                           network (`provider`, left in place) or else create a throwaway
+  //                           one with DHCP, boot an instance with a config drive,
   //                           wait for the console to show the login prompt and for the
   //                           Neutron port to go ACTIVE, print "instance ready: ip=.. mac=..
   //                           network=..", then delete everything it created unless --keep.
@@ -709,18 +710,27 @@ def boot_test(path, keep=False):
             die('flavor create failed: HTTP %s %s' % (s, p))
         flavor = p['flavor']['id']
         made.append(('flavor', NOVA + '/flavors/' + flavor))
-        # network + subnet (DHCP on)
-        s, p, _ = call('POST', NEUTRON + '/v2.0/networks', {'network': {'name': 'orphera-boot-test', 'provider:network_type': 'flat', 'provider:physical_network': PHYSNET}}, token)
-        if s == 409:
-            die('a flat network on physical network %s already exists (only one is allowed); delete it first: %s' % (PHYSNET, p))
-        if s not in (200, 201):
-            die('network create failed: HTTP %s %s' % (s, p))
-        net = p['network']['id']
-        made.append(('network', NEUTRON + '/v2.0/networks/' + net))
-        s, p, _ = call('POST', NEUTRON + '/v2.0/subnets', {'subnet': {'network_id': net, 'ip_version': 4, 'cidr': CIDR, 'gateway_ip': GATEWAY, 'enable_dhcp': True, 'allocation_pools': [{'start': POOL[0], 'end': POOL[1]}], 'name': 'orphera-boot-test'}}, token)
-        if s not in (200, 201):
-            die('subnet create failed: HTTP %s %s' % (s, p))
-        made.append(('subnet', NEUTRON + '/v2.0/subnets/' + p['subnet']['id']))
+        # network + subnet (DHCP on). Only one flat network is allowed on PHYSNET: when one is
+        # there (the persistent `provider` network, neutron_single_node.scala's provider-net), use it
+        # and leave it in place; otherwise make a throwaway one.
+        flat = [n for n in call('GET', NEUTRON + '/v2.0/networks', None, token)[1].get('networks', [])
+                if n.get('provider:network_type') == 'flat' and n.get('provider:physical_network') == PHYSNET]
+        if flat:
+            net = flat[0]['id']
+            subs = call('GET', NEUTRON + '/v2.0/subnets?network_id=' + net, None, token)[1].get('subnets', [])
+            if not any(x.get('enable_dhcp') for x in subs):
+                die('the flat network %s (%s) has no subnet with DHCP; the boot test needs one' % (flat[0].get('name'), net))
+            print('using the existing flat network %s (%s)' % (flat[0].get('name'), net))
+        else:
+            s, p, _ = call('POST', NEUTRON + '/v2.0/networks', {'network': {'name': 'orphera-boot-test', 'provider:network_type': 'flat', 'provider:physical_network': PHYSNET}}, token)
+            if s not in (200, 201):
+                die('network create failed: HTTP %s %s' % (s, p))
+            net = p['network']['id']
+            made.append(('network', NEUTRON + '/v2.0/networks/' + net))
+            s, p, _ = call('POST', NEUTRON + '/v2.0/subnets', {'subnet': {'network_id': net, 'ip_version': 4, 'cidr': CIDR, 'gateway_ip': GATEWAY, 'enable_dhcp': True, 'allocation_pools': [{'start': POOL[0], 'end': POOL[1]}], 'name': 'orphera-boot-test'}}, token)
+            if s not in (200, 201):
+                die('subnet create failed: HTTP %s %s' % (s, p))
+            made.append(('subnet', NEUTRON + '/v2.0/subnets/' + p['subnet']['id']))
         print('flavor %s, network %s ready' % (flavor, net))
         # server
         s, p, _ = call('POST', NOVA + '/servers', {'server': {'name': 'orphera-boot-test', 'imageRef': image, 'flavorRef': flavor, 'networks': [{'uuid': net}], 'config_drive': True}}, token)
