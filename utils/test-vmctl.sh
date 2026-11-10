@@ -53,7 +53,8 @@ case "${1:-}" in
     echo "echoed script text"
     echo "[$name] Starting $pb"
     echo "[$name] host: Running: virsh start x"
-    env | grep '^ORPHERA_' | grep -v '^ORPHERA_CONFIG_DIR=' | sort | sed "s/^/[$name] env /"
+    # Only the variables vmctl sets for the playbooks (never ORPHERA_TOKEN or other secrets of the caller).
+    env | grep -E '^ORPHERA_(AUTOSTART|HYPERVISORS|VM_[A-Z_]+)=' | LC_ALL=C sort | sed "s/^/[$name] env /"
     [ -z "$cfg" ] || echo "[$name] config $(basename "$cfg")"
     case "$cfg${ORPHERA_HYPERVISORS:-}" in *bad*) echo "[$name] the step FAILED"; exit 1 ;; esac
     case "${ORPHERA_VM_NAMES:-}" in *bad*) echo "Cluster playbook kvm-autostart failed"; exit 0 ;; esac
@@ -163,6 +164,7 @@ t autostart add --node-groups ceph --exclude-nodes tst2
 t autostart add --retries 1 0
 t autostart add
 t autostart add badvm 0
+t autostart add 5 0 badvm 1
 t autostart add nosuch 0
 
 echo "$cases cases, $diffs differ"

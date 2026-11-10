@@ -202,7 +202,8 @@ if [ "$action" = autostart ]; then
       vm_lookup "$arg" || { fail=1; continue; }
       groups[$hv]+=" $vm"
     done
-    for h in "${!groups[@]}"; do
+    # One run per hypervisor, in name order (an associative array has no order of its own); names are plain.
+    for h in $(printf '%s\n' "${!groups[@]}" | LC_ALL=C sort); do
       run_autostart "$h" "${groups[$h]}" || fail=1
     done
   fi

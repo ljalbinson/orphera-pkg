@@ -317,13 +317,13 @@ object Main:
           usage(src)
           sys.exit(2)
         val looked = vms.map(src.vmLookup)
-        // hypervisor -> " vm1 vm2", in the order the hypervisors were first met
+        // hypervisor -> " vm1 vm2", one run per hypervisor in name order (as vmctl.sh, LC_ALL=C sort)
         val byHv = looked.flatten.foldLeft(Vector.empty[(String, String)]) { (acc, vm) =>
           acc.indexWhere(_._1 == vm.hv) match
             case -1 => acc :+ (vm.hv -> s" ${vm.name}")
             case i  => acc.updated(i, (vm.hv, s"${acc(i)._2} ${vm.name}"))
         }
-        val runs = byHv.map((hv, names) => runAutostart(hv, names))
+        val runs = byHv.sortBy(_._1).map((hv, names) => runAutostart(hv, names))
         looked.forall(_.isDefined) && runs.forall(identity)
     if !ok then 1
     else
