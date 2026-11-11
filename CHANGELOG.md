@@ -7,6 +7,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- `manifests/p420_hba.scala`: presents every disk behind an HP Smart Array P420 / P420i to the host as a plain disk. It puts the controller in
+  HBA mode (`ssacli ctrl slot=N modify hbamode=on`, which takes effect after a reboot) and falls back to one single-drive RAID 0 logical drive
+  per disk if the firmware refuses. It installs `ssacli` if it is missing (HPE repository, or a .deb in `/var/lib/orphera/ssacli/`). It only
+  reports unless run with `P420_ERASE=yes`, because deleting logical drives destroys the data on the disks, and it refuses a controller whose
+  logical drives are mounted unless `P420_ALLOW_MOUNTED=yes`. The target is named in a `--config` file (`nodes: [name]`); there is no default.
+  Not yet run. (Merged on 2026-11-11 from the `p420-hba` branch of 2026-10-27, with the inventory group `dl380p` [tst23], which that branch had misnamed `dl280p`.)
 - Retrying a task. A playbook or cluster-playbook task takes `retries: N` and `retry_delay: S` in YAML, or `.retry(N, delaySeconds = S)` in the Scala DSL, and the commands that change a node take `--retries N` and `--retry-delay S` (also in a `pipeline` step). A failed task is run again up to N more times, waiting S seconds (default 5) before the first retry and doubling after, at most 5 minutes; every failure is retried, `when:` is decided once. Each retry prints `attempt n failed (...); retry n of N in Ss` and writes a `task_retry` run-log event. It is in TaskExecutor, so it is the same for all three. New checks in `TaskExecutorCheck`. Not yet run on the lab.
 - `utils/macos-setup.sh`: installs the build tools on a clean macOS, Intel or Apple Silicon, without Homebrew (which no longer supports Intel): the Xcode command line tools, then JDK 21 (Temurin), sbt 1.10.7, Go and the GitHub CLI unpacked under `~/.local` (no administrator password), with `JAVA_HOME` and the PATH set in `~/.zprofile`. The `.deb` and `.rpm` packages stay a Linux build (GitHub builds them on a tag). Run on an Intel Mac with Sonoma: `sbt compile` and `sbt test` pass.
 

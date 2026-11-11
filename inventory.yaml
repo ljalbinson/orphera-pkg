@@ -408,6 +408,8 @@ groups:
     members: [tst49, tst50]
   - name: hypervisors
     members: [gs1, gs2, gs3, gs9, st0]
+  - name: dl380p
+    members: [tst23]
   - name: all
     members: [tst0, tst1, tst2, tst3, tst4, tst5, tst6, tst7, tst8, tst9,
       tst10, tst11, tst12, tst13, tst14, tst15, tst16, tst17, tst18, tst19,
