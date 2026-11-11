@@ -15,8 +15,7 @@ case "$state" in
   "")        echo "RESULT|error|domain '@VM@' is not defined on this hypervisor" ;;
   running)   out=$($V reboot '@VM@' 2>&1) && echo "RESULT|ok|reboot sent" || echo "RESULT|error|$out" ;;
   *)         echo "RESULT|error|domain is $state, not running" ;;
-esac
-"""
+esac"""
 
   val hard: String =
     """V="virsh --connect qemu:///system"
@@ -41,5 +40,4 @@ if [ "$state" != "shut off" ]; then
 else
   how="was already shut off"
 fi
-out=$($V start '@VM@' 2>&1) && echo "RESULT|ok|$how, started" || echo "RESULT|error|$how, but start failed: $out"
-"""
+out=$($V start '@VM@' 2>&1) && echo "RESULT|ok|$how, started" || echo "RESULT|error|$how, but start failed: $out""""

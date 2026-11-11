@@ -23,5 +23,4 @@ if [ @FORCE@ -eq 1 ]; then
   out=$($V destroy '@VM@' 2>&1) && echo "RESULT|ok|did not shut down in @WAIT@s; powered off" || echo "RESULT|error|$out"
 else
   echo "RESULT|error|still running after @WAIT@s (use --force to power it off)"
-fi
-"""
+fi"""

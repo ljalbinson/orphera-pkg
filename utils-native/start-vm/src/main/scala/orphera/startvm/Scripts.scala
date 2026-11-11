@@ -17,5 +17,4 @@ case "$state" in
   paused)       $V resume '@VM@' >/dev/null 2>&1 && echo "RESULT|ok|resumed" || echo "RESULT|error|virsh resume failed" ;;
   "shut off")   out=$($V start '@VM@' 2>&1) && echo "RESULT|ok|started" || echo "RESULT|error|$out" ;;
   *)            echo "RESULT|error|domain is in state '$state'; not touching it" ;;
-esac
-"""
+esac"""
