@@ -214,10 +214,17 @@ object Os10Check:
 
   /** Runs `orphera os10 ...` and returns (exit code, standard output, standard error). */
   private def run(args: String*): (Int, String, String) =
+    runWith(Map("OS10_PASSWORD" -> "secret"), args*)
+
+  /** `orphera os10 <args>` with this environment: its exit code, standard
+    * output and standard error (captured, so the checks print only their
+    * own lines).
+    */
+  private def runWith(env: Map[String, String], args: String*): (Int, String, String) =
     val out, err = ByteArrayOutputStream()
     val code = Console.withOut(out) {
       Console.withErr(err) {
-        Os10Tool.run(args.toList, Map("OS10_PASSWORD" -> "secret"))
+        Os10Tool.run(args.toList, env)
       }
     }
     (code, out.toString(UTF_8), err.toString(UTF_8))
@@ -291,14 +298,21 @@ object Os10Check:
 
     // ---- errors ----
     m = Mock()
-    val bad = Os10Tool.run(List("vlans", m.url), Map("OS10_PASSWORD" -> "wrong"))
-    check("a refused login is one request, not retried", bad == 1 && m.requests.size == 1, m.requests.toString)
+    val (cb, _, eb) = runWith(Map("OS10_PASSWORD" -> "wrong"), "vlans", m.url)
+    check(
+      "a refused login is one request, not retried",
+      cb == 1 && m.requests.size == 1 && eb.contains("refused the login") && eb.contains("not retried"),
+      m.requests.toString + eb
+    )
     m.stop()
     val (cu, _, eu) = run("vlans", "http://127.0.0.1:9")
     check("an unreachable switch names the likely cause", cu == 1 && eu.contains("rest api restconf"), eu)
-    check("a command needs a switch", Os10Tool.run(List("vlans"), Map.empty) == 2)
-    check("vlan needs a number", Os10Tool.run(List("vlan", "http://127.0.0.1:9"), Map.empty) == 2)
-    check("an unknown command is a usage error", Os10Tool.run(List("frobnicate", "x"), Map.empty) == 2)
+    val (cs, _, es) = runWith(Map.empty, "vlans")
+    check("a command needs a switch", cs == 2 && es.contains("vlans needs a switch"), es)
+    val (cv, _, ev) = runWith(Map.empty, "vlan", "http://127.0.0.1:9")
+    check("vlan needs a number", cv == 2 && ev.contains("vlan needs a VLAN number"), ev)
+    val (cx, _, ex) = runWith(Map.empty, "frobnicate", "x")
+    check("an unknown command is a usage error", cx == 2 && ex.contains("unknown command 'frobnicate'"), ex)
 
     // ---- changing ----
     m = Mock()
