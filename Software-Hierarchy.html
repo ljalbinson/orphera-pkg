@@ -18,13 +18,15 @@ svg{width:100%;height:auto;display:block}
 <body>
 <main>
 <h1>Orphera software layers</h1>
-<p>Top to bottom, from how playbooks are written to what runs on the managed host. Everything above the
-shared protocol runs in the orchestrator; everything below it runs in the root agent daemon on each host,
-reached over gRPC/TLS. SSH is used only to bootstrap or remove the agent.</p>
-<svg xmlns="http://www.w3.org/2000/svg" width="680" height="986" viewBox="0 0 680 986" role="img">
+<p>Top to bottom, from how playbooks are written to what runs on the managed host. Everything marked
+orchestrator runs in the <code>orphera</code> command; everything below the shared protocol runs in the root agent
+daemon on each host (the Scala agent or the Go one, the same protocol and service), reached over gRPC/TLS. SSH is used
+only to bootstrap or remove the agent. Switches and iLOs have no agent: device control talks to them directly over
+HTTPS. Utilities and packaging sit beside the orchestrator: they drive it from the shell and ship it.</p>
+<svg xmlns="http://www.w3.org/2000/svg" width="680" height="1392" viewBox="0 0 680 1392" role="img">
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 <title>Orphera software layers</title>
-<desc>Layered stack of Orphera from playbook authoring down to the runtime, coloured by owning sbt module.</desc>
+<desc>Layered stack of Orphera from playbook authoring down to the runtime, coloured by owning part: authoring, the orchestrator, utilities and packaging, the shared protocol, the agents, and the host.</desc>
 <style>
 svg{font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif}
 .band rect{stroke-width:.5}
@@ -34,6 +36,7 @@ svg{font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif}
 .lg{font-size:12px;fill:#5F5E5A}
 .purple rect{fill:#EEEDFE;stroke:#534AB7}.purple .bt{fill:#3C3489}.purple .bs{fill:#534AB7}
 .teal rect{fill:#E1F5EE;stroke:#0F6E56}.teal .bt{fill:#085041}.teal .bs{fill:#0F6E56}
+.blue rect{fill:#E6F1FB;stroke:#185FA5}.blue .bt{fill:#0C447C}.blue .bs{fill:#185FA5}
 .amber rect{fill:#FAEEDA;stroke:#854F0B}.amber .bt{fill:#633806}.amber .bs{fill:#854F0B}
 .coral rect{fill:#FAECE7;stroke:#993C1D}.coral .bt{fill:#712B13}.coral .bs{fill:#993C1D}
 .gray rect{fill:#F1EFE8;stroke:#5F5E5A}.gray .bt{fill:#444441}.gray .bs{fill:#5F5E5A}
@@ -43,71 +46,100 @@ svg{font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif}
 .lg{fill:#B4B2A9}
 .purple rect{fill:#3C3489;stroke:#AFA9EC}.purple .bt{fill:#CECBF6}.purple .bs{fill:#AFA9EC}
 .teal rect{fill:#085041;stroke:#5DCAA5}.teal .bt{fill:#9FE1CB}.teal .bs{fill:#5DCAA5}
+.blue rect{fill:#0C447C;stroke:#85B7EB}.blue .bt{fill:#B5D4F4}.blue .bs{fill:#85B7EB}
 .amber rect{fill:#633806;stroke:#EF9F27}.amber .bt{fill:#FAC775}.amber .bs{fill:#EF9F27}
 .coral rect{fill:#712B13;stroke:#F0997B}.coral .bt{fill:#F5C4B3}.coral .bs{fill:#F0997B}
 .gray rect{fill:#444441;stroke:#B4B2A9}.gray .bt{fill:#D3D1C7}.gray .bs{fill:#B4B2A9}
 }
 </style>
-<g class="band purple"><rect x="40" y="40" width="600" height="58" rx="8"/><text class="bt" x="56" y="66">Authoring</text><text class="bs" x="56" y="84">manifests, scripting</text></g>
+<g class="band purple"><rect x="40" y="40" width="600" height="96" rx="8"/><text class="bt" x="56" y="66">Authoring</text><text class="bs" x="56" y="84">manifests, scripting</text></g>
 <rect class="chip" x="196" y="54" width="134" height="30" rx="4"/><text class="ct" x="263" y="69">YAML playbooks</text>
 <rect class="chip" x="342" y="54" width="134" height="30" rx="4"/><text class="ct" x="409" y="69">Typed Scala DSL</text>
 <rect class="chip" x="488" y="54" width="134" height="30" rx="4"/><text class="ct" x="555" y="69">Run-time scripts</text>
-<g class="band teal"><rect x="40" y="108" width="600" height="58" rx="8"/><text class="bt" x="56" y="134">CLI &amp; inventory</text><text class="bs" x="56" y="152">orchestrator</text></g>
-<rect class="chip" x="196" y="122" width="134" height="30" rx="4"/><text class="ct" x="263" y="137">Command parser</text>
-<rect class="chip" x="342" y="122" width="134" height="30" rx="4"/><text class="ct" x="409" y="137">Inventory (YAML)</text>
-<rect class="chip" x="488" y="122" width="134" height="30" rx="4"/><text class="ct" x="555" y="137">Playbook registry</text>
-<g class="band teal"><rect x="40" y="176" width="600" height="96" rx="8"/><text class="bt" x="56" y="202">Execution engine</text><text class="bs" x="56" y="220">orchestrator</text></g>
-<rect class="chip" x="196" y="190" width="134" height="30" rx="4"/><text class="ct" x="263" y="205">Playbook runner</text>
-<rect class="chip" x="342" y="190" width="134" height="30" rx="4"/><text class="ct" x="409" y="205">Cluster runner</text>
-<rect class="chip" x="488" y="190" width="134" height="30" rx="4"/><text class="ct" x="555" y="205">Staged health gates</text>
-<rect class="chip" x="196" y="228" width="134" height="30" rx="4"/><text class="ct" x="263" y="243">Mustache templating</text>
-<rect class="chip" x="342" y="228" width="134" height="30" rx="4"/><text class="ct" x="409" y="243">Cross-node facts</text>
-<rect class="chip" x="488" y="228" width="134" height="30" rx="4"/><text class="ct" x="555" y="243">Checkpoint / resume</text>
-<g class="band teal"><rect x="40" y="282" width="600" height="58" rx="8"/><text class="bt" x="56" y="308">Secrets &amp; config</text><text class="bs" x="56" y="326">orchestrator</text></g>
-<rect class="chip" x="196" y="296" width="134" height="30" rx="4"/><text class="ct" x="263" y="311">Secret store (age)</text>
-<rect class="chip" x="342" y="296" width="134" height="30" rx="4"/><text class="ct" x="409" y="311">Typed config files</text>
-<rect class="chip" x="488" y="296" width="134" height="30" rx="4"/><text class="ct" x="555" y="311">Check mode</text>
-<g class="band teal"><rect x="40" y="350" width="600" height="96" rx="8"/><text class="bt" x="56" y="376">Observability</text><text class="bs" x="56" y="394">orchestrator</text></g>
-<rect class="chip" x="196" y="364" width="134" height="30" rx="4"/><text class="ct" x="263" y="379">Console renderer</text>
-<rect class="chip" x="342" y="364" width="134" height="30" rx="4"/><text class="ct" x="409" y="379">Run log</text>
-<rect class="chip" x="488" y="364" width="134" height="30" rx="4"/><text class="ct" x="555" y="379">Audit log</text>
-<rect class="chip" x="196" y="402" width="134" height="30" rx="4"/><text class="ct" x="263" y="417">Log summary</text>
-<rect class="chip" x="342" y="402" width="134" height="30" rx="4"/><text class="ct" x="409" y="417">Fact printer</text>
-<g class="band teal"><rect x="40" y="456" width="600" height="58" rx="8"/><text class="bt" x="56" y="482">Transport</text><text class="bs" x="56" y="500">orchestrator</text></g>
-<rect class="chip" x="196" y="470" width="134" height="30" rx="4"/><text class="ct" x="263" y="485">gRPC node client</text>
-<rect class="chip" x="342" y="470" width="134" height="30" rx="4"/><text class="ct" x="409" y="485">SSH bootstrap</text>
-<rect class="chip" x="488" y="470" width="134" height="30" rx="4"/><text class="ct" x="555" y="485">Node certificates</text>
-<g class="band amber"><rect x="40" y="524" width="600" height="58" rx="8"/><text class="bt" x="56" y="550">Shared protocol</text><text class="bs" x="56" y="568">common</text></g>
-<rect class="chip" x="196" y="538" width="134" height="30" rx="4"/><text class="ct" x="263" y="553">Protocol.proto</text>
-<rect class="chip" x="342" y="538" width="134" height="30" rx="4"/><text class="ct" x="409" y="553">fs2-grpc stubs</text>
-<rect class="chip" x="488" y="538" width="134" height="30" rx="4"/><text class="ct" x="555" y="553">Auth helpers</text>
-<g class="band coral"><rect x="40" y="592" width="600" height="58" rx="8"/><text class="bt" x="56" y="618">Agent server</text><text class="bs" x="56" y="636">agent, port 50051</text></g>
-<rect class="chip" x="196" y="606" width="134" height="30" rx="4"/><text class="ct" x="263" y="621">Auth interceptor</text>
-<rect class="chip" x="342" y="606" width="134" height="30" rx="4"/><text class="ct" x="409" y="621">Service impl</text>
-<rect class="chip" x="488" y="606" width="134" height="30" rx="4"/><text class="ct" x="555" y="621">Dispatcher</text>
-<g class="band coral"><rect x="40" y="660" width="600" height="134" rx="8"/><text class="bt" x="56" y="686">Action handlers</text><text class="bs" x="56" y="704">agent</text></g>
-<rect class="chip" x="196" y="674" width="134" height="30" rx="4"/><text class="ct" x="263" y="689">Apt / dnf installer</text>
-<rect class="chip" x="342" y="674" width="134" height="30" rx="4"/><text class="ct" x="409" y="689">Deb / rpm installer</text>
-<rect class="chip" x="488" y="674" width="134" height="30" rx="4"/><text class="ct" x="555" y="689">File transfer</text>
-<rect class="chip" x="196" y="712" width="134" height="30" rx="4"/><text class="ct" x="263" y="727">Command runner</text>
-<rect class="chip" x="342" y="712" width="134" height="30" rx="4"/><text class="ct" x="409" y="727">Network reload</text>
-<rect class="chip" x="488" y="712" width="134" height="30" rx="4"/><text class="ct" x="555" y="727">Fact gatherer</text>
-<rect class="chip" x="196" y="750" width="134" height="30" rx="4"/><text class="ct" x="263" y="765">Rebooter</text>
-<rect class="chip" x="342" y="750" width="134" height="30" rx="4"/><text class="ct" x="409" y="765">Uptime reader</text>
-<rect class="chip" x="488" y="750" width="134" height="30" rx="4"/><text class="ct" x="555" y="765">Thread reader</text>
-<g class="band gray"><rect x="40" y="804" width="600" height="58" rx="8"/><text class="bt" x="56" y="830">Managed host</text><text class="bs" x="56" y="848">Debian, Ubuntu, Rocky</text></g>
-<rect class="chip" x="196" y="818" width="134" height="30" rx="4"/><text class="ct" x="263" y="833">apt, dnf / dpkg, rpm</text>
-<rect class="chip" x="342" y="818" width="134" height="30" rx="4"/><text class="ct" x="409" y="833">networkd / nmcli</text>
-<rect class="chip" x="488" y="818" width="134" height="30" rx="4"/><text class="ct" x="555" y="833">Shell &amp; files</text>
-<g class="band gray"><rect x="40" y="872" width="600" height="58" rx="8"/><text class="bt" x="56" y="898">Runtime</text><text class="bs" x="56" y="916">all modules</text></g>
-<rect class="chip" x="196" y="886" width="134" height="30" rx="4"/><text class="ct" x="263" y="901">Scala 3.8</text>
-<rect class="chip" x="342" y="886" width="134" height="30" rx="4"/><text class="ct" x="409" y="901">Cats Effect · fs2</text>
-<rect class="chip" x="488" y="886" width="134" height="30" rx="4"/><text class="ct" x="555" y="901">JVM / native image</text>
-<g class="band purple"><rect x="40" y="946" width="14" height="14" rx="3"/></g><text class="lg" x="60" y="957">Authoring</text>
-<g class="band teal"><rect x="160" y="946" width="14" height="14" rx="3"/></g><text class="lg" x="180" y="957">Orchestrator</text>
-<g class="band amber"><rect x="280" y="946" width="14" height="14" rx="3"/></g><text class="lg" x="300" y="957">Common</text>
-<g class="band coral"><rect x="400" y="946" width="14" height="14" rx="3"/></g><text class="lg" x="420" y="957">Agent</text>
-<g class="band gray"><rect x="520" y="946" width="14" height="14" rx="3"/></g><text class="lg" x="540" y="957">Host and runtime</text>
+<rect class="chip" x="196" y="92" width="134" height="30" rx="4"/><text class="ct" x="263" y="107">Playbook library</text>
+<rect class="chip" x="342" y="92" width="134" height="30" rx="4"/><text class="ct" x="409" y="107">Catalogues, schemas</text>
+<rect class="chip" x="488" y="92" width="134" height="30" rx="4"/><text class="ct" x="555" y="107">Per-host configs</text>
+<g class="band teal"><rect x="40" y="146" width="600" height="96" rx="8"/><text class="bt" x="56" y="172">CLI &amp; inventory</text><text class="bs" x="56" y="190">orchestrator</text></g>
+<rect class="chip" x="196" y="160" width="134" height="30" rx="4"/><text class="ct" x="263" y="175">Command parser</text>
+<rect class="chip" x="342" y="160" width="134" height="30" rx="4"/><text class="ct" x="409" y="175">Inventory (YAML)</text>
+<rect class="chip" x="488" y="160" width="134" height="30" rx="4"/><text class="ct" x="555" y="175">Playbook registry</text>
+<rect class="chip" x="196" y="198" width="134" height="30" rx="4"/><text class="ct" x="263" y="213">Node groups</text>
+<rect class="chip" x="342" y="198" width="134" height="30" rx="4"/><text class="ct" x="409" y="213">Tab completion</text>
+<rect class="chip" x="488" y="198" width="134" height="30" rx="4"/><text class="ct" x="555" y="213">CA &amp; certificates</text>
+<g class="band blue"><rect x="40" y="252" width="600" height="96" rx="8"/><text class="bt" x="56" y="278">Utilities &amp; packaging</text><text class="bs" x="56" y="296">utils, utils-native</text></g>
+<rect class="chip" x="196" y="266" width="134" height="30" rx="4"/><text class="ct" x="263" y="281">vmctl &amp; VM scripts</text>
+<rect class="chip" x="342" y="266" width="134" height="30" rx="4"/><text class="ct" x="409" y="281">Scala Native builds</text>
+<rect class="chip" x="488" y="266" width="134" height="30" rx="4"/><text class="ct" x="555" y="281">OS10 / iLO (Python)</text>
+<rect class="chip" x="196" y="304" width="134" height="30" rx="4"/><text class="ct" x="263" y="319">deb / rpm / tarball</text>
+<rect class="chip" x="342" y="304" width="134" height="30" rx="4"/><text class="ct" x="409" y="319">Release workflow</text>
+<rect class="chip" x="488" y="304" width="134" height="30" rx="4"/><text class="ct" x="555" y="319">Check programs</text>
+<g class="band teal"><rect x="40" y="358" width="600" height="96" rx="8"/><text class="bt" x="56" y="384">Execution engine</text><text class="bs" x="56" y="402">orchestrator</text></g>
+<rect class="chip" x="196" y="372" width="134" height="30" rx="4"/><text class="ct" x="263" y="387">Playbook runner</text>
+<rect class="chip" x="342" y="372" width="134" height="30" rx="4"/><text class="ct" x="409" y="387">Cluster runner</text>
+<rect class="chip" x="488" y="372" width="134" height="30" rx="4"/><text class="ct" x="555" y="387">Staged health gates</text>
+<rect class="chip" x="196" y="410" width="134" height="30" rx="4"/><text class="ct" x="263" y="425">Mustache templating</text>
+<rect class="chip" x="342" y="410" width="134" height="30" rx="4"/><text class="ct" x="409" y="425">Cross-node facts</text>
+<rect class="chip" x="488" y="410" width="134" height="30" rx="4"/><text class="ct" x="555" y="425">Checkpoint / resume</text>
+<g class="band teal"><rect x="40" y="464" width="600" height="96" rx="8"/><text class="bt" x="56" y="490">Secrets &amp; config</text><text class="bs" x="56" y="508">orchestrator</text></g>
+<rect class="chip" x="196" y="478" width="134" height="30" rx="4"/><text class="ct" x="263" y="493">Secret store (age)</text>
+<rect class="chip" x="342" y="478" width="134" height="30" rx="4"/><text class="ct" x="409" y="493">Typed config files</text>
+<rect class="chip" x="488" y="478" width="134" height="30" rx="4"/><text class="ct" x="555" y="493">Check mode</text>
+<rect class="chip" x="196" y="516" width="134" height="30" rx="4"/><text class="ct" x="263" y="531">MariaDB source</text>
+<rect class="chip" x="342" y="516" width="134" height="30" rx="4"/><text class="ct" x="409" y="531">Site locations</text>
+<g class="band teal"><rect x="40" y="570" width="600" height="96" rx="8"/><text class="bt" x="56" y="596">Observability</text><text class="bs" x="56" y="614">orchestrator</text></g>
+<rect class="chip" x="196" y="584" width="134" height="30" rx="4"/><text class="ct" x="263" y="599">Console renderer</text>
+<rect class="chip" x="342" y="584" width="134" height="30" rx="4"/><text class="ct" x="409" y="599">Run log</text>
+<rect class="chip" x="488" y="584" width="134" height="30" rx="4"/><text class="ct" x="555" y="599">Audit log</text>
+<rect class="chip" x="196" y="622" width="134" height="30" rx="4"/><text class="ct" x="263" y="637">Log summary</text>
+<rect class="chip" x="342" y="622" width="134" height="30" rx="4"/><text class="ct" x="409" y="637">Fact printer</text>
+<g class="band teal"><rect x="40" y="676" width="600" height="58" rx="8"/><text class="bt" x="56" y="702">Transport</text><text class="bs" x="56" y="720">orchestrator</text></g>
+<rect class="chip" x="196" y="690" width="134" height="30" rx="4"/><text class="ct" x="263" y="705">gRPC node client</text>
+<rect class="chip" x="342" y="690" width="134" height="30" rx="4"/><text class="ct" x="409" y="705">SSH bootstrap</text>
+<rect class="chip" x="488" y="690" width="134" height="30" rx="4"/><text class="ct" x="555" y="705">Node certificates</text>
+<g class="band teal"><rect x="40" y="744" width="600" height="58" rx="8"/><text class="bt" x="56" y="770">Device control</text><text class="bs" x="56" y="788">orchestrator, no agent</text></g>
+<rect class="chip" x="196" y="758" width="134" height="30" rx="4"/><text class="ct" x="263" y="773">OS10 (RESTCONF)</text>
+<rect class="chip" x="342" y="758" width="134" height="30" rx="4"/><text class="ct" x="409" y="773">iLO (Redfish / REST)</text>
+<rect class="chip" x="488" y="758" width="134" height="30" rx="4"/><text class="ct" x="555" y="773">TLS &amp; secrets</text>
+<g class="band amber"><rect x="40" y="812" width="600" height="58" rx="8"/><text class="bt" x="56" y="838">Shared protocol</text><text class="bs" x="56" y="856">common</text></g>
+<rect class="chip" x="196" y="826" width="134" height="30" rx="4"/><text class="ct" x="263" y="841">Protocol.proto</text>
+<rect class="chip" x="342" y="826" width="134" height="30" rx="4"/><text class="ct" x="409" y="841">fs2-grpc stubs</text>
+<rect class="chip" x="488" y="826" width="134" height="30" rx="4"/><text class="ct" x="555" y="841">Auth helpers</text>
+<g class="band coral"><rect x="40" y="880" width="600" height="96" rx="8"/><text class="bt" x="56" y="906">Agent server</text><text class="bs" x="56" y="924">agent · agent-go</text></g>
+<rect class="chip" x="196" y="894" width="134" height="30" rx="4"/><text class="ct" x="263" y="909">Auth interceptor</text>
+<rect class="chip" x="342" y="894" width="134" height="30" rx="4"/><text class="ct" x="409" y="909">Service impl</text>
+<rect class="chip" x="488" y="894" width="134" height="30" rx="4"/><text class="ct" x="555" y="909">Dispatcher</text>
+<rect class="chip" x="196" y="932" width="134" height="30" rx="4"/><text class="ct" x="263" y="947">gRPC, port 50051</text>
+<rect class="chip" x="342" y="932" width="134" height="30" rx="4"/><text class="ct" x="409" y="947">TLS key files</text>
+<rect class="chip" x="488" y="932" width="134" height="30" rx="4"/><text class="ct" x="555" y="947">Scala or Go build</text>
+<g class="band coral"><rect x="40" y="986" width="600" height="172" rx="8"/><text class="bt" x="56" y="1012">Action handlers</text><text class="bs" x="56" y="1030">agent</text></g>
+<rect class="chip" x="196" y="1000" width="134" height="30" rx="4"/><text class="ct" x="263" y="1015">Apt / dnf installer</text>
+<rect class="chip" x="342" y="1000" width="134" height="30" rx="4"/><text class="ct" x="409" y="1015">Deb / rpm installer</text>
+<rect class="chip" x="488" y="1000" width="134" height="30" rx="4"/><text class="ct" x="555" y="1015">File transfer</text>
+<rect class="chip" x="196" y="1038" width="134" height="30" rx="4"/><text class="ct" x="263" y="1053">Command runner</text>
+<rect class="chip" x="342" y="1038" width="134" height="30" rx="4"/><text class="ct" x="409" y="1053">Network reload</text>
+<rect class="chip" x="488" y="1038" width="134" height="30" rx="4"/><text class="ct" x="555" y="1053">Fact gatherer</text>
+<rect class="chip" x="196" y="1076" width="134" height="30" rx="4"/><text class="ct" x="263" y="1091">Rebooter</text>
+<rect class="chip" x="342" y="1076" width="134" height="30" rx="4"/><text class="ct" x="409" y="1091">Uptime reader</text>
+<rect class="chip" x="488" y="1076" width="134" height="30" rx="4"/><text class="ct" x="555" y="1091">Thread reader</text>
+<rect class="chip" x="196" y="1114" width="134" height="30" rx="4"/><text class="ct" x="263" y="1129">Shutdown</text>
+<rect class="chip" x="342" y="1114" width="134" height="30" rx="4"/><text class="ct" x="409" y="1129">Package steps</text>
+<g class="band gray"><rect x="40" y="1168" width="600" height="58" rx="8"/><text class="bt" x="56" y="1194">Managed host</text><text class="bs" x="56" y="1212">Debian, Ubuntu, Rocky</text></g>
+<rect class="chip" x="196" y="1182" width="134" height="30" rx="4"/><text class="ct" x="263" y="1197">apt, dnf / dpkg, rpm</text>
+<rect class="chip" x="342" y="1182" width="134" height="30" rx="4"/><text class="ct" x="409" y="1197">networkd / nmcli</text>
+<rect class="chip" x="488" y="1182" width="134" height="30" rx="4"/><text class="ct" x="555" y="1197">Shell &amp; files</text>
+<g class="band gray"><rect x="40" y="1236" width="600" height="96" rx="8"/><text class="bt" x="56" y="1262">Runtime</text><text class="bs" x="56" y="1280">all modules</text></g>
+<rect class="chip" x="196" y="1250" width="134" height="30" rx="4"/><text class="ct" x="263" y="1265">Scala 3.8</text>
+<rect class="chip" x="342" y="1250" width="134" height="30" rx="4"/><text class="ct" x="409" y="1265">Cats Effect · fs2</text>
+<rect class="chip" x="488" y="1250" width="134" height="30" rx="4"/><text class="ct" x="555" y="1265">JVM / native image</text>
+<rect class="chip" x="196" y="1288" width="134" height="30" rx="4"/><text class="ct" x="263" y="1303">Go (agent-go)</text>
+<rect class="chip" x="342" y="1288" width="134" height="30" rx="4"/><text class="ct" x="409" y="1303">Scala Native (utils)</text>
+<rect class="chip" x="488" y="1288" width="134" height="30" rx="4"/><text class="ct" x="555" y="1303">Python 3 (utils)</text>
+<g class="band purple"><rect x="40" y="1352" width="14" height="14" rx="3"/></g><text class="lg" x="60" y="1363">Authoring</text>
+<g class="band teal"><rect x="142" y="1352" width="14" height="14" rx="3"/></g><text class="lg" x="162" y="1363">Orchestrator</text>
+<g class="band blue"><rect x="264" y="1352" width="14" height="14" rx="3"/></g><text class="lg" x="284" y="1363">Tooling</text>
+<g class="band amber"><rect x="350" y="1352" width="14" height="14" rx="3"/></g><text class="lg" x="370" y="1363">Common</text>
+<g class="band coral"><rect x="432" y="1352" width="14" height="14" rx="3"/></g><text class="lg" x="452" y="1363">Agent</text>
+<g class="band gray"><rect x="510" y="1352" width="14" height="14" rx="3"/></g><text class="lg" x="530" y="1363">Host and runtime</text>
 </svg>
 </main>
 </body>

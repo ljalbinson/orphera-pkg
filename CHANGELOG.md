@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+- `Software-Hierarchy.svg` and `.html` redrawn for what exists now: device control (OS10, iLO) beside the transport, the Go agent beside the Scala one, the utilities and packaging as their own layer, MariaDB as a configuration source, node groups, certificate commands, and the Go, Scala Native and Python runtimes. The page text says that switches and iLOs are reached without an agent.
 ## [0.1.209] - 2026-11-11
 
 New: `orphera os10` and `orphera ilo` (the OS10 switch and HPE iLO tools in Scala, beside their Python versions, with VLAN, port and power control), the hypervisor config files, one-line playbook errors, and `vmctl` and the other VM scripts as commands (`/opt/orphera/bin` from `make orpheracli`, `bin/` in the packages).
