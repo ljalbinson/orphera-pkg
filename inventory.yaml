@@ -408,3 +408,10 @@ groups:
     members: [tst49, tst50]
   - name: hypervisors
     members: [gs1, gs2, gs3, gs9, st0]
+  - name: all
+    members: [tst0, tst1, tst2, tst3, tst4, tst5, tst6, tst7, tst8, tst9,
+      tst10, tst11, tst12, tst13, tst14, tst15, tst16, tst17, tst18, tst19,
+      tst20, tst21, tst22, tst23, tst24, tst25, tst26,
+      tst30, tst31, tst32, tst33, tst34, tst35, tst36, tst37, tst38, tst39,
+      tst40, tst41, tst42, tst43, tst44, tst45, tst46, tst47, tst48, tst49,
+      tst50, fs0]
