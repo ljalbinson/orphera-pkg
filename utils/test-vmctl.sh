@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# Checks that the Scala Native vmctl (utils/vmctl, built by `make vmctl` from vmctl/) does what utils/vmctl.sh
+# Checks that the Scala Native vmctl (utils/vmctl, built by `make vmctl` from utils-native/) does what utils/vmctl.sh
 # does: for each case, both are run with the same arguments and their standard output, standard error and exit
 # code must be the same. A stand-in `orphera` on PATH answers `nodes` and `cluster-playbook` (it prints the
 # ORPHERA_* variables it was given as steps, so those are compared too), and the VM configs are made in a
