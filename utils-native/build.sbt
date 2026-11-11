@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 //
-// Scripts of utils/ in Scala, compiled to native executables with Scala Native: vmctl (utils/vmctl.sh) and
-// move-vm (utils/move-vm.sh). A build of its own, not part of the main build: the main build, `make test` and
-// CI never need the Scala Native toolchain (clang), and the executables need no JVM at run time.
+// Scripts of utils/ in Scala, compiled to native executables with Scala Native, each named as its shell version
+// without .sh: vmctl, move-vm, start-vm, stop-vm, reboot-vm, list-vms, galera-cold-start and scan-vm-sizes. A
+// build of its own, not part of the main build: the main build, `make test` and CI never need the Scala Native
+// toolchain (clang), and the executables need no JVM at run time.
 //
-//   make vmctl          # sbt vmctl/nativeLink here, then installs the executable as utils/vmctl
-//   make move-vm        # sbt moveVm/nativeLink, installed as utils/move-vm
-//   make native-utils   # both
+//   make native-utils   # all of them, in one sbt run (utils/build-native.sh), installed in utils/
+//   make vmctl          # one (each has its own target: make move-vm, make galera-cold-start, ...)
 //
 // Each executable finds utils/ as its own directory, so it must sit there, beside the shell version. No library
 // dependencies: only the Scala and Java standard libraries (and Scala Native's POSIX bindings).
@@ -43,6 +43,40 @@ lazy val moveVm = (project in file("move-vm"))
   .dependsOn(shared)
   .settings(settings, executable("move-vm"), Compile / mainClass := Some("orphera.movevm.Main"))
 
+lazy val startVm = (project in file("start-vm"))
+  .enablePlugins(ScalaNativePlugin)
+  .dependsOn(shared)
+  .settings(settings, executable("start-vm"), Compile / mainClass := Some("orphera.startvm.Main"))
+
+lazy val stopVm = (project in file("stop-vm"))
+  .enablePlugins(ScalaNativePlugin)
+  .dependsOn(shared)
+  .settings(settings, executable("stop-vm"), Compile / mainClass := Some("orphera.stopvm.Main"))
+
+lazy val rebootVm = (project in file("reboot-vm"))
+  .enablePlugins(ScalaNativePlugin)
+  .dependsOn(shared)
+  .settings(settings, executable("reboot-vm"), Compile / mainClass := Some("orphera.rebootvm.Main"))
+
+lazy val listVms = (project in file("list-vms"))
+  .enablePlugins(ScalaNativePlugin)
+  .dependsOn(shared)
+  .settings(settings, executable("list-vms"), Compile / mainClass := Some("orphera.listvms.Main"))
+
+lazy val galeraColdStart = (project in file("galera-cold-start"))
+  .enablePlugins(ScalaNativePlugin)
+  .dependsOn(shared)
+  .settings(
+    settings,
+    executable("galera-cold-start"),
+    Compile / mainClass := Some("orphera.galeracoldstart.Main")
+  )
+
+lazy val scanVmSizes = (project in file("scan-vm-sizes"))
+  .enablePlugins(ScalaNativePlugin)
+  .dependsOn(shared)
+  .settings(settings, executable("scan-vm-sizes"), Compile / mainClass := Some("orphera.scanvmsizes.Main"))
+
 lazy val root = (project in file("."))
-  .aggregate(shared, vmctl, moveVm)
+  .aggregate(shared, vmctl, moveVm, startVm, stopVm, rebootVm, listVms, galeraColdStart, scanVmSizes)
   .settings(name := "utils-native", publish / skip := true)

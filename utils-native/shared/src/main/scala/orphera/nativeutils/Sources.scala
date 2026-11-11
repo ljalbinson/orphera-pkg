@@ -143,6 +143,13 @@ object Sources:
       .flatMap(exe => Option(exe.getParent))
       .getOrElse(Paths.get("utils").toAbsolutePath)
 
+  /** For a script that does not source orphera-sources.sh
+    * (galera-cold-start.sh): this process's environment as it is, relative
+    * paths from the working directory.
+    */
+  def plain(): Sources =
+    new Sources(Paths.get("").toAbsolutePath, findUtilsDir(), System.getenv().asScala.toMap)
+
   /** The environment orphera-sources.sh would give: this process's own, or,
     * in an installation (utils/ is PREFIX/share/orphera/utils and
     * PREFIX/lib/orphera/orphera-env.sh exists), that with ORPHERA_PREFIX set,

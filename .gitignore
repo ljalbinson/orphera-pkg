@@ -48,4 +48,10 @@ github-files/
 # The Scala Native executables (make native-utils) and their sbt build's own working files
 /utils/vmctl
 /utils/move-vm
+/utils/start-vm
+/utils/stop-vm
+/utils/reboot-vm
+/utils/list-vms
+/utils/galera-cold-start
+/utils/scan-vm-sizes
 utils-native/project/project/

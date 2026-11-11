@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-.PHONY: all release rpm-if-available go-agent-if-available bump-patch _build_all clean test assembly pkg-stage deb rpm verify certs certs-clean fmt fmt-manifests scripting lint fix cli-stage cli-deb cli-rpm cli-tar cli-package check-package install uninstall check-ilo check-os10 vmctl move-vm native-utils check-vmctl check-move-vm
+.PHONY: all release rpm-if-available go-agent-if-available bump-patch _build_all clean test assembly pkg-stage deb rpm verify certs certs-clean fmt fmt-manifests scripting lint fix cli-stage cli-deb cli-rpm cli-tar cli-package check-package install uninstall check-ilo check-os10 native-utils vmctl move-vm start-vm stop-vm reboot-vm list-vms galera-cold-start scan-vm-sizes check-native-utils check-vmctl check-move-vm check-vm-scripts check-galera-cold-start check-scan-vm-sizes
 
 VERSION_FILE := VERSION
 VERSION      := $(shell cat $(VERSION_FILE))
@@ -138,21 +138,17 @@ check-os10:
 
 # Scripts of utils/ in Scala, compiled to native executables with Scala Native: a build of its own in utils-native/
 # (it needs sbt and clang to build, and no JVM to run). Each is installed in utils/ beside its shell version, which
-# stays: utils/vmctl (vmctl.sh) and utils/move-vm (move-vm.sh). `print <project>/nativeLink` links one and prints
-# where the executable is.
-define native_build
-	@out=$$(cd utils-native && sbt -batch -Dsbt.supershell=false -Dsbt.color=false "print $(1)/nativeLink" | tee /dev/stderr | grep -E '^/.*/$(2)$$' | tail -1) && \
-	  { [ -n "$$out" ] || { echo "make $(2): no executable path in sbt's output" >&2; exit 1; }; } && \
-	  install -m 755 "$$out" utils/$(2) && echo "Installed utils/$(2)"
-endef
+# stays, named as it without .sh. `make native-utils` builds them all in one sbt run; each also has its own target.
+NATIVE_UTILS := vmctl:vmctl moveVm:move-vm startVm:start-vm stopVm:stop-vm rebootVm:reboot-vm listVms:list-vms galeraColdStart:galera-cold-start scanVmSizes:scan-vm-sizes
 
-vmctl:
-	$(call native_build,vmctl,vmctl)
+native-utils:
+	utils/build-native.sh $(NATIVE_UTILS)
 
-move-vm:
-	$(call native_build,moveVm,move-vm)
+vmctl move-vm start-vm stop-vm reboot-vm list-vms galera-cold-start scan-vm-sizes:
+	utils/build-native.sh $(filter %:$@,$(NATIVE_UTILS))
 
-native-utils: vmctl move-vm
+# Each native executable against its shell version (no lab needed; see the scripts for what they compare).
+check-native-utils: check-vmctl check-move-vm check-vm-scripts check-galera-cold-start check-scan-vm-sizes
 
 # Runs utils/vmctl (make vmctl) and utils/vmctl.sh with the same arguments against a stand-in orphera and
 # checks they print the same and exit the same (no lab needed).
@@ -164,6 +160,18 @@ check-vmctl:
 # file (no lab needed; about a minute, for the waits it includes).
 check-move-vm:
 	utils/test-move-vm.sh
+
+# start-vm, stop-vm, reboot-vm and list-vms (make native-utils) against their shell versions, with a stand-in orphera.
+check-vm-scripts:
+	utils/test-vm-scripts.sh
+
+# galera-cold-start against galera-cold-start.sh, with a stand-in orphera playing tst3, tst4 and tst5.
+check-galera-cold-start:
+	utils/test-galera-cold-start.sh
+
+# scan-vm-sizes against scan-vm-sizes.sh, with a stand-in orphera playing the hypervisors and guests.
+check-scan-vm-sizes:
+	utils/test-scan-vm-sizes.sh
 
 # Fails if a tracked source file has no SPDX-License-Identifier header and is not listed in utils/spdx-exempt.txt.
 check-spdx:
