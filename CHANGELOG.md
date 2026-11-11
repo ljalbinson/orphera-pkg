@@ -7,7 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
-- `utils/macos-setup.sh`: installs the build tools on a clean macOS, Intel or Apple Silicon, without Homebrew (which no longer supports Intel): the Xcode command line tools, then JDK 21 (Temurin), sbt 1.10.7, Go and the GitHub CLI unpacked under `~/.local` (no administrator password), with `JAVA_HOME` and the PATH set in `~/.zprofile`. The `.deb` and `.rpm` packages stay a Linux build (GitHub builds them on a tag). Not run on a Mac yet.
+- `utils/macos-setup.sh`: installs the build tools on a clean macOS, Intel or Apple Silicon, without Homebrew (which no longer supports Intel): the Xcode command line tools, then JDK 21 (Temurin), sbt 1.10.7, Go and the GitHub CLI unpacked under `~/.local` (no administrator password), with `JAVA_HOME` and the PATH set in `~/.zprofile`. The `.deb` and `.rpm` packages stay a Linux build (GitHub builds them on a tag). Run on an Intel Mac with Sonoma: `sbt compile` and `sbt test` pass.
 
 ### Changed
 - `make deb` and `make rpm` in `agent-go/` remove the packages of earlier versions (for the same architecture) before building, so the directory no longer collects old `.deb` and `.rpm` files.
