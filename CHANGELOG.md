@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+- `make deb` and `make rpm` in `agent-go/` remove the packages of earlier versions (for the same architecture) before building, so the directory no longer collects old `.deb` and `.rpm` files.
+
 ## [0.1.209] - 2026-11-11
 
 New: `orphera os10` and `orphera ilo` (the OS10 switch and HPE iLO tools in Scala, beside their Python versions, with VLAN, port and power control), the hypervisor config files, one-line playbook errors, and `vmctl` and the other VM scripts as commands (`/opt/orphera/bin` from `make orpheracli`, `bin/` in the packages).

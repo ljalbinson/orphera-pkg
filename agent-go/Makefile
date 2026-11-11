@@ -89,7 +89,10 @@ stage: test $(ARCH)
 	install -m 0755 ../packaging/prerm $(PKG_DIR)/DEBIAN/prerm
 	install -m 0644 ../packaging/conffiles $(PKG_DIR)/DEBIAN/conffiles
 
+# Building removes the packages of earlier versions (for this ARCH) first, so the directory holds the
+# latest only and `--agent agent-go/<file>` cannot pick up an old one by mistake.
 deb: stage
+	rm -f orphera-agent_*_$(ARCH).deb
 	dpkg-deb --build --root-owner-group $(PKG_DIR) $(DEB_FILE)
 	@echo "Built $(DEB_FILE). Deploy with: orphera deploy-agent --agent agent-go/$(DEB_FILE) --nodes <nodes>"
 
@@ -101,6 +104,7 @@ rpm: stage
 	sed "s/@VERSION@/$(VERSION)/" packaging/rpm/orphera-agent-go.spec.template > $(RPM_TOP)/orphera-agent.spec
 	rpmbuild -bb --target $(RPM_ARCH) --define "_topdir $(RPM_TOP)" --define "stagedir $(CURDIR)/$(PKG_DIR)" \
 	  --define "_binary_payload w19.zstdio" $(RPM_TOP)/orphera-agent.spec
+	rm -f orphera-agent-*.$(RPM_ARCH).rpm
 	cp $(RPM_TOP)/RPMS/$(RPM_ARCH)/$(RPM_FILE) .
 	@echo "Built $(RPM_FILE). Deploy with: orphera deploy-agent --agent agent-go/$(RPM_FILE) --nodes <nodes>"
 
