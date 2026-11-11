@@ -21,10 +21,18 @@ object NodeClient:
     Installation.caCertProblem.foreach(problem =>
       throw new IllegalStateException(problem)
     )
-    val sslContext = GrpcSslContexts
+    // The client certificate, when this orchestrator has one, for agents that
+    // require it (mutual TLS: `issue-certs --client-auth`).
+    val trusting = GrpcSslContexts
       .forClient()
       .trustManager(new File(Installation.caCert))
-      .build()
+    val sslContext =
+      (if ClientCert.present then
+         trusting.keyManager(
+           new File(Installation.clientCert),
+           new File(Installation.clientKey)
+         )
+       else trusting).build()
 
     NettyChannelBuilder
       .forTarget(s"dns:///${node.host}:${node.port}")

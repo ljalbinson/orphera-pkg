@@ -60,6 +60,9 @@ object Main extends IOApp:
       case "init-ca" :: rest =>
         IO.blocking(CaInit.run(rest))
           .map(code => if code == 0 then ExitCode.Success else ExitCode.Error)
+      case "issue-client-cert" :: rest =>
+        IO.blocking(ClientCert.run(rest))
+          .map(code => if code == 0 then ExitCode.Success else ExitCode.Error)
       case _ =>
         Cli.parse(args).toOption.filter(AuditLog.isAuditable) match
           case Some(command) => auditedRun(command, args)
@@ -296,7 +299,9 @@ object Main extends IOApp:
               )
             }
 
-      case Right(Command.IssueCerts(nodeNames, sshUser, sshKeyPath)) =>
+      case Right(
+            Command.IssueCerts(nodeNames, sshUser, sshKeyPath, clientAuth)
+          ) =>
         val targets = nodeNames match
           case Some(names) => Inventory.all.filter(n => names.contains(n.name))
           case None        => Inventory.all
@@ -306,7 +311,7 @@ object Main extends IOApp:
           )
         else
           Orchestrator
-            .issueNodeCerts(targets, sshUser, sshKeyPath)
+            .issueNodeCerts(targets, sshUser, sshKeyPath, clientAuth)
             .map(allOk => if allOk then ExitCode.Success else ExitCode.Error)
 
       case Right(

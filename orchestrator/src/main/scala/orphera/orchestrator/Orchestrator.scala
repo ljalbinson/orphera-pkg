@@ -293,11 +293,19 @@ object Orchestrator:
   def issueNodeCerts(
       nodes: List[Node],
       sshUser: String,
-      sshKeyPath: Option[String]
+      sshKeyPath: Option[String],
+      clientAuth: Option[Boolean] = None
   ): IO[Boolean] =
     if !NodeCerts.caAvailable then
       IO.println(
         s"${Installation.caCert} and ${Installation.caKey} are needed to sign node certificates (make certs DOMAIN=...)"
+      ).as(false)
+    // Requiring client certificates on a node while this orchestrator has none
+    // would leave it unable to reach the node.
+    else if clientAuth.contains(true) && !ClientCert.present then
+      IO.println(
+        s"This orchestrator has no client certificate (${Installation.clientCert}), and the nodes " +
+          "would then refuse it: run `orphera issue-client-cert` first. Nothing was changed."
       ).as(false)
     else
       nodes
@@ -307,7 +315,8 @@ object Orchestrator:
               node,
               sshUser,
               sshKeyPath,
-              line => IO.println(s"[${node.name}] $line")
+              line => IO.println(s"[${node.name}] $line"),
+              clientAuth
             )
             .attempt
             .flatTap {
@@ -351,14 +360,17 @@ object Orchestrator:
       val localPath = localDir.resolve(
         s"${node.name}-${java.nio.file.Paths.get(remotePath).getFileName}"
       )
-      NodeClient.fetchFile(node, remotePath, localPath).flatMap {
-        case Right(metadata) =>
-          IO.println(
-            s"[${node.name}] Fetched ${remotePath} -> $localPath (owner=${metadata.owner}, mode=${metadata.mode}%o)"
-          )
-        case Left(err) =>
-          IO.println(s"[${node.name}] FAILED: $err")
-      }
+      NodeClient
+        .fetchFile(node, remotePath, localPath)
+        .flatMap {
+          case Right(metadata) =>
+            IO.println(
+              s"[${node.name}] Fetched ${remotePath} -> $localPath (owner=${metadata.owner}, mode=${metadata.mode}%o)"
+            )
+          case Left(err) =>
+            ConsoleRenderer.nodeFailed(node, s"FAILED: $err")
+        }
+        .handleErrorWith(e => ConsoleRenderer.nodeFailed(node, NodeError.line(e)))
     }
 
   /** Facts from every node. Every node is tried; if any fail, the error names
@@ -402,11 +414,13 @@ object Orchestrator:
       )
     ) >>
       allowed.parTraverse_ { node =>
-        NodeClient.shutdown(
-          node,
-          delaySeconds,
-          line => IO.println(s"[${node.name}] $line")
-        )
+        NodeClient
+          .shutdown(
+            node,
+            delaySeconds,
+            line => IO.println(s"[${node.name}] $line")
+          )
+          .handleErrorWith(e => ConsoleRenderer.nodeFailed(node, NodeError.line(e)))
       }
 
   def getUptimes(

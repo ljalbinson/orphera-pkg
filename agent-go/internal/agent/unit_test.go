@@ -4,7 +4,15 @@ package agent
 
 import (
 	"bufio"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
 	"errors"
+	"math/big"
 	"net"
 	"os"
 	"path/filepath"
@@ -465,5 +473,161 @@ func TestRequireToken(t *testing.T) {
 	}
 	if tok, err := RequireToken("s3cret", true); err != nil || tok != "s3cret" {
 		t.Fatal("good token")
+	}
+}
+
+func TestProtectedPaths(t *testing.T) {
+	dir := t.TempDir()
+	prot := filepath.Join(dir, "orphera-agent")
+	if err := os.MkdirAll(filepath.Join(prot, "tls"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(prot, "agent.env"), []byte("ORPHERA_TOKEN=x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "link")
+	if err := os.Symlink(prot, link); err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		path string
+		want bool
+	}{
+		{filepath.Join(prot, "agent.env"), true},
+		{prot, true},
+		{filepath.Join(prot, "tls", "server.key"), true}, // does not exist yet
+		{filepath.Join(dir, "other", "..", "orphera-agent", "agent.env"), true},
+		{filepath.Join(link, "agent.env"), true},                // through a symbolic link
+		{filepath.Join(link, "tls", "new.crt"), true},           // new file, linked directory
+		{filepath.Join(dir, "orphera-agent-other", "x"), false}, // a name that only starts the same
+		{filepath.Join(dir, "elsewhere.txt"), false},
+	}
+	for _, c := range cases {
+		if got := isProtected(c.path, prot); got != c.want {
+			t.Errorf("isProtected(%q) = %v, want %v", c.path, got, c.want)
+		}
+	}
+	if protectedRefusal("/etc/orphera-agent/agent.env") == "" || protectedRefusal("/etc/motd") != "" {
+		t.Error("protectedRefusal does not refuse /etc/orphera-agent/agent.env, or refuses /etc/motd")
+	}
+}
+
+// testCert makes a certificate for cn signed by parent (or self-signed when
+// parent is nil), returning it as a tls.Certificate and the parsed form.
+func testCert(t *testing.T, cn string, isCA bool, usage x509.ExtKeyUsage, parent *x509.Certificate, parentKey *ecdsa.PrivateKey) (tls.Certificate, *x509.Certificate, *ecdsa.PrivateKey) {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber:          big.NewInt(time.Now().UnixNano()),
+		Subject:               pkix.Name{CommonName: cn},
+		DNSNames:              []string{cn},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(time.Hour),
+		IsCA:                  isCA,
+		BasicConstraintsValid: true,
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
+	}
+	if !isCA {
+		tmpl.ExtKeyUsage = []x509.ExtKeyUsage{usage}
+	}
+	signer, signerKey := tmpl, key
+	if parent != nil {
+		signer, signerKey = parent, parentKey
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, signer, &key.PublicKey, signerKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := x509.ParseCertificate(der)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key}, parsed, key
+}
+
+// handshake runs a TLS handshake between a server with conf and a client that
+// trusts ca and presents client (if any); it returns the server's error.
+func handshake(t *testing.T, conf *tls.Config, ca *x509.Certificate, client *tls.Certificate) error {
+	t.Helper()
+	sc, cc := net.Pipe()
+	defer sc.Close()
+	defer cc.Close()
+	deadline := time.Now().Add(5 * time.Second)
+	_ = sc.SetDeadline(deadline)
+	_ = cc.SetDeadline(deadline)
+	pool := x509.NewCertPool()
+	pool.AddCert(ca)
+	cconf := &tls.Config{RootCAs: pool, ServerName: "node.example"}
+	if client != nil {
+		// Sent whatever CAs the server asks for, so a certificate from another
+		// CA reaches the server's check instead of being withheld by the client.
+		cconf.GetClientCertificate = func(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
+			return client, nil
+		}
+	}
+	done := make(chan error, 1)
+	go func() {
+		c := tls.Client(cc, cconf)
+		err := c.Handshake()
+		if err == nil {
+			// TLS 1.3: the server's verdict on the client certificate arrives
+			// with the first read.
+			_, err = c.Read(make([]byte, 1))
+		}
+		done <- err
+	}()
+	s := tls.Server(sc, conf)
+	serr := s.Handshake()
+	if serr == nil {
+		_, _ = s.Write([]byte("x"))
+	}
+	// The raw pipe, not the TLS layer: closing that would write a close-notify
+	// into the unbuffered pipe after the client has stopped reading, and wait
+	// for the deadline.
+	sc.Close()
+	<-done
+	return serr
+}
+
+func TestServerTLSConfigMutual(t *testing.T) {
+	_, ca, caKey := testCert(t, "Test CA", true, 0, nil, nil)
+	server, _, _ := testCert(t, "node.example", false, x509.ExtKeyUsageServerAuth, ca, caKey)
+	client, _, _ := testCert(t, "orphera-orchestrator@test", false, x509.ExtKeyUsageClientAuth, ca, caKey)
+	_, otherCA, otherKey := testCert(t, "Other CA", true, 0, nil, nil)
+	stranger, _, _ := testCert(t, "stranger", false, x509.ExtKeyUsageClientAuth, otherCA, otherKey)
+
+	plain, err := ServerTLSConfig(server, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := handshake(t, plain, ca, nil); err != nil {
+		t.Errorf("without tls/ca.crt, a client with no certificate should connect: %v", err)
+	}
+
+	caFile := filepath.Join(t.TempDir(), "ca.crt")
+	if err := os.WriteFile(caFile, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: ca.Raw}), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mutual, err := ServerTLSConfig(server, caFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := handshake(t, mutual, ca, &client); err != nil {
+		t.Errorf("with tls/ca.crt, a client certificate from the CA should connect: %v", err)
+	}
+	if err := handshake(t, mutual, ca, nil); err == nil {
+		t.Error("with tls/ca.crt, a client with no certificate should be refused")
+	}
+	if err := handshake(t, mutual, ca, &stranger); err == nil {
+		t.Error("with tls/ca.crt, a client certificate from another CA should be refused")
+	}
+
+	bad := filepath.Join(t.TempDir(), "bad.crt")
+	_ = os.WriteFile(bad, []byte("not a certificate"), 0o644)
+	if _, err := ServerTLSConfig(server, bad); err == nil {
+		t.Error("a tls/ca.crt with no certificate in it should be an error, not an open door")
 	}
 }

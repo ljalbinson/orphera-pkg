@@ -16,6 +16,20 @@ object NodeError:
   def isUnauthenticated(e: Throwable): Boolean =
     Status.fromThrowable(e).getCode == Status.Code.UNAUTHENTICATED
 
+  /** True when the call was not made because this orchestrator has no agent
+    * token (it is not the node's fault).
+    */
+  private def notConfigured(e: Throwable): Boolean =
+    Iterator
+      .iterate(Option(e))(_.flatMap(c => Option(c.getCause)))
+      .take(10)
+      .takeWhile(_.isDefined)
+      .flatten
+      .exists {
+        case _: AgentToken.NotConfiguredError => true
+        case _                                => false
+      }
+
   /** True when the agent answered but does not know the call, i.e. it is older
     * than the orchestrator.
     */
@@ -26,7 +40,8 @@ object NodeError:
     * `unsupported` or `unreachable`.
     */
   def line(e: Throwable): String =
-    if isUnauthenticated(e) then
+    if notConfigured(e) then AgentToken.NotConfigured
+    else if isUnauthenticated(e) then
       "unauthenticated: the node rejected this orchestrator's token " +
         "(utils/set-agent-token.sh <node> sets it)"
     else if isUnimplemented(e) then

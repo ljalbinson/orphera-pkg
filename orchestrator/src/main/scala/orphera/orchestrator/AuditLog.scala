@@ -85,7 +85,7 @@ object AuditLog:
       case Command.DeployAgent(_, _, _, _, _, _)        => true
       case Command.Bootstrap(_, _, _, _, _, _)          => true
       case Command.Teardown(_, _, _, _, _)              => true
-      case Command.IssueCerts(_, _, _)                  => true
+      case Command.IssueCerts(_, _, _, _)               => true
       case Command.RunPlaybook(_, _, _)                 => true
       case Command.Reboot(_, _, _, _)                   => true
       case Command.Shutdown(_, _, _)                    => true
@@ -243,11 +243,13 @@ object AuditLog:
           "ssh_user" -> sshUser,
           "nodes" -> nodesField(nodes)
         )
-      case Command.IssueCerts(nodes, sshUser, _) =>
+      case Command.IssueCerts(nodes, sshUser, _, clientAuth) =>
         List(
           "command" -> "issue-certs",
           "ssh_user" -> sshUser,
           "nodes" -> nodesField(nodes)
+        ) ++ clientAuth.map(on =>
+          "client_auth" -> (if on then "on" else "off")
         )
       case Command.Teardown(nodes, sshUser, sshKeyPath, purge, confirmed) =>
         List(

@@ -100,6 +100,25 @@ object CaInitCheck:
       CaInit.refusal(dir0, _ == dir0.resolve("ca.key")).isDefined
     )
 
+    check(
+      "issue-certs --client-auth parses",
+      Cli.parse(List("issue-certs", "--nodes", "a", "--client-auth")) ==
+        Right(Command.IssueCerts(Some(List("a")), "root", None, Some(true)))
+    )
+    check(
+      "issue-certs --no-client-auth parses",
+      Cli.parse(List("issue-certs", "--nodes", "a", "--no-client-auth")) ==
+        Right(Command.IssueCerts(Some(List("a")), "root", None, Some(false)))
+    )
+    check(
+      "issue-certs without either leaves client auth as it is",
+      Cli.parse(List("issue-certs", "--nodes", "a")) == Right(Command.IssueCerts(Some(List("a")), "root", None, None))
+    )
+    check(
+      "--client-auth and --no-client-auth together are refused",
+      Cli.parse(List("issue-certs", "--client-auth", "--no-client-auth")).isLeft
+    )
+
     // For real
     if opensslInstalled then
       val dir: Path = Files.createTempDirectory("ca-init-check").resolve("certs")
@@ -128,7 +147,54 @@ object CaInitCheck:
         "and changes nothing",
         out("openssl", "x509", "-noout", "-text", "-in", dir.resolve("ca.crt").toString) == text
       )
-      List("ca.crt", "ca.key").foreach(f => Files.deleteIfExists(dir.resolve(f)))
+
+      // The orchestrator's client certificate (issue-client-cert), signed by it
+      check("issue-client-cert parses", ClientCert.parse(List("--days", "10", "--force")) == Right(ClientCert.Options(10, true)))
+      check("issue-client-cert refuses an unknown argument", ClientCert.parse(List("--bogus")).isLeft)
+      val emptyDir = Files.createTempDirectory("client-cert-check")
+      check(
+        "a client certificate needs the CA",
+        ClientCert.create(emptyDir, ClientCert.Options(10, false)).left.exists(_.contains("ca.crt"))
+      )
+      Files.deleteIfExists(emptyDir)
+      val client = ClientCert.create(dir, ClientCert.Options(10, false))
+      check("a client certificate is made", client.exists(_.startsWith("CN=orphera-orchestrator@")), client.toString)
+      check(
+        "its key is private to its owner",
+        Files.getPosixFilePermissions(dir.resolve("client.key")) == PosixFilePermissions.fromString("rw-------")
+      )
+      val verified = out(
+        "openssl", "verify", "-CAfile", dir.resolve("ca.crt").toString, "-purpose", "sslclient",
+        dir.resolve("client.crt").toString
+      )
+      check("it is signed by the CA, for use as a TLS client", verified.trim.endsWith(": OK"), verified)
+      val pub1 = out("openssl", "x509", "-noout", "-pubkey", "-in", dir.resolve("client.crt").toString)
+      val pub2 = out("openssl", "pkey", "-pubout", "-in", dir.resolve("client.key").toString)
+      check("the certificate is for the key", pub1.nonEmpty && pub1 == pub2)
+      check(
+        "the key is PKCS#8, which the gRPC client reads",
+        // (the header is built here so the secrets scan does not take it for a key)
+        Files.readString(dir.resolve("client.key")).startsWith("-----BEGIN " + "PRIVATE" + " KEY-----")
+      )
+      val before = Files.readString(dir.resolve("client.crt"))
+      check("a second one is refused without --force", ClientCert.create(dir, ClientCert.Options(10, false)).isLeft)
+      check("and changes nothing", Files.readString(dir.resolve("client.crt")) == before)
+      check("with --force it is replaced", ClientCert.create(dir, ClientCert.Options(10, true)).isRight &&
+        Files.readString(dir.resolve("client.crt")) != before)
+      val clientContext = scala.util.Try(
+        io.grpc.netty.shaded.io.grpc.netty.GrpcSslContexts
+          .forClient()
+          .trustManager(dir.resolve("ca.crt").toFile)
+          .keyManager(dir.resolve("client.crt").toFile, dir.resolve("client.key").toFile)
+          .build()
+      )
+      check("the gRPC client loads it as NodeClient does", clientContext.isSuccess, clientContext.toString)
+      check(
+        "no work files are left beside it",
+        Files.list(dir).toArray.map(_.toString).forall(n => !n.contains(".client-cert"))
+      )
+
+      List("ca.crt", "ca.key", "client.crt", "client.key").foreach(f => Files.deleteIfExists(dir.resolve(f)))
       Files.deleteIfExists(dir)
       Files.deleteIfExists(dir.getParent)
     else println("openssl is not installed: skipped making a real CA")

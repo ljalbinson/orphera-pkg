@@ -8,6 +8,7 @@ import fs2.grpc.syntax.all.*
 
 import io.grpc.ServerInterceptors
 import io.grpc.netty.shaded.io.grpc.netty.{GrpcSslContexts, NettyServerBuilder}
+import io.grpc.netty.shaded.io.netty.handler.ssl.ClientAuth
 
 import orphera.common.{AgentFs2Grpc, Auth}
 
@@ -30,9 +31,20 @@ object Main extends IOApp.Simple:
       certFile: java.io.File,
       keyFile: java.io.File
   ): IO[Unit] =
-    val sslContext = GrpcSslContexts
-      .forServer(certFile, keyFile)
+    // With tls/ca.crt, a caller must also present a client certificate signed
+    // by that CA (see TlsFiles.clientCa).
+    val clientCa = TlsFiles.clientCa
+    val sslContext = clientCa
+      .fold(GrpcSslContexts.forServer(certFile, keyFile))(ca =>
+        GrpcSslContexts
+          .forServer(certFile, keyFile)
+          .trustManager(ca)
+          .clientAuth(ClientAuth.REQUIRE)
+      )
       .build()
+    val clientAuthNote = clientCa.fold("")(ca =>
+      s"; client certificates required, signed by ${ca.getPath}"
+    )
 
     for
       _ <- NetworkReloader.initKnownGood()
@@ -52,7 +64,7 @@ object Main extends IOApp.Simple:
         }
         .use { server =>
           IO.println(
-            s"Orphera Agent listening on 50051 (TLS, ${certFile.getPath})"
+            s"Orphera Agent listening on 50051 (TLS, ${certFile.getPath}$clientAuthNote)"
           ) >>
             IO.blocking(server.start()) >>
             IO.never

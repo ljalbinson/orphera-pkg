@@ -301,7 +301,7 @@ This produces `certs/ca.{crt,key}`. The orchestrator trusts `ca.crt`;
 ### Per-node certificates
 
 Every agent has a certificate and key of its own; the agent package ships
-none, and not the CA certificate either (the agent never reads it), so the same
+none, and not the CA certificate either (the agent reads it only for mutual TLS, see below), so the same
 package serves every site and building it needs no `make certs`. `orphera bootstrap` issues one to each node it installs, and
 `orphera issue-certs [--nodes ...] --ssh-user localadmin` issues (or
 renews) them for nodes already running. Over SSH, each node generates a
@@ -318,6 +318,31 @@ removes it. An agent with no certificate in `tls/` will not start, and
 says so in its journal; `deploy-agent` refuses to upgrade such a node,
 since the upgraded agent could not start and there would be no SSH
 session to recover with — run `issue-certs` for it first.
+
+### Mutual TLS
+
+By default an agent accepts any TLS client that holds the token. Mutual TLS adds a second key: the agent also requires
+the caller to present a client certificate signed by the CA, so a copy of the token alone no longer gets in. It is
+turned on per node, so it can be rolled out a few nodes at a time:
+
+```bash
+orphera issue-client-cert                                         # once per orchestrator: certs/client.crt and client.key
+orphera issue-certs --nodes tst0,tst1 --ssh-user localadmin --client-auth
+```
+
+`issue-client-cert` makes this orchestrator's certificate and key in `certs/` (or `ORPHERA_CERTS_DIR`), signed by
+`certs/ca.key` (valid 825 days, `--days N`; `--force` replaces it). From then on the orchestrator presents it to every
+agent; an agent that does not ask for one ignores it. Each orchestrator needs one: on scala1, either run it there (it
+needs `ca.key`) or copy `client.crt` and `client.key` from scala0. Keep `client.key` as private as `ca.key`: with the
+token, it is what gets into a node.
+
+`issue-certs --client-auth` renews the node's certificate as usual and also puts `certs/ca.crt` on the node as
+`/etc/orphera-agent/tls/ca.crt`. While that file is there, the agent (Scala or Go) refuses a caller without a client
+certificate from that CA, and its start line says `client certificates required`. It refuses to run if this
+orchestrator has no client certificate yet, since it could not reach the node afterwards. `issue-certs
+--no-client-auth` takes the file off again; `issue-certs` without either leaves it as it is. A node whose agent is
+older than this ignores `tls/ca.crt`, so upgrade it (`deploy-agent`) first. A caller without the certificate sees
+`unreachable: UNAVAILABLE: ...` (the TLS handshake fails before the token is looked at).
 
 `orphera cert-info [--nodes ...]` shows which certificate each agent
 actually presents, read from the TLS handshake (no SSH or token needed):
@@ -613,7 +638,8 @@ Verbs that act on nodes (`install`, `remove`, `dist-upgrade`, `run`, `copy`, `wr
 | `nodes [--nodes ...] [--node-groups ...] [--exclude-nodes ...]` | Print the node names a selection stands for, one per line (every node when none is given), expanded exactly as for every other command; `nodes --groups` prints each group with its members. Reads the inventory only and contacts no node; `utils/vmctl.sh` uses it for `--node-groups` |
 | `show-config <name>...` | Print each per-VM config as Orphera reads it, one line per config, from the `-c` / `ORPHERA_CONFIG_DIR` location (a directory or a `mariadb://` location), to compare two sources; read-only, contacts no node |
 | `cert-info [--nodes ...]` | Show the TLS certificate each agent presents, read from the TLS handshake (no SSH or token needed): per-node or wildcard, the names it covers, whether it names the host and is signed by `certs/ca.crt`, expiry and days left, serial, SHA-256 fingerprint. Exits non-zero if any node has a problem or cannot be reached — see [Per-node certificates](#per-node-certificates) |
-| `issue-certs [--nodes ...] [--ssh-user] [--ssh-key]` | Give each node a TLS certificate of its own over SSH: the node generates its key (it never leaves the node), the orchestrator signs the request with `certs/ca.key`, and the agent is restarted. A failure changes nothing. Also the way to renew (825 days) or to re-issue after replacing the CA — see [Replacing the CA](#replacing-the-ca) |
+| `issue-certs [--nodes ...] [--ssh-user] [--ssh-key] [--client-auth \| --no-client-auth]` | Give each node a TLS certificate of its own over SSH: the node generates its key (it never leaves the node), the orchestrator signs the request with `certs/ca.key`, and the agent is restarted. A failure changes nothing. Also the way to renew (825 days) or to re-issue after replacing the CA — see [Replacing the CA](#replacing-the-ca). `--client-auth` also puts the CA on the node, which then requires a client certificate; `--no-client-auth` removes it — see [Mutual TLS](#mutual-tls) |
+| `issue-client-cert [--days 825] [--force]` | Make this orchestrator's client certificate (`certs/client.crt` and `client.key`, signed by `certs/ca.key`), which it presents to every agent; needed before `issue-certs --client-auth`. Runs on this machine only — see [Mutual TLS](#mutual-tls) |
 | `audit-log [--limit 20] [--full]` | List recent invocations of mutating commands (install, copy, bootstrap, teardown, playbooks, ...) from `.orphera-audit/audit.jsonl`: the command, its nodes, outcome and duration. Node lists are shown as runs (`tst0-7,tst9-20`), and a `run` script is put on one line; both are cut at 40 and 100 characters unless `--full`. The status is OK, FAILED (exit n, with the error when the command threw), INTERRUPTED (Ctrl-C), RUNNING (its process is still alive), or NO END RECORD (the process ended without writing one: killed, or a record from before 0.1.204). Read-only commands are not recorded, and there is no per-operator identity — only that someone holding the token ran it from this host. The file rotates by size |
 | `thread-info [--nodes ...] [--detail] [--reset-peak]` | Report each agent process's thread count: all OS threads, the Java threads and the most there have been since the agent started, CPUs, resident memory and heap. `--detail` adds the Java thread states and the threads grouped by name (`ioapp-compute`, `grpc-default-ex`, `GC Thread`, ...); `--reset-peak` starts the peak again after reading it, so the next call shows the highest count for one piece of work. An agent older than the orchestrator answers `unsupported` |
 | `pipeline <step>... (--nodes ... \| --node-groups ...) [--parallel N] [--quiet]` | Run a chain of verbs on each node, the nodes in parallel. Each step is one quoted verb line, e.g. `orphera pipeline "install tree" "dist-upgrade" "reboot --wait" --node-groups mons`. Steps run in order per node and a failure stops that node only; output is prefixed `[node]`, logged to `.orphera-build-logs/<time>/<node>.log`, and followed by a summary table; exit 1 if any node failed. A step may be any node verb (`install`, `remove`, `autoremove`, `dist-upgrade`, `copy`, `write-file`, `network-apply`, `deploy-agent`, `run`, `fetch`, `facts`, `version`, `uptime`, `thread-info`, `reboot`, `shutdown`) but may not give its own `--nodes` |
@@ -1553,10 +1579,9 @@ node isn't confirmed within the timeout, and it prints which ones.
   systemd retries every five seconds until the token is set. The
   orchestrator takes its token from `ORPHERA_TOKEN`, else from the
   secret store entry `orphera/agent-token` (`AgentToken.scala`); with
-  neither it still falls back to the built-in token, with a warning on
-  stderr, so that it can reach an agent that has not been fixed yet, but
-  `bootstrap` and `deploy-agent` refuse to run in that state, because
-  they would leave a node that cannot start. Set a real one:
+  neither, every command that contacts a node stops before it does, with
+  `no agent token is configured here: ...` (it used to fall back to the
+  built-in token, which every agent refuses). Set a real one:
 
   ```bash
   orphera secrets generate orphera/agent-token     # once
@@ -1569,24 +1594,29 @@ node isn't confirmed within the timeout, and it prints which ones.
   changed `agent.env` when it is upgraded. `bootstrap` writes the same
   token to a node it installs; the script is for nodes that are already
   installed.
-- **What a failed call looks like:** `version`, `uptime` and `thread-info`
-  print `unauthenticated` when the node answered and rejected this
+- **What a failed call looks like:** every command, playbook and cluster
+  playbook prints `unauthenticated` when the node answered and rejected this
   orchestrator's token (fix it with `utils/set-agent-token.sh`),
   `unsupported` (thread-info) when the agent is too old to know the call, and
   `unreachable: <status>` when nothing usable came back (no route, no
-  listener, a certificate the orchestrator does not trust). Other
-  commands still show the raw gRPC error.
+  listener, a certificate the orchestrator does not trust, or a node that
+  requires a client certificate this orchestrator does not have).
+- **Mutual TLS:** optional, per node; see [Mutual TLS](#mutual-tls).
+- **The agent's own files:** `copy`, `fetch` and the check before a copy
+  refuse anything in `/etc/orphera-agent` (the token in `agent.env`, the TLS
+  key and CA in `tls/`), after resolving `..` and symbolic links, so the token
+  and key cannot be read back or replaced through the agent; they are set over
+  SSH. This is not a sandbox: `run` executes any command as root, so the token
+  (and, with mutual TLS, the client certificate) is the boundary, not a list of
+  paths.
 - **Agent logs:** the agent no longer writes the arguments of the
   commands it runs to its journal. A command's arguments are still
   visible in the process list on the node while it runs, so a command
   that embeds a password exposes it for that time; `Resource.checkTask`
   avoids this for file checks by sending a hash.
 - **Secrets in playbooks:** see [Secrets](#secrets).
-- **Not implemented:** mutual TLS (agent doesn't verify orchestrator
-  identity beyond the shared token), per-destination-path
-  restrictions on `copy` (an authenticated orchestrator can currently
-  write to any path the agent's root user can reach) and per-node
-  tokens.
+- **Not implemented:** per-node tokens, and limits on what an
+  authenticated caller may do (`run` is a root shell).
 
 ## Secrets
 
@@ -1924,6 +1954,7 @@ Afterwards both hosts hold the same CA key, secret store and SSH key, and either
 | `make verify` | builds, then prints `.deb` contents/metadata |
 | `make certs` | generates the CA (`certs/ca.{crt,key}`) that signs each node's certificate. Refuses to run if `certs/ca.crt` already exists. `orphera init-ca` does the same without a checkout |
 | `orphera issue-certs --nodes ...` | issues each node its own certificate over SSH (see *Per-node certificates*) |
+| `orphera issue-client-cert` | makes this orchestrator's client certificate in `certs/` (see *Mutual TLS*) |
 | `make certs-clean` | deletes the CA in `certs/` — you must type `delete` to confirm; every node then needs a certificate from a new CA (`make certs`, `orphera issue-certs`) |
 | `make orpheracli` | builds the orchestrator and the scripting jar and installs them as `/usr/local/lib/orphera-orchestrator.jar` and `/usr/local/lib/orphera-scripting.jar`, with the `orphera` launcher in `/usr/local/bin`, the utility commands (`vmctl`, `start-vm`, ...) in `/opt/orphera/bin` (on the `PATH` of new login shells) and, on Linux, the bash completion in `/etc/bash_completion.d/orphera` (effective in new shells). Also works on macOS; see [Installing the command line](#installing-the-command-line) |
 | `make release` | bumps the patch version in `VERSION`, then runs the full clean/test/assembly/deb chain (plus the `.rpm` when `rpmbuild` is installed) and the command-line package (`make cli-package`) at the new version, and installs the new orchestrator on this machine as `make orpheracli` does. It does not commit `VERSION` or tag; see [Versions and tags](#versions-and-tags) |
@@ -1974,10 +2005,15 @@ many checks passed and exits non-zero on a failure:
   error with no message is named, not shown as `null`), retries (`retries:`/`retry_delay:`, `.retry`, `--retries`)
 - `LocationsCheck`: `-I`/`-c`, the environment variables, config names, reading through a URI
 - `InstallationCheck`: where the scripting jar is looked for
-- `CaInitCheck`: `init-ca`
+- `CaInitCheck`: `init-ca`; `issue-client-cert` (made, verified by openssl as a TLS client certificate from the CA,
+  loaded by the gRPC client as `NodeClient` loads it, not replaced without `--force`); `issue-certs --client-auth` parsing
 - `DbDocumentsCheck`: the `mariadb://` locations and the rows-to-documents conversion, with no database
 - `AgentGuardCheck`: the agent refuses a reboot and a shutdown on a host with the marker; it never calls the
-  unprotected path, which would really reboot the test machine
+  unprotected path, which would really reboot the test machine. Also that `copy`, `fetch` and the check before a copy
+  refuse `/etc/orphera-agent`, including through `..` and symbolic links
+- In `agent-go/` (`go test ./...`), `TestProtectedPaths` is the same for the Go agent, and `TestServerTLSConfigMutual`
+  runs TLS handshakes against it with `tls/ca.crt`: no client certificate and one from another CA are refused, one from
+  the CA is accepted, and a `ca.crt` with no certificate in it is an error rather than an open door
 
 The scripts `manifests/test_*.sh` apply a playbook to the lab and check the
 result independently of the playbook's own health check. They print a
@@ -2824,17 +2860,15 @@ playbooks marked DRAFT there have been written but not all run on the lab.
 - No standalone declarative file-manifest mechanism (`apply`) or task
   ordering within one — playbooks are the actual implemented mechanism
   for ordered, multi-step execution, see [Playbooks](#playbooks)
-- No mutual TLS
-- No path allowlisting on `copy` **or `fetch`** — an authenticated
-  orchestrator can write or read any path the agent's root user can
-  reach
+- Mutual TLS is per node and opt-in (`issue-certs --client-auth`); nodes
+  without it accept any TLS client that has the token
+- No limits on what an authenticated caller may do: `run` is a root
+  shell, so the only paths protected are the agent's own
+  (`/etc/orphera-agent`, see [Authentication and security
+  notes](#authentication-and-security-notes))
 - Secrets: one encrypted file on the orchestrator machine, no rotation,
   and values are visible in a command's arguments on the node while it
-  runs (see [Secrets](#secrets)). The orchestrator still falls back to
-  the built-in development token (with a warning) when none is
-  configured; agents refuse to run with it. All commands other than
-  `version`, `uptime` and `thread-info` show a rejected token as a raw
-  gRPC error
+  runs (see [Secrets](#secrets))
 - Typed configuration (see [Typed configuration files and check
   mode](#typed-configuration-files-and-check-mode)) covers the OpenStack
   control plane only; check mode covers Placement only; the

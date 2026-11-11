@@ -26,6 +26,15 @@ object TlsFiles:
     else if present(legacy) then Some(legacy)
     else None
 
+  /** The CA that signs the orchestrators' client certificates, put here by
+    * `orphera issue-certs --client-auth`. While it is present the agent
+    * requires every caller to present a certificate signed by it (mutual TLS),
+    * as well as the token; without it, any TLS client may connect, as before.
+    */
+  val ClientCaPath = "tls/ca.crt"
+
+  def clientCa: Option[File] = Some(new File(ClientCaPath)).filter(_.isFile)
+
   val Missing: String =
     "No TLS certificate in /etc/orphera-agent/tls: this node has not been issued one. " +
       "From the orchestrator run: orphera issue-certs --nodes <this node> --ssh-user <user>"

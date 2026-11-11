@@ -36,11 +36,17 @@ object NodeCerts:
   def caAvailable: Boolean =
     Files.isRegularFile(CaCert) && Files.isRegularFile(CaKey)
 
+  /** Issues the node a certificate. `clientAuth`: Some(true) also puts this
+    * CA's certificate on the node as `tls/ca.crt`, so its agent then accepts
+    * only callers with a client certificate from this CA (ClientCert);
+    * Some(false) removes it; None leaves it as it is.
+    */
   def issue(
       node: Node,
       sshUser: String,
       sshKeyPath: Option[String],
-      onLine: String => IO[Unit]
+      onLine: String => IO[Unit],
+      clientAuth: Option[Boolean] = None
   ): IO[Unit] =
     for
       _ <- IO.raiseUnless(caAvailable)(
@@ -63,18 +69,41 @@ object NodeCerts:
         )
       )
       cert <- sign(node.host, csr)
+      _ <-
+        if clientAuth.contains(true) then
+          IO.blocking(Files.readString(CaCert, UTF_8)).flatMap(ca =>
+            SshDeployer.sshRunWithInput(
+              node,
+              sshUser,
+              sshKeyPath,
+              stageClientCa,
+              ca,
+              onLine
+            )
+          )
+        else IO.unit
       _ <- SshDeployer.sshRunWithInput(
         node,
         sshUser,
         sshKeyPath,
-        installCert,
+        installCert(clientAuth),
         cert,
         onLine
       )
       _ <- onLine(
-        s"issued a certificate for ${node.host} (valid $ValidDays days); agent restarted"
+        s"issued a certificate for ${node.host} (valid $ValidDays days)" +
+          clientAuth.fold("")(on =>
+            if on then "; client certificates now required (mutual TLS)"
+            else "; client certificates no longer required"
+          ) + "; agent restarted"
       )
     yield ()
+
+  /** Writes the CA certificate from stdin to `ca.crt.new`; installCert moves
+    * it into place with the node's certificate.
+    */
+  private val stageClientCa: String =
+    s"sudo sh -c 'set -e; umask 022; mkdir -p $RemoteDir; cat > $RemoteDir/ca.crt.new'"
 
   /** Makes `server.key.new` (mode 0600) and prints a CSR for it. Nothing the
     * agent uses is touched yet.
@@ -85,14 +114,20 @@ object NodeCerts:
       s"""-subj "/CN=$host" 2>/dev/null'"""
 
   /** Reads the certificate from stdin, checks it carries the public half of
-    * `server.key.new`, then replaces the live pair and restarts the agent.
+    * `server.key.new`, then replaces the live pair (and puts in place or
+    * removes `ca.crt`, for `clientAuth`) and restarts the agent.
     */
-  private val installCert: String =
+  private def installCert(clientAuth: Option[Boolean]): String =
+    val clientCaStep = clientAuth match
+      case Some(true)  => "chmod 644 $d/ca.crt.new; mv $d/ca.crt.new $d/ca.crt; "
+      case Some(false) => "rm -f $d/ca.crt; "
+      case None        => ""
     s"sudo sh -c 'set -e; d=$RemoteDir; cat > $$d/server.crt.new; " +
       "if [ \"$(openssl x509 -noout -pubkey -in $d/server.crt.new)\" != " +
       "\"$(openssl pkey -pubout -in $d/server.key.new)\" ]; then " +
-      "rm -f $d/server.crt.new $d/server.key.new; echo \"signed certificate does not match the new key; nothing changed\"; exit 1; fi; " +
+      "rm -f $d/server.crt.new $d/server.key.new $d/ca.crt.new; echo \"signed certificate does not match the new key; nothing changed\"; exit 1; fi; " +
       "chmod 644 $d/server.crt.new; mv $d/server.key.new $d/server.key; mv $d/server.crt.new $d/server.crt; " +
+      clientCaStep +
       "systemctl restart orphera-agent'"
 
   private def isIpAddress(host: String): Boolean =

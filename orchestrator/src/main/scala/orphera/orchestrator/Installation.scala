@@ -52,6 +52,14 @@ object Installation:
   def caCert: String = s"${certsDirOf(name => sys.env.get(name))}/ca.crt"
   def caKey: String = s"${certsDirOf(name => sys.env.get(name))}/ca.key"
 
+  /** This orchestrator's client certificate and key (`orphera
+    * issue-client-cert`), presented to every agent when both are present.
+    */
+  def clientCert: String =
+    s"${certsDirOf(name => sys.env.get(name))}/client.crt"
+  def clientKey: String =
+    s"${certsDirOf(name => sys.env.get(name))}/client.key"
+
   /** Why the CA certificate cannot be used, or `None` when the file is there
     * and readable. The TLS library only says "File does not contain valid
     * certificates" for a missing file as much as for a bad one.
