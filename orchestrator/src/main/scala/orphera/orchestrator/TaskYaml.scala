@@ -153,7 +153,7 @@ object TaskYaml:
       keys = c.keys
         .map(_.toList)
         .getOrElse(Nil)
-        .filterNot(k => k == "name" || k == "when")
+        .filterNot(TaskOptionKeys.contains)
       taskKey <- keys.headOption.toRight(
         DecodingFailure(s"Task '$name' has no task type key", c.history)
       )
@@ -164,4 +164,40 @@ object TaskYaml:
       when <- whenStr match
         case None      => Right(None)
         case Some(str) => decodeCondition(str).map(Some(_))
-    yield NamedTask(name, task, when)
+
+      retry <- decodeRetry(name, c)
+    yield NamedTask(name, task, when, retry)
+
+  /** The keys of a task that are not its type (`install:`, `copy:`, ...). */
+  private val TaskOptionKeys: Set[String] =
+    Set("name", "when", "retries", "retry_delay")
+
+  /** `retries: N` (0 or more; 0 is no retry) and `retry_delay: S` (seconds
+    * before the first retry, doubling after; default 5).
+    */
+  private def decodeRetry(
+      name: String,
+      c: HCursor
+  ): Either[DecodingFailure, Option[Retry]] =
+    def fail(msg: String): DecodingFailure = DecodingFailure(s"Task '$name': $msg", c.history)
+    for
+      retries <- c.get[Option[Int]]("retries")
+      delay <- c.get[Option[Int]]("retry_delay")
+      _ <- Either.cond(
+        retries.forall(_ >= 0),
+        (),
+        fail("retries must be 0 or more")
+      )
+      _ <- Either.cond(
+        delay.forall(_ >= 0),
+        (),
+        fail("retry_delay must be 0 or more seconds")
+      )
+      _ <- Either.cond(
+        delay.isEmpty || retries.isDefined,
+        (),
+        fail("retry_delay needs retries")
+      )
+    yield retries.flatMap(n =>
+      Retry.of(n, delay.getOrElse(Retry.DefaultDelaySeconds))
+    )

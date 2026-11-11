@@ -270,7 +270,69 @@ object Cli:
           else Right(rest ++ List("--nodes", targets.mkString(",")))
 
   def parse(rawArgs: List[String]): Either[String, Command] =
-    expandNodeGroups(rawArgs).flatMap(parseExpanded)
+    extractRetry(rawArgs).flatMap { case (_, args) =>
+      expandNodeGroups(args).flatMap(parseExpanded)
+    }
+
+  /** The commands that change a node: they run as one task through
+    * TaskExecutor, so they take `--retries` and `--retry-delay`.
+    */
+  val retryVerbs: Set[String] = Set(
+    "install",
+    "remove",
+    "autoremove",
+    "dist-upgrade",
+    "copy",
+    "write-file",
+    "network-apply",
+    "reboot",
+    "run"
+  )
+
+  /** Takes `--retries N` and `--retry-delay S` off `args`, wherever they are
+    * (as `--nodes` is; so `run` cannot pass a literal `--retries` to its
+    * command). Returns the Retry they give (None without them, or for
+    * `--retries 0`) and the other arguments. parse uses it to drop them, Main
+    * to read them.
+    */
+  def extractRetry(
+      args: List[String]
+  ): Either[String, (Option[Retry], List[String])] =
+    @scala.annotation.tailrec
+    def scan(
+        in: List[String],
+        rest: List[String],
+        retries: Option[String],
+        delay: Option[String]
+    ): (List[String], Option[String], Option[String]) =
+      in match
+        case "--retries" :: v :: tl     => scan(tl, rest, Some(v), delay)
+        case "--retry-delay" :: v :: tl => scan(tl, rest, retries, Some(v))
+        case h :: tl                    => scan(tl, rest :+ h, retries, delay)
+        case Nil                        => (rest, retries, delay)
+
+    val (rest, retries, delay) = scan(args, Nil, None, None)
+    (retries, delay) match
+      case (None, None) => Right((None, args))
+      case _ if !args.headOption.exists(retryVerbs.contains) =>
+        Left(
+          "--retries and --retry-delay apply only to " +
+            retryVerbs.toList.sorted.mkString(", ")
+        )
+      case (None, Some(_)) => Left("--retry-delay needs --retries")
+      case (Some(r), d)    =>
+        for
+          n <- r.toIntOption
+            .filter(n => n >= 0 && n <= 100)
+            .toRight(s"Invalid --retries value: $r (0 to 100)")
+          seconds <- d.fold[Either[String, Int]](
+            Right(Retry.DefaultDelaySeconds)
+          )(v =>
+            v.toIntOption
+              .filter(_ >= 0)
+              .toRight(s"Invalid --retry-delay value: $v (seconds, 0 or more)")
+          )
+        yield (Retry.of(n, seconds), rest)
 
   private def parseExpanded(args: List[String]): Either[String, Command] =
     args match
@@ -1273,6 +1335,11 @@ object Cli:
       |  --exclude-nodes a,b   (takes nodes out of what --nodes/--node-groups selected,
       |                         or out of all nodes for a command that defaults to all,
       |                         such as deploy-agent; names must be in the selection)
+      |  --retries N           (the commands that change a node: install, remove, autoremove,
+      |  --retry-delay S        dist-upgrade, copy, write-file, network-apply, reboot, run)
+      |                        tries a node where the command failed up to N more times,
+      |                        S seconds (default 5) before the first retry, doubling
+      |                        after, at most 300
       |
       |Usage:
       |  install           <package> [<package> ...] [--nodes host1,host2] [--update-cache]

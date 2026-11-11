@@ -640,6 +640,20 @@ applies to all three. A command differs from a playbook run only in that it gath
 prints one line (`[tst7] unreachable: ...`) and the others carry on; the exit code is 1 if the command failed on any
 node. `reboot` skips a `never-reboot` node and says so, where a playbook's `reboot` task fails on it.
 
+**Retries.** These commands take `--retries N` (and optionally `--retry-delay S`): a node where the command failed is
+tried again up to N more times, as a playbook task with `retries:` is (see [Retrying a task](#retrying-a-task)). Each
+retry prints one line and the exit code is that of the last attempt:
+
+```
+$ orphera install tree --nodes tst0,tst2 --retries 2 --retry-delay 10
+[tst0] Installing packages
+...
+[tst0] exit=0 success=true
+[tst2] attempt 1 failed (unreachable: UNAVAILABLE: io exception (no route to host: tst2.ljalbinson.com/10.10.5.14:50051)); retry 1 of 2 in 10s
+```
+
+They also work in a `pipeline` step (`"install tree --retries 2"`).
+
 ## Playbooks
 
 A playbook is an ordered list of tasks, run per node — unlike a
@@ -762,6 +776,27 @@ Confirmed in practice: `apt-get`/`dpkg` lock contention (see below)
 produces exactly this behavior — one node's `remove`/`autoremove` task
 failing with exit 100 does not affect other nodes' progress.
 
+#### Retrying a task
+
+A task can be tried again when it fails, before its node gives up:
+
+```yaml
+- name: install ceph packages
+  retries: 3          # up to 3 more attempts (default 0: none)
+  retry_delay: 10     # seconds before the first retry (default 5)
+  install:
+    packages: [cephadm]
+```
+
+The pause doubles after each failed attempt (10, 20, 40 s here), up to 5 minutes. Every failure is retried, whether
+the remote command reported failure or the node could not be reached, so it is for tasks that are safe to run again
+(installing a package, writing a file, a command that checks before it changes). `when:` is decided once, before the
+first attempt. Each failed attempt but the last prints `[node] task: attempt 1 failed (...); retry 1 of 3 in 10s` and
+writes a `task_retry` event (`attempt`, `error`, `delay_s`) to the run log; the task's `task_end` is that of the last
+attempt. In the Scala DSL, `.retry(3, delaySeconds = 10)` after `.task(...)` does the same for that task, in a playbook
+or a cluster playbook stage. The commands that change a node take `--retries` and `--retry-delay` ([CLI
+reference](#cli-reference)).
+
 **Facts-unavailable behavior:** if fact-gathering itself fails for a
 node (agent unreachable, etc.), any task on that node with a `when:`
 clause is conservatively skipped rather than causing the whole node's
@@ -775,8 +810,8 @@ the agent passes `-o DPkg::Lock::Timeout=600`, so a task that hits the
 lock (background unattended-upgrades, another concurrent Orphera task,
 etc.) waits up to 10 minutes and retries automatically rather than
 failing immediately with exit 100. This was added after hitting the
-failure directly in practice — see [Known gaps](#known-gaps--not-yet-built)
-for the retry/backoff work this doesn't yet fully cover.
+failure directly in practice. For other transient failures, see
+[Retrying a task](#retrying-a-task).
 
 ### Scala DSL front-end
 
@@ -898,9 +933,6 @@ script's `Playbook` value has already been built.
 - Any compile-time check that a DSL playbook extending `OrpheraPlaybook`
   is also registered in `PlaybookRegistry` — currently a silent gap if
   forgotten, not a build error
-- Per-task retry/backoff beyond the built-in `apt`/`dpkg` lock timeout
-  above — a task that fails for another transient reason still stops
-  that node's remaining tasks rather than retrying
 
 ## Cross-node coordination and staged playbooks
 
@@ -1419,7 +1451,8 @@ alongside the existing human-readable console output, not instead of
 it. Task/stage lifecycle only: `run_start`/`run_end`,
 `stage_start`/`stage_end` (cluster-playbook), `task_start`, `task_end`
 (`success`, `duration_ms`, `error` on failure), `task_skipped`
-(`reason`: `condition_not_met` or `resume_checkpoint`). Not every
+(`reason`: `condition_not_met` or `resume_checkpoint`), `task_retry`
+(`attempt`, `error`, `delay_s`; see [Retrying a task](#retrying-a-task)). Not every
 streamed command-output line — the console already has that.
 
 ```bash
@@ -1937,7 +1970,8 @@ many checks passed and exits non-zero on a failure:
 - `InventoryCheck`: reading `never-reboot`, which nodes it protects, that `shutdown` refuses and skips them,
   `--node-groups` and `--exclude-nodes`, `orphera nodes`, and the `deploy-agent`/`bootstrap` agent options
 - `TaskExecutorCheck`: the task executor that commands, playbooks and cluster playbooks share: templating on and off,
-  a failure stopping only that node's remaining tasks, `when:` with no facts, and how a failure is described
+  a failure stopping only that node's remaining tasks, `when:` with no facts, how a failure is described (a connection
+  error with no message is named, not shown as `null`), retries (`retries:`/`retry_delay:`, `.retry`, `--retries`)
 - `LocationsCheck`: `-I`/`-c`, the environment variables, config names, reading through a URI
 - `InstallationCheck`: where the scripting jar is looked for
 - `CaInitCheck`: `init-ca`

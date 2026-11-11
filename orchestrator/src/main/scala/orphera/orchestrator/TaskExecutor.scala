@@ -2,6 +2,7 @@
 
 package orphera.orchestrator
 
+import scala.concurrent.duration.*
 import scala.jdk.CollectionConverters.*
 
 import cats.effect.*
@@ -141,6 +142,9 @@ object TaskExecutor:
     val facts = env.context.factsByNode.get(node.name)
 
     def log(kind: String, task: String, more: (String, Any)*): IO[Unit] =
+      logSeq(kind, task, more)
+
+    def logSeq(kind: String, task: String, more: Seq[(String, Any)]): IO[Unit] =
       runLog.event(
         ((("event" -> kind) :: logFields) ++
           List("node" -> node.name, "task" -> task) ++ more)*
@@ -176,7 +180,7 @@ object TaskExecutor:
                   for
                     startMs <- IO.delay(System.currentTimeMillis())
                     _ <- log("task_start", name)
-                    result <- runTask(namedTask, node, env).attempt
+                    result <- runWithRetry(namedTask, node, env, logSeq).attempt
                     endMs <- IO.delay(System.currentTimeMillis())
                     took = "duration_ms" -> (endMs - startMs)
                     ok <- result match
@@ -198,6 +202,52 @@ object TaskExecutor:
           }
 
     go(tasks)
+
+  /** Runs the task and, when it fails and has a `retry`, runs it again (see
+    * retrying). Each failed attempt but the last gets a line (`attempt 1
+    * failed (...); retry 1 of 3 in 5s`) and a `task_retry` run-log event; the
+    * last one's error is the task's.
+    */
+  private def runWithRetry(
+      namedTask: NamedTask,
+      node: Node,
+      env: Env,
+      log: (String, String, Seq[(String, Any)]) => IO[Unit]
+  ): IO[Unit] =
+    val name = namedTask.name
+    val once = runTask(namedTask, node, env)
+    namedTask.retry match
+      case None        => once
+      case Some(retry) =>
+        retrying(retry) { (n, err, pause) =>
+          env.output.line(
+            node,
+            name,
+            s"attempt $n failed (${describe(err)}); retry $n of ${retry.retries} in ${pause}s"
+          ) >>
+            log(
+              "task_retry",
+              name,
+              List("attempt" -> n, "error" -> describe(err), "delay_s" -> pause)
+            )
+        }(once)
+
+  /** Runs `action`, and when it fails runs it again up to `retry.retries` more
+    * times, sleeping Retry.delayBefore(n) seconds before retry n. `onRetry`
+    * gets the number of the attempt that failed, its error and the pause,
+    * before the pause. The error of the last attempt is raised.
+    */
+  def retrying(retry: Retry)(
+      onRetry: (Int, Throwable, Int) => IO[Unit]
+  )(action: IO[Unit]): IO[Unit] =
+    def attempt(n: Int): IO[Unit] =
+      action.handleErrorWith { err =>
+        if n > retry.retries then IO.raiseError(err)
+        else
+          val pause = retry.delayBefore(n)
+          onRetry(n, err, pause) >> IO.sleep(pause.seconds) >> attempt(n + 1)
+      }
+    attempt(1)
 
   /** Carries out one task on one node; raises if it failed. */
   def runTask(namedTask: NamedTask, node: Node, env: Env): IO[Unit] =
@@ -369,7 +419,19 @@ object TaskExecutor:
     */
   def failureLine(err: Throwable): String =
     if isGrpcFailure(err) then NodeError.line(err)
-    else s"FAILED: ${Option(err.getMessage).getOrElse(err.toString)}"
+    else s"FAILED: ${message(err)}"
+
+  /** A failure in a few words, for a retry line: as failureLine, without the
+    * `FAILED: `.
+    */
+  def describe(err: Throwable): String =
+    err match
+      case _: RemoteFailure        => "the command reported failure"
+      case _ if isGrpcFailure(err) => NodeError.line(err)
+      case _                       => message(err)
+
+  private def message(err: Throwable): String =
+    Option(err.getMessage).getOrElse(err.toString)
 
   private def isGrpcFailure(err: Throwable): Boolean =
     Iterator

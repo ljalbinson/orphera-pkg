@@ -40,6 +40,27 @@ object NodeError:
   def describe(e: Throwable): String =
     val top = Option(e.getMessage).getOrElse(e.getClass.getSimpleName)
     Option(e.getCause)
-      .flatMap(c => Option(c.getMessage))
+      .flatMap(c => Option(c.getMessage).map(causeText(c, _)))
       .filterNot(top.contains)
       .fold(top)(c => s"$top ($c)")
+
+  /** The cause's message, with a name for what went wrong where the network
+    * library left it out: Netty can report a failed connection as
+    * `null: host/address:port`, the `null` being the underlying exception's
+    * missing message.
+    */
+  private def causeText(cause: Throwable, msg: String): String =
+    if msg == "null" then networkReason(cause)
+    else if msg.startsWith("null: ") then
+      s"${networkReason(cause)}: ${msg.stripPrefix("null: ")}"
+    else msg
+
+  private def networkReason(cause: Throwable): String =
+    cause match
+      case _: java.net.NoRouteToHostException => "no route to host"
+      // with no message, a refused connection and a host that is down look
+      // the same here
+      case _: java.net.ConnectException       => "could not connect"
+      case _: java.net.UnknownHostException   => "unknown host"
+      case _: java.net.SocketTimeoutException => "timed out"
+      case other                              => other.getClass.getSimpleName
