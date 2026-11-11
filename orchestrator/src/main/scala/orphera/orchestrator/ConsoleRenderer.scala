@@ -22,6 +22,12 @@ object ConsoleRenderer:
 
   def failureCount: Int = failures.get()
 
+  /** Counts a node that failed without an unsuccessful RESULT (it could not be
+    * reached, or `fetch` found no file), so the command still exits non-zero.
+    */
+  def nodeFailed(node: Node, line: String): IO[Unit] =
+    IO.delay(failures.incrementAndGet()) >> IO.println(s"[${node.name}] $line")
+
   /** Terse rendering for `orphera run --quiet`: only the command's own output
     * (still prefixed with the node name, so several nodes stay readable). The
     * "Running: ..." progress line and the "exit=0 success=true" line are

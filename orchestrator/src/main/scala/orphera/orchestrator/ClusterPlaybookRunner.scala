@@ -33,6 +33,7 @@ object ClusterPlaybookRunner:
       ) >> IO.pure(false)
     else
       for
+        _ <- AgentToken.requireConfigured
         context <- TaskExecutor.gatherFacts(allNodes)
         setFacts <- SetFacts.empty
         checkpoint <- Checkpoint.load("cluster", playbook.name, resume)

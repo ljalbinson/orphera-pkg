@@ -351,14 +351,17 @@ object Orchestrator:
       val localPath = localDir.resolve(
         s"${node.name}-${java.nio.file.Paths.get(remotePath).getFileName}"
       )
-      NodeClient.fetchFile(node, remotePath, localPath).flatMap {
-        case Right(metadata) =>
-          IO.println(
-            s"[${node.name}] Fetched ${remotePath} -> $localPath (owner=${metadata.owner}, mode=${metadata.mode}%o)"
-          )
-        case Left(err) =>
-          IO.println(s"[${node.name}] FAILED: $err")
-      }
+      NodeClient
+        .fetchFile(node, remotePath, localPath)
+        .flatMap {
+          case Right(metadata) =>
+            IO.println(
+              s"[${node.name}] Fetched ${remotePath} -> $localPath (owner=${metadata.owner}, mode=${metadata.mode}%o)"
+            )
+          case Left(err) =>
+            ConsoleRenderer.nodeFailed(node, s"FAILED: $err")
+        }
+        .handleErrorWith(e => ConsoleRenderer.nodeFailed(node, NodeError.line(e)))
     }
 
   /** Facts from every node. Every node is tried; if any fail, the error names
@@ -402,11 +405,13 @@ object Orchestrator:
       )
     ) >>
       allowed.parTraverse_ { node =>
-        NodeClient.shutdown(
-          node,
-          delaySeconds,
-          line => IO.println(s"[${node.name}] $line")
-        )
+        NodeClient
+          .shutdown(
+            node,
+            delaySeconds,
+            line => IO.println(s"[${node.name}] $line")
+          )
+          .handleErrorWith(e => ConsoleRenderer.nodeFailed(node, NodeError.line(e)))
       }
 
   def getUptimes(

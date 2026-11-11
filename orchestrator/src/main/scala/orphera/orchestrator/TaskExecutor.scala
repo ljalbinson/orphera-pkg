@@ -59,7 +59,7 @@ object TaskExecutor:
         (node, task, text) => IO.println(playbookLine(node, task, text)),
         (node, task, err) =>
           IO.println(
-            s"[${node.name}] $task: FAILED — ${err.getMessage}$afterFailure"
+            s"[${node.name}] $task: FAILED — ${describe(err)}$afterFailure"
           )
       )
 
@@ -426,8 +426,9 @@ object TaskExecutor:
     */
   def describe(err: Throwable): String =
     err match
-      case _: RemoteFailure        => "the command reported failure"
-      case _ if isGrpcFailure(err) => NodeError.line(err)
+      case _: RemoteFailure                 => "the command reported failure (see output above)"
+      case _: AgentToken.NotConfiguredError => AgentToken.NotConfigured
+      case _ if isGrpcFailure(err)          => NodeError.line(err)
       case _                       => message(err)
 
   private def message(err: Throwable): String =

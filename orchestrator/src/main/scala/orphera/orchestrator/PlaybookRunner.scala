@@ -23,6 +23,7 @@ object PlaybookRunner:
       ) >> IO.pure(false)
     else
       for
+        _ <- AgentToken.requireConfigured
         context <- TaskExecutor.gatherFacts(targets)
         setFacts <- SetFacts.empty
         checkpoint <- Checkpoint.load("playbook", playbook.name, resume)
@@ -71,6 +72,7 @@ object PlaybookRunner:
       retry: Option[Retry] = None
   ): IO[Boolean] =
     for
+      _ <- AgentToken.requireConfigured
       env <- TaskExecutor.commandEnv(quiet)
       checkpoint <- Checkpoint.disabled
       runLog <- RunLog.disabled

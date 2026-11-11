@@ -327,6 +327,15 @@ object TaskExecutorCheck:
       noRoute == "unreachable: UNAVAILABLE: io exception (no route to host: tst2.example.com/10.10.5.14:50051)",
       noRoute
     )
+    check(
+      "no agent token here is reported as that, not as an unreachable node",
+      NodeError.line(new RuntimeException("call failed", new AgentToken.NotConfiguredError)) == AgentToken.NotConfigured &&
+        TaskExecutor.describe(new AgentToken.NotConfiguredError) == AgentToken.NotConfigured
+    )
+    check(
+      "a playbook's FAILED line names a rejected token",
+      TaskExecutor.describe(Status.UNAUTHENTICATED.asRuntimeException()).startsWith("unauthenticated:")
+    )
     val refused = NodeError.line(unavailable(new java.net.ConnectException("Connection refused: tst2/10.10.5.14:50051")))
     check(
       "a connection error with a message keeps it",
