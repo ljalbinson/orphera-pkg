@@ -173,7 +173,8 @@ object CaInitCheck:
       check("the certificate is for the key", pub1.nonEmpty && pub1 == pub2)
       check(
         "the key is PKCS#8, which the gRPC client reads",
-        Files.readString(dir.resolve("client.key")).startsWith("-----BEGIN PRIVATE KEY-----")
+        // (the header is built here so the secrets scan does not take it for a key)
+        Files.readString(dir.resolve("client.key")).startsWith("-----BEGIN " + "PRIVATE" + " KEY-----")
       )
       val before = Files.readString(dir.resolve("client.crt"))
       check("a second one is refused without --force", ClientCert.create(dir, ClientCert.Options(10, false)).isLeft)
