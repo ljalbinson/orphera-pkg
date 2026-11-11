@@ -94,7 +94,9 @@ command follows the same shape. The read-only queries (`facts`,
 
 **Build machine:**
 
-(On a clean Mac, `utils/macos-setup.sh` installs JDK 21, sbt, Go and the GitHub CLI under `~/.local`; see its header for what then works on macOS.)
+(On a clean Mac, `utils/macos-setup.sh` installs JDK 21, sbt, Go and the GitHub CLI under `~/.local`, with no Homebrew.
+After it, `sbt compile`, `sbt test` and `make orpheracli` work on macOS (run on an Intel Mac with Sonoma); the `.deb` and
+`.rpm` packages stay a Linux build, and GitHub builds them when a `v*` tag is pushed.)
 
 - **JDK 21.** Developed and tested against Oracle GraalVM 21.0.9
   (`21.0.9+7-LTS`) — any standard JDK 21 distribution should compile
@@ -1744,6 +1746,7 @@ auto-updated; remove the entry manually.
 | Where | What |
 |---|---|
 | `/usr/bin/orphera` | the command |
+| `/usr/bin/vmctl`, `start-vm`, ... | the utility commands (see *Utility commands* below) |
 | `/usr/lib/orphera` | the two jars and `orphera-env.sh` (the defaults below) |
 | `/usr/share/orphera` | read-only: `manifests/` (playbooks and their scripts), `utils/`, `catalogues/`, `schemas/`, `files/`, `examples/` |
 | `/usr/share/doc/orphera` | `README.md`, `CHANGELOG.md`, `LICENSE`, `docs/` |
@@ -1787,6 +1790,24 @@ make install PREFIX=$HOME/.local     # no root; add ~/.local/bin to PATH
 
 The tarball unpacks as `orphera-<version>/` with `bin/`, `lib/orphera/` and `share/orphera/` in it. Without root, unpack it
 anywhere, set `ORPHERA_SITE_DIR` to a directory of your own, and run `<dir>/bin/orphera`.
+
+**Utility commands.** `vmctl`, `start-vm`, `stop-vm`, `reboot-vm`, `list-vms`, `move-vm`, `galera-cold-start`,
+`scan-vm-sizes` and `vbmc-vm` (the list is `packaging/cli/utilities`) are commands on the `PATH`, so `vmctl start 30` works
+from any directory as `utils/vmctl.sh start 30` does in the checkout. Where they come from depends on how `orphera` was
+installed:
+
+| Installed by | Where | What each one runs |
+|---|---|---|
+| the packages, `make install` | `bin/` beside `orphera` (`/usr/bin` in the package) | `share/orphera/utils/<name>.sh` of that installation (`packaging/cli/utility`); native executables are not packaged |
+| `make orpheracli` | `/opt/orphera/bin` | the checkout's `utils/<name>` (the native executable, if `make native-utils` built it), else `utils/<name>.sh` (`utils/orphera-utility`). The checkout is `$ORPHERA_HOME`, else `~/orphera-pkg` |
+
+`make orpheracli` puts `/opt/orphera/bin` on the `PATH` of new login shells: through `/etc/profile.d/orphera-utils.sh` on
+Linux, and `/etc/paths.d/orphera` on macOS. `orphera` itself stays in `/usr/local/bin`.
+
+**On macOS.** `make orpheracli` works on a Mac (after `utils/macos-setup.sh`): it creates `/usr/local/lib` and
+`/usr/local/bin` when they are missing and does not use `install -D`, which the BSD `install` lacks. It writes neither
+`/etc/profile.d` nor the bash completion, which are Linux only. Run on an Intel Mac with Sonoma: `orphera help` and the
+utility commands run from any directory.
 
 A file a playbook names with a relative path (`src = "files/motd"`) is read from the current directory when it is there, as before,
 and otherwise from `$ORPHERA_ROOT` (`/usr/share/orphera` in the package), so the packaged playbooks work from any directory.
@@ -1874,7 +1895,7 @@ Afterwards both hosts hold the same CA key, secret store and SSH key, and either
 | `make certs` | generates the CA (`certs/ca.{crt,key}`) that signs each node's certificate. Refuses to run if `certs/ca.crt` already exists. `orphera init-ca` does the same without a checkout |
 | `orphera issue-certs --nodes ...` | issues each node its own certificate over SSH (see *Per-node certificates*) |
 | `make certs-clean` | deletes the CA in `certs/` — you must type `delete` to confirm; every node then needs a certificate from a new CA (`make certs`, `orphera issue-certs`) |
-| `make orpheracli` | builds the orchestrator and the scripting jar and installs them as `/usr/local/lib/orphera-orchestrator.jar` and `/usr/local/lib/orphera-scripting.jar`, with the `orphera` launcher in `/usr/local/bin` and the bash completion in `/etc/bash_completion.d/orphera` (effective in new shells) |
+| `make orpheracli` | builds the orchestrator and the scripting jar and installs them as `/usr/local/lib/orphera-orchestrator.jar` and `/usr/local/lib/orphera-scripting.jar`, with the `orphera` launcher in `/usr/local/bin`, the utility commands (`vmctl`, `start-vm`, ...) in `/opt/orphera/bin` (on the `PATH` of new login shells) and, on Linux, the bash completion in `/etc/bash_completion.d/orphera` (effective in new shells). Also works on macOS; see [Installing the command line](#installing-the-command-line) |
 | `make release` | bumps the patch version in `VERSION`, then runs the full clean/test/assembly/deb chain (plus the `.rpm` when `rpmbuild` is installed) and the command-line package (`make cli-package`) at the new version, and installs the new orchestrator on this machine as `make orpheracli` does. It does not commit `VERSION` or tag; see [Versions and tags](#versions-and-tags) |
 | `make fmt` | `scalafmt` over the sources, then over `manifests/` (`make fmt-manifests`) |
 | `make lint` | the `scalafix` rules in `.scalafix.conf` in check mode; CI runs the same check |
@@ -2441,7 +2462,9 @@ Worth knowing:
 `galera-cold-start.sh` also exist in Scala, compiled to native executables with Scala Native: `utils/vmctl`,
 `utils/start-vm` and so on, the same name without `.sh`. They take the same arguments, print the same, send the same
 scripts to the hypervisors and exit with the same codes, and start at once with no JVM. The shell versions stay and
-are not changed by them.
+are not changed by them. After `make orpheracli` both are reached by the plain name (`stop-vm --parallel 8 ...`), which
+runs the native executable when it has been built and the shell script otherwise (see *Utility commands* in
+[Installing the command line](#installing-the-command-line)).
 
 ```bash
 make native-utils             # all eight, in one sbt run (needs sbt and clang); installed in utils/
@@ -2460,7 +2483,7 @@ version says so in its own words.
 
 Tab completion (`orphera-completion.bash`) covers these scripts under both names, with and without `utils/`: the
 actions and options, VM names from the config files, hypervisor names, and group names for `--node-groups` (a
-comma-separated list completes one name at a time). Installed by `make orpheracli` in `/etc/bash_completion.d` it is
+comma-separated list completes one name at a time). Installed by `make orpheracli` in `/etc/bash_completion.d` (Linux only) it is
 read by every new shell; installed by the package as bash-completion's file for `orphera`, it is read the first time
 `orphera` itself is completed in a shell, and only then completes these scripts.
 

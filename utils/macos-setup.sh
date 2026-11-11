@@ -12,10 +12,10 @@
 # It can be run before the repository is cloned. Adds to ~/.zprofile, between "# >>> orphera build tools" and
 # "# <<< orphera build tools" markers.
 #
-# What it makes possible on a Mac: sbt compile, test and assembly; the Go agent (cross-compiled for Linux);
-# the Scala Native utilities (the Xcode tools provide clang). What it leaves to Linux: the .deb and .rpm
-# packages (dpkg and rpmbuild), `make orpheracli`, `make install` and the lab itself. The release packages are
-# built by GitHub when a v* tag is pushed.
+# What it makes possible on a Mac: sbt compile, test and assembly; `make orpheracli`; the Go agent
+# (cross-compiled for Linux); the Scala Native utilities (the Xcode tools provide clang). What it leaves to
+# Linux: the .deb and .rpm packages (dpkg and rpmbuild), `make install` and the lab itself. The release
+# packages are built by GitHub when a v* tag is pushed.
 set -euo pipefail
 
 SBT_VERSION=1.10.7   # the version project/build.properties pins; the project does not build with sbt 2
