@@ -11,6 +11,7 @@
 #   utils/start-vm.sh config/tst7.yaml          # an explicit config file
 #   utils/start-vm.sh --node-groups ceph        # every VM in an inventory group
 #   utils/start-vm.sh --node-groups k8s --exclude-nodes tst39 50   # groups and VMs, less some
+#   utils/start-vm.sh --parallel 8 --node-groups k8s   # up to 8 at a time
 #
 # A VM that is shut off is started, a paused one is resumed, and one that is
 # already running is left alone. The script reports that the hypervisor has
@@ -28,6 +29,8 @@
 # checked against the inventory and without repeats (`orphera nodes`), less
 # the VMs excluded; the VMs are printed first. --exclude-nodes needs
 # --node-groups or VM names as well. Options may come anywhere among the names.
+# --parallel N starts up to N VMs at a time (default 1, one after another);
+# the results are still printed in command-line order.
 
 set -uo pipefail
 . "$(dirname "$0")/vm-common.sh"
@@ -35,8 +38,10 @@ set -uo pipefail
 usage() { sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'; }
 [ $# -gt 0 ] || { usage; exit 2; }
 pos=()
+par=1
 while [ $# -gt 0 ]; do
   case "$1" in
+    --parallel) vm_parallel_option "${2:-}"; par=$2; shift 2 ;;
     --node-groups|--exclude-nodes) vm_select_option "$1" "${2:-}"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     -*) echo "unknown option $1" >&2; exit 2 ;;
@@ -66,12 +71,7 @@ esac
 SH
 }
 
-failed=""
-for arg in "$@"; do
-  vm_lookup "$arg" || { failed="$failed $arg"; continue; }
-  vm_run "$hv" "$(remote_script "$vm")"
-  vm_report "$vm" "$hv" || failed="$failed $vm"
-done
+vm_run_all "$par" "" remote_script "$@"
 
 if [ -n "$failed" ]; then
   echo "Not started:$failed" >&2

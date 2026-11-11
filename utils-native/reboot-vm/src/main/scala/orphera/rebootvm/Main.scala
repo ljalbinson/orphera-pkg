@@ -15,6 +15,7 @@ object Main:
 
   final case class Opts(
       sel: Selection = Selection(),
+      par: String = "1",
       hard: Boolean = false,
       waitS: String = "120",
       force: Boolean = false
@@ -28,12 +29,16 @@ object Main:
     sys.exit(code)
 
   private def usage(src: Sources): Unit =
-    src.usage("reboot-vm.sh", "Usage: reboot-vm [--soft | --hard] [--wait SECONDS] [--force] [--node-groups G] [--exclude-nodes V] <vm>...")
+    src.usage("reboot-vm.sh", "Usage: reboot-vm [--soft | --hard] [--wait SECONDS] [--force] [--parallel N] [--node-groups G] [--exclude-nodes V] <vm>...")
 
   @tailrec
   private def parse(args: List[String], o: Opts, src: Sources): Opts =
     args match
       case Nil => o
+      case "--parallel" :: rest =>
+        VmCommon.parallelOption(rest.headOption) match
+          case Some(v) => parse(rest.drop(1), o.copy(par = v), src)
+          case None    => sys.exit(2)
       case (opt @ ("--node-groups" | "--exclude-nodes")) :: rest =>
         o.sel.withOption(opt, rest.headOption) match
           case Some(s) => parse(rest.drop(1), o.copy(sel = s), src)
@@ -60,20 +65,11 @@ object Main:
       sys.exit(2)
     // $((wait_s + 60)): a leading 0 is octal there, as in bash
     val hardTimeout = (Bash.arith(o.waitS).getOrElse(o.waitS.toLong) + 60).toString
-    val failed = vms.foldLeft(Vector.empty[String]) { (acc, arg) =>
-      src.vmLookup(arg) match
-        case None => acc :+ arg
-        case Some(vm) =>
-          val result =
-            if o.hard then
-              val script = Scripts.hard
-                .replace("@VM@", vm.name)
-                .replace("@WAIT@", o.waitS)
-                .replace("@FORCE@", if o.force then "1" else "0")
-              VmCommon.vmRun(src, vm.hv, script, hardTimeout)
-            else VmCommon.vmRun(src, vm.hv, Scripts.soft.replace("@VM@", vm.name))
-          if VmCommon.report(vm.name, vm.hv, result) then acc else acc :+ vm.name
-    }
+    def hardScript(vm: String) =
+      Scripts.hard.replace("@VM@", vm).replace("@WAIT@", o.waitS).replace("@FORCE@", if o.force then "1" else "0")
+    val failed =
+      if o.hard then VmCommon.runAll(src, o.par, hardTimeout, hardScript, vms)
+      else VmCommon.runAll(src, o.par, "", vm => Scripts.soft.replace("@VM@", vm), vms)
     if failed.isEmpty then 0
     else
       Out.err(s"Not rebooted:${failed.map(f => s" $f").mkString}")

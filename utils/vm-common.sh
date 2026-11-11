@@ -44,6 +44,11 @@ vm_lookup() {
 # hypervisor never answered) and out to everything that came back.
 vm_run() {
   out=$(orphera run --nodes "$1" --quiet --timeout "${3:-60}" -- sh -c "$2" 2>&1)
+  vm_result
+}
+
+# vm_result  sets result from out, as vm_run does.
+vm_result() {
   result=$(printf '%s\n' "$out" | sed -n 's/^\[[^]]*\] *RESULT|//p; s/^RESULT|//p' | head -1)
 }
 
@@ -132,4 +137,55 @@ vm_select() {
   SELECTED=($expanded)
   [ "${#SELECTED[@]}" -gt 0 ] || { echo "the selection has no VMs in it" >&2; exit 2; }
   echo "VMs: ${SELECTED[*]}"
+}
+
+# vm_parallel_option <value>  checks the value of --parallel (a number of VMs, 1 or more).
+vm_parallel_option() {
+  case "${1:-}" in ''|*[!0-9]*) echo "--parallel needs a number of VMs (1 or more)" >&2; exit 2 ;; esac
+  [ "$1" -ge 1 ] || { echo "--parallel needs a number of VMs (1 or more)" >&2; exit 2; }
+}
+
+# vm_run_all <parallel> <timeout> <script function> <vm>...  looks each VM up, runs the script the function
+# prints for its domain name on its hypervisor and reports, adding the VMs that failed to $failed. With
+# <parallel> 1 one VM after another; with more, up to that many at a time: the VMs are all looked up first,
+# then each report is printed in command-line order as soon as that VM and those before it have finished.
+vm_run_all() {
+  local par=$1 timeout=$2 fn=$3 arg tmpd k n=0 launched=0
+  shift 3
+  failed=""
+  if [ "$par" -le 1 ]; then
+    for arg in "$@"; do
+      vm_lookup "$arg" || { failed="$failed $arg"; continue; }
+      vm_run "$hv" "$("$fn" "$vm")" "$timeout"
+      vm_report "$vm" "$hv" || failed="$failed $vm"
+    done
+    return 0
+  fi
+  local -a a_arg=() a_vm=() a_hv=() a_ok=() pids=()
+  for arg in "$@"; do
+    a_arg[n]=$arg a_ok[n]=0
+    if vm_lookup "$arg"; then a_vm[n]=$vm a_hv[n]=$hv a_ok[n]=1; fi
+    n=$((n + 1))
+  done
+  tmpd=$(mktemp -d) || exit 1
+  trap 'rm -rf "$tmpd"' EXIT
+  for ((k = 0; k < n; k++)); do
+    while [ "$launched" -lt "$n" ] && [ "$launched" -lt $((k + par)) ]; do
+      if [ "${a_ok[launched]}" = 1 ]; then
+        ( vm_run "${a_hv[launched]}" "$("$fn" "${a_vm[launched]}")" "$timeout"; printf '%s' "$out" >"$tmpd/$launched" ) &
+        pids[launched]=$!
+      fi
+      launched=$((launched + 1))
+    done
+    if [ "${a_ok[k]}" = 1 ]; then
+      wait "${pids[k]}"
+      out=$(cat "$tmpd/$k" 2>/dev/null)
+      vm_result
+      vm_report "${a_vm[k]}" "${a_hv[k]}" || failed="$failed ${a_vm[k]}"
+    else
+      failed="$failed ${a_arg[k]}"
+    fi
+  done
+  rm -rf "$tmpd"
+  trap - EXIT
 }

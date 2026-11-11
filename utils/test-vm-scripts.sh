@@ -50,6 +50,7 @@ while [ $# -gt 0 ]; do
   case "$1" in --nodes) nodes=$2; shift 2 ;; --timeout) timeout=$2; shift 2 ;; --quiet) shift ;; --) shift; break ;; *) shift ;; esac
 done
 script=$3
+[ -z "${STUB_SLEEP:-}" ] || sleep "$STUB_SLEEP"
 sum=$(printf '%s' "$script" | sha256sum | cut -c1-16)
 mkdir -p "$STUB_DIR/scripts"
 printf '%s' "$script" > "$STUB_DIR/scripts/$sum"
@@ -145,6 +146,11 @@ t start-vm --exclude-nodes tst1
 t start-vm --exclude-nodes tst1 1 2 3
 t start-vm --node-groups web --exclude-nodes tst1,tst2
 t start-vm --node-groups web unknownvm
+t start-vm --parallel 3 1 2 badvm nosuch silentvm 3
+t start-vm --parallel 1 1 badvm
+t start-vm --parallel 0 1
+t start-vm --parallel x 1
+t start-vm 1 --parallel
 
 t stop-vm
 t stop-vm --help
@@ -161,6 +167,8 @@ t stop-vm --node-groups mixed --wait 60
 t stop-vm --force --node-groups web --exclude-nodes tst2 3
 t stop-vm --exclude-nodes
 t stop-vm --wait x --node-groups web
+t stop-vm --parallel 2 --wait 60 --node-groups mixed
+t stop-vm --parallel 010 --force 1 2 3 badvm
 
 t reboot-vm
 t reboot-vm --help
@@ -175,6 +183,8 @@ t reboot-vm --wait
 t reboot-vm --node-groups web
 t reboot-vm --hard --node-groups mixed --exclude-nodes badvm
 t reboot-vm 2 --hard --node-groups web
+t reboot-vm --hard --parallel 4 1 2 3 silentvm
+t reboot-vm --parallel 2 1 nosuch 2
 
 t list-vms
 t list-vms gs1
@@ -182,5 +192,22 @@ t list-vms gs1 gsdown gs2
 t list-vms 'gs1  gs2'
 t list-vms gsdown
 
+# --parallel must overlap the runs: four VMs that each take 1 s, 4 at a time, in well under 4 s.
+slow=0
+for side in a b; do
+  if [ "$side" = a ]; then prog="$repo/utils/stop-vm.sh"; else prog="$repo/utils/stop-vm$suffix"; fi
+  rm -rf "$tmp/$side"; setup "$tmp/$side"
+  start=$(date +%s%N)
+  (cd "$tmp/$side" && PATH="$tmp/bin:$PATH" STUB_DIR="$tmp/$side/stub" STUB_SLEEP=1 ORPHERA_CONFIG_DIR= \
+    "$prog" --parallel 4 1 2 3 badvm >/dev/null 2>&1 </dev/null)
+  ms=$(( ($(date +%s%N) - start) / 1000000 ))
+  if [ "$ms" -lt 2500 ]; then
+    printf '  ok    stop-vm --parallel 4, four VMs of 1 s each: %s ms (%s)\n' "$ms" "$([ $side = a ] && echo shell || echo native)"
+  else
+    printf '  SLOW  stop-vm --parallel 4, four VMs of 1 s each: %s ms (%s); not run in parallel\n' "$ms" "$([ $side = a ] && echo shell || echo native)"
+    slow=1
+  fi
+done
+
 echo "$cases cases, $diffs differ"
-[ "$diffs" -eq 0 ]
+[ "$diffs" -eq 0 ] && [ "$slow" -eq 0 ]

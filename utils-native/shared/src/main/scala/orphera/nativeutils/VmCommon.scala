@@ -2,6 +2,8 @@
 
 package orphera.nativeutils
 
+import java.nio.charset.StandardCharsets
+import java.nio.file.{Files, Path, Paths}
 import java.util.regex.Pattern
 
 import scala.util.Try
@@ -34,15 +36,80 @@ object VmCommon:
       .nextOption()
       .getOrElse("")
 
+  private def runCommand(hv: String, script: String, timeout: String): List[String] =
+    List("orphera", "run", "--nodes", hv, "--quiet", "--timeout", if timeout.isEmpty then "60" else timeout,
+      "--", "sh", "-c", script)
+
   /** `vm_run <hypervisor> <script> [timeout]`: runs the script there, as the agent (root). */
   def vmRun(src: Sources, hv: String, script: String, timeout: String = "60"): Run =
-    val (_, out) = Proc.capture(
-      List("orphera", "run", "--nodes", hv, "--quiet", "--timeout", timeout, "--", "sh", "-c", script),
-      src.env,
-      src.root,
-      ErrMode.Merge
-    )
+    val (_, out) = Proc.capture(runCommand(hv, script, timeout), src.env, src.root, ErrMode.Merge)
     Run(out, after(out, "RESULT|"))
+
+  /** `vm_parallel_option`: the value of --parallel if it is a number of VMs (1 or more). */
+  def parallelOption(value: Option[String]): Option[String] =
+    value match
+      case Some(v) if v.nonEmpty && Sources.allDigits(v) && Bash.testInt(v).exists(_ >= 1) => Some(v)
+      case _ =>
+        Out.err("--parallel needs a number of VMs (1 or more)")
+        None
+
+  /** `vm_run_all <parallel> <timeout> <script> <vm>...`: looks each VM up,
+    * runs `script(domain)` on its hypervisor and reports; the VMs that failed.
+    * With `parallel` 1 one VM after another; with more, up to that many at a
+    * time: the VMs are all looked up first, then each report is printed in
+    * command-line order as soon as that VM and those before it have finished.
+    */
+  def runAll(
+      src: Sources,
+      parallel: String,
+      timeout: String,
+      script: String => String,
+      args: Seq[String]
+  ): Vector[String] =
+    if Bash.testInt(parallel).forall(_ <= 1) then
+      args.foldLeft(Vector.empty[String]) { (failed, arg) =>
+        src.vmLookup(arg) match
+          case None => failed :+ arg
+          case Some(vm) =>
+            if report(vm.name, vm.hv, vmRun(src, vm.hv, script(vm.name), timeout)) then failed
+            else failed :+ vm.name
+      }
+    else
+      val looked = args.toVector.map(a => (a, src.vmLookup(a)))
+      // $((k + par)): a leading 0 is octal there, as in bash
+      val window = Bash.arith(parallel).orElse(Bash.testInt(parallel)).getOrElse(1L)
+      val tmp: Path = Files.createTempDirectory(
+        Paths.get(src.env.get("TMPDIR").filter(_.nonEmpty).getOrElse("/tmp")),
+        "tmp."
+      )
+      var running = Map.empty[Int, Option[Process]]
+      var launched = 0
+      var failed = Vector.empty[String]
+      try
+        looked.indices.foreach { k =>
+          while launched < looked.size && launched < k + window do
+            looked(launched)._2.foreach { vm =>
+              running += launched -> Proc.background(
+                runCommand(vm.hv, script(vm.name), timeout),
+                src.env,
+                src.root,
+                tmp.resolve(launched.toString)
+              )
+            }
+            launched += 1
+          looked(k) match
+            case (_, Some(vm)) =>
+              running.get(k).flatten.foreach(_.waitFor())
+              val out = Try(new String(Files.readAllBytes(tmp.resolve(k.toString)), StandardCharsets.UTF_8))
+                .getOrElse("")
+                .replaceAll("\n+$", "")
+              if !report(vm.name, vm.hv, Run(out, after(out, "RESULT|"))) then failed :+= vm.name
+            case (arg, None) => failed :+= arg
+        }
+      finally
+        Try(Option(tmp.toFile.listFiles()).foreach(_.foreach(_.delete())))
+        Try(Files.deleteIfExists(tmp))
+      failed
 
   /** `vm_report <vm> <hypervisor>`: prints the outcome of a vmRun; false when
     * it was not a success.

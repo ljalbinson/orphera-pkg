@@ -10,6 +10,7 @@
 #   utils/reboot-vm.sh --hard tst7
 #   utils/reboot-vm.sh --hard --force --wait 60 tst7
 #   utils/reboot-vm.sh --node-groups k8s-workers
+#   utils/reboot-vm.sh --hard --parallel 4 --node-groups k8s-workers   # up to 4 at a time
 #
 #   --soft         virsh reboot: asks the guest to reboot (an ACPI request), so
 #                  the guest shuts down cleanly and comes straight back; a guest
@@ -23,6 +24,8 @@
 #                  failed and left running
 #   --node-groups G1,G2     every VM in those inventory groups
 #   --exclude-nodes V1,V2   leave those VMs out of the selection
+#   --parallel N            work on up to N VMs at a time (default 1, one after
+#                           another); the results are still printed in order
 #
 # The groups and VM names are taken in the order given, each group as its
 # members (`orphera nodes --groups` lists them), checked against the inventory
@@ -43,8 +46,10 @@ mode=soft
 wait_s=120
 force=0
 pos=()
+par=1
 while [ $# -gt 0 ]; do
   case "$1" in
+    --parallel) vm_parallel_option "${2:-}"; par=$2; shift 2 ;;
     --node-groups|--exclude-nodes) vm_select_option "$1" "${2:-}"; shift 2 ;;
     --soft) mode=soft; shift ;;
     --hard) mode=hard; shift ;;
@@ -104,16 +109,11 @@ out=\$(\$V start '$1' 2>&1) && echo "RESULT|ok|\$how, started" || echo "RESULT|e
 SH
 }
 
-failed=""
-for arg in "$@"; do
-  vm_lookup "$arg" || { failed="$failed $arg"; continue; }
-  if [ "$mode" = hard ]; then
-    vm_run "$hv" "$(hard_script "$vm")" $((wait_s + 60))
-  else
-    vm_run "$hv" "$(soft_script "$vm")"
-  fi
-  vm_report "$vm" "$hv" || failed="$failed $vm"
-done
+if [ "$mode" = hard ]; then
+  vm_run_all "$par" $((wait_s + 60)) hard_script "$@"
+else
+  vm_run_all "$par" "" soft_script "$@"
+fi
 
 if [ -n "$failed" ]; then
   echo "Not rebooted:$failed" >&2
