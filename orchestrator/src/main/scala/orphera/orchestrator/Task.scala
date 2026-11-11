@@ -109,10 +109,37 @@ final case class FactCondition(
       case "hostname"   => Some(facts.hostname)
       case _            => None
 
+/** How a failed task is tried again: up to `retries` more times, waiting
+  * `delaySeconds` before the first retry and twice as long before each one
+  * after it, but never more than `maxDelaySeconds`. Every failure is retried —
+  * a remote command that reported failure, a node that could not be reached —
+  * so it is for tasks that are safe to run again.
+  */
+final case class Retry(
+    retries: Int,
+    delaySeconds: Int = Retry.DefaultDelaySeconds,
+    maxDelaySeconds: Int = Retry.MaxDelaySeconds
+):
+  /** Seconds to wait before retry `n` (1 for the first). */
+  def delayBefore(n: Int): Int =
+    val doubled = delaySeconds.toLong << math.min(math.max(n - 1, 0), 30)
+    math.min(doubled, maxDelaySeconds.toLong).toInt
+
+object Retry:
+  val DefaultDelaySeconds: Int = 5
+  val MaxDelaySeconds: Int = 300
+
+  /** A Retry for `retries` more attempts, or None for 0 (no retry). */
+  def of(retries: Int, delaySeconds: Int = DefaultDelaySeconds): Option[Retry] =
+    Option.when(retries > 0)(
+      Retry(retries, math.max(delaySeconds, 0))
+    )
+
 final case class NamedTask(
     name: String,
     task: Task,
-    when: Option[FactCondition] = None
+    when: Option[FactCondition] = None,
+    retry: Option[Retry] = None
 )
 
 final case class Playbook(

@@ -32,6 +32,25 @@ object ClusterPlaybookDsl:
         case None =>
           this
 
+    /** Retries the most recently added task when it fails: up to `times` more
+      * times, `delaySeconds` before the first retry and doubling after it (see
+      * Retry).
+      */
+    def retry(
+        times: Int,
+        delaySeconds: Int = Retry.DefaultDelaySeconds
+    ): StageBuilder =
+      tasks.lastOption match
+        case Some(last) =>
+          new StageBuilder(
+            name,
+            nodes,
+            tasks.dropRight(1) :+ last.copy(retry = Retry.of(times, delaySeconds)),
+            waitForCheck
+          )
+        case None =>
+          this
+
     def waitFor(check: HealthCheck): StageBuilder =
       new StageBuilder(name, nodes, tasks, Some(check))
 

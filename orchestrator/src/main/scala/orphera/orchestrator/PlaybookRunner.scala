@@ -60,13 +60,15 @@ object PlaybookRunner:
     * are gathered, `{{...}}` is sent as typed, there is no checkpoint or run
     * log (the audit log records the command), and the output is the console's
     * (`[node] ...`). A node that fails, or cannot be reached, does not stop the
-    * others. Returns whether it succeeded on every node.
+    * others; with `retry` (`--retries`), it is tried again first. Returns
+    * whether it succeeded on every node.
     */
   def runCommand(
       command: String,
       nodes: List[Node],
       task: Task,
-      quiet: Boolean = false
+      quiet: Boolean = false,
+      retry: Option[Retry] = None
   ): IO[Boolean] =
     for
       env <- TaskExecutor.commandEnv(quiet)
@@ -74,7 +76,7 @@ object PlaybookRunner:
       runLog <- RunLog.disabled
       results <- nodes.parTraverse(
         TaskExecutor.runTasks(
-          List(NamedTask(command, task)),
+          List(NamedTask(command, task, retry = retry)),
           _,
           env,
           checkpoint,

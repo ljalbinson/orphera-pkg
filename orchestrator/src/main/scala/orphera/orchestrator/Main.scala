@@ -132,6 +132,25 @@ object Main extends IOApp:
       case other => other
 
   private def dispatchCommand(args: List[String]): IO[ExitCode] =
+    // --retries/--retry-delay: parse has checked them and left them out of the
+    // Command; read them here for the commands that run as a task.
+    val retry = Cli.extractRetry(args).toOption.flatMap(_._1)
+
+    def runAsTask(
+        command: String,
+        nodeNames: Option[List[String]],
+        task: Task,
+        quiet: Boolean = false
+    ): IO[ExitCode] =
+      runAsTaskOn(command, nodeNames, task, quiet, retry)
+
+    def runOnNodes(
+        command: String,
+        targets: List[Node],
+        task: Task
+    ): IO[ExitCode] =
+      runOnNodesWith(command, targets, task, quiet = false, retry)
+
     Cli.parse(args).map(withResolvedConfigs) match
 
       case Left(error) =>
@@ -1123,24 +1142,26 @@ object Main extends IOApp:
   /** A command that changes a node, run as a playbook of one task named after
     * the command; exits non-zero if it failed on any node.
     */
-  private def runAsTask(
+  private def runAsTaskOn(
       command: String,
       nodeNames: Option[List[String]],
       task: Task,
-      quiet: Boolean = false
+      quiet: Boolean,
+      retry: Option[Retry]
   ): IO[ExitCode] =
     val targets = selectTargets(nodeNames)
     if targets.isEmpty then noMatchingNodes
-    else runOnNodes(command, targets, task, quiet)
+    else runOnNodesWith(command, targets, task, quiet, retry)
 
-  private def runOnNodes(
+  private def runOnNodesWith(
       command: String,
       targets: List[Node],
       task: Task,
-      quiet: Boolean = false
+      quiet: Boolean,
+      retry: Option[Retry]
   ): IO[ExitCode] =
     PlaybookRunner
-      .runCommand(command, targets, task, quiet)
+      .runCommand(command, targets, task, quiet, retry)
       .map(ok => if ok then ExitCode.Success else ExitCode.Error)
 
   private def withTargets(nodeNames: Option[List[String]])(
