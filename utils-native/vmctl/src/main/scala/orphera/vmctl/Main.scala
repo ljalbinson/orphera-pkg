@@ -10,7 +10,7 @@ import java.util.regex.Pattern
 import scala.annotation.tailrec
 import scala.util.Try
 
-import orphera.nativeutils.{Out, Proc, Sources}
+import orphera.nativeutils.{Bash, Out, Proc, Sources, VmCommon}
 
 /** utils/vmctl.sh in Scala, for Scala Native: the same actions, options,
   * output, log files and exit codes. The VM playbooks in manifests/ do the
@@ -43,6 +43,7 @@ object Main:
       except: String = "",
       all: Boolean = false,
       dry: Boolean = false,
+      par: String = "",
       ngroups: Vector[String] = Vector.empty,
       nexclude: Vector[String] = Vector.empty,
       hvs: Vector[String] = Vector.empty,
@@ -80,6 +81,10 @@ object Main:
         val (v, t) = value(rest, "--wait needs a number of seconds")
         parse(t, o.copy(waitS = v), src)
       case "--force" :: t   => parse(t, o.copy(force = true), src)
+      case "--parallel" :: rest =>
+        VmCommon.parallelOption(rest.headOption) match
+          case Some(v) => parse(rest.drop(1), o.copy(par = v), src)
+          case None    => sys.exit(2)
       case "--hard" :: t    => parse(t, o.copy(mode = "hard"), src)
       case "--soft" :: t    => parse(t, o.copy(mode = "soft"), src)
       case "--yes" :: t     => parse(t, o.copy(yes = true), src)
@@ -125,6 +130,8 @@ object Main:
       die(2, "--wait and --force apply to stop and reboot only")
     if o.mode.nonEmpty && action != "reboot" then
       die(2, "--hard and --soft apply to reboot only")
+    if o.par.nonEmpty && !Set("start", "stop", "reboot").contains(action) then
+      die(2, "--parallel applies to start, stop and reboot only")
 
   /** --node-groups and --exclude-nodes: the groups and VM names in command-line
     * order, each group as its members (`orphera nodes --groups`), a bare
@@ -376,26 +383,47 @@ object Main:
       opt(o.waitS.nonEmpty, "ORPHERA_VM_WAIT" -> o.waitS) ++
       opt(o.force, "ORPHERA_VM_FORCE" -> "1") ++
       opt(o.mode.nonEmpty, "ORPHERA_VM_MODE" -> o.mode)
-    val failed = vms.foldLeft(Vector.empty[String]) { (acc, arg) =>
-      src.vmLookup(arg) match
-        case None => acc :+ arg
-        case Some(vm) =>
-          val log = s"/tmp/vmctl.${vm.name}.log"
-          val rc = Proc.toLog(
-            List("orphera", "cluster-playbook", playbook, "--config", vm.cfg),
-            src.env ++ extra,
-            src.root,
-            Paths.get(log)
-          )
-          // One line per step: drop the echoed script text and the "Running: ..." lines.
-          showSteps(log, "^\\[kvm-vm-[a-z]*\\] Starting")
-          if rc != 0 || failedIn(log) then
-            Out.err(s"${vm.name}: $action FAILED (full output: $log)")
-            acc :+ vm.name
-          else
-            Out.out(s"${vm.name}: $action done")
-            acc
-    }
+    def command(vm: Sources.Vm) = List("orphera", "cluster-playbook", playbook, "--config", vm.cfg)
+    def logOf(vm: Sources.Vm) = s"/tmp/vmctl.${vm.name}.log"
+
+    // show_vm: one line per step (without the echoed script text and the "Running: ..." lines) and the result
+    def show(vm: Sources.Vm, rc: Int): Boolean =
+      val log = logOf(vm)
+      showSteps(log, "^\\[kvm-vm-[a-z]*\\] Starting")
+      if rc != 0 || failedIn(log) then
+        Out.err(s"${vm.name}: $action FAILED (full output: $log)")
+        false
+      else
+        Out.out(s"${vm.name}: $action done")
+        true
+
+    val failed =
+      if Bash.testInt(o.par).forall(_ <= 1) then
+        vms.foldLeft(Vector.empty[String]) { (acc, arg) =>
+          src.vmLookup(arg) match
+            case None => acc :+ arg
+            case Some(vm) =>
+              val rc = Proc.toLog(command(vm), src.env ++ extra, src.root, Paths.get(logOf(vm)))
+              if show(vm, rc) then acc else acc :+ vm.name
+        }
+      else
+        // Look every VM up first, then keep up to --parallel playbooks running, reporting in command-line order.
+        val looked = vms.map(a => (a, src.vmLookup(a)))
+        val window = Bash.arith(o.par).orElse(Bash.testInt(o.par)).getOrElse(1L)
+        var running = Map.empty[Int, Option[Process]]
+        var launched = 0
+        looked.indices.foldLeft(Vector.empty[String]) { (acc, k) =>
+          while launched < looked.size && launched < k + window do
+            looked(launched)._2.foreach { vm =>
+              running += launched -> Proc.background(command(vm), src.env ++ extra, src.root, Paths.get(logOf(vm)))
+            }
+            launched += 1
+          looked(k) match
+            case (_, Some(vm)) =>
+              val rc = running.get(k).flatten.fold(127)(_.waitFor())
+              if show(vm, rc) then acc else acc :+ vm.name
+            case (arg, None) => acc :+ arg
+        }
     if failed.isEmpty then 0
     else
       Out.err(s"Failed:${failed.map(f => s" $f").mkString}")

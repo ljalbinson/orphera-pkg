@@ -46,6 +46,7 @@ case "${1:-}" in
       echo "$n"
     done ;;
   cluster-playbook)
+    [ -z "${STUB_SLEEP:-}" ] || sleep "$STUB_SLEEP"
     pb=$2; shift 2
     cfg=""
     [ "${1:-}" = --config ] && cfg=$2
@@ -93,6 +94,11 @@ t() {
 }
 
 # usage and argument errors
+t start --parallel 0 1
+t start --parallel
+t start --parallel x 1
+t shutdown-all --parallel 2 gs1
+t autostart add --parallel 2 0
 t
 t --help
 t bogus
@@ -131,6 +137,14 @@ t start nosuch
 t start weird
 t start badvm 1 nosuch
 
+# --parallel
+t start --parallel 3 0 1 2
+t stop --parallel 2 --wait 60 --force 0 badvm nosuch 1
+t reboot --hard --parallel 010 0 1 badvm
+t start --parallel 1 0 nosuch
+t start 0 --parallel 2 --node-groups ceph
+t stop --parallel 4 7 weird 2
+
 # node groups
 t start --node-groups ceph
 t stop --node-groups k8s-workers,k8s-dns --exclude-nodes tst39
@@ -167,5 +181,20 @@ t autostart add badvm 0
 t autostart add 5 0 badvm 1
 t autostart add nosuch 0
 
+# --parallel must overlap the playbooks: four VMs whose playbook takes 1 s each, 4 at a time, in well under 4 s.
+slow=0
+for prog in "$repo/utils/vmctl.sh" "$native"; do
+  start=$(date +%s%N)
+  (PATH="$tmp/bin:$PATH" ORPHERA_CONFIG_DIR="$tmp/config" HYPERVISORS="" STUB_SLEEP=1 \
+    "$prog" start --parallel 4 0 1 2 5 >/dev/null 2>&1 </dev/null)
+  ms=$(( ($(date +%s%N) - start) / 1000000 ))
+  if [ "$ms" -lt 2500 ]; then
+    printf '  ok    start --parallel 4, four playbooks of 1 s each: %s ms (%s)\n' "$ms" "$prog"
+  else
+    printf '  SLOW  start --parallel 4, four playbooks of 1 s each: %s ms (%s); not run in parallel\n' "$ms" "$prog"
+    slow=1
+  fi
+done
+
 echo "$cases cases, $diffs differ"
-[ "$diffs" -eq 0 ]
+[ "$diffs" -eq 0 ] && [ "$slow" -eq 0 ]

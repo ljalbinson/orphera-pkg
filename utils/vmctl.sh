@@ -16,6 +16,7 @@
 #   utils/vmctl.sh start --node-groups k8s       # every VM in that inventory group (orphera nodes --groups lists them)
 #   utils/vmctl.sh stop --node-groups k8s-workers,k8s-dns --exclude-nodes tst39   # groups, less some VMs
 #   utils/vmctl.sh start --node-groups lustre-servers 49 50   # groups and VM names together, started in that order
+#   utils/vmctl.sh stop --parallel 8 --node-groups k8s   # up to 8 VMs at a time (start, stop, reboot)
 #   utils/vmctl.sh shutdown-all <hypervisor>...  # list the running VMs on those hypervisors (nothing is shut down)
 #   utils/vmctl.sh shutdown-all --yes gs2 st0    # shut them all down, gracefully, and wait
 #   utils/vmctl.sh shutdown-all --yes --force --except <vm> gs2   # power off any that do not stop; leave <vm> running
@@ -50,6 +51,9 @@
 # the VM names. --exclude-nodes needs
 # --node-groups or VM names as well: it never means every VM. Groups are for VMs; a member with no config/<vm>.yaml
 # (a hypervisor, say) fails like any other unknown VM.
+# --parallel N (start, stop, reboot) runs the playbook for up to N VMs at a time instead of one after another (the
+# default, 1). The VMs are all looked up first; each VM's steps and result are then printed in command-line order as
+# soon as that VM and those before it have finished, so the output reads as before.
 #
 # Unlike start-vm.sh, stop-vm.sh and reboot-vm.sh (which only ask the hypervisor), these run
 # the playbooks, so `start` also waits until the guest answers SSH. Prints one line per step;
@@ -80,7 +84,7 @@ case "$action" in
   *) echo "unknown action '$action' (start, stop, reboot, shutdown-all, start-all, autostart or list)" >&2; exit 2 ;;
 esac
 
-retries="" wait_s="" force="" mode="" yes="" except="" all="" dry="" ngroups="" nexclude=""
+retries="" wait_s="" force="" mode="" yes="" except="" all="" dry="" ngroups="" nexclude="" par=""
 hvs=()
 pos=()     # the positional arguments (VM names, hypervisors), in order
 order=()   # VM names and --node-groups values as given, "n:<vm>" or "g:<g1,g2>", to keep the command-line order
@@ -89,6 +93,7 @@ while [ $# -gt 0 ]; do
     --retries) retries=${2:-}; shift 2 || { echo "--retries needs a number" >&2; exit 2; } ;;
     --wait) wait_s=${2:-}; shift 2 || { echo "--wait needs a number of seconds" >&2; exit 2; } ;;
     --force) force=1; shift ;;
+    --parallel) vm_parallel_option "${2:-}"; par=$2; shift 2 ;;
     --hard) mode=hard; shift ;;
     --soft) mode=soft; shift ;;
     --yes) yes=1; shift ;;
@@ -119,6 +124,7 @@ done
 [ "${#hvs[@]}" -eq 0 ] || [ "$action" = autostart ] || { echo "--hypervisor applies to autostart only" >&2; exit 2; }
 [ -z "$wait_s$force" ] || [ "$action" != start ] || { echo "--wait and --force apply to stop and reboot only" >&2; exit 2; }
 [ -z "$mode" ] || [ "$action" = reboot ] || { echo "--hard and --soft apply to reboot only" >&2; exit 2; }
+[ -z "$par" ] || case "$action" in start|stop|reboot) ;; *) echo "--parallel applies to start, stop and reboot only" >&2; exit 2 ;; esac
 if [ -n "$ngroups$nexclude" ]; then
   case "$action" in
     start|stop|reboot|autostart) ;;
@@ -248,26 +254,62 @@ fi
 playbook="manifests/kvm_vm_$action.scala"
 [ -f "$playbook" ] || { echo "$playbook not found" >&2; exit 1; }
 
-failed=""
-for arg in "$@"; do
-  vm_lookup "$arg" || { failed="$failed $arg"; continue; }
-  log="/tmp/vmctl.$vm.log"
-  env_args=()
-  [ -z "$retries" ] || env_args+=("ORPHERA_VM_RETRIES=$retries")
-  [ -z "$wait_s" ] || env_args+=("ORPHERA_VM_WAIT=$wait_s")
-  [ -z "$force" ] || env_args+=("ORPHERA_VM_FORCE=1")
-  [ -z "$mode" ] || env_args+=("ORPHERA_VM_MODE=$mode")
-  env "${env_args[@]}" orphera cluster-playbook "$playbook" --config "$cfg" >"$log" 2>&1
-  rc=$?
+env_args=()
+[ -z "$retries" ] || env_args+=("ORPHERA_VM_RETRIES=$retries")
+[ -z "$wait_s" ] || env_args+=("ORPHERA_VM_WAIT=$wait_s")
+[ -z "$force" ] || env_args+=("ORPHERA_VM_FORCE=1")
+[ -z "$mode" ] || env_args+=("ORPHERA_VM_MODE=$mode")
+
+# run_vm <config file> <log>  runs the playbook for one VM.
+run_vm() {
+  env "${env_args[@]}" orphera cluster-playbook "$playbook" --config "$1" >"$2" 2>&1
+}
+
+# show_vm <vm> <log> <exit code>  prints the steps and the result, and adds a failed VM to $failed.
+show_vm() {
   # One line per step: drop the echoed script text and the "Running: ..." lines.
-  grep -E '^\[[A-Za-z0-9_-]+\] ' "$log" | grep -v ': Running: ' | grep -v '^\[kvm-vm-[a-z]*\] Starting' | sed 's/^/  /'
-  if [ "$rc" -ne 0 ] || grep -qE "aborting remaining stages|Cluster playbook .* failed|FAILED" "$log"; then
-    echo "$vm: $action FAILED (full output: $log)" >&2
-    failed="$failed $vm"
+  grep -E '^\[[A-Za-z0-9_-]+\] ' "$2" | grep -v ': Running: ' | grep -v '^\[kvm-vm-[a-z]*\] Starting' | sed 's/^/  /'
+  if [ "$3" -ne 0 ] || grep -qE "aborting remaining stages|Cluster playbook .* failed|FAILED" "$2"; then
+    echo "$1: $action FAILED (full output: $2)" >&2
+    failed="$failed $1"
   else
-    echo "$vm: $action done"
+    echo "$1: $action done"
   fi
-done
+}
+
+failed=""
+if [ "${par:-1}" -le 1 ]; then
+  for arg in "$@"; do
+    vm_lookup "$arg" || { failed="$failed $arg"; continue; }
+    run_vm "$cfg" "/tmp/vmctl.$vm.log"
+    show_vm "$vm" "/tmp/vmctl.$vm.log" $?
+  done
+else
+  # Look every VM up first, then keep up to $par playbooks running, reporting in command-line order.
+  a_arg=() a_vm=() a_cfg=() a_ok=() pids=()
+  n=0
+  for arg in "$@"; do
+    a_arg[n]=$arg a_ok[n]=0
+    if vm_lookup "$arg"; then a_vm[n]=$vm a_cfg[n]=$cfg a_ok[n]=1; fi
+    n=$((n + 1))
+  done
+  launched=0
+  for ((k = 0; k < n; k++)); do
+    while [ "$launched" -lt "$n" ] && [ "$launched" -lt $((k + par)) ]; do
+      if [ "${a_ok[launched]}" = 1 ]; then
+        run_vm "${a_cfg[launched]}" "/tmp/vmctl.${a_vm[launched]}.log" &
+        pids[launched]=$!
+      fi
+      launched=$((launched + 1))
+    done
+    if [ "${a_ok[k]}" = 1 ]; then
+      wait "${pids[k]}"
+      show_vm "${a_vm[k]}" "/tmp/vmctl.${a_vm[k]}.log" $?
+    else
+      failed="$failed ${a_arg[k]}"
+    fi
+  done
+fi
 
 if [ -n "$failed" ]; then
   echo "Failed:$failed" >&2
