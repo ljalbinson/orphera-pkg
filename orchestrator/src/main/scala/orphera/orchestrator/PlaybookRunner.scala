@@ -21,6 +21,11 @@ object PlaybookRunner:
       IO.println(
         s"[${playbook.name}] No matching nodes found in inventory."
       ) >> IO.pure(false)
+    else if Handlers.problems(playbook.tasks, playbook.handlers).nonEmpty then
+      Handlers
+        .problems(playbook.tasks, playbook.handlers)
+        .traverse_(p => IO.println(s"[${playbook.name}] $p"))
+        .as(false)
     else
       for
         _ <- AgentToken.requireConfigured
@@ -43,7 +48,14 @@ object PlaybookRunner:
           "target_count" -> targets.length
         )
         results <- targets.parTraverse(
-          TaskExecutor.runTasks(playbook.tasks, _, env, checkpoint, runLog)
+          TaskExecutor.runTasks(
+            playbook.tasks,
+            _,
+            env,
+            checkpoint,
+            runLog,
+            handlers = playbook.handlers
+          )
         )
         ok = results.forall(identity)
         endMs <- IO.delay(System.currentTimeMillis())
