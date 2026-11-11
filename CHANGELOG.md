@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.1.209] - 2026-11-11
+
+New: `orphera os10` and `orphera ilo` (the OS10 switch and HPE iLO tools in Scala, beside their Python versions, with VLAN, port and power control), the hypervisor config files, one-line playbook errors, and `vmctl` and the other VM scripts as commands (`/opt/orphera/bin` from `make orpheracli`, `bin/` in the packages).
+
 ### Added
 - The utility commands `vmctl`, `start-vm`, `stop-vm`, `reboot-vm`, `list-vms`, `move-vm`, `galera-cold-start`, `scan-vm-sizes` and `vbmc-vm` (the list is `packaging/cli/utilities`) are now commands on the PATH. `make orpheracli` installs them in `/opt/orphera/bin` (a launcher, `utils/orphera-utility`, that runs the checkout's `utils/<name>`, the native executable if built, else `<name>.sh`; `/etc/profile.d/orphera-utils.sh` adds the directory to the PATH of new login shells). The packages and `make install` put them in `bin/` beside `orphera`, each running `share/orphera/utils/<name>.sh` (`packaging/cli/utility`); native executables are not packaged. `make check-package` tests both launchers. Not yet run on scala0.
 - Docs and tab completion for the VM scripts: the README has a section on the Scala Native versions (building, testing, what differs) and describes `--parallel`, `--node-groups` and `--exclude-nodes` for vmctl, start-vm, stop-vm and reboot-vm; `docs/TESTS.md` records the native checks (M1) and the `move-vm --dry-run` on the lab (M2). `orphera-completion.bash` now completes start-vm, stop-vm, reboot-vm, list-vms, move-vm, scan-vm-sizes and galera-cold-start as well as vmctl, each with and without `.sh` and `utils/`, with `--parallel`, and with comma-separated `--node-groups` and `--exclude-nodes` values completed one name at a time.
