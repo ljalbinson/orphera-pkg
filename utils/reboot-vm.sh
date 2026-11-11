@@ -9,6 +9,7 @@
 #   utils/reboot-vm.sh --soft tst7 tst8
 #   utils/reboot-vm.sh --hard tst7
 #   utils/reboot-vm.sh --hard --force --wait 60 tst7
+#   utils/reboot-vm.sh --node-groups k8s-workers
 #
 #   --soft         virsh reboot: asks the guest to reboot (an ACPI request), so
 #                  the guest shuts down cleanly and comes straight back; a guest
@@ -20,6 +21,14 @@
 #   --force        with --hard, power the VM off at once (virsh destroy) if it has
 #                  not shut down in that time; without it the VM is reported as
 #                  failed and left running
+#   --node-groups G1,G2     every VM in those inventory groups
+#   --exclude-nodes V1,V2   leave those VMs out of the selection
+#
+# The groups and VM names are taken in the order given, each group as its
+# members (`orphera nodes --groups` lists them), checked against the inventory
+# and without repeats (`orphera nodes`), less the VMs excluded; the VMs are
+# printed first. --exclude-nodes needs --node-groups or VM names as well.
+# Options may come anywhere among the VM names.
 #
 # Only a running VM is rebooted with --soft; a VM that is shut off is reported
 # (use start-vm.sh), while --hard starts it. The script does not wait for the guest
@@ -33,18 +42,26 @@ set -uo pipefail
 mode=soft
 wait_s=120
 force=0
+pos=()
 while [ $# -gt 0 ]; do
   case "$1" in
+    --node-groups|--exclude-nodes) vm_select_option "$1" "${2:-}"; shift 2 ;;
     --soft) mode=soft; shift ;;
     --hard) mode=hard; shift ;;
     --force) force=1; shift ;;
     --wait) wait_s=${2:-}; shift 2 || { echo "--wait needs a number of seconds" >&2; exit 2; } ;;
     -h|--help) sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     -*) echo "unknown option $1" >&2; exit 2 ;;
-    *) break ;;
+    *) pos+=("$1"); vm_select_name "$1"; shift ;;
   esac
 done
 case "$wait_s" in ''|*[!0-9]*) echo "--wait needs a number of seconds" >&2; exit 2 ;; esac
+if vm_select_wanted; then
+  vm_select
+  set -- "${SELECTED[@]}"
+else
+  set -- "${pos[@]+"${pos[@]}"}"
+fi
 [ $# -gt 0 ] || { sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 
 soft_script() {

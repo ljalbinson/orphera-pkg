@@ -24,7 +24,25 @@ mkdir -p "$tmp/bin"
 cat > "$tmp/bin/orphera" <<'EOF'
 #!/usr/bin/env bash
 # Stand-in for `orphera nodes --groups` and `orphera run --nodes N [--quiet] [--timeout T] -- sh -c SCRIPT`.
-if [ "${1:-}" = nodes ]; then printf 'k8s: tst30 tst31\nhypervisors: gs1, gs2\n'; exit 0; fi
+if [ "${1:-}" = nodes ]; then
+  shift
+  if [ "${1:-}" = --groups ]; then
+    printf 'k8s: tst30 tst31\nhypervisors: gs1, gs2\nweb: tst1 tst2\nmixed: tst3 badvm silentvm tst1\n'; exit 0
+  fi
+  want="" excl=""
+  while [ $# -gt 0 ]; do
+    case "$1" in --nodes) want=$2; shift 2 ;; --exclude-nodes) excl=$2; shift 2 ;; *) shift ;; esac
+  done
+  seen=","
+  IFS=, read -r -a ns <<<"$want"
+  for n in "${ns[@]}"; do
+    case "$n" in tst*|badvm|silentvm) ;; *) echo "Error: Unknown node(s): $n" >&2; exit 1 ;; esac
+    case ",$excl," in *",$n,"*) continue ;; esac
+    case "$seen" in *",$n,"*) continue ;; esac
+    seen="$seen$n,"; echo "$n"
+  done
+  exit 0
+fi
 [ "${1:-}" = run ] || { echo "stand-in orphera: $*" >&2; exit 1; }
 shift
 nodes="" timeout="-"
@@ -116,6 +134,17 @@ t start-vm silentvm
 t start-vm nosuch
 t start-vm -h
 t start-vm tst1 badvm nosuch silentvm 2
+t start-vm -x 1
+t start-vm --node-groups web
+t start-vm --node-groups web,mixed --exclude-nodes silentvm
+t start-vm 3 --node-groups web 1
+t start-vm --node-groups web config/tst3.yaml
+t start-vm --node-groups nosuch
+t start-vm --node-groups
+t start-vm --exclude-nodes tst1
+t start-vm --exclude-nodes tst1 1 2 3
+t start-vm --node-groups web --exclude-nodes tst1,tst2
+t start-vm --node-groups web unknownvm
 
 t stop-vm
 t stop-vm --help
@@ -128,6 +157,10 @@ t stop-vm 1 2
 t stop-vm --wait 300 --force 1 badvm
 t stop-vm --wait 010 1
 t stop-vm 1 --force
+t stop-vm --node-groups mixed --wait 60
+t stop-vm --force --node-groups web --exclude-nodes tst2 3
+t stop-vm --exclude-nodes
+t stop-vm --wait x --node-groups web
 
 t reboot-vm
 t reboot-vm --help
@@ -139,6 +172,9 @@ t reboot-vm --hard --wait 60 --force 1 badvm
 t reboot-vm --hard --soft 2
 t reboot-vm --wait 015 --hard 3
 t reboot-vm --wait
+t reboot-vm --node-groups web
+t reboot-vm --hard --node-groups mixed --exclude-nodes badvm
+t reboot-vm 2 --hard --node-groups web
 
 t list-vms
 t list-vms gs1

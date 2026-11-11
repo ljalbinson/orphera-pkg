@@ -4,7 +4,7 @@ package orphera.stopvm
 
 import scala.annotation.tailrec
 
-import orphera.nativeutils.{Bash, Out, Sources, VmCommon}
+import orphera.nativeutils.{Bash, Out, Selection, Sources, VmCommon}
 
 /** utils/stop-vm.sh in Scala, for Scala Native: asks each VM's guest to shut
   * down and waits until libvirt reports it shut off (--force: then power it
@@ -13,7 +13,11 @@ import orphera.nativeutils.{Bash, Out, Sources, VmCommon}
   */
 object Main:
 
-  final case class Opts(waitS: String = "120", force: Boolean = false)
+  final case class Opts(
+      sel: Selection = Selection(),
+      waitS: String = "120",
+      force: Boolean = false
+  )
 
   def main(args: Array[String]): Unit =
     sys.exit(run(args.toList, Sources.load(rootIsCheckout = false)))
@@ -23,11 +27,16 @@ object Main:
     sys.exit(code)
 
   private def usage(src: Sources): Unit =
-    src.usage("stop-vm.sh", "Usage: stop-vm [--wait SECONDS] [--force] <vm>...")
+    src.usage("stop-vm.sh", "Usage: stop-vm [--wait SECONDS] [--force] [--node-groups G] [--exclude-nodes V] <vm>...")
 
   @tailrec
-  private def parse(args: List[String], o: Opts, src: Sources): (Opts, List[String]) =
+  private def parse(args: List[String], o: Opts, src: Sources): Opts =
     args match
+      case Nil => o
+      case (opt @ ("--node-groups" | "--exclude-nodes")) :: rest =>
+        o.sel.withOption(opt, rest.headOption) match
+          case Some(s) => parse(rest.drop(1), o.copy(sel = s), src)
+          case None    => sys.exit(2)
       case "--wait" :: rest =>
         rest match
           case v :: t => parse(t, o.copy(waitS = v), src)
@@ -37,11 +46,12 @@ object Main:
         usage(src)
         sys.exit(0)
       case opt :: _ if opt.startsWith("-") => die(2, s"unknown option $opt")
-      case _                               => (o, args)
+      case n :: t                          => parse(t, o.copy(sel = o.sel.withName(n)), src)
 
   def run(args: List[String], src: Sources): Int =
-    val (o, vms) = parse(args, Opts(), src)
+    val o = parse(args, Opts(), src)
     if o.waitS.isEmpty || !Sources.allDigits(o.waitS) then die(2, "--wait needs a number of seconds")
+    val vms = if o.sel.wanted then o.sel.expand(src) else o.sel.names
     if vms.isEmpty then
       usage(src)
       sys.exit(2)

@@ -62,3 +62,74 @@ vm_report() {
       return 1 ;;
   esac
 }
+
+# --node-groups and --exclude-nodes for start-vm.sh, stop-vm.sh and reboot-vm.sh, as in vmctl.sh. The option
+# parser calls vm_select_option for each of the two (and vm_select_name for each VM argument, to keep the
+# command-line order); vm_select then sets SELECTED to the VMs: the groups and VM names in the order given, each
+# group as its members (`orphera nodes --groups`), a bare number N as tstN and a config file as its hostname:,
+# then checked against the inventory, without repeats and less --exclude-nodes (`orphera nodes`). It prints
+# "VMs: ..." and exits 2 on a usage error or if `orphera nodes` fails.
+SEL_GROUPS="" SEL_EXCLUDE=""
+SEL_ORDER=()   # "g:<g1,g2>" and "n:<vm>", in command-line order
+
+# vm_select_option <option> <value>
+vm_select_option() {
+  case "$1" in
+    --node-groups)
+      [ -n "${2:-}" ] || { echo "--node-groups needs a group name" >&2; exit 2; }
+      SEL_GROUPS="${SEL_GROUPS:+$SEL_GROUPS,}$2"; SEL_ORDER+=("g:$2") ;;
+    --exclude-nodes)
+      [ -n "${2:-}" ] || { echo "--exclude-nodes needs a VM name" >&2; exit 2; }
+      SEL_EXCLUDE="${SEL_EXCLUDE:+$SEL_EXCLUDE,}$2" ;;
+  esac
+}
+
+vm_select_name() { SEL_ORDER+=("n:$1"); }
+
+# True if --node-groups or --exclude-nodes was given.
+vm_select_wanted() { [ -n "$SEL_GROUPS$SEL_EXCLUDE" ]; }
+
+vm_select() {
+  local listing line item f n g gl wanted=() sel=() expanded names=0
+  local -A members=()
+  for item in "${SEL_ORDER[@]}"; do case "$item" in n:*) names=1 ;; esac; done
+  [ -n "$SEL_GROUPS" ] || [ "$names" = 1 ] || {
+    echo "--exclude-nodes takes VMs out of a selection: give --node-groups or VM names as well" >&2; exit 2; }
+  if [ -n "$SEL_GROUPS" ]; then
+    listing=$(orphera nodes --groups) || exit 2
+    while IFS= read -r line; do
+      [ -n "$line" ] && members[${line%%:*}]=${line#*: }
+    done <<<"$listing"
+  fi
+  for item in "${SEL_ORDER[@]}"; do
+    case "$item" in
+      g:*)
+        IFS=, read -r -a gl <<<"${item#g:}"
+        for g in "${gl[@]}"; do
+          [ -n "$g" ] || continue
+          if [ -z "${members[$g]+x}" ]; then
+            echo "Error: Unknown node group(s): $g. Defined in inventory: $(printf '%s\n' "${!members[@]}" | sort | paste -sd, - | sed 's/,/, /g')" >&2
+            exit 2
+          fi
+          # shellcheck disable=SC2206  # member names are plain (inventory schema)
+          wanted+=(${members[$g]})
+        done ;;
+      n:*.yaml)
+        f=${item#n:}
+        [ -f "$f" ] || { echo "$f: no such config file" >&2; exit 2; }
+        n=$(config_value "$f" hostname)
+        [ -n "$n" ] || { echo "$f has no hostname:" >&2; exit 2; }
+        wanted+=("$n") ;;
+      n:*[!0-9]*) wanted+=("${item#n:}") ;;
+      n:*) wanted+=("tst${item#n:}") ;;
+    esac
+  done
+  [ "${#wanted[@]}" -gt 0 ] || { echo "the selection has no VMs in it" >&2; exit 2; }
+  sel=(--nodes "$(IFS=,; printf '%s' "${wanted[*]}")")
+  [ -z "$SEL_EXCLUDE" ] || sel+=(--exclude-nodes "$SEL_EXCLUDE")
+  expanded=$(orphera nodes "${sel[@]}") || exit 2
+  # shellcheck disable=SC2206  # node names are plain (inventory schema), one per line
+  SELECTED=($expanded)
+  [ "${#SELECTED[@]}" -gt 0 ] || { echo "the selection has no VMs in it" >&2; exit 2; }
+  echo "VMs: ${SELECTED[*]}"
+}
