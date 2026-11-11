@@ -65,7 +65,10 @@ object IloTool:
     "soft-reset" -> (true, "soft reset: graceful shutdown, then power on")
   )
 
-  private def parse(args: List[String], env: Map[String, String]): Either[String, Opts] =
+  private def parse(
+      args: List[String],
+      env: Map[String, String]
+  ): Either[String, Opts] =
     @scala.annotation.tailrec
     def go(rest: List[String], o: Opts): Either[String, Opts] =
       rest match
@@ -76,10 +79,11 @@ object IloTool:
             case "--password-file" => go(tail, o.copy(passwordFile = Some(v)))
             case "--secret"        => go(tail, o.copy(secret = Some(v)))
             case "--cacert"        => go(tail, o.copy(cacert = Some(v)))
-            case _ =>
+            case _                 =>
               v.toIntOption.filter(_ > 0) match
                 case Some(n) => go(tail, o.copy(timeout = n))
-                case None    => Left(s"--timeout needs a number of seconds, not $v")
+                case None    =>
+                  Left(s"--timeout needs a number of seconds, not $v")
         case f :: Nil if valueFlags(f) => Left(s"$f needs a value")
         case f :: tail if boolFlags(f) =>
           f match
@@ -87,29 +91,52 @@ object IloTool:
             case "-y" | "--yes"      => go(tail, o.copy(yes = true))
             case "-n" | "--dry-run"  => go(tail, o.copy(dryRun = true))
             case _                   => go(tail, o.copy(waits = false))
-        case f :: _ if f.startsWith("-") && f.length > 1 => Left(s"unknown option $f")
+        case f :: _ if f.startsWith("-") && f.length > 1 =>
+          Left(s"unknown option $f")
         case p :: tail => go(tail, o.copy(positional = p :: o.positional))
     go(
       args,
       Opts(
-        env.getOrElse("ILO_USER", "Administrator"), None, None,
-        env.get("ILO_INSECURE").contains("1"), None, false, false, true, 300, Nil
+        env.getOrElse("ILO_USER", "Administrator"),
+        None,
+        None,
+        env.get("ILO_INSECURE").contains("1"),
+        None,
+        false,
+        false,
+        true,
+        300,
+        Nil
       )
     )
 
-  /** The secret that holds an iLO's password: its address or name as given, or the host of a URL. */
+  /** The secret that holds an iLO's password: its address or name as given, or
+    * the host of a URL.
+    */
   def secretKey(target: String): String = DeviceAccess.secretKey(target)
 
   private def done(ilo: Ilo, sent: Boolean, o: Opts, text: String): Unit =
-    if sent then ilo.log(s"${ilo.name}: $text${if o.waits then "" else " requested"}")
+    if sent then
+      ilo.log(s"${ilo.name}: $text${if o.waits then "" else " requested"}")
 
   private val ok: Either[IloError, Unit] = Right(())
 
-  private def waitIf(ilo: Ilo, sent: Boolean, o: Opts, want: String): Either[IloError, Unit] =
+  private def waitIf(
+      ilo: Ilo,
+      sent: Boolean,
+      o: Opts,
+      want: String
+  ): Either[IloError, Unit] =
     if sent && o.waits then ilo.waitFor(want, o.timeout) else ok
 
-  /** After a restart request: give the server a moment to go down, then wait for it to be on. */
-  private def waitRestart(ilo: Ilo, sent: Boolean, o: Opts): Either[IloError, Unit] =
+  /** After a restart request: give the server a moment to go down, then wait
+    * for it to be on.
+    */
+  private def waitRestart(
+      ilo: Ilo,
+      sent: Boolean,
+      o: Opts
+  ): Either[IloError, Unit] =
     if sent && o.waits then
       Thread.sleep(math.min(ilo.pollMillis, 5000L))
       ilo.waitFor("On", o.timeout)
@@ -118,21 +145,34 @@ object IloTool:
   private def requireOn(ilo: Ilo, doc: io.circe.Json): Either[IloError, Unit] =
     Ilo.stateOf(doc) match
       case "On" => ok
-      case s =>
+      case s    =>
         Left(
           IloError(
-            s"${ilo.name}: the server is ${if s.isEmpty then "in an unknown power state" else s}, not on; " +
+            s"${ilo.name}: the server is ${
+                if s.isEmpty then "in an unknown power state" else s
+              }, not on; " +
               "this needs a running server (use `on`)"
           )
         )
 
-  /** Asks the OS to shut down. Only for a server that is on: pressing the button of one that is off powers it on. */
-  private def gracefulOff(ilo: Ilo, o: Opts, doc: io.circe.Json): Either[IloError, Boolean] =
+  /** Asks the OS to shut down. Only for a server that is on: pressing the
+    * button of one that is off powers it on.
+    */
+  private def gracefulOff(
+      ilo: Ilo,
+      o: Opts,
+      doc: io.circe.Json
+  ): Either[IloError, Boolean] =
     val kind =
-      if Ilo.allowed(doc).contains("GracefulShutdown") then "GracefulShutdown" else "PushPowerButton"
+      if Ilo.allowed(doc).contains("GracefulShutdown") then "GracefulShutdown"
+      else "PushPowerButton"
     ilo.sendReset(kind).flatMap { sent =>
       waitIf(ilo, sent, o, "Off").left
-        .map(e => IloError(s"${e.message}; the OS has not shut down (`off` cuts the power)"))
+        .map(e =>
+          IloError(
+            s"${e.message}; the OS has not shut down (`off` cuts the power)"
+          )
+        )
         .map(_ => sent)
     }
 
@@ -142,7 +182,7 @@ object IloTool:
   private def opOn(ilo: Ilo, o: Opts): Either[IloError, Unit] =
     ilo.powerState().flatMap {
       case "On" => Right(ilo.log(s"${ilo.name}: already on"))
-      case _ =>
+      case _    =>
         for
           sent <- ilo.sendReset("On")
           _ <- waitIf(ilo, sent, o, "On")
@@ -152,7 +192,7 @@ object IloTool:
   private def opOff(ilo: Ilo, o: Opts): Either[IloError, Unit] =
     ilo.powerState().flatMap {
       case "Off" => Right(ilo.log(s"${ilo.name}: already off"))
-      case _ =>
+      case _     =>
         for
           sent <- ilo.sendReset("ForceOff")
           _ <- waitIf(ilo, sent, o, "Off")
@@ -161,7 +201,8 @@ object IloTool:
 
   private def opShutdown(ilo: Ilo, o: Opts): Either[IloError, Unit] =
     ilo.read().flatMap { doc =>
-      if Ilo.stateOf(doc) == "Off" then Right(ilo.log(s"${ilo.name}: already off"))
+      if Ilo.stateOf(doc) == "Off" then
+        Right(ilo.log(s"${ilo.name}: already off"))
       else
         for
           _ <- requireOn(ilo, doc)
@@ -189,47 +230,73 @@ object IloTool:
           // iLO 4 has no graceful restart: shut the OS down, then power on
           gracefulOff(ilo, o, doc).flatMap { sent =>
             if !sent then
-              Right(ilo.log(s"${ilo.name}: would then wait for the shutdown and send POST On"))
+              Right(
+                ilo.log(
+                  s"${ilo.name}: would then wait for the shutdown and send POST On"
+                )
+              )
             else if !o.waits then
-              Right(ilo.log(s"${ilo.name}: shutdown requested; --no-wait leaves the power on to you"))
+              Right(
+                ilo.log(
+                  s"${ilo.name}: shutdown requested; --no-wait leaves the power on to you"
+                )
+              )
             else
               for
                 _ <- ilo.sendReset("On")
                 _ <- ilo.waitFor("On", o.timeout)
-              yield ilo.log(s"${ilo.name}: soft reset (shut down, then powered on)")
+              yield ilo.log(
+                s"${ilo.name}: soft reset (shut down, then powered on)"
+              )
           }
       }
     }
 
-  private def operate(action: String, ilo: Ilo, o: Opts): Either[IloError, Unit] =
+  private def operate(
+      action: String,
+      ilo: Ilo,
+      o: Opts
+  ): Either[IloError, Unit] =
     action match
-      case "status"     => opStatus(ilo)
-      case "on"         => opOn(ilo, o)
-      case "off"        => opOff(ilo, o)
-      case "shutdown"   => opShutdown(ilo, o)
-      case "reset"      => opReset(ilo, o)
-      case _            => opSoftReset(ilo, o)
+      case "status"   => opStatus(ilo)
+      case "on"       => opOn(ilo, o)
+      case "off"      => opOff(ilo, o)
+      case "shutdown" => opShutdown(ilo, o)
+      case "reset"    => opReset(ilo, o)
+      case _          => opSoftReset(ilo, o)
 
-  private def confirm(action: String, o: Opts, targets: List[String]): Either[String, Unit] =
+  private def confirm(
+      action: String,
+      o: Opts,
+      targets: List[String]
+  ): Either[String, Unit] =
     val (destructive, desc) = actions.getOrElse(action, (false, ""))
     if !destructive || o.yes || o.dryRun then Right(())
-    else if System.console() == null then Left(s"$action needs --yes when there is no terminal")
+    else if System.console() == null then
+      Left(s"$action needs --yes when there is no terminal")
     else
       println(s"$action ($desc): ${targets.mkString(", ")}")
       print("type yes to go on: ")
-      if Option(scala.io.StdIn.readLine()).exists(_.trim == "yes") then Right(())
+      if Option(scala.io.StdIn.readLine()).exists(_.trim == "yes") then
+        Right(())
       else Left("not confirmed, nothing sent")
 
   /** Returns the exit code: 0 done, 1 an iLO failed, 2 wrong usage.
     * `pollMillis` is how often the power state is read while waiting.
     */
-  def run(args: List[String], env: Map[String, String] = sys.env, pollMillis: Long = 3000L): Int =
+  def run(
+      args: List[String],
+      env: Map[String, String] = sys.env,
+      pollMillis: Long = 3000L
+  ): Int =
     args match
       case Nil | ("help" | "-h" | "--help") :: _ =>
         println(usage)
         if args.isEmpty then 2 else 0
       case action :: _ if !actions.contains(action) =>
-        Console.err.println(s"orphera ilo: unknown action '$action' (orphera ilo --help)")
+        Console.err.println(
+          s"orphera ilo: unknown action '$action' (orphera ilo --help)"
+        )
         2
       case action :: rest =>
         parse(rest, env) match
@@ -237,7 +304,9 @@ object IloTool:
             Console.err.println(s"orphera ilo: $msg")
             2
           case Right(o) if o.positional.isEmpty =>
-            Console.err.println(s"orphera ilo: $action needs an iLO (orphera ilo --help)")
+            Console.err.println(
+              s"orphera ilo: $action needs an iLO (orphera ilo --help)"
+            )
             2
           case Right(o) =>
             confirm(action, o, o.positional) match
@@ -248,13 +317,25 @@ object IloTool:
                 val failed = o.positional.count { target =>
                   val result =
                     DeviceAccess
-                      .password(env, "ILO_PASSWORD", o.passwordFile, o.secret, target, o.user)
+                      .password(
+                        env,
+                        "ILO_PASSWORD",
+                        o.passwordFile,
+                        o.secret,
+                        target,
+                        o.user
+                      )
                       .left
                       .map(m => IloError(m))
                       .flatMap { pw =>
                         val ilo = Ilo(
-                          target, o.user, pw, o.insecure, o.cacert,
-                          dryRun = o.dryRun, pollMillis = pollMillis
+                          target,
+                          o.user,
+                          pw,
+                          o.insecure,
+                          o.cacert,
+                          dryRun = o.dryRun,
+                          pollMillis = pollMillis
                         )
                         operate(action, ilo, o)
                       }

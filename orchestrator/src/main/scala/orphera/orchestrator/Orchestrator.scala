@@ -152,8 +152,8 @@ object Orchestrator:
       }
     yield results.toMap
 
-  /** The version each node's agent reports; a node that does not answer is
-    * left out (it is then treated as needing the package).
+  /** The version each node's agent reports; a node that does not answer is left
+    * out (it is then treated as needing the package).
     */
   private def runningVersions(nodes: List[Node]): IO[Map[String, String]] =
     nodes

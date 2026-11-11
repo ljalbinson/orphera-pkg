@@ -208,7 +208,14 @@ object AuditLog:
           "nodes" -> nodesField(nodes),
           "timeout_seconds" -> timeoutSeconds
         )
-      case Command.DeployAgent(localPath, remotePath, nodes, useScala, force, _) =>
+      case Command.DeployAgent(
+            localPath,
+            remotePath,
+            nodes,
+            useScala,
+            force,
+            _
+          ) =>
         List(
           "command" -> "deploy-agent",
           "local_path" -> localPath.getOrElse(

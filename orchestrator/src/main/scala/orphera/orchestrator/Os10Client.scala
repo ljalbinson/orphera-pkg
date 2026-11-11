@@ -3,15 +3,20 @@
 package orphera.orchestrator
 
 import java.io.IOException
+import java.net.http.{
+  HttpClient,
+  HttpRequest,
+  HttpResponse,
+  HttpTimeoutException
+}
 import java.net.{ConnectException, URI, URLEncoder}
-import java.net.http.{HttpClient, HttpRequest, HttpResponse, HttpTimeoutException}
 import java.nio.charset.StandardCharsets.UTF_8
 import java.time.Duration
 import java.util.Base64
 import javax.net.ssl.SSLHandshakeException
 
 import io.circe.Json
-import io.circe.yaml.parser  // YAML is a superset of JSON, and this is the parser the project has
+import io.circe.yaml.parser // YAML is a superset of JSON, and this is the parser the project has
 
 /** What went wrong with a request to the switch. */
 final case class Os10Error(message: String, status: Option[Int] = None):
@@ -43,7 +48,9 @@ final class Os10Switch(
   val name: String = base.split("://", 2).lastOption.getOrElse(base)
 
   private val auth: String =
-    "Basic " + Base64.getEncoder.encodeToString(s"$user:$password".getBytes(UTF_8))
+    "Basic " + Base64.getEncoder.encodeToString(
+      s"$user:$password".getBytes(UTF_8)
+    )
 
   private lazy val client: Either[Os10Error, HttpClient] =
     DeviceAccess
@@ -108,7 +115,11 @@ final class Os10Switch(
             )
           )
         case e: IOException =>
-          Left(Os10Error(s"$name: ${Option(e.getMessage).getOrElse(e.getClass.getName)}"))
+          Left(
+            Os10Error(
+              s"$name: ${Option(e.getMessage).getOrElse(e.getClass.getName)}"
+            )
+          )
         case _: InterruptedException =>
           Thread.currentThread().interrupt()
           Left(Os10Error(s"$name: interrupted"))
@@ -186,15 +197,16 @@ final case class Os10PortRow(
     tagged: List[Int]
 )
 
-/** Reading and changing a switch. Nothing here prints: reads return data, and
-  * a change is planned (`plan*`) and then sent with `execute`. A change is to
-  * the running configuration; `save` is what keeps it over a reload.
+/** Reading and changing a switch. Nothing here prints: reads return data, and a
+  * change is planned (`plan*`) and then sent with `execute`. A change is to the
+  * running configuration; `save` is what keeps it over a reload.
   */
 object Os10:
   val Ifaces = "/data/ietf-interfaces:interfaces/interface"
   val Tagged = "dell-interface:tagged-ports"
   val Untagged = "dell-interface:untagged-ports"
-  val NotSaved = "not saved to the startup configuration: `orphera os10 save` or `write memory` on the switch keeps it"
+  val NotSaved =
+    "not saved to the startup configuration: `orphera os10 save` or `write memory` on the switch keeps it"
 
   /** A name or a value as a path segment: percent-encoded, '/' and ':' too. */
   def q(s: String): String = URLEncoder.encode(s, UTF_8).replace("+", "%20")
@@ -207,7 +219,9 @@ object Os10:
     chunkRe
       .findAllIn(s)
       .toList
-      .map(c => if c.headOption.exists(_.isDigit) then (0, c.toLong, "") else (1, 0L, c))
+      .map(c =>
+        if c.headOption.exists(_.isDigit) then (0, c.toLong, "") else (1, 0L, c)
+      )
 
   private def compareKeys(x: List[Key], y: List[Key]): Int =
     (x, y) match
@@ -237,10 +251,14 @@ object Os10:
 
   def table(header: List[String], rows: List[List[String]]): String =
     val all = header :: rows
-    val widths = header.indices.map(i => all.map(_(i).length).foldLeft(0)(math.max))
+    val widths =
+      header.indices.map(i => all.map(_(i).length).foldLeft(0)(math.max))
     all
       .map(r =>
-        r.zip(widths).map((c, w) => c.padTo(w, ' ')).mkString("  ").stripTrailing()
+        r.zip(widths)
+          .map((c, w) => c.padTo(w, ' '))
+          .mkString("  ")
+          .stripTrailing()
       )
       .mkString("\n")
 
@@ -254,7 +272,11 @@ object Os10:
 
   def vlanId(name: String): Option[Int] =
     Option
-      .when(name.startsWith("vlan") && name.length > 4 && name.drop(4).forall(_.isDigit))(
+      .when(
+        name.startsWith("vlan") && name.length > 4 && name
+          .drop(4)
+          .forall(_.isDigit)
+      )(
         name.drop(4).toInt
       )
 
@@ -275,7 +297,10 @@ object Os10:
     sw.data("ietf-interfaces:interfaces/interface").map(interfaceList)
 
   /** The interface, or None if the switch has none of that name. */
-  def getInterface(sw: Os10Switch, name: String): Either[Os10Error, Option[Json]] =
+  def getInterface(
+      sw: Os10Switch,
+      name: String
+  ): Either[Os10Error, Option[Json]] =
     sw.data("ietf-interfaces:interfaces/interface=" + q(name)) match
       case Left(e) if e.missing => Right(None)
       case Left(e)              => Left(e)
@@ -313,9 +338,8 @@ object Os10:
             leaf(p, "dell-interface:speed")
               .flatMap(_.asString)
               .fold("-")(_.replace("GIGE", "G")),
-            leaf(p, "dell-interface:mtu").fold("-")(j =>
-              j.asString.getOrElse(j.noSpaces)
-            ),
+            leaf(p, "dell-interface:mtu")
+              .fold("-")(j => j.asString.getOrElse(j.noSpaces)),
             un,
             tg
           )
@@ -323,16 +347,17 @@ object Os10:
     }
 
   def operations(sw: Os10Switch): Either[Os10Error, List[String]] =
-    sw.json("/operations").map(
-      _.hcursor
-        .downField("ietf-restconf:operations")
-        .keys
-        .fold(List.empty[String])(_.toList.sorted)
-    )
+    sw.json("/operations")
+      .map(
+        _.hcursor
+          .downField("ietf-restconf:operations")
+          .keys
+          .fold(List.empty[String])(_.toList.sorted)
+      )
 
   /** The text of a YANG module, from the switch's get-schema. The reply may be
-    * JSON, JSON that is not valid (the text unquoted inside a wrapper, as
-    * OS10 sends it), XML, or the plain text.
+    * JSON, JSON that is not valid (the text unquoted inside a wrapper, as OS10
+    * sends it), XML, or the plain text.
     */
   def schema(sw: Os10Switch, module: String): Either[Os10Error, String] =
     val body = Json.obj(
@@ -341,29 +366,43 @@ object Os10:
         "format" -> Json.fromString("yang")
       )
     )
-    sw.request("POST", "/operations/ietf-netconf-monitoring:get-schema", Some(body))
-      .flatMap { raw =>
-        val t = raw.trim
-        val wrapper = "{\"ietf-netconf-monitoring:output\":{\"data\":"
-        val text =
-          // OS10 sends the module text unquoted inside the wrapper, which is not JSON; and plain YANG text would
-          // parse as YAML, so only text that starts like JSON is parsed
-          if t.startsWith(wrapper) && !t.drop(wrapper.length).trim.startsWith("\"") then
-            Some(unwrapSchema(raw))
-          else if t.startsWith("{") || t.startsWith("[") then
-            parser.parse(raw) match
-              case Right(j) => firstText(j)
-              case Left(_)  => Some(unwrapSchema(raw))
-          else Some(unwrapSchema(raw))
-        text.filter(_.nonEmpty).toRight(Os10Error(s"${sw.name}: no schema text for $module in the reply"))
-      }
+    sw.request(
+      "POST",
+      "/operations/ietf-netconf-monitoring:get-schema",
+      Some(body)
+    ).flatMap { raw =>
+      val t = raw.trim
+      val wrapper = "{\"ietf-netconf-monitoring:output\":{\"data\":"
+      val text =
+        // OS10 sends the module text unquoted inside the wrapper, which is not JSON; and plain YANG text would
+        // parse as YAML, so only text that starts like JSON is parsed
+        if t.startsWith(wrapper) && !t
+            .drop(wrapper.length)
+            .trim
+            .startsWith("\"")
+        then Some(unwrapSchema(raw))
+        else if t.startsWith("{") || t.startsWith("[") then
+          parser.parse(raw) match
+            case Right(j) => firstText(j)
+            case Left(_)  => Some(unwrapSchema(raw))
+        else Some(unwrapSchema(raw))
+      text
+        .filter(_.nonEmpty)
+        .toRight(
+          Os10Error(s"${sw.name}: no schema text for $module in the reply")
+        )
+    }
 
   private def firstText(j: Json): Option[String] =
     j.asString.orElse(
       j.asObject
-        .flatMap(_.values.iterator.map(firstText).collectFirst { case Some(t) => t })
+        .flatMap(_.values.iterator.map(firstText).collectFirst { case Some(t) =>
+          t
+        })
         .orElse(
-          j.asArray.flatMap(_.iterator.map(firstText).collectFirst { case Some(t) => t })
+          j.asArray.flatMap(_.iterator.map(firstText).collectFirst {
+            case Some(t) => t
+          })
         )
     )
 
@@ -416,7 +455,9 @@ object Os10:
     yield
       val old = leaf(port, key)
       if old == newValue then
-        Os10NoChange(s"${sw.name}: $name $label is already $shownNew, nothing to do")
+        Os10NoChange(
+          s"${sw.name}: $name $label is already $shownNew, nothing to do"
+        )
       else
         val path = Ifaces + "=" + q(name)
         val step = newValue match
@@ -430,7 +471,9 @@ object Os10:
               getInterface(sw, name).flatMap { p =>
                 val got = p.flatMap(leaf(_, key))
                 if got == newValue then
-                  Right(s"${sw.name}: $name $label is now $shownNew. ${NotSaved.capitalize}")
+                  Right(
+                    s"${sw.name}: $name $label is now $shownNew. ${NotSaved.capitalize}"
+                  )
                 else
                   Left(
                     Os10Error(
@@ -441,45 +484,93 @@ object Os10:
           )
         )
 
-  def planDescription(sw: Os10Switch, port: String, text: String): Either[Os10Error, Os10Plan] =
+  def planDescription(
+      sw: Os10Switch,
+      port: String,
+      text: String
+  ): Either[Os10Error, Os10Plan] =
     planPortLeaf(
-      sw, port, "description", "description",
+      sw,
+      port,
+      "description",
+      "description",
       Option.when(text.nonEmpty)(Json.fromString(text)),
       if text.isEmpty then "(none)" else text
     )
 
-  def planMtu(sw: Os10Switch, port: String, value: String): Either[Os10Error, Os10Plan] =
+  def planMtu(
+      sw: Os10Switch,
+      port: String,
+      value: String
+  ): Either[Os10Error, Os10Plan] =
     if value.nonEmpty && value.forall(_.isDigit) && value.length <= 5 &&
       value.toInt >= 64 && value.toInt <= 65535
     then
       planPortLeaf(
-        sw, port, "MTU", "dell-interface:mtu",
-        Some(Json.fromInt(value.toInt)), value.toInt.toString
+        sw,
+        port,
+        "MTU",
+        "dell-interface:mtu",
+        Some(Json.fromInt(value.toInt)),
+        value.toInt.toString
       )
-    else Left(Os10Error(s"an MTU is a number of bytes, e.g. 9216, not '$value'"))
+    else
+      Left(Os10Error(s"an MTU is a number of bytes, e.g. 9216, not '$value'"))
 
   val Speeds: Map[String, String] = Map(
-    "10G" -> "10GIGE", "25G" -> "25GIGE", "40G" -> "40GIGE",
-    "50G" -> "50GIGE", "100G" -> "100GIGE", "AUTO" -> "auto"
+    "10G" -> "10GIGE",
+    "25G" -> "25GIGE",
+    "40G" -> "40GIGE",
+    "50G" -> "50GIGE",
+    "100G" -> "100GIGE",
+    "AUTO" -> "auto"
   )
 
-  def planSpeed(sw: Os10Switch, port: String, value: String): Either[Os10Error, Os10Plan] =
+  def planSpeed(
+      sw: Os10Switch,
+      port: String,
+      value: String
+  ): Either[Os10Error, Os10Plan] =
     Speeds.get(value.toUpperCase) match
       case Some(raw) =>
-        planPortLeaf(sw, port, "speed", "dell-interface:speed", Some(Json.fromString(raw)), raw)
+        planPortLeaf(
+          sw,
+          port,
+          "speed",
+          "dell-interface:speed",
+          Some(Json.fromString(raw)),
+          raw
+        )
       case None =>
         Left(Os10Error(s"speed '$value': use one of 10G 25G 40G 50G 100G auto"))
 
-  /** trunk is MODE_L2HYBRID (what the trunk ports on the switch show); access is no mode at all. */
-  def planMode(sw: Os10Switch, port: String, value: String): Either[Os10Error, Os10Plan] =
+  /** trunk is MODE_L2HYBRID (what the trunk ports on the switch show); access
+    * is no mode at all.
+    */
+  def planMode(
+      sw: Os10Switch,
+      port: String,
+      value: String
+  ): Either[Os10Error, Os10Plan] =
     value.toLowerCase match
       case "trunk" =>
         planPortLeaf(
-          sw, port, "mode", "dell-interface:mode",
-          Some(Json.fromString("MODE_L2HYBRID")), "trunk (MODE_L2HYBRID)"
+          sw,
+          port,
+          "mode",
+          "dell-interface:mode",
+          Some(Json.fromString("MODE_L2HYBRID")),
+          "trunk (MODE_L2HYBRID)"
         )
       case "access" =>
-        planPortLeaf(sw, port, "mode", "dell-interface:mode", None, "access (no mode set)")
+        planPortLeaf(
+          sw,
+          port,
+          "mode",
+          "dell-interface:mode",
+          None,
+          "access (no mode set)"
+        )
       case _ =>
         Left(
           Os10Error(
@@ -487,7 +578,9 @@ object Os10:
           )
         )
 
-  /** VLAN number: 2-4093, or 1-4093 when it is a VLAN that ports go in and out of. */
+  /** VLAN number: 2-4093, or 1-4093 when it is a VLAN that ports go in and out
+    * of.
+    */
   def vlanNumber(arg: String, member: Boolean = false): Either[Os10Error, Int] =
     val lowest = if member then 1 else 2
     Option
@@ -523,7 +616,9 @@ object Os10:
           "PUT",
           Ifaces + "=" + q(name),
           Some(entry),
-          fallback = Some(Os10Step("POST", "/data/ietf-interfaces:interfaces", Some(entry)))
+          fallback = Some(
+            Os10Step("POST", "/data/ietf-interfaces:interfaces", Some(entry))
+          )
         )
         Os10Apply(
           Os10Change(
@@ -531,13 +626,23 @@ object Os10:
             List(put),
             _ =>
               getVlan(sw, vid).flatMap {
-                case Some(_) => Right(s"${sw.name}: VLAN $vid created\n${sw.name}: $NotSaved")
-                case None    => Left(Os10Error(s"${sw.name}: sent, but VLAN $vid is not there afterwards"))
+                case Some(_) =>
+                  Right(s"${sw.name}: VLAN $vid created\n${sw.name}: $NotSaved")
+                case None =>
+                  Left(
+                    Os10Error(
+                      s"${sw.name}: sent, but VLAN $vid is not there afterwards"
+                    )
+                  )
               }
           )
         )
 
-  private def mustBeEmpty(sw: Os10Switch, vid: Int, v: Json): Either[Os10Error, Unit] =
+  private def mustBeEmpty(
+      sw: Os10Switch,
+      vid: Int,
+      v: Json
+  ): Either[Os10Error, Unit] =
     val members = strings(v, Untagged) ++ strings(v, Tagged)
     if members.isEmpty then Right(())
     else
@@ -552,7 +657,9 @@ object Os10:
   def planVlanDelete(sw: Os10Switch, arg: String): Either[Os10Error, Os10Plan] =
     for
       vid <- vlanNumber(arg)
-      v <- getVlan(sw, vid).flatMap(_.toRight(Os10Error(s"${sw.name}: no VLAN $vid")))
+      v <- getVlan(sw, vid).flatMap(
+        _.toRight(Os10Error(s"${sw.name}: no VLAN $vid"))
+      )
       _ <- mustBeEmpty(sw, vid, v)
     yield Os10Apply(
       Os10Change(
@@ -560,8 +667,10 @@ object Os10:
         List(Os10Step("DELETE", Ifaces + "=" + q(s"vlan$vid"))),
         _ =>
           getVlan(sw, vid).flatMap {
-            case None    => Right(s"${sw.name}: VLAN $vid deleted\n${sw.name}: $NotSaved")
-            case Some(_) => Left(Os10Error(s"${sw.name}: sent, but VLAN $vid is still there"))
+            case None =>
+              Right(s"${sw.name}: VLAN $vid deleted\n${sw.name}: $NotSaved")
+            case Some(_) =>
+              Left(Os10Error(s"${sw.name}: sent, but VLAN $vid is still there"))
           }
       )
     )
@@ -576,16 +685,23 @@ object Os10:
     for
       vid <- vlanNumber(vlanArg, member = true)
       pa <- portArg.toRight(
-        Os10Error(s"$command needs a VLAN and a port, e.g. $command swt4 600 1/1/44")
+        Os10Error(
+          s"$command needs a VLAN and a port, e.g. $command swt4 600 1/1/44"
+        )
       )
       port <- portName(pa)
       _ <- getInterface(sw, port).flatMap(_.toRight(noPort(sw, port)))
       v <- getVlan(sw, vid).flatMap(
-        _.toRight(Os10Error(s"${sw.name}: no VLAN $vid (create it with vlan-create)"))
+        _.toRight(
+          Os10Error(s"${sw.name}: no VLAN $vid (create it with vlan-create)")
+        )
       )
     yield (vid, port, v)
 
-  private def membersNow(sw: Os10Switch, vid: Int): Either[Os10Error, (Set[String], Set[String])] =
+  private def membersNow(
+      sw: Os10Switch,
+      vid: Int
+  ): Either[Os10Error, (Set[String], Set[String])] =
     getVlan(sw, vid).map(v =>
       (
         v.fold(Set.empty[String])(strings(_, Untagged).toSet),
@@ -600,7 +716,12 @@ object Os10:
       Some(patchBody(s"vlan$vid", key, Json.arr(Json.fromString(port))))
     )
 
-  private def leaveStep(vid: Int, key: String, port: String, withUndo: Boolean): Os10Step =
+  private def leaveStep(
+      vid: Int,
+      key: String,
+      port: String,
+      withUndo: Boolean
+  ): Os10Step =
     Os10Step(
       "DELETE",
       Ifaces + "=" + q(s"vlan$vid") + "/" + key + "=" + q(port),
@@ -628,11 +749,17 @@ object Os10:
     val other = if untagged then Tagged else Untagged
     val word = if untagged then "untagged" else "tagged"
     if strings(v, key).contains(port) then
-      Right(Os10NoChange(s"${sw.name}: $port is already $word in VLAN $vid, nothing to do"))
+      Right(
+        Os10NoChange(
+          s"${sw.name}: $port is already $word in VLAN $vid, nothing to do"
+        )
+      )
     else if strings(v, other).contains(port) then
       Left(
         Os10Error(
-          s"${sw.name}: $port is ${if untagged then "tagged" else "untagged"} in VLAN $vid: take it out first with vlan-remove"
+          s"${sw.name}: $port is ${
+              if untagged then "tagged" else "untagged"
+            } in VLAN $vid: take it out first with vlan-remove"
         )
       )
     else
@@ -642,24 +769,38 @@ object Os10:
           else
             vlansOf(ifaces).toList
               .sortBy(_._1)
-              .collect { case (ovid, o) if ovid != vid && strings(o, Untagged).contains(port) => ovid }
+              .collect {
+                case (ovid, o)
+                    if ovid != vid && strings(o, Untagged).contains(port) =>
+                  ovid
+              }
         val verify: (String => Unit) => Either[Os10Error, String] = say =>
           // the switch may leave the port untagged in its old VLAN too: take it out
-          val cleaned = olds.foldLeft[Either[Os10Error, Unit]](Right(())) { (acc, o) =>
-            acc.flatMap { _ =>
-              membersNow(sw, o).flatMap { (un, _) =>
-                if un.contains(port) then
-                  say(s"${sw.name}: $port is still untagged in VLAN $o: taking it out")
-                  val gone = leaveStep(o, Untagged, port, withUndo = false)
-                  sw.request(gone.method, gone.url).map(_ => ())
-                else Right(())
+          val cleaned = olds.foldLeft[Either[Os10Error, Unit]](Right(())) {
+            (acc, o) =>
+              acc.flatMap { _ =>
+                membersNow(sw, o).flatMap { (un, _) =>
+                  if un.contains(port) then
+                    say(
+                      s"${sw.name}: $port is still untagged in VLAN $o: taking it out"
+                    )
+                    val gone = leaveStep(o, Untagged, port, withUndo = false)
+                    sw.request(gone.method, gone.url).map(_ => ())
+                  else Right(())
+                }
               }
-            }
           }
           cleaned.flatMap(_ => membersNow(sw, vid)).flatMap { (un, tg) =>
             if (if untagged then un else tg).contains(port) then
-              Right(s"${sw.name}: $port is now $word in VLAN $vid\n${sw.name}: $NotSaved")
-            else Left(Os10Error(s"${sw.name}: sent, but $port is not $word in VLAN $vid afterwards"))
+              Right(
+                s"${sw.name}: $port is now $word in VLAN $vid\n${sw.name}: $NotSaved"
+              )
+            else
+              Left(
+                Os10Error(
+                  s"${sw.name}: sent, but $port is not $word in VLAN $vid afterwards"
+                )
+              )
           }
         val retry =
           Option.when(olds.nonEmpty)(
@@ -667,7 +808,9 @@ object Os10:
               rc(
                 s"${sw.name}: put $port in VLAN $vid untagged, moving it out of VLAN ${olds.mkString(", ")} first, where it is untagged"
               ),
-              olds.map(o => leaveStep(o, Untagged, port, withUndo = true)) :+ vlanStep(vid, key, port),
+              olds.map(o =>
+                leaveStep(o, Untagged, port, withUndo = true)
+              ) :+ vlanStep(vid, key, port),
               verify
             )
           )
@@ -703,19 +846,30 @@ object Os10:
           val word = if k == Untagged then "untagged" else "tagged"
           Os10Apply(
             Os10Change(
-              rc(s"${sw.name}: take $port out of VLAN $vid (it is $word there)"),
+              rc(
+                s"${sw.name}: take $port out of VLAN $vid (it is $word there)"
+              ),
               List(leaveStep(vid, k, port, withUndo = false)),
               _ =>
                 membersNow(sw, vid).flatMap { (un, tg) =>
                   if (un ++ tg).contains(port) then
-                    Left(Os10Error(s"${sw.name}: sent, but $port is still in VLAN $vid"))
-                  else Right(s"${sw.name}: $port is no longer in VLAN $vid\n${sw.name}: $NotSaved")
+                    Left(
+                      Os10Error(
+                        s"${sw.name}: sent, but $port is still in VLAN $vid"
+                      )
+                    )
+                  else
+                    Right(
+                      s"${sw.name}: $port is no longer in VLAN $vid\n${sw.name}: $NotSaved"
+                    )
                 }
             )
           )
     }
 
-  /** copy running-configuration startup-configuration, as yuma-netconf:copy-config. */
+  /** copy running-configuration startup-configuration, as
+    * yuma-netconf:copy-config.
+    */
   def planSave(sw: Os10Switch): Os10Plan =
     val body = Json.obj(
       "yuma-netconf:input" -> Json.obj(
@@ -726,29 +880,42 @@ object Os10:
     Os10Apply(
       Os10Change(
         s"${sw.name}: save the running configuration to the startup configuration (copy-config running -> startup)",
-        List(Os10Step("POST", "/operations/yuma-netconf:copy-config", Some(body))),
-        _ => Right(s"${sw.name}: saved. Check on the switch with `show startup-configuration`.")
+        List(
+          Os10Step("POST", "/operations/yuma-netconf:copy-config", Some(body))
+        ),
+        _ =>
+          Right(
+            s"${sw.name}: saved. Check on the switch with `show startup-configuration`."
+          )
       )
     )
 
   // ---- changing: sending ----
-  private def send(sw: Os10Switch, step: Os10Step): Either[Os10Error, Os10Step] =
+  private def send(
+      sw: Os10Switch,
+      step: Os10Step
+  ): Either[Os10Error, Os10Step] =
     sw.request(step.method, step.url, step.body) match
       case Right(_) => Right(step)
-      case Left(e) =>
+      case Left(e)  =>
         (e.status, step.fallback) match
           case (Some(405 | 501), Some(f)) =>
             sw.request(f.method, f.url, f.body).map(_ => f)
           case _ => Left(e)
 
-  /** Sends the steps in order; if one fails, takes back the earlier ones that can be. */
+  /** Sends the steps in order; if one fails, takes back the earlier ones that
+    * can be.
+    */
   private def runSteps(
       sw: Os10Switch,
       steps: List[Os10Step],
       say: String => Unit
   ): Either[Os10Error, Unit] =
     @scala.annotation.tailrec
-    def go(rest: List[Os10Step], done: List[Os10Step]): Either[Os10Error, Unit] =
+    def go(
+        rest: List[Os10Step],
+        done: List[Os10Step]
+    ): Either[Os10Error, Unit] =
       rest match
         case Nil       => Right(())
         case s :: tail =>
@@ -759,16 +926,20 @@ object Os10:
                 p.undo.foreach { u =>
                   sw.request(u.method, u.url, u.body) match
                     case Right(_) =>
-                      say(s"${sw.name}: took back the earlier step (${p.method} ${p.url})")
+                      say(
+                        s"${sw.name}: took back the earlier step (${p.method} ${p.url})"
+                      )
                     case Left(e2) =>
-                      say(s"${sw.name}: could NOT take back ${p.method} ${p.url}: ${e2.message}")
+                      say(
+                        s"${sw.name}: could NOT take back ${p.method} ${p.url}: ${e2.message}"
+                      )
                 }
               }
               Left(e)
     go(steps, Nil)
 
-  /** Sends a change, reads the switch back and returns the closing message.
-    * If the steps are refused and the change has a `retry`, that is sent instead.
+  /** Sends a change, reads the switch back and returns the closing message. If
+    * the steps are refused and the change has a `retry`, that is sent instead.
     */
   def execute(
       sw: Os10Switch,
@@ -776,7 +947,7 @@ object Os10:
       say: String => Unit
   ): Either[Os10Error, String] =
     runSteps(sw, change.steps, say) match
-      case Right(_) => change.verify(say)
+      case Right(_)    => change.verify(say)
       case Left(first) =>
         change.retry match
           case None        => Left(first)

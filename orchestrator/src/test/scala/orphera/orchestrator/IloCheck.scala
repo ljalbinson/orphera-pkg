@@ -11,7 +11,7 @@ import scala.collection.mutable
 
 import com.sun.net.httpserver.{HttpExchange, HttpServer}
 import io.circe.Json
-import io.circe.yaml.parser  // YAML is a superset of JSON, and this is the parser the project has
+import io.circe.yaml.parser // YAML is a superset of JSON, and this is the parser the project has
 
 /** Checks for the iLO client and `orphera ilo`, against a mock iLO (Redfish
   * or the older HP REST API; the JDK's HTTP server on localhost). Needs no

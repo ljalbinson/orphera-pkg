@@ -5,8 +5,8 @@ package orphera.orchestrator
 import java.io.FileInputStream
 import java.net.Socket
 import java.net.http.HttpClient
-import java.security.{KeyStore, SecureRandom}
 import java.security.cert.{CertificateFactory, X509Certificate}
+import java.security.{KeyStore, SecureRandom}
 import java.time.Duration
 import javax.net.ssl.{
   SSLContext,
@@ -22,19 +22,37 @@ import javax.net.ssl.{
 private object DeviceTrustAll extends X509ExtendedTrustManager:
   def checkClientTrusted(c: Array[X509Certificate], a: String): Unit = ()
   def checkServerTrusted(c: Array[X509Certificate], a: String): Unit = ()
-  def checkClientTrusted(c: Array[X509Certificate], a: String, s: Socket): Unit = ()
-  def checkServerTrusted(c: Array[X509Certificate], a: String, s: Socket): Unit = ()
-  def checkClientTrusted(c: Array[X509Certificate], a: String, e: SSLEngine): Unit = ()
-  def checkServerTrusted(c: Array[X509Certificate], a: String, e: SSLEngine): Unit = ()
+  def checkClientTrusted(
+      c: Array[X509Certificate],
+      a: String,
+      s: Socket
+  ): Unit = ()
+  def checkServerTrusted(
+      c: Array[X509Certificate],
+      a: String,
+      s: Socket
+  ): Unit = ()
+  def checkClientTrusted(
+      c: Array[X509Certificate],
+      a: String,
+      e: SSLEngine
+  ): Unit = ()
+  def checkServerTrusted(
+      c: Array[X509Certificate],
+      a: String,
+      e: SSLEngine
+  ): Unit = ()
   def getAcceptedIssuers: Array[X509Certificate] = Array.empty
 
-/** What reaching a device over HTTPS has in common, for the iLO and OS10
-  * tools: its certificate, how the HTTP client is made, and where its
-  * password comes from.
+/** What reaching a device over HTTPS has in common, for the iLO and OS10 tools:
+  * its certificate, how the HTTP client is made, and where its password comes
+  * from.
   */
 object DeviceAccess:
 
-  /** --insecure: any certificate. --cacert FILE: only that one. Otherwise the system's. */
+  /** --insecure: any certificate. --cacert FILE: only that one. Otherwise the
+    * system's.
+    */
   def tlsContext(
       insecure: Boolean,
       cacert: Option[String]
@@ -50,7 +68,8 @@ object DeviceAccess:
           try
             val in = FileInputStream(path)
             val cert =
-              try CertificateFactory.getInstance("X.509").generateCertificate(in)
+              try
+                CertificateFactory.getInstance("X.509").generateCertificate(in)
               finally in.close()
             val ks = KeyStore.getInstance(KeyStore.getDefaultType)
             ks.load(null, null)
@@ -80,7 +99,9 @@ object DeviceAccess:
         .build()
     )
 
-  /** The secret that holds a device's password: its address or name as given, or the host of a URL. */
+  /** The secret that holds a device's password: its address or name as given,
+    * or the host of a URL.
+    */
   def secretKey(target: String): String =
     val t = target.trim.stripSuffix("/")
     if t.contains("://") then
@@ -92,8 +113,8 @@ object DeviceAccess:
     else t
 
   /** The password for one device: the environment variable, --password-file,
-    * the secret (--secret NAME, or the one named after the device as typed),
-    * or a prompt on a terminal. Never from the command line.
+    * the secret (--secret NAME, or the one named after the device as typed), or
+    * a prompt on a terminal. Never from the command line.
     */
   def password(
       env: Map[String, String],
@@ -106,7 +127,7 @@ object DeviceAccess:
   ): Either[String, String] =
     env.get(envVar).filter(_.nonEmpty) match
       case Some(p) => Right(p)
-      case None =>
+      case None    =>
         passwordFile match
           case Some(f) =>
             try
@@ -121,10 +142,10 @@ object DeviceAccess:
             val name = secret.getOrElse(secretKey(target))
             val (value, why) = store().flatMap(_.get(name)) match
               case Right(Some(v)) if v.nonEmpty => (Some(v), "")
-              case Right(_)                     => (None, s"no secret called $name")
-              case Left(msg)                    => (None, msg)
+              case Right(_)  => (None, s"no secret called $name")
+              case Left(msg) => (None, msg)
             value match
-              case Some(v) => Right(v)
+              case Some(v)                          => Right(v)
               case None if System.console() != null =>
                 val pw = System
                   .console()

@@ -2,13 +2,13 @@
 
 package orphera.orchestrator
 
-/** `orphera nodes`: prints the node names a selection stands for, one per
-  * line, from the inventory (-I / ORPHERA_INVENTORY). It takes the same
-  * `--nodes`, `--node-groups` and `--exclude-nodes` as every other command and
-  * expands them with the same code (Cli.expandNodeGroups), so an unknown group
-  * or a bad exclusion gives the same error here as anywhere else. With no
-  * selection it prints every node. `nodes --groups` prints each group instead,
-  * as `<group>: <member> <member> ...`.
+/** `orphera nodes`: prints the node names a selection stands for, one per line,
+  * from the inventory (-I / ORPHERA_INVENTORY). It takes the same `--nodes`,
+  * `--node-groups` and `--exclude-nodes` as every other command and expands
+  * them with the same code (Cli.expandNodeGroups), so an unknown group or a bad
+  * exclusion gives the same error here as anywhere else. With no selection it
+  * prints every node. `nodes --groups` prints each group instead, as
+  * `<group>: <member> <member> ...`.
   *
   * It only reads the inventory and runs on this machine. Its use is scripts
   * that need a group's members, such as utils/vmctl.sh:

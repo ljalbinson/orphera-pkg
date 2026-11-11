@@ -844,20 +844,61 @@ object Cli:
           "deploy-agent: --scala picks the Scala packages by itself; --agent names a file, so give one or the other"
         )
       case Nil =>
-        Right(Command.DeployAgent(local, remotePath, nodes, useScala, force, parallel))
+        Right(
+          Command.DeployAgent(
+            local,
+            remotePath,
+            nodes,
+            useScala,
+            force,
+            parallel
+          )
+        )
       case ("--agent" | "--file") :: value :: rest =>
-        parseDeployAgent(rest, Some(value), remotePath, nodes, useScala, force, parallel)
+        parseDeployAgent(
+          rest,
+          Some(value),
+          remotePath,
+          nodes,
+          useScala,
+          force,
+          parallel
+        )
       case "--scala" :: rest =>
         parseDeployAgent(rest, local, remotePath, nodes, true, force, parallel)
       // The Go agent is the default now; --go is still accepted.
       case "--go" :: rest =>
-        parseDeployAgent(rest, local, remotePath, nodes, useScala, force, parallel)
+        parseDeployAgent(
+          rest,
+          local,
+          remotePath,
+          nodes,
+          useScala,
+          force,
+          parallel
+        )
       case "--force" :: rest =>
-        parseDeployAgent(rest, local, remotePath, nodes, useScala, true, parallel)
+        parseDeployAgent(
+          rest,
+          local,
+          remotePath,
+          nodes,
+          useScala,
+          true,
+          parallel
+        )
       case "--parallel" :: n :: rest =>
         n.toIntOption.filter(_ > 0) match
           case Some(p) =>
-            parseDeployAgent(rest, local, remotePath, nodes, useScala, force, Some(p))
+            parseDeployAgent(
+              rest,
+              local,
+              remotePath,
+              nodes,
+              useScala,
+              force,
+              Some(p)
+            )
           case None =>
             Left(s"--parallel requires a positive number, got '$n'")
       case "--remote-path" :: value :: rest =>

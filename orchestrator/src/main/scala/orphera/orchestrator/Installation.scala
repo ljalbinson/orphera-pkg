@@ -16,8 +16,8 @@ import java.nio.file.{Files, Path, Paths}
   * Files named by a playbook (`src = "files/motd"`): a relative path is read
   * from the current directory, as before; when it is not there and
   * `ORPHERA_ROOT` is set (the packaged launcher sets it to
-  * `/usr/share/orphera`), it
-  * is looked for under that directory. An absolute path is never moved.
+  * `/usr/share/orphera`), it is looked for under that directory. An absolute
+  * path is never moved.
   *
   * Run state (`.orphera-state`, `.orphera-logs`, `.orphera-audit`,
   * `.orphera-build-logs`): under `ORPHERA_STATE_DIR` when it is set, else in

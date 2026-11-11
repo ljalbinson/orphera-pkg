@@ -5,9 +5,9 @@ package orphera.orchestrator
 import java.lang.reflect.InvocationTargetException
 
 /** A playbook failed. Its message is the whole report: toString is just the
-  * message and there is no stack trace to fill in, so when cats-effect's
-  * IOApp prints the error that ended the program, the output is one line
-  * instead of a Java backtrace.
+  * message and there is no stack trace to fill in, so when cats-effect's IOApp
+  * prints the error that ended the program, the output is one line instead of a
+  * Java backtrace.
   */
 final class PlaybookFailed(message: String)
     extends RuntimeException(message, null, false, false):
@@ -27,7 +27,8 @@ object PlaybookLauncher:
     args.toList match
       case className :: rest =>
         try
-          val mainArgs: AnyRef = rest.toArray // one argument: the String[] that main takes
+          val mainArgs: AnyRef =
+            rest.toArray // one argument: the String[] that main takes
           Class
             .forName(className)
             .getMethod("main", classOf[Array[String]])

@@ -44,9 +44,9 @@ object AgentPackages:
       requested.stripSuffix(".rpm") + ".deb"
     else requested
 
-  /** An explicit `--agent` selects one package (by extension). Otherwise the
-    * Go agent is the default: the newest package `make deb` / `make rpm` left
-    * in agent-go/. `useScala = true` offers the Scala agent's newest
+  /** An explicit `--agent` selects one package (by extension). Otherwise the Go
+    * agent is the default: the newest package `make deb` / `make rpm` left in
+    * agent-go/. `useScala = true` offers the Scala agent's newest
     * `orphera-agent_*_amd64.deb` and `orphera-agent-*.rpm` in `dir` instead.
     * Whether a file really is the agent package is checked later
     * (Orchestrator.requireOrpheraAgentPackage), not here.

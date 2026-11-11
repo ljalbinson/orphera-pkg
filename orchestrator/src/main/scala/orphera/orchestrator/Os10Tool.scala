@@ -8,8 +8,8 @@ import io.circe.{Json, Printer}
 
 /** `orphera os10 <command> <switch> ...`: read, and change, a Dell OS10 switch
   * through its RESTCONF API. The same commands as utils/os10.py, on the Os10
-  * client library. Changes are to the running configuration; `save` keeps
-  * them over a reload.
+  * client library. Changes are to the running configuration; `save` keeps them
+  * over a reload.
   */
 object Os10Tool:
   val usage: String =
@@ -69,15 +69,23 @@ object Os10Tool:
 
   /** (command word -> what its first argument is called, or None) */
   private val needs: Map[String, Option[String]] = Map(
-    "interfaces" -> None, "vlans" -> None, "operations" -> None,
-    "save" -> None, "backup" -> None,
-    "vlan" -> Some("VLAN number"), "port" -> Some("port, e.g. 1/1/49:1"),
+    "interfaces" -> None,
+    "vlans" -> None,
+    "operations" -> None,
+    "save" -> None,
+    "backup" -> None,
+    "vlan" -> Some("VLAN number"),
+    "port" -> Some("port, e.g. 1/1/49:1"),
     "get" -> Some("path under /restconf/data"),
     "schema" -> Some("module name, e.g. yuma-netconf"),
-    "set-description" -> Some("port, e.g. 1/1/5"), "set-mtu" -> Some("port, e.g. 1/1/5"),
-    "set-speed" -> Some("port, e.g. 1/1/5"), "set-mode" -> Some("port, e.g. 1/1/5"),
-    "vlan-create" -> Some("VLAN number"), "vlan-delete" -> Some("VLAN number"),
-    "vlan-add" -> Some("VLAN number and a port"), "vlan-remove" -> Some("VLAN number and a port")
+    "set-description" -> Some("port, e.g. 1/1/5"),
+    "set-mtu" -> Some("port, e.g. 1/1/5"),
+    "set-speed" -> Some("port, e.g. 1/1/5"),
+    "set-mode" -> Some("port, e.g. 1/1/5"),
+    "vlan-create" -> Some("VLAN number"),
+    "vlan-delete" -> Some("VLAN number"),
+    "vlan-add" -> Some("VLAN number and a port"),
+    "vlan-remove" -> Some("VLAN number and a port")
   )
 
   private def parse(
@@ -108,12 +116,22 @@ object Os10Tool:
     go(
       args,
       Opts(
-        env.getOrElse("OS10_USER", "admin"), None, None,
-        env.get("OS10_INSECURE").contains("1"), None, false, false, false, false, Nil
+        env.getOrElse("OS10_USER", "admin"),
+        None,
+        None,
+        env.get("OS10_INSECURE").contains("1"),
+        None,
+        false,
+        false,
+        false,
+        false,
+        Nil
       )
     )
 
-  /** The secret that holds a switch's password: its address or name as given, or the host of a URL. */
+  /** The secret that holds a switch's password: its address or name as given,
+    * or the host of a URL.
+    */
   def secretKey(target: String): String = DeviceAccess.secretKey(target)
 
   private def password(
@@ -132,7 +150,8 @@ object Os10Tool:
       Left(Os10Error(s"$command needs --yes when there is no terminal"))
     else
       print("type yes to go on: ")
-      if Option(scala.io.StdIn.readLine()).exists(_.trim == "yes") then Right(())
+      if Option(scala.io.StdIn.readLine()).exists(_.trim == "yes") then
+        Right(())
       else Left(Os10Error("not confirmed, nothing sent"))
 
   private def applyPlan(
@@ -142,7 +161,7 @@ object Os10Tool:
       plan: Either[Os10Error, Os10Plan]
   ): Either[Os10Error, Unit] =
     plan.flatMap {
-      case Os10NoChange(m) => println(m); Right(())
+      case Os10NoChange(m)   => println(m); Right(())
       case Os10Apply(change) =>
         println(change.headline)
         if o.dryRun then
@@ -155,12 +174,19 @@ object Os10Tool:
           )
     }
 
-  /** Two-space indent and `"name": "x"`, as utils/os10.py prints it (circe's own spaces2 puts a space before the colon). */
+  /** Two-space indent and `"name": "x"`, as utils/os10.py prints it (circe's
+    * own spaces2 puts a space before the colon).
+    */
   private val printer: Printer = Printer.spaces2.copy(colonLeft = "")
 
   private def printJson(j: Json): Unit = println(printer.print(j))
 
-  private def command(sw: Os10Switch, o: Opts, cmd: String, args: List[String]): Either[Os10Error, Unit] =
+  private def command(
+      sw: Os10Switch,
+      o: Opts,
+      cmd: String,
+      args: List[String]
+  ): Either[Os10Error, Unit] =
     val a1 = args.headOption
     val a2 = args.drop(1).headOption
     cmd match
@@ -168,16 +194,19 @@ object Os10Tool:
         Os10.portRows(sw).map { rows =>
           if o.json then
             printJson(
-              Json.arr(rows.map(r =>
-                Json.obj(
-                  "name" -> Json.fromString(r.name),
-                  "mode" -> Json.fromString(r.mode),
-                  "speed" -> Json.fromString(r.speed),
-                  "mtu" -> r.mtu.toIntOption.fold(Json.fromString(r.mtu))(Json.fromInt),
-                  "untagged" -> Json.arr(r.untagged.map(Json.fromInt)*),
-                  "tagged" -> Json.arr(r.tagged.map(Json.fromInt)*)
-                )
-              )*)
+              Json.arr(
+                rows.map(r =>
+                  Json.obj(
+                    "name" -> Json.fromString(r.name),
+                    "mode" -> Json.fromString(r.mode),
+                    "speed" -> Json.fromString(r.speed),
+                    "mtu" -> r.mtu.toIntOption
+                      .fold(Json.fromString(r.mtu))(Json.fromInt),
+                    "untagged" -> Json.arr(r.untagged.map(Json.fromInt)*),
+                    "tagged" -> Json.arr(r.tagged.map(Json.fromInt)*)
+                  )
+                )*
+              )
             )
           else
             println(
@@ -185,9 +214,16 @@ object Os10Tool:
                 List("PORT", "MODE", "SPEED", "MTU", "UNTAGGED", "TAGGED"),
                 rows.map(r =>
                   List(
-                    r.name, r.mode, r.speed, r.mtu,
-                    Some(Os10.ranges(r.untagged)).filter(_.nonEmpty).getOrElse("-"),
-                    Some(Os10.ranges(r.tagged)).filter(_.nonEmpty).getOrElse("-")
+                    r.name,
+                    r.mode,
+                    r.speed,
+                    r.mtu,
+                    Some(Os10.ranges(r.untagged))
+                      .filter(_.nonEmpty)
+                      .getOrElse("-"),
+                    Some(Os10.ranges(r.tagged))
+                      .filter(_.nonEmpty)
+                      .getOrElse("-")
                   )
                 )
               )
@@ -198,13 +234,17 @@ object Os10Tool:
           val vlans = Os10.vlansOf(ifaces).toList.sortBy(_._1)
           if o.json then
             printJson(
-              Json.arr(vlans.map((vid, v) =>
-                Json.obj(
-                  "vlan" -> Json.fromInt(vid),
-                  "untagged_ports" -> Json.fromInt(Os10.strings(v, Os10.Untagged).size),
-                  "tagged_ports" -> Json.fromInt(Os10.strings(v, Os10.Tagged).size)
-                )
-              )*)
+              Json.arr(
+                vlans.map((vid, v) =>
+                  Json.obj(
+                    "vlan" -> Json.fromInt(vid),
+                    "untagged_ports" -> Json
+                      .fromInt(Os10.strings(v, Os10.Untagged).size),
+                    "tagged_ports" -> Json
+                      .fromInt(Os10.strings(v, Os10.Tagged).size)
+                  )
+                )*
+              )
             )
           else
             println(
@@ -226,7 +266,7 @@ object Os10Tool:
           Left(Os10Error("a VLAN is given by its number, e.g. 228"))
         else
           Os10.getInterface(sw, s"vlan$n").flatMap {
-            case None => Left(Os10Error(s"${sw.name}: no VLAN $n"))
+            case None    => Left(Os10Error(s"${sw.name}: no VLAN $n"))
             case Some(v) =>
               val un = Os10.strings(v, Os10.Untagged).sorted(using Os10.natural)
               val tg = Os10.strings(v, Os10.Tagged).sorted(using Os10.natural)
@@ -240,17 +280,24 @@ object Os10Tool:
                 )
               else
                 println(s"VLAN $n")
-                println(s"  untagged (${un.size}): ${if un.isEmpty then "-" else un.mkString(" ")}")
-                println(s"  tagged   (${tg.size}): ${if tg.isEmpty then "-" else tg.mkString(" ")}")
+                println(s"  untagged (${un.size}): ${
+                    if un.isEmpty then "-" else un.mkString(" ")
+                  }")
+                println(s"  tagged   (${tg.size}): ${
+                    if tg.isEmpty then "-" else tg.mkString(" ")
+                  }")
               Right(())
           }
       case "port" =>
         for
           name <- Os10.portName(a1.getOrElse(""))
-          port <- Os10.getInterface(sw, name).flatMap(_.toRight(Os10Error(s"${sw.name}: no port $name")))
+          port <- Os10
+            .getInterface(sw, name)
+            .flatMap(_.toRight(Os10Error(s"${sw.name}: no port $name")))
           ifaces <- Os10.allInterfaces(sw)
         yield
-          val (un, tg) = Os10.membership(Os10.vlansOf(ifaces)).getOrElse(name, (Nil, Nil))
+          val (un, tg) =
+            Os10.membership(Os10.vlansOf(ifaces)).getOrElse(name, (Nil, Nil))
           if o.json then
             printJson(
               Json.obj(
@@ -261,8 +308,12 @@ object Os10Tool:
             )
           else
             printJson(port)
-            println(s"untagged VLANs: ${Some(Os10.ranges(un)).filter(_.nonEmpty).getOrElse("-")}")
-            println(s"tagged VLANs:   ${Some(Os10.ranges(tg)).filter(_.nonEmpty).getOrElse("-")}")
+            println(
+              s"untagged VLANs: ${Some(Os10.ranges(un)).filter(_.nonEmpty).getOrElse("-")}"
+            )
+            println(
+              s"tagged VLANs:   ${Some(Os10.ranges(tg)).filter(_.nonEmpty).getOrElse("-")}"
+            )
       case "get" =>
         sw.data(a1.getOrElse("")).map(printJson)
       case "operations" =>
@@ -276,32 +327,46 @@ object Os10Tool:
         sw.json("/data").flatMap { doc =>
           try
             Files.writeString(Paths.get(path), printer.print(doc))
-            println(s"${sw.name}: saved ${Files.size(Paths.get(path))} bytes to $path")
+            println(
+              s"${sw.name}: saved ${Files.size(Paths.get(path))} bytes to $path"
+            )
             Right(())
-          catch case e: Exception => Left(Os10Error(s"cannot write $path: ${e.getMessage}"))
+          catch
+            case e: Exception =>
+              Left(Os10Error(s"cannot write $path: ${e.getMessage}"))
         }
       case "set-description" =>
         a2 match
-          case None => Left(Os10Error("set-description needs a value after the port"))
-          case Some(t) => applyPlan(sw, o, cmd, Os10.planDescription(sw, a1.getOrElse(""), t))
+          case None =>
+            Left(Os10Error("set-description needs a value after the port"))
+          case Some(t) =>
+            applyPlan(sw, o, cmd, Os10.planDescription(sw, a1.getOrElse(""), t))
       case "set-mtu" =>
         a2 match
           case None => Left(Os10Error("set-mtu needs a value after the port"))
-          case Some(v) => applyPlan(sw, o, cmd, Os10.planMtu(sw, a1.getOrElse(""), v))
+          case Some(v) =>
+            applyPlan(sw, o, cmd, Os10.planMtu(sw, a1.getOrElse(""), v))
       case "set-speed" =>
         a2 match
           case None => Left(Os10Error("set-speed needs a value after the port"))
-          case Some(v) => applyPlan(sw, o, cmd, Os10.planSpeed(sw, a1.getOrElse(""), v))
+          case Some(v) =>
+            applyPlan(sw, o, cmd, Os10.planSpeed(sw, a1.getOrElse(""), v))
       case "set-mode" =>
         a2 match
           case None => Left(Os10Error("set-mode needs a value after the port"))
-          case Some(v) => applyPlan(sw, o, cmd, Os10.planMode(sw, a1.getOrElse(""), v))
+          case Some(v) =>
+            applyPlan(sw, o, cmd, Os10.planMode(sw, a1.getOrElse(""), v))
       case "vlan-create" =>
         applyPlan(sw, o, cmd, Os10.planVlanCreate(sw, a1.getOrElse("")))
       case "vlan-delete" =>
         applyPlan(sw, o, cmd, Os10.planVlanDelete(sw, a1.getOrElse("")))
       case "vlan-add" =>
-        applyPlan(sw, o, cmd, Os10.planVlanAdd(sw, a1.getOrElse(""), a2, o.untagged))
+        applyPlan(
+          sw,
+          o,
+          cmd,
+          Os10.planVlanAdd(sw, a1.getOrElse(""), a2, o.untagged)
+        )
       case "vlan-remove" =>
         applyPlan(sw, o, cmd, Os10.planVlanRemove(sw, a1.getOrElse(""), a2))
       case "save" =>
@@ -309,14 +374,18 @@ object Os10Tool:
       case other =>
         Left(Os10Error(s"unknown command $other"))
 
-  /** Returns the exit code: 0 done, 1 the switch failed or refused, 2 wrong usage. */
+  /** Returns the exit code: 0 done, 1 the switch failed or refused, 2 wrong
+    * usage.
+    */
   def run(args: List[String], env: Map[String, String] = sys.env): Int =
     args match
       case Nil | ("help" | "-h" | "--help") :: _ =>
         println(usage)
         if args.isEmpty then 2 else 0
       case cmd :: _ if !needs.contains(cmd) =>
-        Console.err.println(s"orphera os10: unknown command '$cmd' (orphera os10 --help)")
+        Console.err.println(
+          s"orphera os10: unknown command '$cmd' (orphera os10 --help)"
+        )
         2
       case cmd :: rest =>
         parse(rest, env) match
@@ -326,7 +395,9 @@ object Os10Tool:
           case Right(o) =>
             o.positional match
               case Nil =>
-                Console.err.println(s"orphera os10: $cmd needs a switch (orphera os10 --help)")
+                Console.err.println(
+                  s"orphera os10: $cmd needs a switch (orphera os10 --help)"
+                )
                 2
               case target :: cmdArgs =>
                 needs(cmd).filter(_ => cmdArgs.isEmpty && cmd != "backup") match
@@ -336,7 +407,8 @@ object Os10Tool:
                   case None =>
                     val result =
                       password(o, target, env).flatMap { pw =>
-                        val sw = Os10Switch(target, o.user, pw, o.insecure, o.cacert)
+                        val sw =
+                          Os10Switch(target, o.user, pw, o.insecure, o.cacert)
                         command(sw, o, cmd, cmdArgs)
                       }
                     result match
