@@ -7,6 +7,8 @@
 #
 # The standard (FHS) layout, under PREFIX (default /usr):
 #   PREFIX/bin/orphera                       the launcher
+#   PREFIX/bin/vmctl, start-vm, ...          the utility commands (packaging/cli/utilities), each running
+#                                            share/orphera/utils/<name>.sh
 #   PREFIX/lib/orphera/                      the two jars and orphera-env.sh (the site defaults)
 #   PREFIX/share/orphera/                    manifests/ (playbooks and their scripts), utils/, catalogues/,
 #                                            schemas/, files/, examples/, VERSION
@@ -51,6 +53,10 @@ mkdir -p "$p/bin" "$lib" "$share/examples" "$doc" "$p/share/bash-completion/comp
   "$stage/etc/orphera/config" "$stage/etc/orphera/certs"
 
 install -m 755 "$root/packaging/cli/orphera" "$p/bin/orphera"
+utilities=$(grep -v '^[[:space:]]*#' "$root/packaging/cli/utilities" | grep -v '^[[:space:]]*$')
+for u in $utilities; do
+  install -m 755 "$root/packaging/cli/utility" "$p/bin/$u"
+done
 install -m 644 "$root/packaging/cli/orphera-env.sh" "$lib/orphera-env.sh"
 install -m 644 "$orch" "$lib/orphera-orchestrator.jar"
 install -m 644 "$scripting" "$lib/orphera-scripting.jar"
@@ -58,8 +64,10 @@ install -m 644 "$scripting" "$lib/orphera-scripting.jar"
 for d in manifests utils catalogues schemas files; do
   cp -a "$root/$d" "$share/$d"
 done
-# The checkout's launcher is not part of the package, and neither is a Python cache.
-rm -f "$share/utils/orphera"
+# The checkout's launchers are not part of the package, and neither is a Python cache.
+rm -f "$share/utils/orphera" "$share/utils/orphera-utility"
+# Nor are the native executables of the utilities (built here for this machine only; the package is for any).
+for u in $utilities; do rm -f "$share/utils/$u"; done
 find "$share" -name __pycache__ -prune -exec rm -rf {} +
 
 # The lab's own inventory and configs are examples of the format, not defaults.

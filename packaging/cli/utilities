@@ -1,0 +1,11 @@
+# The scripts of utils/ that are commands of their own: installed in bin/ beside `orphera` (by the
+# packages, `make install` and `make orpheracli`), each running utils/<name>.sh. One name per line.
+vmctl
+start-vm
+stop-vm
+reboot-vm
+list-vms
+move-vm
+galera-cold-start
+scan-vm-sizes
+vbmc-vm

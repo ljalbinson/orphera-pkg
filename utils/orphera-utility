@@ -1,0 +1,44 @@
+#!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
+# One of the utility commands of a checkout (vmctl, start-vm, ...; the list is packaging/cli/utilities).
+# `make orpheracli` installs this file in /opt/orphera/bin under each name (on the PATH through
+# /etc/profile.d/orphera-utils.sh); `orphera` itself stays in /usr/local/bin.
+# It runs utils/<name> (the native executable, when it has been built with `make native-utils`) or else
+# utils/<name>.sh, from the same checkout `orphera` runs from: $ORPHERA_HOME, else ~/orphera-pkg.
+#
+# Not part of a package (packaging/cli/utility is).
+
+set -e
+
+self=$0
+while [ -h "$self" ]; do
+  dir=$(cd "$(dirname "$self")" && pwd)
+  link=$(readlink "$self")
+  case $link in
+    /*) self=$link ;;
+    *) self=$dir/$link ;;
+  esac
+done
+name=$(basename "$self")
+
+if [ -n "${ORPHERA_HOME:-}" ]; then
+  if [ ! -d "$ORPHERA_HOME" ]; then
+    echo "Error: ORPHERA_HOME is $ORPHERA_HOME, which is not a directory" >&2
+    exit 1
+  fi
+  home=$ORPHERA_HOME
+elif [ -d "$HOME/orphera-pkg" ]; then
+  home=$HOME/orphera-pkg
+else
+  echo "Error: no Orphera checkout: set ORPHERA_HOME, or keep it in ~/orphera-pkg" >&2
+  exit 1
+fi
+
+if [ -f "$home/utils/$name" ] && [ -x "$home/utils/$name" ]; then
+  exec "$home/utils/$name" "$@"
+fi
+if [ ! -f "$home/utils/$name.sh" ]; then
+  echo "Error: $home/utils/$name.sh not found" >&2
+  exit 1
+fi
+exec bash "$home/utils/$name.sh" "$@"

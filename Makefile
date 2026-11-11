@@ -14,6 +14,10 @@ CERTS_DIR    := $(or $(ORPHERA_CERTS_DIR),certs)
 CLI_JAR      := /usr/local/lib/orphera-orchestrator.jar
 SCRIPTING_JAR := /usr/local/lib/orphera-scripting.jar
 CLI_BIN      := /usr/local/bin/orphera
+# The utils/ scripts that are commands of their own (vmctl, ...). `make orpheracli` puts them in UTIL_BIN;
+# the packages and `make install` put them in bin/ beside orphera.
+UTIL_BIN     := /opt/orphera/bin
+UTILITIES    := $(shell grep -v '^[[:space:]]*\#' packaging/cli/utilities | grep -v '^[[:space:]]*$$')
 CLI_COMPLETION := /etc/bash_completion.d/orphera
 
 all: clean test assembly deb rpm
@@ -204,8 +208,11 @@ orpheracli:
 	sudo cp scripting/target/scala-3.8.4/scripting-assembly-$(VERSION).jar $(SCRIPTING_JAR).new
 	sudo mv $(SCRIPTING_JAR).new $(SCRIPTING_JAR)
 	sudo install -m 755 utils/orphera $(CLI_BIN)
+	sudo install -d -m 755 $(UTIL_BIN)
+	for u in $(UTILITIES); do sudo install -m 755 utils/orphera-utility $(UTIL_BIN)/$$u; done
+	sudo install -D -m 644 packaging/cli/orphera-utils-profile.sh /etc/profile.d/orphera-utils.sh
 	sudo install -D -m 644 orphera-completion.bash $(CLI_COMPLETION)
-	@echo "Installed orchestrator $(VERSION) as $(CLI_JAR) and the scripting jar as $(SCRIPTING_JAR); tab completion applies to new shells"
+	@echo "Installed orchestrator $(VERSION) as $(CLI_JAR) and the scripting jar as $(SCRIPTING_JAR), and $(UTILITIES) in $(UTIL_BIN) (on the PATH of new login shells); tab completion applies to new shells"
 
 scripting:
 	sbt scripting/assembly
@@ -263,6 +270,7 @@ install:
 # Removes what `make install` put under PREFIX. Never touches /etc/orphera or anyone's ~/.config/orphera.
 uninstall:
 	rm -f "$(DESTDIR)$(PREFIX)/bin/orphera" "$(DESTDIR)$(PREFIX)/share/bash-completion/completions/orphera"
+	for u in $(UTILITIES); do rm -f "$(DESTDIR)$(PREFIX)/bin/$$u"; done
 	rm -rf "$(DESTDIR)$(PREFIX)/lib/orphera" "$(DESTDIR)$(PREFIX)/share/orphera" "$(DESTDIR)$(PREFIX)/share/doc/orphera"
 
 cli-package: cli-deb cli-tar

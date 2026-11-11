@@ -1,0 +1,30 @@
+#!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
+# One of the utility commands of an installed package (vmctl, start-vm, ...; the list is
+# packaging/cli/utilities). The same file is installed in bin/ under each name; it runs the script of
+# that name from the installation's share/orphera/utils. The installation prefix is found from where
+# this file is (its bin/..), as the orphera launcher does, so the tree also works when it is moved or
+# reached through a symlink.
+#
+# Not the launcher of a checkout (utils/orphera-utility).
+
+set -e
+
+self=$0
+while [ -h "$self" ]; do
+  dir=$(cd "$(dirname "$self")" && pwd)
+  link=$(readlink "$self")
+  case $link in
+    /*) self=$link ;;
+    *) self=$dir/$link ;;
+  esac
+done
+name=$(basename "$self")
+prefix=$(cd "$(dirname "$self")/.." && pwd)
+script=$prefix/share/orphera/utils/$name.sh
+
+if [ ! -f "$script" ]; then
+  echo "Error: $script not found: the installation at $prefix is incomplete" >&2
+  exit 1
+fi
+exec bash "$script" "$@"

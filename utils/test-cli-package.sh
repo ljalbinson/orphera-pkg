@@ -38,7 +38,13 @@ for f in lib/orphera/orphera-env.sh share/orphera/manifests/build_openstack_stac
   [ -e "$p/$f" ] && ok "has $f" || bad "has $f"
 done
 [ -z "$(ls -A "$stage" | grep -vxE 'usr|etc|DEBIAN')" ] && ok "nothing outside usr/ and etc/" || bad "nothing outside usr/ and etc/: $(ls -A "$stage")"
-[ -z "$(ls -A "$p/bin" | grep -vx orphera)" ] && ok "bin/ holds only orphera" || bad "bin/ holds only orphera: $(ls -A "$p/bin")"
+utilities=$(grep -v '^[[:space:]]*#' packaging/cli/utilities | grep -v '^[[:space:]]*$')
+want=$(printf '%s\n' orphera $utilities | sort)
+eq "bin/ holds orphera and the utilities" "$(ls -A "$p/bin" | sort)" "$want"
+for u in $utilities; do
+  [ -f "utils/$u.sh" ] || bad "utilities lists $u, but utils/$u.sh does not exist"
+  [ -f "$share/utils/$u.sh" ] || bad "utils/$u.sh is staged"
+done
 [ ! -e "$share/utils/orphera" ] && ok "the checkout's launcher is not in the package" || bad "the checkout's launcher is not in the package"
 [ -z "$(find "$p" -name __pycache__)" ] && ok "no Python cache" || bad "no Python cache"
 eq "VERSION" "$(cat "$share/VERSION")" "9.9.9"
@@ -129,6 +135,41 @@ if [ "$rc" -ne 0 ] && grep -q "incomplete" <<<"$out"; then ok "a missing jar say
 rm "$tmp/moved/lib/orphera/orphera-env.sh"
 out=$(run "$tmp/moved/bin/orphera" help 2>&1); rc=$?
 if [ "$rc" -ne 0 ] && grep -q "incomplete" <<<"$out"; then ok "a missing orphera-env.sh says the installation is incomplete"; else bad "a missing orphera-env.sh says the installation is incomplete: $out"; fi
+
+# The utility commands: each runs its own script from the installation, also through a symlink and after a move
+mkdir -p "$tmp/fakeutils"
+printf '#!/bin/bash\necho "RAN $0 $*"\n' >"$tmp/fakeutils/probe.sh"
+cp -a "$p" "$tmp/up"
+cp "$tmp/fakeutils/probe.sh" "$tmp/up/share/orphera/utils/vmctl.sh"
+out=$("$tmp/up/bin/vmctl" start tst5 2>&1)
+eq "vmctl runs utils/vmctl.sh with its arguments" "$out" "RAN $tmp/up/share/orphera/utils/vmctl.sh start tst5"
+ln -s "$tmp/up/bin/vmctl" "$tmp/usrbin/vmctl"
+out=$("$tmp/usrbin/vmctl" list 2>&1)
+eq "a utility found through a symlink" "$out" "RAN $tmp/up/share/orphera/utils/vmctl.sh list"
+cp -a "$tmp/up" "$tmp/up2"
+out=$("$tmp/up2/bin/vmctl" list 2>&1)
+eq "a moved tree's utility finds itself" "$out" "RAN $tmp/up2/share/orphera/utils/vmctl.sh list"
+rm "$tmp/up2/share/orphera/utils/vmctl.sh"
+out=$("$tmp/up2/bin/vmctl" list 2>&1); rc=$?
+if [ "$rc" -ne 0 ] && grep -q "incomplete" <<<"$out"; then ok "a missing script says the installation is incomplete"; else bad "a missing script says the installation is incomplete: $out"; fi
+[ ! -e "$share/utils/vmctl" ] && ok "a native executable is not packaged" || bad "a native executable is not packaged"
+
+# The checkout's launcher of the same commands (make orpheracli): the checkout from ORPHERA_HOME, the native executable when there is one
+mkdir -p "$tmp/co/utils" "$tmp/cobin"
+cp utils/orphera-utility "$tmp/cobin/vmctl"
+printf '#!/bin/bash\necho "SH $0 $*"\n' >"$tmp/co/utils/vmctl.sh"
+out=$(run ORPHERA_HOME="$tmp/co" "$tmp/cobin/vmctl" start 5 2>&1)
+eq "checkout: runs utils/vmctl.sh of ORPHERA_HOME" "$out" "SH $tmp/co/utils/vmctl.sh start 5"
+printf '#!/bin/sh\necho "NATIVE $*"\n' >"$tmp/co/utils/vmctl"; chmod +x "$tmp/co/utils/vmctl"
+out=$(run ORPHERA_HOME="$tmp/co" "$tmp/cobin/vmctl" start 5 2>&1)
+eq "checkout: prefers the native executable" "$out" "NATIVE start 5"
+mkdir -p "$tmp/home/orphera-pkg/utils" && cp "$tmp/co/utils/vmctl.sh" "$tmp/home/orphera-pkg/utils/"
+out=$(run "$tmp/cobin/vmctl" list 2>&1)
+eq "checkout: ~/orphera-pkg when ORPHERA_HOME is not set" "$out" "SH $tmp/home/orphera-pkg/utils/vmctl.sh list"
+out=$(run ORPHERA_HOME="$tmp/nowhere" "$tmp/cobin/vmctl" list 2>&1); rc=$?
+[ "$rc" -ne 0 ] && ok "checkout: a bad ORPHERA_HOME is an error" || bad "checkout: a bad ORPHERA_HOME is an error: $out"
+out=$(run HOME="$tmp/empty" "$tmp/cobin/vmctl" list 2>&1); rc=$?
+if [ "$rc" -ne 0 ] && grep -q "no Orphera checkout" <<<"$out"; then ok "checkout: no checkout is an error that says so"; else bad "checkout: no checkout is an error that says so: $out"; fi
 
 # The shell scripts of the package
 got=$(cd "$share" && env -i PATH=/usr/bin:/bin HOME="$tmp/home" ORPHERA_SYSTEM_SITE_DIR="$sys" bash -c '. utils/orphera-sources.sh; config_dir; inventory_file; echo "$PATH"')

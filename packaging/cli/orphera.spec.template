@@ -29,6 +29,15 @@ rm -rf %{buildroot}/DEBIAN
 %files
 %defattr(-,root,root,-)
 /usr/bin/orphera
+/usr/bin/vmctl
+/usr/bin/start-vm
+/usr/bin/stop-vm
+/usr/bin/reboot-vm
+/usr/bin/list-vms
+/usr/bin/move-vm
+/usr/bin/galera-cold-start
+/usr/bin/scan-vm-sizes
+/usr/bin/vbmc-vm
 /usr/lib/orphera
 /usr/share/orphera
 /usr/share/doc/orphera
