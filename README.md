@@ -342,7 +342,9 @@ certificate from that CA, and its start line says `client certificates required`
 orchestrator has no client certificate yet, since it could not reach the node afterwards. `issue-certs
 --no-client-auth` takes the file off again; `issue-certs` without either leaves it as it is. A node whose agent is
 older than this ignores `tls/ca.crt`, so upgrade it (`deploy-agent`) first. A caller without the certificate sees
-`unreachable: UNAVAILABLE: ...` (the TLS handshake fails before the token is looked at).
+`client certificate required: the node requires mutual TLS, and this orchestrator has no client certificate (...)`,
+and one whose certificate is from another CA `client certificate rejected: ...`; the TLS handshake fails before the
+token is looked at.
 
 `orphera cert-info [--nodes ...]` shows which certificate each agent
 actually presents, read from the TLS handshake (no SSH or token needed):
@@ -1599,8 +1601,10 @@ node isn't confirmed within the timeout, and it prints which ones.
   orchestrator's token (fix it with `utils/set-agent-token.sh`),
   `unsupported` (thread-info) when the agent is too old to know the call, and
   `unreachable: <status>` when nothing usable came back (no route, no
-  listener, a certificate the orchestrator does not trust, or a node that
-  requires a client certificate this orchestrator does not have).
+  listener, a certificate the orchestrator does not trust), and
+  `client certificate required` or `client certificate rejected` when the
+  node requires mutual TLS and this orchestrator has no certificate, or one
+  the node does not trust.
 - **Mutual TLS:** optional, per node; see [Mutual TLS](#mutual-tls).
 - **The agent's own files:** `copy`, `fetch` and the check before a copy
   refuse anything in `/etc/orphera-agent` (the token in `agent.env`, the TLS

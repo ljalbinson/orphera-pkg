@@ -336,6 +336,40 @@ object TaskExecutorCheck:
       "a playbook's FAILED line names a rejected token",
       TaskExecutor.describe(Status.UNAUTHENTICATED.asRuntimeException()).startsWith("unauthenticated:")
     )
+    // What the orchestrator saw on scala0 from a node with tls/ca.crt, with no
+    // client certificate.
+    val noClientCert = Status.UNAVAILABLE
+      .withDescription("ssl exception")
+      .withCause(
+        new javax.net.ssl.SSLException(
+          "error:1000045c:SSL routines:OPENSSL_internal:TLSV1_ALERT_CERTIFICATE_REQUIRED"
+        )
+      )
+      .asRuntimeException()
+    check(
+      "a node that requires a client certificate says so, not unreachable",
+      NodeError.line(noClientCert).startsWith("client certificate required:"),
+      NodeError.line(noClientCert)
+    )
+    val wrongCa = Status.UNAVAILABLE
+      .withDescription("ssl exception")
+      .withCause(new javax.net.ssl.SSLException("error:10000418:SSL routines:OPENSSL_internal:TLSV1_ALERT_UNKNOWN_CA"))
+      .asRuntimeException()
+    check(
+      "a node that rejects the client certificate says so",
+      NodeError.line(wrongCa).startsWith("client certificate rejected:"),
+      NodeError.line(wrongCa)
+    )
+    check(
+      "an orchestrator that does not trust the node's certificate is still unreachable",
+      NodeError
+        .line(
+          Status.UNAVAILABLE
+            .withCause(new javax.net.ssl.SSLHandshakeException("PKIX path building failed: unable to find valid certification path"))
+            .asRuntimeException()
+        )
+        .startsWith("unreachable:")
+    )
     val refused = NodeError.line(unavailable(new java.net.ConnectException("Connection refused: tst2/10.10.5.14:50051")))
     check(
       "a connection error with a message keeps it",

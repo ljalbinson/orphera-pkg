@@ -82,8 +82,9 @@ stage: test $(ARCH)
 	install -m 0755 packaging/deb/run.sh $(PKG_DIR)/opt/orphera-agent/run.sh
 	install -m 0644 ../packaging/agent.env $(PKG_DIR)/etc/orphera-agent/agent.env
 	install -m 0644 ../packaging/orphera-agent.service $(PKG_DIR)/etc/systemd/system/orphera-agent.service
-	# No certificates: the agent never reads the CA, and each node's own key and certificate are
-	# issued over SSH into /etc/orphera-agent/tls, so the package is the same for every site.
+	# No certificates: each node's own key and certificate, and the CA when it requires client
+	# certificates (mutual TLS), are put in /etc/orphera-agent/tls over SSH (issue-certs
+	# [--client-auth]), so the package is the same for every site.
 	sed -e "s/@VERSION@/$(VERSION)/" -e "s/@ARCH@/$(ARCH)/" packaging/deb/control.template > $(PKG_DIR)/DEBIAN/control
 	install -m 0755 packaging/deb/postinst $(PKG_DIR)/DEBIAN/postinst
 	install -m 0755 ../packaging/prerm $(PKG_DIR)/DEBIAN/prerm

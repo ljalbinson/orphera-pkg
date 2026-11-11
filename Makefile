@@ -319,9 +319,9 @@ pkg-stage: assembly
 	cp packaging/agent.env $(PKG_DIR)/etc/orphera-agent/agent.env
 	cp packaging/orphera-agent.service $(PKG_DIR)/etc/systemd/system/orphera-agent.service
 
-	# No certificates: the agent never reads the CA (only the orchestrator verifies it), and each
-	# node's own key and certificate are issued over SSH into /etc/orphera-agent/tls by bootstrap /
-	# issue-certs. So this package is the same for every site, and building it needs no CA.
+	# No certificates: each node's own key and certificate, and the CA when it requires client
+	# certificates (mutual TLS), are put in /etc/orphera-agent/tls over SSH by bootstrap /
+	# issue-certs [--client-auth]. So this package is the same for every site, and building it needs no CA.
 
 	sed "s/@VERSION@/$(VERSION)/" packaging/control.template > $(PKG_DIR)/DEBIAN/control
 	cp packaging/postinst $(PKG_DIR)/DEBIAN/postinst

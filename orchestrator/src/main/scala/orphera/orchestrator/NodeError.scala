@@ -16,6 +16,35 @@ object NodeError:
   def isUnauthenticated(e: Throwable): Boolean =
     Status.fromThrowable(e).getCode == Status.Code.UNAUTHENTICATED
 
+  // The TLS alerts a node sends when it requires a client certificate and got
+  // none (Java and BoringSSL spell them differently), and when it got one it
+  // does not trust. Alerts come from the node, so neither is the orchestrator
+  // distrusting the node's certificate, which fails locally with a different
+  // message.
+  private val ClientCertRequiredAlerts =
+    List("CERTIFICATE_REQUIRED", "certificate_required", "certificate required")
+  private val ClientCertRejectedAlerts =
+    List(
+      "ALERT_UNKNOWN_CA",
+      "ALERT_BAD_CERTIFICATE",
+      "ALERT_CERTIFICATE_UNKNOWN",
+      "Received fatal alert: unknown_ca",
+      "Received fatal alert: bad_certificate",
+      "Received fatal alert: certificate_unknown"
+    )
+
+  private def messages(e: Throwable): List[String] =
+    Iterator
+      .iterate(Option(e))(_.flatMap(c => Option(c.getCause)))
+      .take(10)
+      .takeWhile(_.isDefined)
+      .flatten
+      .flatMap(t => Option(t.getMessage))
+      .toList
+
+  private def tlsAlert(e: Throwable, alerts: List[String]): Boolean =
+    messages(e).exists(m => alerts.exists(m.contains))
+
   /** True when the call was not made because this orchestrator has no agent
     * token (it is not the node's fault).
     */
@@ -41,6 +70,18 @@ object NodeError:
     */
   def line(e: Throwable): String =
     if notConfigured(e) then AgentToken.NotConfigured
+    else if tlsAlert(e, ClientCertRequiredAlerts) then
+      if ClientCert.present then
+        "client certificate required: the node requires mutual TLS, but this orchestrator's " +
+          s"certificate (${Installation.clientCert}) was not sent; check that it and its key are readable"
+      else
+        "client certificate required: the node requires mutual TLS, and this orchestrator has no " +
+          "client certificate (orphera issue-client-cert, or copy certs/client.crt and client.key " +
+          "from an orchestrator that has them)"
+    else if tlsAlert(e, ClientCertRejectedAlerts) then
+      "client certificate rejected: the node requires mutual TLS and did not accept this " +
+        s"orchestrator's certificate (${Installation.clientCert}); it must be signed by the CA the node " +
+        "has in /etc/orphera-agent/tls/ca.crt (orphera issue-client-cert --force with that CA)"
     else if isUnauthenticated(e) then
       "unauthenticated: the node rejected this orchestrator's token " +
         "(utils/set-agent-token.sh <node> sets it)"
