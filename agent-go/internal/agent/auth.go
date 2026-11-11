@@ -5,7 +5,10 @@ package agent
 import (
 	"context"
 	"crypto/subtle"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
+	"fmt"
 	"os"
 
 	"google.golang.org/grpc"
@@ -86,6 +89,40 @@ var (
 	perNodeCert = [2]string{"tls/server.crt", "tls/server.key"}
 	legacyCert  = [2]string{"certs/server.crt", "certs/server.key"}
 )
+
+// ClientCAPath is the CA that signs the orchestrators' client certificates,
+// put here by `orphera issue-certs --client-auth`. While it is present the
+// agent requires every caller to present a certificate signed by it (mutual
+// TLS), as well as the token; without it, any TLS client may connect, as
+// before. As in the Scala agent.
+const ClientCAPath = "tls/ca.crt"
+
+// ClientCA returns ClientCAPath if this node has it.
+func ClientCA() (string, bool) { return ClientCAPath, isFile(ClientCAPath) }
+
+// ServerTLSConfig is the agent's TLS configuration: its certificate, and, when
+// clientCAFile is not "", mutual TLS: a caller must present a certificate
+// signed by that CA.
+func ServerTLSConfig(cert tls.Certificate, clientCAFile string) (*tls.Config, error) {
+	conf := &tls.Config{
+		Certificates: []tls.Certificate{cert},
+		MinVersion:   tls.VersionTLS12,
+	}
+	if clientCAFile == "" {
+		return conf, nil
+	}
+	pem, err := os.ReadFile(clientCAFile)
+	if err != nil {
+		return nil, fmt.Errorf("cannot read %s: %w", clientCAFile, err)
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(pem) {
+		return nil, fmt.Errorf("%s holds no PEM certificate", clientCAFile)
+	}
+	conf.ClientCAs = pool
+	conf.ClientAuth = tls.RequireAndVerifyClientCert
+	return conf, nil
+}
 
 // MissingCertMessage says what to do when the node has no certificate.
 const MissingCertMessage = "No TLS certificate in /etc/orphera-agent/tls: this node has not been issued one. " +

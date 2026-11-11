@@ -60,11 +60,19 @@ func run() error {
 	svc := agent.NewService()
 	svc.Init()
 
-	opts := append(agent.AuthInterceptors(token),
-		grpc.Creds(credentials.NewTLS(&tls.Config{
-			Certificates: []tls.Certificate{cert},
-			MinVersion:   tls.VersionTLS12,
-		})))
+	caFile, mutual := agent.ClientCA()
+	if !mutual {
+		caFile = ""
+	}
+	tlsConf, err := agent.ServerTLSConfig(cert, caFile)
+	if err != nil {
+		return err
+	}
+	clientAuthNote := ""
+	if mutual {
+		clientAuthNote = "; client certificates required, signed by " + caFile
+	}
+	opts := append(agent.AuthInterceptors(token), grpc.Creds(credentials.NewTLS(tlsConf)))
 	server := grpc.NewServer(opts...)
 	pb.RegisterAgentServer(server, svc)
 
@@ -87,6 +95,6 @@ func run() error {
 		}
 	}()
 
-	fmt.Printf("Orphera Agent listening on %d (TLS, %s)\n", port, certFile)
+	fmt.Printf("Orphera Agent listening on %d (TLS, %s%s)\n", port, certFile, clientAuthNote)
 	return server.Serve(lis)
 }

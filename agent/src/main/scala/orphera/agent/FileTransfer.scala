@@ -35,8 +35,14 @@ object FileTransfer:
           )
 
         case Some(metadata) =>
-          val contentChunks = all.drop(1).flatMap(_.payload.content)
-          write(metadata, contentChunks, queue)
+          ProtectedPaths.refusal(metadata.destPath) match
+            case Some(reason) =>
+              queue.offer(
+                Event(Event.Kind.RESULT, reason, exitCode = 1, success = false)
+              )
+            case None =>
+              val contentChunks = all.drop(1).flatMap(_.payload.content)
+              write(metadata, contentChunks, queue)
     }
 
   private def write(
@@ -108,6 +114,15 @@ object FileTransfer:
     val path = Paths.get(request.path)
 
     Stream
+      .eval(IO.blocking(ProtectedPaths.refusal(request.path)))
+      .flatMap {
+        case Some(reason) =>
+          Stream.emit(FileData(FileData.Payload.Error(reason)))
+        case None => readFile(request, path)
+      }
+
+  private def readFile(request: FetchFile, path: Path): Stream[IO, FileData] =
+    Stream
       .eval(IO.blocking(Files.exists(path)))
       .flatMap { exists =>
         if !exists then
@@ -178,7 +193,11 @@ object FileTransfer:
     IO.blocking {
       val path = Paths.get(request.destPath)
 
-      if !Files.exists(path) then
+      // Says nothing about a protected file (not even whether it differs);
+      // the copy that follows is refused.
+      if ProtectedPaths.refusal(request.destPath).isDefined then
+        FileCheckResult(needsCopy = true, reason = "protected path")
+      else if !Files.exists(path) then
         FileCheckResult(needsCopy = true, reason = "file does not exist")
       else
         val actualHash = sha256(path)

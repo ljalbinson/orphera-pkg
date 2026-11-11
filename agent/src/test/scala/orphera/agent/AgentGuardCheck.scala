@@ -84,7 +84,43 @@ object AgentGuardCheck:
     check("removing the marker lifts the protection", !NeverReboot.isProtected(marker))
     Files.delete(dir)
 
+    protectedPathChecks()
+
     if failures > 0 then
       println(s"$failures check(s) failed")
       sys.exit(1)
     else println(s"AgentGuardCheck: all $passes checks passed")
+
+  /** copy and fetch refuse the agent's own directory (ProtectedPaths). */
+  private def protectedPathChecks(): Unit =
+    val base = Files.createTempDirectory("orphera-protected")
+    val prot = base.resolve("orphera-agent")
+    Files.createDirectories(prot.resolve("tls"))
+    Files.writeString(prot.resolve("agent.env"), "ORPHERA_TOKEN=x\n")
+    val link = base.resolve("link")
+    Files.createSymbolicLink(link, prot)
+    def p(path: java.nio.file.Path): Boolean = ProtectedPaths.isProtected(path.toString, prot)
+
+    check("the token file is protected", p(prot.resolve("agent.env")))
+    check("the directory itself is protected", p(prot))
+    check("a file that does not exist yet in it is protected", p(prot.resolve("tls/server.key")))
+    check("a path with .. into it is protected", p(base.resolve("other/../orphera-agent/agent.env")))
+    check("a path through a symbolic link to it is protected", p(link.resolve("agent.env")))
+    check("a new file through a symbolic link is protected", p(link.resolve("tls/new.crt")))
+    check("a directory whose name only starts the same is not", !p(base.resolve("orphera-agent-other/x")))
+    check("another file is not protected", !p(base.resolve("elsewhere.txt")))
+    check(
+      "the real agent directory is refused, with the reason",
+      ProtectedPaths.refusal("/etc/orphera-agent/agent.env").exists(_.contains("token")) &&
+        ProtectedPaths.refusal("/etc/motd").isEmpty
+    )
+
+    val fetched = FileTransfer.send(FetchFile("/etc/orphera-agent/agent.env")).compile.toList.unsafeRunSync()
+    check(
+      "fetch of the token file sends only a refusal",
+      fetched.map(_.payload.error).flatten.exists(_.startsWith("Refused")) && fetched.length == 1,
+      fetched.toString
+    )
+    val checked = FileTransfer.check(FileCheck("/etc/orphera-agent/agent.env", "x")).unsafeRunSync()
+    check("the check before a copy says nothing about a protected file", checked.needsCopy && checked.reason == "protected path", checked.toString)
+

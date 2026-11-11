@@ -293,11 +293,19 @@ object Orchestrator:
   def issueNodeCerts(
       nodes: List[Node],
       sshUser: String,
-      sshKeyPath: Option[String]
+      sshKeyPath: Option[String],
+      clientAuth: Option[Boolean] = None
   ): IO[Boolean] =
     if !NodeCerts.caAvailable then
       IO.println(
         s"${Installation.caCert} and ${Installation.caKey} are needed to sign node certificates (make certs DOMAIN=...)"
+      ).as(false)
+    // Requiring client certificates on a node while this orchestrator has none
+    // would leave it unable to reach the node.
+    else if clientAuth.contains(true) && !ClientCert.present then
+      IO.println(
+        s"This orchestrator has no client certificate (${Installation.clientCert}), and the nodes " +
+          "would then refuse it: run `orphera issue-client-cert` first. Nothing was changed."
       ).as(false)
     else
       nodes
@@ -307,7 +315,8 @@ object Orchestrator:
               node,
               sshUser,
               sshKeyPath,
-              line => IO.println(s"[${node.name}] $line")
+              line => IO.println(s"[${node.name}] $line"),
+              clientAuth
             )
             .attempt
             .flatTap {

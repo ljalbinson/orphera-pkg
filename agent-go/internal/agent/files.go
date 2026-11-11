@@ -60,6 +60,10 @@ func receiveFile(stream grpc.BidiStreamingServer[pb.FileChunk, pb.Event], q *que
 		q.result("No metadata received", 1, false)
 		return nil
 	}
+	if reason := protectedRefusal(meta.DestPath); reason != "" {
+		q.result(reason, 1, false)
+		return nil
+	}
 	return writeFile(meta, content, q)
 }
 
@@ -149,6 +153,9 @@ func sendFile(req *pb.FetchFile, stream grpc.ServerStreamingServer[pb.FileData])
 		return stream.Send(&pb.FileData{Payload: &pb.FileData_Error{Error: validUTF8(msg)}})
 	}
 	path := javaPath(req.Path)
+	if reason := protectedRefusal(path); reason != "" {
+		return sendErr(reason)
+	}
 	if _, err := os.Stat(path); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return sendErr("File does not exist: " + req.Path)
@@ -223,6 +230,11 @@ func checkFile(req *pb.FileCheck) *pb.FileCheckResult {
 
 func checkFileErr(req *pb.FileCheck) (*pb.FileCheckResult, error) {
 	path := req.DestPath
+	// Says nothing about a protected file (not even whether it differs); the
+	// copy that follows is refused.
+	if protectedRefusal(path) != "" {
+		return &pb.FileCheckResult{NeedsCopy: true, Reason: "protected path"}, nil
+	}
 	fi, err := os.Stat(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return &pb.FileCheckResult{NeedsCopy: true, Reason: "file does not exist"}, nil

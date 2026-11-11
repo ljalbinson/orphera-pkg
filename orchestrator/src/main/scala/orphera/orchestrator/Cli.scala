@@ -74,10 +74,14 @@ enum Command:
       forgetHostKey: Boolean = false
   )
   // Issues each node a TLS certificate of its own over SSH (see NodeCerts).
+  // clientAuth: Some(true) puts the CA on the node as tls/ca.crt, so its agent
+  // requires a client certificate (--client-auth); Some(false) takes it off
+  // (--no-client-auth); None leaves it as it is.
   case IssueCerts(
       nodes: Option[List[String]],
       sshUser: String,
-      sshKeyPath: Option[String]
+      sshKeyPath: Option[String],
+      clientAuth: Option[Boolean] = None
   )
   case Teardown(
       nodes: List[String],
@@ -1066,21 +1070,32 @@ object Cli:
       args: List[String],
       nodes: Option[List[String]],
       sshUser: String,
-      sshKeyPath: Option[String]
+      sshKeyPath: Option[String],
+      clientAuth: Option[Boolean] = None
   ): Either[String, Command] =
     args match
-      case Nil => Right(Command.IssueCerts(nodes, sshUser, sshKeyPath))
+      case Nil =>
+        Right(Command.IssueCerts(nodes, sshUser, sshKeyPath, clientAuth))
       case "--nodes" :: value :: rest =>
         parseIssueCerts(
           rest,
           Some(value.split(",").toList.map(_.trim)),
           sshUser,
-          sshKeyPath
+          sshKeyPath,
+          clientAuth
         )
       case "--ssh-user" :: value :: rest =>
-        parseIssueCerts(rest, nodes, value, sshKeyPath)
+        parseIssueCerts(rest, nodes, value, sshKeyPath, clientAuth)
       case "--ssh-key" :: value :: rest =>
-        parseIssueCerts(rest, nodes, sshUser, Some(value))
+        parseIssueCerts(rest, nodes, sshUser, Some(value), clientAuth)
+      case "--client-auth" :: rest =>
+        if clientAuth.contains(false) then
+          Left("--client-auth and --no-client-auth cannot both be given")
+        else parseIssueCerts(rest, nodes, sshUser, sshKeyPath, Some(true))
+      case "--no-client-auth" :: rest =>
+        if clientAuth.contains(true) then
+          Left("--client-auth and --no-client-auth cannot both be given")
+        else parseIssueCerts(rest, nodes, sshUser, sshKeyPath, Some(false))
       case other :: _ =>
         Left(s"Unknown argument to issue-certs: $other")
 
@@ -1373,9 +1388,18 @@ object Cli:
       |                      deploy-agent; also issues the node its own certificate (as issue-certs)
       |                      and sets its ORPHERA_TOKEN
       |  issue-certs       [--nodes host1,host2] [--ssh-user root] [--ssh-key ~/.ssh/id_ed25519]
+      |                    [--client-auth | --no-client-auth]
       |                    — gives each node a TLS certificate of its own, signed by
       |                      certs/ca.key; the key is generated on the node and never
-      |                      leaves it. Restarts the agent; a failure changes nothing
+      |                      leaves it. Restarts the agent; a failure changes nothing.
+      |                      --client-auth also puts certs/ca.crt on the node, after which
+      |                      its agent accepts only callers with a client certificate
+      |                      from that CA (mutual TLS; see issue-client-cert);
+      |                      --no-client-auth takes it off again
+      |  issue-client-cert [--days 825] [--force]
+      |                    — makes this orchestrator's client certificate, certs/client.crt
+      |                      and client.key, signed by certs/ca.key; orphera presents it to
+      |                      every agent. Needed before issue-certs --client-auth
       |  teardown          --nodes host1,host2 --yes [--purge] [--ssh-user root] [--ssh-key ~/.ssh/id_ed25519]
       |  playbook          <file.yaml | file.scala | compiled-name> [--resume] [--config <path>]
       |                    — .scala files are compiled at run time; --resume skips
