@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Included by handlers_test.yaml (`- include: handlers_test_common.yaml`): its
+# tasks go where the include is, and its handlers join the playbook's.
+tasks:
+  - name: write the test file
+    write_file:
+      content: "written by handlers_test.yaml, version 1\n"
+      dest: /tmp/orphera-handlers-test.txt
+      mode: "0644"
+    notify: record the change
+handlers:
+  - name: record the change
+    run_command:
+      command: ["sh", "-c", "date >> /tmp/orphera-handlers-test.log; echo handler ran"]

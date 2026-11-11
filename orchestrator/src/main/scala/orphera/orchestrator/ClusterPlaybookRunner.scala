@@ -27,10 +27,18 @@ object ClusterPlaybookRunner:
     val allNodeNames = playbook.stages.flatMap(_.nodeNames).distinct
     val allNodes = Inventory.all.filter(n => allNodeNames.contains(n.name))
 
+    val handlerProblems = playbook.stages.flatMap(stage =>
+      Handlers
+        .problems(stage.tasks, stage.handlers)
+        .map(p => s"[${playbook.name}] stage '${stage.name}': $p")
+    )
+
     if allNodes.isEmpty then
       IO.println(
         s"[${playbook.name}] No matching nodes found in inventory across any stage."
       ) >> IO.pure(false)
+    else if handlerProblems.nonEmpty then
+      handlerProblems.traverse_(p => IO.println(p)).as(false)
     else
       for
         _ <- AgentToken.requireConfigured
@@ -138,7 +146,8 @@ object ClusterPlaybookRunner:
             env,
             checkpoint,
             runLog,
-            List("stage" -> stage.name)
+            List("stage" -> stage.name),
+            stage.handlers
           )
           .attempt
           .map(r => node.name -> r.getOrElse(false))

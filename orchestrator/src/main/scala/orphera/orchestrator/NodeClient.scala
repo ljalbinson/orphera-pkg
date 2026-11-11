@@ -208,12 +208,34 @@ object NodeClient:
         )
         val requestStream =
           fs2.Stream.emit(metadataChunk) ++ fs2.Stream.emit(contentChunk)
+        val hash = java.security.MessageDigest
+          .getInstance("SHA-256")
+          .digest(content)
+          .map(b => f"$b%02x")
+          .mkString
 
+        // As copyFile: a file that already has this content, owner, group
+        // and mode is not sent again ("Skipped: unchanged"), which is also how
+        // a write_file task tells that it changed nothing.
         stub
-          .copyFile(requestStream, metadata)
-          .evalMap(e => onEvent(Secrets.mask(e)))
-          .compile
-          .drain
+          .checkFile(FileCheck(destPath, hash, owner, group, mode), metadata)
+          .flatMap { check =>
+            if !check.needsCopy then
+              onEvent(
+                Event(
+                  Event.Kind.RESULT,
+                  s"Skipped: ${check.reason}",
+                  exitCode = 0,
+                  success = true
+                )
+              )
+            else
+              stub
+                .copyFile(requestStream, metadata)
+                .evalMap(e => onEvent(Secrets.mask(e)))
+                .compile
+                .drain
+          }
       }
 
   /** Simple boolean health-probe wrapper around CheckFile: true if the remote

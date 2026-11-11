@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Handlers, include: and change detection, on two nodes, touching only /tmp
+# and the `tree` package.
+#
+#   orphera playbook handlers_test.yaml   # first run: the file is written, so "record the change" runs
+#   orphera playbook handlers_test.yaml   # again: the file is unchanged (Skipped), so no handler runs
+#   orphera remove tree --nodes tst0      # then a run installs tree on tst0 only,
+#   orphera playbook handlers_test.yaml   #   and "say packages changed" runs on tst0 only
+#
+# The handler's log on each node: /tmp/orphera-handlers-test.log (one line per run of it).
+name: handlers-test
+nodes: [tst0, tst1]
+tasks:
+  - name: make sure tree is installed
+    install:
+      packages: [tree]
+    notify: say packages changed
+  - include: handlers_test_common.yaml
+handlers:
+  - name: say packages changed
+    debug:
+      message: "tree was installed or upgraded on {{facts.hostname}}"

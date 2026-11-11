@@ -2,7 +2,7 @@
 
 package orphera.orchestrator
 
-import java.nio.file.{Files, Paths}
+import java.nio.file.{Files, Path, Paths}
 
 import cats.syntax.all.*
 
@@ -86,34 +86,63 @@ object ClusterPlaybookYaml:
           yield r
     yield result
 
-  private def decodeStage(c: HCursor): Either[DecodingFailure, Stage] =
+  // `include:` in a stage's tasks is expanded relative to `dir`, the
+  // playbook's directory (YamlIncludes).
+  private def decodeStage(
+      c: HCursor,
+      dir: Path,
+      self: Path
+  ): Either[String, Stage] =
     for
-      name <- c.get[String]("name")
-      nodes <- c.get[List[String]]("nodes")
-      taskCursors <- c.downField("tasks").as[List[Json]]
-      tasks <- taskCursors.traverse(j => TaskYaml.decodeNamedTask(j.hcursor))
-      waitForOpt <- c.get[Option[Json]]("wait_for")
-      waitFor <- waitForOpt match
-        case None       => Right(None)
-        case Some(json) => decodeHealthCheck(json.hcursor).map(Some(_))
-    yield Stage(name, nodes, tasks, waitFor)
+      name <- c.get[String]("name").left.map(_.getMessage)
+      nodes <- c.get[List[String]]("nodes").left.map(_.getMessage)
+      taskJson <- c.downField("tasks").as[List[Json]].left.map(_.getMessage)
+      handlerJson <- c
+        .get[Option[List[Json]]]("handlers")
+        .left
+        .map(_.getMessage)
+      expanded <- YamlIncludes
+        .expand(taskJson, dir, List(self))
+        .left
+        .map(e => s"stage '$name': $e")
+      tasks <- expanded.tasks
+        .traverse(j => TaskYaml.decodeNamedTask(j.hcursor))
+        .left
+        .map(_.getMessage)
+      handlers <- (handlerJson.getOrElse(Nil) ++ expanded.handlers)
+        .traverse(j => TaskYaml.decodeNamedTask(j.hcursor))
+        .left
+        .map(e => s"stage '$name': handlers: ${e.getMessage}")
+      waitForOpt <- c.get[Option[Json]]("wait_for").left.map(_.getMessage)
+      waitFor <- waitForOpt
+        .traverse(json => decodeHealthCheck(json.hcursor))
+        .left
+        .map(_.getMessage)
+    yield Stage(name, nodes, tasks, waitFor, handlers)
 
   private def decodeClusterPlaybook(
-      c: HCursor
-  ): Either[DecodingFailure, ClusterPlaybook] =
+      c: HCursor,
+      dir: Path,
+      self: Path
+  ): Either[String, ClusterPlaybook] =
     for
-      name <- c.get[String]("name")
-      stageCursors <- c.downField("stages").as[List[Json]]
-      stages <- stageCursors.traverse(j => decodeStage(j.hcursor))
+      name <- c.get[String]("name").left.map(_.getMessage)
+      stageCursors <- c.downField("stages").as[List[Json]].left.map(_.getMessage)
+      stages <- stageCursors.traverse(j => decodeStage(j.hcursor, dir, self))
     yield ClusterPlaybook(name, stages)
 
   def load(path: String): Either[String, ClusterPlaybook] =
+    val file = Paths.get(path).toAbsolutePath.normalize
     for
       content <- scala.util
-        .Try(Files.readString(Paths.get(path)))
+        .Try(Files.readString(file))
         .toEither
         .left
         .map(_.getMessage)
       json <- parser.parse(content).left.map(_.getMessage)
-      playbook <- decodeClusterPlaybook(json.hcursor).left.map(_.getMessage)
+      playbook <- decodeClusterPlaybook(
+        json.hcursor,
+        Option(file.getParent).getOrElse(Paths.get(".")),
+        scala.util.Try(file.toRealPath()).getOrElse(file)
+      )
     yield playbook

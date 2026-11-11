@@ -135,15 +135,40 @@ object Retry:
       Retry(retries, math.max(delaySeconds, 0))
     )
 
+/** A task in a playbook. `notifies` (YAML `notify:`) names handlers (of the playbook, or of the
+  * cluster-playbook stage) to run on this node after its tasks, if this task
+  * changed something (see TaskExecutor.changed).
+  */
 final case class NamedTask(
     name: String,
     task: Task,
     when: Option[FactCondition] = None,
-    retry: Option[Retry] = None
+    retry: Option[Retry] = None,
+    notifies: List[String] = Nil
 )
 
+/** `handlers` run on a node after its tasks, each once, in this order, if a
+  * task that changed something notified it (NamedTask.notifies), and only if
+  * none of the node's tasks failed.
+  */
 final case class Playbook(
     name: String,
     nodeNames: List[String],
-    tasks: List[NamedTask]
+    tasks: List[NamedTask],
+    handlers: List[NamedTask] = Nil
 )
+
+object Handlers:
+
+  /** What is wrong with these tasks' `notifies` and these handlers, if anything:
+    * a name no handler has, two handlers with one name, or a handler that
+    * notifies (handlers do not chain).
+    */
+  def problems(tasks: List[NamedTask], handlers: List[NamedTask]): List[String] =
+    val names = handlers.map(_.name)
+    val unknown = tasks.flatMap(_.notifies).distinct.filterNot(names.contains)
+    val duplicated = names.diff(names.distinct).distinct
+    val chained = handlers.filter(_.notifies.nonEmpty).map(_.name)
+    unknown.map(n => s"a task notifies '$n', but there is no handler of that name") ++
+      duplicated.map(n => s"two handlers are named '$n'") ++
+      chained.map(n => s"handler '$n' has notify:, but handlers do not notify other handlers")

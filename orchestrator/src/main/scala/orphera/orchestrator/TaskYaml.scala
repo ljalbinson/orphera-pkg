@@ -166,11 +166,33 @@ object TaskYaml:
         case Some(str) => decodeCondition(str).map(Some(_))
 
       retry <- decodeRetry(name, c)
-    yield NamedTask(name, task, when, retry)
+      notifies <- decodeNotify(name, c)
+    yield NamedTask(name, task, when, retry, notifies)
 
   /** The keys of a task that are not its type (`install:`, `copy:`, ...). */
   private val TaskOptionKeys: Set[String] =
-    Set("name", "when", "retries", "retry_delay")
+    Set("name", "when", "retries", "retry_delay", "notify")
+
+  /** `notify: restart nginx` or `notify: [restart nginx, reload haproxy]`. */
+  private def decodeNotify(
+      name: String,
+      c: HCursor
+  ): Either[DecodingFailure, List[String]] =
+    val field = c.downField("notify")
+    if field.failed then Right(Nil)
+    else
+      field
+        .as[String]
+        .map(List(_))
+        .orElse(field.as[List[String]])
+        .left
+        .map(_ =>
+          DecodingFailure(
+            s"Task '$name': notify must be a handler name or a list of them",
+            c.history
+          )
+        )
+        .map(_.map(_.trim).filter(_.nonEmpty))
 
   /** `retries: N` (0 or more; 0 is no retry) and `retry_delay: S` (seconds
     * before the first retry, doubling after; default 5).

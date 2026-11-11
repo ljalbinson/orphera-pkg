@@ -804,6 +804,73 @@ Confirmed in practice: `apt-get`/`dpkg` lock contention (see below)
 produces exactly this behavior — one node's `remove`/`autoremove` task
 failing with exit 100 does not affect other nodes' progress.
 
+#### Handlers
+
+A handler is a task that runs only when another task changed something, such as restarting a service after its
+configuration file was rewritten:
+
+```yaml
+name: web
+nodes: [tst0, tst1]
+tasks:
+  - name: push nginx.conf
+    copy:
+      src: files/nginx.conf
+      dest: /etc/nginx/nginx.conf
+    notify: restart nginx          # one name, or a list: [restart nginx, reload haproxy]
+handlers:
+  - name: restart nginx
+    run_command:
+      command: [systemctl, restart, nginx]
+```
+
+On each node, the handlers that a changed task notified run after that node's tasks, each once however many tasks
+notified it, in the order of `handlers:`. They are shown and logged as `restart nginx (handler)`, and the task that
+notified prints `[tst0] push nginx.conf: changed; notifies restart nginx`. If one of the node's tasks fails, its
+handlers do not run, and a line says which were left (`[tst0] handlers: not run, because a task failed: restart
+nginx`); a handler that fails fails the node. A handler is an ordinary task (`when:`, `retries:` and templating work)
+but cannot itself notify. A `notify:` with no handler of that name, two handlers with one name, or a handler with
+`notify:` stops the playbook before it starts. In a cluster playbook, each stage has its own `handlers:`, run on each
+of its nodes after that stage's tasks.
+
+What counts as a change, from what the task reports (the agents send no separate "changed" flag):
+
+| Task | Changed when |
+|---|---|
+| `copy`, `write_file`, `distribute_file` | the file was written, i.e. it did not already have this content, owner, group and mode (`Skipped: unchanged`) |
+| `install`, `remove`, `autoremove`, `dist_upgrade` | apt's summary line has a count above 0 (`1 upgraded, 0 newly installed, ...`); for dnf, anything but `Nothing to do.` |
+| `set_fact`, `debug`, `dump_facts` | never |
+| `run_command`, `reboot`, `network_apply` | always (nothing says otherwise) |
+
+`write_file` now checks the node first, as `copy` always has, and leaves an unchanged file alone. The run log's
+`task_end` events have `changed`. With `--resume`, a handler that already ran is skipped like a task, but a
+notification from a task that the resumed run skips is not remembered, so a handler it would have run does not run.
+
+In the Scala DSL: `.notifies("restart nginx")` after `.task(...)`, and `.handler("restart nginx")(Task.RunCommand(...))`,
+on a playbook or a cluster-playbook stage.
+
+#### Includes
+
+A task entry `- include: <file>` is replaced by the tasks of that file, where the include is:
+
+```yaml
+tasks:
+  - include: common/base_packages.yaml
+  - name: site config
+    copy: { src: files/site.conf, dest: /etc/site.conf }
+```
+
+The file is either a list of tasks, or a mapping with `tasks:` and, optionally, `handlers:` (added to the
+playbook's). Its path is relative to the file that includes it, and it may include others; a file that ends up
+including itself is an error (`include cycle: a.yaml -> b.yaml -> a.yaml`), and so is an include entry with any key
+but `include:` (put `when:` and the rest on the included tasks). Includes work in a playbook's `tasks:` and in a
+cluster-playbook stage's. They are expanded when the playbook is read, so a run (and its output, run log and
+checkpoint) sees only the tasks. In the Scala DSL, tasks are ordinary values: build a `List[NamedTask]` once and add
+it with `.includeTasks(list)`.
+
+`manifests/handlers_test.yaml` (with `handlers_test_common.yaml`) tries both on tst0 and tst1, touching only `/tmp`
+and the `tree` package; its header says what each run should show.
+
 #### Retrying a task
 
 A task can be tried again when it fails, before its node gives up:
@@ -952,8 +1019,6 @@ that data only exists later, inside `PlaybookRunner.run`, after the
 script's `Playbook` value has already been built.
 
 **Not yet implemented:**
-- Handlers/triggers (Ansible-style "restart only if config changed")
-- Includes/imports across playbook files
 - A monadic/for-comprehension style for the Scala DSL (`for _ <- run(...)
   yield ()`), as an alternative to the current fluent `.task(...)`
   chain — designed, not implemented; the fluent builder above is what
@@ -1478,7 +1543,7 @@ whichever identity actually connects (interactively, or via
 alongside the existing human-readable console output, not instead of
 it. Task/stage lifecycle only: `run_start`/`run_end`,
 `stage_start`/`stage_end` (cluster-playbook), `task_start`, `task_end`
-(`success`, `duration_ms`, `error` on failure), `task_skipped`
+(`success`, `changed`, `duration_ms`, `error` on failure), `task_skipped`
 (`reason`: `condition_not_met` or `resume_checkpoint`), `task_retry`
 (`attempt`, `error`, `delay_s`; see [Retrying a task](#retrying-a-task)). Not every
 streamed command-output line — the console already has that.
@@ -2005,6 +2070,8 @@ many checks passed and exits non-zero on a failure:
 - `InventoryCheck`: reading `never-reboot`, which nodes it protects, that `shutdown` refuses and skips them,
   `--node-groups` and `--exclude-nodes`, `orphera nodes`, and the `deploy-agent`/`bootstrap` agent options
 - `TaskExecutorCheck`: the task executor that commands, playbooks and cluster playbooks share: templating on and off,
+  what counts as a change, handlers (notified once, in order, not after a failure, problems found before a run), YAML
+  includes (nested, relative paths, handlers, cycles, cluster stages) and the DSL's `notifies`/`handler`/`includeTasks`,
   a failure stopping only that node's remaining tasks, `when:` with no facts, how a failure is described (a connection
   error with no message is named, not shown as `null`), retries (`retries:`/`retry_delay:`, `.retry`, `--retries`)
 - `LocationsCheck`: `-I`/`-c`, the environment variables, config names, reading through a URI
@@ -2899,7 +2966,6 @@ playbooks marked DRAFT there have been written but not all run on the lab.
   genuinely static value, declaring it directly in `inventory.yaml`
   (node or group vars) is usually the better fit — see
   [Inventory](#inventory) and [Cross-node data and vars](#cross-node-data-and-vars)
-- No handlers/triggers or playbook includes/imports
 - No monadic/for-comprehension style for the Scala DSL, as an
   alternative to the current fluent `.task(...).when(...)` builder —
   designed, not implemented, see [Playbooks](#playbooks)

@@ -94,7 +94,11 @@ object TaskExecutor:
       context: ClusterContext,
       setFacts: SetFacts,
       output: Output,
-      templating: Boolean
+      templating: Boolean,
+      // Carries out one task and says whether it changed something;
+      // runTask, except in checks that need a task to change something
+      // without an agent.
+      perform: (NamedTask, Node, Env) => IO[Boolean] = runTask
   )
 
   /** A direct command's Env: no facts, no templating, console output. */
@@ -137,7 +141,8 @@ object TaskExecutor:
       env: Env,
       checkpoint: Checkpoint.Handle,
       runLog: RunLog.Handle,
-      logFields: List[(String, Any)] = Nil
+      logFields: List[(String, Any)] = Nil,
+      handlers: List[NamedTask] = Nil
   ): IO[Boolean] =
     val facts = env.context.factsByNode.get(node.name)
 
@@ -154,7 +159,7 @@ object TaskExecutor:
       env.output.line(node, task, s"skipped ($message)") >>
         log("task_skipped", task, "reason" -> reason)
 
-    def go(remaining: List[NamedTask]): IO[Boolean] =
+    def go(remaining: List[NamedTask], notified: Ref[IO, Vector[String]]): IO[Boolean] =
       remaining match
         case Nil => IO.pure(true)
 
@@ -166,7 +171,7 @@ object TaskExecutor:
                 name,
                 "resume_checkpoint",
                 "already completed in a previous run — resuming"
-              ) >> go(rest)
+              ) >> go(rest, notified)
             else
               env.setFacts.get(node.name).flatMap { ownSetFacts =>
                 val shouldRun = namedTask.when match
@@ -175,7 +180,7 @@ object TaskExecutor:
 
                 if !shouldRun then
                   skip(name, "condition_not_met", "condition not met") >>
-                    go(rest)
+                    go(rest, notified)
                 else
                   for
                     startMs <- IO.delay(System.currentTimeMillis())
@@ -184,10 +189,17 @@ object TaskExecutor:
                     endMs <- IO.delay(System.currentTimeMillis())
                     took = "duration_ms" -> (endMs - startMs)
                     ok <- result match
-                      case Right(()) =>
-                        log("task_end", name, "success" -> true, took) >>
+                      case Right(changed) =>
+                        log(
+                          "task_end",
+                          name,
+                          "success" -> true,
+                          "changed" -> changed,
+                          took
+                        ) >>
                           checkpoint.markDone(node.name, name) >>
-                          go(rest)
+                          noteHandlers(namedTask, changed, notified) >>
+                          go(rest, notified)
                       case Left(err) =>
                         log(
                           "task_end",
@@ -201,7 +213,47 @@ object TaskExecutor:
               }
           }
 
-    go(tasks)
+    // A changed task's handlers are noted (once each) and the line says so.
+    def noteHandlers(
+        namedTask: NamedTask,
+        changed: Boolean,
+        notified: Ref[IO, Vector[String]]
+    ): IO[Unit] =
+      if !changed || namedTask.notifies.isEmpty then IO.unit
+      else
+        notified.update(already =>
+          already ++ namedTask.notifies.filterNot(already.contains)
+        ) >> env.output.line(
+          node,
+          namedTask.name,
+          s"changed; notifies ${namedTask.notifies.mkString(", ")}"
+        )
+
+    // The handlers notified, in the order they are listed, each once. A
+    // handler is named "<name> (handler)" in the output, run log and
+    // checkpoint, so it cannot be taken for a task of the same name.
+    def runHandlers(names: Vector[String]): IO[Boolean] =
+      val due = handlers
+        .filter(h => names.contains(h.name))
+        .map(h => h.copy(name = s"${h.name} (handler)", notifies = Nil))
+      Ref.of[IO, Vector[String]](Vector.empty).flatMap(go(due, _))
+
+    for
+      notified <- Ref.of[IO, Vector[String]](Vector.empty)
+      tasksOk <- go(tasks, notified)
+      names <- notified.get
+      ok <-
+        if names.isEmpty then IO.pure(tasksOk)
+        else if tasksOk then runHandlers(names)
+        else
+          env.output
+            .line(
+              node,
+              "handlers",
+              s"not run, because a task failed: ${names.mkString(", ")}"
+            )
+            .as(false)
+    yield ok
 
   /** Runs the task and, when it fails and has a `retry`, runs it again (see
     * retrying). Each failed attempt but the last gets a line (`attempt 1
@@ -213,9 +265,9 @@ object TaskExecutor:
       node: Node,
       env: Env,
       log: (String, String, Seq[(String, Any)]) => IO[Unit]
-  ): IO[Unit] =
+  ): IO[Boolean] =
     val name = namedTask.name
-    val once = runTask(namedTask, node, env)
+    val once = env.perform(namedTask, node, env)
     namedTask.retry match
       case None        => once
       case Some(retry) =>
@@ -237,10 +289,10 @@ object TaskExecutor:
     * gets the number of the attempt that failed, its error and the pause,
     * before the pause. The error of the last attempt is raised.
     */
-  def retrying(retry: Retry)(
+  def retrying[A](retry: Retry)(
       onRetry: (Int, Throwable, Int) => IO[Unit]
-  )(action: IO[Unit]): IO[Unit] =
-    def attempt(n: Int): IO[Unit] =
+  )(action: IO[A]): IO[A] =
+    def attempt(n: Int): IO[A] =
       action.handleErrorWith { err =>
         if n > retry.retries then IO.raiseError(err)
         else
@@ -249,11 +301,61 @@ object TaskExecutor:
       }
     attempt(1)
 
-  /** Carries out one task on one node; raises if it failed. */
-  def runTask(namedTask: NamedTask, node: Node, env: Env): IO[Unit] =
+  /** Carries out one task on one node; raises if it failed. Returns whether
+    * it changed something (see changed).
+    */
+  def runTask(namedTask: NamedTask, node: Node, env: Env): IO[Boolean] =
+    for
+      seen <- Ref.of[IO, Vector[Event]](Vector.empty)
+      _ <- carryOut(namedTask, node, env, e => seen.update(_ :+ e))
+      events <- seen.get
+    yield changed(namedTask.task, events)
+
+  /** Whether a task that succeeded changed something, from what it reported.
+    * A file task (copy, write_file, distribute_file) did unless the file was
+    * already as asked ("Skipped: unchanged"); a package task did unless the
+    * package manager says nothing was installed, upgraded or removed;
+    * set_fact, debug and dump_facts never do; run_command, reboot and
+    * network_apply always do, since nothing says otherwise.
+    */
+  def changed(task: Task, events: Vector[Event]): Boolean =
+    def output: Vector[String] =
+      events.filter(_.kind == Event.Kind.OUTPUT).map(_.message)
+    task match
+      case _: Task.Copy | _: Task.WriteFile | _: Task.DistributeFile =>
+        !events.exists(e =>
+          e.kind == Event.Kind.RESULT && e.message.startsWith("Skipped:")
+        )
+      case _: Task.Install | _: Task.Remove | _: Task.AutoRemove |
+          _: Task.DistUpgrade =>
+        packagesChanged(output)
+      case _: Task.SetFact | _: Task.Debug | _: Task.DumpFacts => false
+      case _                                                   => true
+
+  private val AptSummary =
+    raw"(\d+) upgraded, (\d+) newly installed, (\d+) to remove".r.unanchored
+
+  /** From a package manager's output: apt's summary line (`0 upgraded, 0
+    * newly installed, 0 to remove ...`) with any count above 0, or, from dnf
+    * (no such line), anything but `Nothing to do.`. With neither, changed.
+    */
+  def packagesChanged(lines: Seq[String]): Boolean =
+    val apt = lines.collect { case AptSummary(u, n, r) =>
+      List(u, n, r).exists(c => c.toLongOption.exists(_ > 0))
+    }
+    if apt.nonEmpty then apt.exists(identity)
+    else !lines.exists(_.trim == "Nothing to do.")
+
+  private def carryOut(
+      namedTask: NamedTask,
+      node: Node,
+      env: Env,
+      record: Event => IO[Unit]
+  ): IO[Unit] =
     val name = namedTask.name
     val facts = env.context.factsByNode.get(node.name)
-    val render: Event => IO[Unit] = env.output.event(node, name, _)
+    val render: Event => IO[Unit] = event =>
+      record(event) >> env.output.event(node, name, event)
     def say(text: String): IO[Unit] = env.output.line(node, name, text)
 
     // Gives `f` a function that renders a string's `{{...}}`; the template

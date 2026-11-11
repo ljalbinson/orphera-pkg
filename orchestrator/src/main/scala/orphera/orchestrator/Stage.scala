@@ -70,11 +70,15 @@ enum HealthCheck:
       timeoutSeconds: Int = 120
   )
 
+/** `handlers`: as a Playbook's, run on each of the stage's nodes after its
+  * tasks for this stage.
+  */
 final case class Stage(
     name: String,
     nodeNames: List[String],
     tasks: List[NamedTask],
-    waitFor: Option[HealthCheck] = None
+    waitFor: Option[HealthCheck] = None,
+    handlers: List[NamedTask] = Nil
 )
 
 final case class ClusterPlaybook(name: String, stages: List[Stage])
