@@ -201,8 +201,12 @@ reboot-all:
 # mid-install never sees a half-written jar.
 # Installs the CLI and the jar that compiles and runs .scala playbooks (Installation.scala
 # looks for it at $(SCRIPTING_JAR)), so neither needs a build tree.
+# Also on macOS (zsh, no /etc/profile.d, no bash completion directory, and /usr/local/lib may not exist): the
+# directories are created first, `install -D` (not in the BSD install) is not used, and the PATH entry for
+# $(UTIL_BIN) goes in /etc/paths.d instead of /etc/profile.d.
 orpheracli:
 	sbt orchestrator/assembly scripting/assembly
+	sudo install -d -m 755 $(dir $(CLI_JAR)) $(dir $(SCRIPTING_JAR)) $(dir $(CLI_BIN))
 	sudo cp orchestrator/target/scala-3.8.4/orchestrator-assembly-$(VERSION).jar $(CLI_JAR).new
 	sudo mv $(CLI_JAR).new $(CLI_JAR)
 	sudo cp scripting/target/scala-3.8.4/scripting-assembly-$(VERSION).jar $(SCRIPTING_JAR).new
@@ -210,9 +214,14 @@ orpheracli:
 	sudo install -m 755 utils/orphera $(CLI_BIN)
 	sudo install -d -m 755 $(UTIL_BIN)
 	for u in $(UTILITIES); do sudo install -m 755 utils/orphera-utility $(UTIL_BIN)/$$u; done
-	sudo install -D -m 644 packaging/cli/orphera-utils-profile.sh /etc/profile.d/orphera-utils.sh
-	sudo install -D -m 644 orphera-completion.bash $(CLI_COMPLETION)
-	@echo "Installed orchestrator $(VERSION) as $(CLI_JAR) and the scripting jar as $(SCRIPTING_JAR), and $(UTILITIES) in $(UTIL_BIN) (on the PATH of new login shells); tab completion applies to new shells"
+	@if [ "$$(uname -s)" = Darwin ]; then \
+	  echo "$(UTIL_BIN)" | sudo tee /etc/paths.d/orphera >/dev/null; \
+	else \
+	  sudo install -d -m 755 /etc/profile.d $(dir $(CLI_COMPLETION)); \
+	  sudo install -m 644 packaging/cli/orphera-utils-profile.sh /etc/profile.d/orphera-utils.sh; \
+	  sudo install -m 644 orphera-completion.bash $(CLI_COMPLETION); \
+	fi
+	@echo "Installed orchestrator $(VERSION) as $(CLI_JAR) and the scripting jar as $(SCRIPTING_JAR), and $(UTILITIES) in $(UTIL_BIN) (on the PATH of new login shells); tab completion applies to new bash shells on Linux"
 
 scripting:
 	sbt scripting/assembly
