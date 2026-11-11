@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-.PHONY: all release rpm-if-available go-agent-if-available bump-patch _build_all clean test assembly pkg-stage deb rpm verify certs certs-clean fmt fmt-manifests scripting lint fix cli-stage cli-deb cli-rpm cli-tar cli-package check-package install uninstall check-ilo check-os10 native-utils vmctl move-vm start-vm stop-vm reboot-vm list-vms galera-cold-start scan-vm-sizes check-native-utils check-vmctl check-move-vm check-vm-scripts check-galera-cold-start check-scan-vm-sizes
+.PHONY: all release rpm-if-available go-agent-if-available bump-patch _build_all clean test assembly pkg-stage deb rpm verify certs certs-clean fmt fmt-manifests scripting lint fix cli-stage cli-deb cli-rpm cli-tar cli-package check-package install uninstall check-ilo check-os10 native-utils vmctl move-vm start-vm stop-vm reboot-vm list-vms galera-cold-start scan-vm-sizes check-native-utils check-vmctl check-move-vm check-vm-scripts check-galera-cold-start check-scan-vm-sizes gh-check
 
 VERSION_FILE := VERSION
 VERSION      := $(shell cat $(VERSION_FILE))
@@ -174,6 +174,10 @@ check-scan-vm-sizes:
 	utils/test-scan-vm-sizes.sh
 
 # Fails if a tracked source file has no SPDX-License-Identifier header and is not listed in utils/spdx-exempt.txt.
+# The latest CI run on GitHub (needs gh, logged in: gh auth login).
+gh-check:
+	gh run list --limit 1
+
 check-spdx:
 	utils/spdx.py --check
 
