@@ -56,6 +56,7 @@ New to Orphera? [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md) takes you fro
 - [Development notes](#development-notes)
 - [Example: a real Ceph cluster deployment](#example-a-real-ceph-cluster-deployment)
 - [Example: OpenStack Keystone and Cinder from Kolla images](#example-openstack-keystone-and-cinder-from-kolla-images)
+- [Scala Native versions of the VM scripts](#scala-native-versions-of-the-vm-scripts)
 - [Example: parallel network throughput test (iperf3)](#example-parallel-network-throughput-test-iperf3)
 - [Example: a file server for Linux and macOS](#example-a-file-server-for-linux-and-macos)
 - [Example: a Lustre file system (tst43-tst50)](#example-a-lustre-file-system-tst43-tst50)
@@ -1248,6 +1249,20 @@ utils/vmctl.sh start --node-groups ceph,galera
 utils/vmctl.sh reboot --node-groups k8s-workers --exclude-nodes tst39
 ```
 
+`start`, `stop` and `reboot` take `--parallel N` to run the playbook for up to N VMs at a time instead of one after
+another (the default). The VMs are all looked up first; each VM's steps and result are then printed in command-line
+order as soon as that VM and those before it have finished, so the output reads as it does without the option, and
+each VM keeps its own `/tmp/vmctl.<vm>.log`. `start` waits for every guest to answer SSH, so a large N boots that many
+guests at once on their hypervisors; 4 to 8 is gentler than a whole group.
+
+```bash
+utils/vmctl.sh stop --parallel 8 --node-groups k8s
+utils/vmctl.sh start --parallel 4 --node-groups ceph,galera
+```
+
+`utils/vmctl` (no `.sh`) is the same front end compiled to a native executable; see [Scala Native versions of the VM
+scripts](#scala-native-versions-of-the-vm-scripts).
+
 `utils/vmctl.sh shutdown-all <hypervisor>...` empties hypervisors before maintenance
 (`manifests/kvm_shutdown_all.scala`; hypervisors are given by name, none is assumed). Without `--yes` it
 only lists the running VMs on each. With `--yes` it asks them all to shut down (`virsh shutdown`), waits
@@ -2373,7 +2388,10 @@ Worth knowing:
   shuts a VM down with `virsh shutdown` and waits until it is off (`--force` powers it off if it has not
   shut down in time); `reboot-vm.sh [--soft | --hard] <vm>...` reboots a VM from the hypervisor, for a
   guest whose agent or SSH is not answering (`--soft`, the default, is `virsh reboot`; `--hard` shuts the VM down,
-  waits, and starts it again, with `--wait` and `--force` as for `stop-vm.sh`);
+  waits, and starts it again, with `--wait` and `--force` as for `stop-vm.sh`). All three take
+  `--node-groups g1,g2` and `--exclude-nodes a,b` as `vmctl.sh` does (`stop-vm.sh --node-groups k8s --exclude-nodes
+  tst39`), and `--parallel N` to work on up to N VMs at a time, printing the results in command-line order; options
+  may come anywhere among the VM names;
   `manifests/kvm_vm_stop.scala` and `manifests/kvm_vm_reboot.scala` do the same as playbooks, for one VM per run
   (`--config config/<vm>.yaml`; `ORPHERA_VM_WAIT`, `ORPHERA_VM_FORCE=1`, and `ORPHERA_VM_MODE=soft|hard` for the
   reboot); the scripts stay, and are the way to do several VMs in one command;
@@ -2401,10 +2419,8 @@ Worth knowing:
   (`kvm_zfs_vm_provision.scala`) to another hypervisor: it checks both ends, shuts the guest down, sends a ZFS snapshot of
   `tank/kvm/<hypervisor>/<vm>` with `zfs send | nc | zfs receive`, compares file names and sizes, defines the domain on the
   destination (same UUID and MACs), undefines it on the source, changes `hypervisor:` in the VM's config file, starts it
-  and waits for its agent; a failure before the source is undefined is rolled back. Scala Native versions of
-  `vmctl.sh`, `move-vm.sh`, `start-vm.sh`, `stop-vm.sh`, `reboot-vm.sh`, `list-vms.sh`, `galera-cold-start.sh`
-  and `scan-vm-sizes.sh` are built from `utils-native/` by `make native-utils` and installed beside them without
-  `.sh` (`utils/move-vm`, ...); `make check-native-utils` compares each with its shell version;
+  and waits for its agent; a failure before the source is undefined is rolled back; Scala Native versions of
+  the VM scripts are described [below](#scala-native-versions-of-the-vm-scripts);
   `trace-dhcp.sh` captures DHCP on the provider NICs of tst17, tst18 and tst19
   while a test instance boots, to show where packets are lost; `check-guest-dhcp.sh <ip> <mac>
   <network-id>` proves a guest took its address (it answers ARP from the DHCP namespace on tst19;
@@ -2416,6 +2432,35 @@ Worth knowing:
   report the plan, `ORPHERA_GALERA_BOOTSTRAP=<node>` to override), using `register:` on `run_command`
   to carry each node's state to the decision; the script stays until the playbook has been run on
   the lab.
+
+## Scala Native versions of the VM scripts
+
+`vmctl.sh`, `start-vm.sh`, `stop-vm.sh`, `reboot-vm.sh`, `list-vms.sh`, `move-vm.sh`, `scan-vm-sizes.sh` and
+`galera-cold-start.sh` also exist in Scala, compiled to native executables with Scala Native: `utils/vmctl`,
+`utils/start-vm` and so on, the same name without `.sh`. They take the same arguments, print the same, send the same
+scripts to the hypervisors and exit with the same codes, and start at once with no JVM. The shell versions stay and
+are not changed by them.
+
+```bash
+make native-utils             # all eight, in one sbt run (needs sbt and clang); installed in utils/
+make move-vm                  # just one (each has its own target)
+make check-native-utils       # each against its shell version, with a stand-in orphera; no lab needed
+utils/stop-vm --parallel 8 --node-groups k8s
+```
+
+The sources are a build of their own in `utils-native/` (a `shared` module for what `orphera-sources.sh` and
+`vm-common.sh` give the scripts, and one project per executable), so the main build, `make test` and CI never need
+the native toolchain. Each executable finds the checkout from its own location, so it must stay in `utils/`.
+`make check-vmctl`, `check-move-vm`, `check-vm-scripts`, `check-galera-cold-start` and `check-scan-vm-sizes` run both
+versions with the same arguments and compare standard output, standard error, exit code and every command sent to
+the hypervisors. Where bash stops on a value that is not a number in its arithmetic (a config's `cpu: 4G`), a native
+version says so in its own words.
+
+Tab completion (`orphera-completion.bash`) covers these scripts under both names, with and without `utils/`: the
+actions and options, VM names from the config files, hypervisor names, and group names for `--node-groups` (a
+comma-separated list completes one name at a time). Installed by `make orpheracli` in `/etc/bash_completion.d` it is
+read by every new shell; installed by the package as bash-completion's file for `orphera`, it is read the first time
+`orphera` itself is completed in a shell, and only then completes these scripts.
 
 ## Example: parallel network throughput test (iperf3)
 

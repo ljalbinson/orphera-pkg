@@ -876,3 +876,28 @@ Not done: Skyline's logout ends only Skyline's session (its console logs out in 
 `check`, first run: kcadmin (openstack-admins) admin, manager, member and reader on Default/admin; kcdemo (openstack-members)
 member and reader on keycloak/keycloak-demo; kcreader (openstack-readers) reader only; kcnogroup (no group) refused; only kcadmin
 may list users; kcdemo cannot scope to the admin project. `federate` removed the earlier catch-all group `keycloak-users`.
+
+## M. Scala Native versions of the VM scripts (2026-11-10 and 11), on scala0
+
+Each native executable against its shell version, with a stand-in `orphera` (no lab); built with `make native-utils`
+(Scala 3.8.4, Scala Native 0.5.12, sbt 1.10.7, Java 21; the linker warns about an executable stack in Scala Native's own
+`SafepointPollTrampoline-x86_64.S`, harmless).
+
+### M1. `make check-native-utils` - PASSED (2026-11-11)
+    make native-utils
+    make check-native-utils
+`check-vmctl` 76/76, `check-move-vm` 36/36, `check-vm-scripts` 62/62, `check-galera-cold-start` 28/28,
+`check-scan-vm-sizes` 13/13. Found on the way, and fixed: the first build of `move-vm` stopped on an unused default
+value under `-Werror`; `vmctl autostart` with VMs on two hypervisors ran them in a different order in each version
+(bash's associative array has none; both now go in hypervisor name order); start-vm, stop-vm and reboot-vm sent their
+script with a trailing newline that the shell versions drop. `--parallel 4` with four 1-second runs: about 1.0 s in
+each version, for vmctl and for stop-vm.
+
+### M2. `utils/move-vm --dry-run tst0 gs3` against the lab - PASSED (2026-11-10)
+Every check on gs1 and gs3 passed (domain and dataset movable, both bridges br-net105 and br-net107 on gs3, space, CPU
+vendor, gs1 resolves gs3.ljalbinson.com) and the plan was printed: 9003 MiB to send, tst0 running, autostart disabled.
+Nothing was moved.
+
+Not yet run on the lab: the other native executables, `--parallel`, and `--node-groups` for start-vm, stop-vm and
+reboot-vm.
+

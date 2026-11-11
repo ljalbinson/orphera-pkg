@@ -451,8 +451,10 @@ _orphera_completions() {
 
 complete -F _orphera_completions orphera
 
-# --- utils/vmctl.sh -----------------------------------------------------------------------------
-# Completes the actions, options, VM names and hypervisor names of utils/vmctl.sh. VM names are the
+# --- utils/vmctl.sh and the other VM scripts ----------------------------------------------------
+# Completes the actions, options, VM names and hypervisor names of utils/vmctl.sh, and of start-vm.sh,
+# stop-vm.sh, reboot-vm.sh, list-vms.sh, move-vm.sh, scan-vm-sizes.sh and galera-cold-start.sh; each also
+# under the name of its Scala Native version (utils/vmctl, utils/start-vm, ...). VM names are the
 # config files in the config directory (ORPHERA_CONFIG_DIR, a path or a file: URI, else config/);
 # hypervisor names are the members of the inventory group `hypervisors` (read from the inventory file,
 # ORPHERA_INVENTORY, else inventory.yaml), else $HYPERVISORS, else gs1 gs2 gs3 st0.
@@ -497,6 +499,23 @@ _vmctl_hypervisors() {
   printf '%s\n' $out
 }
 
+# _vm_complete_list <cur> <names...>  completes a comma-separated list (--node-groups g1,g2, --exclude-nodes a,b):
+# the part after the last comma, keeping what came before it and leaving out the names already in it.
+_vm_complete_list() {
+  local cur="$1" prefix="" last="$1" names="" n
+  shift
+  if [[ "$cur" == *,* ]]; then
+    prefix="${cur%,*},"
+    last="${cur##*,}"
+  fi
+  for n in "$@"; do
+    case ",$prefix" in *",$n,"*) ;; *) names="$names $n" ;; esac
+  done
+  COMPREPLY=($(compgen -P "$prefix" -W "$names" -- "$last"))
+  [[ ${#COMPREPLY[@]} -gt 0 ]] && compopt -o nospace 2>/dev/null
+  return 0
+}
+
 _vmctl_completions() {
   local cur prev words cword
   _init_completion || return
@@ -515,17 +534,17 @@ _vmctl_completions() {
 
   # Values of the options that take one.
   case "$prev" in
-    --retries|--wait) COMPREPLY=(); return 0 ;;
+    --retries|--wait|--parallel) COMPREPLY=(); return 0 ;;
     --hypervisor) COMPREPLY=($(compgen -W "$(_vmctl_hypervisors)" -- "$cur")); return 0 ;;
-    --except|--exclude-nodes) COMPREPLY=($(compgen -W "$(_vmctl_vms)" -- "$cur")); return 0 ;;
-    --node-groups) COMPREPLY=($(compgen -W "$(_orphera_groups)" -- "$cur")); return 0 ;;
+    --except|--exclude-nodes) _vm_complete_list "$cur" $(_vmctl_vms); return 0 ;;
+    --node-groups) _vm_complete_list "$cur" $(_orphera_groups); return 0 ;;
   esac
 
   local opts=""
   case "$action" in
-    start)        opts="--retries --node-groups --exclude-nodes" ;;
-    stop)         opts="--wait --force --node-groups --exclude-nodes" ;;
-    reboot)       opts="--hard --soft --wait --force --retries --node-groups --exclude-nodes" ;;
+    start)        opts="--retries --parallel --node-groups --exclude-nodes" ;;
+    stop)         opts="--wait --force --parallel --node-groups --exclude-nodes" ;;
+    reboot)       opts="--hard --soft --wait --force --retries --parallel --node-groups --exclude-nodes" ;;
     shutdown-all) opts="--yes --wait --force --except" ;;
     start-all)    opts="--all --dry-run --retries --except" ;;
     autostart)    opts="--all --hypervisor --node-groups --exclude-nodes" ;;
@@ -544,4 +563,91 @@ _vmctl_completions() {
   esac
 }
 
-complete -F _vmctl_completions vmctl.sh ./vmctl.sh utils/vmctl.sh ./utils/vmctl.sh
+# _vm_names <script>  the names a script of utils/ may be typed as: with and without .sh (the native version),
+# bare, after ./, after utils/ and after ./utils/.
+_vm_names() {
+  local n
+  for n in "$1.sh" "$1"; do printf '%s ./%s utils/%s ./utils/%s ' "$n" "$n" "$n" "$n"; done
+}
+
+complete -F _vmctl_completions $(_vm_names vmctl)
+
+# start-vm, stop-vm, reboot-vm: VM names; --node-groups, --exclude-nodes, --parallel, and their own options.
+_vm_script_completions() {
+  local cur prev words cword
+  _init_completion || return
+  local cmd="${words[0]##*/}"
+  cmd="${cmd%.sh}"
+  case "$prev" in
+    --wait|--parallel) COMPREPLY=(); return 0 ;;
+    --exclude-nodes) _vm_complete_list "$cur" $(_vmctl_vms); return 0 ;;
+    --node-groups) _vm_complete_list "$cur" $(_orphera_groups); return 0 ;;
+  esac
+  local opts="--parallel --node-groups --exclude-nodes --help"
+  case "$cmd" in
+    stop-vm)   opts="--wait --force $opts" ;;
+    reboot-vm) opts="--soft --hard --wait --force $opts" ;;
+  esac
+  if [[ "$cur" == -* ]]; then
+    COMPREPLY=($(compgen -W "$opts" -- "$cur"))
+  else
+    COMPREPLY=($(compgen -W "$(_vmctl_vms)" -- "$cur"))
+  fi
+}
+complete -F _vm_script_completions $(_vm_names start-vm) $(_vm_names stop-vm) $(_vm_names reboot-vm)
+
+# list-vms: hypervisor names.
+_list_vms_completions() {
+  local cur prev words cword
+  _init_completion || return
+  COMPREPLY=($(compgen -W "$(_vmctl_hypervisors)" -- "$cur"))
+}
+complete -F _list_vms_completions $(_vm_names list-vms)
+
+# scan-vm-sizes: VM names.
+_scan_vm_sizes_completions() {
+  local cur prev words cword
+  _init_completion || return
+  COMPREPLY=($(compgen -W "$(_vmctl_vms)" -- "$cur"))
+}
+complete -F _scan_vm_sizes_completions $(_vm_names scan-vm-sizes)
+
+# move-vm [options] <vm> <hypervisor>: the options, then a VM, then a hypervisor.
+_move_vm_completions() {
+  local cur prev words cword
+  _init_completion || return
+  case "$prev" in
+    --stop-wait|--boot-wait|--transfer-timeout|--port) COMPREPLY=(); return 0 ;;
+  esac
+  if [[ "$cur" == -* ]]; then
+    COMPREPLY=($(compgen -W "--dry-run --yes --delete-source --no-start --force-stop --stop-wait --boot-wait --transfer-timeout --port --help" -- "$cur"))
+    return 0
+  fi
+  # The arguments before this one that are not options or option values: none so far means the VM, one the hypervisor.
+  local i n=0
+  for ((i = 1; i < cword; i++)); do
+    case "${words[i]}" in
+      --stop-wait|--boot-wait|--transfer-timeout|--port) i=$((i + 1)) ;;
+      -*) ;;
+      *) n=$((n + 1)) ;;
+    esac
+  done
+  case "$n" in
+    0) COMPREPLY=($(compgen -W "$(_vmctl_vms)" -- "$cur")) ;;
+    1) COMPREPLY=($(compgen -W "$(_vmctl_hypervisors)" -- "$cur")) ;;
+    *) COMPREPLY=() ;;
+  esac
+}
+complete -F _move_vm_completions $(_vm_names move-vm)
+
+# galera-cold-start: --check, --bootstrap <tst3|tst4|tst5>.
+_galera_cold_start_completions() {
+  local cur prev words cword
+  _init_completion || return
+  if [[ "$prev" == --bootstrap ]]; then
+    COMPREPLY=($(compgen -W "tst3 tst4 tst5" -- "$cur"))
+  else
+    COMPREPLY=($(compgen -W "--check --bootstrap --help" -- "$cur"))
+  fi
+}
+complete -F _galera_cold_start_completions $(_vm_names galera-cold-start)
