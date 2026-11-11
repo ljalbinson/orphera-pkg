@@ -94,6 +94,8 @@ command follows the same shape. The read-only queries (`facts`,
 
 **Build machine:**
 
+(On a clean Mac, `utils/macos-setup.sh` installs the tools below: JDK 21, sbt, Go, Homebrew, and the packaging tools; see its header for what then works on macOS.)
+
 - **JDK 21.** Developed and tested against Oracle GraalVM 21.0.9
   (`21.0.9+7-LTS`) — any standard JDK 21 distribution should compile
   and run the JVM assembly jars fine; GraalVM is only actually needed

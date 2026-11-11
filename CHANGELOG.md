@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- `utils/macos-setup.sh`: installs the build tools on a clean macOS (Xcode command line tools, Homebrew, git, gh, JDK 21, sbt, Go, Python, and unless `--minimal` GNU make and tar, dpkg, rpm and the protobuf tools) and sets `JAVA_HOME` and the PATH in `~/.zprofile`. Not run on a Mac yet.
+
 ### Changed
 - `make deb` and `make rpm` in `agent-go/` remove the packages of earlier versions (for the same architecture) before building, so the directory no longer collects old `.deb` and `.rpm` files.
 - `Software-Hierarchy.svg` and `.html` redrawn for what exists now: device control (OS10, iLO) beside the transport, the Go agent beside the Scala one, the utilities and packaging as their own layer, MariaDB as a configuration source, node groups, certificate commands, and the Go, Scala Native and Python runtimes. The page text says that switches and iLOs are reached without an agent.
