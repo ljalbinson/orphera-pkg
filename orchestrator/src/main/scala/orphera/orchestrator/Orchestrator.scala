@@ -12,106 +12,6 @@ import orphera.common.*
 
 object Orchestrator:
 
-  def installPackages(
-      nodes: List[Node],
-      packages: List[String],
-      updateCache: Boolean = false
-  ): IO[Unit] =
-    nodes.parTraverse_ { node =>
-      NodeClient.installPackages(
-        node,
-        packages,
-        updateCache,
-        ConsoleRenderer.render(node, _)
-      )
-    }
-
-  def removePackages(
-      nodes: List[Node],
-      packages: List[String],
-      purge: Boolean = false
-  ): IO[Unit] =
-    nodes.parTraverse_ { node =>
-      NodeClient.removePackages(
-        node,
-        packages,
-        purge,
-        ConsoleRenderer.render(node, _)
-      )
-    }
-
-  def autoRemove(nodes: List[Node], purge: Boolean = false): IO[Unit] =
-    nodes.parTraverse_ { node =>
-      NodeClient.autoRemove(node, purge, ConsoleRenderer.render(node, _))
-    }
-
-  def distUpgrade(nodes: List[Node], updateCache: Boolean = true): IO[Unit] =
-    nodes.parTraverse_ { node =>
-      NodeClient.distUpgrade(
-        node,
-        updateCache,
-        ConsoleRenderer.render(node, _)
-      )
-    }
-
-  def copyFile(
-      nodes: List[Node],
-      localPath: java.nio.file.Path,
-      destPath: String,
-      owner: String,
-      group: String,
-      mode: Int
-  ): IO[Unit] =
-    nodes.parTraverse_ { node =>
-      NodeClient.copyFile(
-        node,
-        localPath,
-        destPath,
-        owner,
-        group,
-        mode,
-        ConsoleRenderer.render(node, _)
-      )
-    }
-
-  /** `content` is already-resolved bytes — Main.scala reads --content-file (or
-    * UTF-8-encodes a literal --content string) before calling this, so this
-    * stays a pure "push these bytes" operation, same shape as copyFile just
-    * without a local path. Goes through the same CopyFile RPC/FileChunk
-    * streaming copyFile does (NodeClient.copyBytes).
-    */
-  def writeFile(
-      nodes: List[Node],
-      content: Array[Byte],
-      destPath: String,
-      owner: String,
-      group: String,
-      mode: Int
-  ): IO[Unit] =
-    nodes.parTraverse_ { node =>
-      NodeClient.copyBytes(
-        node,
-        content,
-        destPath,
-        owner,
-        group,
-        mode,
-        ConsoleRenderer.render(node, _)
-      )
-    }
-
-  def applyNetworkConfig(
-      nodes: List[Node],
-      confirmTimeoutSeconds: Int = 60
-  ): IO[Unit] =
-    nodes.parTraverse_ { node =>
-      NodeClient.applyNetworkConfig(
-        node,
-        confirmTimeoutSeconds,
-        ConsoleRenderer.render(node, _)
-      )
-    }
-
   /** Pushes and installs the agent `.deb`, then polls each node's `getVersion`
     * RPC until it reports the `.deb`'s own `Version` field or
     * `confirmTimeoutSeconds` elapses — see `NodeClient.pollForVersion`'s doc
@@ -493,26 +393,6 @@ object Orchestrator:
         case (name, Left(e))  => name -> NodeError.line(e)
       }.toMap)
 
-  def reboot(
-      nodes: List[Node],
-      delaySeconds: Int = 5,
-      waitForReturn: Boolean = false,
-      waitTimeoutSeconds: Int = 300
-  ): IO[Unit] =
-    val (protectedNodes, rebootable) = nodes.partition(Inventory.neverReboot)
-    protectedNodes.traverse_(n =>
-      IO.println(s"[${n.name}] skipped: never-reboot is set in the inventory")
-    ) >>
-      rebootable.parTraverse_ { node =>
-        NodeClient.reboot(
-          node,
-          delaySeconds,
-          waitForReturn,
-          waitTimeoutSeconds,
-          line => IO.println(s"[${node.name}] $line")
-        )
-      }
-
   def shutdown(nodes: List[Node], delaySeconds: Int = 5): IO[Unit] =
     val protectedNodes = nodes.filter(Inventory.neverReboot)
     val allowed = nodes.filterNot(Inventory.neverReboot)
@@ -550,19 +430,3 @@ object Orchestrator:
           .map(result => node.name -> result)
       }
       .map(_.toMap)
-
-  def executeCommand(
-      nodes: List[Node],
-      command: List[String],
-      timeoutSeconds: Int = 60,
-      quiet: Boolean = false
-  ): IO[Unit] =
-    nodes.parTraverse_ { node =>
-      NodeClient.executeCommand(
-        node,
-        command,
-        timeoutSeconds,
-        if quiet then ConsoleRenderer.renderQuiet(node, _)
-        else ConsoleRenderer.render(node, _)
-      )
-    }

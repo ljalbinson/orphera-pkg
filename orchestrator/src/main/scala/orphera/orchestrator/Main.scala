@@ -145,37 +145,28 @@ object Main extends IOApp:
       case Right(Command.Help) =>
         IO.println(Cli.usage) >> IO.pure(ExitCode.Success)
 
+      // The commands that change a node run as a playbook of one task, through
+      // the same executor as playbooks (PlaybookRunner.runCommand).
       case Right(Command.Install(packages, nodeNames, updateCache)) =>
-        withTargets(nodeNames) { targets =>
-          Orchestrator.installPackages(targets, packages, updateCache)
-        }
+        runAsTask("install", nodeNames, Task.Install(packages, updateCache))
 
       case Right(Command.Remove(packages, nodeNames, purge)) =>
-        withTargets(nodeNames) { targets =>
-          Orchestrator.removePackages(targets, packages, purge)
-        }
+        runAsTask("remove", nodeNames, Task.Remove(packages, purge))
 
       case Right(Command.AutoRemove(nodeNames, purge)) =>
-        withTargets(nodeNames) { targets =>
-          Orchestrator.autoRemove(targets, purge)
-        }
+        runAsTask("autoremove", nodeNames, Task.AutoRemove(purge))
 
       case Right(Command.DistUpgrade(nodeNames, updateCache)) =>
-        withTargets(nodeNames) { targets =>
-          Orchestrator.distUpgrade(targets, updateCache)
-        }
+        runAsTask("dist-upgrade", nodeNames, Task.DistUpgrade(updateCache))
 
+      // The local path as given (made absolute, so it is never looked for
+      // under ORPHERA_ROOT as a playbook's relative path is).
       case Right(Command.Copy(local, dest, nodeNames, owner, group, mode)) =>
-        withTargets(nodeNames) { targets =>
-          Orchestrator.copyFile(
-            targets,
-            Paths.get(local),
-            dest,
-            owner,
-            group,
-            mode
-          )
-        }
+        runAsTask(
+          "copy",
+          nodeNames,
+          Task.Copy(absolute(local), dest, owner, group, mode)
+        )
 
       case Right(
             Command.WriteFile(
@@ -187,26 +178,29 @@ object Main extends IOApp:
               mode
             )
           ) =>
-        resolveContentSource(contentSource).flatMap {
-          case Left(err) =>
-            IO.println(s"Error: $err") >> IO.pure(ExitCode.Error)
-          case Right(bytes) =>
-            withTargets(nodeNames) { targets =>
-              Orchestrator.writeFile(
-                targets,
-                bytes,
-                destPath,
-                owner,
-                group,
-                mode
-              )
-            }
-        }
+        contentSource match
+          // --content: the text itself (sent as typed: no templating)
+          case Left(literal) =>
+            runAsTask(
+              "write-file",
+              nodeNames,
+              Task.WriteFile(literal, destPath, owner, group, mode)
+            )
+          // --content-file: sent as it is, so any bytes, like `copy`; checked
+          // here first so a bad path is one error, not one per node
+          case Right(path) =>
+            checkContentFile(path) match
+              case Some(err) =>
+                IO.println(s"Error: $err") >> IO.pure(ExitCode.Error)
+              case None =>
+                runAsTask(
+                  "write-file",
+                  nodeNames,
+                  Task.Copy(absolute(path), destPath, owner, group, mode)
+                )
 
       case Right(Command.NetworkApply(nodeNames, timeoutSeconds)) =>
-        withTargets(nodeNames) { targets =>
-          Orchestrator.applyNetworkConfig(targets, timeoutSeconds)
-        }
+        runAsTask("network-apply", nodeNames, Task.NetworkApply(timeoutSeconds))
 
       case Right(
             Command.DeployAgent(
@@ -398,9 +392,25 @@ object Main extends IOApp:
       case Right(
             Command.Reboot(nodeNames, delaySeconds, wait, waitTimeoutSeconds)
           ) =>
-        withTargets(nodeNames) { targets =>
-          Orchestrator.reboot(targets, delaySeconds, wait, waitTimeoutSeconds)
-        }
+        // A never-reboot node is skipped here, with a line saying so; in a
+        // playbook, the reboot task fails on it instead (NodeClient.reboot).
+        val targets = selectTargets(nodeNames)
+        val (protectedNodes, rebootable) =
+          targets.partition(Inventory.neverReboot)
+        if targets.isEmpty then noMatchingNodes
+        else
+          protectedNodes.traverse_(n =>
+            IO.println(
+              s"[${n.name}] skipped: never-reboot is set in the inventory"
+            )
+          ) >>
+            (if rebootable.isEmpty then IO.pure(ExitCode.Success)
+             else
+               runOnNodes(
+                 "reboot",
+                 rebootable,
+                 Task.Reboot(delaySeconds, wait, waitTimeoutSeconds)
+               ))
 
       case Right(Command.Shutdown(nodeNames, delaySeconds, confirmed)) =>
         if !confirmed then
@@ -508,9 +518,12 @@ object Main extends IOApp:
       case Right(
             Command.RunCommand(command, nodeNames, timeoutSeconds, quiet)
           ) =>
-        withTargets(nodeNames) { targets =>
-          Orchestrator.executeCommand(targets, command, timeoutSeconds, quiet)
-        }
+        runAsTask(
+          "run",
+          nodeNames,
+          Task.RunCommand(command, timeoutSeconds),
+          quiet
+        )
 
       case Right(Command.Pipeline(steps, nodeNames, parallel, quiet)) =>
         runPipeline(steps, nodeNames.getOrElse(Nil), parallel, quiet)
@@ -1082,41 +1095,60 @@ object Main extends IOApp:
       case Right(_)  => IO.pure(ExitCode.Error)
     }
 
-  /** Resolves write-file's --content/--content-file into real bytes. The
-    * literal-string case is pure (just UTF-8 encoding) but is still routed
-    * through IO here so both branches return the same type — the actual file
-    * read (--content-file) is the one that genuinely needs IO.blocking, same as
-    * every other local-disk read in this file.
+  /** Why write-file's --content-file cannot be sent, if it cannot. */
+  private def checkContentFile(path: String): Option[String] =
+    val file = Paths.get(path)
+    if !java.nio.file.Files.isRegularFile(file) then
+      Some(s"Could not read --content-file '$path': no such file")
+    else if !java.nio.file.Files.isReadable(file) then
+      Some(s"Could not read --content-file '$path': permission denied")
+    else None
+
+  private def absolute(path: String): String =
+    Paths.get(path).toAbsolutePath.toString
+
+  /** The nodes `--nodes` names (every node when it is not given), in inventory
+    * order.
     */
-  private def resolveContentSource(
-      source: Either[String, String]
-  ): IO[Either[String, Array[Byte]]] =
-    source match
-      case Left(literal) =>
-        IO.pure(
-          Right(literal.getBytes(java.nio.charset.StandardCharsets.UTF_8))
-        )
-      case Right(path) =>
-        IO.blocking(
-          java.nio.file.Files.readAllBytes(java.nio.file.Paths.get(path))
-        ).attempt
-          .map {
-            case Left(err) =>
-              Left(s"Could not read --content-file '$path': ${err.getMessage}")
-            case Right(bytes) => Right(bytes)
-          }
+  private def selectTargets(nodeNames: Option[List[String]]): List[Node] =
+    nodeNames match
+      case Some(names) => Inventory.all.filter(n => names.contains(n.name))
+      case None        => Inventory.all
+
+  private def noMatchingNodes: IO[ExitCode] =
+    IO.println("No matching nodes found in inventory.") >> IO.pure(
+      ExitCode.Error
+    )
+
+  /** A command that changes a node, run as a playbook of one task named after
+    * the command; exits non-zero if it failed on any node.
+    */
+  private def runAsTask(
+      command: String,
+      nodeNames: Option[List[String]],
+      task: Task,
+      quiet: Boolean = false
+  ): IO[ExitCode] =
+    val targets = selectTargets(nodeNames)
+    if targets.isEmpty then noMatchingNodes
+    else runOnNodes(command, targets, task, quiet)
+
+  private def runOnNodes(
+      command: String,
+      targets: List[Node],
+      task: Task,
+      quiet: Boolean = false
+  ): IO[ExitCode] =
+    PlaybookRunner
+      .runCommand(command, targets, task, quiet)
+      .map(ok => if ok then ExitCode.Success else ExitCode.Error)
 
   private def withTargets(nodeNames: Option[List[String]])(
       action: List[Node] => IO[Unit]
   ): IO[ExitCode] =
-    val targets = nodeNames match
-      case Some(names) => Inventory.all.filter(n => names.contains(n.name))
-      case None        => Inventory.all
+    val targets = selectTargets(nodeNames)
 
-    if targets.isEmpty then
-      IO.println("No matching nodes found in inventory.") >> IO.pure(
-        ExitCode.Error
-      )
+    if targets.isEmpty then noMatchingNodes
     else
       // A node reporting an unsuccessful RESULT (see ConsoleRenderer) makes
       // the command exit non-zero; previously this always returned Success.

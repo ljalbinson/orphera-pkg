@@ -44,17 +44,11 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 //     run: the health check timed out every time because nginx/php-fpm
 //     weren't installed yet when it started polling.
 //
-// A real gap found by reading ClusterPlaybookRunner.scala's actual
-// Task.Copy handling before using it here (not assumed): the cluster
-// runner discards Task.Copy's `vars` field entirely
-// (`case Task.Copy(src, dest, owner, group, mode, _) =>` — the mustache
-// vars map is thrown away), unlike the flat PlaybookRunner.scala, which
-// does render `.mustache` templates. So wp-config.php and the nginx site
-// config are written here the same way every other config file in this
-// project is — a RunCommand heredoc script with values already
-// interpolated at Scala-compile-time — rather than Task.Copy with a
-// `.mustache` template, which would silently ship the literal
-// `{{placeholders}}` unrendered in a ClusterPlaybook.
+// wp-config.php and the nginx site config are written the same way every
+// other config file in this project is: a RunCommand heredoc script with the
+// values interpolated at Scala-compile-time. (When this was written, a
+// cluster playbook's Task.Copy did not render `.mustache` templates; it does
+// now, since every runner uses TaskExecutor, so a template would also work.)
 object wordpress_site extends OrpheraClusterPlaybook:
 
   // Test-only hardcoded credentials, same convention (and same caveat) as

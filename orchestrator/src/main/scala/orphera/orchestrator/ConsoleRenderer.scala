@@ -11,9 +11,11 @@ import orphera.common.*
 object ConsoleRenderer:
 
   // Number of unsuccessful RESULT events rendered since the last
-  // resetFailures(). The ad-hoc verbs (install, run, copy, ...) return
-  // IO[Unit], so the CLI's exit code (Main.withTargets) reads this to
-  // report a node-level failure instead of always exiting 0.
+  // resetFailures(). The commands that return IO[Unit] (Main.withTargets)
+  // read this to report a node-level failure instead of always exiting 0.
+  // The commands that change a node (install, run, copy, ...) run through
+  // TaskExecutor and take their exit code from its result instead; they use
+  // render/renderQuiet only for the output.
   private val failures = new AtomicInteger(0)
 
   def resetFailures(): Unit = failures.set(0)
