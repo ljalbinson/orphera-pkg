@@ -37,17 +37,22 @@ import cats.effect.std.Semaphore
   */
 object RunLog:
 
-  final class Handle private[RunLog] (file: Path, lock: Semaphore[IO]):
+  // `file` is None for a run that keeps no log (a direct command such as
+  // `orphera install`, which the audit log already records).
+  final class Handle private[RunLog] (file: Option[Path], lock: Semaphore[IO]):
     /** Appends one JSON object as a single line, under a lock so concurrent
       * writes from parallel node fibers can't interleave and corrupt the file —
       * same concern, same fix, as Checkpoint.Handle.markDone.
       */
     def event(fields: (String, Any)*): IO[Unit] =
+      file.fold(IO.unit)(append(_, fields))
+
+    private def append(path: Path, fields: Seq[(String, Any)]): IO[Unit] =
       lock.permit.use { _ =>
         IO.blocking {
           val line = toJson(fields :+ ("ts" -> Instant.now().toString))
           Files.write(
-            file,
+            path,
             List(line).asJava,
             StandardOpenOption.CREATE,
             StandardOpenOption.APPEND
@@ -79,7 +84,10 @@ object RunLog:
         s"$kind-${sanitize(playbookName)}-$timestamp$tag.jsonl"
       )
       lock <- Semaphore[IO](1)
-    yield new Handle(file, lock)
+    yield new Handle(Some(file), lock)
+
+  /** A handle that writes nothing; see Checkpoint.disabled. */
+  def disabled: IO[Handle] = Semaphore[IO](1).map(new Handle(None, _))
 
   private def sanitize(name: String): String =
     name.replaceAll("[^a-zA-Z0-9._-]", "-")

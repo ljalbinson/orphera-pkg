@@ -8,6 +8,7 @@ import scala.jdk.CollectionConverters.*
 
 import cats.effect.*
 import cats.effect.std.Semaphore
+import cats.syntax.all.*
 
 /** Per-task, per-node restart checkpointing for both PlaybookRunner and
   * ClusterPlaybookRunner.
@@ -58,7 +59,9 @@ object Checkpoint:
   private val emptyState: State = Map.empty
 
   final class Handle private[Checkpoint] (
-      file: Path,
+      // None for a run that keeps no checkpoint (a direct command such as
+      // `orphera install`): isDone is always false and markDone writes nothing.
+      file: Option[Path],
       ref: Ref[IO, State],
       lock: Semaphore[IO]
   ):
@@ -83,19 +86,22 @@ object Checkpoint:
       }
 
     private def writeAtomically(state: State): IO[Unit] =
+      file.traverse_(writeTo(_, state))
+
+    private def writeTo(path: Path, state: State): IO[Unit] =
       IO.blocking {
         val lines = state.toSeq.sortBy(_._1).flatMap { case (node, tasks) =>
           tasks.toSeq.sorted.map(task => s"$node\t$task")
         }
         val tmp = Files.createTempFile(
-          file.getParent,
-          file.getFileName.toString,
+          path.getParent,
+          path.getFileName.toString,
           ".tmp"
         )
         Files.write(tmp, lines.asJava)
         Files.move(
           tmp,
-          file,
+          path,
           StandardCopyOption.REPLACE_EXISTING,
           StandardCopyOption.ATOMIC_MOVE
         )
@@ -129,7 +135,7 @@ object Checkpoint:
       initial <- if resume then readExisting(file) else IO.pure(emptyState)
       ref <- Ref.of[IO, State](initial)
       lock <- Semaphore[IO](1)
-      handle = new Handle(file, ref, lock)
+      handle = new Handle(Some(file), ref, lock)
       // Overwrite the on-disk file right away (even in the resume case,
       // where this just re-serializes what was loaded) so the file on
       // disk always reflects "this run's starting point" rather than
@@ -149,6 +155,16 @@ object Checkpoint:
         )
       }
     yield handle
+
+  /** A handle that records nothing, for the direct commands (`orphera install`,
+    * `run`, ...), which run one task through the same executor as a playbook
+    * but have nothing to resume.
+    */
+  def disabled: IO[Handle] =
+    for
+      ref <- Ref.of[IO, State](emptyState)
+      lock <- Semaphore[IO](1)
+    yield new Handle(None, ref, lock)
 
   private def readExisting(file: Path): IO[State] =
     IO.blocking(Files.exists(file)).flatMap { exists =>

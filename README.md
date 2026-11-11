@@ -631,15 +631,14 @@ task ordering) was designed but superseded before being built;
 declarative, ordered multi-step execution, including file pushes as
 one task type among several.
 
-Every CLI command above (`install`, `remove`, `autoremove`, `dist-upgrade`, `copy`,
-`write-file`, `network-apply`, `reboot`) currently has its **own direct dispatch
-path** in `Main.scala`/`Orchestrator.scala`, separate from
-`PlaybookRunner`. A design where single CLI commands are internally
-expressed as one-task playbooks — so there's exactly one execution
-engine instead of two — was discussed but is **not yet implemented**;
-this is worth doing as a follow-up, since right now a fix or feature
-added to `PlaybookRunner` (e.g. lock-contention retry behavior) does
-not automatically apply to the direct CLI path, and vice versa.
+**One execution engine.** The commands that change a node (`install`, `remove`, `autoremove`, `dist-upgrade`, `copy`,
+`write-file`, `network-apply`, `reboot` and `run`) run as a playbook of one task, named after the command, through the
+same executor (`TaskExecutor`) as playbooks and each stage of a cluster playbook. A change to how a task runs therefore
+applies to all three. A command differs from a playbook run only in that it gathers no facts, sends `{{...}}` as typed
+(no templating), keeps no checkpoint or run log (`audit-log` records it), and shows its output as
+`[node] ...` without a task name. The nodes run in parallel and independently: a node that fails, or cannot be reached,
+prints one line (`[tst7] unreachable: ...`) and the others carry on; the exit code is 1 if the command failed on any
+node. `reboot` skips a `never-reboot` node and says so, where a playbook's `reboot` task fails on it.
 
 ## Playbooks
 
@@ -742,7 +741,8 @@ task's own `vars:` map merged with facts gathered for that node
 (`facts.hostname`, `facts.os_id`, `facts.os_version`,
 `facts.architecture` — note this is a different, wider naming
 convention than the `when:` condition keys below; not yet normalized
-to match). Non-`.mustache` sources are pushed verbatim. The idempotent
+to match). The same holds in a cluster playbook (before 0.1.210 its `copy` sent a `.mustache` source unrendered),
+but not for the `copy` command, which sends the file as it is. Non-`.mustache` sources are pushed verbatim. The idempotent
 pre-check (content hash) runs against the *rendered* output, so
 re-applying an unchanged playbook is a no-op even if the template
 source itself changed in a way that doesn't affect the rendered
@@ -901,9 +901,6 @@ script's `Playbook` value has already been built.
 - Per-task retry/backoff beyond the built-in `apt`/`dpkg` lock timeout
   above — a task that fails for another transient reason still stops
   that node's remaining tasks rather than retrying
-- Direct CLI commands (`install`, `remove`, etc.) do **not** currently
-  run through this same `PlaybookRunner` execution engine — see the
-  note in [CLI reference](#cli-reference)
 
 ## Cross-node coordination and staged playbooks
 
@@ -1886,7 +1883,7 @@ Afterwards both hosts hold the same CA key, secret store and SSH key, and either
 |---|---|
 | `make` / `make all` | clean → test → assembly → deb |
 | `make clean` | `sbt clean`, removes `pkg/` and any built `.deb` / `.rpm` |
-| `make test` | `sbt test`, then the check programs `ContainerCheck`, `ConfCheck`, `SecretsCheck`, `ThreadInfoCheck`, `InventoryCheck`, `LocationsCheck`, `InstallationCheck`, `CaInitCheck`, `DbDocumentsCheck`, `Os10Check` and `IloCheck` (set `CHECK_VERBOSE=1` to print every passing check) |
+| `make test` | `sbt test`, then the check programs `ContainerCheck`, `ConfCheck`, `SecretsCheck`, `ThreadInfoCheck`, `InventoryCheck`, `TaskExecutorCheck`, `LocationsCheck`, `InstallationCheck`, `CaInitCheck`, `DbDocumentsCheck`, `Os10Check` and `IloCheck` (set `CHECK_VERBOSE=1` to print every passing check) |
 | `make check-ilo`, `make check-os10` | `utils/ilo.py` and `utils/os10.py` against a mock iLO and a mock OS10 switch on localhost (no hardware needed) |
 | `make assembly` | `sbt agent/assembly` |
 | `make deb` | stages package contents, runs `dpkg-deb --build` |
@@ -1939,6 +1936,8 @@ many checks passed and exits non-zero on a failure:
 - `AuditLogCheck`: how `audit-log` shortens its Nodes and Detail columns
 - `InventoryCheck`: reading `never-reboot`, which nodes it protects, that `shutdown` refuses and skips them,
   `--node-groups` and `--exclude-nodes`, `orphera nodes`, and the `deploy-agent`/`bootstrap` agent options
+- `TaskExecutorCheck`: the task executor that commands, playbooks and cluster playbooks share: templating on and off,
+  a failure stopping only that node's remaining tasks, `when:` with no facts, and how a failure is described
 - `LocationsCheck`: `-I`/`-c`, the environment variables, config names, reading through a URI
 - `InstallationCheck`: where the scripting jar is looked for
 - `CaInitCheck`: `init-ca`
@@ -2822,15 +2821,6 @@ playbooks marked DRAFT there have been written but not all run on the lab.
   afterward is how that gets closed instead. `bootstrap` (SSH-based,
   no existing agent to poll against) isn't covered by this — its own
   success is still only as good as the SSH session's exit code
-- Direct CLI commands (`install`, `remove`, `autoremove`, `copy`,
-  `write-file`, `network-apply`, `reboot`, `run`) each have their own dispatch path
-  in `Main.scala`/`Orchestrator.scala`, separate from `PlaybookRunner`
-  — a design where they're unified (CLI commands as one-task
-  playbooks, one execution engine) was discussed but not implemented.
-  Practical consequence: the `DPkg::Lock::Timeout` fix and any future
-  `PlaybookRunner`-level improvement (retries, etc.) apply to
-  `playbook` runs but not to direct CLI invocations, unless ported to
-  both places separately
 - `set_fact` has no way to target a specific node by name from a task
   list shared across many nodes — the workaround is a per-node
   `when: hostname == "..."` guard repeated once per node. For a
