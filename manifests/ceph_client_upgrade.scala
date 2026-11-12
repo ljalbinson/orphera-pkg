@@ -15,10 +15,10 @@ import orphera.orchestrator.*
 // packages for the cluster's release (20.2.5) are used instead.
 //
 // What it does:
-//   1. On tst21 (kolla_build.scala's registry), for each image below: pulls
-//      the image from quay.io, runs a container of it that upgrades the Ceph
-//      client packages it has (librados2, librbd1, python3-rados, ...) from
-//      download.ceph.com and saves it as an image (podman commit), checks the version, and pushes it to tst21's
+//   1. On tst21 (kolla_build.scala's registry), for each image below: copies
+//      the image from quay.io (as OCI), builds an image on top of it that
+//      upgrades the Ceph client packages it has (librados2, librbd1,
+//      python3-rados, ...) from download.ceph.com, checks the version, and pushes it to tst21's
 //      registry under the same name and tag. The nodes already try tst21 first
 //      for quay.io images (orphera-kolla-cache.conf), so the service manifests
 //      need no change, and a later run of them keeps the new image.
@@ -72,52 +72,53 @@ object ceph_client_upgrade extends OrpheraScript:
       |set -e
       |""".stripMargin
 
-  // Run inside a container of the Kolla image, as root: Ceph's packages for the client.
-  private val installScript =
-    """set -e
-      |mkdir -p /etc/apt/keyrings
-      |cp /orphera-build/ceph-release.asc /etc/apt/keyrings/ceph-release.asc
-      |echo "deb [signed-by=/etc/apt/keyrings/ceph-release.asc] @REPO@/ noble main" > /etc/apt/sources.list.d/ceph-upstream.list
-      |apt-get update -q >/dev/null
-      |pkgs=""
-      |for p in @PACKAGES@; do if dpkg -s "$p" >/dev/null 2>&1; then pkgs="$pkgs $p"; fi; done
-      |echo "upgrading:$pkgs"
-      |DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends $pkgs >/dev/null
-      |apt-get clean
-      |rm -rf /var/lib/apt/lists/*
-      |""".stripMargin.replace("@REPO@", repo).replace("@PACKAGES@", cephPackages)
+  // The new image: the Kolla image with Ceph's packages for the client.
+  private val containerfile =
+    """ARG BASE
+      |FROM ${BASE}
+      |ARG RUN_USER=root
+      |ARG CEPH_REPO
+      |USER root
+      |COPY ceph-release.asc /etc/apt/keyrings/ceph-release.asc
+      |RUN echo "deb [signed-by=/etc/apt/keyrings/ceph-release.asc] ${CEPH_REPO}/ noble main" > /etc/apt/sources.list.d/ceph-upstream.list \
+      | && apt-get update -q >/dev/null \
+      | && pkgs="" \
+      | && for p in @PACKAGES@; do if dpkg -s "$p" >/dev/null 2>&1; then pkgs="$pkgs $p"; fi; done \
+      | && echo "upgrading:$pkgs" \
+      | && DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends $pkgs >/dev/null \
+      | && apt-get clean && rm -rf /var/lib/apt/lists/*
+      |LABEL orphera.ceph-client="${CEPH_REPO}"
+      |USER ${RUN_USER}
+      |""".stripMargin.replace("@PACKAGES@", cephPackages)
 
-  // Builds and pushes one image on tst21. Not with podman build: on tst21 it refuses these Docker-format
-  // Kolla images ("unsupported MIME type for compression: application/vnd.docker.image.rootfs.diff.tar.gzip").
-  // A container of the image is run instead, the packages are upgraded in it, and podman commit saves it,
-  // with the image's own user, entrypoint and command put back.
+  // Builds and pushes one image on tst21. The Kolla image is copied in with skopeo converted to OCI
+  // format: podman on tst21 (Ubuntu noble) fails on the Docker-format original, in podman build
+  // ("unsupported MIME type for compression: application/vnd.docker.image.rootfs.diff.tar.gzip")
+  // and in podman commit (a panic). Built FROM the OCI copy, the image keeps the original's layers,
+  // environment, user, entrypoint and command; the last three are checked before the push.
   private def buildScript(image: String): String =
     helpers +
       """NAME='@NAME@'; TAG='@TAG@'; REPO='@REPO@'; WANT='@VERSION@'
-        |BASE="quay.io/openstack.kolla/$NAME:$TAG"; OUT="localhost/orphera-ceph/$NAME:$TAG"; C="orphera-ceph-build-$NAME"
+        |SRC="quay.io/openstack.kolla/$NAME:$TAG"; BASE="localhost/orphera-base/$NAME:$TAG"
+        |OUT="localhost/orphera-ceph/$NAME:$TAG"; C="orphera-ceph-build-$NAME"
         |curl -sf http://localhost:5000/v2/ >/dev/null || fail "no image registry on localhost:5000 (kolla_build.scala sets it up)"
         |curl -fsI "$REPO/dists/noble/Release" >/dev/null || fail "$REPO has no packages for Ubuntu noble (set CEPH_CLIENT_REPO)"
         |W=/var/lib/orphera/ceph-client-images/$NAME
         |mkdir -p "$W"
         |curl -fsSL https://download.ceph.com/keys/release.asc -o "$W/ceph-release.asc"
-        |cat > "$W/install.sh" <<'INSTALL'
-        |@INSTALL@INSTALL
-        |# The Kolla image straight from quay.io: an empty registries config, so that no mirror (tst21's own
-        |# registry, which may hold a built image) is used. Earlier copies are removed first.
+        |cat > "$W/Containerfile" <<'CONTAINERFILE'
+        |@CONTAINERFILE@CONTAINERFILE
+        |# Earlier copies, from this or an earlier attempt, go first.
         |podman rm -f "$C" >/dev/null 2>&1 || true
-        |podman rmi -f "$OUT" "$BASE" "localhost/orphera-base/$NAME:$TAG" >/dev/null 2>&1 || true
-        |: > "$W/registries.conf"
-        |echo "pulling $BASE from quay.io"
-        |CONTAINERS_REGISTRIES_CONF="$W/registries.conf" podman pull -q "$BASE" >/dev/null
+        |podman rmi -f "$OUT" "$BASE" "$SRC" >/dev/null 2>&1 || true
+        |# Straight from quay.io (no mirror: tst21's own registry may hold a built image), as OCI.
+        |echo "copying $SRC from quay.io, as OCI"
+        |skopeo --registries-conf /dev/null copy -q --format oci "docker://$SRC" "containers-storage:$BASE"
         |U=$(podman image inspect -f '{{.Config.User}}' "$BASE")
         |EP=$(podman image inspect -f '{{json .Config.Entrypoint}}' "$BASE")
         |CMD=$(podman image inspect -f '{{json .Config.Cmd}}' "$BASE")
-        |[ "$EP" = null ] && EP='[]'
-        |[ "$CMD" = null ] && CMD='[]'
-        |podman run --name "$C" --user root --entrypoint /bin/sh -v "$W:/orphera-build:ro,z" "$BASE" /orphera-build/install.sh
-        |podman commit -q --format docker --change "USER ${U:-root}" --change "ENTRYPOINT $EP" --change "CMD $CMD" \
-        |  --change "LABEL orphera.ceph-client=$REPO" "$C" "$OUT" >/dev/null
-        |podman rm -f "$C" >/dev/null
+        |podman build -q --pull=never --build-arg "BASE=$BASE" --build-arg "RUN_USER=${U:-root}" \
+        |  --build-arg "CEPH_REPO=$REPO" -t "$OUT" "$W" >/dev/null
         |V=$(podman run --rm --user root --entrypoint dpkg-query "$OUT" -W -f='${Version}' librados2)
         |case "$V" in "$WANT"*) ;; *) fail "the built $NAME image has librados2 $V, not $WANT" ;; esac
         |GOT=$(podman image inspect -f '{{.Config.User}} {{json .Config.Entrypoint}} {{json .Config.Cmd}}' "$OUT")
@@ -129,7 +130,7 @@ object ceph_client_upgrade extends OrpheraScript:
         .replace("@TAG@", tag)
         .replace("@REPO@", repo)
         .replace("@VERSION@", version)
-        .replace("@INSTALL@", installScript)
+        .replace("@CONTAINERFILE@", containerfile)
 
   // Pulls the new image on a service node, checks it, restarts the service.
   private def useScript(image: String): String =
