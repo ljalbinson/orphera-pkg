@@ -2621,10 +2621,16 @@ Worth knowing:
 - **Ceph cipher compromise.** Ceph 19.2.6 and later (CVE-2025-30156) accepts
   only the new `aes256k` cephx cipher by default, but the Kolla images carry
   Ubuntu's Ceph 19.2.3 client, which only knows the older `aes`. The
-  `cephadm_install.scala`, `cinder_single_node.scala` and `glance_single_node.scala` playbooks therefore run
-  `ceph mon set auth_allowed_ciphers aes,aes256k`. Once the clients are upgraded,
-  enforce `aes256k` only (`ceph mon set auth_allowed_ciphers aes256k`) and
-  rotate `client.cinder` and `client.glance`.
+  `cephadm_install.scala` playbook therefore runs
+  `ceph mon set auth_allowed_ciphers aes,aes256k`, and `cinder_single_node.scala`,
+  `glance_single_node.scala` and `manila_single_node.scala` do so while their
+  own key is an `aes` one (`CephKeys.allowCiphersFor`). To end the compromise:
+  `ceph_client_upgrade.scala` gives the services and the compute hosts Ceph's
+  20.2.5 client, then `ceph_key_rotation.scala` rotates `client.cinder`,
+  `client.glance` and `client.manila` to `aes256k`, re-runs their playbooks and
+  `nova_compute.scala`, and sets the monitors to `aes256k` only, unless another
+  client (such as `client.k8s`, whose kernel RBD client needs `aes` before
+  Linux 7.0) still has an `aes` key.
 - **Kolla specifics learned the hard way:** `keystone-manage fernet_setup`
   switches to the image's `keystone` user, so the host key directories must be
   owned by that uid; the image's Apache has `mod_ssl` but does not load it;
