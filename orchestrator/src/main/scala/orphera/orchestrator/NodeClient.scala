@@ -385,6 +385,7 @@ object NodeClient:
       onLine: String => IO[Unit]
   ): IO[Unit] =
     for
+      askedAt <- IO.monotonic
       ack <- channelBuilder(node)
         .resource[IO]
         .flatMap(AgentFs2Grpc.stubResource[IO])
@@ -397,8 +398,49 @@ object NodeClient:
         else
           onLine("Waiting for host to come back...") >>
             IO.sleep((delaySeconds + 5).seconds) >>
-            pollUntilBack(node, waitTimeoutSeconds, onLine)
+            pollUntilBack(node, waitTimeoutSeconds, onLine) >>
+            confirmRebooted(node, askedAt, onLine)
     yield ()
+
+  /** After `reboot --wait` sees the agent answer again: whether the host
+    * really rebooted, rather than only the agent restarting. Its uptime must be
+    * shorter than the time since the reboot was asked for. Fails if it is not;
+    * an agent too old to report uptime gets a line saying the reboot could not
+    * be confirmed.
+    */
+  private def confirmRebooted(
+      node: Node,
+      askedAt: FiniteDuration,
+      onLine: String => IO[Unit]
+  ): IO[Unit] =
+    for
+      now <- IO.monotonic
+      uptime <- getUptime(node).attempt
+      _ <- uptime match
+        case Right(info) =>
+          rebootVerdict(info.uptimeSeconds, (now - askedAt).toSeconds)
+            .fold(why => IO.raiseError(new RuntimeException(why)), onLine)
+        case Left(e) if NodeError.isUnimplemented(e) =>
+          onLine(
+            "Its agent is too old to report uptime, so the reboot is not confirmed"
+          )
+        case Left(e) => IO.raiseError(e)
+    yield ()
+
+  /** Whether a host whose uptime is `uptimeSeconds`, `sinceAskedSeconds` after
+    * the reboot was asked for, rebooted: Right with a line, or Left with why
+    * not.
+    */
+  def rebootVerdict(
+      uptimeSeconds: Long,
+      sinceAskedSeconds: Long
+  ): Either[String, String] =
+    Either.cond(
+      uptimeSeconds < sinceAskedSeconds,
+      s"Rebooted: up ${uptimeSeconds}s, ${sinceAskedSeconds}s after the reboot was asked for",
+      s"the agent answers again but the host did not reboot: it has been up ${uptimeSeconds}s, " +
+        s"longer than the ${sinceAskedSeconds}s since the reboot was asked for"
+    )
 
   /** Powers the host off after `delaySeconds`. Returns once the agent has
     * acknowledged scheduling it — the host going down afterwards is not
@@ -440,7 +482,11 @@ object NodeClient:
       elapsed: Int = 0
   ): IO[Unit] =
     if elapsed >= timeoutSeconds then
-      onLine(s"Timed out after ${timeoutSeconds}s waiting for host to return")
+      IO.raiseError(
+        new RuntimeException(
+          s"timed out after ${timeoutSeconds}s waiting for the host to come back"
+        )
+      )
     else
       channelBuilder(node)
         .resource[IO]

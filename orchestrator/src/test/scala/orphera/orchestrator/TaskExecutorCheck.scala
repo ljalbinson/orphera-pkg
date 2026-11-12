@@ -168,6 +168,7 @@ object TaskExecutorCheck:
       TaskExecutor.failureLine(new RuntimeException("No such file: x"))
     )
 
+    rebootAndHealthChecks()
     whenChecks()
     changedChecks()
     handlerChecks()
@@ -698,5 +699,23 @@ object TaskExecutorCheck:
         fLines.contains("check-a|when not yes|skipped (condition not met)") &&
         fLines.contains("check-a|when other node|ran"),
       fLines.toString
+    )
+
+  private def rebootAndHealthChecks(): Unit =
+    check(
+      "a host up for less time than since the reboot was asked for rebooted",
+      NodeClient.rebootVerdict(20, 45).isRight
+    )
+    check(
+      "a host up for longer did not reboot, only its agent came back",
+      NodeClient.rebootVerdict(86400, 45).left.exists(_.contains("did not reboot"))
+    )
+    val attempt = ClusterPlaybookRunner.CheckAttempt(3, (1 to 15).map(i => s"line $i").toVector)
+    val described = attempt.describe(List("ceph", "health"))
+    check(
+      "a timed-out health check shows the command, its exit code and the last 10 lines",
+      described.headOption.contains("ceph health: exit 3") && described.length == 11 &&
+        described.lastOption.contains("| line 15") && !described.exists(_.endsWith("line 5")),
+      described.toString
     )
 
