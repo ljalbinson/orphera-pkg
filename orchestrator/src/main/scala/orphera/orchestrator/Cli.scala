@@ -98,6 +98,10 @@ enum Command:
   // Only meaningful for a .scala script; ignored for .yaml/a registered
   // compiled playbook, which have no way to read it at all.
   case RunPlaybook(path: String, resume: Boolean, config: Option[String])
+  // `apply <file.scala>`: a declarative description (OrpheraApply), run as a
+  // script is, with --check, --nodes and --stop-on-failure handed over as
+  // ORPHERA_CHECK, ORPHERA_APPLY_NODES and ORPHERA_STOP_ON_FAILURE.
+  case Apply(path: String, check: Boolean, nodes: Option[List[String]], stopOnFailure: Boolean)
   case Reboot(
       nodes: Option[List[String]],
       delaySeconds: Int,
@@ -376,6 +380,8 @@ object Cli:
         parseTeardown(rest, Nil, "root", None, purge = false, confirmed = false)
       case "fetch" :: remote :: rest  => parseFetch(rest, remote, ".", None)
       case "facts" :: rest            => parseFacts(rest, None)
+      case "apply" :: path :: rest =>
+        parseApplyFlags(rest, Command.Apply(path, check = false, nodes = None, stopOnFailure = false))
       case "playbook" :: path :: rest =>
         parsePlaybookFlags(rest, resume = false, config = None).map {
           case (resume, config) => Command.RunPlaybook(path, resume, config)
@@ -436,6 +442,16 @@ object Cli:
     * (checkpoint-based restart skipping, `Checkpoint.scala`) and `config`
     * (ORPHERA_CONFIG hand-off, `ConfigYaml.scala`) do.
     */
+  private def parseApplyFlags(args: List[String], acc: Command.Apply): Either[String, Command] =
+    args match
+      case Nil                          => Right(acc)
+      case "--check" :: rest            => parseApplyFlags(rest, acc.copy(check = true))
+      case "--stop-on-failure" :: rest  => parseApplyFlags(rest, acc.copy(stopOnFailure = true))
+      case "--nodes" :: value :: rest   =>
+        parseApplyFlags(rest, acc.copy(nodes = Some(value.split(",").toList.map(_.trim).filter(_.nonEmpty))))
+      case other :: _                   =>
+        Left(s"Unknown argument to apply: $other (expected --check, --nodes, --node-groups, --stop-on-failure)")
+
   private def parsePlaybookFlags(
       args: List[String],
       resume: Boolean,
@@ -1401,6 +1417,10 @@ object Cli:
       |                      and client.key, signed by certs/ca.key; orphera presents it to
       |                      every agent. Needed before issue-certs --client-auth
       |  teardown          --nodes host1,host2 --yes [--purge] [--ssh-user root] [--ssh-key ~/.ssh/id_ed25519]
+      |  apply             <file.scala> [--nodes host1,host2] [--check] [--stop-on-failure]
+      |                    — a declarative description (OrpheraApply): each resource is
+      |                      read, compared and changed only where it differs; --check
+      |                      changes nothing and shows what would change, with diffs
       |  playbook          <file.yaml | file.scala | compiled-name> [--resume] [--config <path>]
       |                    — .scala files are compiled at run time; --resume skips
       |                      tasks already completed in a previous run (per

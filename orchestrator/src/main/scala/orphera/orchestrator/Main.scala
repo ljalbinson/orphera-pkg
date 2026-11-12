@@ -110,6 +110,8 @@ object Main extends IOApp:
     */
   private def withResolvedConfigs(command: Command): Command =
     command match
+      case a: Command.Apply =>
+        a.copy(path = Locations.resolveManifest(a.path))
       case Command.RunPlaybook(source, resume, config) =>
         Command.RunPlaybook(
           Locations.resolveManifest(source),
@@ -372,6 +374,18 @@ object Main extends IOApp:
               }
             }
           }
+
+      case Right(Command.Apply(source, check, nodes, stopOnFailure)) =>
+        if !source.endsWith(".scala") then
+          IO.println(s"Error: apply takes a .scala description (OrpheraApply), not $source") >> IO.pure(ExitCode.Error)
+        else
+          runScalaPlaybookScript(
+            source,
+            resume = false,
+            config = None,
+            extraEnv = Map("ORPHERA_CHECK" -> check.toString, "ORPHERA_STOP_ON_FAILURE" -> stopOnFailure.toString) ++
+              nodes.map(ns => "ORPHERA_APPLY_NODES" -> ns.mkString(","))
+          )
 
       case Right(Command.RunPlaybook(source, resume, config)) =>
         if source.endsWith(".scala") then
@@ -1091,7 +1105,8 @@ object Main extends IOApp:
   private def runScalaPlaybookScript(
       scriptPath: String,
       resume: Boolean,
-      config: Option[String]
+      config: Option[String],
+      extraEnv: Map[String, String] = Map.empty
   ): IO[ExitCode] =
     IO.blocking {
       Installation.scriptingJar match
@@ -1108,6 +1123,7 @@ object Main extends IOApp:
           if resume then builder.environment().put("ORPHERA_RESUME", "true")
           config
             .foreach(path => builder.environment().put("ORPHERA_CONFIG", path))
+          extraEnv.foreach((k, v) => builder.environment().put(k, v))
           val exit = builder
             .inheritIO()
             .start()

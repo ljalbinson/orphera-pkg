@@ -80,6 +80,13 @@ enum Task:
   )
   case Debug(message: String)
 
+  /** Applies a declarative description to the node (Apply,
+    * docs/APPLY-DESIGN.md): each resource observed, compared and changed only
+    * where it differs; with `check`, only observed and compared. Changed if
+    * any resource changed; fails if any failed.
+    */
+  case Apply(plan: ApplyPlan, check: Boolean = false, stopOnFailure: Boolean = false)
+
 /** A `when:` condition: `key == "expected"`, or `!=` with `negate`. The key is
   * looked up in the same variables as a template's `{{...}}`
   * (TaskExecutor.conditionHolds): this node's set facts and inventory vars by

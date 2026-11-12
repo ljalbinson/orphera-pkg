@@ -478,7 +478,7 @@ object TaskExecutor:
     def output: Vector[String] =
       events.filter(_.kind == Event.Kind.OUTPUT).map(_.message)
     task match
-      case _: Task.Copy | _: Task.WriteFile | _: Task.DistributeFile =>
+      case _: Task.Copy | _: Task.WriteFile | _: Task.DistributeFile | _: Task.Apply =>
         !events.exists(e =>
           e.kind == Event.Kind.RESULT && e.message.startsWith("Skipped:")
         )
@@ -629,6 +629,14 @@ object TaskExecutor:
       case Task.Debug(message) =>
         rendered(message.contains("{{"))(r => r(message)).flatMap(say)
 
+      case Task.Apply(plan, check, stopOnFailure) =>
+        applyOn(plan, node, env, check, stopOnFailure, say).flatMap { report =>
+          if report.failed then
+            IO.raiseError(new RuntimeException(s"${report.failures.size} of ${report.results.size} resources failed: ${report.failures.mkString("; ")}"))
+          else if !report.changed then record(Event(Event.Kind.RESULT, "Skipped: unchanged", 0, true))
+          else IO.unit
+        }
+
       case Task.DumpFacts() =>
         templateVars(node, facts, env).flatMap { vars =>
           say(s"\n${FactPrinter.render(vars)}")
@@ -761,6 +769,83 @@ object TaskExecutor:
     * node's gathered facts, inventory/group vars and set-facts, nested under
     * nodes.<name>.*.
     */
+  /** Applies `plan` to `node`, each resource's line through `say`: reads the
+    * node quietly, changes it (unless `check`) with write-file and `sh -c`
+    * steps, and renders `.mustache` sources with the node's template vars.
+    */
+  def applyOn(
+      plan: ApplyPlan,
+      node: Node,
+      env: Env,
+      check: Boolean,
+      stopOnFailure: Boolean,
+      say: String => IO[Unit]
+  ): IO[ApplyReport] =
+    templateVars(node, env.context.factsByNode.get(node.name), env).flatMap(vars =>
+      Apply.run(plan, new NodeTarget(node, env, vars), check, say, stopOnFailure)
+    )
+
+  // A real node for Apply: every step through env.perform (runTask), with
+  // nothing printed (the engine prints one line per resource), and no
+  // `{{...}}` rendering in scripts or content.
+  private final class NodeTarget(n: Node, env: Env, vars: Map[String, Any]) extends ApplyTarget:
+    def node: String = n.name
+
+    private final case class Done(error: Option[Throwable], exitCode: Int, output: Vector[String])
+
+    private def quietly(label: String, task: Task): IO[Done] =
+      for
+        seen <- Ref.of[IO, Vector[Event]](Vector.empty)
+        silent = env.copy(
+          output = Output((_, _, e) => seen.update(_ :+ e), (_, _, _) => IO.unit, (_, _, _) => IO.unit),
+          templating = false,
+          templateFiles = false
+        )
+        result <- silent.perform(NamedTask(label, task), n, silent).attempt
+        events <- seen.get
+      yield Done(
+        result.left.toOption,
+        events.filter(_.kind == Event.Kind.RESULT).lastOption.fold(0)(_.exitCode),
+        events.filter(_.kind == Event.Kind.OUTPUT).map(_.message)
+      )
+
+    private def failure(label: String, done: Done): Throwable =
+      val said = done.output.map(_.trim).filter(_.nonEmpty).takeRight(5)
+      done.error match
+        case Some(_: RemoteFailure) | None =>
+          new RuntimeException(s"$label: exit ${done.exitCode}${if said.isEmpty then "" else ": " + said.mkString(" | ")}")
+        case Some(other) => new RuntimeException(s"$label: ${describe(other)}")
+
+    def observe(resources: List[(Int, ApplyResource)]): IO[Map[Int, Observed]] =
+      if resources.isEmpty then IO.pure(Map.empty)
+      else
+        quietly("read the node", Task.RunCommand(List("sh", "-c", Apply.observeScript(resources)), 120)).flatMap(done =>
+          done.error match
+            case None | Some(_: RemoteFailure) => IO.pure(Apply.parseObserved(resources, done.output))
+            case Some(e)                       => IO.raiseError(e)
+        )
+
+    def readText(path: String): IO[Option[String]] =
+      val q = Apply.quote(path)
+      quietly("read a file", Task.RunCommand(List("sh", "-c", s"[ -f $q ] && head -c 262144 -- $q"), 60)).map(done =>
+        Option.when(done.error.isEmpty && done.exitCode == 0)(done.output.mkString("\n"))
+      )
+
+    def source(path: String, more: Map[String, String]): IO[String] =
+      IO.blocking(new String(java.nio.file.Files.readAllBytes(java.nio.file.Paths.get(path)), "UTF-8")).map(text =>
+        if path.endsWith(".mustache") then Templating.render(text, vars ++ more) else text
+      )
+
+    def write(path: String, content: String, owner: String, group: String, mode: Int): IO[Unit] =
+      quietly(s"write $path", Task.WriteFile(content, path, owner, group, mode)).flatMap(done =>
+        if done.error.isEmpty then IO.unit else IO.raiseError(failure(s"writing $path", done))
+      )
+
+    def shell(label: String, script: String, timeout: Int): IO[Unit] =
+      quietly(label, Task.RunCommand(List("sh", "-c", script), timeout)).flatMap(done =>
+        if done.error.isEmpty then IO.unit else IO.raiseError(failure(script.linesIterator.nextOption().getOrElse(label), done))
+      )
+
   private def templateVars(
       node: Node,
       facts: Option[Facts],

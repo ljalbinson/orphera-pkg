@@ -144,7 +144,7 @@ object Orphera:
   /** Runs `script` with a context for `name`: the agent token checked, a run
     * log, and a checkpoint (`--resume`). Fails if the script did.
     */
-  def run(name: String, resume: Boolean)(
+  def run(name: String, resume: Boolean, kind: String = "Script")(
       script: Orphera => IO[Unit]
   ): IO[Unit] =
     for
@@ -163,10 +163,10 @@ object Orphera:
         "duration_ms" -> (end - start).toMillis
       )
       _ <- result match
-        case Right(()) => IO.println(s"Script '$name' finished.")
+        case Right(()) => IO.println(s"$kind '$name' finished.")
         case Left(err) =>
-          IO.println(s"Script '$name' failed: ${TaskExecutor.describe(err)}") >>
-            IO.raiseError(new PlaybookFailed(s"Script '$name' failed (see output above)"))
+          IO.println(s"$kind '$name' failed: ${TaskExecutor.describe(err)}") >>
+            IO.raiseError(new PlaybookFailed(s"$kind '$name' failed (see output above)"))
     yield ()
 
   /** A context; `adjust` changes its Env (checks give it a fake runner). */
@@ -352,6 +352,45 @@ final class NodeRef private[orchestrator] (val node: Node, orphera: Orphera):
 
   def networkApply(name: String, timeout: Int = 60): IO[TaskExecutor.StepResult] =
     change(name, Task.NetworkApply(timeout), None)
+
+  /** Applies a declarative description to this node (docs/APPLY-DESIGN.md):
+    * each resource read, compared and changed only where it differs; with
+    * `check`, nothing is changed. Not checkpointed: running it again is its
+    * resume. Raises (StepFailed) if a resource failed; otherwise the report
+    * says what changed (`report.changed("file[/etc/x]")`).
+    */
+  def apply(plan: ApplyPlan, check: Boolean = false, stopOnFailure: Boolean = false): IO[ApplyReport] =
+    val label = s"apply ${plan.name}"
+    facts.flatMap { f =>
+      val env = orphera.env.copy(context = ClusterContext(Map(node.name -> f)))
+      for
+        _ <- orphera.runLog.event("event" -> "task_start", "node" -> node.name, "task" -> label, "check" -> check)
+        report <- TaskExecutor.applyOn(plan, node, env, check, stopOnFailure, text => env.output.line(node, label, text))
+        _ <- orphera.runLog.event(
+          "event" -> "task_end",
+          "node" -> node.name,
+          "task" -> label,
+          "success" -> !report.failed,
+          "changed" -> report.changed,
+          "resources" -> report.results.map(r => s"${r.id} ${outcomeWord(r.outcome)}").mkString("; ")
+        )
+        _ <- IO.raiseWhen(report.failed)(
+          new TaskExecutor.StepFailed(node.name, label, new RuntimeException(report.failures.mkString("; ")))
+        )
+      yield report
+    }
+
+  /** As `apply`, from the resources (checked first). */
+  def apply(name: String, resources: List[ApplyResource]): IO[ApplyReport] =
+    Apply.plan(name, resources).flatMap(p => apply(p))
+
+  private def outcomeWord(o: ApplyOutcome): String = o match
+    case ApplyOutcome.Unchanged(_)       => "unchanged"
+    case ApplyOutcome.NotNotified        => "not notified"
+    case ApplyOutcome.WouldChange(_, _)  => "would change"
+    case ApplyOutcome.Changed(_, _)      => "changed"
+    case ApplyOutcome.Skipped(_)         => "skipped"
+    case ApplyOutcome.Failed(_)          => "failed"
 
 /** Several nodes. `each` is the barrier between parts of a script, as a stage
   * is in a cluster playbook.

@@ -87,6 +87,7 @@ object AuditLog:
       case Command.Teardown(_, _, _, _, _)              => true
       case Command.IssueCerts(_, _, _, _)               => true
       case Command.RunPlaybook(_, _, _)                 => true
+      case Command.Apply(_, check, _, _)                => !check
       case Command.Reboot(_, _, _, _)                   => true
       case Command.Shutdown(_, _, _)                    => true
       case Command.RunClusterPlaybook(_, _, _, _, _, _) => true
@@ -257,6 +258,14 @@ object AuditLog:
           "nodes" -> nodes.mkString(","),
           "ssh_user" -> sshUser,
           "purge" -> purge
+        )
+      case Command.Apply(path, check, nodes, stopOnFailure) =>
+        List(
+          "command" -> "apply",
+          "path" -> path,
+          "check" -> check,
+          "nodes" -> nodes.fold("")(_.mkString(",")),
+          "stop_on_failure" -> stopOnFailure
         )
       case Command.RunPlaybook(path, resume, config) =>
         List(

@@ -96,7 +96,7 @@ _orphera_completions() {
   _init_completion || return
 
   local verbs="install remove autoremove dist-upgrade copy write-file network-apply reboot shutdown uptime thread-info run
-    playbook cluster-playbook deploy-agent bootstrap issue-certs teardown fetch facts
+    apply playbook cluster-playbook deploy-agent bootstrap issue-certs teardown fetch facts
     version cert-info log-summary audit-log pipeline secrets show-config nodes init-ca os10 ilo help"
 
   # Flags common to most verbs that take --nodes
@@ -326,6 +326,19 @@ _orphera_completions() {
         --timeout) COMPREPLY=() ;;
         --) COMPREPLY=() ;;
         *) COMPREPLY=($(compgen -W "--nodes --node-groups --exclude-nodes --timeout --quiet --" -- "$cur")) ;;
+      esac
+      ;;
+
+    apply)
+      case "$prev" in
+        --nodes) COMPREPLY=($(compgen -W "$(_orphera_nodes)" -- "$cur")) ;;
+        *)
+          if [[ "$cur" == --* ]]; then
+            COMPREPLY=($(compgen -W "--nodes --node-groups --check --stop-on-failure" -- "$cur"))
+          else
+            _orphera_playbook_path_completions "$cur"
+          fi
+          ;;
       esac
       ;;
 
