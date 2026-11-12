@@ -94,10 +94,10 @@ object glance_single_node extends OrpheraClusterPlaybook:
   private val createDatabaseScript =
     s"""mariadb -N -e "CREATE DATABASE IF NOT EXISTS $dbName; CREATE USER IF NOT EXISTS '$dbUser'@'%' IDENTIFIED BY '${dbPassword.reveal}'; GRANT ALL PRIVILEGES ON $dbName.* TO '$dbUser'@'%'; FLUSH PRIVILEGES;""""
 
-  // Same cipher compromise as cinder_single_node.scala (idempotent; see there).
+  // Same cipher rule as cinder_single_node.scala: `aes` is allowed only for an `aes` key (see there).
   private val cephScript =
     s"""set -e
-       |cephadm shell -- ceph mon set auth_allowed_ciphers aes,aes256k
+       |${CephKeys.allowCiphersFor(cephKey.reveal, "client.glance")}
        |cephadm shell -- ceph osd pool create $cephPool
        |cephadm shell -- rbd pool init $cephPool
        |cat > /tmp/glance.keyring <<'KEYRING'

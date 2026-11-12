@@ -102,28 +102,28 @@ object manila_single_node extends OrpheraClusterPlaybook:
   private val dbPassword = Secrets.secret("manila/db")
   private val manilaPassword = Secrets.secret("manila/service")
 
-  // A valid cephx key: base64 of a 12 byte header (type 1 = AES as a little-endian u16, a creation time as
-  // two u32, the key length 16 as a u16) and 16 key bytes. The 16 bytes come from a SHA-256 of a stored
-  // secret, so the key is the same on every run. Test infrastructure only.
+  // The key of client.manila. The secret `manila/ceph-key` holds either a whole cephx key, as
+  // ceph_key_rotation.scala stores after rotating client.manila to aes256k, used as it is, or (from before)
+  // any text, from which an old `aes` key is derived: base64 of a 12 byte header (type 1 = AES as a
+  // little-endian u16, a creation time as two u32, the key length 16 as a u16) and 16 key bytes from a
+  // SHA-256 of the text, the same on every run. Test infrastructure only.
   private val cephKey: String =
-    val keyBytes = java.security.MessageDigest
-      .getInstance("SHA-256")
-      .digest(
-        Secrets
-          .secret("manila/ceph-key")
-          .reveal
-          .getBytes(java.nio.charset.StandardCharsets.UTF_8)
-      )
-      .take(16)
-    val header = java.nio.ByteBuffer
-      .allocate(12)
-      .order(java.nio.ByteOrder.LITTLE_ENDIAN)
-      .putShort(1.toShort)
-      .putInt(1700000000)
-      .putInt(0)
-      .putShort(16.toShort)
-      .array()
-    java.util.Base64.getEncoder.encodeToString(header ++ keyBytes)
+    val stored = Secrets.secret("manila/ceph-key").reveal
+    if CephKeys.isKey(stored) then stored
+    else
+      val keyBytes = java.security.MessageDigest
+        .getInstance("SHA-256")
+        .digest(stored.getBytes(java.nio.charset.StandardCharsets.UTF_8))
+        .take(16)
+      val header = java.nio.ByteBuffer
+        .allocate(12)
+        .order(java.nio.ByteOrder.LITTLE_ENDIAN)
+        .putShort(1.toShort)
+        .putInt(1700000000)
+        .putInt(0)
+        .putShort(16.toShort)
+        .array()
+      java.util.Base64.getEncoder.encodeToString(header ++ keyBytes)
 
   private val confRoot = "/etc/kolla"
   private val srcDir = "/etc/kolla/manila"
@@ -209,8 +209,8 @@ object manila_single_node extends OrpheraClusterPlaybook:
   // FILE visible at /mnt/<name> inside the shell container.
   private val cephScript =
     s"""set -e
-       |# Same cephx cipher compromise as cinder_single_node.scala: the Kolla images carry an older Ceph client.
-       |cephadm shell -- ceph mon set auth_allowed_ciphers aes,aes256k
+       |# Same cephx cipher rule as cinder_single_node.scala: `aes` is allowed only for an `aes` key.
+       |${CephKeys.allowCiphersFor(cephKey, "client.manila")}
        |if ! cephadm shell -- ceph fs ls 2>/dev/null | grep -q '^name: $cephFs,'; then
        |  cephadm shell -- ceph fs volume create $cephFs
        |fi
