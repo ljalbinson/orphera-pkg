@@ -92,18 +92,25 @@ object ceph_client_upgrade extends OrpheraScript:
       |USER ${RUN_USER}
       |""".stripMargin.replace("@PACKAGES@", cephPackages)
 
-  // Builds and pushes one image on tst21, with buildah in a container (quay.io/buildah/stable), in its
-  // own storage: overlay, kept on tst21 in /var/lib/orphera/buildah-storage between builds, so a base
-  // layer is downloaded and stored once for all the images (vfs, the first choice, copied the whole
-  // image for every layer: some 25 GB written for one Kolla image). Not with tst21's podman 4.9.3 (Ubuntu noble): its storage keeps the Kolla
-  // images' layers, which other images on tst21 share, under their Docker media type, and podman build
-  // then fails ("unsupported MIME type for compression: application/vnd.docker.image.rootfs.diff.tar.gzip")
-  // and podman commit panics, whether the image was pulled or copied in as OCI. podman run is fine.
+  // Builds and pushes one image on tst21.
+  //
+  // Building straight on the Kolla image from quay.io fails, with podman 4.9.3 and with a current buildah
+  // in fresh storage alike: "unsupported MIME type for compression:
+  // application/vnd.docker.image.rootfs.diff.tar.gzip" when the build container is made (and podman
+  // commit panicked). The image's manifest and its layers' media types do not agree, and the tools fail
+  // when they rewrite it. So skopeo first copies it into tst21's registry as a plain Docker image
+  // (--format v2s2, manifest and layers in one format), and the build starts from that copy and writes
+  // Docker format too, so that nothing is converted.
+  //
+  // The build is buildah in a container (quay.io/buildah/stable), with overlay storage kept on tst21 in
+  // /var/lib/orphera/buildah-storage between builds, so a shared layer is downloaded and stored once
+  // (vfs copied the whole image for every layer: some 25 GB written for one Kolla image).
   // The pushed image's user, entrypoint and command are checked against quay.io's original.
   private def buildScript(image: String): String =
     helpers +
       """NAME='@NAME@'; TAG='@TAG@'; REPO='@REPO@'
         |SRC="quay.io/openstack.kolla/$NAME:$TAG"; DEST="localhost:5000/openstack.kolla/$NAME:$TAG"
+        |BASE="localhost:5000/orphera-base/$NAME:$TAG"
         |BUILDAH='quay.io/buildah/stable:latest'
         |curl -sf http://localhost:5000/v2/ >/dev/null || fail "no image registry on localhost:5000 (kolla_build.scala sets it up)"
         |curl -fsI "$REPO/dists/noble/Release" >/dev/null || fail "$REPO has no packages for Ubuntu noble (set CEPH_CLIENT_REPO)"
@@ -125,15 +132,17 @@ object ceph_client_upgrade extends OrpheraScript:
         |'; }
         |ORIG=$(config) || fail "cannot read $SRC from quay.io"
         |U=$(printf '%s\n' "$ORIG" | sed -n 1p)
-        |echo "building $NAME on $SRC with $BUILDAH"
+        |echo "copying $SRC to $BASE as a plain Docker image"
+        |skopeo --registries-conf /dev/null copy -q --format v2s2 --dest-tls-verify=false "docker://$SRC" "docker://$BASE"
+        |echo "building $NAME on $BASE with $BUILDAH"
         |podman pull -q "$BUILDAH" >/dev/null
         |STORE=/var/lib/orphera/buildah-storage
         |mkdir -p "$STORE"
         |podman run --rm --privileged --network host -v "$W:/build:ro,z" -v "$STORE:/var/lib/containers:z" \
         |  -e BUILDAH_ISOLATION=chroot "$BUILDAH" sh -ec "
-        |  buildah --storage-driver overlay bud -q --build-arg BASE='$SRC' --build-arg RUN_USER='${U:-root}' \
+        |  buildah --storage-driver overlay bud -q --format docker --pull-always --tls-verify=false --build-arg BASE='$BASE' --build-arg RUN_USER='${U:-root}' \
         |    --build-arg CEPH_REPO='$REPO' -t 'localhost/orphera-ceph/$NAME:$TAG' /build >/dev/null
-        |  buildah --storage-driver overlay push -q --tls-verify=false 'localhost/orphera-ceph/$NAME:$TAG' 'docker://$DEST'
+        |  buildah --storage-driver overlay push -q --format v2s2 --tls-verify=false 'localhost/orphera-ceph/$NAME:$TAG' 'docker://$DEST'
         |"
         |GOT=$(skopeo inspect --tls-verify=false --config "docker://$DEST" | python3 -c '
         |import json, sys
