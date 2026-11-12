@@ -1036,6 +1036,39 @@ live agent (a `Fact`, or another task's `set_fact` result), since
 that data only exists later, inside `PlaybookRunner.run`, after the
 script's `Playbook` value has already been built.
 
+**Native Scala or `.when(...)`.** Decide by when the value is known:
+
+- **Known before the run** (the inventory, config files, environment
+  variables, anything computed from them): use ordinary Scala, such as
+  `if`, `match`, `filter`, or building a different task list. The
+  compiler checks it, and the playbook says plainly which tasks each
+  node gets. Prefer this whenever the value allows it.
+- **Known only during the run** (a gathered fact such as
+  `facts.os_id` or `nodes.tst2.ip_eth0`, or a value an earlier task
+  set with `set_fact`, often from a command's output): use
+  `.when("key" === "value")`, since the decision has to be made after
+  the playbook was built. It takes the same keys as YAML's `when:`
+  (see `when:` conditions above). `lustre_cluster.scala` is an example:
+  an earlier task sets `lustre_reboot` from what it finds on the node,
+  and `.when("lustre_reboot" === "yes")` decides whether the reboot
+  runs.
+
+```scala
+// Known before the run: plain Scala.
+val webNodes = Inventory.all.filter(_.vars.get("role").contains("web")).map(_.name)
+val builder = PlaybookDsl.playbook("web", webNodes*)
+val withTls = if sys.env.contains("WEB_TLS") then builder.task("tls")(tlsTask) else builder
+
+// Known only during the run: .when.
+withTls
+  .task("check the kernel")(Task.RunCommand(List("sh", "-c", "..."), register = "needs_reboot"))
+  .task("reboot")(Task.Reboot(waitForReturn = true))
+  .when("needs_reboot" === "yes")
+```
+
+The monadic DSL style (not yet implemented, below) would let a run-time
+value be used with ordinary `if` and `match` as well, with no `.when`.
+
 **Not yet implemented:**
 - A monadic/for-comprehension style for the Scala DSL (`for _ <- run(...)
   yield ()`), as an alternative to the current fluent `.task(...)`
