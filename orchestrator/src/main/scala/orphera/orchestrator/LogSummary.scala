@@ -99,7 +99,7 @@ object LogSummary:
       else
         val sanitized = sanitize(target)
         val pattern =
-          ("^(playbook|cluster)-" + java.util.regex.Pattern.quote(
+          ("^(playbook|cluster|script)-" + java.util.regex.Pattern.quote(
             sanitized
           ) + "-\\d{8}-\\d{6}(-[A-Za-z0-9._-]+)?\\.jsonl$").r
         val matches = Option(dir.toFile.listFiles()).toList.flatten
@@ -109,7 +109,7 @@ object LogSummary:
           .map(_.toPath())
           .toRight(
             s"No log files found for '$target' under $dir/ " +
-              s"(looked for playbook-$sanitized-*.jsonl / cluster-$sanitized-*.jsonl)"
+              s"(looked for playbook-, cluster- and script-$sanitized-*.jsonl)"
           )
 
   // Mirrors RunLog.sanitize exactly, so a playbook name resolves to the
