@@ -80,34 +80,24 @@ enum Task:
   )
   case Debug(message: String)
 
+/** A `when:` condition: `key == "expected"`, or `!=` with `negate`. The key is
+  * looked up in the same variables as a template's `{{...}}`
+  * (TaskExecutor.conditionHolds): this node's set facts and inventory vars by
+  * name, `facts.os_id` and the rest, and `nodes.<node>.<field>` for any node;
+  * `os_id`, `os_version`, `arch` and `hostname` also still work. A key with
+  * no value makes the condition false, `==` or `!=`.
+  */
 final case class FactCondition(
     key: String,
     expected: String,
     negate: Boolean = false
 ):
-  def matches(facts: orphera.common.Facts): Boolean =
-    val actual = factValue(facts)
-    val eq = actual.contains(expected)
-    if negate then !eq else eq
-
-  def matches(
-      facts: orphera.common.Facts,
-      setFacts: Map[String, String]
-  ): Boolean =
-    setFacts.get(key) match
-      case Some(v) =>
-        val eq = v == expected
-        if negate then !eq else eq
-      case None =>
-        matches(facts)
-
-  private def factValue(facts: orphera.common.Facts): Option[String] =
-    key match
-      case "os_id"      => Some(facts.osId)
-      case "os_version" => Some(facts.osVersion)
-      case "arch"       => Some(facts.architecture)
-      case "hostname"   => Some(facts.hostname)
-      case _            => None
+  /** Whether it holds, given how to look a key up; Left with why not. */
+  def check(lookup: String => Option[String]): Either[String, Unit] =
+    lookup(key) match
+      case None => Left(s"condition not met: $key has no value")
+      case Some(actual) =>
+        Either.cond((actual == expected) != negate, (), "condition not met")
 
 /** How a failed task is tried again: up to `retries` more times, waiting
   * `delaySeconds` before the first retry and twice as long before each one
