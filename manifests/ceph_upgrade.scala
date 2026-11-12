@@ -7,7 +7,8 @@ import orphera.orchestrator.*
 // Upgrades the cephadm cluster on tst0-tst2 to a new Ceph release (Squid 19.2
 // to Tentacle 20.2, or a point release), in stages, checking the cluster
 // between each: the managers, then the monitors, then the OSDs one host at a
-// time, then everything else (MDS, RGW, crash, exporters, monitoring).
+// time, then everything else (MDS, RGW, exporters, monitoring), with the
+// crash daemons, which cephadm wants upgraded everywhere first, before the OSDs.
 //
 // cephadm does the work on each daemon (`ceph orch upgrade start` with
 // --daemon-types and --hosts, a staged upgrade); this script decides what
@@ -26,6 +27,11 @@ import orphera.orchestrator.*
 //   CEPH_ADMIN       node that runs the ceph commands (default tst0)
 //   CEPH_ALLOW_WARN  yes: start from HEALTH_WARN, and between stages wait for
 //                    every PG to be active+clean rather than for HEALTH_OK
+//   CEPH_IGNORE_HEALTH  health checks to treat as healthy, e.g.
+//                    AUTH_INSECURE_CLIENT_KEY_TYPE,AUTH_INSECURE_KEYS_ALLOWED,
+//                    AUTH_INSECURE_KEYS_CREATABLE (warnings known and accepted;
+//                    a mute does not last through the monitor upgrade). Muted
+//                    checks count as healthy too. Any other check holds the upgrade.
 //
 // Run:   orphera playbook manifests/ceph_upgrade.scala
 //        (--resume after a failure: the stages started are not started
@@ -38,6 +44,8 @@ object ceph_upgrade extends OrpheraScript:
   private val image = sys.env.getOrElse("CEPH_IMAGE", "quay.io/ceph/ceph:v20")
   private val admin = sys.env.getOrElse("CEPH_ADMIN", "tst0")
   private val allowWarn = sys.env.get("CEPH_ALLOW_WARN").contains("yes")
+  private val ignoreHealth: List[String] =
+    sys.env.getOrElse("CEPH_IGNORE_HEALTH", "").split("[ ,]+").map(_.trim).filter(_.nonEmpty).toList
 
   // `ceph` through the cephadm shell, without its "Inferring fsid" lines.
   //
@@ -49,6 +57,16 @@ object ceph_upgrade extends OrpheraScript:
   private val helpers =
     """fail() { echo "FAILED: $(hostname -s): $*"; exit 1; }
       |c() { cephadm shell -- ceph "$@" 2>/dev/null; }
+      |healthy() {
+      |  c health --format json | python3 -c '
+      |import json, sys
+      |ignore = set("@IGNORE@".split(",")) - {""}
+      |s = json.load(sys.stdin)
+      |left = ["%s: %s" % (k, (v.get("summary") or {}).get("message", ""))
+      |        for k, v in (s.get("checks") or {}).items() if k not in ignore and not v.get("muted")]
+      |print("ok" if not left else "; ".join(left))
+      |'
+      |}
       |status() {
       |  c orch upgrade status --format json | python3 -c '
       |import json, sys
@@ -69,7 +87,7 @@ object ceph_upgrade extends OrpheraScript:
       |print(" ".join(x for x in [s.get("progress") or "", (s.get("message") or "").replace("\n", " ")] if x))
       |'
       |}
-      |""".stripMargin
+      |""".stripMargin.replace("@IGNORE@", ignoreHealth.mkString(","))
 
   // Prints the target digest, the target version, and how many daemons need
   // the upgrade and how many have it, one per line.
@@ -90,7 +108,7 @@ object ceph_upgrade extends OrpheraScript:
   private val statusScript =
     helpers + "status | sed -n '1p;3p'"
 
-  private val healthScript = helpers + "c health"
+  private val healthScript = helpers + "healthy"
 
   // How many manager daemons; cephadm needs a standby to upgrade them.
   private val mgrCountScript =
@@ -129,12 +147,12 @@ object ceph_upgrade extends OrpheraScript:
         |done
         |last=""
         |while :; do
-        |  h=$(c health)
-        |  case "$h" in HEALTH_OK*) echo "health: HEALTH_OK"; break ;; esac
+        |  h=$(healthy) || { sleep 15; continue; }
+        |  [ "$h" = ok ] && { echo "health: OK"; break; }
         |  if [ "@ALLOW_WARN@" = yes ]; then
         |    p=$(c pg stat)
         |    if printf '%s\n' "$p" | grep -Eq '^([0-9]+) pgs: \1 active\+clean;'; then
-        |      echo "health: $h; every PG active+clean ($p)"
+        |      echo "health: every PG active+clean ($p); also: $h"
         |      break
         |    fi
         |  fi
@@ -161,7 +179,11 @@ object ceph_upgrade extends OrpheraScript:
     def stage(digest: String, label: String, limits: String): IO[Unit] =
       node.sh(
         s"start the upgrade: $label",
-        s"$helpers set -e\nc orch upgrade start --image '$digest' $limits",
+        // stderr kept, without cephadm shell's own "Inferring ..." lines, so a refusal says why
+        helpers +
+          s"""if out=$$(cephadm shell -- ceph orch upgrade start --image '$digest' $limits 2>&1); then rc=0; else rc=$$?; fi
+             |printf '%s\\n' "$$out" | grep -v -e '^Inferring ' -e '^Using ceph image' -e '^quay.io/ceph/ceph@' || true
+             |exit $$rc""".stripMargin,
         timeout = 120
       ) >> node.sh(s"wait for the upgrade: $label", waitScript, timeout = 3600).void
 
@@ -200,9 +222,10 @@ object ceph_upgrade extends OrpheraScript:
       // A cluster part-way through this upgrade (a resume) is not HEALTH_OK; one not yet started must be.
       health <- node.query("cluster health", healthScript)
       h = health.stdout.trim
-      _ <- IO.raiseUnless(done > 0 || h.startsWith("HEALTH_OK") || (allowWarn && h.startsWith("HEALTH_WARN")))(
+      _ <- IO.raiseUnless(done > 0 || h == "ok" || allowWarn)(
         new IllegalStateException(
-          s"the cluster is $h: fix it first (ceph health detail), or set CEPH_ALLOW_WARN=yes for a warning"
+          s"the cluster is not healthy: $h. Fix it first (ceph health detail), or name a known warning in " +
+            "CEPH_IGNORE_HEALTH, or set CEPH_ALLOW_WARN=yes"
         )
       )
       mgrs <- node.query("how many managers", mgrCountScript)
@@ -212,11 +235,15 @@ object ceph_upgrade extends OrpheraScript:
         )
       )
       osdHosts <- node.query("hosts with OSDs", osdHostsScript).map(lines(_).filter(_.nonEmpty))
-      _ <- IO.println(s"[${node.name}] stages: mgr, mon, OSDs on ${osdHosts.mkString(", ")}, then the rest")
+      _ <- IO.println(s"[${node.name}] stages: mgr, mon, crash, OSDs on ${osdHosts.mkString(", ")}, then the rest")
       _ <- stage(digest, "managers", "--daemon-types mgr")
       _ <- stage(digest, "monitors", "--daemon-types mon")
+      // cephadm upgrades types in a fixed order (mgr, mon, crash, osd, ...) and
+      // refuses a stage that would leave an earlier type behind on another host,
+      // so the crash daemons go everywhere first, then the OSDs host by host.
+      _ <- stage(digest, "crash daemons", "--daemon-types crash")
       _ <- osdHosts.foldLeft(IO.unit)((before, host) =>
-        before >> stage(digest, s"OSDs on $host", s"--daemon-types crash,osd --hosts $host")
+        before >> stage(digest, s"OSDs on $host", s"--daemon-types osd --hosts $host")
       )
       _ <- stage(digest, "everything else", "")
       // cephadm sets require-osd-release when the last OSD is upgraded; check.
