@@ -15,10 +15,11 @@ import orphera.orchestrator.*
 // packages for the cluster's release (20.2.5) are used instead.
 //
 // What it does:
-//   1. On tst21 (kolla_build.scala's registry), for each image below: copies
-//      the image from quay.io (as OCI), builds an image on top of it that
-//      upgrades the Ceph client packages it has (librados2, librbd1,
-//      python3-rados, ...) from download.ceph.com, checks the version, and pushes it to tst21's
+//   1. On tst21 (kolla_build.scala's registry), for each image below: with
+//      buildah in a container (tst21's own podman cannot build on these
+//      images), builds an image on the one from quay.io that upgrades the Ceph
+//      client packages it has (librados2, librbd1, python3-rados, ...) from
+//      download.ceph.com, and pushes it to tst21's
 //      registry under the same name and tag. The nodes already try tst21 first
 //      for quay.io images (orphera-kolla-cache.conf), so the service manifests
 //      need no change, and a later run of them keeps the new image.
@@ -91,16 +92,17 @@ object ceph_client_upgrade extends OrpheraScript:
       |USER ${RUN_USER}
       |""".stripMargin.replace("@PACKAGES@", cephPackages)
 
-  // Builds and pushes one image on tst21. The Kolla image is copied in with skopeo converted to OCI
-  // format: podman on tst21 (Ubuntu noble) fails on the Docker-format original, in podman build
-  // ("unsupported MIME type for compression: application/vnd.docker.image.rootfs.diff.tar.gzip")
-  // and in podman commit (a panic). Built FROM the OCI copy, the image keeps the original's layers,
-  // environment, user, entrypoint and command; the last three are checked before the push.
+  // Builds and pushes one image on tst21, with buildah in a container (quay.io/buildah/stable), in that
+  // container's own storage. Not with tst21's podman 4.9.3 (Ubuntu noble): its storage keeps the Kolla
+  // images' layers, which other images on tst21 share, under their Docker media type, and podman build
+  // then fails ("unsupported MIME type for compression: application/vnd.docker.image.rootfs.diff.tar.gzip")
+  // and podman commit panics, whether the image was pulled or copied in as OCI. podman run is fine.
+  // The pushed image's user, entrypoint and command are checked against quay.io's original.
   private def buildScript(image: String): String =
     helpers +
-      """NAME='@NAME@'; TAG='@TAG@'; REPO='@REPO@'; WANT='@VERSION@'
-        |SRC="quay.io/openstack.kolla/$NAME:$TAG"; BASE="localhost/orphera-base/$NAME:$TAG"
-        |OUT="localhost/orphera-ceph/$NAME:$TAG"; C="orphera-ceph-build-$NAME"
+      """NAME='@NAME@'; TAG='@TAG@'; REPO='@REPO@'
+        |SRC="quay.io/openstack.kolla/$NAME:$TAG"; DEST="localhost:5000/openstack.kolla/$NAME:$TAG"
+        |BUILDAH='quay.io/buildah/stable:latest'
         |curl -sf http://localhost:5000/v2/ >/dev/null || fail "no image registry on localhost:5000 (kolla_build.scala sets it up)"
         |curl -fsI "$REPO/dists/noble/Release" >/dev/null || fail "$REPO has no packages for Ubuntu noble (set CEPH_CLIENT_REPO)"
         |W=/var/lib/orphera/ceph-client-images/$NAME
@@ -108,28 +110,40 @@ object ceph_client_upgrade extends OrpheraScript:
         |curl -fsSL https://download.ceph.com/keys/release.asc -o "$W/ceph-release.asc"
         |cat > "$W/Containerfile" <<'CONTAINERFILE'
         |@CONTAINERFILE@CONTAINERFILE
-        |# Earlier copies, from this or an earlier attempt, go first.
-        |podman rm -f "$C" >/dev/null 2>&1 || true
-        |podman rmi -f "$OUT" "$BASE" "$SRC" >/dev/null 2>&1 || true
-        |# Straight from quay.io (no mirror: tst21's own registry may hold a built image), as OCI.
-        |echo "copying $SRC from quay.io, as OCI"
-        |skopeo --registries-conf /dev/null copy -q --format oci "docker://$SRC" "containers-storage:$BASE"
-        |U=$(podman image inspect -f '{{.Config.User}}' "$BASE")
-        |EP=$(podman image inspect -f '{{json .Config.Entrypoint}}' "$BASE")
-        |CMD=$(podman image inspect -f '{{json .Config.Cmd}}' "$BASE")
-        |podman build -q --pull=never --build-arg "BASE=$BASE" --build-arg "RUN_USER=${U:-root}" \
-        |  --build-arg "CEPH_REPO=$REPO" -t "$OUT" "$W" >/dev/null
-        |V=$(podman run --rm --user root --entrypoint dpkg-query "$OUT" -W -f='${Version}' librados2)
-        |case "$V" in "$WANT"*) ;; *) fail "the built $NAME image has librados2 $V, not $WANT" ;; esac
-        |GOT=$(podman image inspect -f '{{.Config.User}} {{json .Config.Entrypoint}} {{json .Config.Cmd}}' "$OUT")
-        |[ "$GOT" = "$U $EP $CMD" ] || [ "$GOT" = "${U:-root} $EP $CMD" ] || fail "the built image's user, entrypoint and command are $GOT, not $U $EP $CMD"
-        |podman push -q --tls-verify=false "$OUT" "docker://localhost:5000/openstack.kolla/$NAME:$TAG"
-        |echo "$NAME:$TAG with librados2 $V (user ${U:-root}, entrypoint $EP, command $CMD) pushed to tst21's registry"
+        |# The images tst21's podman could not build on: freed, they are not used.
+        |podman rm -f "orphera-ceph-build-$NAME" >/dev/null 2>&1 || true
+        |podman rmi -f "localhost/orphera-ceph/$NAME:$TAG" "localhost/orphera-base/$NAME:$TAG" >/dev/null 2>&1 || true
+        |# The original's settings, read from quay.io without a mirror.
+        |config() { skopeo --registries-conf /dev/null inspect --config "docker://$SRC" | python3 -c '
+        |import json, sys
+        |c = json.load(sys.stdin).get("config") or {}
+        |print(c.get("User") or "")
+        |print(json.dumps(c.get("Entrypoint")))
+        |print(json.dumps(c.get("Cmd")))
+        |'; }
+        |ORIG=$(config) || fail "cannot read $SRC from quay.io"
+        |U=$(printf '%s\n' "$ORIG" | sed -n 1p)
+        |echo "building $NAME on $SRC with $BUILDAH"
+        |podman pull -q "$BUILDAH" >/dev/null
+        |podman run --rm --privileged --network host -v "$W:/build:ro,z" -e BUILDAH_ISOLATION=chroot "$BUILDAH" sh -ec "
+        |  buildah --storage-driver vfs bud -q --build-arg BASE='$SRC' --build-arg RUN_USER='${U:-root}' \
+        |    --build-arg CEPH_REPO='$REPO' -t 'localhost/orphera-ceph/$NAME:$TAG' /build >/dev/null
+        |  buildah --storage-driver vfs push -q --tls-verify=false 'localhost/orphera-ceph/$NAME:$TAG' 'docker://$DEST'
+        |"
+        |GOT=$(skopeo inspect --tls-verify=false --config "docker://$DEST" | python3 -c '
+        |import json, sys
+        |c = json.load(sys.stdin).get("config") or {}
+        |print(c.get("User") or "")
+        |print(json.dumps(c.get("Entrypoint")))
+        |print(json.dumps(c.get("Cmd")))
+        |')
+        |WANTCFG=$(printf '%s\n' "$ORIG" | sed "1s/^\$/root/")
+        |[ "$GOT" = "$ORIG" ] || [ "$GOT" = "$WANTCFG" ] || fail "the pushed image's user, entrypoint and command are $(echo $GOT), not $(echo $ORIG)"
+        |echo "$NAME:$TAG pushed to tst21's registry (user, entrypoint and command as on quay.io: $(echo $GOT))"
         |""".stripMargin
         .replace("@NAME@", image)
         .replace("@TAG@", tag)
         .replace("@REPO@", repo)
-        .replace("@VERSION@", version)
         .replace("@CONTAINERFILE@", containerfile)
 
   // Pulls the new image on a service node, checks it, restarts the service.
