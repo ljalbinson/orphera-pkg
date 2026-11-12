@@ -40,7 +40,8 @@ object ConsoleRenderer:
         IO.println(s"[${node.name}] ${event.message}")
       case Event.Kind.RESULT if !event.success =>
         val reason =
-          if event.message.startsWith("FAILED: ") then event.message + " "
+          if event.message.startsWith("FAILED: ") || TaskExecutor.RemoteFailure.timedOut(event.message)
+          then event.message + " "
           else ""
         IO.delay(failures.incrementAndGet()).void >>
           IO.println(
@@ -65,7 +66,8 @@ object ConsoleRenderer:
           // program ..."); show it, otherwise a spawn failure is
           // indistinguishable from a command that returned non-zero.
           // A file left as it was says so ("Skipped: unchanged").
-          (if (!event.success && event.message.startsWith("FAILED: ")) ||
+          (if (!event.success && (event.message.startsWith("FAILED: ") ||
+               TaskExecutor.RemoteFailure.timedOut(event.message))) ||
              event.message.startsWith("Skipped:")
            then IO.println(s"[${node.name}] ${event.message}")
            else IO.unit) >>

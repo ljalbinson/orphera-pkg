@@ -322,6 +322,28 @@ object lustre_cluster_script extends OrpheraScript:
       |done""".stripMargin.replace("@ROLES@", roles)
   )
 
+  // After a restart, each MDT and OST waits for the clients it knew to come
+  // back (Lustre recovery, up to 15 minutes), and refuses new clients until then
+  // (mds_connect rc = -16). Wait for that here, showing the time left, rather
+  // than inside the client mount.
+  private val recoveryScript = fill(
+    helpers +
+      """set -e
+      |for p in $(lctl list_param 'mdt.*.recovery_status' 'obdfilter.*.recovery_status' 2>/dev/null); do
+      |  t=${p#*.}; t=${t%.recovery_status}
+      |  while :; do
+      |    s=$(lctl get_param -n "$p")
+      |    st=$(printf '%s\n' "$s" | awk '$1 == "status:" { print $2 }')
+      |    case "$st" in
+      |      COMPLETE|INACTIVE) echo "$t: recovery ${st}"; break ;;
+      |    esac
+      |    left=$(printf '%s\n' "$s" | awk '$1 == "time_remaining:" { print $2 }')
+      |    echo "$t: recovery ${st:-unknown}, ${left:-?}s left"
+      |    sleep 15
+      |  done
+      |done""".stripMargin
+  )
+
   private val clientMountScript = fill(
     helpers +
       """set -e
@@ -399,6 +421,7 @@ object lustre_cluster_script extends OrpheraScript:
       _ <- stage(serverNodes, "mount the MGT, then MDT0", mountScript("mgt mdt0"), 600)
       _ <- stage(serverNodes, "mount the other MDTs", mountScript("mdt"), 600)
       _ <- stage(serverNodes, "mount the OSTs", mountScript("ost"), 600)
+      _ <- stage(serverNodes, "wait for MDT and OST recovery", recoveryScript, 1200)
       _ <- stage(clientNodes, s"mount $fsName at /mnt/$fsName", clientMountScript, 300)
       _ <- stage(clientNodes, "every MDT and OST is visible to the client", verifyScript, 300)
     yield ()
