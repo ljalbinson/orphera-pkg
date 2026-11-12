@@ -231,11 +231,16 @@ object ClusterPlaybookRunner:
             ) >>
               pollHealthy(stageName, n, single, elapsed = 0)
 
+  // Polls quietly; `last` describes the last failed attempt (exit code and
+  // the end of its output, or why it could not run), printed only if the
+  // check times out, so a stage's log stays readable while polling and still
+  // says why it never became healthy.
   private def pollHealthy(
       stageName: String,
       node: Node,
       check: HealthCheck,
-      elapsed: Int
+      elapsed: Int,
+      last: List[String] = Nil
   ): IO[Boolean] =
     val (pollIntervalSeconds, timeoutSeconds) = check match
       case HealthCheck.Sentinel(_, _, _, p, t)  => (p, t)
@@ -245,29 +250,54 @@ object ClusterPlaybookRunner:
 
     if elapsed >= timeoutSeconds then
       IO.println(
-        s"[$stageName] Health check timed out after ${timeoutSeconds}s"
-      ) >> IO.pure(false)
+        s"[$stageName] Health check timed out after ${timeoutSeconds}s" +
+          (if last.isEmpty then "" else "; the last attempt:")
+      ) >> last.traverse_(l => IO.println(s"[$stageName]   $l")) >> IO.pure(false)
     else
       checkOnce(node, check).attempt.flatMap {
-        case Right(true) =>
+        case Right((true, _)) =>
           IO.println(s"[$stageName] Healthy after ~${elapsed}s") >> IO.pure(
             true
           )
-        case _ =>
+        case other =>
+          val described = other match
+            case Right((_, lines)) => lines
+            case Left(err)         => List(NodeError.line(err))
           IO.sleep(pollIntervalSeconds.seconds) >>
-            pollHealthy(stageName, node, check, elapsed + pollIntervalSeconds)
+            pollHealthy(
+              stageName,
+              node,
+              check,
+              elapsed + pollIntervalSeconds,
+              described
+            )
       }
 
-  private def checkOnce(node: Node, check: HealthCheck): IO[Boolean] =
+  // Whether the check passed, and what to say about it if it did not.
+  private def checkOnce(
+      node: Node,
+      check: HealthCheck
+  ): IO[(Boolean, List[String])] =
     check match
       case HealthCheck.Sentinel(_, sentinelPath, expectedSha256, _, _) =>
-        NodeClient.checkFile(node, sentinelPath, expectedSha256)
+        NodeClient
+          .checkFile(node, sentinelPath, expectedSha256)
+          .map(ok =>
+            (
+              ok,
+              List(s"$sentinelPath is missing or not the expected content")
+            )
+          )
 
       case HealthCheck.Command(_, command, _, _) =>
-        collectExitCode(node, command).map(_ == 0)
+        runCheckCommand(node, command).map(a =>
+          (a.exitCode == 0, a.describe(command))
+        )
 
       case HealthCheck.Ssh(_, _, sshUser, sshKeyPath, remoteCommand, _, _) =>
-        SshDeployer.checkAlive(node, sshUser, sshKeyPath, remoteCommand)
+        SshDeployer
+          .checkAlive(node, sshUser, sshKeyPath, remoteCommand)
+          .map(ok => (ok, List(s"SSH to ${node.host} did not succeed")))
 
       case HealthCheck.Quorum(_, _, _, _, _) =>
         IO.raiseError(
@@ -283,22 +313,28 @@ object ClusterPlaybookRunner:
       requiredCount: Int,
       pollIntervalSeconds: Int,
       timeoutSeconds: Int,
-      elapsed: Int
+      elapsed: Int,
+      last: List[(String, List[String])] = Nil
   ): IO[Boolean] =
     if elapsed >= timeoutSeconds then
       IO.println(
-        s"[$stageName] Quorum check timed out after ${timeoutSeconds}s"
-      ) >> IO.pure(false)
+        s"[$stageName] Quorum check timed out after ${timeoutSeconds}s" +
+          (if last.isEmpty then "" else "; the last attempt on each node not healthy:")
+      ) >> last.traverse_ { case (name, lines) =>
+        lines.traverse_(l => IO.println(s"[$stageName]   $name: $l"))
+      } >> IO.pure(false)
     else
       nodes
         .parTraverse { node =>
-          collectExitCode(node, command).attempt.map {
-            case Right(0) => Some(node.name)
-            case _        => None
+          runCheckCommand(node, command).attempt.map {
+            case Right(a) if a.exitCode == 0 => (node.name, Nil)
+            case Right(a) => (node.name, a.describe(command))
+            case Left(err) => (node.name, List(NodeError.line(err)))
           }
         }
-        .flatMap { results =>
-          val healthy = results.flatten
+        .flatMap { attempts =>
+          val healthy = attempts.collect { case (name, Nil) => name }
+          val failing = attempts.filter(_._2.nonEmpty)
           if healthy.length >= requiredCount then
             IO.println(
               s"[$stageName] Quorum reached after ~${elapsed}s: ${healthy.mkString(", ")} ($requiredCount required)"
@@ -315,21 +351,39 @@ object ClusterPlaybookRunner:
                 requiredCount,
                 pollIntervalSeconds,
                 timeoutSeconds,
-                elapsed + pollIntervalSeconds
+                elapsed + pollIntervalSeconds,
+                failing
               )
         }
 
-  private def collectExitCode(node: Node, command: List[String]): IO[Int] =
-    Ref.of[IO, Int](-1).flatMap { exitRef =>
-      NodeClient
-        .executeCommand(
-          node,
-          command,
-          timeoutSeconds = 30,
-          onEvent = event =>
-            if event.kind == orphera.common.Event.Kind.RESULT then
-              exitRef.set(event.exitCode)
-            else IO.unit
-        )
-        .flatMap(_ => exitRef.get)
-    }
+  /** One run of a health-check command: its exit code and its output. */
+  final case class CheckAttempt(exitCode: Int, output: Vector[String]):
+    /** For a timed-out check: the exit code and the last lines of output. */
+    def describe(command: List[String]): List[String] =
+      s"${command.mkString(" ")}: exit $exitCode" ::
+        output.takeRight(CheckAttempt.TailLines).map(l => s"| $l").toList
+
+  object CheckAttempt:
+    val TailLines = 10
+
+  private def runCheckCommand(
+      node: Node,
+      command: List[String]
+  ): IO[CheckAttempt] =
+    for
+      exitRef <- Ref.of[IO, Int](-1)
+      lines <- Ref.of[IO, Vector[String]](Vector.empty)
+      _ <- NodeClient.executeCommand(
+        node,
+        command,
+        timeoutSeconds = 30,
+        onEvent = event =>
+          if event.kind == orphera.common.Event.Kind.RESULT then
+            exitRef.set(event.exitCode)
+          else if event.kind == orphera.common.Event.Kind.OUTPUT then
+            lines.update(_ :+ event.message)
+          else IO.unit
+      )
+      exit <- exitRef.get
+      output <- lines.get
+    yield CheckAttempt(exit, output)

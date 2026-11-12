@@ -628,7 +628,7 @@ Verbs that act on nodes (`install`, `remove`, `dist-upgrade`, `run`, `copy`, `wr
 | `copy <local> <remote> [--owner] [--group] [--mode]` | Push a file, with an idempotent pre-check (content hash + owner/group/mode) so unchanged files are skipped |
 | `write-file <remote> (--content <string> \| --content-file <local>) [--owner] [--group] [--mode]` | Write a literal string straight to a file on the agent — no local source file required first, unlike `copy`. `--content-file` is for when the string is awkward to pass inline (multi-line, shell-quoting-sensitive); it still just reads that local file and sends its bytes, same mechanism as `copy` |
 | `network-apply [--timeout 60]` | Apply pushed `.network`/`.netdev`/`.link` files (or, on NetworkManager hosts, `.nmconnection` keyfiles) with automatic rollback if not confirmed within the timeout — see [Network config safety](#network-config-safety) |
-| `reboot [--delay 5] [--wait] [--wait-timeout 300]` | Reboot a host. Runs fully detached from the agent's own process (`systemd-run`), for the same reason as `deploy-agent` below — the agent's own systemd unit would otherwise be killed by the reboot before it can schedule it. `--wait` polls the agent afterward and reports when it's reachable again (or times out) — see [Known gaps](#known-gaps--not-yet-built) for exactly what "reachable" does and doesn't confirm |
+| `reboot [--delay 5] [--wait] [--wait-timeout 300]` | Reboot a host. Runs fully detached from the agent's own process (`systemd-run`), for the same reason as `deploy-agent` below — the agent's own systemd unit would otherwise be killed by the reboot before it can schedule it. `--wait` polls the agent afterward until it answers again, then checks the host's uptime: it must be shorter than the time since the reboot was asked for (`Rebooted: up 31s, 52s after the reboot was asked for`), so an agent that only restarted is a failure (`the agent answers again but the host did not reboot: ...`), as is a host that does not come back within `--wait-timeout`. An agent too old to report uptime is said to be back, with the reboot not confirmed. The same holds for a playbook's `reboot` task with `wait: true` |
 | `version [--nodes ...]` | Print the build of `orphera` itself first (version, commit, commit date, "+uncommitted changes" if the tree was dirty), then each agent's running version, baked in at build time from the `VERSION` file — see [Versioning](#versioning) |
 | `deploy-agent [--agent <local.deb\|.rpm>] [--remote-path]` | Push and install an updated agent package (`.deb` or `.rpm`, chosen per node; found automatically when `--agent` is omitted) on a host **that already has an agent running**. It refuses to start if the orchestrator has no agent token configured, since an upgraded agent would not start without one, and `deploy-agent` could not repair it. The install runs fully detached from the agent's own process (`systemd-run`), since the agent's own service restart would otherwise kill its own upgrade mid-unpack, so the RPC call that launches it can't itself confirm completion — instead, each node is polled afterward via the `version` RPC (60s default timeout) until it reports the `.deb`'s own version or the timeout elapses; the command's exit code and printed summary reflect that confirmation, not just that the install was launched — see [Versioning](#versioning) |
 | `bootstrap [--agent <local.deb\|.rpm>] --nodes ... [--ssh-user] [--ssh-key] [--forget-host-key]` | First-time agent install via SSH, for a host with **no agent yet**. The host's package manager decides whether the `.deb` or `.rpm` is used. `--ssh-user` defaults to `root`; the cloud images used here block root login, so pass `--ssh-user localadmin`. It then issues the node its own certificate (as `issue-certs`; needs `certs/ca.key`) and sets `ORPHERA_TOKEN` in the node's `/etc/orphera-agent/agent.env` to this orchestrator's token (keeping any other lines), restarting the agent. It stops before touching any node if the CA key is missing or if the orchestrator has no agent token configured, because an agent without a token does not start. On a dnf host a package of the same version and release is reinstalled rather than skipped, so a rebuild at an unchanged `VERSION` (new certificates, say) still reaches the node |
@@ -951,10 +951,15 @@ object WebBaseline extends OrpheraPlaybook:
       .build
 ```
 
-Every DSL playbook needs an entry in `PlaybookRegistry.scala`'s `all`
-map (`"web-baseline" -> WebBaseline.playbook`) to be reachable by name
-— this is currently a manual, easy-to-forget step with no build-time
-check that a defined playbook is actually registered.
+Every DSL playbook compiled into the orchestrator needs an entry in
+`PlaybookRegistry.scala`'s `all` map (`"web-baseline" ->
+WebBaseline.playbook`) to be reachable by name. `RegistryCheck` (in
+`make test`) finds every `object` in the orchestrator that extends
+`OrpheraPlaybook` and fails, naming the line to add, if one is missing
+or registered under a name other than its own. (It cannot be a compile
+error: Scala cannot list a trait's objects at compile time, and the
+`manifests/*.scala` scripts, which are not registered but run by path,
+extend the same trait.)
 
 Run a registered DSL playbook the same way as a YAML one, by name
 instead of file path:
@@ -1074,9 +1079,6 @@ value be used with ordinary `if` and `match` as well, with no `.when`.
   yield ()`), as an alternative to the current fluent `.task(...)`
   chain — designed, not implemented; the fluent builder above is what
   actually exists and works
-- Any compile-time check that a DSL playbook extending `OrpheraPlaybook`
-  is also registered in `PlaybookRegistry` — currently a silent gap if
-  forgotten, not a build error
 
 ## Cross-node coordination and staged playbooks
 
@@ -1154,7 +1156,11 @@ designated node (`on_node:`) at `poll_interval` seconds until
   remote command to exit `0`, e.g. `["systemctl", "is-active",
   "--quiet", "nginx"]`. This is a real service-state check, not a
   proxy — use it whenever the target has a meaningful way to report
-  its own readiness.
+  its own readiness. The polls are quiet, but if the check times out,
+  the last attempt's exit code and the last 10 lines of its output are
+  printed (`[stage]   ceph health: exit 1`, `[stage]   | HEALTH_WARN
+  ...`), so the log says why it never became healthy; a quorum check
+  prints the same for each node that was not healthy.
 - **Ssh** (`host:`, `ssh_user:`, optional `ssh_key_path:`/`remote_command:`,
   default `true`) — like Command, but polls over plain SSH instead of
   Orphera's own agent RPC, and against `host` directly rather than an
@@ -2120,8 +2126,10 @@ many checks passed and exits non-zero on a failure:
 - `AuditLogCheck`: how `audit-log` shortens its Nodes and Detail columns
 - `InventoryCheck`: reading `never-reboot`, which nodes it protects, that `shutdown` refuses and skips them,
   `--node-groups` and `--exclude-nodes`, `orphera nodes`, and the `deploy-agent`/`bootstrap` agent options
+- `RegistryCheck`: every `OrpheraPlaybook` object compiled into the orchestrator is in `PlaybookRegistry.all`, under
+  its own name
 - `TaskExecutorCheck`: the task executor that commands, playbooks and cluster playbooks share: templating on and off,
-  `when:` (the same names as templates, `nodes.<node>.<field>`, a key with no value), what counts as a change, handlers (notified once, in order, not after a failure, problems found before a run), YAML
+  `reboot --wait`'s uptime verdict, a timed-out health check's last attempt, `when:` (the same names as templates, `nodes.<node>.<field>`, a key with no value), what counts as a change, handlers (notified once, in order, not after a failure, problems found before a run), YAML
   includes (nested, relative paths, handlers, cycles, cluster stages) and the DSL's `notifies`/`handler`/`includeTasks`,
   a failure stopping only that node's remaining tasks, `when:` with no facts, how a failure is described (a connection
   error with no message is named, not shown as `null`), retries (`retries:`/`retry_delay:`, `.retry`, `--retries`)
@@ -3014,18 +3022,6 @@ playbooks marked DRAFT there have been written but not all run on the lab.
 - No monadic/for-comprehension style for the Scala DSL, as an
   alternative to the current fluent `.task(...).when(...)` builder —
   designed, not implemented, see [Playbooks](#playbooks)
-- No compile-time check that a DSL playbook is actually registered in
-  `PlaybookRegistry` — a defined-but-unregistered playbook fails
-  silently at the CLI (though it's still directly runnable via
-  `runMain`, since `OrpheraPlaybook` doesn't depend on the registry)
-- `reboot --wait` confirms only that the agent's gRPC service answers
-  again — `uptime` (see [CLI reference](#cli-reference)) is the way to
-  confirm the host actually rebooted, rather than just that the agent
-  process came back
-- `run_command`'s health-check polling path discards the command's
-  stdout/stderr on every poll attempt (to keep stage-progress logs
-  readable) — usable as a pass/fail gate only, not for inspecting
-  output while polling
 - Test coverage incomplete (see [Testing](#testing))
 - Native-image build not working (see [A note on native-image](#a-note-on-native-image))
 - `-Werror`/`-Wconf` are now enabled in `build.sbt`, which has already
