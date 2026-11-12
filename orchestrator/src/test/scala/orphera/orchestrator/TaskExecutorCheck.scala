@@ -137,7 +137,7 @@ object TaskExecutorCheck:
     check(
       "a when: with no facts for the node skips the task, and the run goes on",
       whenOk == List(true) &&
-        whenLines.contains("check-a|only-ubuntu|skipped (condition not met)") &&
+        whenLines.contains("check-a|only-ubuntu|skipped (condition not met: os_id has no value)") &&
         whenLines.contains("check-a|always|ran"),
       whenLines.toString
     )
@@ -168,6 +168,7 @@ object TaskExecutorCheck:
       TaskExecutor.failureLine(new RuntimeException("No such file: x"))
     )
 
+    whenChecks()
     changedChecks()
     handlerChecks()
     includeChecks()
@@ -639,4 +640,63 @@ object TaskExecutorCheck:
           ),
           example.toString
         )
+
+  private def whenChecks(): Unit =
+    import scala.jdk.CollectionConverters.*
+    val tst2: java.util.Map[String, Any] =
+      Map[String, Any]("os_id" -> "rocky", "ip_eth0" -> "10.10.5.14", "role" -> "osd").asJava
+    val vars: Map[String, Any] = Map(
+      "facts.os_id" -> "ubuntu",
+      "facts.architecture" -> "x86_64",
+      "facts.hostname" -> "tst0",
+      "role" -> "mon",
+      "port" -> 8080,
+      "disks" -> List("sdb", "sdc").asJava,
+      "nodes" -> Map[String, Any]("tst2" -> tst2).asJava
+    )
+    def v(key: String) = TaskExecutor.lookupVar(vars, key)
+    check("when: reads facts.* as templates do", v("facts.os_id").contains("ubuntu"))
+    check(
+      "the old when: names still work",
+      v("os_id").contains("ubuntu") && v("arch").contains("x86_64") && v("hostname").contains("tst0") &&
+        v("facts.arch").contains("x86_64")
+    )
+    check("when: reads this node's inventory vars by name", v("role").contains("mon") && v("port").contains("8080"))
+    check(
+      "when: reads another node's facts and vars",
+      v("nodes.tst2.os_id").contains("rocky") && v("nodes.tst2.ip_eth0").contains("10.10.5.14")
+    )
+    check("an unknown node or field has no value", v("nodes.tst9.os_id").isEmpty && v("nodes.tst2.nothing").isEmpty)
+    check("a list has no single value", v("disks").isEmpty)
+
+    def holds(c: FactCondition) = c.check(v).isRight
+    check("== holds when equal", holds(FactCondition("nodes.tst2.os_id", "rocky")))
+    check("!= holds when different", holds(FactCondition("os_id", "rocky", negate = true)))
+    check("== does not hold when different", !holds(FactCondition("role", "osd")))
+    check(
+      "a key with no value makes != false too, and says which key",
+      FactCondition("nodes.tst9.os_id", "rocky", negate = true).check(v) ==
+        Left("condition not met: nodes.tst9.os_id has no value")
+    )
+    check(
+      "YAML when: takes a nodes.* key",
+      TaskYaml.decodeCondition("nodes.tst2.os_id == \"rocky\"") == Right(FactCondition("nodes.tst2.os_id", "rocky"))
+    )
+
+    // Through a run: a set fact decides a later task's when:, with no
+    // gathered facts at all.
+    val flagged = List(
+      NamedTask("flag", Task.SetFact("needs_reboot", "yes")),
+      NamedTask("when yes", Task.Debug("ran"), Some(FactCondition("needs_reboot", "yes"))),
+      NamedTask("when not yes", Task.Debug("ran"), Some(FactCondition("needs_reboot", "yes", negate = true))),
+      NamedTask("when other node", Task.Debug("ran"), Some(FactCondition("nodes.check-a.needs_reboot", "yes")))
+    )
+    val (fOk, fLines) = run(flagged, List(a), templating = true)
+    check(
+      "a set fact decides a later when:, also as nodes.<this node>.<key>",
+      fOk == List(true) && fLines.contains("check-a|when yes|ran") &&
+        fLines.contains("check-a|when not yes|skipped (condition not met)") &&
+        fLines.contains("check-a|when other node|ran"),
+      fLines.toString
+    )
 

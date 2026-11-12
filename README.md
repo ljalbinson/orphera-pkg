@@ -781,9 +781,7 @@ command: `delay`, `wait`, `wait_timeout` in YAML.
 [Mustache](https://mustache.github.io/) before being pushed, using the
 task's own `vars:` map merged with facts gathered for that node
 (`facts.hostname`, `facts.os_id`, `facts.os_version`,
-`facts.architecture` — note this is a different, wider naming
-convention than the `when:` condition keys below; not yet normalized
-to match). The same holds in a cluster playbook (before 0.1.210 its `copy` sent a `.mustache` source unrendered),
+`facts.architecture`, the same names `when:` uses). The same holds in a cluster playbook (before 0.1.210 its `copy` sent a `.mustache` source unrendered),
 but not for the `copy` command, which sends the file as it is. Non-`.mustache` sources are pushed verbatim. The idempotent
 pre-check (content hash) runs against the *rendered* output, so
 re-applying an unchanged playbook is a no-op even if the template
@@ -791,11 +789,31 @@ source itself changed in a way that doesn't affect the rendered
 result.
 
 **`when:` conditions** are simple `key == "value"` / `key != "value"`
-checks against facts gathered from the node immediately before its
-task sequence runs (see [Fact gathering](#fact-gathering)) — not a
-general expression language. Supported keys currently:
-`os_id`, `os_version`, `arch`, `hostname`, plus any key already set
-via an earlier `set_fact` on that same node.
+checks, not a general expression language. The key is looked up in the
+same variables as a template's `{{...}}` (see [Cross-node data and
+vars](#cross-node-data-and-vars)), as the task is about to run:
+
+| Key | Value |
+|---|---|
+| a name, e.g. `role`, `needs_reboot` | this node's `set_fact` of that name, else its inventory or group var |
+| `facts.hostname`, `facts.os_id`, `facts.os_version`, `facts.architecture` | gathered from this node (see [Fact gathering](#fact-gathering)) |
+| `nodes.<node>.<field>`, e.g. `nodes.tst2.os_id`, `nodes.tst2.ip_eth0` | any node's gathered facts (`hostname`, `os_id`, `os_version`, `architecture`, `ip_<interface>`, `ip_secondary`), inventory and group vars, and set facts |
+| `os_id`, `os_version`, `arch`, `hostname` | the older names, the same as `facts.*` (unless a var of that name exists) |
+
+```yaml
+- name: join the mon quorum
+  when: nodes.tst2.os_id == "ubuntu"      # another node's fact
+  run_command: { command: [sh, -c, "..."] }
+```
+
+A key with no value (no such var, a node whose facts could not be
+gathered, a list) makes the condition false, `==` and `!=` alike, and
+the skip line says so: `skipped (condition not met: nodes.tst9.os_id
+has no value)`. (Before 0.1.210, `!=` on an unknown key was true, and
+only `os_id`, `os_version`, `arch`, `hostname` and set facts could be
+used.) In the Scala DSL, `.when("nodes.tst2.os_id" === "ubuntu")`
+works the same. `manifests/when_test.yaml` shows each kind of key on
+tst0 and tst1, with debug tasks only.
 
 **Failure behavior:** if a task fails, that node's remaining tasks are
 skipped, but other nodes' playbooks continue independently — one
@@ -893,13 +911,12 @@ attempt. In the Scala DSL, `.retry(3, delaySeconds = 10)` after `.task(...)` doe
 or a cluster playbook stage. The commands that change a node take `--retries` and `--retry-delay` ([CLI
 reference](#cli-reference)).
 
-**Facts-unavailable behavior:** if fact-gathering itself fails for a
-node (agent unreachable, etc.), any task on that node with a `when:`
-clause is conservatively skipped rather than causing the whole node's
-playbook to abort; tasks with no condition still run normally. Worth
-being aware of if a task's `when:` is silently never satisfied —
-check whether facts are actually being retrieved from that node before
-assuming the condition itself is wrong.
+**Facts-unavailable behavior:** if fact-gathering fails for a node
+(agent unreachable, etc.), its `facts.*` (and `nodes.<it>.os_id` and the
+rest) have no value, so a `when:` on them is false and the task is
+skipped, with `has no value` in the skip line, rather than the whole
+playbook aborting; a `when:` on a set fact or an inventory var is still
+decided, and tasks with no condition run normally.
 
 **`apt`/`dpkg` lock contention:** every `apt-get`/`dpkg` invocation on
 the agent passes `-o DPkg::Lock::Timeout=600`, so a task that hits the
@@ -2071,7 +2088,7 @@ many checks passed and exits non-zero on a failure:
 - `InventoryCheck`: reading `never-reboot`, which nodes it protects, that `shutdown` refuses and skips them,
   `--node-groups` and `--exclude-nodes`, `orphera nodes`, and the `deploy-agent`/`bootstrap` agent options
 - `TaskExecutorCheck`: the task executor that commands, playbooks and cluster playbooks share: templating on and off,
-  what counts as a change, handlers (notified once, in order, not after a failure, problems found before a run), YAML
+  `when:` (the same names as templates, `nodes.<node>.<field>`, a key with no value), what counts as a change, handlers (notified once, in order, not after a failure, problems found before a run), YAML
   includes (nested, relative paths, handlers, cycles, cluster stages) and the DSL's `notifies`/`handler`/`includeTasks`,
   a failure stopping only that node's remaining tasks, `when:` with no facts, how a failure is described (a connection
   error with no message is named, not shown as `null`), retries (`retries:`/`retry_delay:`, `.retry`, `--retries`)
@@ -2922,12 +2939,6 @@ playbooks marked DRAFT there have been written but not all run on the lab.
 
 ## Known gaps / not yet built
 
-- `when:` conditions can only check the *executing* node's own facts —
-  there is no way to branch on a *different* node's fact/var inside a
-  `when:` key (only inside `{{...}}` template substitution, which does
-  support `nodes.<name>.*`). The `cephadm_add_osds.yaml` per-node
-  device selection works around this by templating a shell script that
-  does its own `if`/`test` branching, rather than using `when:` at all.
 - No dynamic/cloud inventory source
 - No standalone declarative file-manifest mechanism (`apply`) or task
   ordering within one — playbooks are the actual implemented mechanism
@@ -2974,18 +2985,10 @@ playbooks marked DRAFT there have been written but not all run on the lab.
   `PlaybookRegistry` — a defined-but-unregistered playbook fails
   silently at the CLI (though it's still directly runnable via
   `runMain`, since `OrpheraPlaybook` doesn't depend on the registry)
-- No per-task retry/backoff in either runner beyond the built-in
-  `apt`/`dpkg` lock-contention timeout — other transient failures
-  still stop a node's remaining tasks rather than retrying
 - `reboot --wait` confirms only that the agent's gRPC service answers
   again — `uptime` (see [CLI reference](#cli-reference)) is the way to
   confirm the host actually rebooted, rather than just that the agent
   process came back
-- Fact keys usable in `when:` conditions are a small fixed set
-  (`os_id`, `os_version`, `arch`, `hostname`, plus anything already
-  `set_fact`-ed on that node) — not the full `Facts` schema, and use a
-  different naming convention than the `facts.*`/`nodes.*.*` keys
-  exposed to templating (not yet normalized)
 - `run_command`'s health-check polling path discards the command's
   stdout/stderr on every poll attempt (to keep stage-progress logs
   readable) — usable as a pass/fail gate only, not for inspecting

@@ -173,15 +173,10 @@ object TaskExecutor:
                 "already completed in a previous run — resuming"
               ) >> go(rest, notified)
             else
-              env.setFacts.get(node.name).flatMap { ownSetFacts =>
-                val shouldRun = namedTask.when match
-                  case None       => true
-                  case Some(cond) => facts.exists(cond.matches(_, ownSetFacts))
-
-                if !shouldRun then
-                  skip(name, "condition_not_met", "condition not met") >>
-                    go(rest, notified)
-                else
+              conditionHolds(namedTask.when, node, facts, env).flatMap {
+                case Left(why) =>
+                  skip(name, "condition_not_met", why) >> go(rest, notified)
+                case Right(()) =>
                   for
                     startMs <- IO.delay(System.currentTimeMillis())
                     _ <- log("task_start", name)
@@ -300,6 +295,60 @@ object TaskExecutor:
           onRetry(n, err, pause) >> IO.sleep(pause.seconds) >> attempt(n + 1)
       }
     attempt(1)
+
+  /** Whether a task's `when:` lets it run on `node`: Right without one, else
+    * the condition checked against the variables templates use
+    * (lookupVar). Left says why not, for the skip line.
+    */
+  private def conditionHolds(
+      when: Option[FactCondition],
+      node: Node,
+      facts: Option[Facts],
+      env: Env
+  ): IO[Either[String, Unit]] =
+    when match
+      case None       => IO.pure(Right(()))
+      case Some(cond) =>
+        templateVars(node, facts, env).map(vars =>
+          cond.check(lookupVar(vars, _))
+        )
+
+  // The names `when:` has always had, for the facts templates call facts.*.
+  private val ConditionAliases: Map[String, String] = Map(
+    "os_id" -> "facts.os_id",
+    "os_version" -> "facts.os_version",
+    "arch" -> "facts.architecture",
+    "facts.arch" -> "facts.architecture",
+    "hostname" -> "facts.hostname"
+  )
+
+  /** A variable's value as a string, as `{{key}}` would give it, from the
+    * variables of templateVars: a name of this node's (set fact, inventory or
+    * group var, `facts.*`), or `nodes.<node>.<field>`; also the old `when:`
+    * names (ConditionAliases). None when there is no such value, or it is not
+    * a single value (a list or a map).
+    */
+  def lookupVar(vars: Map[String, Any], key: String): Option[String] =
+    def scalar(v: Any): Option[String] =
+      v match
+        case null                    => None
+        case _: java.util.Map[?, ?]  => None
+        case _: java.util.List[?]    => None
+        case _: Iterable[?]          => None
+        case other                   => Some(other.toString)
+    def direct(k: String): Option[String] = vars.get(k).flatMap(scalar)
+    key.split("\\.", 3).toList match
+      case "nodes" :: nodeName :: field :: Nil =>
+        vars.get("nodes").flatMap {
+          case nodes: java.util.Map[?, ?] =>
+            Option(nodes.get(nodeName)).flatMap {
+              case fields: java.util.Map[?, ?] =>
+                Option(fields.get(field)).flatMap(scalar)
+              case _ => None
+            }
+          case _ => None
+        }
+      case _ => direct(key).orElse(ConditionAliases.get(key).flatMap(direct))
 
   /** Carries out one task on one node; raises if it failed. Returns whether
     * it changed something (see changed).

@@ -1,0 +1,40 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# when: on tst0 and tst1, with debug tasks only (nothing on the nodes changes):
+#
+#   orphera playbook when_test.yaml
+#
+# Expected, on each node:
+#   own fact (old name)       runs  (os_id == "ubuntu")
+#   own fact (facts.*)        runs
+#   other node's fact         runs  (nodes.tst1.os_id; on tst0 too)
+#   set fact                  runs
+#   != on a set fact          skipped (condition not met)
+#   node not in inventory     skipped (condition not met: nodes.tst9x.os_id has no value)
+#   only on tst1              runs on tst1, skipped on tst0
+name: when-test
+nodes: [tst0, tst1]
+tasks:
+  - name: own fact (old name)
+    when: os_id == "ubuntu"
+    debug: { message: "os_id is ubuntu" }
+  - name: own fact (facts.*)
+    when: facts.os_id == "ubuntu"
+    debug: { message: "facts.os_id is ubuntu" }
+  - name: other node's fact
+    when: nodes.tst1.os_id == "ubuntu"
+    debug: { message: "tst1 runs ubuntu (seen from {{facts.hostname}})" }
+  - name: set a fact
+    set_fact: { key: checked, value: "yes" }
+  - name: set fact
+    when: checked == "yes"
+    debug: { message: "checked is yes" }
+  - name: "!= on a set fact"
+    when: checked != "yes"
+    debug: { message: "should not run" }
+  - name: node not in inventory
+    when: nodes.tst9x.os_id != "ubuntu"
+    debug: { message: "should not run" }
+  - name: only on tst1
+    when: facts.hostname == "tst1"
+    debug: { message: "this is tst1" }
