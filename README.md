@@ -812,7 +812,8 @@ the skip line says so: `skipped (condition not met: nodes.tst9.os_id
 has no value)`. (Before 0.1.210, `!=` on an unknown key was true, and
 only `os_id`, `os_version`, `arch`, `hostname` and set facts could be
 used.) In the Scala DSL, `.when("nodes.tst2.os_id" === "ubuntu")`
-works the same.
+works the same. `manifests/when_test.yaml` shows each kind of key on
+tst0 and tst1, with debug tasks only.
 
 **Failure behavior:** if a task fails, that node's remaining tasks are
 skipped, but other nodes' playbooks continue independently — one
