@@ -15,7 +15,7 @@ import orphera.orchestrator.*
 // packages for the cluster's release (20.2.5) are used instead.
 //
 // What it does:
-//   1. On tst21 (kolla_build.scala's registry), for each image below: copies
+//   1. On tst21 (kolla_build.scala's registry), for each image below: pulls
 //      the image from quay.io, builds a thin image on top of it that upgrades
 //      the Ceph client packages it has (librados2, librbd1, python3-rados, ...)
 //      from download.ceph.com, checks the version, and pushes it to tst21's
@@ -102,10 +102,16 @@ object ceph_client_upgrade extends OrpheraScript:
         |curl -fsSL https://download.ceph.com/keys/release.asc -o "$W/ceph-release.asc"
         |cat > "$W/Containerfile" <<'CONTAINERFILE'
         |@CONTAINERFILE@CONTAINERFILE
-        |echo "copying quay.io/openstack.kolla/$NAME:$TAG"
-        |skopeo --registries-conf /dev/null copy -q "docker://quay.io/openstack.kolla/$NAME:$TAG" "containers-storage:localhost/orphera-base/$NAME:$TAG"
-        |U=$(podman image inspect -f '{{.Config.User}}' "localhost/orphera-base/$NAME:$TAG")
-        |podman build -q --build-arg "BASE=localhost/orphera-base/$NAME:$TAG" --build-arg "RUN_USER=${U:-root}" \
+        |# The Kolla image straight from quay.io: an empty registries config, so that no mirror (tst21's own
+        |# registry, which may already hold a built image) is used. podman pull, not skopeo copy into
+        |# containers-storage: podman build refuses a Docker-format image copied that way ("unsupported
+        |# MIME type for compression").
+        |BASE="quay.io/openstack.kolla/$NAME:$TAG"
+        |: > "$W/registries.conf"
+        |echo "pulling $BASE from quay.io"
+        |CONTAINERS_REGISTRIES_CONF="$W/registries.conf" podman pull -q "$BASE" >/dev/null
+        |U=$(podman image inspect -f '{{.Config.User}}' "$BASE")
+        |podman build -q --pull=never --build-arg "BASE=$BASE" --build-arg "RUN_USER=${U:-root}" \
         |  --build-arg "CEPH_REPO=$REPO" -t "localhost/orphera-ceph/$NAME:$TAG" "$W" >/dev/null
         |V=$(podman run --rm --user root --entrypoint dpkg-query "localhost/orphera-ceph/$NAME:$TAG" -W -f='${Version}' librados2)
         |case "$V" in "$WANT"*) ;; *) fail "the built $NAME image has librados2 $V, not $WANT" ;; esac
