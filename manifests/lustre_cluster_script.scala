@@ -253,9 +253,15 @@ object lustre_cluster_script extends OrpheraScript:
       |  firewall-cmd -q --permanent --add-port=988/tcp
       |  firewall-cmd -q --reload
       |fi
+      |# lnet.service (enabled below) starts LNet at boot from /etc/lnet.conf, with no
+      |# network if that file has none; `lnet configure --all` then does nothing, as
+      |# LNet is already up. So add tcp0 explicitly, and save it for the next boot.
       |if ! lctl list_nids 2>/dev/null | grep -qx '@CLUSTER_IP@@tcp'; then
       |  modprobe lnet
-      |  lnetctl lnet configure --all
+      |  lnetctl lnet configure 2>/dev/null || true
+      |  lnetctl net del --net tcp0 2>/dev/null || true
+      |  lnetctl net add --net tcp0 --if "$IF"
+      |  lnetctl export --backup > /etc/lnet.conf.new && mv /etc/lnet.conf.new /etc/lnet.conf
       |fi
       |modprobe lustre
       |systemctl enable -q lnet.service 2>/dev/null || true
