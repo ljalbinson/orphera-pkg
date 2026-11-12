@@ -837,7 +837,7 @@ What counts as a change, from what the task reports (the agents send no separate
 
 | Task | Changed when |
 |---|---|
-| `copy`, `write_file`, `distribute_file` | the file was written, i.e. it did not already have this content, owner, group and mode (`Skipped: unchanged`) |
+| `copy`, `write_file`, `distribute_file` | the file was written, i.e. it did not already have this content, owner, group and mode; an unchanged file shows `Skipped: unchanged (exit=0 success=true)` |
 | `install`, `remove`, `autoremove`, `dist_upgrade` | apt's summary line has a count above 0 (`1 upgraded, 0 newly installed, ...`); for dnf, anything but `Nothing to do.` |
 | `set_fact`, `debug`, `dump_facts` | never |
 | `run_command`, `reboot`, `network_apply` | always (nothing says otherwise) |
