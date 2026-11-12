@@ -16,9 +16,9 @@ import orphera.orchestrator.*
 //
 // What it does:
 //   1. On tst21 (kolla_build.scala's registry), for each image below: pulls
-//      the image from quay.io, builds a thin image on top of it that upgrades
-//      the Ceph client packages it has (librados2, librbd1, python3-rados, ...)
-//      from download.ceph.com, checks the version, and pushes it to tst21's
+//      the image from quay.io, runs a container of it that upgrades the Ceph
+//      client packages it has (librados2, librbd1, python3-rados, ...) from
+//      download.ceph.com and saves it as an image (podman commit), checks the version, and pushes it to tst21's
 //      registry under the same name and tag. The nodes already try tst21 first
 //      for quay.io images (orphera-kolla-cache.conf), so the service manifests
 //      need no change, and a later run of them keeps the new image.
@@ -72,57 +72,64 @@ object ceph_client_upgrade extends OrpheraScript:
       |set -e
       |""".stripMargin
 
-  // The thin image: the Kolla image with Ceph's packages for the client.
-  private val containerfile =
-    """ARG BASE
-      |FROM ${BASE}
-      |ARG RUN_USER=root
-      |ARG CEPH_REPO
-      |USER root
-      |COPY ceph-release.asc /etc/apt/keyrings/ceph-release.asc
-      |RUN echo "deb [signed-by=/etc/apt/keyrings/ceph-release.asc] ${CEPH_REPO}/ noble main" > /etc/apt/sources.list.d/ceph-upstream.list \
-      | && apt-get update \
-      | && pkgs="" \
-      | && for p in @PACKAGES@; do if dpkg -s "$p" >/dev/null 2>&1; then pkgs="$pkgs $p"; fi; done \
-      | && echo "upgrading:$pkgs" \
-      | && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends $pkgs \
-      | && apt-get clean && rm -rf /var/lib/apt/lists/*
-      |LABEL orphera.ceph-client="${CEPH_REPO}"
-      |USER ${RUN_USER}
-      |""".stripMargin.replace("@PACKAGES@", cephPackages)
+  // Run inside a container of the Kolla image, as root: Ceph's packages for the client.
+  private val installScript =
+    """set -e
+      |mkdir -p /etc/apt/keyrings
+      |cp /orphera-build/ceph-release.asc /etc/apt/keyrings/ceph-release.asc
+      |echo "deb [signed-by=/etc/apt/keyrings/ceph-release.asc] @REPO@/ noble main" > /etc/apt/sources.list.d/ceph-upstream.list
+      |apt-get update -q >/dev/null
+      |pkgs=""
+      |for p in @PACKAGES@; do if dpkg -s "$p" >/dev/null 2>&1; then pkgs="$pkgs $p"; fi; done
+      |echo "upgrading:$pkgs"
+      |DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends $pkgs >/dev/null
+      |apt-get clean
+      |rm -rf /var/lib/apt/lists/*
+      |""".stripMargin.replace("@REPO@", repo).replace("@PACKAGES@", cephPackages)
 
-  // Builds and pushes one image on tst21.
+  // Builds and pushes one image on tst21. Not with podman build: on tst21 it refuses these Docker-format
+  // Kolla images ("unsupported MIME type for compression: application/vnd.docker.image.rootfs.diff.tar.gzip").
+  // A container of the image is run instead, the packages are upgraded in it, and podman commit saves it,
+  // with the image's own user, entrypoint and command put back.
   private def buildScript(image: String): String =
     helpers +
       """NAME='@NAME@'; TAG='@TAG@'; REPO='@REPO@'; WANT='@VERSION@'
+        |BASE="quay.io/openstack.kolla/$NAME:$TAG"; OUT="localhost/orphera-ceph/$NAME:$TAG"; C="orphera-ceph-build-$NAME"
         |curl -sf http://localhost:5000/v2/ >/dev/null || fail "no image registry on localhost:5000 (kolla_build.scala sets it up)"
         |curl -fsI "$REPO/dists/noble/Release" >/dev/null || fail "$REPO has no packages for Ubuntu noble (set CEPH_CLIENT_REPO)"
         |W=/var/lib/orphera/ceph-client-images/$NAME
         |mkdir -p "$W"
         |curl -fsSL https://download.ceph.com/keys/release.asc -o "$W/ceph-release.asc"
-        |cat > "$W/Containerfile" <<'CONTAINERFILE'
-        |@CONTAINERFILE@CONTAINERFILE
+        |cat > "$W/install.sh" <<'INSTALL'
+        |@INSTALL@INSTALL
         |# The Kolla image straight from quay.io: an empty registries config, so that no mirror (tst21's own
-        |# registry, which may already hold a built image) is used. podman pull, not skopeo copy into
-        |# containers-storage: podman build refuses a Docker-format image copied that way ("unsupported
-        |# MIME type for compression").
-        |BASE="quay.io/openstack.kolla/$NAME:$TAG"
+        |# registry, which may hold a built image) is used. Earlier copies are removed first.
+        |podman rm -f "$C" >/dev/null 2>&1 || true
+        |podman rmi -f "$OUT" "$BASE" "localhost/orphera-base/$NAME:$TAG" >/dev/null 2>&1 || true
         |: > "$W/registries.conf"
         |echo "pulling $BASE from quay.io"
         |CONTAINERS_REGISTRIES_CONF="$W/registries.conf" podman pull -q "$BASE" >/dev/null
         |U=$(podman image inspect -f '{{.Config.User}}' "$BASE")
-        |podman build -q --pull=never --build-arg "BASE=$BASE" --build-arg "RUN_USER=${U:-root}" \
-        |  --build-arg "CEPH_REPO=$REPO" -t "localhost/orphera-ceph/$NAME:$TAG" "$W" >/dev/null
-        |V=$(podman run --rm --user root --entrypoint dpkg-query "localhost/orphera-ceph/$NAME:$TAG" -W -f='${Version}' librados2)
+        |EP=$(podman image inspect -f '{{json .Config.Entrypoint}}' "$BASE")
+        |CMD=$(podman image inspect -f '{{json .Config.Cmd}}' "$BASE")
+        |[ "$EP" = null ] && EP='[]'
+        |[ "$CMD" = null ] && CMD='[]'
+        |podman run --name "$C" --user root --entrypoint /bin/sh -v "$W:/orphera-build:ro,z" "$BASE" /orphera-build/install.sh
+        |podman commit -q --format docker --change "USER ${U:-root}" --change "ENTRYPOINT $EP" --change "CMD $CMD" \
+        |  --change "LABEL orphera.ceph-client=$REPO" "$C" "$OUT" >/dev/null
+        |podman rm -f "$C" >/dev/null
+        |V=$(podman run --rm --user root --entrypoint dpkg-query "$OUT" -W -f='${Version}' librados2)
         |case "$V" in "$WANT"*) ;; *) fail "the built $NAME image has librados2 $V, not $WANT" ;; esac
-        |podman push -q --tls-verify=false "localhost/orphera-ceph/$NAME:$TAG" "docker://localhost:5000/openstack.kolla/$NAME:$TAG"
-        |echo "$NAME:$TAG with librados2 $V (user ${U:-root}) pushed to tst21's registry"
+        |GOT=$(podman image inspect -f '{{.Config.User}} {{json .Config.Entrypoint}} {{json .Config.Cmd}}' "$OUT")
+        |[ "$GOT" = "$U $EP $CMD" ] || [ "$GOT" = "${U:-root} $EP $CMD" ] || fail "the built image's user, entrypoint and command are $GOT, not $U $EP $CMD"
+        |podman push -q --tls-verify=false "$OUT" "docker://localhost:5000/openstack.kolla/$NAME:$TAG"
+        |echo "$NAME:$TAG with librados2 $V (user ${U:-root}, entrypoint $EP, command $CMD) pushed to tst21's registry"
         |""".stripMargin
         .replace("@NAME@", image)
         .replace("@TAG@", tag)
         .replace("@REPO@", repo)
         .replace("@VERSION@", version)
-        .replace("@CONTAINERFILE@", containerfile)
+        .replace("@INSTALL@", installScript)
 
   // Pulls the new image on a service node, checks it, restarts the service.
   private def useScript(image: String): String =
