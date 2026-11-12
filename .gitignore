@@ -42,6 +42,8 @@ tmp/
 certs/*.key
 certs/*.srl
 certs/*.csr
+# This orchestrator's client certificate (`orphera issue-client-cert`): one per machine
+certs/client.crt
 __pycache__/
 github-files/
 
