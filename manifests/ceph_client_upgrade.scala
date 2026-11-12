@@ -97,10 +97,12 @@ object ceph_client_upgrade extends OrpheraScript:
   // Building straight on the Kolla image from quay.io fails, with podman 4.9.3 and with a current buildah
   // in fresh storage alike: "unsupported MIME type for compression:
   // application/vnd.docker.image.rootfs.diff.tar.gzip" when the build container is made (and podman
-  // commit panicked). The image's manifest and its layers' media types do not agree, and the tools fail
-  // when they rewrite it. So skopeo first copies it into tst21's registry as a plain Docker image
-  // (--format v2s2, manifest and layers in one format), and the build starts from that copy and writes
-  // Docker format too, so that nothing is converted.
+  // commit panicked). The image has an OCI manifest whose layers are labelled half OCI
+  // (application/vnd.oci.image.layer.v1.tar+gzip) and half Docker
+  // (application/vnd.docker.image.rootfs.diff.tar.gzip); the bytes are gzipped tar either way, but the
+  // tools will not rewrite a manifest that mixes the two. So skopeo copies the image into tst21's
+  // registry unchanged (--preserve-digests), the manifest there is given OCI labels throughout (the
+  // layers are not touched), and the build starts from that.
   //
   // The build is buildah in a container (quay.io/buildah/stable), with overlay storage kept on tst21 in
   // /var/lib/orphera/buildah-storage between builds, so a shared layer is downloaded and stored once
@@ -132,17 +134,35 @@ object ceph_client_upgrade extends OrpheraScript:
         |'; }
         |ORIG=$(config) || fail "cannot read $SRC from quay.io"
         |U=$(printf '%s\n' "$ORIG" | sed -n 1p)
-        |echo "copying $SRC to $BASE as a plain Docker image"
-        |skopeo --registries-conf /dev/null copy -q --format v2s2 --dest-tls-verify=false "docker://$SRC" "docker://$BASE"
+        |echo "copying $SRC to tst21's registry unchanged"
+        |skopeo --registries-conf /dev/null copy -q --preserve-digests --dest-tls-verify=false "docker://$SRC" "docker://$BASE-quay"
+        |python3 - "orphera-base/$NAME" "$TAG-quay" "$TAG" <<'MANIFEST'
+        |import json, sys, urllib.request
+        |repo, src, dst = sys.argv[1:4]
+        |reg = "http://localhost:5000/v2/" + repo + "/manifests/"
+        |oci = "application/vnd.oci.image.manifest.v1+json"
+        |req = urllib.request.Request(reg + src, headers={"Accept": oci + ", application/vnd.docker.distribution.manifest.v2+json"})
+        |m = json.load(urllib.request.urlopen(req))
+        |n = 0
+        |if m.get("mediaType") == oci:
+        |    for layer in m.get("layers", []):
+        |        if layer.get("mediaType") == "application/vnd.docker.image.rootfs.diff.tar.gzip":
+        |            layer["mediaType"] = "application/vnd.oci.image.layer.v1.tar+gzip"
+        |            n += 1
+        |put = urllib.request.Request(reg + dst, data=json.dumps(m).encode(), method="PUT",
+        |                             headers={"Content-Type": m.get("mediaType", oci)})
+        |urllib.request.urlopen(put)
+        |print("manifest of %s:%s: %d of %d layer labels made OCI" % (repo, dst, n, len(m.get("layers", []))))
+        |MANIFEST
         |echo "building $NAME on $BASE with $BUILDAH"
         |podman pull -q "$BUILDAH" >/dev/null
         |STORE=/var/lib/orphera/buildah-storage
         |mkdir -p "$STORE"
         |podman run --rm --privileged --network host -v "$W:/build:ro,z" -v "$STORE:/var/lib/containers:z" \
         |  -e BUILDAH_ISOLATION=chroot "$BUILDAH" sh -ec "
-        |  buildah --storage-driver overlay bud -q --format docker --pull-always --tls-verify=false --build-arg BASE='$BASE' --build-arg RUN_USER='${U:-root}' \
+        |  buildah --storage-driver overlay bud -q --pull-always --tls-verify=false --build-arg BASE='$BASE' --build-arg RUN_USER='${U:-root}' \
         |    --build-arg CEPH_REPO='$REPO' -t 'localhost/orphera-ceph/$NAME:$TAG' /build >/dev/null
-        |  buildah --storage-driver overlay push -q --format v2s2 --tls-verify=false 'localhost/orphera-ceph/$NAME:$TAG' 'docker://$DEST'
+        |  buildah --storage-driver overlay push -q --tls-verify=false 'localhost/orphera-ceph/$NAME:$TAG' 'docker://$DEST'
         |"
         |GOT=$(skopeo inspect --tls-verify=false --config "docker://$DEST" | python3 -c '
         |import json, sys
