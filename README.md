@@ -1135,7 +1135,10 @@ that does nothing (the `else` of an `if`); `.void` drops a result;
 parallel.
 
 `manifests/script_demo.scala` tries it on tst0 and tst1 (only `/tmp` and
-the `tree` package). The fluent DSL stays for playbooks whose steps do not
+the `tree` package). `manifests/lustre_cluster_script.scala` is
+`lustre_cluster.scala` as a script: the reboot decision is a query and an
+`if`, and each node's `cluster_ip` and `lustre_targets` are read from
+`inventory.yaml` in Scala and checked before anything runs. The fluent DSL stays for playbooks whose steps do not
 depend on what is found: a script's later steps are known only by running
 it, and there is no check mode for scripts yet.
 
