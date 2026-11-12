@@ -1071,14 +1071,73 @@ withTls
   .when("needs_reboot" === "yes")
 ```
 
-The monadic DSL style (not yet implemented, below) would let a run-time
-value be used with ordinary `if` and `match` as well, with no `.when`.
+A script (next) lets a run-time value be used with ordinary `if` and
+`match` too, with no `.when`.
 
-**Not yet implemented:**
-- A monadic/for-comprehension style for the Scala DSL (`for _ <- run(...)
-  yield ()`), as an alternative to the current fluent `.task(...)`
-  chain — designed, not implemented; the fluent builder above is what
-  actually exists and works
+### Scripts: `OrpheraScript`
+
+A Scala playbook can also be a script in plain Cats Effect `IO`, where
+each step on a node returns its result, so a value found during the run
+is used directly (the design, and why: `docs/SCRIPT-DSL-DESIGN.md`):
+
+```scala
+import cats.effect.IO
+import orphera.orchestrator.*
+
+object lustre_boot extends OrpheraScript:
+  def script(using orphera: Orphera): IO[Unit] =
+    val nodes = orphera.nodes("tst40", "tst41", "tst42")
+    for
+      _ <- nodes.each(_.sh("default to the Lustre kernel", bootKernelScript, timeout = 300))
+      _ <- nodes.each { node =>
+        node.query("is a reboot needed", needsRebootScript).flatMap { answer =>
+          if answer.stdout.trim == "yes" then node.reboot("reboot into the Lustre kernel", waitTimeout = 600).void
+          else IO.unit
+        }
+      }
+    yield ()
+```
+
+It runs like any Scala playbook, `orphera playbook manifests/lustre_boot.scala`
+(`--resume` and `--config` as for the others), and each step goes through the
+same task executor as a playbook task: the same output (`[tst0] step: ...`),
+run log (`log-summary lustre_boot`), retries and change detection.
+
+| | |
+|---|---|
+| `orphera.node("tst0")`, `nodes(...)`, `group("lustre")` | nodes of the inventory; an unknown name fails the script |
+| `node.sh(name, script)`, `node.run(name, command)` | run a shell script (`sh -c`) or a command list; a non-zero exit fails the step |
+| `node.query(name, script or command)` | a command that only reads: never checkpointed, so it runs again on `--resume`; a non-zero exit is its `exitCode`, not a failure |
+| `node.install`, `remove`, `copy`, `writeFile`, `reboot`, `networkApply` | as the tasks of the same names; modes as octal strings (`"0644"`); a `.mustache` `copy` is rendered with its `vars` and the node's facts |
+| `node.facts` | the node's gathered facts, gathered once per run |
+| `nodes.each(f)` | `f` on every node in parallel, returning their results in order; a barrier, as a stage is. If any node failed, it fails after all have finished, naming them, and the script stops |
+| `orphera.secret(value)` | masks the value in output and logs; `reveal` gives it where needed |
+| `orphera.waitUntil(name, timeout, every)(check)` | polls an `IO[Boolean]` until true, or fails saying what the last attempt was |
+
+Each step returns a `StepResult`: `changed`, `exitCode`, `output` (lines)
+and `stdout` (joined). A failed step raises, so the rest of that node's
+`for` does not run. A handler is plain code:
+`IO.whenA(result.changed)(node.sh("restart nginx", ...).void)`.
+
+Two rules come with `--resume`. A change step already done is skipped and
+returns `skipped = true` with no output, so **read values with `query`**,
+which always runs. And a change step's name must be unique on a node within
+a run, since it is how the checkpoint knows what was done: in a loop, put
+the item in the name (`s"zap $disk"`); a repeated name fails at once.
+`{{...}}` in a step's strings is sent as typed: use Scala interpolation.
+
+A short primer for the Cats Effect involved: a step is an `IO`, a
+description of work that runs only when the script runs. `for ... yield ()`
+runs steps one after another, each `x <- step` giving the step's result to
+what follows; `flatMap` does the same for one step; `IO.unit` is a step
+that does nothing (the `else` of an `if`); `.void` drops a result;
+`traverse_` runs a step for each item of a list, in turn; `parTraverse`, in
+parallel.
+
+`manifests/script_demo.scala` tries it on tst0 and tst1 (only `/tmp` and
+the `tree` package). The fluent DSL stays for playbooks whose steps do not
+depend on what is found: a script's later steps are known only by running
+it, and there is no check mode for scripts yet.
 
 ## Cross-node coordination and staged playbooks
 
@@ -2126,6 +2185,9 @@ many checks passed and exits non-zero on a failure:
 - `AuditLogCheck`: how `audit-log` shortens its Nodes and Detail columns
 - `InventoryCheck`: reading `never-reboot`, which nodes it protects, that `shutdown` refuses and skips them,
   `--node-groups` and `--exclude-nodes`, `orphera nodes`, and the `deploy-agent`/`bootstrap` agent options
+- `ScriptCheck`: scripts (`OrpheraScript`) against a stand-in agent: a value from one step used by the next and on
+  another node, a query's non-zero exit as a value, `each` naming the node that failed and stopping the script, step
+  names unique on a node, `--resume` skipping done changes but running queries, `secret`, `waitUntil`
 - `RegistryCheck`: every `OrpheraPlaybook` object compiled into the orchestrator is in `PlaybookRegistry.all`, under
   its own name
 - `TaskExecutorCheck`: the task executor that commands, playbooks and cluster playbooks share: templating on and off,
@@ -3019,9 +3081,6 @@ playbooks marked DRAFT there have been written but not all run on the lab.
   genuinely static value, declaring it directly in `inventory.yaml`
   (node or group vars) is usually the better fit — see
   [Inventory](#inventory) and [Cross-node data and vars](#cross-node-data-and-vars)
-- No monadic/for-comprehension style for the Scala DSL, as an
-  alternative to the current fluent `.task(...).when(...)` builder —
-  designed, not implemented, see [Playbooks](#playbooks)
 - Test coverage incomplete (see [Testing](#testing))
 - Native-image build not working (see [A note on native-image](#a-note-on-native-image))
 - `-Werror`/`-Wconf` are now enabled in `build.sbt`, which has already

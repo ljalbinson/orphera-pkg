@@ -98,7 +98,12 @@ object TaskExecutor:
       // Carries out one task and says whether it changed something;
       // runTask, except in checks that need a task to change something
       // without an agent.
-      perform: (NamedTask, Node, Env) => IO[Boolean] = runTask
+      perform: (NamedTask, Node, Env) => IO[Boolean] = runTask,
+      // Whether a copy renders a `.mustache` source (with the task's vars and
+      // the template vars). Separate from `templating`, which is for `{{...}}`
+      // in a task's own strings: a script (OrpheraScript) renders files but
+      // not strings, a direct command neither.
+      templateFiles: Boolean = true
   )
 
   /** A direct command's Env: no facts, no templating, console output. */
@@ -108,7 +113,8 @@ object TaskExecutor:
         ClusterContext(Map.empty),
         setFacts,
         Output.console(quiet),
-        templating = false
+        templating = false,
+        templateFiles = false
       )
     )
 
@@ -249,6 +255,100 @@ object TaskExecutor:
             )
             .as(false)
     yield ok
+
+  /** What a step of a script (OrpheraScript) returns: whether it changed
+    * something, the exit code of its command (0 when it reported none), its
+    * output lines, and whether it was skipped because a resumed run had
+    * already done it (then it has no output).
+    */
+  final case class StepResult(
+      changed: Boolean,
+      exitCode: Int,
+      output: Vector[String],
+      skipped: Boolean = false
+  ):
+    /** The output lines joined, as a command would have printed them. */
+    def stdout: String = output.mkString("\n")
+
+  /** A script step that failed on a node; it has already been reported. */
+  final class StepFailed(val node: String, val step: String, cause: Throwable)
+      extends RuntimeException(s"'$step' failed on $node: ${describe(cause)}", cause)
+
+  /** One task on one node, for a script: as a playbook runs a task (output,
+    * retries, run log, the checkpoint when `checkpointed`), but returning a
+    * StepResult made from the events the task reported, and raising StepFailed
+    * when it fails. With `checkpointed`, a task the resumed run had already
+    * done is skipped. Without `failOnExit` (a query), a command that ran but
+    * exited non-zero is a result with that exit code, not a failure.
+    */
+  def runStep(
+      namedTask: NamedTask,
+      node: Node,
+      env: Env,
+      checkpoint: Checkpoint.Handle,
+      runLog: RunLog.Handle,
+      checkpointed: Boolean,
+      failOnExit: Boolean = true
+  ): IO[StepResult] =
+    val name = namedTask.name
+    def log(kind: String, more: Seq[(String, Any)]): IO[Unit] =
+      runLog.event(
+        (List[(String, Any)]("event" -> kind, "node" -> node.name, "task" -> name) ++ more)*
+      )
+    val alreadyDone =
+      if checkpointed then checkpoint.isDone(node.name, name) else IO.pure(false)
+    alreadyDone.flatMap {
+      case true =>
+        env.output.line(
+          node,
+          name,
+          "skipped (already completed in a previous run — resuming)"
+        ) >> log("task_skipped", List("reason" -> "resume_checkpoint"))
+          .as(StepResult(changed = false, 0, Vector.empty, skipped = true))
+      case false =>
+        for
+          seen <- Ref.of[IO, Vector[Event]](Vector.empty)
+          // The events of the last attempt (a retry starts the record again).
+          recording = env.copy(
+            output = env.output.copy(event = (n, t, e) =>
+              seen.update(_ :+ e) >> env.output.event(n, t, e)
+            ),
+            perform = (nt, n, e) => seen.set(Vector.empty) >> env.perform(nt, n, e)
+          )
+          start <- IO.monotonic
+          _ <- log("task_start", Nil)
+          result <- runWithRetry(
+            namedTask,
+            node,
+            recording,
+            (kind, _, more) => log(kind, more)
+          ).attempt
+          end <- IO.monotonic
+          took = "duration_ms" -> (end - start).toMillis
+          events <- seen.get
+          exitCode = events
+            .filter(_.kind == Event.Kind.RESULT)
+            .lastOption
+            .fold(0)(_.exitCode)
+          output = events.filter(_.kind == Event.Kind.OUTPUT).map(_.message)
+          step <- result match
+            case Left(_: RemoteFailure) if !failOnExit =>
+              log(
+                "task_end",
+                List("success" -> true, "exit_code" -> exitCode, took)
+              ).as(StepResult(changed = false, exitCode, output))
+            case Right(changed) =>
+              log("task_end", List("success" -> true, "changed" -> changed, took)) >>
+                (if checkpointed then checkpoint.markDone(node.name, name)
+                 else IO.unit).as(StepResult(changed, exitCode, output))
+            case Left(err) =>
+              log(
+                "task_end",
+                List("success" -> false, took, "error" -> err.getMessage)
+              ) >> env.output.failed(node, name, err) >>
+                IO.raiseError(new StepFailed(node.name, name, err))
+        yield step
+    }
 
   /** Runs the task and, when it fails and has a `retry`, runs it again (see
     * retrying). Each failed attempt but the last gets a line (`attempt 1
@@ -630,7 +730,7 @@ object TaskExecutor:
       facts: Option[Facts],
       env: Env
   ): IO[java.nio.file.Path] =
-    if !env.templating || !src.endsWith(".mustache") then
+    if !env.templateFiles || !src.endsWith(".mustache") then
       IO.pure(Installation.source(src))
     else
       templateVars(node, facts, env).flatMap { templateVars =>
