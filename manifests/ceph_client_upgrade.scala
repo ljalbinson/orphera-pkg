@@ -92,8 +92,10 @@ object ceph_client_upgrade extends OrpheraScript:
       |USER ${RUN_USER}
       |""".stripMargin.replace("@PACKAGES@", cephPackages)
 
-  // Builds and pushes one image on tst21, with buildah in a container (quay.io/buildah/stable), in that
-  // container's own storage. Not with tst21's podman 4.9.3 (Ubuntu noble): its storage keeps the Kolla
+  // Builds and pushes one image on tst21, with buildah in a container (quay.io/buildah/stable), in its
+  // own storage: overlay, kept on tst21 in /var/lib/orphera/buildah-storage between builds, so a base
+  // layer is downloaded and stored once for all the images (vfs, the first choice, copied the whole
+  // image for every layer: some 25 GB written for one Kolla image). Not with tst21's podman 4.9.3 (Ubuntu noble): its storage keeps the Kolla
   // images' layers, which other images on tst21 share, under their Docker media type, and podman build
   // then fails ("unsupported MIME type for compression: application/vnd.docker.image.rootfs.diff.tar.gzip")
   // and podman commit panics, whether the image was pulled or copied in as OCI. podman run is fine.
@@ -125,10 +127,13 @@ object ceph_client_upgrade extends OrpheraScript:
         |U=$(printf '%s\n' "$ORIG" | sed -n 1p)
         |echo "building $NAME on $SRC with $BUILDAH"
         |podman pull -q "$BUILDAH" >/dev/null
-        |podman run --rm --privileged --network host -v "$W:/build:ro,z" -e BUILDAH_ISOLATION=chroot "$BUILDAH" sh -ec "
-        |  buildah --storage-driver vfs bud -q --build-arg BASE='$SRC' --build-arg RUN_USER='${U:-root}' \
+        |STORE=/var/lib/orphera/buildah-storage
+        |mkdir -p "$STORE"
+        |podman run --rm --privileged --network host -v "$W:/build:ro,z" -v "$STORE:/var/lib/containers:z" \
+        |  -e BUILDAH_ISOLATION=chroot "$BUILDAH" sh -ec "
+        |  buildah --storage-driver overlay bud -q --build-arg BASE='$SRC' --build-arg RUN_USER='${U:-root}' \
         |    --build-arg CEPH_REPO='$REPO' -t 'localhost/orphera-ceph/$NAME:$TAG' /build >/dev/null
-        |  buildah --storage-driver vfs push -q --tls-verify=false 'localhost/orphera-ceph/$NAME:$TAG' 'docker://$DEST'
+        |  buildah --storage-driver overlay push -q --tls-verify=false 'localhost/orphera-ceph/$NAME:$TAG' 'docker://$DEST'
         |"
         |GOT=$(skopeo inspect --tls-verify=false --config "docker://$DEST" | python3 -c '
         |import json, sys
