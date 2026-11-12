@@ -1145,6 +1145,63 @@ the `tree` package). `manifests/lustre_cluster_script.scala` is
 depend on what is found: a script's later steps are known only by running
 it, and there is no check mode for scripts yet.
 
+### Declarative apply: `OrpheraApply`
+
+A third way to change nodes, beside playbooks (steps in order) and scripts (steps chosen by results): a
+**description** of how a node should be, as resources. Orphera reads each resource on the node, compares it
+with what is wanted, and changes only what differs, so a second run changes nothing and says so. `--check`
+reads and compares only, and shows what would change, with a diff for files. Design:
+[docs/APPLY-DESIGN.md](docs/APPLY-DESIGN.md).
+
+```scala
+object chrony extends OrpheraApply:
+  import Resources.*
+  override def nodes = List("tst8")
+  def describe(node: Node) =
+    val restart = command("restart chronyd", "systemctl restart chronyd", onChangeOnly = true)
+    List(file("/etc/chrony.conf", chronyConf, mode = "0644").notifies(restart), restart)
+```
+
+    orphera apply manifests/chrony.scala --check          # what would change, nothing changed
+    orphera apply manifests/chrony.scala --nodes tst8     # apply (default: the description's nodes)
+
+```
+[tst8] apply chrony: file[/etc/chrony.conf]       would change: content
+[tst8] apply chrony:   --- /etc/chrony.conf (now)
+[tst8] apply chrony:   +++ /etc/chrony.conf (wanted)
+[tst8] apply chrony:   -pool 2.rocky.pool.ntp.org iburst
+[tst8] apply chrony:   +server ntp.ljalbinson.com iburst
+[tst8] apply chrony: command[restart chronyd]   would run (notified by file[/etc/chrony.conf])
+[tst8] apply chrony: 2 to change, 0 unchanged (check: nothing changed)
+```
+
+Resources (`import Resources.*`), each named by kind and path or label (`file[/etc/chrony.conf]`):
+
+| Function | Wanted state |
+|---|---|
+| `file(path, content, mode, owner, group)` | the content, and the mode, owner and group if given |
+| `secretFile(path, secret, ...)` | the same, never shown in a plan or diff |
+| `fileFrom(path, source, vars, ...)` | the content of a local file; a `.mustache` one rendered with `vars` and the node's facts and vars |
+| `directory(path, mode, owner, group)` | a directory |
+| `symlink(path, target)` | a symbolic link |
+| `absentFile`, `absentDirectory` (only if empty), `absentSymlink` | removed |
+| `command(label, run, onlyIf / unless / creates, onChangeOnly)` | a shell command, run when its guard says it is needed or, with `onChangeOnly`, when a resource that notifies it changed; one with neither is refused, since it would run every time |
+
+- **Order:** as listed, except that `r.after(other)` puts `r` after `other` wherever it stands, and a command
+  runs after everything that notifies it (`r.notifies(command)`), once.
+- **Checked before anything runs:** a name used twice, a relative path, a bad mode, an unknown reference, a
+  notification of anything but an `onChangeOnly` command, a cycle.
+- **Failures:** what comes after or is notified by a failed resource is skipped, the rest still runs, and
+  the node fails at the end (`--stop-on-failure` stops at the first). There is no checkpoint: running it
+  again does only what is still different.
+- **Elsewhere:** `node.apply(plan)` in a script returns an `ApplyReport` (`report.changed("file[/etc/x]")`),
+  and `Task.Apply(plan)` is a task in a playbook. Reading a node is one shell command per node.
+- **Not yet:** packages, services, users and groups (step 2 of the design), and YAML descriptions (step 4).
+
+`manifests/apt_cache_clients_apply.scala` and `rpm_cache_clients_apply.scala` are the two cache-client
+playbooks as descriptions; on nodes those playbooks have set up, `--check` should report every resource
+unchanged.
+
 ## Cross-node coordination and staged playbooks
 
 A flat `playbook` treats every target node as fully independent — no
@@ -3112,9 +3169,10 @@ playbooks marked DRAFT there have been written but not all run on the lab.
 ## Known gaps / not yet built
 
 - No dynamic/cloud inventory source
-- No standalone declarative file-manifest mechanism (`apply`) or task
-  ordering within one — playbooks are the actual implemented mechanism
-  for ordered, multi-step execution, see [Playbooks](#playbooks)
+- Declarative apply (`orphera apply`, see [Declarative
+  apply](#declarative-apply-orpheraapply)) covers files, directories,
+  symlinks and guarded commands; packages, services, users, groups and
+  YAML descriptions are still to come
 - Mutual TLS is per node and opt-in (`issue-certs --client-auth`); nodes
   without it accept any TLS client that has the token
 - No limits on what an authenticated caller may do: `run` is a root

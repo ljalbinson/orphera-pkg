@@ -1,0 +1,367 @@
+// SPDX-License-Identifier: Apache-2.0
+
+package orphera.orchestrator
+
+import java.nio.charset.StandardCharsets
+import java.nio.file.attribute.PosixFilePermissions
+import java.nio.file.{Files, Path, Paths}
+
+import scala.jdk.CollectionConverters.*
+
+import cats.effect.*
+import cats.effect.unsafe.implicits.global
+import cats.syntax.all.*
+
+import orphera.common.Event
+
+/** Checks for declarative apply (Apply, docs/APPLY-DESIGN.md).
+  *
+  * Part 1 uses a fake node held in memory: plan checks and order, a first run
+  * that creates, a second that changes nothing, check mode, diffs, secrets,
+  * guards, notifications, failures and what they skip.
+  *
+  * Part 2 runs the real node side (TaskExecutor.applyOn and its shell
+  * scripts) against a temporary directory on this machine: a stand-in task
+  * runner runs each `sh -c` step here and writes files here, so the observe
+  * script, its parsing and the change commands are the ones a node gets.
+  *
+  * Run with `sbt "orchestrator/Test/runMain orphera.orchestrator.ApplyCheck"`.
+  */
+object ApplyCheck:
+  import Resources.*
+
+  private var failures = 0
+  private var passes = 0
+
+  private def check(name: String, ok: Boolean, detail: => String = ""): Unit =
+    if ok then passes += 1
+    else
+      failures += 1
+      println(s"FAIL: $name ${detail}")
+
+  // ---- a node in memory ---------------------------------------------------
+
+  private enum Entry:
+    case F(content: String, mode: Int, owner: String, group: String)
+    case D(mode: Int, owner: String, group: String)
+    case L(target: String)
+
+  private final class FakeNode(
+      var fs: Map[String, Entry],
+      guards: Map[String, Boolean] = Map.empty,
+      failing: Set[String] = Set.empty
+  ) extends ApplyTarget:
+    var ran: Vector[String] = Vector.empty
+    var observed: Int = 0
+    def node = "fake"
+
+    private def sha(t: String) =
+      java.security.MessageDigest.getInstance("SHA-256").digest(t.getBytes(StandardCharsets.UTF_8)).map(b => f"${b & 0xff}%02x").mkString
+
+    def observe(rs: List[(Int, ApplyResource)]): IO[Map[Int, Observed]] = IO {
+      observed += 1
+      rs.map { (i, r) =>
+        val seen = r match
+          case c: ApplyResource.Command =>
+            val g = if c.onlyIf.nonEmpty then guards.getOrElse(c.onlyIf, true)
+            else if c.unless.nonEmpty then !guards.getOrElse(c.unless, false)
+            else !fs.contains(c.creates)
+            Observed.Guard(g, if g then "" else "guard says no")
+          case other =>
+            val p = other match
+              case f: ApplyResource.File      => f.path
+              case d: ApplyResource.Directory => d.path
+              case s: ApplyResource.Symlink   => s.path
+              case _                     => ""
+            fs.get(p) match
+              case None                         => Observed.Absent
+              case Some(Entry.F(t, m, o, g))    => Observed.RegularFile(m, o, g, sha(t))
+              case Some(Entry.D(m, o, g))       => Observed.Dir(m, o, g)
+              case Some(Entry.L(t))             => Observed.Link(t)
+        i -> seen
+      }.toMap
+    }
+
+    def readText(path: String): IO[Option[String]] = IO(fs.get(path).collect { case Entry.F(t, _, _, _) => t })
+
+    def source(path: String, vars: Map[String, String]): IO[String] =
+      IO(Templating.render(s"source $path for {{name}}", vars))
+
+    def write(path: String, content: String, owner: String, group: String, mode: Int): IO[Unit] = IO {
+      ran :+= s"write $path"
+      val old = fs.get(path).collect { case e: Entry.F => e }
+      fs += path -> Entry.F(
+        content,
+        if mode > 0 then mode else old.fold(0x1a4 /* 0644 */ )(_.mode),
+        if owner.nonEmpty then owner else old.fold("root")(_.owner),
+        if group.nonEmpty then group else old.fold("root")(_.group)
+      )
+    }
+
+    private val Q = "'((?:[^']|'\\\\'')*)'"
+    private def unq(s: String) = s.replace("'\\''", "'")
+    private val Rm = s"rm -f -- $Q".r
+    private val Mkdir = s"mkdir -p -- $Q.*".r
+    private val Rmdir = s"rmdir -- $Q".r
+    private val Ln = s"ln -sfn -- $Q $Q".r
+    private val Chmod = s"chmod ([0-7]+) $Q".r
+
+    def shell(label: String, script: String, timeout: Int): IO[Unit] =
+      IO {
+        ran :+= s"$label: $script"
+        if failing.contains(label) then throw new RuntimeException(s"$label failed on purpose")
+        script.split(" && ").toList.foreach {
+          case Rm(p)       => fs -= unq(p)
+          case Mkdir(p)    => fs += unq(p) -> Entry.D(0x1ed /* 0755 */, "root", "root")
+          case Rmdir(p)    => fs -= unq(p)
+          case Ln(t, p)    => fs += unq(p) -> Entry.L(unq(t))
+          case Chmod(m, p) =>
+            val mode = Integer.parseInt(m, 8)
+            fs = fs.updatedWith(unq(p)) {
+              case Some(e: Entry.F) => Some(e.copy(mode = mode))
+              case Some(e: Entry.D) => Some(e.copy(mode = mode))
+              case other            => other
+            }
+          case _ => () // a command: recorded in `ran`
+        }
+      }
+
+  // A run's report and the lines it printed.
+  private final case class Ran(report: ApplyReport, lines: Vector[String])
+
+  private def applyTo(t: ApplyTarget, rs: List[ApplyResource], check: Boolean = false, stop: Boolean = false): Ran =
+    (for
+      lines <- Ref.of[IO, Vector[String]](Vector.empty)
+      p <- Apply.plan("t", rs)
+      r <- Apply.run(p, t, check, s => lines.update(_ :+ s), stop)
+      ls <- lines.get
+    yield Ran(r, ls)).unsafeRunSync()
+
+  private def outcome(r: ApplyReport, id: String): Option[ApplyOutcome] = r.results.find(_.id == id).map(_.outcome)
+
+  private def problems(rs: List[ApplyResource]): List[String] = ApplyPlan("t", rs).left.getOrElse(Nil)
+
+  private def planChecks(): Unit =
+    val restart = command("restart", "systemctl restart x", onChangeOnly = true)
+    check("a good description has no problems", problems(List(file("/etc/x", "x").notifies(restart), restart)).isEmpty, problems(List(file("/etc/x", "x").notifies(restart), restart)).toString)
+    check("a name used twice", problems(List(file("/etc/x", "a"), file("/etc/x", "b"))).exists(_.contains("file[/etc/x] is described 2 times")))
+    check("a relative path", problems(List(file("etc/x", "a"))).exists(_.contains("must be absolute")))
+    check("a bad mode", problems(List(file("/etc/x", "a", mode = "0999"))).exists(_.contains("not an octal mode")))
+    check("an unguarded command", problems(List(command("go", "true"))).exists(_.contains("would run every time")))
+    check("two guards", problems(List(command("go", "true", onlyIf = "a", unless = "b"))).exists(_.contains("one of onlyIf")))
+    check("after something not described", problems(List(file("/etc/x", "a").afterIds("file[/nope]"))).exists(_.contains("which is not described")))
+    check("notifying a file", problems(List(file("/a", "a").notifiesIds("file[/b]"), file("/b", "b"))).exists(_.contains("not an onChangeOnly command")))
+    check("onChangeOnly with nothing notifying it", problems(List(restart)).exists(_.contains("nothing notifies it")))
+    val a = file("/a", "a")
+    val b = file("/b", "b").after(a)
+    check("a cycle", problems(List(a.afterIds("file[/b]"), b)).exists(_.contains("wait for each other")))
+    // Order: declaration order, except what `after` and notification require.
+    val plan = ApplyPlan("t", List(restart, file("/z", "z").after(file("/y", "y")), file("/y", "y"), file("/x", "x").notifies(restart)))
+    check(
+      "order: declaration order unless after/notify say otherwise",
+      plan.toOption.map(p => p.order.map(p.resources(_).id).toList).contains(List("file[/y]", "file[/z]", "file[/x]", "command[restart]")),
+      plan.toString
+    )
+
+  private def runChecks(): Unit =
+    val clean = command("clean", "dnf clean metadata -q", onChangeOnly = true)
+    def desc = List(
+      directory("/etc/app", mode = "0750"),
+      file("/etc/app/app.conf", "a = 1\nb = 2\n", mode = "0640").after(directory("/etc/app")).notifies(clean),
+      symlink("/etc/app/current", "/etc/app/app.conf"),
+      clean
+    )
+    val n = new FakeNode(Map.empty)
+    val ranFirst = applyTo(n, desc)
+    val first = ranFirst.report
+    val lines1 = ranFirst.lines
+    check("first run: everything changed", first.results.forall(_.changed) && !first.failed, first.toString)
+    check("first run: one read of the node", n.observed == 1, n.observed.toString)
+    check("first run: the directory got its mode", n.fs.get("/etc/app").contains(Entry.D(0x1e8, "root", "root")), n.fs.toString)
+    check("first run: the notified command ran last", n.ran.lastOption.exists(_.contains("dnf clean")), n.ran.toString)
+    check("first run: the plan line names who notified", lines1.exists(l => l.contains("command[clean]") && l.contains("ran (notified by file[/etc/app/app.conf])")), lines1.mkString("\n"))
+    check("first run: summary", lines1.lastOption.contains("4 changed, 0 unchanged"), lines1.lastOption.toString)
+
+    n.ran = Vector.empty
+    val ranSecond = applyTo(n, desc)
+    val second = ranSecond.report
+    val lines2 = ranSecond.lines
+    check("second run: nothing changed", !second.changed && n.ran.isEmpty, second.toString + n.ran)
+    check("second run: the command was not notified", outcome(second, "command[clean]").contains(ApplyOutcome.NotNotified))
+    check("second run: summary", lines2.lastOption.contains("0 changed, 4 unchanged"), lines2.lastOption.toString)
+
+    // A changed content: check mode shows it and changes nothing.
+    val changed = desc.updated(1, file("/etc/app/app.conf", "a = 1\nb = 3\n", mode = "0640").after(directory("/etc/app")).notifies(clean))
+    val before = n.fs
+    val ranPlan = applyTo(n, changed, check = true)
+    val plan = ranPlan.report
+    val lines3 = ranPlan.lines
+    check("check: nothing changed on the node", n.fs == before && n.ran.isEmpty, n.ran.toString)
+    check("check: the file would change", outcome(plan, "file[/etc/app/app.conf]").exists(_.isInstanceOf[ApplyOutcome.WouldChange]))
+    check("check: the command would run", lines3.exists(_.contains("would run (notified by file[/etc/app/app.conf])")), lines3.mkString("\n"))
+    check("check: a diff of the content", lines3.contains("  -b = 2") && lines3.contains("  +b = 3"), lines3.mkString("\n"))
+    check("check: summary", lines3.lastOption.contains("2 to change, 2 unchanged (check: nothing changed)"), lines3.lastOption.toString)
+
+    // Only the mode differs: chmod, not a rewrite.
+    n.fs = n.fs.updated("/etc/app/app.conf", Entry.F("a = 1\nb = 2\n", 0x1a4, "root", "root"))
+    n.ran = Vector.empty
+    val modeOnly = applyTo(n, desc).report
+    check("mode only: chmod, not a write", n.ran.exists(_.contains("chmod 0640")) && !n.ran.exists(_.startsWith("write")), n.ran.toString)
+    check("mode only: says what", outcome(modeOnly, "file[/etc/app/app.conf]").contains(ApplyOutcome.Changed(List("mode 0644 -> 0640"), Nil)), modeOnly.toString)
+
+    // A secret is never shown.
+    val sn = new FakeNode(Map("/etc/key" -> Entry.F("old secret", 0x180, "root", "root")))
+    val slines = applyTo(sn, List(secretFile("/etc/key", new Secret("new secret"))), check = true).lines
+    check("secret: content not shown", slines.exists(_.contains("content (secret: not shown)")) && !slines.exists(l => l.contains("new secret") || l.contains("old secret")), slines.mkString("\n"))
+
+    // Guards.
+    val gn = new FakeNode(Map("/opt/done" -> Entry.F("", 0x1a4, "root", "root")), guards = Map("test -e /x" -> false))
+    val guarded = applyTo(gn, List(
+      command("only if", "echo a", onlyIf = "test -e /x"),
+      command("creates", "echo b", creates = "/opt/done"),
+      command("unless", "echo c", unless = "test -e /x")
+    )).report
+    check("guards: onlyIf false and creates existing leave it unchanged", outcome(guarded, "command[only if]").exists(_.isInstanceOf[ApplyOutcome.Unchanged]) && outcome(guarded, "command[creates]").exists(_.isInstanceOf[ApplyOutcome.Unchanged]), guarded.toString)
+    check("guards: unless false runs it", outcome(guarded, "command[unless]").exists(_.isInstanceOf[ApplyOutcome.Changed]) && gn.ran.exists(_.contains("echo c")), gn.ran.toString)
+
+    // Failures: a directory where a file should be; what comes after it is skipped, the rest runs.
+    val restart = command("restart", "systemctl restart app", onChangeOnly = true)
+    val fn = new FakeNode(Map("/etc/app.conf" -> Entry.D(0x1ed, "root", "root")))
+    val ranFailed = applyTo(fn, List(
+      file("/etc/app.conf", "x").notifies(restart),
+      file("/etc/other", "y").afterIds("file[/etc/app.conf]"),
+      file("/etc/third", "z"),
+      restart
+    ))
+    val failed = ranFailed.report
+    val flines = ranFailed.lines
+    check("failure: the file fails", outcome(failed, "file[/etc/app.conf]").exists(_.isInstanceOf[ApplyOutcome.Failed]) && failed.failed, failed.toString)
+    check("failure: what comes after it is skipped", outcome(failed, "file[/etc/other]").contains(ApplyOutcome.Skipped("file[/etc/app.conf] failed")), failed.toString)
+    check("failure: what it notifies is skipped", outcome(failed, "command[restart]").contains(ApplyOutcome.Skipped("file[/etc/app.conf] failed")), failed.toString)
+    check("failure: the rest still runs", outcome(failed, "file[/etc/third]").exists(_.isInstanceOf[ApplyOutcome.Changed]), failed.toString)
+    check("failure: summary counts it", flines.lastOption.contains("1 changed, 0 unchanged, 2 skipped, 1 failed"), flines.lastOption.toString)
+    val sn2 = new FakeNode(Map("/etc/app.conf" -> Entry.D(0x1ed, "root", "root")))
+    val stopped = applyTo(sn2, List(file("/etc/app.conf", "x"), file("/etc/third", "z")), stop = true).report
+    check("stop on failure: the rest is skipped", outcome(stopped, "file[/etc/third]").contains(ApplyOutcome.Skipped("stopped after file[/etc/app.conf] failed")), stopped.toString)
+
+    // A change that fails.
+    val cn = new FakeNode(Map.empty, failing = Set("command[boom]"))
+    val boom = applyTo(cn, List(command("boom", "false", creates = "/nope"), file("/after", "x").afterIds("command[boom]"))).report
+    check("a failing change: failed, and what follows skipped", outcome(boom, "command[boom]").exists(_.isInstanceOf[ApplyOutcome.Failed]) && outcome(boom, "file[/after]").exists(_.isInstanceOf[ApplyOutcome.Skipped]), boom.toString)
+
+    // Removal.
+    val rn = new FakeNode(Map("/old" -> Entry.F("x", 0x1a4, "root", "root"), "/oldlink" -> Entry.L("/x"), "/olddir" -> Entry.D(0x1ed, "root", "root")))
+    val removed = applyTo(rn, List(absentFile("/old"), absentSymlink("/oldlink"), absentDirectory("/olddir"), absentFile("/never"))).report
+    check("removal: removed, and absent left alone", rn.fs.isEmpty && outcome(removed, "file[/never]").exists(_.isInstanceOf[ApplyOutcome.Unchanged]), rn.fs.toString + removed)
+    check("removal: a directory is not removed as a file", applyTo(new FakeNode(Map("/d" -> Entry.D(0x1ed, "r", "r"))), List(absentFile("/d"))).report.failed)
+
+    // A template source is rendered with its vars.
+    val tn = new FakeNode(Map.empty)
+    applyTo(tn, List(fileFrom("/etc/t", "t.mustache", Map("name" -> "tst8"))))
+    check("fileFrom: rendered with vars", tn.fs.get("/etc/t").exists { case Entry.F(t, _, _, _) => t == "source t.mustache for tst8"; case _ => false }, tn.fs.toString)
+
+  private def diffChecks(): Unit =
+    val d = TextDiff.unified("a\nb\nc\nd\ne\nf\ng\n", "a\nb\nc\nX\ne\nf\ng\n", "/f")
+    check("diff: header and the change", d.take(2) == List("--- /f (now)", "+++ /f (wanted)") && d.contains("-d") && d.contains("+X"), d.toString)
+    check("diff: two lines of context, not more", d.contains(" b") && d.contains(" f") && !d.contains(" a") && !d.contains(" g"), d.toString)
+
+  // ---- the real node side, on this machine ------------------------------
+
+  private def localRunner(nt: NamedTask, node: Node, env: TaskExecutor.Env): IO[Boolean] =
+    def ev(kind: Event.Kind, msg: String, exit: Int = 0, ok: Boolean = true) =
+      env.output.event(node, nt.name, Event(kind, msg, exit, ok))
+    nt.task match
+      case Task.RunCommand(command, _, _) =>
+        IO.blocking {
+          val p = new ProcessBuilder(command.asJava).redirectErrorStream(true).start()
+          val out = new String(p.getInputStream.readAllBytes(), StandardCharsets.UTF_8)
+          (out.linesIterator.toList, p.waitFor())
+        }.flatMap((out, code) =>
+          out.traverse_(l => ev(Event.Kind.OUTPUT, l)) >> ev(Event.Kind.RESULT, "", code, code == 0) >>
+            IO.raiseWhen(code != 0)(new TaskExecutor.RemoteFailure("FAILED")).as(true)
+        )
+      case Task.WriteFile(content, dest, _, _, mode) =>
+        IO.blocking {
+          val path = Paths.get(dest)
+          val same = Files.exists(path) && new String(Files.readAllBytes(path), StandardCharsets.UTF_8) == content
+          if !same then Files.write(path, content.getBytes(StandardCharsets.UTF_8))
+          if mode > 0 then Files.setPosixFilePermissions(path, PosixFilePermissions.fromString(rwx(mode)))
+          same
+        }.flatMap(same => ev(Event.Kind.RESULT, if same then "Skipped: unchanged" else "", 0, true).as(!same))
+      case _ => IO.pure(false)
+
+  private def rwx(mode: Int): String =
+    (0 until 9).map(i => if (mode & (1 << (8 - i))) != 0 then "rwx"(i % 3) else '-').mkString
+
+  private def localChecks(): Unit =
+    val dir: Path = Files.createTempDirectory("orphera-apply-check")
+    val base = dir.toString
+    val node = Node("local", "localhost")
+    val restart = command("touch the marker", s"touch $base/notified", onChangeOnly = true)
+    def desc = List(
+      directory(s"$base/conf.d", mode = "0750"),
+      file(s"$base/conf.d/it's.conf", "x = 1\ny = 2\n", mode = "0640").after(directory(s"$base/conf.d")).notifies(restart),
+      symlink(s"$base/current", s"$base/conf.d/it's.conf"),
+      command("make the state file", s"echo made > $base/state", creates = s"$base/state"),
+      restart
+    )
+    def run(rs: List[ApplyResource], check: Boolean): Ran =
+      (for
+        lines <- Ref.of[IO, Vector[String]](Vector.empty)
+        setFacts <- SetFacts.empty
+        env = TaskExecutor.Env(
+          ClusterContext(Map.empty),
+          setFacts,
+          TaskExecutor.Output((_, _, _) => IO.unit, (_, _, _) => IO.unit, (_, _, _) => IO.unit),
+          templating = false,
+          perform = localRunner
+        )
+        plan <- Apply.plan("local", rs)
+        report <- TaskExecutor.applyOn(plan, node, env, check, stopOnFailure = false, s => lines.update(_ :+ s))
+        ls <- lines.get
+      yield Ran(report, ls)).unsafeRunSync()
+
+    try
+      val planned = run(desc, check = true).report
+      check("local check: all would change, nothing made", planned.results.count(_.changed) == 5 && !Files.exists(Paths.get(s"$base/conf.d")), planned.toString)
+      val ranFirst = run(desc, check = false)
+      val first = ranFirst.report
+      val l1 = ranFirst.lines
+      check("local first run: no failures", !first.failed, l1.mkString("\n"))
+      check(
+        "local first run: made as described",
+        Files.isDirectory(Paths.get(s"$base/conf.d")) &&
+          Files.readString(Paths.get(s"$base/conf.d/it's.conf")) == "x = 1\ny = 2\n" &&
+          Files.readSymbolicLink(Paths.get(s"$base/current")).toString == s"$base/conf.d/it's.conf" &&
+          Files.exists(Paths.get(s"$base/state")) && Files.exists(Paths.get(s"$base/notified")),
+        l1.mkString("\n")
+      )
+      check(
+        "local first run: modes",
+        PosixFilePermissions.toString(Files.getPosixFilePermissions(Paths.get(s"$base/conf.d"))) == "rwxr-x---" &&
+          PosixFilePermissions.toString(Files.getPosixFilePermissions(Paths.get(s"$base/conf.d/it's.conf"))) == "rw-r-----",
+        l1.mkString("\n")
+      )
+      Files.delete(Paths.get(s"$base/notified"))
+      val ranSecond = run(desc, check = false)
+      val second = ranSecond.report
+      val l2 = ranSecond.lines
+      check("local second run: nothing changed (read back by the real observe script)", !second.changed && !Files.exists(Paths.get(s"$base/notified")), l2.mkString("\n"))
+      val edited = desc.updated(1, file(s"$base/conf.d/it's.conf", "x = 1\ny = 3\n", mode = "0640").after(directory(s"$base/conf.d")).notifies(restart))
+      val ranDiff = run(edited, check = true)
+      val diff = ranDiff.report
+      val l3 = ranDiff.lines
+      check("local check after an edit: a real diff", diff.changed && l3.contains("  -y = 2") && l3.contains("  +y = 3"), l3.mkString("\n"))
+      val clash = List(file(s"$base/conf.d", "not a dir"))
+      check("local: a directory where a file is wanted fails", run(clash, check = false).report.failed)
+    finally
+      new ProcessBuilder("rm", "-rf", base).start().waitFor()
+      ()
+
+  def main(args: Array[String]): Unit =
+    planChecks()
+    runChecks()
+    diffChecks()
+    localChecks()
+    println(s"ApplyCheck: $passes passed, $failures failed")
+    if failures > 0 then sys.exit(1)
