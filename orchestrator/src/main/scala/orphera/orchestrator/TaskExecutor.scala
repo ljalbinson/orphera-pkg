@@ -29,10 +29,17 @@ object TaskExecutor:
   /** A task whose remote command ran but reported failure (a RESULT event with
     * success = false), as opposed to one that could not be run at all.
     */
-  final class RemoteFailure
-      extends RuntimeException(
-        "Remote command reported failure (see output above)"
+  final class RemoteFailure(
+      // the failed RESULT event's message: "FAILED", or the agent's
+      // "Timed out after Ns"
+      val result: String
+  ) extends RuntimeException(
+        if RemoteFailure.timedOut(result) then s"Remote command ${result.toLowerCase} (see output above)"
+        else "Remote command reported failure (see output above)"
       )
+
+  object RemoteFailure:
+    def timedOut(result: String): Boolean = result.startsWith("Timed out")
 
   /** How a run shows what happens on a node. Each function gets the node and
     * the task's name.
@@ -677,6 +684,8 @@ object TaskExecutor:
     */
   def describe(err: Throwable): String =
     err match
+      case f: RemoteFailure if RemoteFailure.timedOut(f.result) =>
+        s"the command ${f.result.toLowerCase} (see output above)"
       case _: RemoteFailure                 => "the command reported failure (see output above)"
       case _: AgentToken.NotConfiguredError => AgentToken.NotConfigured
       case _ if isGrpcFailure(err)          => NodeError.line(err)
@@ -706,16 +715,16 @@ object TaskExecutor:
       render: Event => IO[Unit]
   )(run: (Event => IO[Unit]) => IO[Unit]): IO[Unit] =
     for
-      failed <- Ref.of[IO, Boolean](false)
+      failed <- Ref.of[IO, Option[String]](None)
       wrappedRender = (event: Event) =>
         render(event) >> (
           if event.kind == Event.Kind.RESULT && !event.success
-          then failed.set(true)
+          then failed.set(Some(event.message))
           else IO.unit
         )
       _ <- run(wrappedRender)
-      didFail <- failed.get
-      _ <- IO.raiseWhen(didFail)(new RemoteFailure)
+      result <- failed.get
+      _ <- result.fold(IO.unit)(r => IO.raiseError(new RemoteFailure(r)))
     yield ()
 
   /** The local file a `copy` sends: `src` as given (or under ORPHERA_ROOT, see
@@ -843,7 +852,9 @@ object TaskExecutor:
       case Event.Kind.PROGRESS => event.message
       case Event.Kind.OUTPUT   => event.message
       // A file left as it was says so: "Skipped: unchanged (exit=0 ...)".
-      case Event.Kind.RESULT if event.message.startsWith("Skipped:") =>
+      // A command stopped at its timeout says so: "Timed out after 300s (exit=124 ...)".
+      case Event.Kind.RESULT
+          if event.message.startsWith("Skipped:") || (!event.success && RemoteFailure.timedOut(event.message)) =>
         s"${event.message} (exit=${event.exitCode} success=${event.success})"
       case Event.Kind.RESULT =>
         s"exit=${event.exitCode} success=${event.success}"

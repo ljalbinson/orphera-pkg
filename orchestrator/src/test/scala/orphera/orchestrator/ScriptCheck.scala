@@ -43,7 +43,7 @@ object ScriptCheck:
             val code = n.toIntOption.getOrElse(1)
             event(Event.Kind.OUTPUT, s"exiting $code") >>
               event(Event.Kind.RESULT, "", code, code == 0) >>
-              IO.raiseWhen(code != 0)(new TaskExecutor.RemoteFailure).as(true)
+              IO.raiseWhen(code != 0)(new TaskExecutor.RemoteFailure("FAILED")).as(true)
           case "fail" :: _   => IO.raiseError(new RuntimeException(s"${node.name} failed on purpose"))
           case "change" :: _ => event(Event.Kind.RESULT, "", 0, true).as(true)
           case _             => event(Event.Kind.RESULT, "", 0, true).as(false)

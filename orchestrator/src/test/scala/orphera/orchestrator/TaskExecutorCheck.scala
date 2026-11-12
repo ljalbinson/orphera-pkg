@@ -413,6 +413,16 @@ object TaskExecutorCheck:
       TaskExecutor.eventLine(result("Skipped: unchanged")) == "Skipped: unchanged (exit=0 success=true)" &&
         TaskExecutor.eventLine(result("Wrote it")) == "exit=0 success=true"
     )
+    check(
+      "a command stopped at its timeout says so",
+      TaskExecutor.eventLine(Event(Event.Kind.RESULT, "Timed out after 300s", 124, false)) ==
+        "Timed out after 300s (exit=124 success=false)" &&
+        TaskExecutor.eventLine(Event(Event.Kind.RESULT, "FAILED", 1, false)) == "exit=1 success=false" &&
+        TaskExecutor.describe(new TaskExecutor.RemoteFailure("Timed out after 300s")) ==
+        "the command timed out after 300s (see output above)" &&
+        TaskExecutor.describe(new TaskExecutor.RemoteFailure("FAILED")) ==
+        "the command reported failure (see output above)"
+    )
     check("debug never changes anything", !TaskExecutor.changed(Task.Debug("x"), Vector.empty))
     check("run_command always counts as a change", TaskExecutor.changed(Task.RunCommand(List("true")), Vector(result("exit=0"))))
 

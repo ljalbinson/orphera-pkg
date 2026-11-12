@@ -351,6 +351,28 @@ object lustre_cluster extends OrpheraClusterPlaybook:
       |done""".stripMargin.replace("@ROLES@", roles)
   )
 
+  // After a restart, each MDT and OST waits for the clients it knew to come
+  // back (Lustre recovery, up to 15 minutes), and refuses new clients until then
+  // (mds_connect rc = -16). Wait for that here, showing the time left, rather
+  // than inside the client mount.
+  private val recoveryScript = fill(
+    helpers +
+      """set -e
+      |for p in $(lctl list_param 'mdt.*.recovery_status' 'obdfilter.*.recovery_status' 2>/dev/null); do
+      |  t=${p#*.}; t=${t%.recovery_status}
+      |  while :; do
+      |    s=$(lctl get_param -n "$p")
+      |    st=$(printf '%s\n' "$s" | awk '$1 == "status:" { print $2 }')
+      |    case "$st" in
+      |      COMPLETE|INACTIVE) echo "$t: recovery ${st}"; break ;;
+      |    esac
+      |    left=$(printf '%s\n' "$s" | awk '$1 == "time_remaining:" { print $2 }')
+      |    echo "$t: recovery ${st:-unknown}, ${left:-?}s left"
+      |    sleep 15
+      |  done
+      |done""".stripMargin
+  )
+
   private val clientMountScript = fill(
     helpers +
       """set -e
@@ -456,6 +478,9 @@ object lustre_cluster extends OrpheraClusterPlaybook:
         .build,
       stage("mount-ost", servers*)
         .task("mount the OSTs")(sh(mountScript("ost"), 600))
+        .build,
+      stage("recovery", servers*)
+        .task("wait for MDT and OST recovery")(sh(recoveryScript, 1200))
         .build,
       stage("mount-client", clients*)
         .task(s"mount $fsName at /mnt/$fsName")(sh(clientMountScript, 300))
