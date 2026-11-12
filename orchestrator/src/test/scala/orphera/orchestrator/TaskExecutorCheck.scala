@@ -406,6 +406,11 @@ object TaskExecutorCheck:
     )
     check("dnf with nothing to do changed nothing", !TaskExecutor.changed(install, Vector(out("Package tree is already installed."), out("Nothing to do."))))
     check("dnf that installed changed something", TaskExecutor.changed(install, Vector(out("Installed:"), out("Complete!"))))
+    check(
+      "an unchanged file says Skipped in a playbook's output",
+      TaskExecutor.eventLine(result("Skipped: unchanged")) == "Skipped: unchanged (exit=0 success=true)" &&
+        TaskExecutor.eventLine(result("Wrote it")) == "exit=0 success=true"
+    )
     check("debug never changes anything", !TaskExecutor.changed(Task.Debug("x"), Vector.empty))
     check("run_command always counts as a change", TaskExecutor.changed(Task.RunCommand(List("true")), Vector(result("exit=0"))))
 

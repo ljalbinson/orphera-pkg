@@ -64,8 +64,10 @@ object ConsoleRenderer:
           // A failed RESULT carries the reason (e.g. "FAILED: Cannot run
           // program ..."); show it, otherwise a spawn failure is
           // indistinguishable from a command that returned non-zero.
-          (if !event.success && event.message.startsWith("FAILED: ") then
-             IO.println(s"[${node.name}] ${event.message}")
+          // A file left as it was says so ("Skipped: unchanged").
+          (if (!event.success && event.message.startsWith("FAILED: ")) ||
+             event.message.startsWith("Skipped:")
+           then IO.println(s"[${node.name}] ${event.message}")
            else IO.unit) >>
           IO.println(
             s"[${node.name}] exit=${event.exitCode} success=${event.success}"

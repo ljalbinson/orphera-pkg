@@ -689,10 +689,13 @@ object TaskExecutor:
 
     byName + ("ip_secondary" -> secondary)
 
-  private def eventLine(event: Event): String =
+  private[orchestrator] def eventLine(event: Event): String =
     event.kind match
       case Event.Kind.PROGRESS => event.message
       case Event.Kind.OUTPUT   => event.message
-      case Event.Kind.RESULT   =>
+      // A file left as it was says so: "Skipped: unchanged (exit=0 ...)".
+      case Event.Kind.RESULT if event.message.startsWith("Skipped:") =>
+        s"${event.message} (exit=${event.exitCode} success=${event.success})"
+      case Event.Kind.RESULT =>
         s"exit=${event.exitCode} success=${event.success}"
       case _ => event.message
