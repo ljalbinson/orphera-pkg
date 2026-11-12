@@ -869,7 +869,8 @@ checkpoint) sees only the tasks. In the Scala DSL, tasks are ordinary values: bu
 it with `.includeTasks(list)`.
 
 `manifests/handlers_test.yaml` (with `handlers_test_common.yaml`) tries both on tst0 and tst1, touching only `/tmp`
-and the `tree` package; its header says what each run should show.
+and the `tree` package; its header says what each run should show. `manifests/handlers_demo.scala` is the same in the
+Scala DSL (with its own files in `/tmp`, so the two do not undo each other's change).
 
 #### Retrying a task
 
