@@ -40,9 +40,35 @@ object ceph_upgrade extends OrpheraScript:
   private val allowWarn = sys.env.get("CEPH_ALLOW_WARN").contains("yes")
 
   // `ceph` through the cephadm shell, without its "Inferring fsid" lines.
+  //
+  // status() prints four lines from `ceph orch upgrade status`: running
+  // (yes/no), paused (yes/no), the target image, and what cephadm says. Squid
+  // answers in JSON; Tentacle, with no upgrade running, answers in words
+  // ("There are no upgrades in progress currently"), so the words are read too.
+  // Anything else counts as still running, with the text as what it says.
   private val helpers =
     """fail() { echo "FAILED: $(hostname -s): $*"; exit 1; }
       |c() { cephadm shell -- ceph "$@" 2>/dev/null; }
+      |status() {
+      |  c orch upgrade status --format json | python3 -c '
+      |import json, sys
+      |t = sys.stdin.read()
+      |try:
+      |    s = json.loads(t)
+      |except ValueError:
+      |    words = " ".join(t.split())
+      |    if "no upgrade" in words.lower():
+      |        s = {"in_progress": False}
+      |    else:
+      |        s = {"in_progress": True, "message": "unreadable upgrade status: " + words[:200]}
+      |if not isinstance(s, dict):
+      |    s = {"in_progress": True, "message": "unreadable upgrade status: " + " ".join(t.split())[:200]}
+      |print("yes" if s.get("in_progress") else "no")
+      |print("yes" if s.get("is_paused") else "no")
+      |print(s.get("target_image") or "")
+      |print(" ".join(x for x in [s.get("progress") or "", (s.get("message") or "").replace("\n", " ")] if x))
+      |'
+      |}
       |""".stripMargin
 
   // Prints the target digest, the target version, and how many daemons need
@@ -62,13 +88,7 @@ object ceph_upgrade extends OrpheraScript:
 
   // Prints whether an upgrade is in progress (yes/no) and its target image.
   private val statusScript =
-    helpers +
-      """c orch upgrade status --format json | python3 -c '
-        |import json, sys
-        |s = json.load(sys.stdin)
-        |print("yes" if s.get("in_progress") else "no")
-        |print(s.get("target_image") or "")
-        |'""".stripMargin
+    helpers + "status | sed -n '1p;3p'"
 
   private val healthScript = helpers + "c health"
 
@@ -97,16 +117,10 @@ object ceph_upgrade extends OrpheraScript:
         |sleep 10
         |last=""
         |while :; do
-        |  info=$(c orch upgrade status --format json | python3 -c '
-        |import json, sys
-        |s = json.load(sys.stdin)
-        |print("yes" if s.get("in_progress") else "no")
-        |print("yes" if s.get("is_paused") else "no")
-        |print(" ".join(x for x in [s.get("progress") or "", (s.get("message") or "").replace("\n", " ")] if x))
-        |') || { sleep 15; continue; }
+        |  info=$(status) || { sleep 15; continue; }
         |  running=$(printf '%s\n' "$info" | sed -n 1p)
         |  paused=$(printf '%s\n' "$info" | sed -n 2p)
-        |  said=$(printf '%s\n' "$info" | sed -n 3p)
+        |  said=$(printf '%s\n' "$info" | sed -n 4p)
         |  [ "$paused" = yes ] && fail "cephadm paused the upgrade: $said (ceph health detail; then ceph orch upgrade resume)"
         |  [ "$running" = no ] && break
         |  [ "$said" != "$last" ] && echo "cephadm: ${said:-upgrading}"
