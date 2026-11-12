@@ -757,6 +757,9 @@ command: `delay`, `wait`, `wait_timeout` in YAML.
   a YAML list, `timeout:` in seconds), streaming stdout/stderr and
   reporting the real exit code — no shell interpretation (pipes,
   redirects) unless the command list itself is `["sh", "-c", "..."]`.
+  A command still running at its timeout is stopped and fails with
+  `Timed out after 300s (exit=124 success=false)` and `the command timed out
+  after 300s`, not a bare exit code.
   `register:` (a name) stores the command's output (stdout and stderr
   lines, joined, trailing whitespace removed) as that fact on the node once
   the command has succeeded; later tasks read it as `{{{name}}}` on the same
@@ -2726,6 +2729,47 @@ Worth knowing:
   to carry each node's state to the decision; the script stays until the playbook has been run on
   the lab.
 
+## Example: upgrading the Ceph cluster (cephadm)
+
+`manifests/ceph_upgrade.scala` is an `OrpheraScript` that upgrades the cephadm cluster on tst0-tst2 to a new
+release (Squid 19.2 to Tentacle 20.2 on the lab, 2026-11-12) with cephadm's staged upgrade, deciding each next
+step from what the cluster reports:
+
+1. It resolves the image once to its digest (every stage uses that build), says how many daemons need it, and
+   changes nothing if none do. Before the first stage the cluster must be healthy, no other upgrade may be
+   running, and there must be a standby manager.
+2. Stages, in the order cephadm enforces: managers, monitors, crash daemons on every host, the OSDs one host at a
+   time, then everything else (MDS, RGW, NFS, exporters).
+3. After each stage it waits until cephadm has finished it and the cluster is healthy again, printing cephadm's
+   progress as it changes; if cephadm pauses (an image it cannot pull, a daemon that will not start), or refuses
+   a stage, it stops with cephadm's own message.
+4. At the end it checks `require_osd_release` names the new release, and sets it if cephadm has not.
+
+| Setting | Meaning | Default |
+|---|---|---|
+| `CEPH_IMAGE` | image to upgrade to (a tag such as `:v20.2.5` pins a release) | `quay.io/ceph/ceph:v20` |
+| `CEPH_ADMIN` | node that runs the `ceph` commands | `tst0` |
+| `CEPH_IGNORE_HEALTH` | health checks treated as healthy, comma-separated; muted checks count as healthy too | none |
+| `CEPH_ALLOW_WARN` | `yes`: start from HEALTH_WARN, and between stages wait for every PG to be active+clean instead | no |
+
+    cephadm shell -- ceph orch upgrade check --image quay.io/ceph/ceph:v20 | grep target_version   # what v20 is now
+    CEPH_IMAGE=quay.io/ceph/ceph:v20.2.5 orphera playbook manifests/ceph_upgrade.scala            # --resume after a failure
+
+Health mutes did not last through the monitor upgrade, so name warnings that are known and accepted in
+`CEPH_IGNORE_HEALTH` rather than muting them. The `cephadm` package on the hosts is not upgraded; `cephadm
+shell` works with the new image. `cephadm_mon_rolling_upgrade.scala` is the older package-based monitor
+upgrade and does not suit a cephadm cluster.
+
+After an upgrade past 19.2.6 / 20.2.4, the OpenStack clients' `aes` cephx keys are reported as insecure
+(the CVE-2025-30156 fix; see "Ceph cipher compromise" above). Two scripts end that:
+`ceph_client_upgrade.scala` gives Cinder, Glance, Manila and nova-compute, and the compute hosts' QEMU, Ceph's
+own client of the cluster's release (images built on tst21 with buildah and pushed to its registry under the
+Kolla names and tags, which the nodes already try first), and then `ceph_key_rotation.scala` rotates their
+keys to `aes256k` and sets the monitors to `aes256k` only. Run from the repository directory:
+
+    orphera playbook manifests/ceph_client_upgrade.scala    # run on the lab 2026-11-12
+    orphera playbook manifests/ceph_key_rotation.scala      # Cinder, Glance, Manila off Ceph for a few minutes
+
 ## Scala Native versions of the VM scripts
 
 `vmctl.sh`, `start-vm.sh`, `stop-vm.sh`, `reboot-vm.sh`, `list-vms.sh`, `move-vm.sh`, `scan-vm-sizes.sh` and
@@ -2865,6 +2909,19 @@ mounts them in order: MGT, MDT0, the other MDTs, OSTs, then the client. A disk t
 is left alone; a disk with any other signature stops the run. Nothing goes into `/etc/fstab`: after the VMs
 have been off, run `lustre_cluster.scala` again, which mounts everything in the right order. SELinux is set
 to permissive on the servers.
+
+After a restart, two stages matter. `lnet.service` (enabled by the LNet stage) starts LNet at boot from
+`/etc/lnet.conf`, so the LNet stage adds tcp0 itself with `lnetctl net add` when it is missing and saves the
+configuration there for the next boot. And each MDT and OST, once mounted again, waits for the clients it knew
+(Lustre recovery, up to 15 minutes) and refuses new ones until then (`mds_connect ... rc = -16` on the client),
+so a stage before the client mounts waits on every server until recovery is complete, printing each target's
+status and time left.
+
+`lustre_cluster_script.scala` is the same build written as an `OrpheraScript` (same stages, scripts and
+settings; the reboot decision is a query and an `if`, and each node's `cluster_ip` and `lustre_targets` are read
+from `inventory.yaml` and checked before anything runs). Both ran on the lab on 2026-11-12:
+
+    orphera playbook manifests/lustre_cluster_script.scala     # --resume after a failure
 
 | Setting | Meaning | Default |
 |---|---|---|
@@ -3045,7 +3102,10 @@ playbooks marked DRAFT there have been written but not all run on the lab.
 | `ceph_observability.scala` | Adds Ceph's own metrics to the Prometheus and Grafana stack on tst6 (see `manifests/Ceph-Observability-Lifecycle-Howto.md`) |
 | `ceph_performance_test.scala` | A `rados bench` run as a playbook, with pass or fail checks and cleanup |
 | `ceph_mon_keyring.scala`, `ceph_mon_quorum.scala`, `ceph_mgr.scala`, `ceph_admin_keyring.scala`, `ceph-osd.scala`, `ceph-health-fixes.scala`, `ceph_teardown.scala` | The steps of the manual Ceph path, in the order in `manifests/Ceph-Playbook-Usage.md`, and its teardown |
-| `cephadm_add_mons.scala`, `cephadm_mon_rolling_upgrade.scala` | The cephadm path: adding monitors on tst1 and tst2, and a rolling monitor upgrade with tst0 first |
+| `cephadm_add_mons.scala`, `cephadm_mon_rolling_upgrade.scala` | The cephadm path: adding monitors on tst1 and tst2, and a package-based rolling monitor upgrade with tst0 first (for a cephadm cluster, use `ceph_upgrade.scala`) |
+| `ceph_upgrade.scala` | Staged cephadm upgrade of the whole cluster to a new release, health-checked between stages (see [upgrading the Ceph cluster](#example-upgrading-the-ceph-cluster-cephadm)) |
+| `ceph_client_upgrade.scala`, `ceph_key_rotation.scala` | Ceph's own client for the OpenStack services and compute hosts, then their keys rotated to `aes256k` and the monitors set to `aes256k` only |
+| `lustre_cluster_script.scala` | `lustre_cluster.scala` as an `OrpheraScript` |
 | `apt_cache_teardown.scala`, `rpm_cache_teardown.scala`, `kolla_cache_teardown.scala` | Undo the apt cache (tst11) and its clients, the RPM cache (tst12) and its clients, and the Kolla image cache (tst9) |
 | `keystone_teardown.scala`, `glance_teardown.scala`, `placement_teardown.scala`, `cinder_teardown.scala`, `nova_teardown.scala`, `neutron_teardown.scala`, `horizon_teardown.scala` | Undo the matching `*_single_node.scala` playbook (see the OpenStack example below) |
 
