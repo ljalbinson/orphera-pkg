@@ -104,6 +104,67 @@ object ApplyResource:
     def guarded: Boolean = onlyIf.nonEmpty || unless.nonEmpty || creates.nonEmpty
     protected def relinked(n: List[String], t: List[String]): ApplyResource = copy(needs = n, triggers = t)
 
+  /** A package, through apt (Debian, Ubuntu) or dnf (Rocky, RHEL), whichever
+    * the node has. `version`, if given, is the version as the package manager
+    * names it, and the installed one must equal it. `updateCache` runs
+    * `apt-get update` before installing (dnf refreshes by itself).
+    */
+  final case class Package(
+      name: String,
+      version: String,
+      updateCache: Boolean,
+      present: Boolean,
+      needs: List[String] = Nil,
+      triggers: List[String] = Nil
+  ) extends ApplyResource:
+    def id: String = s"package[$name]"
+    protected def relinked(n: List[String], t: List[String]): ApplyResource = copy(needs = n, triggers = t)
+
+  /** A systemd unit, enabled or not and running or not (None: left as it
+    * is). A resource that notifies it restarts it, once, unless this run
+    * starts it anyway.
+    */
+  final case class Service(
+      unit: String,
+      enabled: Option[Boolean],
+      running: Option[Boolean],
+      needs: List[String] = Nil,
+      triggers: List[String] = Nil
+  ) extends ApplyResource:
+    def id: String = s"service[$unit]"
+    protected def relinked(n: List[String], t: List[String]): ApplyResource = copy(needs = n, triggers = t)
+
+  /** A local user. `uid` -1, and an empty `group`, `home` or `shell`, are
+    * left as they are; `groups` are supplementary groups it must be in (others
+    * it is in are left alone). Removing it leaves its home directory.
+    */
+  final case class User(
+      name: String,
+      uid: Int,
+      group: String,
+      groups: List[String],
+      home: String,
+      shell: String,
+      system: Boolean,
+      present: Boolean,
+      needs: List[String] = Nil,
+      triggers: List[String] = Nil
+  ) extends ApplyResource:
+    def id: String = s"user[$name]"
+    protected def relinked(n: List[String], t: List[String]): ApplyResource = copy(needs = n, triggers = t)
+
+  /** A local group (`gid` -1: any). */
+  final case class Group(
+      name: String,
+      gid: Int,
+      system: Boolean,
+      present: Boolean,
+      needs: List[String] = Nil,
+      triggers: List[String] = Nil
+  ) extends ApplyResource:
+    def id: String = s"group[$name]"
+    protected def relinked(n: List[String], t: List[String]): ApplyResource = copy(needs = n, triggers = t)
+
 /** The functions a description is written with. `mode` is octal text
   * ("0644"); an empty `mode`, `owner` or `group` is left as it is.
   */
@@ -139,6 +200,34 @@ object Resources:
   def symlink(path: String, target: String): ApplyResource = Symlink(path, target, present = true)
 
   def absentSymlink(path: String): ApplyResource = Symlink(path, "", present = false)
+
+  /** A package installed (`package` is a word Scala keeps for itself). */
+  def pkg(name: String, version: String = "", updateCache: Boolean = false): ApplyResource =
+    Package(name, version, updateCache, present = true)
+
+  def absentPkg(name: String): ApplyResource = Package(name, "", updateCache = false, present = false)
+
+  /** A systemd unit: by default enabled and running; None leaves either as it is. */
+  def service(unit: String, enabled: Option[Boolean] = Some(true), running: Option[Boolean] = Some(true)): ApplyResource =
+    Service(unit, enabled, running)
+
+  def user(
+      name: String,
+      uid: Int = -1,
+      group: String = "",
+      groups: List[String] = Nil,
+      home: String = "",
+      shell: String = "",
+      system: Boolean = false
+  ): ApplyResource =
+    User(name, uid, group, groups, home, shell, system, present = true)
+
+  def absentUser(name: String): ApplyResource = User(name, -1, "", Nil, "", "", system = false, present = false)
+
+  def group(name: String, gid: Int = -1, system: Boolean = false): ApplyResource =
+    Group(name, gid, system, present = true)
+
+  def absentGroup(name: String): ApplyResource = Group(name, -1, system = false, present = false)
 
   def command(
       label: String,
@@ -195,6 +284,17 @@ object ApplyPlan:
       case s: ApplyResource.Symlink =>
         checkPath(s.id, s.path)
         if s.present && s.target.isEmpty then problems += s"${s.id}: no target"
+      case p: ApplyResource.Package =>
+        if !p.name.matches("[A-Za-z0-9][A-Za-z0-9.+_:-]*") then problems += s"${p.id}: not a package name"
+      case u: ApplyResource.Service =>
+        if !u.unit.matches("[A-Za-z0-9@._:-]+") then problems += s"${u.id}: not a unit name"
+        if u.enabled.isEmpty && u.running.isEmpty && !rs.exists(_.triggers.contains(u.id)) then
+          problems += s"${u.id}: says nothing about it (enabled, running) and nothing notifies it"
+      case u: ApplyResource.User =>
+        if !u.name.matches("[a-z_][a-z0-9_-]*[$]?") then problems += s"${u.id}: not a user name"
+        if u.home.nonEmpty && !u.home.startsWith("/") then problems += s"${u.id}: home must be an absolute path"
+      case g: ApplyResource.Group =>
+        if !g.name.matches("[a-z_][a-z0-9_-]*[$]?") then problems += s"${g.id}: not a group name"
       case c: ApplyResource.Command =>
         if c.label.trim.isEmpty then problems += "a command has no label"
         if c.run.trim.isEmpty then problems += s"${c.id}: nothing to run"
@@ -215,7 +315,8 @@ object ApplyPlan:
         byId.get(t).map(rs(_)) match
           case None                                          => problems += s"${r.id} notifies $t, which is not described"
           case Some(c: ApplyResource.Command) if c.onChangeOnly   => ()
-          case Some(_)                                       => problems += s"${r.id} notifies $t, which is not an onChangeOnly command"
+          case Some(_: ApplyResource.Service)                => ()
+          case Some(_)                                       => problems += s"${r.id} notifies $t, which is not a service or an onChangeOnly command"
       )
     }
     rs.collect { case c: ApplyResource.Command if c.onChangeOnly => c }.foreach(c =>
@@ -226,8 +327,15 @@ object ApplyPlan:
     val found = problems.result()
     if found.nonEmpty then Left(found)
     else
+      // Besides `after`: a user comes after the groups it names, and a file or directory after the user
+      // and group that own it, when those are described too.
+      def implied(r: ApplyResource): List[String] = r match
+        case u: ApplyResource.User      => (u.group :: u.groups).filter(_.nonEmpty).map(g => s"group[$g]")
+        case f: ApplyResource.File      => List(f.owner).filter(_.nonEmpty).map(o => s"user[$o]") ++ List(f.group).filter(_.nonEmpty).map(g => s"group[$g]")
+        case d: ApplyResource.Directory => List(d.owner).filter(_.nonEmpty).map(o => s"user[$o]") ++ List(d.group).filter(_.nonEmpty).map(g => s"group[$g]")
+        case _                          => Nil
       val needs: Map[Int, Set[Int]] =
-        rs.indices.map(i => i -> rs(i).needs.flatMap(byId.get).toSet).toMap
+        rs.indices.map(i => i -> (rs(i).needs ++ implied(rs(i)).filter(id => byId.get(id).exists(_ != i))).flatMap(byId.get).toSet).toMap
       val notifiers: Map[Int, Set[Int]] =
         rs.indices.map(i => i -> rs.indices.filter(j => rs(j).triggers.contains(rs(i).id)).toSet).toMap
       // Before i: what it needs and what notifies it. Declaration order otherwise.
@@ -251,6 +359,14 @@ enum Observed:
   case OtherType
   /** A command's guard: whether the command is needed. */
   case Guard(needed: Boolean, note: String)
+  /** A package: the node's package manager ("apt", "dnf", "none"), and the installed versions. */
+  case Pkg(manager: String, installed: Boolean, versions: List[String])
+  /** A systemd unit, as `systemctl is-enabled` and `is-active` name it. */
+  case ServiceState(enabled: String, active: String)
+  /** A user that exists. */
+  case Account(uid: Int, group: String, groups: List[String], home: String, shell: String)
+  /** A group that exists. */
+  case GroupEntry(gid: Int)
   case Unreadable(text: String)
 
 /** How a resource ended. */
@@ -357,7 +473,9 @@ object Apply:
       r: ApplyResource,
       seen: Observed,
       content: Option[(String, Boolean)], // the wanted text, and whether it is secret
-      target: ApplyTarget
+      target: ApplyTarget,
+      check: Boolean,
+      notifiedBy: List[String]
   ): IO[Either[String, Difference]] =
     import ApplyResource.*
     val path = r match
@@ -424,6 +542,126 @@ object Apply:
               case _                                  => Left(s"$path is a directory or other: not replaced by a symlink"))
           case c: Command =>
             IO.pure(Right(Difference(List("run"), List(Action.Shell(c.run)), Nil)))
+          case p: Package   => IO.pure(comparePackage(p, seen))
+          case u: Service   => IO.pure(compareService(u, seen, check, notifiedBy))
+          case u: User      => IO.pure(compareUser(u, seen))
+          case g: Group     => IO.pure(compareGroup(g, seen))
+
+  private def shellOf(changes: List[String], script: String): Either[String, Difference] =
+    Right(Difference(changes, List(Action.Shell(script)), Nil))
+
+  /** Whether an installed `version` is the wanted one: equal, or the wanted
+    * one without its release part ("1.2.3" matches "1.2.3-1.el9").
+    */
+  private[orchestrator] def versionMatches(installed: String, wanted: String): Boolean =
+    installed == wanted || installed.startsWith(wanted + "-")
+
+  private def comparePackage(p: ApplyResource.Package, seen: Observed): Either[String, Difference] =
+    val n = quote(p.name)
+    seen match
+      case Observed.Pkg("none", _, _) => Left("neither apt nor dnf on this node")
+      case Observed.Pkg(manager, installed, versions) =>
+        val apt = manager == "apt"
+        val spec = if p.version.isEmpty then n else if apt then quote(s"${p.name}=${p.version}") else quote(s"${p.name}-${p.version}")
+        val install =
+          if apt then
+            val update = if p.updateCache then "apt-get update -q && " else ""
+            s"${update}DEBIAN_FRONTEND=noninteractive apt-get install -y -q -o DPkg::Lock::Timeout=300 --allow-downgrades $spec"
+          else s"dnf -y -q install $spec || dnf -y -q downgrade $spec"
+        if !p.present then
+          if !installed then Right(NoDifference)
+          else if apt then shellOf(List("removed"), s"DEBIAN_FRONTEND=noninteractive apt-get remove -y -q -o DPkg::Lock::Timeout=300 $n")
+          else shellOf(List("removed"), s"dnf -y -q remove $n")
+        else if !installed then shellOf(List(if p.version.isEmpty then "installed" else s"installed ${p.version}"), install)
+        else if p.version.nonEmpty && !versions.exists(versionMatches(_, p.version)) then
+          shellOf(List(s"version ${versions.mkString(",")} -> ${p.version}"), install)
+        else Right(NoDifference)
+      case other => Left(s"unexpected state: $other")
+
+  private val Enabledish = Set("enabled", "enabled-runtime", "static", "indirect", "generated", "transient", "alias", "linked", "linked-runtime")
+  private val Activeish = Set("active", "activating", "reloading")
+
+  private def compareService(u: ApplyResource.Service, seen: Observed, check: Boolean, notifiedBy: List[String]): Either[String, Difference] =
+    val n = quote(u.unit)
+    seen match
+      case Observed.ServiceState(enabled, active) =>
+        val missing = enabled == "not-found" || enabled.isEmpty
+        val masked = enabled.startsWith("masked")
+        val enable: Option[Either[String, (String, String)]] = u.enabled.flatMap {
+          case true if missing  => Some(Left("no such unit"))
+          case true if masked   => Some(Left("the unit is masked"))
+          case true if !Enabledish(enabled) => Some(Right("enabled" -> s"systemctl enable $n"))
+          case false if enabled == "enabled" || enabled == "enabled-runtime" => Some(Right("disabled" -> s"systemctl disable $n"))
+          case _ => None
+        }
+        val running = Activeish(active)
+        val run: Option[Either[String, (String, String)]] = u.running.flatMap {
+          case true if missing  => Some(Left("no such unit"))
+          case true if masked   => Some(Left("the unit is masked"))
+          case true if !running => Some(Right("started" -> s"systemctl start $n"))
+          case false if running => Some(Right("stopped" -> s"systemctl stop $n"))
+          case _ => None
+        }
+        val starting = run.exists(_.exists(_._1 == "started"))
+        val restart: Option[Either[String, (String, String)]] =
+          if notifiedBy.isEmpty || starting || u.running.contains(false) then None
+          else
+            val by = s"(notified by ${notifiedBy.mkString(", ")})"
+            u.running match
+              case Some(true) => Some(Right(s"restarted $by" -> s"systemctl restart $n"))
+              case _          => Option.when(running)(Right(s"restarted $by" -> s"systemctl try-restart $n"))
+        val steps = List(enable, run, restart).flatten
+        steps.collectFirst { case Left(e) => e } match
+          case Some(e) if check && e == "no such unit" =>
+            // An earlier resource (a package, a unit file) may yet bring it.
+            Right(Difference(List("the unit does not exist yet"), Nil, Nil))
+          case Some(e) => Left(e)
+          case None =>
+            val ok = steps.collect { case Right(x) => x }
+            if ok.isEmpty then Right(NoDifference)
+            else shellOf(ok.map(_._1), ("systemctl daemon-reload" :: ok.map(_._2)).mkString(" && "))
+      case other => Left(s"unexpected state: $other")
+
+  private def compareUser(u: ApplyResource.User, seen: Observed): Either[String, Difference] =
+    val n = quote(u.name)
+    seen match
+      case Observed.Absent if !u.present => Right(NoDifference)
+      case Observed.Absent =>
+        val flags = List(
+          Option.when(u.uid >= 0)(s"-u ${u.uid}"),
+          Option.when(u.group.nonEmpty)(s"-g ${quote(u.group)}"),
+          Option.when(u.groups.nonEmpty)(s"-G ${quote(u.groups.mkString(","))}"),
+          Option.when(u.home.nonEmpty)(s"-d ${quote(u.home)}"),
+          Option.when(!u.system || u.home.nonEmpty)("-m"),
+          Option.when(u.shell.nonEmpty)(s"-s ${quote(u.shell)}"),
+          Option.when(u.system)("-r")
+        ).flatten
+        shellOf(List("created"), (("useradd" :: flags) :+ n).mkString(" "))
+      case _: Observed.Account if !u.present => shellOf(List("removed"), s"userdel $n")
+      case Observed.Account(uid, group, groups, home, shell) =>
+        val missing = u.groups.filterNot(groups.contains)
+        val wanted = List(
+          Option.when(u.uid >= 0 && u.uid != uid)(s"uid $uid -> ${u.uid}" -> s"-u ${u.uid}"),
+          Option.when(u.group.nonEmpty && u.group != group)(s"group $group -> ${u.group}" -> s"-g ${quote(u.group)}"),
+          Option.when(missing.nonEmpty)(s"added to ${missing.mkString(", ")}" -> s"-a -G ${quote(missing.mkString(","))}"),
+          Option.when(u.home.nonEmpty && u.home != home)(s"home $home -> ${u.home}" -> s"-d ${quote(u.home)}"),
+          Option.when(u.shell.nonEmpty && u.shell != shell)(s"shell $shell -> ${u.shell}" -> s"-s ${quote(u.shell)}")
+        ).flatten
+        if wanted.isEmpty then Right(NoDifference)
+        else shellOf(wanted.map(_._1), (("usermod" :: wanted.map(_._2)) :+ n).mkString(" "))
+      case other => Left(s"unexpected state: $other")
+
+  private def compareGroup(g: ApplyResource.Group, seen: Observed): Either[String, Difference] =
+    val n = quote(g.name)
+    seen match
+      case Observed.Absent if !g.present => Right(NoDifference)
+      case Observed.Absent =>
+        val flags = List(Option.when(g.gid >= 0)(s"-g ${g.gid}"), Option.when(g.system)("-r")).flatten
+        shellOf(List("created"), (("groupadd" :: flags) :+ n).mkString(" "))
+      case _: Observed.GroupEntry if !g.present => shellOf(List("removed"), s"groupdel $n")
+      case Observed.GroupEntry(gid) if g.gid >= 0 && g.gid != gid => shellOf(List(s"gid $gid -> ${g.gid}"), s"groupmod -g ${g.gid} $n")
+      case _: Observed.GroupEntry => Right(NoDifference)
+      case other => Left(s"unexpected state: $other")
 
   /** Applies `plan` to `target` (with `check`: only reads and compares),
     * printing each resource's line through `say`, and returns the report. A
@@ -453,12 +691,11 @@ object Apply:
           ).attempt.map(e => i -> e.leftMap(err => Option(err.getMessage).getOrElse(err.toString)))
         case (_, i) => IO.pure(i -> Right(("", false)))
       }.map(_.toMap)
-      observable = rs.zipWithIndex.collect {
-        case (c: ApplyResource.Command, i) if c.guarded => (i, c: ApplyResource)
-        case (f: ApplyResource.File, i)      => (i, f: ApplyResource)
-        case (d: ApplyResource.Directory, i) => (i, d: ApplyResource)
-        case (s: ApplyResource.Symlink, i)   => (i, s: ApplyResource)
-      }.toList
+      observable = rs.zipWithIndex.toList.filter {
+        case (c: ApplyResource.Command, _) => c.guarded
+        case _                             => true
+      }.map(_.swap)
+      observableIds = observable.map(_._1).toSet
       seenOrError <- target.observe(observable).attempt
       outcomes <- Ref.of[IO, Map[Int, ApplyOutcome]](Map.empty)
       _ <- plan.order.toList.traverse_ { i =>
@@ -495,13 +732,20 @@ object Apply:
               r match
                 case c: ApplyResource.Command if c.onChangeOnly && notifiedBy.isEmpty => finish(ApplyOutcome.NotNotified)
                 case _ =>
-                  val seen: Either[String, Observed] = r match
-                    case c: ApplyResource.Command if !c.guarded => Right(Observed.Guard(needed = true, ""))
-                    case _ =>
-                      seenOrError match
-                        case Left(err) => Left(s"could not read the node: ${Option(err.getMessage).getOrElse(err.toString)}")
-                        case Right(m)  => m.get(i).toRight("the node did not say")
-                  (seen, contents(i)) match
+                  // After a real change, what the node holds may have moved (a package brings a unit,
+                  // a user owns a file): read this resource again rather than trust the first read.
+                  val again = !check && observableIds(i) && done.values.exists {
+                    case _: ApplyOutcome.Changed => true
+                    case _                       => false
+                  }
+                  def from(m: Either[Throwable, Map[Int, Observed]]): Either[String, Observed] = m match
+                    case Left(err) => Left(s"could not read the node: ${Option(err.getMessage).getOrElse(err.toString)}")
+                    case Right(found) => found.get(i).toRight("the node did not say")
+                  val seenIO: IO[Either[String, Observed]] = r match
+                    case c: ApplyResource.Command if !c.guarded => IO.pure(Right(Observed.Guard(needed = true, "")))
+                    case _ if again => target.observe(List(i -> r)).attempt.map(from)
+                    case _          => IO.pure(from(seenOrError))
+                  seenIO.flatMap(seen => (seen, contents(i)) match
                     case (Left(e), _)                 => finish(ApplyOutcome.Failed(e))
                     case (_, Left(e))                 => finish(ApplyOutcome.Failed(s"its content: $e"))
                     case (Right(Observed.Guard(false, note)), _) => finish(ApplyOutcome.Unchanged(note))
@@ -509,7 +753,7 @@ object Apply:
                       val wanted = r match
                         case f: ApplyResource.File if f.content.nonEmpty => Some(content)
                         case _                                      => None
-                      compare(r, s, wanted, target).attempt.flatMap {
+                      compare(r, s, wanted, target, check, notifiedBy.map(rs(_).id)).attempt.flatMap {
                         case Left(err)       => finish(ApplyOutcome.Failed(Option(err.getMessage).getOrElse(err.toString)))
                         case Right(Left(e))  => finish(ApplyOutcome.Failed(e))
                         case Right(Right(d)) if d.changes.isEmpty => finish(ApplyOutcome.Unchanged(""))
@@ -517,6 +761,7 @@ object Apply:
                         case Right(Right(d)) =>
                           val timeout = r match
                             case c: ApplyResource.Command => c.timeout
+                            case _: ApplyResource.Package => 900
                             case _                   => 120
                           d.actions.traverse_ {
                             case Action.Write(p, t, o, g, m) => target.write(p, t, o, g, m)
@@ -526,6 +771,7 @@ object Apply:
                             case Left(err)  => finish(ApplyOutcome.Failed(Option(err.getMessage).getOrElse(err.toString)))
                           }
                       }
+                  )
         }
       }
       done <- outcomes.get
@@ -564,11 +810,41 @@ object Apply:
         else s"[ ! -e ${quote(c.creates)} ]"
       s"""echo '$Marker$i'
          |if $test; then echo guard=yes; else echo guard=no; fi""".stripMargin
+    def pkg(i: Int, p: ApplyResource.Package): String =
+      val n = quote(p.name)
+      s"""echo '$Marker$i'
+         |if command -v dpkg-query >/dev/null 2>&1 && command -v apt-get >/dev/null 2>&1; then echo manager=apt
+         |  s=$$(dpkg-query -W -f='$${db:Status-Abbrev}|$${Version}' $n 2>/dev/null)
+         |  case "$$s" in ?i*) echo installed=yes; echo "versions=$${s#*|}";; *) echo installed=no;; esac
+         |elif command -v rpm >/dev/null 2>&1; then echo manager=dnf
+         |  if v=$$(rpm -q --qf '%{VERSION}-%{RELEASE} ' $n 2>/dev/null); then echo installed=yes; echo "versions=$$(echo $$v | tr ' ' ',')"; else echo installed=no; fi
+         |else echo manager=none; fi""".stripMargin
+    def unit(i: Int, u: ApplyResource.Service): String =
+      val n = quote(u.unit)
+      s"""echo '$Marker$i'
+         |e=$$(systemctl is-enabled $n 2>/dev/null); [ -n "$$e" ] || e=not-found
+         |if [ "$$e" = not-found ] && systemctl cat $n >/dev/null 2>&1; then e=static; fi
+         |echo "enabled=$$e"; echo "active=$$(systemctl is-active $n 2>/dev/null)"""".stripMargin
+    def user(i: Int, u: ApplyResource.User): String =
+      val n = quote(u.name)
+      s"""echo '$Marker$i'
+         |if e=$$(getent passwd $n); then echo exists=yes
+         |  echo "uid=$$(echo "$$e" | cut -d: -f3)"; echo "home=$$(echo "$$e" | cut -d: -f6)"; echo "shell=$$(echo "$$e" | cut -d: -f7)"
+         |  echo "group=$$(id -gn $n)"; echo "groups=$$(id -Gn $n | tr ' ' ',')"
+         |else echo exists=no; fi""".stripMargin
+    def group(i: Int, g: ApplyResource.Group): String =
+      val n = quote(g.name)
+      s"""echo '$Marker$i'
+         |if e=$$(getent group $n); then echo exists=yes; echo "gid=$$(echo "$$e" | cut -d: -f3)"; else echo exists=no; fi""".stripMargin
     ("set +e" :: resources.map {
       case (i, f: ApplyResource.File)      => pathState(i, f.path)
       case (i, d: ApplyResource.Directory) => pathState(i, d.path)
       case (i, s: ApplyResource.Symlink)   => pathState(i, s.path)
       case (i, c: ApplyResource.Command)   => guard(i, c)
+      case (i, p: ApplyResource.Package)   => pkg(i, p)
+      case (i, u: ApplyResource.Service)   => unit(i, u)
+      case (i, u: ApplyResource.User)      => user(i, u)
+      case (i, g: ApplyResource.Group)     => group(i, g)
     }).mkString("\n")
 
   /** The states in `observeScript`'s output. */
@@ -602,6 +878,32 @@ object Apply:
             kv.get("guard") match
               case Some("yes") => Observed.Guard(needed = true, "")
               case Some("no")  => Observed.Guard(needed = false, note)
+              case _           => Observed.Unreadable(kv.mkString(" "))
+          case _: ApplyResource.Package =>
+            kv.get("manager") match
+              case Some(m) =>
+                Observed.Pkg(m, kv.get("installed").contains("yes"), kv.getOrElse("versions", "").split(",").toList.filter(_.nonEmpty))
+              case None => Observed.Unreadable(kv.mkString(" "))
+          case _: ApplyResource.Service =>
+            kv.get("enabled") match
+              case Some(e) => Observed.ServiceState(e, kv.getOrElse("active", ""))
+              case None    => Observed.Unreadable(kv.mkString(" "))
+          case _: ApplyResource.User =>
+            kv.get("exists") match
+              case Some("no")  => Observed.Absent
+              case Some("yes") =>
+                Observed.Account(
+                  kv.get("uid").flatMap(_.toIntOption).getOrElse(-1),
+                  kv.getOrElse("group", ""),
+                  kv.getOrElse("groups", "").split(",").toList.filter(_.nonEmpty),
+                  kv.getOrElse("home", ""),
+                  kv.getOrElse("shell", "")
+                )
+              case _ => Observed.Unreadable(kv.mkString(" "))
+          case _: ApplyResource.Group =>
+            kv.get("exists") match
+              case Some("no")  => Observed.Absent
+              case Some("yes") => Observed.GroupEntry(kv.get("gid").flatMap(_.toIntOption).getOrElse(-1))
               case _           => Observed.Unreadable(kv.mkString(" "))
           case _ =>
             kv.get("type") match

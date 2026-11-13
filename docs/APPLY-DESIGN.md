@@ -2,7 +2,9 @@
 
 Status: step 1 built 2026-11-12 (core, files, directories, symlinks, commands, check mode, `orphera
 apply`, `Task.Apply`, `node.apply`; the types are `ApplyResource` and `ApplyOutcome`, since `Resource` and
-`Outcome` were taken), with the two cache-client descriptions of step 3; steps 2 and 4 to come. Proposed
+`Outcome` were taken), with the two cache-client descriptions of step 3; step 2 (packages, services,
+users, groups, service restart on notification, reading a resource again after a change) built
+2026-11-13; step 4 to come. Proposed
 2026-11-12. Closes the "No standalone declarative file-manifest mechanism (`apply`)"
 entry in the README's known gaps, and most of "check mode covers Placement only".
 

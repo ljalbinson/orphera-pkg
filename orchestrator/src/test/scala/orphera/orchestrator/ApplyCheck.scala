@@ -46,10 +46,14 @@ object ApplyCheck:
     case D(mode: Int, owner: String, group: String)
     case L(target: String)
 
-  private final class FakeNode(
+  private class FakeNode(
       var fs: Map[String, Entry],
       guards: Map[String, Boolean] = Map.empty,
-      failing: Set[String] = Set.empty
+      failing: Set[String] = Set.empty,
+      var pkgs: Map[String, String] = Map.empty,
+      var units: Map[String, (String, String)] = Map.empty,
+      var users: Map[String, Observed.Account] = Map.empty,
+      var groupsDb: Map[String, Int] = Map.empty
   ) extends ApplyTarget:
     var ran: Vector[String] = Vector.empty
     var observed: Int = 0
@@ -67,6 +71,12 @@ object ApplyCheck:
             else if c.unless.nonEmpty then !guards.getOrElse(c.unless, false)
             else !fs.contains(c.creates)
             Observed.Guard(g, if g then "" else "guard says no")
+          case p: ApplyResource.Package => Observed.Pkg("apt", pkgs.contains(p.name), pkgs.get(p.name).toList)
+          case u: ApplyResource.Service =>
+            val (e, a) = units.getOrElse(u.unit, ("not-found", "inactive"))
+            Observed.ServiceState(e, a)
+          case u: ApplyResource.User  => users.getOrElse(u.name, Observed.Absent)
+          case g: ApplyResource.Group => groupsDb.get(g.name).fold(Observed.Absent)(Observed.GroupEntry(_))
           case other =>
             val p = other match
               case f: ApplyResource.File      => f.path
@@ -105,6 +115,16 @@ object ApplyCheck:
     private val Rmdir = s"rmdir -- $Q".r
     private val Ln = s"ln -sfn -- $Q $Q".r
     private val Chmod = s"chmod ([0-7]+) $Q".r
+    private val AptInstall = s".*apt-get install .* $Q".r
+    private val AptRemove = s".*apt-get remove .* $Q".r
+    private val Systemctl = s"systemctl ([a-z-]+) $Q".r
+    private val UserAdd = s"useradd (.*)$Q".r
+    private val UserMod = s"usermod (.*)$Q".r
+    private val UserDel = s"userdel $Q".r
+    private val GroupAdd = s"groupadd (.*)$Q".r
+    private val GroupDel = s"groupdel $Q".r
+    private def flag(flags: String, f: String): Option[String] =
+      s"$f (?:$Q|(\\S+))".r.findFirstMatchIn(flags).map(m => Option(m.group(1)).map(unq).getOrElse(m.group(2)))
 
     def shell(label: String, script: String, timeout: Int): IO[Unit] =
       IO {
@@ -122,6 +142,39 @@ object ApplyCheck:
               case Some(e: Entry.D) => Some(e.copy(mode = mode))
               case other            => other
             }
+          case AptInstall(spec) =>
+            unq(spec).split("=", 2) match
+              case Array(n, v) => pkgs += n -> v
+              case other       => pkgs += other.mkString -> "1.0-1"
+          case AptRemove(n) => pkgs -= unq(n)
+          case Systemctl(verb, u) =>
+            val (e, a) = units.getOrElse(unq(u), ("not-found", "inactive"))
+            if e == "not-found" then throw new RuntimeException(s"no unit ${unq(u)}")
+            units += unq(u) -> (verb match
+              case "enable"                    => ("enabled", a)
+              case "disable"                   => ("disabled", a)
+              case "start" | "restart"         => (e, "active")
+              case "stop"                      => (e, "inactive")
+              case _                           => (e, a))
+          case UserAdd(flags, n) =>
+            val name = unq(n)
+            users += name -> Observed.Account(
+              flag(flags, "-u").flatMap(_.toIntOption).getOrElse(1001),
+              flag(flags, "-g").getOrElse(name),
+              flag(flags, "-G").fold(List.empty[String])(_.split(",").toList),
+              flag(flags, "-d").getOrElse(s"/home/$name"),
+              flag(flags, "-s").getOrElse("/bin/sh")
+            )
+          case UserMod(flags, n) =>
+            users = users.updatedWith(unq(n))(_.map { a =>
+              a.copy(
+                shell = flag(flags, "-s").getOrElse(a.shell),
+                groups = a.groups ++ flag(flags, "-a -G").fold(List.empty[String])(_.split(",").toList)
+              )
+            })
+          case UserDel(n) => users -= unq(n)
+          case GroupAdd(flags, n) => groupsDb += unq(n) -> flag(flags, "-g").flatMap(_.toIntOption).getOrElse(1001)
+          case GroupDel(n) => groupsDb -= unq(n)
           case _ => () // a command: recorded in `ran`
         }
       }
@@ -150,7 +203,7 @@ object ApplyCheck:
     check("an unguarded command", problems(List(command("go", "true"))).exists(_.contains("would run every time")))
     check("two guards", problems(List(command("go", "true", onlyIf = "a", unless = "b"))).exists(_.contains("one of onlyIf")))
     check("after something not described", problems(List(file("/etc/x", "a").afterIds("file[/nope]"))).exists(_.contains("which is not described")))
-    check("notifying a file", problems(List(file("/a", "a").notifiesIds("file[/b]"), file("/b", "b"))).exists(_.contains("not an onChangeOnly command")))
+    check("notifying a file", problems(List(file("/a", "a").notifiesIds("file[/b]"), file("/b", "b"))).exists(_.contains("not a service or an onChangeOnly command")))
     check("onChangeOnly with nothing notifying it", problems(List(restart)).exists(_.contains("nothing notifies it")))
     val a = file("/a", "a")
     val b = file("/b", "b").after(a)
@@ -176,7 +229,7 @@ object ApplyCheck:
     val first = ranFirst.report
     val lines1 = ranFirst.lines
     check("first run: everything changed", first.results.forall(_.changed) && !first.failed, first.toString)
-    check("first run: one read of the node", n.observed == 1, n.observed.toString)
+    check("first run: one read, then each resource again once something changed", n.observed == 3, n.observed.toString)
     check("first run: the directory got its mode", n.fs.get("/etc/app").contains(Entry.D(0x1e8, "root", "root")), n.fs.toString)
     check("first run: the notified command ran last", n.ran.lastOption.exists(_.contains("dnf clean")), n.ran.toString)
     check("first run: the plan line names who notified", lines1.exists(l => l.contains("command[clean]") && l.contains("ran (notified by file[/etc/app/app.conf])")), lines1.mkString("\n"))
@@ -259,6 +312,58 @@ object ApplyCheck:
     val tn = new FakeNode(Map.empty)
     applyTo(tn, List(fileFrom("/etc/t", "t.mustache", Map("name" -> "tst8"))))
     check("fileFrom: rendered with vars", tn.fs.get("/etc/t").exists { case Entry.F(t, _, _, _) => t == "source t.mustache for tst8"; case _ => false }, tn.fs.toString)
+
+  private def kindChecks(): Unit =
+    // Plans.
+    check("a bad package name", problems(List(pkg("no spaces"))).exists(_.contains("not a package name")))
+    check("a bad user name", problems(List(user("Bad Name"))).exists(_.contains("not a user name")))
+    check("a service with nothing to do", problems(List(service("x.service", enabled = None, running = None))).exists(_.contains("says nothing about it")))
+    check("a service may be notified", problems(List(file("/etc/x", "x").notifiesIds("service[x.service]"), service("x.service"))).isEmpty)
+    val implied = ApplyPlan("t", List(file("/srv/f", "x", owner = "app", group = "app"), user("app", group = "app"), group("app")))
+    check(
+      "order: a group before its users, a user before the files it owns",
+      implied.toOption.map(p => p.order.map(p.resources(_).id).toList).contains(List("group[app]", "user[app]", "file[/srv/f]")),
+      implied.toString
+    )
+
+    // A package, its config, its service, restarted on a config change.
+    def desc(conf: String) = List(
+      group("app", gid = 990, system = true),
+      user("app", group = "app", groups = List("adm"), shell = "/usr/sbin/nologin", system = true),
+      pkg("app-server", updateCache = true),
+      file("/etc/app.conf", conf, owner = "app").after(pkg("app-server")).notifiesIds("service[app.service]"),
+      service("app.service").after(pkg("app-server"))
+    )
+    val n = new FakeNode(Map.empty, users = Map("root" -> Observed.Account(0, "root", Nil, "/root", "/bin/bash")))
+    val planned = applyTo(n, desc("a\n"), check = true)
+    check("kinds check: all would change", planned.report.results.forall(_.changed), planned.lines.mkString("\n"))
+    check("kinds check: a unit that a package will bring", planned.lines.exists(l => l.contains("service[app.service]") && l.contains("the unit does not exist yet")), planned.lines.mkString("\n"))
+    // Installing the package brings its unit, disabled and stopped.
+    val withUnit = new FakeNode(Map.empty) {
+      override def shell(label: String, script: String, timeout: Int): IO[Unit] =
+        super.shell(label, script, timeout) >> IO { if script.contains("apt-get install") then units += "app.service" -> ("disabled", "inactive") }
+    }
+    val first = applyTo(withUnit, desc("a\n"))
+    check("kinds first run: nothing failed", !first.report.failed, first.lines.mkString("\n"))
+    check("kinds first run: group then user", withUnit.groupsDb.get("app").contains(990) && withUnit.users.get("app").exists(a => a.group == "app" && a.groups == List("adm")), withUnit.users.toString)
+    check("kinds first run: apt-get update then install", withUnit.ran.exists(r => r.contains("apt-get update -q && ") && r.contains("'app-server'")), withUnit.ran.toString)
+    check("kinds first run: the service enabled and started, not restarted", withUnit.units.get("app.service").contains(("enabled", "active")) && first.lines.exists(l => l.contains("service[app.service]") && l.contains("enabled, started") && !l.contains("restarted")), first.lines.mkString("\n"))
+    withUnit.ran = Vector.empty
+    val second = applyTo(withUnit, desc("a\n"))
+    check("kinds second run: nothing changed", !second.report.changed && withUnit.ran.isEmpty, second.lines.mkString("\n") + withUnit.ran)
+    val third = applyTo(withUnit, desc("b\n"))
+    check("kinds config change: restarted", third.lines.exists(_.contains("restarted (notified by file[/etc/app.conf])")) && withUnit.ran.exists(_.contains("systemctl restart 'app.service'")), third.lines.mkString("\n"))
+    val pinned = applyTo(withUnit, List(pkg("app-server", version = "2.0-1")), check = true)
+    check("a version differs", pinned.lines.exists(_.contains("version 1.0-1 -> 2.0-1")), pinned.lines.mkString("\n"))
+    check("a version without its release matches", Apply.versionMatches("2.0-1.el9", "2.0") && !Apply.versionMatches("2.01", "2.0"))
+    val more = applyTo(withUnit, List(user("app", groups = List("adm", "ceph"))))
+    check("supplementary groups are added, not replaced", withUnit.users.get("app").exists(_.groups == List("adm", "ceph")) && more.lines.exists(_.contains("added to ceph")), more.lines.mkString("\n"))
+    val gone = applyTo(withUnit, List(service("app.service", enabled = Some(false), running = Some(false)), absentPkg("app-server"), absentUser("app"), absentGroup("app")))
+    check("removal of the four kinds", withUnit.units.get("app.service").contains(("disabled", "inactive")) && withUnit.pkgs.isEmpty && withUnit.users.isEmpty && withUnit.groupsDb.isEmpty, gone.lines.mkString("\n"))
+    val masked = new FakeNode(Map.empty, units = Map("m.service" -> ("masked", "inactive")))
+    check("a masked unit fails", applyTo(masked, List(service("m.service"))).report.failures.exists(_.contains("masked")))
+    val missing = new FakeNode(Map.empty)
+    check("a unit that does not exist fails in a real run", applyTo(missing, List(service("none.service"))).report.failures.exists(_.contains("no such unit")))
 
   private def diffChecks(): Unit =
     val d = TextDiff.unified("a\nb\nc\nd\ne\nf\ng\n", "a\nb\nc\nX\ne\nf\ng\n", "/f")
@@ -354,6 +459,28 @@ object ApplyCheck:
       check("local check after an edit: a real diff", diff.changed && l3.contains("  -y = 2") && l3.contains("  +y = 3"), l3.mkString("\n"))
       val clash = List(file(s"$base/conf.d", "not a dir"))
       check("local: a directory where a file is wanted fails", run(clash, check = false).report.failed)
+      // The four kinds, read by the real observe script on this machine (check mode only: nothing changes).
+      val kinds = run(
+        List(
+          pkg("bash"),
+          absentPkg("orphera-no-such-package"),
+          service("orphera-no-such-unit.service"),
+          user("root"),
+          absentUser("orphera-nobody"),
+          group("root"),
+          absentGroup("orphera-nogroup"),
+          group("orphera-new-group")
+        ),
+        check = true
+      )
+      val kl = kinds.lines.mkString("\n")
+      def kindOutcome(id: String) = outcome(kinds.report, id)
+      check("local: an installed package (bash) is unchanged", kindOutcome("package[bash]").exists(_.isInstanceOf[ApplyOutcome.Unchanged]), kl)
+      check("local: an absent package stays absent", kindOutcome("package[orphera-no-such-package]").exists(_.isInstanceOf[ApplyOutcome.Unchanged]), kl)
+      check("local: a unit that does not exist would change in check mode", kindOutcome("service[orphera-no-such-unit.service]").exists(_.isInstanceOf[ApplyOutcome.WouldChange]), kl)
+      check("local: root exists", kindOutcome("user[root]").exists(_.isInstanceOf[ApplyOutcome.Unchanged]) && kindOutcome("group[root]").exists(_.isInstanceOf[ApplyOutcome.Unchanged]), kl)
+      check("local: absent user and group", kindOutcome("user[orphera-nobody]").exists(_.isInstanceOf[ApplyOutcome.Unchanged]) && kindOutcome("group[orphera-nogroup]").exists(_.isInstanceOf[ApplyOutcome.Unchanged]), kl)
+      check("local: a new group would be created", kindOutcome("group[orphera-new-group]").contains(ApplyOutcome.WouldChange(List("created"), Nil)), kl)
     finally
       new ProcessBuilder("rm", "-rf", base).start().waitFor()
       ()
@@ -361,6 +488,7 @@ object ApplyCheck:
   def main(args: Array[String]): Unit =
     planChecks()
     runChecks()
+    kindChecks()
     diffChecks()
     localChecks()
     println(s"ApplyCheck: $passes passed, $failures failed")
