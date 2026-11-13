@@ -30,7 +30,8 @@ import orphera.orchestrator.*
 //      glance/ceph-key, manila/ceph-key). The key is fetched masked with a
 //      one-time pad, so it is not in the output or the run log.
 //   4. Re-runs cinder_single_node, glance_single_node, manila_single_node and
-//      nova_compute (orphera cluster-playbook), which write the new keys into
+//      nova_compute (orphera cluster-playbook, in full: never resumed from an
+//      old checkpoint, even under --resume), which write the new keys into
 //      the services' keyrings and the compute hosts' libvirt secret, and leave
 //      the cipher setting alone now that the keys are aes256k.
 //   5. Checks each service connects with its new key, and the libvirt secret.
@@ -109,7 +110,13 @@ object ceph_key_rotation extends OrpheraScript:
 
   private def runManifest(name: String): IO[Unit] =
     IO.println(s"[scala0] orphera cluster-playbook manifests/$name.scala") >>
-      IO.blocking(new ProcessBuilder("orphera", "cluster-playbook", s"manifests/$name.scala").inheritIO().start().waitFor())
+      IO.blocking {
+        val pb = new ProcessBuilder("orphera", "cluster-playbook", s"manifests/$name.scala").inheritIO()
+        // In full, never resumed: `--resume` on this script sets ORPHERA_RESUME, and a manifest that inherited
+        // it would skip, from an old checkpoint, the very steps that write the new key.
+        pb.environment().remove("ORPHERA_RESUME")
+        pb.start().waitFor()
+      }
         .flatMap(rc => IO.raiseWhen(rc != 0)(new IllegalStateException(s"manifests/$name.scala failed (exit $rc): see above; then --resume")))
 
   // Each service connects to the cluster with the keyring it has, from inside its container.
