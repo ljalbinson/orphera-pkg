@@ -184,6 +184,21 @@ playbook() {
   rm -f "$out"
 }
 
+# A declarative description (orphera apply): changes only what differs.
+apply_desc() {
+  local f="$1" out rc
+  log "applying $1"
+  shift
+  out=$(mktemp)
+  orphera apply "$f" "$@" 2>&1 | tee "$out"
+  rc=${PIPESTATUS[0]}
+  if [ "$rc" -ne 0 ] || grep -qE "Apply '.*' failed" "$out"; then
+    rm -f "$out"
+    die "$(basename "$f") did not complete"
+  fi
+  rm -f "$out"
+}
+
 # ---- preflight ------------------------------------------------------------
 
 preflight() {
@@ -223,7 +238,7 @@ step_prep() {
 
 step_caches() {
   playbook apt_cache.scala
-  playbook apt_cache_clients.scala
+  apply_desc apt_cache_clients.scala
   playbook kolla_cache.scala
   out=$(run_on tst11 "curl -s -o /dev/null -w 'http=%{http_code}' http://localhost:3142/acng-report.html")
   check "apt cache answers on tst11" contains "http=200" "$out"

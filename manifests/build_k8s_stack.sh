@@ -151,6 +151,21 @@ playbook() {
   rm -f "$out"
 }
 
+# A declarative description (orphera apply): changes only what differs.
+apply_desc() {
+  local f="$1" out rc
+  log "applying $1"
+  shift
+  out=$(mktemp)
+  orphera apply "$f" "$@" 2>&1 | tee "$out"
+  rc=${PIPESTATUS[0]}
+  if [ "$rc" -ne 0 ] || grep -qE "Apply '.*' failed" "$out"; then
+    rm -f "$out"
+    die "$(basename "$f") did not complete"
+  fi
+  rm -f "$out"
+}
+
 # agents_answer <nodes...>: every node answers through its agent.
 agents_answer() {
   local n out bad=""
@@ -189,7 +204,7 @@ step_dns() {
 }
 
 step_mirrors()    { playbook k8s_registry_mirrors.scala; }
-step_aptclients() { playbook apt_cache_clients.scala; }
+step_aptclients() { apply_desc apt_cache_clients.scala; }
 step_nodeprep()   { playbook k8s_node_prep.scala; }
 step_vip()        { playbook k8s_api_vip.scala; }
 

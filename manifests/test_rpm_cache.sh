@@ -75,7 +75,7 @@ if ! orphera cluster-playbook rpm_cache.scala; then
 fi
 
 log "point the Rocky client at it"
-if ! orphera cluster-playbook rpm_cache_clients.scala; then
+if ! orphera apply rpm_cache_clients.scala; then
   log "FAIL: rpm_cache_clients.scala did not complete"; exit 1
 fi
 
@@ -139,10 +139,18 @@ assert_contains "the cache answers again when it is back" "ok" "$OUT"
 # ---- idempotence -----------------------------------------------------------
 
 log "re-apply (idempotence)"
-if orphera cluster-playbook rpm_cache.scala && orphera cluster-playbook rpm_cache_clients.scala; then
-  log "PASS: second run completed"; PASS=$((PASS + 1))
+if orphera cluster-playbook rpm_cache.scala; then
+  log "PASS: second run of rpm_cache.scala completed"; PASS=$((PASS + 1))
 else
-  log "FAIL: second run failed"; FAIL=$((FAIL + 1))
+  log "FAIL: second run of rpm_cache.scala failed"; FAIL=$((FAIL + 1))
+fi
+# The clients are a declarative description: a second run must change nothing.
+OUT=$(orphera apply rpm_cache_clients.scala 2>&1); RC=$?
+echo "$OUT"
+if [ "$RC" -eq 0 ] && ! echo "$OUT" | grep -qE ': [1-9][0-9]* changed'; then
+  log "PASS: second run of rpm_cache_clients.scala changed nothing"; PASS=$((PASS + 1))
+else
+  log "FAIL: second run of rpm_cache_clients.scala failed or changed something"; FAIL=$((FAIL + 1))
 fi
 
 log "passed=$PASS failed=$FAIL"
