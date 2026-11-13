@@ -2825,7 +2825,18 @@ Kolla names and tags, which the nodes already try first), and then `ceph_key_rot
 keys to `aes256k` and sets the monitors to `aes256k` only. Run from the repository directory:
 
     orphera playbook manifests/ceph_client_upgrade.scala    # run on the lab 2026-11-12
-    orphera playbook manifests/ceph_key_rotation.scala      # Cinder, Glance, Manila off Ceph for a few minutes
+    orphera playbook manifests/ceph_key_rotation.scala      # run on the lab 2026-11-13; Cinder, Glance, Manila off Ceph for a few minutes
+
+After an upgrade, check NFS (Ganesha) left its grace period. The upgrade renamed Ganesha's member in its
+grace database (`nfs.manila.0` before, `0` after on the lab, 2026-11-13), and the stale member, still marked
+as needing grace, kept the server in grace: NFS clients could mount but every open for writing waited for
+ever, and Manila's share test hung. Ganesha's log repeats `nfs_try_lift_grace` (or
+`Attempt to lift grace failed`) instead of `NFS Server Now NOT IN GRACE`. The database should list only
+the running daemon's member (`nodeid` in `RADOS_KV` in its `ganesha.conf`):
+
+    cephadm shell -- ganesha-rados-grace --pool .nfs --ns manila dump
+    cephadm shell -- ganesha-rados-grace --pool .nfs --ns manila remove <stale member>
+    cephadm shell -- ganesha-rados-grace --pool .nfs --ns manila add <the daemon's nodeid>   # if it is missing
 
 ## Scala Native versions of the VM scripts
 
