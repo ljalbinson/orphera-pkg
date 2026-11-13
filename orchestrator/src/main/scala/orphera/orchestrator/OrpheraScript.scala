@@ -360,12 +360,28 @@ final class NodeRef private[orchestrator] (val node: Node, orphera: Orphera):
     * says what changed (`report.changed("file[/etc/x]")`).
     */
   def apply(plan: ApplyPlan, check: Boolean = false, stopOnFailure: Boolean = false): IO[ApplyReport] =
+    applyGrouped(plan, check, stopOnFailure, None)
+
+  /** As `apply`; with `together`, the node's lines are held back and printed
+    * in one block when it finishes (under that lock, so blocks from nodes
+    * applied in parallel do not interleave).
+    */
+  private[orchestrator] def applyGrouped(
+      plan: ApplyPlan,
+      check: Boolean,
+      stopOnFailure: Boolean,
+      together: Option[std.Mutex[IO]]
+  ): IO[ApplyReport] =
     val label = s"apply ${plan.name}"
     facts.flatMap { f =>
       val env = orphera.env.copy(context = ClusterContext(Map(node.name -> f)))
+      def show(text: String): IO[Unit] = env.output.line(node, label, text)
       for
+        held <- Ref.of[IO, Vector[String]](Vector.empty)
+        say = (text: String) => if together.isDefined then held.update(_ :+ text) else show(text)
+        flush = together.fold(IO.unit)(lock => lock.lock.surround(held.get.flatMap(_.traverse_(show))))
         _ <- orphera.runLog.event("event" -> "task_start", "node" -> node.name, "task" -> label, "check" -> check)
-        report <- TaskExecutor.applyOn(plan, node, env, check, stopOnFailure, text => env.output.line(node, label, text))
+        report <- TaskExecutor.applyOn(plan, node, env, check, stopOnFailure, say).guarantee(flush)
         _ <- orphera.runLog.event(
           "event" -> "task_end",
           "node" -> node.name,
