@@ -98,9 +98,10 @@ enum Command:
   // Only meaningful for a .scala script; ignored for .yaml/a registered
   // compiled playbook, which have no way to read it at all.
   case RunPlaybook(path: String, resume: Boolean, config: Option[String])
-  // `apply <file.scala>`: a declarative description (OrpheraApply), run as a
-  // script is, with --check, --nodes and --stop-on-failure handed over as
-  // ORPHERA_CHECK, ORPHERA_APPLY_NODES and ORPHERA_STOP_ON_FAILURE.
+  // `apply <file.scala|file.yaml>`: a declarative description. A .scala one
+  // (OrpheraApply) is run as a script is, with --check, --nodes and
+  // --stop-on-failure handed over as ORPHERA_CHECK, ORPHERA_APPLY_NODES and
+  // ORPHERA_STOP_ON_FAILURE; a .yaml one (ApplyYaml) is read and run here.
   case Apply(path: String, check: Boolean, nodes: Option[List[String]], stopOnFailure: Boolean)
   case Reboot(
       nodes: Option[List[String]],
@@ -1417,8 +1418,8 @@ object Cli:
       |                      and client.key, signed by certs/ca.key; orphera presents it to
       |                      every agent. Needed before issue-certs --client-auth
       |  teardown          --nodes host1,host2 --yes [--purge] [--ssh-user root] [--ssh-key ~/.ssh/id_ed25519]
-      |  apply             <file.scala> [--nodes host1,host2] [--check] [--stop-on-failure]
-      |                    — a declarative description (OrpheraApply): each resource is
+      |  apply             <file.scala | file.yaml> [--nodes host1,host2] [--check] [--stop-on-failure]
+      |                    — a declarative description (OrpheraApply, or YAML): each resource is
       |                      read, compared and changed only where it differs; --check
       |                      changes nothing and shows what would change, with diffs
       |  playbook          <file.yaml | file.scala | compiled-name> [--resume] [--config <path>]

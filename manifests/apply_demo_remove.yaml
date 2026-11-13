@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: Apache-2.0
+
+# Undoes apply_demo.yaml (leaves the tree package, which the node may have had
+# before). A second run finds nothing to do.
+#
+#   orphera apply manifests/apply_demo_remove.yaml --nodes tst5
+name: apply-demo-remove
+nodes: [tst5]
+resources:
+  - command: stop orphera-demo
+    run: systemctl disable --now orphera-demo.service
+    only_if: test -e /etc/systemd/system/orphera-demo.service
+  - file: /etc/systemd/system/orphera-demo.service
+    state: absent
+    requires: ["command[stop orphera-demo]"]
+    notify: ["command[reload systemd]"]
+  - command: reload systemd
+    run: systemctl daemon-reload
+    on_change_only: true
+  - command: remove the demo directory
+    run: rm -rf /var/lib/orphera-demo
+    only_if: test -d /var/lib/orphera-demo
+  - user: orphera-demo
+    state: absent
+    requires: ["command[stop orphera-demo]", "command[remove the demo directory]"]
+  - group: orphera-demo
+    state: absent
+    requires: ["user[orphera-demo]"]

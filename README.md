@@ -1205,7 +1205,27 @@ Resources (`import Resources.*`), each named by kind and path or label (`file[/e
   again does only what is still different.
 - **Elsewhere:** `node.apply(plan)` in a script returns an `ApplyReport` (`report.changed("file[/etc/x]")`),
   and `Task.Apply(plan)` is a task in a playbook. Reading a node is one shell command per node.
-- **Not yet:** YAML descriptions (step 4 of the design).
+- **YAML:** `orphera apply <file.yaml>` takes the same resources without Scala, for descriptions that need
+  no code (`manifests/apply_demo.yaml`):
+
+  ```yaml
+  name: chrony
+  nodes: [tst8]
+  resources:
+    - package: chrony
+    - file: /etc/chrony.conf
+      source: files/chrony.conf.mustache   # or content: |, with vars: {...} for a template
+      mode: "0644"
+      notify: ["service[chronyd]"]
+    - service: chronyd                     # enabled and running: true (default), false or any
+  ```
+
+  Each resource has one kind key (`file`, `directory`, `symlink`, `package`, `service`, `user`, `group`,
+  `command`) whose value names it, the options of the Scala function in snake case (`update_cache`,
+  `only_if`, `on_change_only`), `state: absent` to remove, and `requires` / `notify` with resource ids.
+  Quote modes (`"0644"`; unquoted, YAML may read a number) and ids in `[...]` lists (`["file[/etc/x]"]`).
+  An unknown option is an error. A `source` path is relative to the directory orphera runs in. Secret
+  content needs Scala (`secretFile`).
 
 `manifests/apt_cache_clients_apply.scala` and `rpm_cache_clients_apply.scala` are the two cache-client
 playbooks as descriptions; on nodes those playbooks have set up, `--check` should report every resource
@@ -3190,7 +3210,8 @@ playbooks marked DRAFT there have been written but not all run on the lab.
 
 - No dynamic/cloud inventory source
 - Declarative apply (`orphera apply`, see [Declarative
-  apply](#declarative-apply-orpheraapply)) has no YAML descriptions yet
+  apply](#declarative-apply-orpheraapply)) has no secret file content in
+  YAML descriptions (use Scala's `secretFile`)
 - Mutual TLS is per node and opt-in (`issue-certs --client-auth`); nodes
   without it accept any TLS client that has the token
 - No limits on what an authenticated caller may do: `run` is a root
