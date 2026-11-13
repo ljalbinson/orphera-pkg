@@ -1185,18 +1185,27 @@ Resources (`import Resources.*`), each named by kind and path or label (`file[/e
 | `directory(path, mode, owner, group)` | a directory |
 | `symlink(path, target)` | a symbolic link |
 | `absentFile`, `absentDirectory` (only if empty), `absentSymlink` | removed |
+| `pkg(name, version, updateCache)`, `absentPkg(name)` | a package installed (apt or dnf, whichever the node has), at `version` if given (`"2.0"` matches `2.0-1.el9`); `updateCache` runs `apt-get update` before installing |
+| `service(unit, enabled, running)` | a systemd unit enabled and running (each `Some(true)`, `Some(false)`, or `None` to leave it); a resource that notifies it restarts it once, unless this run starts it anyway |
+| `user(name, uid, group, groups, home, shell, system)`, `absentUser(name)` | a local user; `groups` are added to, never taken from; removing one leaves its home |
+| `group(name, gid, system)`, `absentGroup(name)` | a local group |
 | `command(label, run, onlyIf / unless / creates, onChangeOnly)` | a shell command, run when its guard says it is needed or, with `onChangeOnly`, when a resource that notifies it changed; one with neither is refused, since it would run every time |
 
-- **Order:** as listed, except that `r.after(other)` puts `r` after `other` wherever it stands, and a command
-  runs after everything that notifies it (`r.notifies(command)`), once.
-- **Checked before anything runs:** a name used twice, a relative path, a bad mode, an unknown reference, a
-  notification of anything but an `onChangeOnly` command, a cycle.
+- **Order:** as listed, except that `r.after(other)` puts `r` after `other` wherever it stands, a command or
+  service comes after everything that notifies it (`r.notifies(command)`), a user after the groups it names,
+  and a file or directory after the user and group that own it, when those are described.
+- **Read again after a change:** once something has changed on a node, each later resource is read again just
+  before its turn, so a unit that a package installed, or a user that a file is chowned to, is seen. In
+  `--check` nothing changes, so a unit that does not exist yet is reported as such rather than failed.
+- **Checked before anything runs:** a name used twice, a relative path, a bad mode, a bad package, unit,
+  user or group name, an unknown reference, a notification of anything but a service or an `onChangeOnly`
+  command, a cycle.
 - **Failures:** what comes after or is notified by a failed resource is skipped, the rest still runs, and
   the node fails at the end (`--stop-on-failure` stops at the first). There is no checkpoint: running it
   again does only what is still different.
 - **Elsewhere:** `node.apply(plan)` in a script returns an `ApplyReport` (`report.changed("file[/etc/x]")`),
   and `Task.Apply(plan)` is a task in a playbook. Reading a node is one shell command per node.
-- **Not yet:** packages, services, users and groups (step 2 of the design), and YAML descriptions (step 4).
+- **Not yet:** YAML descriptions (step 4 of the design).
 
 `manifests/apt_cache_clients_apply.scala` and `rpm_cache_clients_apply.scala` are the two cache-client
 playbooks as descriptions; on nodes those playbooks have set up, `--check` should report every resource
@@ -3181,9 +3190,7 @@ playbooks marked DRAFT there have been written but not all run on the lab.
 
 - No dynamic/cloud inventory source
 - Declarative apply (`orphera apply`, see [Declarative
-  apply](#declarative-apply-orpheraapply)) covers files, directories,
-  symlinks and guarded commands; packages, services, users, groups and
-  YAML descriptions are still to come
+  apply](#declarative-apply-orpheraapply)) has no YAML descriptions yet
 - Mutual TLS is per node and opt-in (`issue-certs --client-auth`); nodes
   without it accept any TLS client that has the token
 - No limits on what an authenticated caller may do: `run` is a root
