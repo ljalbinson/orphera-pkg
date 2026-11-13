@@ -368,6 +368,7 @@ object ApplyCheck:
   private def diffChecks(): Unit =
     val d = TextDiff.unified("a\nb\nc\nd\ne\nf\ng\n", "a\nb\nc\nX\ne\nf\ng\n", "/f")
     check("diff: header and the change", d.take(2) == List("--- /f (now)", "+++ /f (wanted)") && d.contains("-d") && d.contains("+X"), d.toString)
+    check("diff: the removed line before the added one", d.indexOf("-d") >= 0 && d.indexOf("-d") < d.indexOf("+X"), d.toString)
     check("diff: two lines of context, not more", d.contains(" b") && d.contains(" f") && !d.contains(" a") && !d.contains(" g"), d.toString)
 
   // ---- the real node side, on this machine ------------------------------

@@ -5,7 +5,8 @@ import orphera.orchestrator.*
 // Tries the step-2 resource kinds of declarative apply (docs/APPLY-DESIGN.md)
 // on a node without touching anything it already runs: a package (tree), a
 // group and a system user, a directory they own, and a oneshot systemd unit
-// of its own that a change to its unit file restarts.
+// of its own that a change to its unit file restarts. Removal leaves the
+// package, which the node may have had before.
 //
 //   orphera apply manifests/apply_kinds_demo.scala --check --nodes tst5
 //   orphera apply manifests/apply_kinds_demo.scala --nodes tst5     # creates
@@ -46,7 +47,6 @@ object apply_kinds_demo extends OrpheraApply:
         stop,
         absentFile(unitPath).after(stop).notifies(reload),
         reload,
-        absentPkg("tree"),
         clear,
         gone,
         absentGroup("orphera-demo").after(gone)
