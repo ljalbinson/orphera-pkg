@@ -2,7 +2,8 @@
 
 Status: step 1 built 2026-11-12 (core, files, directories, symlinks, commands, check mode, `orphera
 apply`, `Task.Apply`, `node.apply`; the types are `ApplyResource` and `ApplyOutcome`, since `Resource` and
-`Outcome` were taken), with the two cache-client descriptions of step 3; step 2 (packages, services,
+`Outcome` were taken), with the two cache-client descriptions of step 3 (run on the lab, and since
+2026-11-13 they have replaced the cluster playbooks under the same names); step 2 (packages, services,
 users, groups, service restart on notification, reading a resource again after a change) built
 2026-11-13; step 4 (YAML descriptions, `ApplyYaml`) built 2026-11-13. Proposed
 2026-11-12. Closes the "No standalone declarative file-manifest mechanism (`apply`)"

@@ -135,6 +135,16 @@ object InventoryCheck:
       expanded("uptime", "--node-groups", "nope", "--exclude-nodes", "a").swap.exists(_.contains("Unknown node group"))
     )
     check(
+      "apply takes --node-groups (expanded to --nodes before parsing)",
+      expanded("apply", "d.yaml", "--node-groups", "mons", "--check").flatMap(Cli.parse) ==
+        Right(Command.Apply("d.yaml", check = true, nodes = Some(List("a", "b", "c")), stopOnFailure = false))
+    )
+    check(
+      "apply takes a group with a member excluded",
+      expanded("apply", "d.yaml", "--node-groups", "mons", "--exclude-nodes", "b").flatMap(Cli.parse) ==
+        Right(Command.Apply("d.yaml", check = false, nodes = Some(List("a", "c")), stopOnFailure = false))
+    )
+    check(
       "a pipeline step may not give --exclude-nodes",
       Cli.parse(List("pipeline", "uptime --exclude-nodes a", "--nodes", "a,b")).isLeft
     )

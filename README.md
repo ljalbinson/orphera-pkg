@@ -1227,9 +1227,9 @@ Resources (`import Resources.*`), each named by kind and path or label (`file[/e
   An unknown option is an error. A `source` path is relative to the directory orphera runs in. Secret
   content needs Scala (`secretFile`).
 
-`manifests/apt_cache_clients_apply.scala` and `rpm_cache_clients_apply.scala` are the two cache-client
-playbooks as descriptions; on nodes those playbooks have set up, `--check` should report every resource
-unchanged.
+`manifests/apt_cache_clients.scala` and `rpm_cache_clients.scala` are descriptions (they replaced two
+cluster playbooks of the same names, which wrote the same files, so on nodes those set up `--check`
+reports every resource unchanged): `orphera apply apt_cache_clients.scala`.
 
 ## Cross-node coordination and staged playbooks
 
@@ -2687,8 +2687,8 @@ playbook and its test have not been run; the first build is likely to need adjus
 the playbook).
 
 Separately, `manifests/apt_cache.scala` builds an apt package cache
-(apt-cacher-ng on tst11) and `manifests/apt_cache_clients.scala` points the
-Ubuntu nodes at it. Nodes check the cache with a small auto-detect script and
+(apt-cacher-ng on tst11) and `manifests/apt_cache_clients.scala`, a description
+(`orphera apply apt_cache_clients.scala`), points the Ubuntu nodes at it. Nodes check the cache with a small auto-detect script and
 fetch directly when it is down, so nothing depends on it. `test_apt_cache.sh`
 proves a package is fetched from the mirror once and served from the cache to a
 second node.
@@ -2696,8 +2696,8 @@ second node.
 Likewise `manifests/rpm_cache.scala` builds an rpm package cache on tst12: an
 nginx caching mirror (port 8080) of the Rocky and EPEL download hosts. A mirror
 rather than a proxy, because Rocky repositories are fetched over HTTPS, which a
-plain proxy cannot cache. `manifests/rpm_cache_clients.scala` gives the Rocky
-node (tst8) a repository file listing the cache first and the official host
+plain proxy cannot cache. `manifests/rpm_cache_clients.scala`, a description
+(`orphera apply rpm_cache_clients.scala`), gives the Rocky node (tst8) a repository file listing the cache first and the official host
 second, so dnf falls back to the internet when tst12 is down; package signatures
 are still checked. `test_rpm_cache.sh` proves a package is fetched once (MISS) and
 then served from the cache (HIT) and that dnf works with the cache stopped.
@@ -3134,7 +3134,7 @@ repeated:
 
     manifests/par-mk-new-and-empty.sh -q -j 5 tst30 tst31 tst32 tst33 tst34 tst35 tst36 tst37 tst38 tst39
     orphera cluster-playbook manifests/k8s_registry_mirrors.scala   # 1  tst9: registry.k8s.io, Docker Hub, ghcr.io caches
-    orphera cluster-playbook manifests/apt_cache_clients.scala      #    includes tst30-tst39
+    orphera apply manifests/apt_cache_clients.scala                 #    includes tst30-tst39
     orphera cluster-playbook manifests/k8s_node_prep.scala          # 2  swap, sysctls, containerd, kubeadm packages
     orphera cluster-playbook manifests/k8s_api_vip.scala            # 3  haproxy + keepalived, 10.10.3.20
     orphera cluster-playbook manifests/k8s_cluster.scala            # 4  kubeadm init and join, stacked etcd on its own disk

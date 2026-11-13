@@ -74,7 +74,7 @@ if ! orphera cluster-playbook apt_cache.scala; then
 fi
 
 log "point the clients at it"
-if ! orphera cluster-playbook apt_cache_clients.scala; then
+if ! orphera apply apt_cache_clients.scala; then
   log "FAIL: apt_cache_clients.scala did not complete"; exit 1
 fi
 
@@ -156,10 +156,18 @@ fi
 # ---- idempotence -----------------------------------------------------------
 
 log "re-apply (idempotence)"
-if orphera cluster-playbook apt_cache.scala && orphera cluster-playbook apt_cache_clients.scala; then
-  log "PASS: second run completed"; PASS=$((PASS + 1))
+if orphera cluster-playbook apt_cache.scala; then
+  log "PASS: second run of apt_cache.scala completed"; PASS=$((PASS + 1))
 else
-  log "FAIL: second run failed"; FAIL=$((FAIL + 1))
+  log "FAIL: second run of apt_cache.scala failed"; FAIL=$((FAIL + 1))
+fi
+# The clients are a declarative description: a second run must change nothing.
+OUT=$(orphera apply apt_cache_clients.scala 2>&1); RC=$?
+echo "$OUT"
+if [ "$RC" -eq 0 ] && ! echo "$OUT" | grep -qE ': [1-9][0-9]* changed'; then
+  log "PASS: second run of apt_cache_clients.scala changed nothing"; PASS=$((PASS + 1))
+else
+  log "FAIL: second run of apt_cache_clients.scala failed or changed something"; FAIL=$((FAIL + 1))
 fi
 
 log "passed=$PASS failed=$FAIL"
