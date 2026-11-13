@@ -219,6 +219,22 @@ object SecretsCheck:
     )
     check("any other failure is reported as unreachable", NodeError.line(new java.io.IOException("no route to host")).startsWith("unreachable"))
 
+    // The file is decrypted once while it is unchanged, and read again when another store changes it.
+    var decrypts = 0
+    object CountingCipher extends Cipher:
+      def encrypt(plain: String): Either[String, Array[Byte]] = ReverseCipher.encrypt(plain)
+      def decrypt(data: Array[Byte]): Either[String, String] = { decrypts += 1; ReverseCipher.decrypt(data) }
+    val counted = dir.resolve("counted.age")
+    new SecretStore(counted, ReverseCipher).set("a/b", "first-value")
+    val cs = new SecretStore(counted, CountingCipher)
+    val reads = List(cs.get("a/b"), cs.get("a/b"), cs.names)
+    check("an unchanged file is decrypted once for several reads", decrypts == 1 && reads.forall(_.isRight), s"$decrypts decrypts")
+    Thread.sleep(20)
+    new SecretStore(counted, ReverseCipher).set("a/b", "second-value")
+    check("a file changed by another store is read again", cs.get("a/b") == Right(Some("second-value")) && decrypts == 2, s"$decrypts decrypts")
+    val c2 = cs.set("c/d", "third-value")
+    check("a write after reading keeps the other store's change", c2.isRight && new SecretStore(counted, ReverseCipher).get("a/b") == Right(Some("second-value")))
+
     // The real thing, when age is installed.
     if haveAge then
       val id = dir.resolve("age.key")
@@ -263,6 +279,25 @@ object SecretsCheck:
           .get("db/pw")
           .isLeft
       )
+      // A recipients file: encrypted to every recipient listed, so either identity reads it; rekey moves a store onto it.
+      val id2 = dir.resolve("second.key")
+      val pub1 = AgeCipher.createIdentity(dir.resolve("first.key"))
+      val pub2 = AgeCipher.createIdentity(id2)
+      val rfile = dir.resolve("recipients")
+      val before = new SecretStore(dir.resolve("rk.age"), new AgeCipher(dir.resolve("first.key")))
+      before.set("k/v", "rekeyed-value")
+      check("before rekey, the second identity cannot read the store", new SecretStore(dir.resolve("rk.age"), new AgeCipher(id2)).get("k/v").isLeft)
+      Files.writeString(rfile, s"# both keys\n${pub1.getOrElse("")}\n${pub2.getOrElse("")}\n")
+      val withList = new AgeCipher(dir.resolve("first.key"), Some(rfile))
+      check("the recipients are the file's lines, comments left out", withList.recipients == Right(List(pub1.getOrElse(""), pub2.getOrElse(""))), withList.recipients.toString)
+      val rekeyed = new SecretStore(dir.resolve("rk.age"), withList).rekey()
+      check("rekey re-encrypts every secret and keeps the old file", rekeyed == Right(1) && Files.exists(dir.resolve("rk.age.before-rekey")), rekeyed.toString)
+      check(
+        "after rekey, each identity reads the store",
+        new SecretStore(dir.resolve("rk.age"), new AgeCipher(id2)).get("k/v") == Right(Some("rekeyed-value")) &&
+          new SecretStore(dir.resolve("rk.age"), new AgeCipher(dir.resolve("first.key"))).get("k/v") == Right(Some("rekeyed-value"))
+      )
+      check("without a recipients file, the identity's own key is the recipient", new AgeCipher(id2, Some(dir.resolve("none"))).recipients == pub2.map(List(_)))
     else println("age is not installed: the age checks were skipped")
 
     check(
