@@ -2,7 +2,7 @@
 
 package orphera.orchestrator
 
-import cats.effect.{IO, IOApp}
+import cats.effect.{IO, IOApp, Ref, std}
 
 /** A declarative description, as a file `orphera apply` runs
   * (docs/APPLY-DESIGN.md):
@@ -62,10 +62,36 @@ object OrpheraApply:
         new PlaybookFailed(s"'$name' names no nodes: give --nodes, or $nodesHint")
       )
       _ <- IO.println(s"Applying '$name' to ${chosen.mkString(", ")}${if check then " (check: nothing will be changed)" else ""}")
+      lock <- std.Mutex[IO]
+      reports <- Ref.of[IO, Map[String, ApplyReport]](Map.empty)
+      // With several nodes, each node's lines come out together when it finishes, then a total.
+      together = Option.when(chosen.size > 1)(lock)
       _ <- Orphera.run(s"apply-$name", resume = false, kind = "Apply") { orphera =>
         orphera
           .nodes(chosen*)
-          .each(n => IO.defer(Apply.plan(name, describe(n.node))).flatMap(plan => n.apply(plan, check, stopOnFailure)))
+          .each(n =>
+            IO.defer(Apply.plan(name, describe(n.node)))
+              .flatMap(plan => n.applyGrouped(plan, check, stopOnFailure, together))
+              .flatTap(r => reports.update(_ + (n.name -> r)))
+          )
+          .attempt
+          .flatTap(_ => if chosen.size > 1 then reports.get.flatMap(rs => IO.println(total(chosen, rs, check))) else IO.unit)
+          .rethrow
           .void
       }
     yield ()
+
+  /** One line for all nodes: how many changed (or would), were unchanged, or
+    * failed; a node with no report could not be read or was stopped.
+    */
+  private[orchestrator] def total(chosen: List[String], reports: Map[String, ApplyReport], check: Boolean): String =
+    val done = chosen.flatMap(reports.get)
+    val changed = done.count(r => !r.failed && r.changed)
+    val unchanged = done.count(r => !r.failed && !r.changed)
+    // A node whose apply failed raises rather than reporting, so it has no report.
+    val failedNames = done.filter(_.failed).map(_.node) ++ chosen.filterNot(reports.contains)
+    val parts = List(
+      s"$changed ${if check then "to change" else "changed"}",
+      s"$unchanged unchanged"
+    ) ++ Option.when(failedNames.nonEmpty)(s"${failedNames.size} failed (${failedNames.mkString(", ")})")
+    s"All ${chosen.size} nodes: ${parts.mkString(", ")}"

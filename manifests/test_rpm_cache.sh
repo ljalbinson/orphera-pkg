@@ -70,7 +70,7 @@ log "teardown (failures here are tolerated: nothing may be installed yet)"
 orphera cluster-playbook rpm_cache_teardown.scala || true
 
 log "install the cache"
-if ! orphera cluster-playbook rpm_cache.scala; then
+if ! orphera apply rpm_cache.scala; then
   log "FAIL: rpm_cache.scala did not complete"; exit 1
 fi
 
@@ -139,19 +139,17 @@ assert_contains "the cache answers again when it is back" "ok" "$OUT"
 # ---- idempotence -----------------------------------------------------------
 
 log "re-apply (idempotence)"
-if orphera cluster-playbook rpm_cache.scala; then
-  log "PASS: second run of rpm_cache.scala completed"; PASS=$((PASS + 1))
-else
-  log "FAIL: second run of rpm_cache.scala failed"; FAIL=$((FAIL + 1))
-fi
-# The clients are a declarative description: a second run must change nothing.
-OUT=$(orphera apply rpm_cache_clients.scala 2>&1); RC=$?
-echo "$OUT"
-if [ "$RC" -eq 0 ] && ! echo "$OUT" | grep -qE ': [1-9][0-9]* changed'; then
-  log "PASS: second run of rpm_cache_clients.scala changed nothing"; PASS=$((PASS + 1))
-else
-  log "FAIL: second run of rpm_cache_clients.scala failed or changed something"; FAIL=$((FAIL + 1))
-fi
+# Both are declarative descriptions: a second run must change nothing (and so
+# not restart the cache).
+for desc in rpm_cache.scala rpm_cache_clients.scala; do
+  OUT=$(orphera apply "$desc" 2>&1); RC=$?
+  echo "$OUT"
+  if [ "$RC" -eq 0 ] && ! echo "$OUT" | grep -qE ': [1-9][0-9]* changed'; then
+    log "PASS: second run of $desc changed nothing"; PASS=$((PASS + 1))
+  else
+    log "FAIL: second run of $desc failed or changed something"; FAIL=$((FAIL + 1))
+  fi
+done
 
 log "passed=$PASS failed=$FAIL"
 [ "$FAIL" -eq 0 ]

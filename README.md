@@ -1203,6 +1203,9 @@ Resources (`import Resources.*`), each named by kind and path or label (`file[/e
 - **Failures:** what comes after or is notified by a failed resource is skipped, the rest still runs, and
   the node fails at the end (`--stop-on-failure` stops at the first). There is no checkpoint: running it
   again does only what is still different.
+- **Output:** with one node, each resource's line is printed as it finishes; with several, applied in
+  parallel, each node's lines are printed together when that node finishes, and a last line totals them
+  (`All 20 nodes: 10 changed, 10 unchanged`, with the failed nodes named).
 - **Elsewhere:** `node.apply(plan)` in a script returns an `ApplyReport` (`report.changed("file[/etc/x]")`),
   and `Task.Apply(plan)` is a task in a playbook. Reading a node is one shell command per node.
 - **YAML:** `orphera apply <file.yaml>` takes the same resources without Scala, for descriptions that need
@@ -2686,14 +2689,14 @@ playbooks point podman at tst21 first, then tst9, then quay.io, so an image that
 playbook and its test have not been run; the first build is likely to need adjustments to the kolla-build options (see the header of
 the playbook).
 
-Separately, `manifests/apt_cache.scala` builds an apt package cache
+Separately, `manifests/apt_cache.scala`, a description (`orphera apply apt_cache.scala`), builds an apt package cache
 (apt-cacher-ng on tst11) and `manifests/apt_cache_clients.scala`, a description
 (`orphera apply apt_cache_clients.scala`), points the Ubuntu nodes at it. Nodes check the cache with a small auto-detect script and
 fetch directly when it is down, so nothing depends on it. `test_apt_cache.sh`
 proves a package is fetched from the mirror once and served from the cache to a
 second node.
 
-Likewise `manifests/rpm_cache.scala` builds an rpm package cache on tst12: an
+Likewise `manifests/rpm_cache.scala` (also a description) builds an rpm package cache on tst12: an
 nginx caching mirror (port 8080) of the Rocky and EPEL download hosts. A mirror
 rather than a proxy, because Rocky repositories are fetched over HTTPS, which a
 plain proxy cannot cache. `manifests/rpm_cache_clients.scala`, a description

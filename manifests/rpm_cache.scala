@@ -1,10 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import orphera.orchestrator.*
-import orphera.orchestrator.ClusterPlaybookDsl.*
 
 // rpm package cache on tst12 (10.10.5.24): an nginx caching mirror of the Rocky
-// Linux repositories (and EPEL), for the dnf nodes (tst8, Rocky 10).
+// Linux repositories (and EPEL), for the dnf nodes (tst8, Rocky 10), as a
+// declarative description (OrpheraApply, docs/APPLY-DESIGN.md).
+//
+//   orphera apply rpm_cache.scala --check
+//   orphera apply rpm_cache.scala
+//
+// A second run changes nothing and does not restart nginx: it is restarted
+// only when its configuration file changed, and only after `nginx -t` accepted
+// the new file (if it does not, the restart is skipped and the run fails).
+// (It replaced a cluster playbook of the same name, which restarted nginx on
+// every run, on 2026-11-13.)
 //
 // Why not a plain proxy like the apt cache: Rocky's default repository setup
 // finds a mirror over HTTPS (mirrorlist), and an HTTP proxy cannot cache
@@ -19,27 +28,24 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 // under one name, so they are kept for 30 days; repomd.xml (the file that
 // names the current metadata) is kept for only 5 minutes.
 //
-// Stages:
-//   - install-rpm-cache (tst12): nginx, the cache config, restart.
-//   - confirm-rpm-cache-healthy (tst12): waits for /healthz, then fetches the
-//     repomd.xml of each Rocky repository through the cache, which proves the
-//     upstream paths and TLS verification work and stores them.
+// The last two resources are checks, written as guarded commands: "unchanged"
+// while the cache answers and serves each Rocky repository's repomd.xml (which
+// proves the upstream paths, DNS and TLS verification work); otherwise they
+// wait for it, or fail with the HTTP codes.
 //
 // Disk: /var/cache/nginx/rpm, limited to 80 GB by nginx (the VM has 120 GB).
 // Only files that were requested are stored.
-//
-// Not compiled where this was written; the first run on scala0 is the first
-// compile.
-object rpm_cache extends OrpheraClusterPlaybook:
+object rpm_cache extends OrpheraApply:
+  import Resources.*
 
-  private val node = "tst12"
+  override def nodes: List[String] = List("tst12")
+
   private val port = 8080
   private val release = "10"
   private val arch = "x86_64"
   private val repos = List("BaseOS", "AppStream", "extras", "CRB")
 
   // Plain triple-quoted strings (no interpolation): nginx variables use `$`.
-  // @PORT@ is substituted below.
   private val nginxConf =
     """proxy_cache_path /var/cache/nginx/rpm levels=1:2 keys_zone=rpm:50m max_size=80g inactive=365d use_temp_path=off;
       |
@@ -106,72 +112,37 @@ object rpm_cache extends OrpheraClusterPlaybook:
       |    }
       |}""".stripMargin.replace("@PORT@", port.toString)
 
-  // The config is written to conf.d (included inside nginx's http block).
-  // nginx -t checks it before the restart, so a typo cannot take nginx down.
-  private val configScript =
-    ("""set -e
-      |mkdir -p /var/cache/nginx/rpm
-      |chown -R www-data:www-data /var/cache/nginx/rpm
-      |cat > /etc/nginx/conf.d/orphera-rpm-cache.conf <<'NGINXCONF'
-      |""".stripMargin + nginxConf +
-      """
-      |NGINXCONF
-      |nginx -t
-      |systemctl enable nginx
-      |systemctl restart nginx
-      |sleep 2
-      |if ! systemctl is-active --quiet nginx; then
-      |  echo "nginx failed to start - see 'journalctl -xeu nginx'" >&2
-      |  exit 1
-      |fi
-      |echo "nginx rpm cache running on port @PORT@"""".stripMargin.replace(
-        "@PORT@",
-        port.toString
-      ))
+  private val healthy = s"""[ "$$(curl -s http://localhost:$port/healthz)" = "ok" ]"""
 
-  private val healthScript =
-    """[ "$(curl -s http://localhost:@PORT@/healthz)" = "ok" ]""".replace(
-      "@PORT@",
-      port.toString
-    )
+  // Up to a minute for nginx to answer after a (re)start.
+  private val waitHealthy =
+    s"""for i in $$(seq 1 20); do $healthy && exit 0; sleep 3; done
+       |echo "nginx does not answer on port $port - see 'journalctl -xeu nginx'" >&2
+       |exit 1""".stripMargin
 
-  // Each fetch must return 200; a bad upstream path, a TLS verification
-  // failure or a DNS problem shows up here rather than on the first client.
-  private val warmScript =
-    ("""set -e
-      |for repo in @REPOS@; do
-      |  CODE=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:@PORT@/rocky/@RELEASE@/$repo/@ARCH@/os/repodata/repomd.xml)
-      |  echo "rocky @RELEASE@ $repo repomd.xml through the cache: HTTP $CODE"
-      |  [ "$CODE" = "200" ]
-      |done
-      |du -sh /var/cache/nginx/rpm""".stripMargin)
-      .replace("@REPOS@", repos.mkString(" "))
-      .replace("@PORT@", port.toString)
-      .replace("@RELEASE@", release)
-      .replace("@ARCH@", arch)
+  private def code(repo: String): String =
+    s"$$(curl -s -o /dev/null -w '%{http_code}' http://localhost:$port/rocky/$release/$repo/$arch/os/repodata/repomd.xml)"
 
-  val playbook: ClusterPlaybook =
-    clusterPlaybook("rpm-cache")(
-      stage("install-rpm-cache", node)
-        .task("install nginx")(
-          Task.Install(packages = List("nginx", "curl"), updateCache = true)
-        )
-        .task("configure and start the caching mirror")(
-          Task.RunCommand(List("sh", "-c", configScript), timeoutSeconds = 120)
-        )
-        .build,
+  // Every repository's repomd.xml through the cache answers 200.
+  private val repomdOk = repos.map(r => s"""[ "${code(r)}" = "200" ]""").mkString(" && ")
 
-      stage("confirm-rpm-cache-healthy", node)
-        .waitFor(
-          HealthCheck.Command(
-            onNode = node,
-            command = List("sh", "-c", healthScript),
-            pollIntervalSeconds = 3,
-            timeoutSeconds = 60
-          )
-        )
-        .task("fetch each Rocky repository's repomd.xml through the cache")(
-          Task.RunCommand(List("sh", "-c", warmScript), timeoutSeconds = 300)
-        )
-        .build
+  private val repomdReport =
+    (repos.map(r => s"""echo "rocky $release $r repomd.xml through the cache: HTTP ${code(r)}"""") :+ "exit 1").mkString("\n")
+
+  def describe(node: Node): List[ApplyResource] =
+    val nginx = pkg("nginx", updateCache = true)
+    val confPath = "/etc/nginx/conf.d/orphera-rpm-cache.conf"
+    val checkConf = command("check the nginx configuration", "nginx -t", onChangeOnly = true)
+    val server = service("nginx").after(checkConf)
+    val answering = command("the cache answers", waitHealthy, unless = healthy).after(server)
+    List(
+      nginx,
+      pkg("curl"),
+      directory("/var/cache/nginx/rpm", owner = "www-data", group = "www-data").after(nginx),
+      file(confPath, nginxConf + "\n", mode = "0644").after(nginx).notifies(checkConf, server),
+      checkConf,
+      server,
+      answering,
+      command("each Rocky repository is served through the cache", repomdReport, unless = repomdOk, timeout = 300)
+        .after(answering)
     )

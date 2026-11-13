@@ -461,6 +461,19 @@ object ApplyCheck:
     val second = applyTo(n, desc).report
     check("yaml: applied, then unchanged", desc.size == 3 && first.results.forall(_.changed) && !second.changed, first.toString + second)
 
+  private def totalChecks(): Unit =
+    def report(node: String, o: ApplyOutcome) = ApplyReport(node, "t", check = false, List(ResourceResult("file[/x]", o)))
+    val rs = Map("a" -> report("a", ApplyOutcome.Changed(Nil, Nil)), "b" -> report("b", ApplyOutcome.Unchanged("")))
+    check(
+      "total: changed, unchanged, and a node without a report counted as failed",
+      OrpheraApply.total(List("a", "b", "c"), rs, check = false) == "All 3 nodes: 1 changed, 1 unchanged, 1 failed (c)",
+      OrpheraApply.total(List("a", "b", "c"), rs, check = false)
+    )
+    check(
+      "total: check mode says to change, and no failures part when none failed",
+      OrpheraApply.total(List("a", "b"), rs, check = true) == "All 2 nodes: 1 to change, 1 unchanged"
+    )
+
   private def diffChecks(): Unit =
     val d = TextDiff.unified("a\nb\nc\nd\ne\nf\ng\n", "a\nb\nc\nX\ne\nf\ng\n", "/f")
     check("diff: header and the change", d.take(2) == List("--- /f (now)", "+++ /f (wanted)") && d.contains("-d") && d.contains("+X"), d.toString)
@@ -587,6 +600,7 @@ object ApplyCheck:
     runChecks()
     kindChecks()
     yamlChecks()
+    totalChecks()
     diffChecks()
     localChecks()
     println(s"ApplyCheck: $passes passed, $failures failed")
