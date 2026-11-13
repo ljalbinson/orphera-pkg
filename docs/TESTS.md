@@ -165,7 +165,7 @@ so apply it before the reboot check.
 Profile `cloud-init enp1s0` in
 `/etc/NetworkManager/system-connections/cloud-init-enp1s0.nmconnection`.
 Needs the agent built with the known-good snapshot fix (commit 7007394).
-Before deploying, make sure the file has the correct `address1=10.10.5.20/...`:
+Before deploying, make sure the file has the correct `address1=10.10.5.39/...`:
 the agent snapshots whatever is there when it first starts.
 Check: `ls /var/lib/orphera/network-backups/known-good` on the node.
 
@@ -174,25 +174,25 @@ A. Additive change, confirmed:
     orphera run sh -c "sudo cp -p /etc/NetworkManager/system-connections/cloud-init-enp1s0.nmconnection /root/nm-orig.bak && sudo sed -i '/^address1=/a address2=10.10.5.120/24' /etc/NetworkManager/system-connections/cloud-init-enp1s0.nmconnection" --nodes tst8
     orphera network-apply --nodes tst8 --timeout 30
     orphera run sh -c "ip -4 addr show enp1s0" --nodes tst8
-Expect: "Confirmed - connectivity OK"; both 10.10.5.20 and 10.10.5.120 present.
+Expect: "Confirmed - connectivity OK"; both 10.10.5.39 and 10.10.5.120 present.
 Then restore the original file from `/root/nm-orig.bak` (`nmcli connection reload`,
 `nmcli connection up 'cloud-init enp1s0'`).
 
 B. Rollback:
 
-    orphera run sh -c "sudo sed -i 's#^address1=10.10.5.20/#address1=10.10.5.99/#' /etc/NetworkManager/system-connections/cloud-init-enp1s0.nmconnection" --nodes tst8
+    orphera run sh -c "sudo sed -i 's#^address1=10.10.5.39/#address1=10.10.5.99/#' /etc/NetworkManager/system-connections/cloud-init-enp1s0.nmconnection" --nodes tst8
     orphera network-apply --nodes tst8 --timeout 20
     sleep 40
     orphera version --nodes tst8
 Expect: connectivity check fails, no confirm; about 20 s later the agent restores
-the known-good file and tst8 answers on 10.10.5.20 again.
+the known-good file and tst8 answers on 10.10.5.39 again.
 FAILED the first time (the node stayed on .99): the per-apply backup was taken
 after the new file was pushed, so rollback restored the same broken file.  Fixed
 by rolling back to a known-good snapshot (taken at first agent start and after
 each confirmed apply).  Applies to the networkd backend too.
 PASSED on tst8 (agent 0.1.171, 2026-10-09): the agent journal shows the bad
 profile activated, then a second activation exactly 20 s later (the watchdog
-restoring known-good); node back on 10.10.5.20 with the original `address1`.
+restoring known-good); node back on 10.10.5.20 (its address then) with the original `address1`.
 Test A PASSED (address2 added, both addresses live, known-good refreshed with
 address2, original restored and re-confirmed).  Known gap: `network-apply` prints only
 "Reload applied, backup <id>" when the connectivity check fails; it does not say

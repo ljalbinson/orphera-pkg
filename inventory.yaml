@@ -97,7 +97,7 @@ nodes:
   - name: tst8
     host: tst8.ljalbinson.com
     vars:
-      cluster_ip: "10.10.5.20"
+      cluster_ip: "10.10.5.39"
 
   # Kolla image cache for the OpenStack work: a pull-through registry mirror of
   # quay.io (manifests/kolla_cache.scala), so nodes pull Kolla images from here
