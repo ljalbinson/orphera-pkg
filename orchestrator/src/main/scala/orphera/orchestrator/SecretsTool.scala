@@ -15,9 +15,15 @@ object SecretsTool:
       |orphera secrets set <name>        store a value read from standard input (one line)
       |orphera secrets get <name>        print a value
       |orphera secrets rm <name>         remove a secret
+      |orphera secrets recipients        who the store is encrypted to
+      |orphera secrets rekey             re-encrypt the store to the recipients file (after editing it)
       |
-      |Files: $ORPHERA_SECRETS (default ~/.config/orphera/secrets.age, encrypted)
-      |       $ORPHERA_AGE_KEY  (default ~/.config/orphera/age.key, the identity: back it up)""".stripMargin
+      |Files: $ORPHERA_SECRETS        (default ~/.config/orphera/secrets.age, encrypted)
+      |       $ORPHERA_AGE_KEY        (default ~/.config/orphera/age.key, the identity: back it up;
+      |                                for a YubiKey, its age-plugin-yubikey identity stub)
+      |       $ORPHERA_AGE_RECIPIENTS (default ~/.config/orphera/recipients, optional: one age
+      |                                recipient per line, such as each YubiKey's age1yubikey1...;
+      |                                without it the store is encrypted to the identity's key)""".stripMargin
 
   /** Returns the exit code. */
   def run(args: List[String]): Int =
@@ -46,6 +52,30 @@ object SecretsTool:
             println(if r then s"$name removed" else s"$name was not there")
           )
         )
+      case "recipients" :: Nil =>
+        val file = SecretStore.recipientsFile
+        SecretStore.defaultCipher.recipients match
+          case Right(rs) =>
+            println(
+              if java.nio.file.Files.exists(file) then s"from $file:"
+              else s"no $file: the identity's own key (${SecretStore.identityFile}):"
+            )
+            rs.foreach(r => println(s"  $r"))
+            0
+          case Left(msg) => System.err.println(s"Error: $msg"); 1
+      case "rekey" :: Nil =>
+        if !java.nio.file.Files.exists(SecretStore.recipientsFile) then
+          System.err.println(s"Error: no ${SecretStore.recipientsFile}: list the recipients there first (one per line)")
+          1
+        else
+          withStore(s =>
+            for
+              n <- s.rekey()
+              rs <- SecretStore.defaultCipher.recipients
+            yield
+              println(s"$n secret(s) re-encrypted to ${rs.size} recipient(s); the old file is ${SecretStore.secretsFile}.before-rekey")
+              println("Check that each recipient's identity reads it (ORPHERA_AGE_KEY=<its identity> orphera secrets list) before removing anything.")
+          )
       case _ =>
         println(usage)
         1

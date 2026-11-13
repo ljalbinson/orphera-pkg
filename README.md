@@ -1967,6 +1967,29 @@ arguments on the node while it runs. The store is a single file on one
 machine, there is no rotation command, and the Ceph and database
 passwords are not changed on the nodes when a stored value changes.
 
+### Keeping the store on YubiKeys
+
+The store can be encrypted to age identities held on YubiKeys
+([age-plugin-yubikey](https://github.com/str4d/age-plugin-yubikey)), so
+that reading it needs a key plugged in (and its PIN and touch, as the key
+was set up), instead of the plain `age.key` file.
+
+- `~/.config/orphera/recipients` (`ORPHERA_AGE_RECIPIENTS`), one age
+  recipient per line, `#` for comments: when it exists, the store is
+  encrypted to every recipient in it, so any one of their identities reads
+  it. List each YubiKey's `age1yubikey1...` recipient there, and a backup
+  recipient if you keep one.
+- `~/.config/orphera/age.key` (`ORPHERA_AGE_KEY`) holds the identity used to
+  read: for a YubiKey, its stub (`AGE-PLUGIN-YUBIKEY-1...`). With a plugin
+  identity, age's PIN and touch prompts go to the terminal.
+- `orphera secrets recipients` shows who the store is encrypted to;
+  `orphera secrets rekey` re-encrypts it to the recipients file (the old file
+  is kept as `secrets.age.before-rekey`).
+- The store is decrypted once per run and kept while the file is unchanged,
+  so a run asks the key once, not for every secret.
+- `ORPHERA_TOKEN` in the environment is used before the store, so ordinary
+  commands do not need the key; only the token kept in the store does.
+
 ## Typed configuration files and check mode
 
 OpenStack services read INI files with hundreds of options, and a
