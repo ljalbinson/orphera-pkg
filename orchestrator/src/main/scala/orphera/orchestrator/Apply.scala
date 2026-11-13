@@ -939,8 +939,9 @@ object TextDiff:
       var j = 0
       while i < a.size || j < b.size do
         if i < a.size && j < b.size && a(i) == b(j) then { ops += (' ' -> a(i)); i += 1; j += 1 }
-        else if j < b.size && (i == a.size || lcs(i)(j + 1) >= lcs(i + 1)(j)) then { ops += ('+' -> b(j)); j += 1 }
-        else { ops += ('-' -> a(i)); i += 1 }
+        // On a tie the removed line comes first, as in diff -u.
+        else if i < a.size && (j == b.size || lcs(i + 1)(j) >= lcs(i)(j + 1)) then { ops += ('-' -> a(i)); i += 1 }
+        else { ops += ('+' -> b(j)); j += 1 }
       val all = ops.result()
       val near = all.indices.filter(k => all(k)._1 != ' ').flatMap(k => (k - 2) to (k + 2)).toSet
       val shown = all.indices.filter(near.contains).map(k => s"${all(k)._1}${all(k)._2}").toList
