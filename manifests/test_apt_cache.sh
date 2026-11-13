@@ -139,9 +139,14 @@ ALL_CLIENTS="tst0,tst1,tst2,tst3,tst4,tst5,tst6,tst7,tst9,tst10"
 NCLIENTS=10
 ERRLOG="/var/log/apt-cacher-ng/apt-cacher.err"
 ERR_BEFORE=$(run_on "$CACHE" "sudo wc -l < $ERRLOG 2>/dev/null || echo 0" | grep -Eo '^\[[a-z0-9]+\] [0-9]+$' | awk '{print $2}' | tail -1)
-OUT=$(run_on "$ALL_CLIENTS" "sudo timeout 150 apt-get update >/dev/null 2>&1; echo rc=\$?")
+OUT=$(run_on "$ALL_CLIENTS" "sudo timeout 150 apt-get update >/tmp/apt-many.log 2>&1; rc=\$?; echo rc=\$rc; [ \$rc -eq 0 ] || tail -n 6 /tmp/apt-many.log")
 RC0=$(printf '%s\n' "$OUT" | grep -c 'rc=0$')
 assert_equals "apt update on all $NCLIENTS clients at once completes (none hung)" "$NCLIENTS" "$RC0"
+if [ "$RC0" != "$NCLIENTS" ]; then
+  # rc=124: timed out (hung); any other code: apt gave up. The end of its output says which file.
+  log "the clients that did not finish cleanly, with the end of their apt output:"
+  printf '%s\n' "$OUT" | grep '^\[' | grep -v 'rc=0$' | grep -v 'exit=0\|success=true\|Running:' | sed 's/^/    /'
+fi
 ERR_AFTER=$(run_on "$CACHE" "sudo wc -l < $ERRLOG 2>/dev/null || echo 0" | grep -Eo '^\[[a-z0-9]+\] [0-9]+$' | awk '{print $2}' | tail -1)
 # apt-cacher-ng 3.7.4 still logs "Failure to move file ... File exists" when several
 # clients ask for the same stale Release file in the same second (it renames the old
