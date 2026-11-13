@@ -7,7 +7,7 @@ params:
   - iperf3
   nic0:
     nic: enp1s0
-    ipaddress: '10.10.5.20'
+    ipaddress: '10.10.5.39'
     gateway: '10.10.5.1'
     bridge: br-net105
     netmask: '255.255.255.0'
