@@ -1,0 +1,12 @@
+# Managed by Orphera (manifests/apply_demo.yaml).
+[Unit]
+Description=Orphera apply demo
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=orphera-demo
+ExecStart=/bin/sh -c 'echo {{message}} >> /var/lib/orphera-demo/started'
+
+[Install]
+WantedBy=multi-user.target

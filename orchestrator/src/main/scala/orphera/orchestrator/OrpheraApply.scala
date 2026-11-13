@@ -40,9 +40,26 @@ trait OrpheraApply extends IOApp.Simple:
       .map(_.split(",").toList.map(_.trim).filter(_.nonEmpty))
       .filter(_.nonEmpty)
       .getOrElse(nodes)
+    OrpheraApply.runOn(name, chosen, describe, check, stopOnFailure, "override `nodes`")
+
+object OrpheraApply:
+
+  /** Applies the description `describe` (called per node) to `chosen`, in
+    * parallel; fails if any node failed. Shared by `OrpheraApply` and YAML
+    * descriptions. `nodesHint` says where nodes can be named, for the error
+    * when there are none.
+    */
+  def runOn(
+      name: String,
+      chosen: List[String],
+      describe: Node => List[ApplyResource],
+      check: Boolean,
+      stopOnFailure: Boolean,
+      nodesHint: String
+  ): IO[Unit] =
     for
       _ <- IO.raiseWhen(chosen.isEmpty)(
-        new PlaybookFailed(s"'$name' names no nodes: give --nodes, or override `nodes`")
+        new PlaybookFailed(s"'$name' names no nodes: give --nodes, or $nodesHint")
       )
       _ <- IO.println(s"Applying '$name' to ${chosen.mkString(", ")}${if check then " (check: nothing will be changed)" else ""}")
       _ <- Orphera.run(s"apply-$name", resume = false, kind = "Apply") { orphera =>

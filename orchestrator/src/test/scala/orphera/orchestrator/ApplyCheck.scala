@@ -365,6 +365,102 @@ object ApplyCheck:
     val missing = new FakeNode(Map.empty)
     check("a unit that does not exist fails in a real run", applyTo(missing, List(service("none.service"))).report.failures.exists(_.contains("no such unit")))
 
+  private def yaml(text: String): Either[String, ApplyDescription] =
+    io.circe.yaml.parser.parse(text).left.map(_.getMessage).flatMap(ApplyYaml.decode)
+
+  private def yamlError(text: String): String = yaml(text).left.getOrElse("")
+
+  private def yamlChecks(): Unit =
+    val full = yaml(
+      """name: all-kinds
+        |nodes: [tst5, tst6]
+        |resources:
+        |  - file: /etc/a.conf
+        |    content: "a = 1\n"
+        |    mode: "0640"
+        |    owner: app
+        |    group: app
+        |    notify: ["service[app.service]"]
+        |  - file: /etc/b.conf
+        |    source: files/b.conf.mustache
+        |    vars: {port: 8080}
+        |  - file: /etc/old
+        |    state: absent
+        |  - directory: /srv/app
+        |    mode: "0750"
+        |  - symlink: /srv/current
+        |    target: /srv/app
+        |  - package: app-server
+        |    version: 2.0
+        |    update_cache: true
+        |  - package: telnet
+        |    state: absent
+        |  - service: app.service
+        |    running: any
+        |  - user: app
+        |    group: app
+        |    groups: [adm]
+        |    system: true
+        |  - group: app
+        |    gid: 990
+        |  - command: reload
+        |    run: systemctl daemon-reload
+        |    unless: test -e /x
+        |    requires: ["file[/etc/a.conf]", "directory[/srv/app]"]
+        |""".stripMargin
+    )
+    val expected = List(
+      file("/etc/a.conf", "a = 1\n", mode = "0640", owner = "app", group = "app").notifiesIds("service[app.service]"),
+      fileFrom("/etc/b.conf", "files/b.conf.mustache", Map("port" -> "8080")),
+      absentFile("/etc/old"),
+      directory("/srv/app", mode = "0750"),
+      symlink("/srv/current", "/srv/app"),
+      pkg("app-server", version = "2.0", updateCache = true),
+      absentPkg("telnet"),
+      service("app.service", running = None),
+      user("app", group = "app", groups = List("adm"), system = true),
+      group("app", gid = 990),
+      command("reload", "systemctl daemon-reload", unless = "test -e /x").afterIds("file[/etc/a.conf]", "directory[/srv/app]")
+    )
+    check("yaml: every kind reads into the same resources as Scala", full.map(_.resources) == Right(expected), full.toString)
+    check("yaml: name and nodes", full.exists(d => d.name == "all-kinds" && d.nodes == List("tst5", "tst6")), full.toString)
+    check("yaml: the description is a valid plan", full.toOption.exists(d => ApplyPlan(d.name, d.resources).isRight), full.map(d => ApplyPlan(d.name, d.resources)).toString)
+    check("yaml: group as an option is not a second kind", yaml("name: x\nresources:\n  - directory: /d\n    group: app\n").isRight)
+    check("yaml: an unknown option", yamlError("name: x\nresources:\n  - file: /a\n    content: x\n    mod: \"0644\"\n").contains("unknown option(s) mod"))
+    check("yaml: two kinds", yamlError("name: x\nresources:\n  - file: /a\n    package: b\n").contains("more than one kind"))
+    check("yaml: no kind", yamlError("name: x\nresources:\n  - path: /a\n").contains("no kind"))
+    check("yaml: an unquoted mode", yamlError("name: x\nresources:\n  - file: /a\n    content: x\n    mode: 0644\n").contains("quote it"))
+    check("yaml: content and source", yamlError("name: x\nresources:\n  - file: /a\n    content: x\n    source: y\n").contains("not both"))
+    check("yaml: absent with options", yamlError("name: x\nresources:\n  - file: /a\n    state: absent\n    mode: \"0644\"\n").contains("takes no mode"))
+    check("yaml: a bad state", yamlError("name: x\nresources:\n  - file: /a\n    state: gone\n").contains("present or absent"))
+    check("yaml: an unknown top-level key", yamlError("name: x\nresource: []\n").contains("unknown key(s) resource"))
+    check("yaml: the error names the resource", yamlError("name: x\nresources:\n  - file: /a\n    content: x\n  - symlink: /b\n").startsWith("resource 2: symlink: target is needed"), yamlError("name: x\nresources:\n  - file: /a\n    content: x\n  - symlink: /b\n"))
+    // The demo descriptions in manifests/ read and plan (sbt may run this from the repository or from orchestrator/).
+    List("apply_demo.yaml", "apply_demo_remove.yaml").foreach { f =>
+      List(s"manifests/$f", s"../manifests/$f").find(p => Files.exists(Paths.get(p))) match
+        case None    => check(s"yaml: $f found", false)
+        case Some(p) =>
+          val d = ApplyYaml.load(p)
+          check(s"yaml: $f reads and plans", d.exists(x => ApplyPlan(x.name, x.resources).isRight), d.toString)
+    }
+    // A YAML description applies as the Scala one does.
+    val desc = yaml(
+      """name: d
+        |resources:
+        |  - directory: /etc/app
+        |  - file: /etc/app/app.conf
+        |    content: "x\n"
+        |    notify: ["command[clean]"]
+        |  - command: clean
+        |    run: dnf clean metadata
+        |    on_change_only: true
+        |""".stripMargin
+    ).map(_.resources).getOrElse(Nil)
+    val n = new FakeNode(Map.empty)
+    val first = applyTo(n, desc).report
+    val second = applyTo(n, desc).report
+    check("yaml: applied, then unchanged", desc.size == 3 && first.results.forall(_.changed) && !second.changed, first.toString + second)
+
   private def diffChecks(): Unit =
     val d = TextDiff.unified("a\nb\nc\nd\ne\nf\ng\n", "a\nb\nc\nX\ne\nf\ng\n", "/f")
     check("diff: header and the change", d.take(2) == List("--- /f (now)", "+++ /f (wanted)") && d.contains("-d") && d.contains("+X"), d.toString)
@@ -490,6 +586,7 @@ object ApplyCheck:
     planChecks()
     runChecks()
     kindChecks()
+    yamlChecks()
     diffChecks()
     localChecks()
     println(s"ApplyCheck: $passes passed, $failures failed")

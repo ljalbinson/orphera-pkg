@@ -1,0 +1,35 @@
+# SPDX-License-Identifier: Apache-2.0
+
+# The step-2 resource kinds as a YAML description (docs/APPLY-DESIGN.md, step 4);
+# apply_kinds_demo.scala is the same in Scala. Touches nothing the node already
+# runs: a package (tree), a system group and user, a directory they own, and a
+# oneshot unit of its own, restarted when its unit file changes.
+#
+#   orphera apply manifests/apply_demo.yaml --check --nodes tst5
+#   orphera apply manifests/apply_demo.yaml --nodes tst5          # creates
+#   orphera apply manifests/apply_demo.yaml --nodes tst5          # changes nothing
+#   (change message: below and run again: the unit restarts)
+#   orphera apply manifests/apply_demo_remove.yaml --nodes tst5   # takes it away (not tree)
+#
+# Run from the repository directory: source: paths are relative to it.
+name: apply-demo
+nodes: [tst5]
+resources:
+  - package: tree
+  - group: orphera-demo
+    system: true
+  - user: orphera-demo
+    group: orphera-demo
+    shell: /usr/sbin/nologin
+    system: true
+  - directory: /var/lib/orphera-demo
+    mode: "0750"
+    owner: orphera-demo
+    group: orphera-demo
+  - file: /etc/systemd/system/orphera-demo.service
+    source: files/orphera-demo.service.mustache
+    vars:
+      message: started
+    mode: "0644"
+    notify: ["service[orphera-demo.service]"]
+  - service: orphera-demo.service

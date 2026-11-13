@@ -376,8 +376,20 @@ object Main extends IOApp:
           }
 
       case Right(Command.Apply(source, check, nodes, stopOnFailure)) =>
-        if !source.endsWith(".scala") then
-          IO.println(s"Error: apply takes a .scala description (OrpheraApply), not $source") >> IO.pure(ExitCode.Error)
+        if source.endsWith(".yaml") || source.endsWith(".yml") then
+          ApplyYaml.load(source).flatMap(d => ApplyPlan(d.name, d.resources).left.map(ps => s"description '${d.name}': ${ps.mkString("; ")}").as(d)) match
+            case Left(err) => IO.println(s"Error: $err") >> IO.pure(ExitCode.Error)
+            case Right(d)  =>
+              OrpheraApply
+                .runOn(d.name, nodes.getOrElse(d.nodes), _ => d.resources, check, stopOnFailure, s"list them under nodes: in $source")
+                .attempt
+                .flatMap {
+                  case Right(())                => IO.pure(ExitCode.Success)
+                  case Left(e: PlaybookFailed)  => IO.println(e.getMessage) >> IO.pure(ExitCode.Error)
+                  case Left(e)                  => IO.println(s"Error: ${TaskExecutor.describe(e)}") >> IO.pure(ExitCode.Error)
+                }
+        else if !source.endsWith(".scala") then
+          IO.println(s"Error: apply takes a .scala (OrpheraApply) or .yaml description, not $source") >> IO.pure(ExitCode.Error)
         else
           runScalaPlaybookScript(
             source,
