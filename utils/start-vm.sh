@@ -12,9 +12,15 @@
 #   utils/start-vm.sh --node-groups ceph        # every VM in an inventory group
 #   utils/start-vm.sh --node-groups k8s --exclude-nodes tst39 50   # groups and VMs, less some
 #   utils/start-vm.sh --parallel 8 --node-groups k8s   # up to 8 at a time
+#   utils/start-vm.sh --retries 5 tst7          # try a failed start up to 5 more times (default 3, 0 = never)
 #
 # A VM that is shut off is started, a paused one is resumed, and one that is
-# already running is left alone. The script reports that the hypervisor has
+# already running is left alone. A failed start or resume is tried again after
+# 5 s, up to --retries more times (default 3); an undefined domain is not. Before
+# each start, Open vSwitch ports named vnetN whose device no longer exists are
+# removed from the hypervisor's bridges (libvirt leaves them behind when a VM
+# stops uncleanly, and a later start fails with "vnetN is actually attached to
+# bridge ..."); the report names any it removed. The script reports that the hypervisor has
 # started the VM; it does not wait for the guest to answer. To wait for SSH, or
 # to reset a guest that is "running" but halted, use
 #   orphera cluster-playbook manifests/kvm_vm_start.scala --config config/<vm>.yaml
@@ -39,9 +45,13 @@ usage() { sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'; }
 [ $# -gt 0 ] || { usage; exit 2; }
 pos=()
 par=1
+retries=3
 while [ $# -gt 0 ]; do
   case "$1" in
     --parallel) vm_parallel_option "${2:-}"; par=$2; shift 2 ;;
+    --retries)
+      case "${2:-}" in ''|*[!0-9]*) echo "--retries needs a number (0 or more)" >&2; exit 2 ;; esac
+      retries=$((10#$2)); shift 2 ;;
     --node-groups|--exclude-nodes) vm_select_option "$1" "${2:-}"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     -*) echo "unknown option $1" >&2; exit 2 ;;
@@ -56,22 +66,52 @@ else
 fi
 [ $# -gt 0 ] || { usage; exit 2; }
 
-# Runs on the hypervisor, as the agent (root): start, resume or leave alone.
+# Runs on the hypervisor, as the agent (root): start, resume or leave alone, with
+# retries and the Open vSwitch clean-up. The same text as utils-native/start-vm's
+# Scripts.start (make check-vm-scripts compares what the two send).
 remote_script() {
-  cat <<SH
+  sed -e "s/@VM@/$1/g" -e "s/@RETRIES@/$retries/g" <<'SH'
 V="virsh --connect qemu:///system"
-state=\$(\$V domstate '$1' 2>/dev/null | head -1)
-case "\$state" in
-  "")           echo "RESULT|error|domain '$1' is not defined on this hypervisor" ;;
-  running)      echo "RESULT|ok|already running" ;;
-  paused)       \$V resume '$1' >/dev/null 2>&1 && echo "RESULT|ok|resumed" || echo "RESULT|error|virsh resume failed" ;;
-  "shut off")   out=\$(\$V start '$1' 2>&1) && echo "RESULT|ok|started" || echo "RESULT|error|\$out" ;;
-  *)            echo "RESULT|error|domain is in state '\$state'; not touching it" ;;
-esac
+pruned=""
+# Open vSwitch ports named vnetN whose device is gone: libvirt leaves them when a VM stops uncleanly,
+# reuses the name, and the start then fails with "vnetN is actually attached to bridge ...".
+prune_ovs() {
+  command -v ovs-vsctl >/dev/null 2>&1 || return 0
+  for b in $(ovs-vsctl list-br 2>/dev/null); do
+    for p in $(ovs-vsctl list-ports "$b" 2>/dev/null); do
+      case "$p" in vnet[0-9]*) ;; *) continue ;; esac
+      [ -e "/sys/class/net/$p" ] && continue
+      ovs-vsctl --if-exists del-port "$b" "$p" || continue
+      case " $pruned " in *" $p "*) ;; *) pruned="$pruned $p" ;; esac
+    done
+  done
+}
+# 0: done, 1: failed (worth another try), 2: failed (another try cannot help).
+attempt() {
+  state=$($V domstate '@VM@' 2>/dev/null | head -1)
+  case "$state" in
+    "")         msg="domain '@VM@' is not defined on this hypervisor"; return 2 ;;
+    running)    msg="already running"; return 0 ;;
+    paused)     $V resume '@VM@' >/dev/null 2>&1 && { msg="resumed"; return 0; }; msg="virsh resume failed"; return 1 ;;
+    "shut off") prune_ovs; out=$($V start '@VM@' 2>&1) && { msg="started"; return 0; }; msg=$(printf '%s' "$out" | tr '\n' ' '); return 1 ;;
+    *)          msg="domain is in state '$state'; not touching it"; return 2 ;;
+  esac
+}
+n=0
+while :; do
+  attempt; rc=$?
+  [ "$rc" -eq 1 ] && [ "$n" -lt @RETRIES@ ] || break
+  n=$((n + 1))
+  sleep 5
+done
+[ "$n" -eq 0 ] || msg="$msg (attempt $((n + 1)) of $((@RETRIES@ + 1)))"
+[ -z "$pruned" ] || msg="$msg; removed stale Open vSwitch port(s)$pruned"
+if [ "$rc" -eq 0 ]; then echo "RESULT|ok|$msg"; else echo "RESULT|error|$msg"; fi
 SH
 }
 
-vm_run_all "$par" "" remote_script "$@"
+# Each attempt may take up to a minute, with 5 s between them.
+vm_run_all "$par" "$((60 * (retries + 1) + 5 * retries))" remote_script "$@"
 
 if [ -n "$failed" ]; then
   echo "Not started:$failed" >&2
