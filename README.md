@@ -1993,6 +1993,44 @@ was set up), instead of the plain `age.key` file.
 - `ORPHERA_TOKEN` in the environment is used before the store, so ordinary
   commands do not need the key; only the token kept in the store does.
 
+Setting it up on Ubuntu 24.04 (as on scala0):
+
+1. **The plugin.** There is no Ubuntu package and the release page may have
+   no `.deb`; build it with a current Rust (`rustup`: Ubuntu's Cargo 1.75 is
+   too old for its dependencies) and the PC/SC headers:
+   `sudo apt-get install -y pcscd libpcsclite-dev pkg-config`, then
+   `cargo install --locked age-plugin-yubikey` and
+   `sudo install -m 755 ~/.cargo/bin/age-plugin-yubikey /usr/local/bin/`.
+2. **pcscd over SSH.** pcscd asks polkit, which allows only a local active
+   session; over SSH every call fails with "Access was denied because of a
+   security violation". Allow the admin user in
+   `/etc/polkit-1/rules.d/50-orphera-pcscd.rules`:
+
+   ```js
+   polkit.addRule(function(action, subject) {
+       if ((action.id == "org.debian.pcsc-lite.access_pcsc" ||
+            action.id == "org.debian.pcsc-lite.access_card") &&
+           subject.user == "localadmin") {
+           return polkit.Result.YES;
+       }
+   });
+   ```
+
+   then `sudo systemctl restart polkit pcscd`.
+3. **A VM.** Pass the key through from the hypervisor (one key plugged in at a
+   time: both have the same USB ids), with
+   `virsh attach-device <vm> yubikey.xml --live --config` and
+   `<hostdev mode='subsystem' type='usb' managed='yes'><source><vendor id='0x1050'/><product id='0x0407'/></source></hostdev>`.
+4. **Each key.** `ykman piv reset` (a new key; clears only PIV), set a PIN and
+   PUK (`ykman piv access change-pin` / `change-puk`; three wrong PINs block
+   it), then `age-plugin-yubikey`: slot 1, PIN policy once, touch policy
+   cached. Keep its identity file (`yubikey-a.identity`) and append its
+   recipient to `recipients` (`age-plugin-yubikey --list --serial S --slot 1`).
+5. **The store.** Add the old key's recipient too (`age-keygen -y age.key`),
+   `orphera secrets rekey`, check each identity reads it
+   (`ORPHERA_AGE_KEY=<identity> orphera secrets list`), then replace `age.key`
+   with a YubiKey identity and move the old key offline.
+
 ## Typed configuration files and check mode
 
 OpenStack services read INI files with hundreds of options, and a
