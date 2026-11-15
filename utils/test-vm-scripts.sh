@@ -151,6 +151,12 @@ t start-vm --parallel 1 1 badvm
 t start-vm --parallel 0 1
 t start-vm --parallel x 1
 t start-vm 1 --parallel
+t start-vm --retries 0 1
+t start-vm --retries 5 tst1 badvm
+t start-vm 1 --retries 007
+t start-vm --retries x 1
+t start-vm --retries
+t start-vm --retries -1 1
 
 t stop-vm
 t stop-vm --help

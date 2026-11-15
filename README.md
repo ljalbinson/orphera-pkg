@@ -2829,7 +2829,9 @@ Worth knowing:
 - **Utilities** in `utils/`: `list-vms.sh [hv...]` lists every VM on each hypervisor with state,
   vCPUs and memory; `scan-vm-sizes.sh [vm...]` compares each VM's CPU and memory in its config file, in libvirt
   and inside the running guest, and exits 1 on a difference; `start-vm.sh <vm>...` starts VMs, finding each one's hypervisor and domain name in
-  its `config/<vm>.yaml` (a shut-off VM is started, a paused one resumed, a running one left alone; it
+  its `config/<vm>.yaml` (a shut-off VM is started, a paused one resumed, a running one left alone; a
+  failed start is tried again after 5 s, up to `--retries N` more times, default 3, and before each start
+  stale Open vSwitch `vnetN` ports with no device are removed, as `kvm_vm_start.scala` does; it
   does not wait for the guest, `manifests/kvm_vm_start.scala` does); `stop-vm.sh [--wait s] [--force] <vm>...`
   shuts a VM down with `virsh shutdown` and waits until it is off (`--force` powers it off if it has not
   shut down in time); `reboot-vm.sh [--soft | --hard] <vm>...` reboots a VM from the hypervisor, for a
