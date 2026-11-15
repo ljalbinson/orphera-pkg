@@ -2041,8 +2041,10 @@ there sends what it has to decrypt through it instead of running `age -d`.
 Encrypting (`secrets set`, `rekey`) needs only the recipients' public keys and
 stays on the control host.
 
-- **On the Mac, once:** the orphera command line (`utils/macos-setup.sh`),
-  `brew install age age-plugin-yubikey`, and with the key plugged in,
+- **On the Mac, once:** `utils/macos-setup.sh --yubikey` (no Homebrew, which
+  no longer supports Intel Macs: it adds age's release build and builds
+  age-plugin-yubikey with Rust), then in the checkout `make orpheracli` for the
+  orphera command line, and with the key plugged in,
   `age-plugin-yubikey --identity > ~/.config/orphera/age.key` (the key's
   identity stub, as on the control host).
 - **On the control host, once:** let sshd replace a socket a previous session
