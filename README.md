@@ -2031,6 +2031,39 @@ Setting it up on Ubuntu 24.04 (as on scala0):
    (`ORPHERA_AGE_KEY=<identity> orphera secrets list`), then replace `age.key`
    with a YubiKey identity and move the old key offline.
 
+#### The YubiKey on another machine (`orphera secrets agent`)
+
+The key can stay plugged into the machine you work at (a Mac, say) while
+orphera runs on the control host, as with `ssh -A` for SSH keys: on the Mac,
+`orphera secrets agent` listens on a Unix socket and decrypts with the key
+there, the SSH session forwards that socket to the control host, and orphera
+there sends what it has to decrypt through it instead of running `age -d`.
+Encrypting (`secrets set`, `rekey`) needs only the recipients' public keys and
+stays on the control host.
+
+- **On the Mac, once:** the orphera command line (`utils/macos-setup.sh`),
+  `brew install age age-plugin-yubikey`, and with the key plugged in,
+  `age-plugin-yubikey --identity > ~/.config/orphera/age.key` (the key's
+  identity stub, as on the control host).
+- **On the control host, once:** let sshd replace a socket a previous session
+  left behind, or the next forward fails ("remote port forwarding failed"):
+  `echo 'StreamLocalBindUnlink yes' | sudo tee /etc/ssh/sshd_config.d/orphera-agent.conf`
+  and `sudo systemctl reload ssh`.
+- **Each time:** in one terminal on the Mac, `orphera secrets agent` (it says
+  where it listens; the PIN and touch prompts appear there); in another,
+  `ssh -R /home/localadmin/.config/orphera/agent.sock:$HOME/.config/orphera/agent.sock scala0`
+  (or a `RemoteForward` line with the same two paths in `~/.ssh/config`).
+  On the control host every orphera run, playbooks and scripts included, then
+  decrypts through the Mac; the agent's terminal lists each request.
+- Where orphera looks: `$ORPHERA_AGE_AGENT`, by default
+  `~/.config/orphera/agent.sock`. If a socket is there but nothing answers (the
+  session has ended), orphera decrypts locally with its own identity, if that
+  works (a key attached there); if the agent answers but cannot decrypt (a
+  wrong PIN, no touch), the run stops with its reason.
+- While the session is open, anything on the control host that can open the
+  socket (your user, root) can ask for a decrypt; the touch policy is the
+  guard: each request needs a touch on the key (cached for 15 s).
+
 ## Typed configuration files and check mode
 
 OpenStack services read INI files with hundreds of options, and a

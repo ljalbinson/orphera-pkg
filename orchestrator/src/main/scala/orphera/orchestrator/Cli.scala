@@ -1502,7 +1502,7 @@ object Cli:
       |                    — power control of HPE ProLiant servers through the iLO
       |                      (Redfish, or the HP REST API on older iLO 4 firmware; run
       |                      `orphera ilo --help`); runs on this machine only
-      |  secrets           init | list | generate <name> | set <name> | get <name> | rm <name>
+      |  secrets           init | list | generate <name> | set <name> | get <name> | rm <name> | recipients | rekey | agent
       |                    — the encrypted store of passwords and keys that playbooks
       |                      use (~/.config/orphera/secrets.age); runs on this machine
       |                      only, nothing is sent to a node
