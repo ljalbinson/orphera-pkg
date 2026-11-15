@@ -139,11 +139,13 @@ ALL_CLIENTS="tst0,tst1,tst2,tst3,tst4,tst5,tst6,tst7,tst9,tst10"
 NCLIENTS=10
 ERRLOG="/var/log/apt-cacher-ng/apt-cacher.err"
 ERR_BEFORE=$(run_on "$CACHE" "sudo wc -l < $ERRLOG 2>/dev/null || echo 0" | grep -Eo '^\[[a-z0-9]+\] [0-9]+$' | awk '{print $2}' | tail -1)
-OUT=$(run_on "$ALL_CLIENTS" "sudo timeout 150 apt-get update >/tmp/apt-many.log 2>&1; rc=\$?; echo rc=\$rc; [ \$rc -eq 0 ] || tail -n 6 /tmp/apt-many.log")
+# orphera run stops a command after 60 s by default, which cut apt off before its own
+# 150 s limit (reported as "Timed out after 60s", not a hang): give it longer than that.
+OUT=$(orphera run sh -c "sudo timeout 150 apt-get update >/tmp/apt-many.log 2>&1; rc=\$?; echo rc=\$rc; [ \$rc -eq 0 ] || tail -n 6 /tmp/apt-many.log" --nodes "$ALL_CLIENTS" --timeout 180 2>&1)
 RC0=$(printf '%s\n' "$OUT" | grep -c 'rc=0$')
 assert_equals "apt update on all $NCLIENTS clients at once completes (none hung)" "$NCLIENTS" "$RC0"
 if [ "$RC0" != "$NCLIENTS" ]; then
-  # rc=124: timed out (hung); any other code: apt gave up. The end of its output says which file.
+  # rc=124: apt passed 150 s (hung); any other code: apt gave up. The end of its output says which file.
   log "the clients that did not finish cleanly, with the end of their apt output:"
   printf '%s\n' "$OUT" | grep '^\[' | grep -v 'rc=0$' | grep -v 'exit=0\|success=true\|Running:' | sed 's/^/    /'
 fi
