@@ -8,6 +8,7 @@
 # again: what is installed is skipped.
 #
 #   ./macos-setup.sh
+#   ./macos-setup.sh --yubikey     # also age and age-plugin-yubikey, for `orphera secrets agent`
 #
 # It can be run before the repository is cloned. Adds to ~/.zprofile, between "# >>> orphera build tools" and
 # "# <<< orphera build tools" markers.
@@ -17,6 +18,15 @@
 # Linux: the .deb and .rpm packages (dpkg and rpmbuild), `make install` and the lab itself. The release
 # packages are built by GitHub when a v* tag is pushed.
 set -euo pipefail
+
+yubikey=""
+for arg in "$@"; do
+  case "$arg" in
+    --yubikey) yubikey=1 ;;
+    -h|--help) sed -n '2,/^set -euo/p' "$0" | sed '$d; s/^# \{0,1\}//'; exit 0 ;;
+    *) echo "macos-setup: unknown option $arg" >&2; exit 2 ;;
+  esac
+done
 
 SBT_VERSION=1.10.7   # the version project/build.properties pins; the project does not build with sbt 2
 JDK_FEATURE=21
@@ -104,7 +114,36 @@ else
   echo "  have the GitHub CLI in $gh_dir"
 fi
 
-# 6. The shell
+# 6. With --yubikey: age (its release build) and age-plugin-yubikey (built with Rust from rustup, under
+# ~/.cargo; macOS has its smart-card support built in, so nothing else is needed), for `orphera secrets agent`
+# with the secret store's YubiKey plugged into this Mac.
+age_dir="$local_dir/age"
+if [ -n "$yubikey" ]; then
+  if [ ! -x "$age_dir/age" ]; then
+    say "age"
+    age_tag=$(curl -fsSL https://api.github.com/repos/FiloSottile/age/releases/latest | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | sed -n 1p)
+    [ -n "$age_tag" ] || die "could not find the current age version"
+    download "https://github.com/FiloSottile/age/releases/download/$age_tag/age-$age_tag-darwin-$go_arch.tar.gz" "$tmp/age.tar.gz"
+    mkdir "$tmp/age" && tar -xzf "$tmp/age.tar.gz" -C "$tmp/age"
+    [ -x "$tmp/age/age/age" ] || die "the age download is not the layout expected"
+    rm -rf "$age_dir" && mv "$tmp/age/age" "$age_dir"
+  else
+    echo "  have age in $age_dir"
+  fi
+  if [ ! -x "$HOME/.cargo/bin/age-plugin-yubikey" ]; then
+    if [ ! -x "$HOME/.cargo/bin/cargo" ]; then
+      say "Rust (rustup), to build age-plugin-yubikey"
+      download https://sh.rustup.rs "$tmp/rustup.sh"
+      sh "$tmp/rustup.sh" -y --profile minimal --no-modify-path
+    fi
+    say "age-plugin-yubikey (built from source: a few minutes)"
+    "$HOME/.cargo/bin/cargo" install --locked age-plugin-yubikey
+  else
+    echo "  have age-plugin-yubikey in $HOME/.cargo/bin"
+  fi
+fi
+
+# 7. The shell
 say "Updating ~/.zprofile"
 profile="$HOME/.zprofile"
 touch "$profile"
@@ -114,12 +153,12 @@ fi
 cat >>"$profile" <<PROFILE
 # >>> orphera build tools
 export JAVA_HOME="$JAVA_HOME"
-export PATH="\$JAVA_HOME/bin:$sbt_dir/bin:$go_dir/bin:\$HOME/go/bin:$gh_dir/bin:\$PATH"
+export PATH="\$JAVA_HOME/bin:$sbt_dir/bin:$go_dir/bin:\$HOME/go/bin:$gh_dir/bin:$age_dir:\$HOME/.cargo/bin:\$PATH"
 # <<< orphera build tools
 PROFILE
-export PATH="$JAVA_HOME/bin:$sbt_dir/bin:$go_dir/bin:$gh_dir/bin:$PATH"
+export PATH="$JAVA_HOME/bin:$sbt_dir/bin:$go_dir/bin:$gh_dir/bin:$age_dir:$HOME/.cargo/bin:$PATH"
 
-# 7. What is there now
+# 8. What is there now
 say "Installed"
 java -version 2>&1 | sed -n 1p
 git --version
@@ -127,6 +166,10 @@ go version
 gh --version | sed -n 1p
 python3 --version
 make --version | sed -n 1p
+if [ -n "$yubikey" ]; then
+  age --version
+  age-plugin-yubikey --version
+fi
 
 cat <<'MSG'
 
