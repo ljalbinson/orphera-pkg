@@ -282,7 +282,7 @@ _orphera_completions() {
 
     secrets)
       if [ "$cword" -eq 2 ]; then
-        COMPREPLY=($(compgen -W "init list generate set get rm" -- "$cur"))
+        COMPREPLY=($(compgen -W "init list generate set get rm recipients rekey agent" -- "$cur"))
       elif [ "$cword" -eq 3 ]; then
         case "${words[2]}" in
           get|set|rm|generate)

@@ -235,6 +235,36 @@ object SecretsCheck:
     val c2 = cs.set("c/d", "third-value")
     check("a write after reading keeps the other store's change", c2.isRight && new SecretStore(counted, ReverseCipher).get("a/b") == Right(Some("second-value")))
 
+    // The agent: a socket another machine (the one with the YubiKey) serves, as ssh-agent forwarding does.
+    def serving(sock: java.nio.file.Path, c: Cipher): Unit =
+      val t = new Thread(() => { val _ = AgeAgent.serve(sock, c, _ => ()) })
+      t.setDaemon(true)
+      t.start()
+      var i = 0
+      while !Files.exists(sock) && i < 100 do { Thread.sleep(20); i += 1 }
+    val sock = dir.resolve("agent.sock")
+    serving(sock, ReverseCipher)
+    val sealedText = ReverseCipher.encrypt("{\"x\":\"through the agent\"}").getOrElse(Array.emptyByteArray)
+    check("agent: decrypts what is sent through the socket", AgeAgent.decrypt(sock, sealedText) == Right("{\"x\":\"through the agent\"}"))
+    object NoCipher extends Cipher:
+      def encrypt(plain: String): Either[String, Array[Byte]] = Left("no")
+      def decrypt(data: Array[Byte]): Either[String, String] = Left("no PIN given")
+    val refusing = dir.resolve("refusing.sock")
+    serving(refusing, NoCipher)
+    check("agent: its failure comes back as refused, with its reason", AgeAgent.decrypt(refusing, sealedText) == Left(AgeAgent.Failure.Refused("no PIN given")))
+    val stale = dir.resolve("stale.sock")
+    val dead = java.nio.channels.ServerSocketChannel.open(java.net.StandardProtocolFamily.UNIX)
+    dead.bind(java.net.UnixDomainSocketAddress.of(stale))
+    dead.close()
+    check(
+      "agent: a socket file nothing listens on is unreachable",
+      AgeAgent.decrypt(stale, sealedText) match
+        case Left(AgeAgent.Failure.Unreachable(_)) => true
+        case _                                     => false
+    )
+    val big = "y" * 300000
+    check("agent: a large store comes back whole", AgeAgent.decrypt(sock, ReverseCipher.encrypt(big).getOrElse(Array.emptyByteArray)) == Right(big))
+
     // The real thing, when age is installed.
     if haveAge then
       val id = dir.resolve("age.key")
@@ -298,6 +328,25 @@ object SecretsCheck:
           new SecretStore(dir.resolve("rk.age"), new AgeCipher(dir.resolve("first.key"))).get("k/v") == Right(Some("rekeyed-value"))
       )
       check("without a recipients file, the identity's own key is the recipient", new AgeCipher(id2, Some(dir.resolve("none"))).recipients == pub2.map(List(_)))
+      // Decrypting through an agent that holds the identity, with none here (as on the orphera host
+      // when the YubiKey is on the Mac); and falling back to a local identity when the agent is gone.
+      val agentSock = dir.resolve("age-agent.sock")
+      serving(agentSock, new AgeCipher(dir.resolve("first.key")))
+      val remoteOnly = new AgeCipher(dir.resolve("no-identity-here.key"), Some(rfile), Some(agentSock))
+      check(
+        "agent: a store is read through the agent with no identity here",
+        new SecretStore(dir.resolve("rk.age"), remoteOnly).get("k/v") == Right(Some("rekeyed-value"))
+      )
+      val viaStale = new AgeCipher(id2, Some(rfile), Some(stale))
+      check(
+        "agent: an unreachable agent falls back to the identity here",
+        new SecretStore(dir.resolve("rk.age"), viaStale).get("k/v") == Right(Some("rekeyed-value"))
+      )
+      check(
+        "agent: unreachable with no identity here says both",
+        new SecretStore(dir.resolve("rk.age"), new AgeCipher(dir.resolve("none.key"), Some(rfile), Some(stale))).get("k/v")
+          .left.exists(_.contains("not answering"))
+      )
     else println("age is not installed: the age checks were skipped")
 
     check(

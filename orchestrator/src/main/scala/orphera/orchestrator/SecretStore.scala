@@ -40,7 +40,8 @@ trait Cipher:
   * Encrypts to the recipients in `recipientsFile` when it exists, otherwise to
   * the identity's own public key.
   */
-final class AgeCipher(identityFile: Path, recipientsFile: Option[Path] = None) extends Cipher:
+final class AgeCipher(identityFile: Path, recipientsFile: Option[Path] = None, agentSocket: Option[Path] = None)
+    extends Cipher:
   import AgeCipher.*
 
   private def listed: Option[Path] = recipientsFile.filter(Files.exists(_))
@@ -59,7 +60,22 @@ final class AgeCipher(identityFile: Path, recipientsFile: Option[Path] = None) e
   private def pluginIdentity: Boolean =
     scala.util.Try(Files.readString(identityFile)).toOption.exists(_.contains("AGE-PLUGIN-"))
 
+  // With an agent socket (AgeAgent: the YubiKey is on another machine), decrypt through it; if
+  // nothing answers there (a stale socket file), here with the identity, when there is one.
   def decrypt(data: Array[Byte]): Either[String, String] =
+    agentSocket.filter(Files.exists(_)) match
+      case None => decryptHere(data)
+      case Some(socket) =>
+        AgeAgent.decrypt(socket, data) match
+          case Right(text)                             => Right(text)
+          case Left(AgeAgent.Failure.Refused(msg))     => Left(s"the age agent could not decrypt: $msg")
+          case Left(AgeAgent.Failure.Unreachable(msg)) =>
+            if Files.exists(identityFile) then
+              System.err.println(s"(age agent: $msg; decrypting here with $identityFile)")
+              decryptHere(data)
+            else Left(s"the age agent is not answering ($msg), and there is no identity here ($identityFile)")
+
+  private def decryptHere(data: Array[Byte]): Either[String, String] =
     run(List("age", "-d", "-i", identityFile.toString), data, showPrompts = pluginIdentity)
       .map(String(_, UTF_8))
 
@@ -293,7 +309,7 @@ object SecretStore:
       .map(Paths.get(_))
       .getOrElse(home.resolve(".config/orphera/recipients"))
 
-  def defaultCipher: AgeCipher = new AgeCipher(identityFile, Some(recipientsFile))
+  def defaultCipher: AgeCipher = new AgeCipher(identityFile, Some(recipientsFile), Some(AgeAgent.socketPath))
 
   private val shared = new java.util.concurrent.atomic.AtomicReference[Option[SecretStore]](None)
 
@@ -302,7 +318,7 @@ object SecretStore:
     * identity yet.
     */
   def default(): Either[String, SecretStore] =
-    if !Files.exists(identityFile) then
+    if !Files.exists(identityFile) && !Files.exists(AgeAgent.socketPath) then
       Left(s"no age identity at $identityFile: run `orphera secrets init` once (and back the file up)")
     else
       shared.synchronized {
