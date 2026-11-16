@@ -2,7 +2,7 @@
 
 package orphera.orchestrator
 
-import java.io.{InputStream, OutputStream}
+import java.io.{InputStream, OutputStream, PushbackInputStream}
 import java.net.{StandardProtocolFamily, UnixDomainSocketAddress}
 import java.nio.channels.{Channels, ServerSocketChannel, SocketChannel}
 import java.nio.charset.StandardCharsets.UTF_8
@@ -22,7 +22,9 @@ import scala.util.Try
   * Encrypting needs only the recipients' public keys, so it stays local.
   *
   * Wire format, one request per connection: "DECRYPT <n>\n" and n bytes; the
-  * reply is "OK <n>\n" and n bytes, or "ERR <message>\n".
+  * reply is "OK <n>\n" and n bytes, or "ERR <message>\n". "PING\n" is answered
+  * "PONG\n", so a login script can tell an agent from a forwarded socket with
+  * nothing behind it (which accepts the connection, then closes it).
   */
 object AgeAgent:
 
@@ -38,7 +40,9 @@ object AgeAgent:
 
   /** Why a request through the agent did not decrypt. */
   enum Failure:
-    /** Nothing answered on the socket (a stale socket file, a closed session).
+    /** Nothing answered on the socket: a stale socket file, a closed session,
+      * or a forwarded socket with no agent at the far end (ssh accepts the
+      * connection and closes it before any reply).
       */
     case Unreachable(message: String)
 
@@ -82,26 +86,41 @@ object AgeAgent:
               Failure.Unreachable(s"nothing answers on $socket (${message(e)})")
             )
             .flatMap { _ =>
+              val in = new PushbackInputStream(Channels.newInputStream(ch))
+              def failed(e: Throwable, replied: Boolean): Failure =
+                if timedOut.get then
+                  Failure.Refused(
+                    s"no answer from the agent on $socket within ${timeout}s (is the YubiKey waiting for a PIN or a touch on the other machine?)"
+                  )
+                else if replied then
+                  Failure.Refused(s"the agent on $socket: ${message(e)}")
+                else noAgent(socket, Some(message(e)))
+              // Until the first byte of a reply, a closed connection means no
+              // agent answered: a forwarded socket with nothing at the far end.
               Try {
                 val out = Channels.newOutputStream(ch)
                 out.write(s"DECRYPT ${data.length}\n".getBytes(UTF_8))
                 out.write(data)
                 out.flush()
-                reply(Channels.newInputStream(ch))
-              }.toEither.left
-                .map(e =>
-                  if timedOut.get then
-                    Failure.Refused(
-                      s"no answer from the agent on $socket within ${timeout}s (is the YubiKey waiting for a PIN or a touch on the other machine?)"
-                    )
-                  else Failure.Refused(s"the agent on $socket: ${message(e)}")
-                )
-                .flatten
+                in.read()
+              }.toEither match
+                case Left(e)   => Left(failed(e, replied = false))
+                case Right(-1) => Left(noAgent(socket, None))
+                case Right(b)  =>
+                  in.unread(b)
+                  Try(reply(in)).toEither.left
+                    .map(e => failed(e, replied = true))
+                    .flatten
             }
         finally
           watchdog.interrupt()
           ch.close()
       }
+
+  private def noAgent(socket: Path, why: Option[String]): Failure =
+    Failure.Unreachable(
+      s"nothing answers at the far end of $socket${why.fold("")(w => s" ($w)")}"
+    )
 
   private def reply(in: InputStream): Either[Failure, String] =
     readLine(in) match
@@ -167,6 +186,9 @@ object AgeAgent:
             val in = Channels.newInputStream(ch)
             val out = Channels.newOutputStream(ch)
             readLine(in) match
+              case Some("PING") =>
+                out.write("PONG\n".getBytes(UTF_8))
+                out.flush()
               case Some(l) if l.startsWith("DECRYPT ") =>
                 l.drop(8)
                   .trim

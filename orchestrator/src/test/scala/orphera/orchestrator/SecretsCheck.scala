@@ -352,6 +352,42 @@ object SecretsCheck:
         case Left(AgeAgent.Failure.Unreachable(_)) => true
         case _                                     => false
     )
+    // What a forwarded socket does with no agent at the far end: ssh accepts
+    // the connection, then closes it.
+    val farEnd = dir.resolve("far-end.sock")
+    val closing = java.nio.channels.ServerSocketChannel
+      .open(java.net.StandardProtocolFamily.UNIX)
+    closing.bind(java.net.UnixDomainSocketAddress.of(farEnd))
+    val closer = new Thread(() => while true do closing.accept().close())
+    closer.setDaemon(true)
+    closer.start()
+    check(
+      "agent: a forwarded socket with no agent behind it is unreachable",
+      AgeAgent.decrypt(farEnd, sealedText) match
+        case Left(AgeAgent.Failure.Unreachable(m)) => m.contains("far end")
+        case _                                     => false
+    )
+    // What the login check in ~/.profile does (README).
+    def ping(socket: java.nio.file.Path): String =
+      val ch = java.nio.channels.SocketChannel
+        .open(java.net.StandardProtocolFamily.UNIX)
+      try
+        scala.util
+          .Try {
+            ch.connect(java.net.UnixDomainSocketAddress.of(socket))
+            val out = java.nio.channels.Channels.newOutputStream(ch)
+            out.write("PING\n".getBytes(UTF_8))
+            out.flush()
+            val in = java.nio.channels.Channels.newInputStream(ch)
+            String(in.readAllBytes, UTF_8)
+          }
+          .getOrElse("")
+      finally ch.close()
+    check("agent: answers PING with PONG", ping(sock) == "PONG\n")
+    check(
+      "agent: a socket with no agent behind it does not answer PING",
+      ping(farEnd) == ""
+    )
     object SlowCipher extends Cipher:
       def encrypt(plain: String): Either[String, Array[Byte]] = Left("no")
       def decrypt(data: Array[Byte]): Either[String, String] = {
