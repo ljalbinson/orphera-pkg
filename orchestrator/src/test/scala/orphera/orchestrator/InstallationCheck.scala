@@ -19,7 +19,9 @@ object InstallationCheck:
       println(s"FAIL: $name $detail")
 
   private val Installed = Installation.InstalledScriptingJar
-  private val Built = Some("/repo/scripting/target/scala-3.8.4/scripting-assembly-1.jar")
+  private val Built = Some(
+    "/repo/scripting/target/scala-3.8.4/scripting-assembly-1.jar"
+  )
 
   private def resolve(
       env: Map[String, String],
@@ -38,7 +40,11 @@ object InstallationCheck:
     )
     check(
       "an environment variable naming nothing is an error, not a fallback",
-      resolve(Map(Installation.ScriptingEnv -> "/x/s.jar"), Set(Installed), Built).swap
+      resolve(
+        Map(Installation.ScriptingEnv -> "/x/s.jar"),
+        Set(Installed),
+        Built
+      ).swap
         .exists(e => e.contains("/x/s.jar") && e.contains("not a file"))
     )
     check(
@@ -57,13 +63,14 @@ object InstallationCheck:
     check(
       "nothing found says how to get it",
       resolve(Map.empty, Set.empty, None).swap.exists(e =>
-        e.contains("make orpheracli") && e.contains(Installation.ScriptingEnv) &&
+        e.contains("make orpheracli") && e.contains(
+          Installation.ScriptingEnv
+        ) &&
           e.contains(Installed)
       )
     )
     check(
-      "the build tree is not searched when something else is found",
-      {
+      "the build tree is not searched when something else is found", {
         var searched = false
         val r = Installation.resolveScriptingJar(
           _ => None,
@@ -83,16 +90,25 @@ object InstallationCheck:
         Set("/x/o.jar", InstalledOrch).contains,
         None
       ) == Right("/x/o.jar") &&
-        Installation.resolveOrchestratorJar(_ => None, Set(InstalledOrch).contains, Built) ==
-          Right(InstalledOrch) &&
+        Installation.resolveOrchestratorJar(
+          _ => None,
+          Set(InstalledOrch).contains,
+          Built
+        ) ==
+        Right(InstalledOrch) &&
         Installation.resolveOrchestratorJar(_ => None, _ => false, Built) ==
-          Right(Built.getOrElse(""))
+        Right(Built.getOrElse(""))
     )
     check(
       "no orchestrator jar says how to get one",
-      Installation.resolveOrchestratorJar(_ => None, _ => false, None).swap.exists(e =>
-        e.contains("make orpheracli") && e.contains(Installation.OrchestratorEnv)
-      )
+      Installation
+        .resolveOrchestratorJar(_ => None, _ => false, None)
+        .swap
+        .exists(e =>
+          e.contains("make orpheracli") && e.contains(
+            Installation.OrchestratorEnv
+          )
+        )
     )
 
     // The certificate authority and the run state
@@ -102,24 +118,34 @@ object InstallationCheck:
     )
     check(
       "ORPHERA_CERTS_DIR moves it, and a trailing slash does not matter",
-      Installation.certsDirOf(Map(Installation.CertsEnv -> "/etc/orphera/ca/").get) ==
+      Installation.certsDirOf(
+        Map(Installation.CertsEnv -> "/etc/orphera/ca/").get
+      ) ==
         "/etc/orphera/ca" &&
-        Installation.certsDirOf(Map(Installation.CertsEnv -> " ").get) == "certs"
+        Installation.certsDirOf(
+          Map(Installation.CertsEnv -> " ").get
+        ) == "certs"
     )
     check(
       "run state is relative to the current directory by default",
-      Installation.statePathOf(_ => None, ".orphera-logs").toString == ".orphera-logs"
+      Installation
+        .statePathOf(_ => None, ".orphera-logs")
+        .toString == ".orphera-logs"
     )
     check(
       "ORPHERA_STATE_DIR puts run state inside it",
-      Installation.statePathOf(
-        Map(Installation.StateEnv -> "/var/lib/orphera").get,
-        ".orphera-logs"
-      ).toString == "/var/lib/orphera/.orphera-logs"
+      Installation
+        .statePathOf(
+          Map(Installation.StateEnv -> "/var/lib/orphera").get,
+          ".orphera-logs"
+        )
+        .toString == "/var/lib/orphera/.orphera-logs"
     )
     check(
       "an empty ORPHERA_STATE_DIR is ignored",
-      Installation.statePathOf(Map(Installation.StateEnv -> "").get, ".orphera-state").toString ==
+      Installation
+        .statePathOf(Map(Installation.StateEnv -> "").get, ".orphera-state")
+        .toString ==
         ".orphera-state"
     )
 
@@ -129,50 +155,69 @@ object InstallationCheck:
     val none: java.nio.file.Path => Boolean = _ => false
     check(
       "a file in the current directory is used as given",
-      Installation.sourceOf(rootEnv, p => p.toString == "files/motd", "files/motd").toString ==
+      Installation
+        .sourceOf(rootEnv, p => p.toString == "files/motd", "files/motd")
+        .toString ==
         "files/motd"
     )
     check(
       "a file missing here is taken from ORPHERA_ROOT",
-      Installation.sourceOf(
-        rootEnv,
-        p => p == Paths.get("/usr/share/orphera/files/motd"),
-        "files/motd"
-      ).toString == "/usr/share/orphera/files/motd"
+      Installation
+        .sourceOf(
+          rootEnv,
+          p => p == Paths.get("/usr/share/orphera/files/motd"),
+          "files/motd"
+        )
+        .toString == "/usr/share/orphera/files/motd"
     )
     check(
       "a file in both places is the one in the current directory",
-      Installation.sourceOf(rootEnv, _ => true, "files/motd").toString == "files/motd"
+      Installation
+        .sourceOf(rootEnv, _ => true, "files/motd")
+        .toString == "files/motd"
     )
     check(
       "a file in neither place keeps the name the playbook used",
-      Installation.sourceOf(rootEnv, none, "files/motd").toString == "files/motd"
+      Installation
+        .sourceOf(rootEnv, none, "files/motd")
+        .toString == "files/motd"
     )
     check(
       "without ORPHERA_ROOT nothing changes",
-      Installation.sourceOf(_ => None, none, "files/motd").toString == "files/motd"
+      Installation
+        .sourceOf(_ => None, none, "files/motd")
+        .toString == "files/motd"
     )
     check(
       "an empty ORPHERA_ROOT is ignored",
-      Installation.sourceOf(Map(Installation.RootEnv -> " ").get, _ => true, "files/motd")
+      Installation
+        .sourceOf(Map(Installation.RootEnv -> " ").get, _ => true, "files/motd")
         .toString == "files/motd"
     )
     check(
       "an absolute path is never moved",
-      Installation.sourceOf(rootEnv, p => p.toString.startsWith("/opt"), "/etc/motd").toString ==
+      Installation
+        .sourceOf(rootEnv, p => p.toString.startsWith("/opt"), "/etc/motd")
+        .toString ==
         "/etc/motd"
     )
 
     // The CA certificate
     check(
       "a missing CA certificate is said to be missing, with how to fix it",
-      Installation.caCertProblemOf("/etc/orphera/certs/ca.crt", false, false).exists(m =>
-        m.contains("/etc/orphera/certs/ca.crt does not exist") && m.contains("ORPHERA_CERTS_DIR")
-      )
+      Installation
+        .caCertProblemOf("/etc/orphera/certs/ca.crt", false, false)
+        .exists(m =>
+          m.contains("/etc/orphera/certs/ca.crt does not exist") && m.contains(
+            "ORPHERA_CERTS_DIR"
+          )
+        )
     )
     check(
       "an unreadable CA certificate is said to be unreadable",
-      Installation.caCertProblemOf("certs/ca.crt", true, false).exists(_.contains("permission denied"))
+      Installation
+        .caCertProblemOf("certs/ca.crt", true, false)
+        .exists(_.contains("permission denied"))
     )
     check(
       "a CA certificate that is there is no problem",
