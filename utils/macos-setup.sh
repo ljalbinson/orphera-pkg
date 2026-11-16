@@ -131,10 +131,15 @@ if [ -n "$yubikey" ]; then
     echo "  have age in $age_dir"
   fi
   if [ ! -x "$HOME/.cargo/bin/age-plugin-yubikey" ]; then
-    if [ ! -x "$HOME/.cargo/bin/cargo" ]; then
+    if [ ! -x "$HOME/.cargo/bin/rustup" ]; then
       say "Rust (rustup), to build age-plugin-yubikey"
       download https://sh.rustup.rs "$tmp/rustup.sh"
       sh "$tmp/rustup.sh" -y --profile minimal --no-modify-path
+    else
+      # An older Rust already here cannot resolve the plugin's pinned dependencies: bring it up to date.
+      say "Updating Rust (rustup)"
+      "$HOME/.cargo/bin/rustup" update stable
+      "$HOME/.cargo/bin/rustup" default stable
     fi
     say "age-plugin-yubikey (built from source: a few minutes)"
     "$HOME/.cargo/bin/cargo" install --locked age-plugin-yubikey
