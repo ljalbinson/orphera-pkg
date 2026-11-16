@@ -45,10 +45,27 @@ object AgeAgent:
 
   private val MaxBytes = 64 * 1024 * 1024
 
-  def decrypt(socket: Path, data: Array[Byte]): Either[Failure, String] =
+  /** How long to wait for the agent's answer (it may be waiting for a PIN and a
+    * touch): $ORPHERA_AGE_AGENT_TIMEOUT seconds, 120 by default.
+    */
+  def timeoutSeconds: Int =
+    sys.env.get("ORPHERA_AGE_AGENT_TIMEOUT").flatMap(_.trim.toIntOption).filter(_ > 0).getOrElse(120)
+
+  def decrypt(socket: Path, data: Array[Byte], timeout: Int = timeoutSeconds): Either[Failure, String] =
     Try(SocketChannel.open(StandardProtocolFamily.UNIX)).toEither.left
       .map(e => Failure.Unreachable(message(e)))
       .flatMap { ch =>
+        // Closing the channel from another thread ends a read that is waiting.
+        val timedOut = new java.util.concurrent.atomic.AtomicBoolean(false)
+        val watchdog = new Thread(() =>
+          try
+            Thread.sleep(timeout * 1000L)
+            timedOut.set(true)
+            ch.close()
+          catch case _: InterruptedException => ()
+        )
+        watchdog.setDaemon(true)
+        watchdog.start()
         try
           Try(ch.connect(UnixDomainSocketAddress.of(socket))).toEither.left
             .map(e => Failure.Unreachable(s"nothing answers on $socket (${message(e)})"))
@@ -59,9 +76,17 @@ object AgeAgent:
                 out.write(data)
                 out.flush()
                 reply(Channels.newInputStream(ch))
-              }.toEither.left.map(e => Failure.Refused(s"the agent on $socket: ${message(e)}")).flatten
+              }.toEither.left
+                .map(e =>
+                  if timedOut.get then
+                    Failure.Refused(s"no answer from the agent on $socket within ${timeout}s (is the YubiKey waiting for a PIN or a touch on the other machine?)")
+                  else Failure.Refused(s"the agent on $socket: ${message(e)}")
+                )
+                .flatten
             }
-        finally ch.close()
+        finally
+          watchdog.interrupt()
+          ch.close()
       }
 
   private def reply(in: InputStream): Either[Failure, String] =
