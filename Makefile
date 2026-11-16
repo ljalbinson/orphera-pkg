@@ -60,7 +60,7 @@ fix:
 	$(MAKE) fmt
 
 fmt:
-	sbt scalafmt
+	sbt scalafmtAll
 	$(MAKE) fmt-manifests
 
 # What CI checks. scalafmt has no check-only form for files outside a

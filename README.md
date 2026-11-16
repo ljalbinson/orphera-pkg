@@ -2350,7 +2350,7 @@ Afterwards both hosts hold the same CA key, secret store and SSH key, and either
 | `make certs-clean` | deletes the CA in `certs/` — you must type `delete` to confirm; every node then needs a certificate from a new CA (`make certs`, `orphera issue-certs`) |
 | `make orpheracli` | builds the orchestrator and the scripting jar and installs them as `/usr/local/lib/orphera-orchestrator.jar` and `/usr/local/lib/orphera-scripting.jar`, with the `orphera` launcher in `/usr/local/bin`, the utility commands (`vmctl`, `start-vm`, ...) in `/opt/orphera/bin` (on the `PATH` of new login shells) and, on Linux, the bash completion in `/etc/bash_completion.d/orphera` (effective in new shells). Also works on macOS; see [Installing the command line](#installing-the-command-line) |
 | `make release` | bumps the patch version in `VERSION`, then runs the full clean/test/assembly/deb chain (plus the `.rpm` when `rpmbuild` is installed) and the command-line package (`make cli-package`) at the new version, and installs the new orchestrator on this machine as `make orpheracli` does. It does not commit `VERSION` or tag; see [Versions and tags](#versions-and-tags) |
-| `make fmt` | `scalafmt` over the sources, then over `manifests/` (`make fmt-manifests`) |
+| `make fmt` | `scalafmt` over the sources, main and test (`scalafmtAll`), then over `manifests/` (`make fmt-manifests`) |
 | `make fmt-check` | checks that the sources and `manifests/` are formatted; CI runs the same check. A manifest that was not is formatted in passing |
 | `make lint` | the `scalafix` rules in `.scalafix.conf` in check mode; CI runs the same check |
 | `make fix` | applies the `scalafix` rules, then runs `make fmt` |
