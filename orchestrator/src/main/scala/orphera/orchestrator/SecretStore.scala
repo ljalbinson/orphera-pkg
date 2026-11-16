@@ -43,7 +43,9 @@ trait Cipher:
 final class AgeCipher(
     identityFile: Path,
     recipientsFile: Option[Path] = None,
-    agentSocket: Option[Path] = None
+    agentSocket: Option[Path] = None,
+    // Where the note that it fell back to the identity here goes.
+    notice: String => Unit = m => System.err.println(m)
 ) extends Cipher:
   import AgeCipher.*
 
@@ -82,9 +84,7 @@ final class AgeCipher(
             Left(s"the age agent could not decrypt: $msg")
           case Left(AgeAgent.Failure.Unreachable(msg)) =>
             if Files.exists(identityFile) then
-              System.err.println(
-                s"(age agent: $msg; decrypting here with $identityFile)"
-              )
+              notice(s"(age agent: $msg; decrypting here with $identityFile)")
               decryptHere(data)
             else
               Left(
