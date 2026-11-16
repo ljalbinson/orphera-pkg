@@ -10,8 +10,8 @@ import scala.util.Try
   * touch: the agent's own directory, `/etc/orphera-agent`, which holds its
   * token (`agent.env`) and its TLS key and CA certificate (`tls/`). Those are
   * set over SSH (`orphera issue-certs`, `utils/set-agent-token.sh`), never
-  * through the agent, so a caller cannot read the token or key back, or
-  * replace them, by accident or otherwise.
+  * through the agent, so a caller cannot read the token or key back, or replace
+  * them, by accident or otherwise.
   *
   * This is not a sandbox: `run` executes any command as root, so whoever holds
   * the token can still reach any file. The token and mutual TLS are what keep

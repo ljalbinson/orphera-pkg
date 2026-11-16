@@ -80,7 +80,8 @@ object apt_cache extends OrpheraApply:
   def describe(node: Node): List[ApplyResource] =
     val acng = pkg("apt-cacher-ng", updateCache = true)
     val cacher = service("apt-cacher-ng").after(acng)
-    val answering = command("the cache answers", waitHealthy, unless = healthy).after(cacher)
+    val answering =
+      command("the cache answers", waitHealthy, unless = healthy).after(cacher)
     val tunnelling = command(
       "tunnelling through the cache is allowed",
       "echo 'a CONNECT tunnel through apt-cacher-ng failed: refused (check PassThroughPattern), or download.ceph.com unreachable' >&2; exit 1",
@@ -89,14 +90,17 @@ object apt_cache extends OrpheraApply:
     List(
       acng,
       pkg("curl"),
-      file("/etc/apt-cacher-ng/zz_orphera.conf", conf, mode = "0644").after(acng).notifies(cacher),
+      file("/etc/apt-cacher-ng/zz_orphera.conf", conf, mode = "0644")
+        .after(acng)
+        .notifies(cacher),
       cacher,
       answering,
       tunnelling,
       command(
         "store the package indexes in the cache",
         warm,
-        unless = "find /var/cache/apt-cacher-ng -type f -name 'InRelease' | grep -q .",
+        unless =
+          "find /var/cache/apt-cacher-ng -type f -name 'InRelease' | grep -q .",
         timeout = 600
       ).after(tunnelling)
     )

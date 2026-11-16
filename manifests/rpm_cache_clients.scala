@@ -24,7 +24,12 @@ object rpm_cache_clients extends OrpheraApply:
   private val cacheHost = "tst12.ljalbinson.com"
   private val port = 8080
 
-  private def repo(id: String, name: String, path: String, enabled: Int): String =
+  private def repo(
+      id: String,
+      name: String,
+      path: String,
+      enabled: Int
+  ): String =
     s"""[orphera-$id]
        |name=Rocky Linux $$releasever - $name (via rpm cache)
        |baseurl=http://$cacheHost:$port/rocky/$$releasever/$path/$$basearch/os/
@@ -54,9 +59,15 @@ object rpm_cache_clients extends OrpheraApply:
       """for f in /etc/yum.repos.d/rocky*.repo; do [ -e "$f" ] && mv "$f" "$f.orphera-off"; done""",
       onlyIf = "ls /etc/yum.repos.d/rocky*.repo"
     )
-    val clean = command("clear dnf's metadata", "dnf clean metadata -q", onChangeOnly = true)
+    val clean = command(
+      "clear dnf's metadata",
+      "dnf clean metadata -q",
+      onChangeOnly = true
+    )
     List(
       setAside,
-      file("/etc/yum.repos.d/orphera-rpm-cache.repo", repoFile, mode = "0644").after(setAside).notifies(clean),
+      file("/etc/yum.repos.d/orphera-rpm-cache.repo", repoFile, mode = "0644")
+        .after(setAside)
+        .notifies(clean),
       clean
     )

@@ -221,7 +221,10 @@ object p420_hba extends OrpheraClusterPlaybook:
     clusterPlaybook("p420-hba")(
       stage("p420-hba", nodes*)
         .task("wait for apt and dpkg to be idle")(
-          Task.RunCommand(List("sh", "-c", waitAptIdleScript), timeoutSeconds = 960)
+          Task.RunCommand(
+            List("sh", "-c", waitAptIdleScript),
+            timeoutSeconds = 960
+          )
         )
         .task("install ssacli if it is missing")(
           Task.RunCommand(List("sh", "-c", installScript), timeoutSeconds = 600)

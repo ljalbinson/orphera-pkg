@@ -71,8 +71,12 @@ object lustre_cluster_script extends OrpheraScript:
 
   // What inventory.yaml must give for this run; checked before anything runs.
   private val missingVars: List[String] =
-    allNodes.filter(nodeVar(_, "cluster_ip").isEmpty).map(n => s"$n has no cluster_ip") ++
-      servers.filter(nodeVar(_, "lustre_targets").isEmpty).map(n => s"$n has no lustre_targets")
+    allNodes
+      .filter(nodeVar(_, "cluster_ip").isEmpty)
+      .map(n => s"$n has no cluster_ip") ++
+      servers
+        .filter(nodeVar(_, "lustre_targets").isEmpty)
+        .map(n => s"$n has no lustre_targets")
 
   // The MGS NID. tcp0 is written `@tcp`.
   private val mgsNid = s"${nodeVar(mgs, "cluster_ip")}@tcp"
@@ -394,20 +398,54 @@ object lustre_cluster_script extends OrpheraScript:
     val clientNodes = orphera.nodes(clients*)
 
     // A stage: one shell script on each of `nodes`.
-    def stage(nodes: Nodes, name: String, script: String, timeout: Int): IO[Unit] =
-      nodes.each(node => node.sh(name, forNode(script, node.name), timeout)).void
+    def stage(
+        nodes: Nodes,
+        name: String,
+        script: String,
+        timeout: Int
+    ): IO[Unit] =
+      nodes
+        .each(node => node.sh(name, forNode(script, node.name), timeout))
+        .void
 
     for
       _ <- IO.raiseUnless(missingVars.isEmpty)(
-        new IllegalStateException(s"inventory.yaml: ${missingVars.mkString("; ")}")
+        new IllegalStateException(
+          s"inventory.yaml: ${missingVars.mkString("; ")}"
+        )
       )
-      _ <- stage(serverNodes, "check OS, target disks and repositories", preflightScript, 120)
-      _ <- stage(serverNodes, "Lustre repositories, kernel and server packages", packagesScript, 1800)
+      _ <- stage(
+        serverNodes,
+        "check OS, target disks and repositories",
+        preflightScript,
+        120
+      )
+      _ <- stage(
+        serverNodes,
+        "Lustre repositories, kernel and server packages",
+        packagesScript,
+        1800
+      )
       _ <- IO.whenA(clientOnly.nonEmpty)(
-        stage(clientOnlyNodes, "check OS and the client repository", clientPreflightScript, 120) >>
-          stage(clientOnlyNodes, "Lustre client repository and packages", clientPackagesScript, 1800)
+        stage(
+          clientOnlyNodes,
+          "check OS and the client repository",
+          clientPreflightScript,
+          120
+        ) >>
+          stage(
+            clientOnlyNodes,
+            "Lustre client repository and packages",
+            clientPackagesScript,
+            1800
+          )
       )
-      _ <- stage(everyNode, "default to the Lustre kernel and lock the packages", bootKernelScript, 300)
+      _ <- stage(
+        everyNode,
+        "default to the Lustre kernel and lock the packages",
+        bootKernelScript,
+        300
+      )
       _ <- everyNode.each { node =>
         node.query("is a reboot needed", needsRebootScript).flatMap { answer =>
           if answer.stdout.trim == "yes" then
@@ -417,11 +455,36 @@ object lustre_cluster_script extends OrpheraScript:
       }
       _ <- stage(everyNode, "LNet on tcp0", lnetScript, 120)
       _ <- stage(everyNode, "reach the MGS over LNet", lnetPingScript, 120)
-      _ <- stage(serverNodes, "mkfs.lustre the blank targets", formatScript, 1800)
-      _ <- stage(serverNodes, "mount the MGT, then MDT0", mountScript("mgt mdt0"), 600)
+      _ <- stage(
+        serverNodes,
+        "mkfs.lustre the blank targets",
+        formatScript,
+        1800
+      )
+      _ <- stage(
+        serverNodes,
+        "mount the MGT, then MDT0",
+        mountScript("mgt mdt0"),
+        600
+      )
       _ <- stage(serverNodes, "mount the other MDTs", mountScript("mdt"), 600)
       _ <- stage(serverNodes, "mount the OSTs", mountScript("ost"), 600)
-      _ <- stage(serverNodes, "wait for MDT and OST recovery", recoveryScript, 1200)
-      _ <- stage(clientNodes, s"mount $fsName at /mnt/$fsName", clientMountScript, 300)
-      _ <- stage(clientNodes, "every MDT and OST is visible to the client", verifyScript, 300)
+      _ <- stage(
+        serverNodes,
+        "wait for MDT and OST recovery",
+        recoveryScript,
+        1200
+      )
+      _ <- stage(
+        clientNodes,
+        s"mount $fsName at /mnt/$fsName",
+        clientMountScript,
+        300
+      )
+      _ <- stage(
+        clientNodes,
+        "every MDT and OST is visible to the client",
+        verifyScript,
+        300
+      )
     yield ()

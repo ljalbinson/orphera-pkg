@@ -46,14 +46,20 @@ import orphera.orchestrator.*
 // /etc/apt/sources.list.d/ceph-upstream.list and downgrade the packages.
 object ceph_client_upgrade extends OrpheraScript:
 
-  private val repo = sys.env.getOrElse("CEPH_CLIENT_REPO", "https://download.ceph.com/debian-20.2.5").stripSuffix("/")
+  private val repo = sys.env
+    .getOrElse("CEPH_CLIENT_REPO", "https://download.ceph.com/debian-20.2.5")
+    .stripSuffix("/")
   private val version = sys.env.getOrElse("CEPH_CLIENT_VERSION", "20.2.5")
 
   private val builder = "tst21"
   private val tag = "2025.1-ubuntu-noble"
 
   // The service nodes, their container, and the Ceph user the service connects as (None: none of its own).
-  private final case class Service(node: String, image: String, cephUser: Option[String])
+  private final case class Service(
+      node: String,
+      image: String,
+      cephUser: Option[String]
+  )
   private val services = List(
     Service("tst10", "cinder-volume", Some("cinder")),
     Service("tst13", "glance-api", Some("glance")),
@@ -227,24 +233,49 @@ object ceph_client_upgrade extends OrpheraScript:
     val images = services.map(_.image).distinct
     for
       _ <- images.foldLeft(IO.unit)((before, image) =>
-        before >> build.sh(s"build $image with Ceph $version", buildScript(image), timeout = 1800).void
+        before >> build
+          .sh(
+            s"build $image with Ceph $version",
+            buildScript(image),
+            timeout = 1800
+          )
+          .void
       )
       _ <- orphera.nodes(services.map(_.node).distinct*).each { node =>
-        services.filter(_.node == node.name).foldLeft(IO.unit)((before, s) =>
-          before >>
-            node.sh(s"run ${s.image} on the new image", useScript(s.image), timeout = 600).void >>
-            s.cephUser.fold(IO.unit)(user =>
-              node.query(s"client.$user connects to Ceph", connectScript(s.image, user), 60).flatMap(r =>
-                IO.raiseWhen(r.exitCode != 0)(
-                  new IllegalStateException(s"${node.name}: client.$user cannot connect from ${s.image} (see above)")
+        services
+          .filter(_.node == node.name)
+          .foldLeft(IO.unit)((before, s) =>
+            before >>
+              node
+                .sh(
+                  s"run ${s.image} on the new image",
+                  useScript(s.image),
+                  timeout = 600
                 )
+                .void >>
+              s.cephUser.fold(IO.unit)(user =>
+                node
+                  .query(
+                    s"client.$user connects to Ceph",
+                    connectScript(s.image, user),
+                    60
+                  )
+                  .flatMap(r =>
+                    IO.raiseWhen(r.exitCode != 0)(
+                      new IllegalStateException(
+                        s"${node.name}: client.$user cannot connect from ${s.image} (see above)"
+                      )
+                    )
+                  )
               )
-            )
-        )
+          )
       }
-      _ <- orphera.nodes(computeHosts*).each(node =>
-        node.sh(s"Ceph $version client on the host", hostScript, timeout = 900)
-      )
+      _ <- orphera
+        .nodes(computeHosts*)
+        .each(node =>
+          node
+            .sh(s"Ceph $version client on the host", hostScript, timeout = 900)
+        )
       _ <- IO.println(
         s"[$builder] Ceph clients on $version: ${services.map(s => s"${s.node} ${s.image}").mkString(", ")}; hosts ${computeHosts.mkString(", ")}"
       )

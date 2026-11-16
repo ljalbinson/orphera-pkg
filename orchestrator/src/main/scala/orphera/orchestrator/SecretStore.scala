@@ -40,8 +40,11 @@ trait Cipher:
   * Encrypts to the recipients in `recipientsFile` when it exists, otherwise to
   * the identity's own public key.
   */
-final class AgeCipher(identityFile: Path, recipientsFile: Option[Path] = None, agentSocket: Option[Path] = None)
-    extends Cipher:
+final class AgeCipher(
+    identityFile: Path,
+    recipientsFile: Option[Path] = None,
+    agentSocket: Option[Path] = None
+) extends Cipher:
   import AgeCipher.*
 
   private def listed: Option[Path] = recipientsFile.filter(Files.exists(_))
@@ -52,31 +55,48 @@ final class AgeCipher(identityFile: Path, recipientsFile: Option[Path] = None, a
 
   def encrypt(plain: String): Either[String, Array[Byte]] =
     listed match
-      case Some(file) => run(List("age", "-a", "-R", file.toString), plain.getBytes(UTF_8))
-      case None       => recipient.flatMap(r => run(List("age", "-a", "-r", r), plain.getBytes(UTF_8)))
+      case Some(file) =>
+        run(List("age", "-a", "-R", file.toString), plain.getBytes(UTF_8))
+      case None =>
+        recipient.flatMap(r =>
+          run(List("age", "-a", "-r", r), plain.getBytes(UTF_8))
+        )
 
   // A plugin identity (a YubiKey) may ask for a PIN or a touch: age's prompts
   // must reach the terminal rather than an error file.
   private def pluginIdentity: Boolean =
-    scala.util.Try(Files.readString(identityFile)).toOption.exists(_.contains("AGE-PLUGIN-"))
+    scala.util
+      .Try(Files.readString(identityFile))
+      .toOption
+      .exists(_.contains("AGE-PLUGIN-"))
 
   // With an agent socket (AgeAgent: the YubiKey is on another machine), decrypt through it; if
   // nothing answers there (a stale socket file), here with the identity, when there is one.
   def decrypt(data: Array[Byte]): Either[String, String] =
     agentSocket.filter(Files.exists(_)) match
-      case None => decryptHere(data)
+      case None         => decryptHere(data)
       case Some(socket) =>
         AgeAgent.decrypt(socket, data) match
-          case Right(text)                             => Right(text)
-          case Left(AgeAgent.Failure.Refused(msg))     => Left(s"the age agent could not decrypt: $msg")
+          case Right(text)                         => Right(text)
+          case Left(AgeAgent.Failure.Refused(msg)) =>
+            Left(s"the age agent could not decrypt: $msg")
           case Left(AgeAgent.Failure.Unreachable(msg)) =>
             if Files.exists(identityFile) then
-              System.err.println(s"(age agent: $msg; decrypting here with $identityFile)")
+              System.err.println(
+                s"(age agent: $msg; decrypting here with $identityFile)"
+              )
               decryptHere(data)
-            else Left(s"the age agent is not answering ($msg), and there is no identity here ($identityFile)")
+            else
+              Left(
+                s"the age agent is not answering ($msg), and there is no identity here ($identityFile)"
+              )
 
   private def decryptHere(data: Array[Byte]): Either[String, String] =
-    run(List("age", "-d", "-i", identityFile.toString), data, showPrompts = pluginIdentity)
+    run(
+      List("age", "-d", "-i", identityFile.toString),
+      data,
+      showPrompts = pluginIdentity
+    )
       .map(String(_, UTF_8))
 
   /** Where the store is encrypted to: the recipients file's lines, or the
@@ -91,7 +111,12 @@ final class AgeCipher(identityFile: Path, recipientsFile: Option[Path] = None, a
           .left
           .map(_.getMessage)
           .map(lines =>
-            scala.jdk.CollectionConverters.ListHasAsScala(lines).asScala.toList.map(_.trim).filter(l => l.nonEmpty && !l.startsWith("#"))
+            scala.jdk.CollectionConverters
+              .ListHasAsScala(lines)
+              .asScala
+              .toList
+              .map(_.trim)
+              .filter(l => l.nonEmpty && !l.startsWith("#"))
           )
       case None => recipient.map(List(_))
 
@@ -125,7 +150,8 @@ object AgeCipher:
     val errFile = Files.createTempFile("orphera-age", ".err")
     try
       val pb = new ProcessBuilder(command*)
-      if showPrompts then pb.redirectError(ProcessBuilder.Redirect.INHERIT) else pb.redirectError(errFile.toFile)
+      if showPrompts then pb.redirectError(ProcessBuilder.Redirect.INHERIT)
+      else pb.redirectError(errFile.toFile)
       val p: Either[String, Process] =
         try Right(pb.start())
         catch
@@ -145,7 +171,8 @@ object AgeCipher:
         val code = proc.waitFor()
         writer.join()
         if code == 0 then Right(out)
-        else if showPrompts then Left(s"$program failed (exit $code): see its message above")
+        else if showPrompts then
+          Left(s"$program failed (exit $code): see its message above")
         else
           Left(
             s"$program failed (exit $code): ${Files.readString(errFile).trim}"
@@ -154,8 +181,8 @@ object AgeCipher:
     finally Files.deleteIfExists(errFile)
 
 /** A name-to-value store in one encrypted file. Every change re-encrypts the
-  * whole file and replaces it atomically, mode 0600. What was decrypted is
-  * kept while the file is unchanged (`SecretStore.default()` is shared in a
+  * whole file and replaces it atomically, mode 0600. What was decrypted is kept
+  * while the file is unchanged (`SecretStore.default()` is shared in a
   * process), so a YubiKey is asked once per run, not for every secret; a file
   * changed by another process is read again before it is used or changed.
   */
@@ -166,9 +193,13 @@ final class SecretStore(
 ):
   import SecretStore.*
 
-  private final case class Cached(all: Map[String, String], stamp: Option[java.nio.file.attribute.FileTime])
+  private final case class Cached(
+      all: Map[String, String],
+      stamp: Option[java.nio.file.attribute.FileTime]
+  )
 
-  private val cache = new java.util.concurrent.atomic.AtomicReference[Option[Cached]](None)
+  private val cache =
+    new java.util.concurrent.atomic.AtomicReference[Option[Cached]](None)
 
   private def stamp(): Option[java.nio.file.attribute.FileTime] =
     scala.util.Try(Files.getLastModifiedTime(file)).toOption
@@ -177,12 +208,13 @@ final class SecretStore(
     val now = stamp()
     cache.get match
       case Some(c) if c.stamp == now => Right(c.all)
-      case _                         => read().map { all => cache.set(Some(Cached(all, now))); all }
+      case _ => read().map { all => cache.set(Some(Cached(all, now))); all }
   }
 
   /** Decrypts the file again and re-encrypts it, unchanged, to the cipher's
     * current recipients (after the recipients file changed). The old file is
-    * kept beside it as `<name>.before-rekey`. Returns how many secrets it holds.
+    * kept beside it as `<name>.before-rekey`. Returns how many secrets it
+    * holds.
     */
   def rekey(): Either[String, Int] = this.synchronized {
     for
@@ -190,7 +222,11 @@ final class SecretStore(
       _ <- scala.util
         .Try(
           if Files.exists(file) then
-            Files.copy(file, file.resolveSibling(s"${file.getFileName}.before-rekey"), StandardCopyOption.REPLACE_EXISTING): Unit
+            Files.copy(
+              file,
+              file.resolveSibling(s"${file.getFileName}.before-rekey"),
+              StandardCopyOption.REPLACE_EXISTING
+            ): Unit
         )
         .toEither
         .left
@@ -300,8 +336,8 @@ object SecretStore:
       .map(Paths.get(_))
       .getOrElse(home.resolve(".config/orphera/age.key"))
 
-  /** The age recipients to encrypt to, one per line (`#` comments), if the
-    * file exists; otherwise the identity's own public key.
+  /** The age recipients to encrypt to, one per line (`#` comments), if the file
+    * exists; otherwise the identity's own public key.
     */
   def recipientsFile: Path =
     sys.env
@@ -309,17 +345,21 @@ object SecretStore:
       .map(Paths.get(_))
       .getOrElse(home.resolve(".config/orphera/recipients"))
 
-  def defaultCipher: AgeCipher = new AgeCipher(identityFile, Some(recipientsFile), Some(AgeAgent.socketPath))
+  def defaultCipher: AgeCipher =
+    new AgeCipher(identityFile, Some(recipientsFile), Some(AgeAgent.socketPath))
 
-  private val shared = new java.util.concurrent.atomic.AtomicReference[Option[SecretStore]](None)
+  private val shared =
+    new java.util.concurrent.atomic.AtomicReference[Option[SecretStore]](None)
 
-  /** The store a playbook uses: the default files, age; one per process, so
-    * the file is decrypted once. Fails with what to do when there is no
-    * identity yet.
+  /** The store a playbook uses: the default files, age; one per process, so the
+    * file is decrypted once. Fails with what to do when there is no identity
+    * yet.
     */
   def default(): Either[String, SecretStore] =
     if !Files.exists(identityFile) && !Files.exists(AgeAgent.socketPath) then
-      Left(s"no age identity at $identityFile: run `orphera secrets init` once (and back the file up)")
+      Left(
+        s"no age identity at $identityFile: run `orphera secrets init` once (and back the file up)"
+      )
     else
       shared.synchronized {
         shared.get match

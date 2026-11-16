@@ -82,17 +82,21 @@ enum Task:
 
   /** Applies a declarative description to the node (Apply,
     * docs/APPLY-DESIGN.md): each resource observed, compared and changed only
-    * where it differs; with `check`, only observed and compared. Changed if
-    * any resource changed; fails if any failed.
+    * where it differs; with `check`, only observed and compared. Changed if any
+    * resource changed; fails if any failed.
     */
-  case Apply(plan: ApplyPlan, check: Boolean = false, stopOnFailure: Boolean = false)
+  case Apply(
+      plan: ApplyPlan,
+      check: Boolean = false,
+      stopOnFailure: Boolean = false
+  )
 
 /** A `when:` condition: `key == "expected"`, or `!=` with `negate`. The key is
   * looked up in the same variables as a template's `{{...}}`
   * (TaskExecutor.conditionHolds): this node's set facts and inventory vars by
   * name, `facts.os_id` and the rest, and `nodes.<node>.<field>` for any node;
-  * `os_id`, `os_version`, `arch` and `hostname` also still work. A key with
-  * no value makes the condition false, `==` or `!=`.
+  * `os_id`, `os_version`, `arch` and `hostname` also still work. A key with no
+  * value makes the condition false, `==` or `!=`.
   */
 final case class FactCondition(
     key: String,
@@ -102,7 +106,7 @@ final case class FactCondition(
   /** Whether it holds, given how to look a key up; Left with why not. */
   def check(lookup: String => Option[String]): Either[String, Unit] =
     lookup(key) match
-      case None => Left(s"condition not met: $key has no value")
+      case None         => Left(s"condition not met: $key has no value")
       case Some(actual) =>
         Either.cond((actual == expected) != negate, (), "condition not met")
 
@@ -132,9 +136,9 @@ object Retry:
       Retry(retries, math.max(delaySeconds, 0))
     )
 
-/** A task in a playbook. `notifies` (YAML `notify:`) names handlers (of the playbook, or of the
-  * cluster-playbook stage) to run on this node after its tasks, if this task
-  * changed something (see TaskExecutor.changed).
+/** A task in a playbook. `notifies` (YAML `notify:`) names handlers (of the
+  * playbook, or of the cluster-playbook stage) to run on this node after its
+  * tasks, if this task changed something (see TaskExecutor.changed).
   */
 final case class NamedTask(
     name: String,
@@ -157,15 +161,22 @@ final case class Playbook(
 
 object Handlers:
 
-  /** What is wrong with these tasks' `notifies` and these handlers, if anything:
-    * a name no handler has, two handlers with one name, or a handler that
-    * notifies (handlers do not chain).
+  /** What is wrong with these tasks' `notifies` and these handlers, if
+    * anything: a name no handler has, two handlers with one name, or a handler
+    * that notifies (handlers do not chain).
     */
-  def problems(tasks: List[NamedTask], handlers: List[NamedTask]): List[String] =
+  def problems(
+      tasks: List[NamedTask],
+      handlers: List[NamedTask]
+  ): List[String] =
     val names = handlers.map(_.name)
     val unknown = tasks.flatMap(_.notifies).distinct.filterNot(names.contains)
     val duplicated = names.diff(names.distinct).distinct
     val chained = handlers.filter(_.notifies.nonEmpty).map(_.name)
-    unknown.map(n => s"a task notifies '$n', but there is no handler of that name") ++
+    unknown.map(n =>
+      s"a task notifies '$n', but there is no handler of that name"
+    ) ++
       duplicated.map(n => s"two handlers are named '$n'") ++
-      chained.map(n => s"handler '$n' has notify:, but handlers do not notify other handlers")
+      chained.map(n =>
+        s"handler '$n' has notify:, but handlers do not notify other handlers"
+      )

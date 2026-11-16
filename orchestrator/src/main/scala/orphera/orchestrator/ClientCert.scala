@@ -49,7 +49,8 @@ object ClientCert:
             case Some(n) => go(tail, o.copy(days = n))
             case None    =>
               Left(s"--days needs a positive number of days, got '$value'")
-        case other :: _ => Left(s"Unknown argument to issue-client-cert: $other")
+        case other :: _ =>
+          Left(s"Unknown argument to issue-client-cert: $other")
     go(args, Options(DefaultDays, force = false))
 
   /** Why no client certificate may be made in `dir`, or None. */
@@ -59,7 +60,8 @@ object ClientCert:
       exists: Path => Boolean
   ): Option[String] =
     val missingCa = List("ca.crt", "ca.key").map(dir.resolve).filterNot(exists)
-    val present = List("client.crt", "client.key").map(dir.resolve).filter(exists)
+    val present =
+      List("client.crt", "client.key").map(dir.resolve).filter(exists)
     if missingCa.nonEmpty then
       Some(
         s"${missingCa.mkString(" and ")} not found: the client certificate is signed by the CA " +
@@ -92,8 +94,8 @@ object ClientCert:
     "0x" + bytes.map(b => f"$b%02x").mkString
 
   /** Makes the pair in `dir`; returns the certificate's subject. The new files
-    * are made beside the old and moved into place only when both are made, so
-    * a failure leaves the current pair (if any) as it was.
+    * are made beside the old and moved into place only when both are made, so a
+    * failure leaves the current pair (if any) as it was.
     */
   def create(dir: Path, o: Options): Either[String, String] =
     refusal(dir, o.force, p => Files.exists(p)) match

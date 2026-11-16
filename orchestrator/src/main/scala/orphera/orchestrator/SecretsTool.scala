@@ -63,14 +63,17 @@ object SecretsTool:
           case Right(rs) =>
             println(
               if java.nio.file.Files.exists(file) then s"from $file:"
-              else s"no $file: the identity's own key (${SecretStore.identityFile}):"
+              else
+                s"no $file: the identity's own key (${SecretStore.identityFile}):"
             )
             rs.foreach(r => println(s"  $r"))
             0
           case Left(msg) => System.err.println(s"Error: $msg"); 1
       case "rekey" :: Nil =>
         if !java.nio.file.Files.exists(SecretStore.recipientsFile) then
-          System.err.println(s"Error: no ${SecretStore.recipientsFile}: list the recipients there first (one per line)")
+          System.err.println(
+            s"Error: no ${SecretStore.recipientsFile}: list the recipients there first (one per line)"
+          )
           1
         else
           withStore(s =>
@@ -78,25 +81,41 @@ object SecretsTool:
               n <- s.rekey()
               rs <- SecretStore.defaultCipher.recipients
             yield
-              println(s"$n secret(s) re-encrypted to ${rs.size} recipient(s); the old file is ${SecretStore.secretsFile}.before-rekey")
-              println("Check that each recipient's identity reads it (ORPHERA_AGE_KEY=<its identity> orphera secrets list) before removing anything.")
+              println(
+                s"$n secret(s) re-encrypted to ${rs.size} recipient(s); the old file is ${SecretStore.secretsFile}.before-rekey"
+              )
+              println(
+                "Check that each recipient's identity reads it (ORPHERA_AGE_KEY=<its identity> orphera secrets list) before removing anything."
+              )
           )
       case "agent" :: rest =>
         // --socket <path>, --cache <minutes> (default 10; 0 keeps nothing).
-        def opts(args: List[String], sock: java.nio.file.Path, cache: Int): Option[(java.nio.file.Path, Int)] =
+        def opts(
+            args: List[String],
+            sock: java.nio.file.Path,
+            cache: Int
+        ): Option[(java.nio.file.Path, Int)] =
           args match
-            case Nil                          => Some((sock, cache))
-            case "--socket" :: path :: more   => opts(more, java.nio.file.Paths.get(path), cache)
-            case "--cache" :: minutes :: more => minutes.toIntOption.filter(_ >= 0).flatMap(m => opts(more, sock, m))
-            case _                            => None
+            case Nil                        => Some((sock, cache))
+            case "--socket" :: path :: more =>
+              opts(more, java.nio.file.Paths.get(path), cache)
+            case "--cache" :: minutes :: more =>
+              minutes.toIntOption
+                .filter(_ >= 0)
+                .flatMap(m => opts(more, sock, m))
+            case _ => None
         opts(rest, AgeAgent.socketPath, 10) match
           case None =>
             println(usage)
             1
           case Some((sock, cacheMinutes)) =>
             val id = SecretStore.identityFile
-            val text = scala.util.Try(java.nio.file.Files.readString(id)).getOrElse("")
-            if !text.linesIterator.exists(l => l.startsWith("AGE-SECRET-KEY-") || l.startsWith("AGE-PLUGIN-")) then
+            val text =
+              scala.util.Try(java.nio.file.Files.readString(id)).getOrElse("")
+            if !text.linesIterator.exists(l =>
+                l.startsWith("AGE-SECRET-KEY-") || l.startsWith("AGE-PLUGIN-")
+              )
+            then
               System.err.println(
                 s"Error: no age identity in $id (for a YubiKey, write it with the key plugged in: " +
                   s"age-plugin-yubikey --identity > $id)"
@@ -109,10 +128,18 @@ object SecretsTool:
                   s"What it decrypts is kept for $cacheMinutes minutes, so the store asks the YubiKey once in that time (--cache 0: every time)."
                 else "Nothing is kept: every request asks the YubiKey."
               )
-              println(s"Forward it from this machine:  ssh -R /home/<user>/.config/orphera/agent.sock:$sock <orphera host>")
+              println(
+                s"Forward it from this machine:  ssh -R /home/<user>/.config/orphera/agent.sock:$sock <orphera host>"
+              )
               println("Stop with Ctrl-C.")
               // No agent socket for its own cipher: it decrypts here, never through itself.
-              AgeAgent.serve(sock, new AgeCipher(id), line => println(s"[${java.time.LocalTime.now.withNano(0)}] $line"), cacheMinutes) match
+              AgeAgent.serve(
+                sock,
+                new AgeCipher(id),
+                line =>
+                  println(s"[${java.time.LocalTime.now.withNano(0)}] $line"),
+                cacheMinutes
+              ) match
                 case Right(_)  => 0
                 case Left(msg) => System.err.println(s"Error: $msg"); 1
       case _ =>

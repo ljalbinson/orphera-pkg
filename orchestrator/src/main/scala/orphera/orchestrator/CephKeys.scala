@@ -12,9 +12,9 @@ import scala.util.Try
   *
   * Type 1 is the old `aes`; Ceph 19.2.6 and 20.2.4 added `aes256k` (the
   * CVE-2025-30156 fix), which the monitors may be set to require
-  * (`auth_allowed_ciphers aes256k`). A playbook that imports an `aes` key has to
-  * allow `aes` first; one that imports an `aes256k` key must not, or it undoes
-  * that setting.
+  * (`auth_allowed_ciphers aes256k`). A playbook that imports an `aes` key has
+  * to allow `aes` first; one that imports an `aes256k` key must not, or it
+  * undoes that setting.
   */
 object CephKeys:
   val Aes = 1
@@ -27,7 +27,9 @@ object CephKeys:
 
   /** The key's type, if `key` is a whole cephx key. */
   def keyType(key: String): Option[Int] =
-    bytes(key).filter(b => b.length > 12 && b.length == 12 + u16(b, 10)).map(u16(_, 0))
+    bytes(key)
+      .filter(b => b.length > 12 && b.length == 12 + u16(b, 10))
+      .map(u16(_, 0))
 
   /** Whether `key` is a whole cephx key (any type). */
   def isKey(key: String): Boolean = keyType(key).isDefined
@@ -40,5 +42,7 @@ object CephKeys:
     * monitors' setting as it is (says so).
     */
   def allowCiphersFor(key: String, entity: String): String =
-    if isAes(key) then "cephadm shell -- ceph mon set auth_allowed_ciphers aes,aes256k"
-    else s"echo '$entity has an aes256k key: the cephx cipher setting is left as it is'"
+    if isAes(key) then
+      "cephadm shell -- ceph mon set auth_allowed_ciphers aes,aes256k"
+    else
+      s"echo '$entity has an aes256k key: the cephx cipher setting is left as it is'"

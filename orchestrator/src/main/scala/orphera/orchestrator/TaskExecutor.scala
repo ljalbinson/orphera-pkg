@@ -12,14 +12,14 @@ import io.grpc.{StatusException, StatusRuntimeException}
 
 import orphera.common.{Event, Facts}
 
-/** The one place a task is carried out on a node. A playbook
-  * (PlaybookRunner), each stage of a cluster playbook (ClusterPlaybookRunner)
-  * and a direct command (`orphera install`, `run`, `copy`, ...: a playbook of
-  * one task, PlaybookRunner.runCommand) all run their tasks here, so a change
-  * to how a task runs (a retry, a timeout, how a failure is detected) applies
-  * to all three at once. Before, each had its own copy and they had drifted: a
-  * cluster playbook's `copy` ignored `.mustache` templates, and a direct
-  * command stopped every node when one was unreachable.
+/** The one place a task is carried out on a node. A playbook (PlaybookRunner),
+  * each stage of a cluster playbook (ClusterPlaybookRunner) and a direct
+  * command (`orphera install`, `run`, `copy`, ...: a playbook of one task,
+  * PlaybookRunner.runCommand) all run their tasks here, so a change to how a
+  * task runs (a retry, a timeout, how a failure is detected) applies to all
+  * three at once. Before, each had its own copy and they had drifted: a cluster
+  * playbook's `copy` ignored `.mustache` templates, and a direct command
+  * stopped every node when one was unreachable.
   *
   * What differs between the three is in Env: how output is shown, whether
   * `{{...}}` is rendered, and what the run keeps (checkpoint and run log).
@@ -34,7 +34,8 @@ object TaskExecutor:
       // "Timed out after Ns"
       val result: String
   ) extends RuntimeException(
-        if RemoteFailure.timedOut(result) then s"Remote command ${result.toLowerCase} (see output above)"
+        if RemoteFailure.timedOut(result) then
+          s"Remote command ${result.toLowerCase} (see output above)"
         else "Remote command reported failure (see output above)"
       )
 
@@ -145,8 +146,8 @@ object TaskExecutor:
   /** Runs `tasks` on `node` in order: a task already recorded in `checkpoint`
     * (a `--resume`d run) or whose `when:` does not hold is skipped, the first
     * failure stops the node's remaining tasks. Returns whether none failed.
-    * `logFields` go into every run-log event after its "event" field (a
-    * cluster playbook's stage).
+    * `logFields` go into every run-log event after its "event" field (a cluster
+    * playbook's stage).
     */
   def runTasks(
       tasks: List[NamedTask],
@@ -172,7 +173,10 @@ object TaskExecutor:
       env.output.line(node, task, s"skipped ($message)") >>
         log("task_skipped", task, "reason" -> reason)
 
-    def go(remaining: List[NamedTask], notified: Ref[IO, Vector[String]]): IO[Boolean] =
+    def go(
+        remaining: List[NamedTask],
+        notified: Ref[IO, Vector[String]]
+    ): IO[Boolean] =
       remaining match
         case Nil => IO.pure(true)
 
@@ -265,8 +269,8 @@ object TaskExecutor:
 
   /** What a step of a script (OrpheraScript) returns: whether it changed
     * something, the exit code of its command (0 when it reported none), its
-    * output lines, and whether it was skipped because a resumed run had
-    * already done it (then it has no output).
+    * output lines, and whether it was skipped because a resumed run had already
+    * done it (then it has no output).
     */
   final case class StepResult(
       changed: Boolean,
@@ -279,7 +283,10 @@ object TaskExecutor:
 
   /** A script step that failed on a node; it has already been reported. */
   final class StepFailed(val node: String, val step: String, cause: Throwable)
-      extends RuntimeException(s"'$step' failed on $node: ${describe(cause)}", cause)
+      extends RuntimeException(
+        s"'$step' failed on $node: ${describe(cause)}",
+        cause
+      )
 
   /** One task on one node, for a script: as a playbook runs a task (output,
     * retries, run log, the checkpoint when `checkpointed`), but returning a
@@ -300,10 +307,15 @@ object TaskExecutor:
     val name = namedTask.name
     def log(kind: String, more: Seq[(String, Any)]): IO[Unit] =
       runLog.event(
-        (List[(String, Any)]("event" -> kind, "node" -> node.name, "task" -> name) ++ more)*
+        (List[(String, Any)](
+          "event" -> kind,
+          "node" -> node.name,
+          "task" -> name
+        ) ++ more)*
       )
     val alreadyDone =
-      if checkpointed then checkpoint.isDone(node.name, name) else IO.pure(false)
+      if checkpointed then checkpoint.isDone(node.name, name)
+      else IO.pure(false)
     alreadyDone.flatMap {
       case true =>
         env.output.line(
@@ -317,10 +329,11 @@ object TaskExecutor:
           seen <- Ref.of[IO, Vector[Event]](Vector.empty)
           // The events of the last attempt (a retry starts the record again).
           recording = env.copy(
-            output = env.output.copy(event = (n, t, e) =>
-              seen.update(_ :+ e) >> env.output.event(n, t, e)
+            output = env.output.copy(event =
+              (n, t, e) => seen.update(_ :+ e) >> env.output.event(n, t, e)
             ),
-            perform = (nt, n, e) => seen.set(Vector.empty) >> env.perform(nt, n, e)
+            perform =
+              (nt, n, e) => seen.set(Vector.empty) >> env.perform(nt, n, e)
           )
           start <- IO.monotonic
           _ <- log("task_start", Nil)
@@ -345,7 +358,10 @@ object TaskExecutor:
                 List("success" -> true, "exit_code" -> exitCode, took)
               ).as(StepResult(changed = false, exitCode, output))
             case Right(changed) =>
-              log("task_end", List("success" -> true, "changed" -> changed, took)) >>
+              log(
+                "task_end",
+                List("success" -> true, "changed" -> changed, took)
+              ) >>
                 (if checkpointed then checkpoint.markDone(node.name, name)
                  else IO.unit).as(StepResult(changed, exitCode, output))
             case Left(err) =>
@@ -358,9 +374,9 @@ object TaskExecutor:
     }
 
   /** Runs the task and, when it fails and has a `retry`, runs it again (see
-    * retrying). Each failed attempt but the last gets a line (`attempt 1
-    * failed (...); retry 1 of 3 in 5s`) and a `task_retry` run-log event; the
-    * last one's error is the task's.
+    * retrying). Each failed attempt but the last gets a line (`attempt 1 failed
+    * (...); retry 1 of 3 in 5s`) and a `task_retry` run-log event; the last
+    * one's error is the task's.
     */
   private def runWithRetry(
       namedTask: NamedTask,
@@ -404,8 +420,8 @@ object TaskExecutor:
     attempt(1)
 
   /** Whether a task's `when:` lets it run on `node`: Right without one, else
-    * the condition checked against the variables templates use
-    * (lookupVar). Left says why not, for the skip line.
+    * the condition checked against the variables templates use (lookupVar).
+    * Left says why not, for the skip line.
     */
   private def conditionHolds(
       when: Option[FactCondition],
@@ -432,17 +448,17 @@ object TaskExecutor:
   /** A variable's value as a string, as `{{key}}` would give it, from the
     * variables of templateVars: a name of this node's (set fact, inventory or
     * group var, `facts.*`), or `nodes.<node>.<field>`; also the old `when:`
-    * names (ConditionAliases). None when there is no such value, or it is not
-    * a single value (a list or a map).
+    * names (ConditionAliases). None when there is no such value, or it is not a
+    * single value (a list or a map).
     */
   def lookupVar(vars: Map[String, Any], key: String): Option[String] =
     def scalar(v: Any): Option[String] =
       v match
-        case null                    => None
-        case _: java.util.Map[?, ?]  => None
-        case _: java.util.List[?]    => None
-        case _: Iterable[?]          => None
-        case other                   => Some(other.toString)
+        case null                   => None
+        case _: java.util.Map[?, ?] => None
+        case _: java.util.List[?]   => None
+        case _: Iterable[?]         => None
+        case other                  => Some(other.toString)
     def direct(k: String): Option[String] = vars.get(k).flatMap(scalar)
     key.split("\\.", 3).toList match
       case "nodes" :: nodeName :: field :: Nil =>
@@ -457,8 +473,8 @@ object TaskExecutor:
         }
       case _ => direct(key).orElse(ConditionAliases.get(key).flatMap(direct))
 
-  /** Carries out one task on one node; raises if it failed. Returns whether
-    * it changed something (see changed).
+  /** Carries out one task on one node; raises if it failed. Returns whether it
+    * changed something (see changed).
     */
   def runTask(namedTask: NamedTask, node: Node, env: Env): IO[Boolean] =
     for
@@ -467,18 +483,19 @@ object TaskExecutor:
       events <- seen.get
     yield changed(namedTask.task, events)
 
-  /** Whether a task that succeeded changed something, from what it reported.
-    * A file task (copy, write_file, distribute_file) did unless the file was
+  /** Whether a task that succeeded changed something, from what it reported. A
+    * file task (copy, write_file, distribute_file) did unless the file was
     * already as asked ("Skipped: unchanged"); a package task did unless the
-    * package manager says nothing was installed, upgraded or removed;
-    * set_fact, debug and dump_facts never do; run_command, reboot and
-    * network_apply always do, since nothing says otherwise.
+    * package manager says nothing was installed, upgraded or removed; set_fact,
+    * debug and dump_facts never do; run_command, reboot and network_apply
+    * always do, since nothing says otherwise.
     */
   def changed(task: Task, events: Vector[Event]): Boolean =
     def output: Vector[String] =
       events.filter(_.kind == Event.Kind.OUTPUT).map(_.message)
     task match
-      case _: Task.Copy | _: Task.WriteFile | _: Task.DistributeFile | _: Task.Apply =>
+      case _: Task.Copy | _: Task.WriteFile | _: Task.DistributeFile |
+          _: Task.Apply =>
         !events.exists(e =>
           e.kind == Event.Kind.RESULT && e.message.startsWith("Skipped:")
         )
@@ -491,9 +508,9 @@ object TaskExecutor:
   private val AptSummary =
     raw"(\d+) upgraded, (\d+) newly installed, (\d+) to remove".r.unanchored
 
-  /** From a package manager's output: apt's summary line (`0 upgraded, 0
-    * newly installed, 0 to remove ...`) with any count above 0, or, from dnf
-    * (no such line), anything but `Nothing to do.`. With neither, changed.
+  /** From a package manager's output: apt's summary line (`0 upgraded, 0 newly
+    * installed, 0 to remove ...`) with any count above 0, or, from dnf (no such
+    * line), anything but `Nothing to do.`. With neither, changed.
     */
   def packagesChanged(lines: Seq[String]): Boolean =
     val apt = lines.collect { case AptSummary(u, n, r) =>
@@ -535,7 +552,12 @@ object TaskExecutor:
               if renderedVersion.isEmpty then packages
               else packages.map(pkg => s"$pkg=$renderedVersion")
             requireStreamedSuccess(render)(r =>
-              NodeClient.installPackages(node, versionedPackages, updateCache, r)
+              NodeClient.installPackages(
+                node,
+                versionedPackages,
+                updateCache,
+                r
+              )
             )
         }
 
@@ -632,8 +654,13 @@ object TaskExecutor:
       case Task.Apply(plan, check, stopOnFailure) =>
         applyOn(plan, node, env, check, stopOnFailure, say).flatMap { report =>
           if report.failed then
-            IO.raiseError(new RuntimeException(s"${report.failures.size} of ${report.results.size} resources failed: ${report.failures.mkString("; ")}"))
-          else if !report.changed then record(Event(Event.Kind.RESULT, "Skipped: unchanged", 0, true))
+            IO.raiseError(
+              new RuntimeException(
+                s"${report.failures.size} of ${report.results.size} resources failed: ${report.failures.mkString("; ")}"
+              )
+            )
+          else if !report.changed then
+            record(Event(Event.Kind.RESULT, "Skipped: unchanged", 0, true))
           else IO.unit
         }
 
@@ -694,10 +721,10 @@ object TaskExecutor:
     err match
       case f: RemoteFailure if RemoteFailure.timedOut(f.result) =>
         s"the command ${f.result.toLowerCase} (see output above)"
-      case _: RemoteFailure                 => "the command reported failure (see output above)"
+      case _: RemoteFailure => "the command reported failure (see output above)"
       case _: AgentToken.NotConfiguredError => AgentToken.NotConfigured
       case _ if isGrpcFailure(err)          => NodeError.line(err)
-      case _                       => message(err)
+      case _                                => message(err)
 
   private def message(err: Throwable): String =
     Option(err.getMessage).getOrElse(err.toString)
@@ -781,23 +808,39 @@ object TaskExecutor:
       stopOnFailure: Boolean,
       say: String => IO[Unit]
   ): IO[ApplyReport] =
-    templateVars(node, env.context.factsByNode.get(node.name), env).flatMap(vars =>
-      Apply.run(plan, new NodeTarget(node, env, vars), check, say, stopOnFailure)
+    templateVars(node, env.context.factsByNode.get(node.name), env).flatMap(
+      vars =>
+        Apply.run(
+          plan,
+          new NodeTarget(node, env, vars),
+          check,
+          say,
+          stopOnFailure
+        )
     )
 
   // A real node for Apply: every step through env.perform (runTask), with
   // nothing printed (the engine prints one line per resource), and no
   // `{{...}}` rendering in scripts or content.
-  private final class NodeTarget(n: Node, env: Env, vars: Map[String, Any]) extends ApplyTarget:
+  private final class NodeTarget(n: Node, env: Env, vars: Map[String, Any])
+      extends ApplyTarget:
     def node: String = n.name
 
-    private final case class Done(error: Option[Throwable], exitCode: Int, output: Vector[String])
+    private final case class Done(
+        error: Option[Throwable],
+        exitCode: Int,
+        output: Vector[String]
+    )
 
     private def quietly(label: String, task: Task): IO[Done] =
       for
         seen <- Ref.of[IO, Vector[Event]](Vector.empty)
         silent = env.copy(
-          output = Output((_, _, e) => seen.update(_ :+ e), (_, _, _) => IO.unit, (_, _, _) => IO.unit),
+          output = Output(
+            (_, _, e) => seen.update(_ :+ e),
+            (_, _, _) => IO.unit,
+            (_, _, _) => IO.unit
+          ),
           templating = false,
           templateFiles = false
         )
@@ -805,7 +848,10 @@ object TaskExecutor:
         events <- seen.get
       yield Done(
         result.left.toOption,
-        events.filter(_.kind == Event.Kind.RESULT).lastOption.fold(0)(_.exitCode),
+        events
+          .filter(_.kind == Event.Kind.RESULT)
+          .lastOption
+          .fold(0)(_.exitCode),
         events.filter(_.kind == Event.Kind.OUTPUT).map(_.message)
       )
 
@@ -813,38 +859,71 @@ object TaskExecutor:
       val said = done.output.map(_.trim).filter(_.nonEmpty).takeRight(5)
       done.error match
         case Some(_: RemoteFailure) | None =>
-          new RuntimeException(s"$label: exit ${done.exitCode}${if said.isEmpty then "" else ": " + said.mkString(" | ")}")
+          new RuntimeException(s"$label: exit ${done.exitCode}${
+              if said.isEmpty then "" else ": " + said.mkString(" | ")
+            }")
         case Some(other) => new RuntimeException(s"$label: ${describe(other)}")
 
     def observe(resources: List[(Int, ApplyResource)]): IO[Map[Int, Observed]] =
       if resources.isEmpty then IO.pure(Map.empty)
       else
-        quietly("read the node", Task.RunCommand(List("sh", "-c", Apply.observeScript(resources)), 120)).flatMap(done =>
+        quietly(
+          "read the node",
+          Task.RunCommand(List("sh", "-c", Apply.observeScript(resources)), 120)
+        ).flatMap(done =>
           done.error match
-            case None | Some(_: RemoteFailure) => IO.pure(Apply.parseObserved(resources, done.output))
-            case Some(e)                       => IO.raiseError(e)
+            case None | Some(_: RemoteFailure) =>
+              IO.pure(Apply.parseObserved(resources, done.output))
+            case Some(e) => IO.raiseError(e)
         )
 
     def readText(path: String): IO[Option[String]] =
       val q = Apply.quote(path)
-      quietly("read a file", Task.RunCommand(List("sh", "-c", s"[ -f $q ] && head -c 262144 -- $q"), 60)).map(done =>
-        Option.when(done.error.isEmpty && done.exitCode == 0)(done.output.mkString("\n"))
+      quietly(
+        "read a file",
+        Task.RunCommand(
+          List("sh", "-c", s"[ -f $q ] && head -c 262144 -- $q"),
+          60
+        )
+      ).map(done =>
+        Option.when(done.error.isEmpty && done.exitCode == 0)(
+          done.output.mkString("\n")
+        )
       )
 
     def source(path: String, more: Map[String, String]): IO[String] =
-      IO.blocking(new String(java.nio.file.Files.readAllBytes(java.nio.file.Paths.get(path)), "UTF-8")).map(text =>
-        if path.endsWith(".mustache") then Templating.render(text, vars ++ more) else text
+      IO.blocking(
+        new String(
+          java.nio.file.Files.readAllBytes(java.nio.file.Paths.get(path)),
+          "UTF-8"
+        )
+      ).map(text =>
+        if path.endsWith(".mustache") then Templating.render(text, vars ++ more)
+        else text
       )
 
-    def write(path: String, content: String, owner: String, group: String, mode: Int): IO[Unit] =
-      quietly(s"write $path", Task.WriteFile(content, path, owner, group, mode)).flatMap(done =>
-        if done.error.isEmpty then IO.unit else IO.raiseError(failure(s"writing $path", done))
-      )
+    def write(
+        path: String,
+        content: String,
+        owner: String,
+        group: String,
+        mode: Int
+    ): IO[Unit] =
+      quietly(s"write $path", Task.WriteFile(content, path, owner, group, mode))
+        .flatMap(done =>
+          if done.error.isEmpty then IO.unit
+          else IO.raiseError(failure(s"writing $path", done))
+        )
 
     def shell(label: String, script: String, timeout: Int): IO[Unit] =
-      quietly(label, Task.RunCommand(List("sh", "-c", script), timeout)).flatMap(done =>
-        if done.error.isEmpty then IO.unit else IO.raiseError(failure(script.linesIterator.nextOption().getOrElse(label), done))
-      )
+      quietly(label, Task.RunCommand(List("sh", "-c", script), timeout))
+        .flatMap(done =>
+          if done.error.isEmpty then IO.unit
+          else
+            IO.raiseError(
+              failure(script.linesIterator.nextOption().getOrElse(label), done)
+            )
+        )
 
   private def templateVars(
       node: Node,
@@ -939,7 +1018,9 @@ object TaskExecutor:
       // A file left as it was says so: "Skipped: unchanged (exit=0 ...)".
       // A command stopped at its timeout says so: "Timed out after 300s (exit=124 ...)".
       case Event.Kind.RESULT
-          if event.message.startsWith("Skipped:") || (!event.success && RemoteFailure.timedOut(event.message)) =>
+          if event.message.startsWith(
+            "Skipped:"
+          ) || (!event.success && RemoteFailure.timedOut(event.message)) =>
         s"${event.message} (exit=${event.exitCode} success=${event.success})"
       case Event.Kind.RESULT =>
         s"exit=${event.exitCode} success=${event.success}"

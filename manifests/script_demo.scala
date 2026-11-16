@@ -28,9 +28,10 @@ object script_demo extends OrpheraScript:
     for
       // A decision from a command's output, on each node.
       _ <- both.each { node =>
-        node.query("is tree installed", "command -v tree || true").flatMap { found =>
-          if found.stdout.trim.nonEmpty then IO.unit
-          else node.install("install tree", List("tree")).void
+        node.query("is tree installed", "command -v tree || true").flatMap {
+          found =>
+            if found.stdout.trim.nonEmpty then IO.unit
+            else node.install("install tree", List("tree")).void
         }
       }
       // A value read on one node, used on another.
@@ -43,6 +44,11 @@ object script_demo extends OrpheraScript:
       )
       // A handler as plain code: only when the file changed.
       _ <- IO.whenA(written.changed)(
-        tst1.sh("note the change", "date >> /tmp/orphera-script-demo.log; echo noted").void
+        tst1
+          .sh(
+            "note the change",
+            "date >> /tmp/orphera-script-demo.log; echo noted"
+          )
+          .void
       )
     yield ()

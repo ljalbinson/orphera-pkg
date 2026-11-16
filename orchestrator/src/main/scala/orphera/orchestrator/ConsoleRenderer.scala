@@ -40,7 +40,8 @@ object ConsoleRenderer:
         IO.println(s"[${node.name}] ${event.message}")
       case Event.Kind.RESULT if !event.success =>
         val reason =
-          if event.message.startsWith("FAILED: ") || TaskExecutor.RemoteFailure.timedOut(event.message)
+          if event.message.startsWith("FAILED: ") || TaskExecutor.RemoteFailure
+              .timedOut(event.message)
           then event.message + " "
           else ""
         IO.delay(failures.incrementAndGet()).void >>

@@ -39,9 +39,21 @@ object apply_kinds_demo extends OrpheraApply:
   def describe(node: Node): List[ApplyResource] =
     if sys.env.get("DEMO_REMOVE").contains("yes") then
       // Stop and disable it while its unit file is still there (a second removal finds nothing to do).
-      val stop = command("stop orphera-demo", "systemctl disable --now orphera-demo.service", onlyIf = s"test -e $unitPath")
-      val reload = command("reload systemd", "systemctl daemon-reload", onChangeOnly = true)
-      val clear = command("remove the demo directory", s"rm -rf $dir", onlyIf = s"test -d $dir")
+      val stop = command(
+        "stop orphera-demo",
+        "systemctl disable --now orphera-demo.service",
+        onlyIf = s"test -e $unitPath"
+      )
+      val reload = command(
+        "reload systemd",
+        "systemctl daemon-reload",
+        onChangeOnly = true
+      )
+      val clear = command(
+        "remove the demo directory",
+        s"rm -rf $dir",
+        onlyIf = s"test -d $dir"
+      )
       val gone = absentUser("orphera-demo").after(stop, clear)
       List(
         stop,
@@ -57,8 +69,18 @@ object apply_kinds_demo extends OrpheraApply:
       List(
         pkg("tree"),
         group("orphera-demo", system = true),
-        user("orphera-demo", group = "orphera-demo", shell = "/usr/sbin/nologin", system = true),
-        directory(dir, mode = "0750", owner = "orphera-demo", group = "orphera-demo"),
+        user(
+          "orphera-demo",
+          group = "orphera-demo",
+          shell = "/usr/sbin/nologin",
+          system = true
+        ),
+        directory(
+          dir,
+          mode = "0750",
+          owner = "orphera-demo",
+          group = "orphera-demo"
+        ),
         file(unitPath, unitFile(message), mode = "0644").notifies(unit),
         unit
       )
