@@ -2059,9 +2059,11 @@ stays on the control host.
   decrypts through the Mac; the agent's terminal lists each request.
 - Where orphera looks: `$ORPHERA_AGE_AGENT`, by default
   `~/.config/orphera/agent.sock`. If a socket is there but nothing answers (the
-  session has ended), orphera decrypts locally with its own identity, if that
-  works (a key attached there); if the agent answers but cannot decrypt (a
-  wrong PIN, no touch), the run stops with its reason.
+  session has ended, or the session forwards the socket and no agent is
+  running at the far end, so ssh closes the connection), orphera says so and
+  decrypts locally with its own identity, if that works (a key attached
+  there); if the agent answers but cannot decrypt (a wrong PIN, no touch), the
+  run stops with its reason.
 - **Making it routine** (as on the Mac used with scala0): in the Mac's
   `~/.ssh/config`, a `Host scala0` block with the `RemoteForward` line and
   `ExitOnForwardFailure yes` (so a failed forward stops the login rather than
@@ -2071,8 +2073,38 @@ stays on the control host.
   `osascript -e 'tell application "iTerm"' -e 'create window with profile "Orphera agent"' -e 'activate' -e 'end tell'`,
   the profile running a login shell with *Send text at start*
   `orphera secrets agent`) and then runs `ssh scala0`; and in the control
-  host's `~/.profile`, a line that says at login whether the socket answers
-  (connect to it with `python3 -c 'import os,socket; s=socket.socket(socket.AF_UNIX); s.connect(os.path.expanduser("~/.config/orphera/agent.sock"))'`).
+  host's `~/.profile`, a check that says at login which way secrets will be
+  read. A forwarded socket accepts a connection even with no agent at the far
+  end, so it sends `PING` (an agent answers `PONG`; one older than this
+  answers `ERR`, which also shows it is there), and it removes a socket file
+  nothing listens on:
+
+  ```sh
+  python3 - <<'EOF' 2>/dev/null
+  import os, socket, sys
+  s = socket.socket(socket.AF_UNIX)
+  s.settimeout(2)
+  try:
+      s.connect(os.path.expanduser("~/.config/orphera/agent.sock"))
+  except OSError:
+      sys.exit(2)
+  try:
+      s.sendall(b"PING\n")
+      sys.exit(0 if s.recv(16) else 1)
+  except OSError:
+      sys.exit(1)
+  EOF
+  case $? in
+    0) echo "orphera secrets: through the YubiKey agent on the Mac" ;;
+    1) echo "orphera secrets: forwarded, but no agent answers on the Mac (start it there)" ;;
+    *) rm -f ~/.config/orphera/agent.sock
+       if lsusb -d 1050: >/dev/null 2>&1; then
+         echo "orphera secrets: through the YubiKey on this machine"
+       else
+         echo "orphera secrets: no YubiKey here and no agent forwarded"
+       fi ;;
+  esac
+  ```
 - What the agent decrypted is kept in its memory for 10 minutes
   (`--cache <minutes>`; `--cache 0` keeps nothing), so a series of runs asks
   for the PIN and touch once rather than at each command; a changed store is
