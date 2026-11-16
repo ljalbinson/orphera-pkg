@@ -92,8 +92,12 @@ object SecretsTool:
             1
           case Some(sock) =>
             val id = SecretStore.identityFile
-            if !java.nio.file.Files.exists(id) then
-              System.err.println(s"Error: no age identity at $id (for a YubiKey, its age-plugin-yubikey identity)")
+            val text = scala.util.Try(java.nio.file.Files.readString(id)).getOrElse("")
+            if !text.linesIterator.exists(l => l.startsWith("AGE-SECRET-KEY-") || l.startsWith("AGE-PLUGIN-")) then
+              System.err.println(
+                s"Error: no age identity in $id (for a YubiKey, write it with the key plugged in: " +
+                  s"age-plugin-yubikey --identity > $id)"
+              )
               1
             else
               println(s"Orphera age agent: decrypting with $id on $sock")
