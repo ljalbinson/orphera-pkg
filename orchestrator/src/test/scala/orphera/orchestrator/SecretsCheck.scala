@@ -277,6 +277,21 @@ object SecretsCheck:
       } && (System.nanoTime - started) < 4000000000L,
       late.toString
     )
+    // A cache: the same encrypted text is decrypted once; a different one is decrypted afresh.
+    var agentDecrypts = 0
+    object CountedCipher extends Cipher:
+      def encrypt(plain: String): Either[String, Array[Byte]] = ReverseCipher.encrypt(plain)
+      def decrypt(data: Array[Byte]): Either[String, String] = { agentDecrypts += 1; ReverseCipher.decrypt(data) }
+    val cached = dir.resolve("cached.sock")
+    val ct = new Thread(() => { val _ = AgeAgent.serve(cached, CountedCipher, _ => (), cacheMinutes = 10) })
+    ct.setDaemon(true)
+    ct.start()
+    var w = 0
+    while !Files.exists(cached) && w < 100 do { Thread.sleep(20); w += 1 }
+    val firstTwo = List(AgeAgent.decrypt(cached, sealedText), AgeAgent.decrypt(cached, sealedText))
+    check("agent cache: the same store twice asks the key once", firstTwo.forall(_ == Right("{\"x\":\"through the agent\"}")) && agentDecrypts == 1, s"$agentDecrypts")
+    val other = ReverseCipher.encrypt("{\"x\":\"changed\"}").getOrElse(Array.emptyByteArray)
+    check("agent cache: a changed store is decrypted afresh", AgeAgent.decrypt(cached, other) == Right("{\"x\":\"changed\"}") && agentDecrypts == 2, s"$agentDecrypts")
     val big = "y" * 300000
     check("agent: a large store comes back whole", AgeAgent.decrypt(sock, ReverseCipher.encrypt(big).getOrElse(Array.emptyByteArray)) == Right(big))
 

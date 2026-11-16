@@ -17,7 +17,7 @@ object SecretsTool:
       |orphera secrets rm <name>         remove a secret
       |orphera secrets recipients        who the store is encrypted to
       |orphera secrets rekey             re-encrypt the store to the recipients file (after editing it)
-      |orphera secrets agent [--socket <path>]
+      |orphera secrets agent [--socket <path>] [--cache <minutes>]
       |                                  on the machine the YubiKey is plugged into: decrypt for an orphera
       |                                  host that the SSH session forwards the socket to (see the README)
       |
@@ -82,15 +82,18 @@ object SecretsTool:
               println("Check that each recipient's identity reads it (ORPHERA_AGE_KEY=<its identity> orphera secrets list) before removing anything.")
           )
       case "agent" :: rest =>
-        val socket = rest match
-          case "--socket" :: path :: Nil => Some(java.nio.file.Paths.get(path))
-          case Nil                       => Some(AgeAgent.socketPath)
-          case _                         => None
-        socket match
+        // --socket <path>, --cache <minutes> (default 10; 0 keeps nothing).
+        def opts(args: List[String], sock: java.nio.file.Path, cache: Int): Option[(java.nio.file.Path, Int)] =
+          args match
+            case Nil                          => Some((sock, cache))
+            case "--socket" :: path :: more   => opts(more, java.nio.file.Paths.get(path), cache)
+            case "--cache" :: minutes :: more => minutes.toIntOption.filter(_ >= 0).flatMap(m => opts(more, sock, m))
+            case _                            => None
+        opts(rest, AgeAgent.socketPath, 10) match
           case None =>
             println(usage)
             1
-          case Some(sock) =>
+          case Some((sock, cacheMinutes)) =>
             val id = SecretStore.identityFile
             val text = scala.util.Try(java.nio.file.Files.readString(id)).getOrElse("")
             if !text.linesIterator.exists(l => l.startsWith("AGE-SECRET-KEY-") || l.startsWith("AGE-PLUGIN-")) then
@@ -101,10 +104,15 @@ object SecretsTool:
               1
             else
               println(s"Orphera age agent: decrypting with $id on $sock")
+              println(
+                if cacheMinutes > 0 then
+                  s"What it decrypts is kept for $cacheMinutes minutes, so the store asks the YubiKey once in that time (--cache 0: every time)."
+                else "Nothing is kept: every request asks the YubiKey."
+              )
               println(s"Forward it from this machine:  ssh -R /home/<user>/.config/orphera/agent.sock:$sock <orphera host>")
               println("Stop with Ctrl-C.")
               // No agent socket for its own cipher: it decrypts here, never through itself.
-              AgeAgent.serve(sock, new AgeCipher(id), line => println(s"[${java.time.LocalTime.now.withNano(0)}] $line")) match
+              AgeAgent.serve(sock, new AgeCipher(id), line => println(s"[${java.time.LocalTime.now.withNano(0)}] $line"), cacheMinutes) match
                 case Right(_)  => 0
                 case Left(msg) => System.err.println(s"Error: $msg"); 1
       case _ =>

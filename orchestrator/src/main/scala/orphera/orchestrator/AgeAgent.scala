@@ -101,9 +101,13 @@ object AgeAgent:
 
   /** Listens on `socket` (mode 0600; a socket file already there is replaced)
     * and decrypts each request with `cipher`, one at a time; `say` reports each.
-    * Runs until the process ends; the socket file is removed then.
+    * What it decrypted is kept in memory for `cacheMinutes` (0: not at all) and
+    * returned for the same encrypted text without asking the YubiKey again, so a
+    * series of runs needs one PIN and touch; a changed store is new text, and
+    * is decrypted afresh. Runs until the process ends; the socket file is
+    * removed then.
     */
-  def serve(socket: Path, cipher: Cipher, say: String => Unit): Either[String, Unit] =
+  def serve(socket: Path, cipher: Cipher, say: String => Unit, cacheMinutes: Int = 0): Either[String, Unit] =
     val addr = UnixDomainSocketAddress.of(socket)
     Try {
       Option(socket.getParent).foreach(Files.createDirectories(_))
@@ -115,6 +119,10 @@ object AgeAgent:
       server
     }.toEither.left.map(e => s"cannot listen on $socket: ${message(e)}").map { server =>
       var n = 0
+      // sha-256 of the encrypted text -> (the decrypted text, when it expires)
+      var cache = Map.empty[String, (String, java.time.Instant)]
+      def key(data: Array[Byte]): String =
+        java.security.MessageDigest.getInstance("SHA-256").digest(data).map(b => f"${b & 0xff}%02x").mkString
       while true do
         val ch = server.accept()
         n += 1
@@ -126,10 +134,21 @@ object AgeAgent:
               l.drop(8).trim.toIntOption.filter(k => k >= 0 && k <= MaxBytes).flatMap(k => readN(in, k)) match
                 case None => answer(out, Left("a request the agent could not read"))
                 case Some(data) =>
-                  say(s"request $n: decrypt ${data.length} bytes (enter the PIN / touch the YubiKey if asked)")
-                  val result = cipher.decrypt(data)
-                  say(s"request $n: ${result.fold(e => s"failed: $e", _ => "done")}")
-                  answer(out, result)
+                  val now = java.time.Instant.now
+                  cache = cache.filter((_, v) => v._2.isAfter(now))
+                  val k = key(data)
+                  cache.get(k) match
+                    case Some((text, until)) =>
+                      say(s"request $n: from the cache (until ${java.time.LocalTime.ofInstant(until, java.time.ZoneId.systemDefault).withNano(0)})")
+                      answer(out, Right(text))
+                    case None =>
+                      say(s"request $n: decrypt ${data.length} bytes (enter the PIN / touch the YubiKey if asked)")
+                      val result = cipher.decrypt(data)
+                      say(s"request $n: ${result.fold(e => s"failed: $e", _ => "done")}")
+                      result.foreach(text =>
+                        if cacheMinutes > 0 then cache = cache + (k -> (text, now.plusSeconds(cacheMinutes * 60L)))
+                      )
+                      answer(out, result)
             case other => answer(out, Left(s"not a request: ${other.getOrElse("(nothing)")}"))
         catch case e: Exception => say(s"request $n: ${message(e)}")
         finally ch.close()
