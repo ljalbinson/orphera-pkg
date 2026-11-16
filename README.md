@@ -2062,9 +2062,14 @@ stays on the control host.
   session has ended), orphera decrypts locally with its own identity, if that
   works (a key attached there); if the agent answers but cannot decrypt (a
   wrong PIN, no touch), the run stops with its reason.
+- What the agent decrypted is kept in its memory for 10 minutes
+  (`--cache <minutes>`; `--cache 0` keeps nothing), so a series of runs asks
+  for the PIN and touch once rather than at each command; a changed store is
+  decrypted afresh.
 - While the session is open, anything on the control host that can open the
   socket (your user, root) can ask for a decrypt; the touch policy is the
-  guard: each request needs a touch on the key (cached for 15 s).
+  guard, except while the agent holds the store: then it answers without one.
+  `--cache 0` makes every request need the key.
 
 ## Typed configuration files and check mode
 
