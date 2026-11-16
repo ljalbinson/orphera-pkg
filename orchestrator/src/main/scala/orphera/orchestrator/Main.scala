@@ -45,6 +45,11 @@ object Main extends IOApp:
       case "show-config" :: rest =>
         IO.blocking(ShowConfig.run(rest))
           .map(code => if code == 0 then ExitCode.Success else ExitCode.Error)
+      // The agent waits on its socket until stopped: IO.blocking would not let Ctrl-C cancel it (IOApp
+      // waits for a blocking call to finish), IO.interruptible interrupts the wait.
+      case "secrets" :: (rest @ ("agent" :: _)) =>
+        IO.interruptible(SecretsTool.run(rest))
+          .map(code => if code == 0 then ExitCode.Success else ExitCode.Error)
       case "secrets" :: rest =>
         IO.blocking(SecretsTool.run(rest))
           .map(code => if code == 0 then ExitCode.Success else ExitCode.Error)
