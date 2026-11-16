@@ -523,12 +523,19 @@ object SecretsCheck:
           Some("rekeyed-value")
         )
       )
-      val viaStale = new AgeCipher(id2, Some(rfile), Some(stale))
+      val notices = scala.collection.mutable.ListBuffer.empty[String]
+      val viaStale =
+        new AgeCipher(id2, Some(rfile), Some(stale), notice = notices += _)
       check(
         "agent: an unreachable agent falls back to the identity here",
         new SecretStore(dir.resolve("rk.age"), viaStale).get("k/v") == Right(
           Some("rekeyed-value")
         )
+      )
+      val said = List("nothing answers on", stale.toString, id2.toString)
+      check(
+        "agent: the fallback says so, naming the socket and the identity",
+        notices.size == 1 && said.forall(t => notices.exists(_.contains(t)))
       )
       check(
         "agent: unreachable with no identity here says both",

@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+- `SecretsCheck` no longer prints the age-agent fallback note (`(age agent: nothing answers on ...; decrypting here with ...)`) during the build, which sbt showed as `[error]` though every check passed; it now checks that note instead (`AgeCipher` takes where the note goes).
+
 ## [0.1.210] - 2026-11-16
 
 New: declarative apply (`orphera apply`, in Scala or YAML: files, directories, symlinks, commands, packages, services, users and groups; the cache servers and clients now described this way), the secret store on YubiKeys with `orphera secrets agent` for a key on another machine, scripts as plain Cats Effect (`OrpheraScript`), the Ceph upgrade to Tentacle and the cephx key rotation to `aes256k`, `start-vm` retries and stale OVS port cleanup, and a formatting check in CI.
