@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# Installs what is needed to build Orphera on a clean macOS (Sonoma or later; Intel or Apple Silicon):
+# Installs what is needed to build Orphera on a clean macOS (Ventura or later; Intel or Apple Silicon):
 # the Xcode command line tools (git, clang, make, python3), JDK 21 (Eclipse Temurin), sbt, Go and the GitHub CLI.
 # It does not use Homebrew (which no longer supports Intel Macs): each tool is unpacked under ~/.local from
 # its own project's download, so no administrator password is needed after the Xcode tools. Safe to run
