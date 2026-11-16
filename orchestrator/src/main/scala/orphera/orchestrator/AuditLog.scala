@@ -249,9 +249,7 @@ object AuditLog:
           "command" -> "issue-certs",
           "ssh_user" -> sshUser,
           "nodes" -> nodesField(nodes)
-        ) ++ clientAuth.map(on =>
-          "client_auth" -> (if on then "on" else "off")
-        )
+        ) ++ clientAuth.map(on => "client_auth" -> (if on then "on" else "off"))
       case Command.Teardown(nodes, sshUser, sshKeyPath, purge, confirmed) =>
         List(
           "command" -> "teardown",

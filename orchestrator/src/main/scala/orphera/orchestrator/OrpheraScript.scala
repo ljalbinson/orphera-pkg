@@ -40,7 +40,9 @@ trait OrpheraScript extends IOApp.Simple:
   def run: IO[Unit] =
     val resume = sys.env.get("ORPHERA_RESUME").contains("true")
     IO.println(
-      s"Running script '$name'${if resume then " (resuming from checkpoint)" else ""}"
+      s"Running script '$name'${
+          if resume then " (resuming from checkpoint)" else ""
+        }"
     ) >> Orphera.run(name, resume)(o => script(using o))
 
 /** The context of a script's run: its nodes, secrets and helpers. */
@@ -55,8 +57,8 @@ final class Orphera private[orchestrator] (
     inventory: List[Node]
 ):
 
-  /** One node of the inventory. Fails (inside the script's IO) if there is
-    * none of that name.
+  /** One node of the inventory. Fails (inside the script's IO) if there is none
+    * of that name.
     */
   def node(name: String): NodeRef =
     inventory.find(_.name == name) match
@@ -87,8 +89,7 @@ final class Orphera private[orchestrator] (
     Secret(value)
 
   /** Polls `check` every `everySeconds` until it is true; fails after
-    * `timeoutSeconds`, saying what the last attempt was (false, or its
-    * error).
+    * `timeoutSeconds`, saying what the last attempt was (false, or its error).
     */
   def waitUntil(
       name: String,
@@ -104,14 +105,20 @@ final class Orphera private[orchestrator] (
         )
       else
         check.attempt.flatMap {
-          case Right(true) => IO.println(s"[$runName] $name: true after ~${elapsed}s")
+          case Right(true) =>
+            IO.println(s"[$runName] $name: true after ~${elapsed}s")
           case Right(false) =>
-            IO.sleep(everySeconds.seconds) >> poll(elapsed + everySeconds, "false")
+            IO.sleep(everySeconds.seconds) >> poll(
+              elapsed + everySeconds,
+              "false"
+            )
           case Left(err) =>
             IO.sleep(everySeconds.seconds) >>
               poll(elapsed + everySeconds, TaskExecutor.describe(err))
         }
-    IO.println(s"[$runName] waiting until $name (timeout ${timeoutSeconds}s)") >>
+    IO.println(
+      s"[$runName] waiting until $name (timeout ${timeoutSeconds}s)"
+    ) >>
       poll(0, "none")
 
   private[orchestrator] def claim(node: String, step: String): IO[Unit] =
@@ -134,9 +141,9 @@ final class Orphera private[orchestrator] (
     factsCache.get.map(_.get(node.name)).flatMap {
       case Some(f) => IO.pure(f)
       case None    =>
-        NodeClient.gatherFacts(node).flatTap(f =>
-          factsCache.update(_.updated(node.name, f))
-        )
+        NodeClient
+          .gatherFacts(node)
+          .flatTap(f => factsCache.update(_.updated(node.name, f)))
     }
 
 object Orphera:
@@ -166,7 +173,9 @@ object Orphera:
         case Right(()) => IO.println(s"$kind '$name' finished.")
         case Left(err) =>
           IO.println(s"$kind '$name' failed: ${TaskExecutor.describe(err)}") >>
-            IO.raiseError(new PlaybookFailed(s"$kind '$name' failed (see output above)"))
+            IO.raiseError(
+              new PlaybookFailed(s"$kind '$name' failed (see output above)")
+            )
     yield ()
 
   /** A context; `adjust` changes its Env (checks give it a fake runner). */
@@ -195,9 +204,9 @@ object Orphera:
 /** One node, and the steps that can be run on it. Every step takes its name
   * first (what the output, run log and checkpoint show) and returns a
   * StepResult. Change steps are checkpointed, so `--resume` skips one already
-  * done (its result then has `skipped` and no output); `query` and `facts`
-  * are not, and always run. A failed step raises (StepFailed), so the rest of
-  * the node's `for` does not run.
+  * done (its result then has `skipped` and no output); `query` and `facts` are
+  * not, and always run. A failed step raises (StepFailed), so the rest of the
+  * node's `for` does not run.
   */
 final class NodeRef private[orchestrator] (val node: Node, orphera: Orphera):
 
@@ -219,7 +228,9 @@ final class NodeRef private[orchestrator] (val node: Node, orphera: Orphera):
     if mode.isEmpty then IO.pure(0)
     else
       IO.fromOption(Try(Integer.parseInt(mode, 8)).toOption)(
-        new IllegalArgumentException(s"mode '$mode' is not an octal number such as \"0644\"")
+        new IllegalArgumentException(
+          s"mode '$mode' is not an octal number such as \"0644\""
+        )
       )
 
   /** Runs a command (a list: the program and its arguments). */
@@ -241,8 +252,8 @@ final class NodeRef private[orchestrator] (val node: Node, orphera: Orphera):
     run(name, List("sh", "-c", script), timeout, retry)
 
   /** Runs a command that only reads (it must not change the node): not
-    * checkpointed, so it runs again on `--resume` and its value is current,
-    * and a non-zero exit is its `exitCode`, not a failure. `changed` is false.
+    * checkpointed, so it runs again on `--resume` and its value is current, and
+    * a non-zero exit is its `exitCode`, not a failure. `changed` is false.
     */
   def query(name: String, command: List[String]): IO[TaskExecutor.StepResult] =
     query(name, command, 60)
@@ -275,7 +286,8 @@ final class NodeRef private[orchestrator] (val node: Node, orphera: Orphera):
   ): IO[TaskExecutor.StepResult] =
     query(name, List("sh", "-c", script), timeout)
 
-  /** This node's gathered facts: gathered on first use, then kept for the run. */
+  /** This node's gathered facts: gathered on first use, then kept for the run.
+    */
   def facts: IO[Facts] = orphera.factsOf(node)
 
   def install(
@@ -339,8 +351,8 @@ final class NodeRef private[orchestrator] (val node: Node, orphera: Orphera):
       change(name, Task.WriteFile(content, dest, owner, group, m), retry)
     )
 
-  /** Reboots the node and (with `waitForReturn`) waits until it is back and
-    * has really rebooted (see `reboot --wait`).
+  /** Reboots the node and (with `waitForReturn`) waits until it is back and has
+    * really rebooted (see `reboot --wait`).
     */
   def reboot(
       name: String,
@@ -350,7 +362,10 @@ final class NodeRef private[orchestrator] (val node: Node, orphera: Orphera):
   ): IO[TaskExecutor.StepResult] =
     change(name, Task.Reboot(delay, waitForReturn, waitTimeout), None)
 
-  def networkApply(name: String, timeout: Int = 60): IO[TaskExecutor.StepResult] =
+  def networkApply(
+      name: String,
+      timeout: Int = 60
+  ): IO[TaskExecutor.StepResult] =
     change(name, Task.NetworkApply(timeout), None)
 
   /** Applies a declarative description to this node (docs/APPLY-DESIGN.md):
@@ -359,12 +374,16 @@ final class NodeRef private[orchestrator] (val node: Node, orphera: Orphera):
     * resume. Raises (StepFailed) if a resource failed; otherwise the report
     * says what changed (`report.changed("file[/etc/x]")`).
     */
-  def apply(plan: ApplyPlan, check: Boolean = false, stopOnFailure: Boolean = false): IO[ApplyReport] =
+  def apply(
+      plan: ApplyPlan,
+      check: Boolean = false,
+      stopOnFailure: Boolean = false
+  ): IO[ApplyReport] =
     applyGrouped(plan, check, stopOnFailure, None)
 
-  /** As `apply`; with `together`, the node's lines are held back and printed
-    * in one block when it finishes (under that lock, so blocks from nodes
-    * applied in parallel do not interleave).
+  /** As `apply`; with `together`, the node's lines are held back and printed in
+    * one block when it finishes (under that lock, so blocks from nodes applied
+    * in parallel do not interleave).
     */
   private[orchestrator] def applyGrouped(
       plan: ApplyPlan,
@@ -378,20 +397,36 @@ final class NodeRef private[orchestrator] (val node: Node, orphera: Orphera):
       def show(text: String): IO[Unit] = env.output.line(node, label, text)
       for
         held <- Ref.of[IO, Vector[String]](Vector.empty)
-        say = (text: String) => if together.isDefined then held.update(_ :+ text) else show(text)
-        flush = together.fold(IO.unit)(lock => lock.lock.surround(held.get.flatMap(_.traverse_(show))))
-        _ <- orphera.runLog.event("event" -> "task_start", "node" -> node.name, "task" -> label, "check" -> check)
-        report <- TaskExecutor.applyOn(plan, node, env, check, stopOnFailure, say).guarantee(flush)
+        say = (text: String) =>
+          if together.isDefined then held.update(_ :+ text) else show(text)
+        flush = together.fold(IO.unit)(lock =>
+          lock.lock.surround(held.get.flatMap(_.traverse_(show)))
+        )
+        _ <- orphera.runLog.event(
+          "event" -> "task_start",
+          "node" -> node.name,
+          "task" -> label,
+          "check" -> check
+        )
+        report <- TaskExecutor
+          .applyOn(plan, node, env, check, stopOnFailure, say)
+          .guarantee(flush)
         _ <- orphera.runLog.event(
           "event" -> "task_end",
           "node" -> node.name,
           "task" -> label,
           "success" -> !report.failed,
           "changed" -> report.changed,
-          "resources" -> report.results.map(r => s"${r.id} ${outcomeWord(r.outcome)}").mkString("; ")
+          "resources" -> report.results
+            .map(r => s"${r.id} ${outcomeWord(r.outcome)}")
+            .mkString("; ")
         )
         _ <- IO.raiseWhen(report.failed)(
-          new TaskExecutor.StepFailed(node.name, label, new RuntimeException(report.failures.mkString("; ")))
+          new TaskExecutor.StepFailed(
+            node.name,
+            label,
+            new RuntimeException(report.failures.mkString("; "))
+          )
         )
       yield report
     }
@@ -401,12 +436,12 @@ final class NodeRef private[orchestrator] (val node: Node, orphera: Orphera):
     Apply.plan(name, resources).flatMap(p => apply(p))
 
   private def outcomeWord(o: ApplyOutcome): String = o match
-    case ApplyOutcome.Unchanged(_)       => "unchanged"
-    case ApplyOutcome.NotNotified        => "not notified"
-    case ApplyOutcome.WouldChange(_, _)  => "would change"
-    case ApplyOutcome.Changed(_, _)      => "changed"
-    case ApplyOutcome.Skipped(_)         => "skipped"
-    case ApplyOutcome.Failed(_)          => "failed"
+    case ApplyOutcome.Unchanged(_)      => "unchanged"
+    case ApplyOutcome.NotNotified       => "not notified"
+    case ApplyOutcome.WouldChange(_, _) => "would change"
+    case ApplyOutcome.Changed(_, _)     => "changed"
+    case ApplyOutcome.Skipped(_)        => "skipped"
+    case ApplyOutcome.Failed(_)         => "failed"
 
 /** Several nodes. `each` is the barrier between parts of a script, as a stage
   * is in a cluster playbook.
@@ -415,20 +450,24 @@ final case class Nodes(toList: List[NodeRef]):
 
   def names: List[String] = toList.map(_.name)
 
-  /** Runs `f` on every node in parallel; returns the results when all are
-    * done. If any failed, fails after all have finished, naming them (a
-    * failed step has already said why; any other error is printed here).
+  /** Runs `f` on every node in parallel; returns the results when all are done.
+    * If any failed, fails after all have finished, naming them (a failed step
+    * has already said why; any other error is printed here).
     */
   def each[A](f: NodeRef => IO[A]): IO[List[A]] =
     toList.parTraverse(n => f(n).attempt.map(n -> _)).flatMap { results =>
       val failed = results.collect { case (n, Left(err)) => n -> err }
-      if failed.isEmpty then IO.pure(results.collect { case (_, Right(a)) => a })
+      if failed.isEmpty then
+        IO.pure(results.collect { case (_, Right(a)) => a })
       else
         failed.traverse_ {
           case (_, _: TaskExecutor.StepFailed) => IO.unit
-          case (n, err) => IO.println(s"[${n.name}] FAILED — ${TaskExecutor.describe(err)}")
+          case (n, err)                        =>
+            IO.println(s"[${n.name}] FAILED — ${TaskExecutor.describe(err)}")
         } >> IO.raiseError(
-          new RuntimeException(s"failed on ${failed.map(_._1.name).mkString(", ")}")
+          new RuntimeException(
+            s"failed on ${failed.map(_._1.name).mkString(", ")}"
+          )
         )
     }
 

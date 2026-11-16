@@ -29,7 +29,18 @@ object apt_cache_clients extends OrpheraApply:
   import Resources.*
 
   override def nodes: List[String] =
-    List("tst0", "tst1", "tst2", "tst3", "tst4", "tst5", "tst6", "tst7", "tst9", "tst10") ++
+    List(
+      "tst0",
+      "tst1",
+      "tst2",
+      "tst3",
+      "tst4",
+      "tst5",
+      "tst6",
+      "tst7",
+      "tst9",
+      "tst10"
+    ) ++
       (30 to 39).map(n => s"tst$n")
 
   private val cacheHost = "tst11.ljalbinson.com"
@@ -59,8 +70,10 @@ object apt_cache_clients extends OrpheraApply:
       |""".stripMargin
 
   def describe(node: Node): List[ApplyResource] =
-    val detect = file("/usr/local/sbin/orphera-apt-proxy", detectScript, mode = "0755")
+    val detect =
+      file("/usr/local/sbin/orphera-apt-proxy", detectScript, mode = "0755")
     List(
       detect,
-      file("/etc/apt/apt.conf.d/02orphera-apt-proxy", aptConf, mode = "0644").after(detect)
+      file("/etc/apt/apt.conf.d/02orphera-apt-proxy", aptConf, mode = "0644")
+        .after(detect)
     )

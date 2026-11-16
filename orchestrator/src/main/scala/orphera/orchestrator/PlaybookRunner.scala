@@ -68,10 +68,10 @@ object PlaybookRunner:
       yield ok
 
   /** A direct command (`orphera install`, `run`, `copy`, ...): a playbook of
-    * one task, named after the command, on `nodes` in parallel. It differs
-    * from a playbook run only in what TaskExecutor.commandEnv says: no facts
-    * are gathered, `{{...}}` is sent as typed, there is no checkpoint or run
-    * log (the audit log records the command), and the output is the console's
+    * one task, named after the command, on `nodes` in parallel. It differs from
+    * a playbook run only in what TaskExecutor.commandEnv says: no facts are
+    * gathered, `{{...}}` is sent as typed, there is no checkpoint or run log
+    * (the audit log records the command), and the output is the console's
     * (`[node] ...`). A node that fails, or cannot be reached, does not stop the
     * others; with `retry` (`--retries`), it is tried again first. Returns
     * whether it succeeded on every node.

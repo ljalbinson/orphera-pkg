@@ -201,7 +201,8 @@ object TaskYaml:
       name: String,
       c: HCursor
   ): Either[DecodingFailure, Option[Retry]] =
-    def fail(msg: String): DecodingFailure = DecodingFailure(s"Task '$name': $msg", c.history)
+    def fail(msg: String): DecodingFailure =
+      DecodingFailure(s"Task '$name': $msg", c.history)
     for
       retries <- c.get[Option[Int]]("retries")
       delay <- c.get[Option[Int]]("retry_delay")

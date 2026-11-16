@@ -252,7 +252,9 @@ object ClusterPlaybookRunner:
       IO.println(
         s"[$stageName] Health check timed out after ${timeoutSeconds}s" +
           (if last.isEmpty then "" else "; the last attempt:")
-      ) >> last.traverse_(l => IO.println(s"[$stageName]   $l")) >> IO.pure(false)
+      ) >> last.traverse_(l => IO.println(s"[$stageName]   $l")) >> IO.pure(
+        false
+      )
     else
       checkOnce(node, check).attempt.flatMap {
         case Right((true, _)) =>
@@ -319,7 +321,8 @@ object ClusterPlaybookRunner:
     if elapsed >= timeoutSeconds then
       IO.println(
         s"[$stageName] Quorum check timed out after ${timeoutSeconds}s" +
-          (if last.isEmpty then "" else "; the last attempt on each node not healthy:")
+          (if last.isEmpty then ""
+           else "; the last attempt on each node not healthy:")
       ) >> last.traverse_ { case (name, lines) =>
         lines.traverse_(l => IO.println(s"[$stageName]   $name: $l"))
       } >> IO.pure(false)
@@ -328,7 +331,7 @@ object ClusterPlaybookRunner:
         .parTraverse { node =>
           runCheckCommand(node, command).attempt.map {
             case Right(a) if a.exitCode == 0 => (node.name, Nil)
-            case Right(a) => (node.name, a.describe(command))
+            case Right(a)                    => (node.name, a.describe(command))
             case Left(err) => (node.name, List(NodeError.line(err)))
           }
         }

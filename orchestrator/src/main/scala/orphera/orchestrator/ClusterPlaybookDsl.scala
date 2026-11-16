@@ -29,12 +29,14 @@ object ClusterPlaybookDsl:
       tasks.lastOption match
         case Some(last) =>
           withTasks(
-            tasks.dropRight(1) :+ last.copy(notifies = last.notifies ++ handlerNames)
+            tasks.dropRight(1) :+ last.copy(notifies =
+              last.notifies ++ handlerNames
+            )
           )
         case None => this
 
-    /** Adds a handler, run on each node after its tasks in this stage, once,
-      * if a task that changed something notified it.
+    /** Adds a handler, run on each node after its tasks in this stage, once, if
+      * a task that changed something notified it.
       */
     def handler(handlerName: String)(t: Task): StageBuilder =
       new StageBuilder(
@@ -64,7 +66,9 @@ object ClusterPlaybookDsl:
       tasks.lastOption match
         case Some(last) =>
           withTasks(
-            tasks.dropRight(1) :+ last.copy(retry = Retry.of(times, delaySeconds))
+            tasks.dropRight(1) :+ last.copy(retry =
+              Retry.of(times, delaySeconds)
+            )
           )
         case None =>
           this

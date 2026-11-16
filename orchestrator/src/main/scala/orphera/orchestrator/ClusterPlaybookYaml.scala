@@ -127,7 +127,11 @@ object ClusterPlaybookYaml:
   ): Either[String, ClusterPlaybook] =
     for
       name <- c.get[String]("name").left.map(_.getMessage)
-      stageCursors <- c.downField("stages").as[List[Json]].left.map(_.getMessage)
+      stageCursors <- c
+        .downField("stages")
+        .as[List[Json]]
+        .left
+        .map(_.getMessage)
       stages <- stageCursors.traverse(j => decodeStage(j.hcursor, dir, self))
     yield ClusterPlaybook(name, stages)
 

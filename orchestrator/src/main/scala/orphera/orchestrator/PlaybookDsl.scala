@@ -30,7 +30,9 @@ object PlaybookDsl:
       tasks.lastOption match
         case Some(last) =>
           withTasks(
-            tasks.dropRight(1) :+ last.copy(notifies = last.notifies ++ handlerNames)
+            tasks.dropRight(1) :+ last.copy(notifies =
+              last.notifies ++ handlerNames
+            )
           )
         case None => this
 
@@ -38,7 +40,12 @@ object PlaybookDsl:
       * that changed something notified it by this name.
       */
     def handler(handlerName: String)(t: Task): PlaybookBuilder =
-      new PlaybookBuilder(name, nodes, tasks, handlers :+ NamedTask(handlerName, t))
+      new PlaybookBuilder(
+        name,
+        nodes,
+        tasks,
+        handlers :+ NamedTask(handlerName, t)
+      )
 
     /** Attaches a `when:` condition to the most recently added task. */
     def when(condition: FactCondition): PlaybookBuilder =
@@ -59,7 +66,9 @@ object PlaybookDsl:
       tasks.lastOption match
         case Some(last) =>
           withTasks(
-            tasks.dropRight(1) :+ last.copy(retry = Retry.of(times, delaySeconds))
+            tasks.dropRight(1) :+ last.copy(retry =
+              Retry.of(times, delaySeconds)
+            )
           )
         case None =>
           this

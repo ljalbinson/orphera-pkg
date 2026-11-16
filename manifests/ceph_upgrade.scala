@@ -45,7 +45,12 @@ object ceph_upgrade extends OrpheraScript:
   private val admin = sys.env.getOrElse("CEPH_ADMIN", "tst0")
   private val allowWarn = sys.env.get("CEPH_ALLOW_WARN").contains("yes")
   private val ignoreHealth: List[String] =
-    sys.env.getOrElse("CEPH_IGNORE_HEALTH", "").split("[ ,]+").map(_.trim).filter(_.nonEmpty).toList
+    sys.env
+      .getOrElse("CEPH_IGNORE_HEALTH", "")
+      .split("[ ,]+")
+      .map(_.trim)
+      .filter(_.nonEmpty)
+      .toList
 
   // `ceph` through the cephadm shell, without its "Inferring fsid" lines.
   //
@@ -164,7 +169,10 @@ object ceph_upgrade extends OrpheraScript:
         |import json, sys
         |for k, n in json.load(sys.stdin)["overall"].items():
         |    print("  %s: %d daemon(s)" % (k.split(" (")[0], n))
-        |'""".stripMargin.replace("@ALLOW_WARN@", if allowWarn then "yes" else "no")
+        |'""".stripMargin.replace(
+        "@ALLOW_WARN@",
+        if allowWarn then "yes" else "no"
+      )
 
   private def lines(r: TaskExecutor.StepResult): List[String] =
     r.stdout.linesIterator.map(_.trim).toList
@@ -185,7 +193,9 @@ object ceph_upgrade extends OrpheraScript:
              |printf '%s\\n' "$$out" | grep -v -e '^Inferring ' -e '^Using ceph image' -e '^quay.io/ceph/ceph@' || true
              |exit $$rc""".stripMargin,
         timeout = 120
-      ) >> node.sh(s"wait for the upgrade: $label", waitScript, timeout = 3600).void
+      ) >> node
+        .sh(s"wait for the upgrade: $label", waitScript, timeout = 3600)
+        .void
 
     for
       check <- node.query("what needs upgrading", checkScript, 900)
@@ -194,11 +204,21 @@ object ceph_upgrade extends OrpheraScript:
       )
       (digest, version, needed, done) <- lines(check) match
         case d :: v :: n :: u :: _ if d.nonEmpty =>
-          IO.pure((d, v, n.toIntOption.getOrElse(0), u.toIntOption.getOrElse(0)))
-        case other => fail(s"unexpected answer from ceph orch upgrade check: ${other.mkString(" | ")}")
-      _ <- IO.println(s"[$admin] target: $version ($digest); $needed daemon(s) to upgrade, $done already on it")
+          IO.pure(
+            (d, v, n.toIntOption.getOrElse(0), u.toIntOption.getOrElse(0))
+          )
+        case other =>
+          fail(
+            s"unexpected answer from ceph orch upgrade check: ${other.mkString(" | ")}"
+          )
+      _ <- IO.println(
+        s"[$admin] target: $version ($digest); $needed daemon(s) to upgrade, $done already on it"
+      )
       _ <-
-        if needed == 0 then IO.println(s"[$admin] every daemon is already on $version: nothing to do")
+        if needed == 0 then
+          IO.println(
+            s"[$admin] every daemon is already on $version: nothing to do"
+          )
         else upgrade(node, digest, version, done, stage)
     yield ()
 
@@ -217,7 +237,9 @@ object ceph_upgrade extends OrpheraScript:
       status <- node.query("is an upgrade already running", statusScript)
       _ <- lines(status) match
         case "yes" :: target :: _ if target != digest =>
-          fail(s"an upgrade to $target is already running: wait for it, or stop it (ceph orch upgrade stop)")
+          fail(
+            s"an upgrade to $target is already running: wait for it, or stop it (ceph orch upgrade stop)"
+          )
         case _ => IO.unit
       // A cluster part-way through this upgrade (a resume) is not HEALTH_OK; one not yet started must be.
       health <- node.query("cluster health", healthScript)
@@ -234,8 +256,12 @@ object ceph_upgrade extends OrpheraScript:
           s"cephadm needs a standby manager to upgrade them; there are ${mgrs.stdout.trim}: ceph orch apply mgr 2"
         )
       )
-      osdHosts <- node.query("hosts with OSDs", osdHostsScript).map(lines(_).filter(_.nonEmpty))
-      _ <- IO.println(s"[${node.name}] stages: mgr, mon, crash, OSDs on ${osdHosts.mkString(", ")}, then the rest")
+      osdHosts <- node
+        .query("hosts with OSDs", osdHostsScript)
+        .map(lines(_).filter(_.nonEmpty))
+      _ <- IO.println(
+        s"[${node.name}] stages: mgr, mon, crash, OSDs on ${osdHosts.mkString(", ")}, then the rest"
+      )
       _ <- stage(digest, "managers", "--daemon-types mgr")
       _ <- stage(digest, "monitors", "--daemon-types mon")
       // cephadm upgrades types in a fixed order (mgr, mon, crash, osd, ...) and
@@ -243,18 +269,27 @@ object ceph_upgrade extends OrpheraScript:
       // so the crash daemons go everywhere first, then the OSDs host by host.
       _ <- stage(digest, "crash daemons", "--daemon-types crash")
       _ <- osdHosts.foldLeft(IO.unit)((before, host) =>
-        before >> stage(digest, s"OSDs on $host", s"--daemon-types osd --hosts $host")
+        before >> stage(
+          digest,
+          s"OSDs on $host",
+          s"--daemon-types osd --hosts $host"
+        )
       )
       _ <- stage(digest, "everything else", "")
       // cephadm sets require-osd-release when the last OSD is upgraded; check.
-      dump <- node.query("require-osd-release", helpers + "c osd dump | sed -n 's/^require_osd_release //p'")
+      dump <- node.query(
+        "require-osd-release",
+        helpers + "c osd dump | sed -n 's/^require_osd_release //p'"
+      )
       _ <-
         if release.nonEmpty && dump.stdout.trim != release then
-          node.sh(
-            s"require-osd-release $release",
-            s"$helpers set -e\nc osd require-osd-release $release",
-            timeout = 120
-          ).void
+          node
+            .sh(
+              s"require-osd-release $release",
+              s"$helpers set -e\nc osd require-osd-release $release",
+              timeout = 120
+            )
+            .void
         else IO.unit
       _ <- IO.println(s"[${node.name}] upgraded to $version")
     yield ()

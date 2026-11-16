@@ -402,8 +402,8 @@ object NodeClient:
             confirmRebooted(node, askedAt, onLine)
     yield ()
 
-  /** After `reboot --wait` sees the agent answer again: whether the host
-    * really rebooted, rather than only the agent restarting. Its uptime must be
+  /** After `reboot --wait` sees the agent answer again: whether the host really
+    * rebooted, rather than only the agent restarting. Its uptime must be
     * shorter than the time since the reboot was asked for. Fails if it is not;
     * an agent too old to report uptime gets a line saying the reboot could not
     * be confirmed.

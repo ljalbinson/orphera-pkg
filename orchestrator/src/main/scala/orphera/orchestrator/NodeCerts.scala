@@ -71,16 +71,17 @@ object NodeCerts:
       cert <- sign(node.host, csr)
       _ <-
         if clientAuth.contains(true) then
-          IO.blocking(Files.readString(CaCert, UTF_8)).flatMap(ca =>
-            SshDeployer.sshRunWithInput(
-              node,
-              sshUser,
-              sshKeyPath,
-              stageClientCa,
-              ca,
-              onLine
+          IO.blocking(Files.readString(CaCert, UTF_8))
+            .flatMap(ca =>
+              SshDeployer.sshRunWithInput(
+                node,
+                sshUser,
+                sshKeyPath,
+                stageClientCa,
+                ca,
+                onLine
+              )
             )
-          )
         else IO.unit
       _ <- SshDeployer.sshRunWithInput(
         node,
@@ -99,8 +100,8 @@ object NodeCerts:
       )
     yield ()
 
-  /** Writes the CA certificate from stdin to `ca.crt.new`; installCert moves
-    * it into place with the node's certificate.
+  /** Writes the CA certificate from stdin to `ca.crt.new`; installCert moves it
+    * into place with the node's certificate.
     */
   private val stageClientCa: String =
     s"sudo sh -c 'set -e; umask 022; mkdir -p $RemoteDir; cat > $RemoteDir/ca.crt.new'"
@@ -119,7 +120,7 @@ object NodeCerts:
     */
   private def installCert(clientAuth: Option[Boolean]): String =
     val clientCaStep = clientAuth match
-      case Some(true)  => "chmod 644 $d/ca.crt.new; mv $d/ca.crt.new $d/ca.crt; "
+      case Some(true) => "chmod 644 $d/ca.crt.new; mv $d/ca.crt.new $d/ca.crt; "
       case Some(false) => "rm -f $d/ca.crt; "
       case None        => ""
     s"sudo sh -c 'set -e; d=$RemoteDir; cat > $$d/server.crt.new; " +

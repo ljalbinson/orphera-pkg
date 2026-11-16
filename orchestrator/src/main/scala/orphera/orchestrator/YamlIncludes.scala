@@ -11,16 +11,16 @@ import cats.syntax.all.*
 import io.circe.*
 import io.circe.yaml.parser
 
-/** `- include: other.yaml` in a YAML playbook's (or a cluster-playbook
-  * stage's) `tasks:`, replaced by the tasks of that file before the playbook
-  * is decoded, so the rest of Orphera never sees an include.
+/** `- include: other.yaml` in a YAML playbook's (or a cluster-playbook stage's)
+  * `tasks:`, replaced by the tasks of that file before the playbook is decoded,
+  * so the rest of Orphera never sees an include.
   *
-  * The included file is either a list of tasks, or a mapping with `tasks:`
-  * and, optionally, `handlers:`; its handlers are added to the including
-  * playbook's (or stage's). Its path is relative to the file that includes
-  * it. An included file may include others; a file that includes itself,
-  * directly or not, is an error. An include entry has only the `include:` key
-  * (`when:`, `notify:` and the rest go on the included tasks themselves).
+  * The included file is either a list of tasks, or a mapping with `tasks:` and,
+  * optionally, `handlers:`; its handlers are added to the including playbook's
+  * (or stage's). Its path is relative to the file that includes it. An included
+  * file may include others; a file that includes itself, directly or not, is an
+  * error. An include entry has only the `include:` key (`when:`, `notify:` and
+  * the rest go on the included tasks themselves).
   */
 object YamlIncludes:
 
@@ -48,13 +48,15 @@ object YamlIncludes:
       chain: List[Path]
   ): Either[String, Expanded] =
     entry.asObject.flatMap(_("include")) match
-      case None          => Right(Expanded(List(entry), Nil))
+      case None           => Right(Expanded(List(entry), Nil))
       case Some(nameJson) =>
         for
           name <- nameJson.asString.toRight(
             s"include: needs a file name, not $nameJson"
           )
-          others = entry.asObject.toList.flatMap(_.keys).filterNot(_ == "include")
+          others = entry.asObject.toList
+            .flatMap(_.keys)
+            .filterNot(_ == "include")
           _ <- Either.cond(
             others.isEmpty,
             (),

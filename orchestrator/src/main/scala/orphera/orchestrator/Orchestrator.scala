@@ -370,7 +370,9 @@ object Orchestrator:
           case Left(err) =>
             ConsoleRenderer.nodeFailed(node, s"FAILED: $err")
         }
-        .handleErrorWith(e => ConsoleRenderer.nodeFailed(node, NodeError.line(e)))
+        .handleErrorWith(e =>
+          ConsoleRenderer.nodeFailed(node, NodeError.line(e))
+        )
     }
 
   /** Facts from every node. Every node is tried; if any fail, the error names
@@ -420,7 +422,9 @@ object Orchestrator:
             delaySeconds,
             line => IO.println(s"[${node.name}] $line")
           )
-          .handleErrorWith(e => ConsoleRenderer.nodeFailed(node, NodeError.line(e)))
+          .handleErrorWith(e =>
+            ConsoleRenderer.nodeFailed(node, NodeError.line(e))
+          )
       }
 
   def getUptimes(

@@ -112,7 +112,8 @@ object rpm_cache extends OrpheraApply:
       |    }
       |}""".stripMargin.replace("@PORT@", port.toString)
 
-  private val healthy = s"""[ "$$(curl -s http://localhost:$port/healthz)" = "ok" ]"""
+  private val healthy =
+    s"""[ "$$(curl -s http://localhost:$port/healthz)" = "ok" ]"""
 
   // Up to a minute for nginx to answer after a (re)start.
   private val waitHealthy =
@@ -124,25 +125,40 @@ object rpm_cache extends OrpheraApply:
     s"$$(curl -s -o /dev/null -w '%{http_code}' http://localhost:$port/rocky/$release/$repo/$arch/os/repodata/repomd.xml)"
 
   // Every repository's repomd.xml through the cache answers 200.
-  private val repomdOk = repos.map(r => s"""[ "${code(r)}" = "200" ]""").mkString(" && ")
+  private val repomdOk =
+    repos.map(r => s"""[ "${code(r)}" = "200" ]""").mkString(" && ")
 
   private val repomdReport =
-    (repos.map(r => s"""echo "rocky $release $r repomd.xml through the cache: HTTP ${code(r)}"""") :+ "exit 1").mkString("\n")
+    (repos.map(r =>
+      s"""echo "rocky $release $r repomd.xml through the cache: HTTP ${code(
+          r
+        )}""""
+    ) :+ "exit 1").mkString("\n")
 
   def describe(node: Node): List[ApplyResource] =
     val nginx = pkg("nginx", updateCache = true)
     val confPath = "/etc/nginx/conf.d/orphera-rpm-cache.conf"
-    val checkConf = command("check the nginx configuration", "nginx -t", onChangeOnly = true)
+    val checkConf =
+      command("check the nginx configuration", "nginx -t", onChangeOnly = true)
     val server = service("nginx").after(checkConf)
-    val answering = command("the cache answers", waitHealthy, unless = healthy).after(server)
+    val answering =
+      command("the cache answers", waitHealthy, unless = healthy).after(server)
     List(
       nginx,
       pkg("curl"),
-      directory("/var/cache/nginx/rpm", owner = "www-data", group = "www-data").after(nginx),
-      file(confPath, nginxConf + "\n", mode = "0644").after(nginx).notifies(checkConf, server),
+      directory("/var/cache/nginx/rpm", owner = "www-data", group = "www-data")
+        .after(nginx),
+      file(confPath, nginxConf + "\n", mode = "0644")
+        .after(nginx)
+        .notifies(checkConf, server),
       checkConf,
       server,
       answering,
-      command("each Rocky repository is served through the cache", repomdReport, unless = repomdOk, timeout = 300)
+      command(
+        "each Rocky repository is served through the cache",
+        repomdReport,
+        unless = repomdOk,
+        timeout = 300
+      )
         .after(answering)
     )

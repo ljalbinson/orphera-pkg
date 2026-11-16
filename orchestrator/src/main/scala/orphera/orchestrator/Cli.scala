@@ -102,7 +102,12 @@ enum Command:
   // (OrpheraApply) is run as a script is, with --check, --nodes and
   // --stop-on-failure handed over as ORPHERA_CHECK, ORPHERA_APPLY_NODES and
   // ORPHERA_STOP_ON_FAILURE; a .yaml one (ApplyYaml) is read and run here.
-  case Apply(path: String, check: Boolean, nodes: Option[List[String]], stopOnFailure: Boolean)
+  case Apply(
+      path: String,
+      check: Boolean,
+      nodes: Option[List[String]],
+      stopOnFailure: Boolean
+  )
   case Reboot(
       nodes: Option[List[String]],
       delaySeconds: Int,
@@ -379,10 +384,18 @@ object Cli:
         parseIssueCerts(rest, None, "root", None)
       case "teardown" :: rest =>
         parseTeardown(rest, Nil, "root", None, purge = false, confirmed = false)
-      case "fetch" :: remote :: rest  => parseFetch(rest, remote, ".", None)
-      case "facts" :: rest            => parseFacts(rest, None)
-      case "apply" :: path :: rest =>
-        parseApplyFlags(rest, Command.Apply(path, check = false, nodes = None, stopOnFailure = false))
+      case "fetch" :: remote :: rest => parseFetch(rest, remote, ".", None)
+      case "facts" :: rest           => parseFacts(rest, None)
+      case "apply" :: path :: rest   =>
+        parseApplyFlags(
+          rest,
+          Command.Apply(
+            path,
+            check = false,
+            nodes = None,
+            stopOnFailure = false
+          )
+        )
       case "playbook" :: path :: rest =>
         parsePlaybookFlags(rest, resume = false, config = None).map {
           case (resume, config) => Command.RunPlaybook(path, resume, config)
@@ -443,15 +456,26 @@ object Cli:
     * (checkpoint-based restart skipping, `Checkpoint.scala`) and `config`
     * (ORPHERA_CONFIG hand-off, `ConfigYaml.scala`) do.
     */
-  private def parseApplyFlags(args: List[String], acc: Command.Apply): Either[String, Command] =
+  private def parseApplyFlags(
+      args: List[String],
+      acc: Command.Apply
+  ): Either[String, Command] =
     args match
-      case Nil                          => Right(acc)
-      case "--check" :: rest            => parseApplyFlags(rest, acc.copy(check = true))
-      case "--stop-on-failure" :: rest  => parseApplyFlags(rest, acc.copy(stopOnFailure = true))
-      case "--nodes" :: value :: rest   =>
-        parseApplyFlags(rest, acc.copy(nodes = Some(value.split(",").toList.map(_.trim).filter(_.nonEmpty))))
-      case other :: _                   =>
-        Left(s"Unknown argument to apply: $other (expected --check, --nodes, --node-groups, --stop-on-failure)")
+      case Nil               => Right(acc)
+      case "--check" :: rest => parseApplyFlags(rest, acc.copy(check = true))
+      case "--stop-on-failure" :: rest =>
+        parseApplyFlags(rest, acc.copy(stopOnFailure = true))
+      case "--nodes" :: value :: rest =>
+        parseApplyFlags(
+          rest,
+          acc.copy(nodes =
+            Some(value.split(",").toList.map(_.trim).filter(_.nonEmpty))
+          )
+        )
+      case other :: _ =>
+        Left(
+          s"Unknown argument to apply: $other (expected --check, --nodes, --node-groups, --stop-on-failure)"
+        )
 
   private def parsePlaybookFlags(
       args: List[String],
