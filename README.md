@@ -2062,6 +2062,17 @@ stays on the control host.
   session has ended), orphera decrypts locally with its own identity, if that
   works (a key attached there); if the agent answers but cannot decrypt (a
   wrong PIN, no touch), the run stops with its reason.
+- **Making it routine** (as on the Mac used with scala0): in the Mac's
+  `~/.ssh/config`, a `Host scala0` block with the `RemoteForward` line and
+  `ExitOnForwardFailure yes` (so a failed forward stops the login rather than
+  passing unnoticed; then only the newest session's forward works); in
+  `~/.zprofile`, a function that starts the agent in a window of its own when
+  none is running (`pgrep -f 'secrets agent'`; with iTerm2,
+  `osascript -e 'tell application "iTerm"' -e 'create window with profile "Orphera agent"' -e 'activate' -e 'end tell'`,
+  the profile running a login shell with *Send text at start*
+  `orphera secrets agent`) and then runs `ssh scala0`; and in the control
+  host's `~/.profile`, a line that says at login whether the socket answers
+  (connect to it with `python3 -c 'import os,socket; s=socket.socket(socket.AF_UNIX); s.connect(os.path.expanduser("~/.config/orphera/agent.sock"))'`).
 - What the agent decrypted is kept in its memory for 10 minutes
   (`--cache <minutes>`; `--cache 0` keeps nothing), so a series of runs asks
   for the PIN and touch once rather than at each command; a changed store is
