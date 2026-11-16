@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-.PHONY: all release rpm-if-available go-agent-if-available bump-patch _build_all clean test assembly pkg-stage deb rpm verify certs certs-clean fmt fmt-manifests scripting lint fix cli-stage cli-deb cli-rpm cli-tar cli-package check-package install uninstall check-ilo check-os10 native-utils vmctl move-vm start-vm stop-vm reboot-vm list-vms galera-cold-start scan-vm-sizes check-native-utils check-vmctl check-move-vm check-vm-scripts check-galera-cold-start check-scan-vm-sizes gh-check
+.PHONY: all release rpm-if-available go-agent-if-available bump-patch _build_all clean test assembly pkg-stage deb rpm verify certs certs-clean fmt fmt-check fmt-manifests scripting lint fix cli-stage cli-deb cli-rpm cli-tar cli-package check-package install uninstall check-ilo check-os10 native-utils vmctl move-vm start-vm stop-vm reboot-vm list-vms galera-cold-start scan-vm-sizes check-native-utils check-vmctl check-move-vm check-vm-scripts check-galera-cold-start check-scan-vm-sizes gh-check
 
 VERSION_FILE := VERSION
 VERSION      := $(shell cat $(VERSION_FILE))
@@ -60,8 +60,16 @@ fix:
 	$(MAKE) fmt
 
 fmt:
-	sbt scalafmt
+	sbt scalafmtAll
 	$(MAKE) fmt-manifests
+
+# What CI checks. scalafmt has no check-only form for files outside a
+# project, so manifests/ is formatted and any change to it fails the check
+# (the file is then left formatted).
+fmt-check:
+	sbt scalafmtCheckAll
+	$(MAKE) fmt-manifests
+	@git diff --quiet -- manifests || { git diff --stat -- manifests; echo "manifests/ was not formatted: run make fmt"; exit 1; }
 
 # manifests/*.scala are standalone playbook scripts, compiled at run time
 # by `orphera playbook`/`cluster-playbook` — none of them are declared as

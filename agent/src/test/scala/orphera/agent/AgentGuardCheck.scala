@@ -10,14 +10,14 @@ import io.grpc.{Status, StatusRuntimeException}
 
 import orphera.common.*
 
-/** Checks that an agent on a host with the never-reboot marker refuses to reboot
-  * or power it off. Run with
+/** Checks that an agent on a host with the never-reboot marker refuses to
+  * reboot or power it off. Run with
   * `sbt "agent/Test/runMain orphera.agent.AgentGuardCheck"`.
   *
-  * Only the PROTECTED path is called. The unprotected path would really schedule
-  * a reboot or shutdown of the machine running this check, so it is never
-  * reached here; that the refusal comes before anything is started is what the
-  * checks below rely on.
+  * Only the PROTECTED path is called. The unprotected path would really
+  * schedule a reboot or shutdown of the machine running this check, so it is
+  * never reached here; that the refusal comes before anything is started is
+  * what the checks below rely on.
   */
 object AgentGuardCheck:
   private var failures = 0
@@ -45,13 +45,18 @@ object AgentGuardCheck:
 
     check(
       "the marker defaults to /etc/orphera-agent/never-reboot",
-      NeverReboot.markerPath(Map.empty).toString == "/etc/orphera-agent/never-reboot"
+      NeverReboot
+        .markerPath(Map.empty)
+        .toString == "/etc/orphera-agent/never-reboot"
     )
     check(
       "ORPHERA_NEVER_REBOOT_FILE overrides the marker path",
       NeverReboot.markerPath(env) == marker
     )
-    check("no marker file: the host is not protected", !NeverReboot.isProtected(marker))
+    check(
+      "no marker file: the host is not protected",
+      !NeverReboot.isProtected(marker)
+    )
 
     Files.createFile(marker)
     check("a marker file protects the host", NeverReboot.isProtected(marker))
@@ -64,11 +69,16 @@ object AgentGuardCheck:
     )
     check(
       "the refusal names the marker and says how to lift it",
-      reboot.left.exists(e => e.getMessage.contains(marker.toString) && e.getMessage.contains("never-reboot")),
+      reboot.left.exists(e =>
+        e.getMessage.contains(marker.toString) && e.getMessage.contains(
+          "never-reboot"
+        )
+      ),
       reboot.toString
     )
 
-    val shutdown = Shutdowner.trigger(ShutdownRequest(0), env).attempt.unsafeRunSync()
+    val shutdown =
+      Shutdowner.trigger(ShutdownRequest(0), env).attempt.unsafeRunSync()
     check(
       "the agent refuses a power off on a protected host (FAILED_PRECONDITION)",
       shutdown.left.exists(failedPrecondition),
@@ -81,7 +91,10 @@ object AgentGuardCheck:
     )
 
     Files.delete(marker)
-    check("removing the marker lifts the protection", !NeverReboot.isProtected(marker))
+    check(
+      "removing the marker lifts the protection",
+      !NeverReboot.isProtected(marker)
+    )
     Files.delete(dir)
 
     protectedPathChecks()
@@ -99,28 +112,58 @@ object AgentGuardCheck:
     Files.writeString(prot.resolve("agent.env"), "ORPHERA_TOKEN=x\n")
     val link = base.resolve("link")
     Files.createSymbolicLink(link, prot)
-    def p(path: java.nio.file.Path): Boolean = ProtectedPaths.isProtected(path.toString, prot)
+    def p(path: java.nio.file.Path): Boolean =
+      ProtectedPaths.isProtected(path.toString, prot)
 
     check("the token file is protected", p(prot.resolve("agent.env")))
     check("the directory itself is protected", p(prot))
-    check("a file that does not exist yet in it is protected", p(prot.resolve("tls/server.key")))
-    check("a path with .. into it is protected", p(base.resolve("other/../orphera-agent/agent.env")))
-    check("a path through a symbolic link to it is protected", p(link.resolve("agent.env")))
-    check("a new file through a symbolic link is protected", p(link.resolve("tls/new.crt")))
-    check("a directory whose name only starts the same is not", !p(base.resolve("orphera-agent-other/x")))
+    check(
+      "a file that does not exist yet in it is protected",
+      p(prot.resolve("tls/server.key"))
+    )
+    check(
+      "a path with .. into it is protected",
+      p(base.resolve("other/../orphera-agent/agent.env"))
+    )
+    check(
+      "a path through a symbolic link to it is protected",
+      p(link.resolve("agent.env"))
+    )
+    check(
+      "a new file through a symbolic link is protected",
+      p(link.resolve("tls/new.crt"))
+    )
+    check(
+      "a directory whose name only starts the same is not",
+      !p(base.resolve("orphera-agent-other/x"))
+    )
     check("another file is not protected", !p(base.resolve("elsewhere.txt")))
     check(
       "the real agent directory is refused, with the reason",
-      ProtectedPaths.refusal("/etc/orphera-agent/agent.env").exists(_.contains("token")) &&
+      ProtectedPaths
+        .refusal("/etc/orphera-agent/agent.env")
+        .exists(_.contains("token")) &&
         ProtectedPaths.refusal("/etc/motd").isEmpty
     )
 
-    val fetched = FileTransfer.send(FetchFile("/etc/orphera-agent/agent.env")).compile.toList.unsafeRunSync()
+    val fetched = FileTransfer
+      .send(FetchFile("/etc/orphera-agent/agent.env"))
+      .compile
+      .toList
+      .unsafeRunSync()
     check(
       "fetch of the token file sends only a refusal",
-      fetched.map(_.payload.error).flatten.exists(_.startsWith("Refused")) && fetched.length == 1,
+      fetched
+        .map(_.payload.error)
+        .flatten
+        .exists(_.startsWith("Refused")) && fetched.length == 1,
       fetched.toString
     )
-    val checked = FileTransfer.check(FileCheck("/etc/orphera-agent/agent.env", "x")).unsafeRunSync()
-    check("the check before a copy says nothing about a protected file", checked.needsCopy && checked.reason == "protected path", checked.toString)
-
+    val checked = FileTransfer
+      .check(FileCheck("/etc/orphera-agent/agent.env", "x"))
+      .unsafeRunSync()
+    check(
+      "the check before a copy says nothing about a protected file",
+      checked.needsCopy && checked.reason == "protected path",
+      checked.toString
+    )

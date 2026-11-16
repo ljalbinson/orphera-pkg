@@ -3,7 +3,8 @@
 package orphera.orchestrator
 
 /** Checks for how `orphera audit-log` shortens its Nodes and Detail columns.
-  * Run with `sbt "orchestrator/Test/runMain orphera.orchestrator.AuditLogCheck"`.
+  * Run with
+  * `sbt "orchestrator/Test/runMain orphera.orchestrator.AuditLogCheck"`.
   */
 object AuditLogCheck:
   private var failures = 0
@@ -64,7 +65,11 @@ object AuditLogCheck:
       LogSummary.oneLine("a" * 50, 10),
       "a" * 9 + "…"
     )
-    same("a text at the limit is not cut", LogSummary.oneLine("abcde", 5), "abcde")
+    same(
+      "a text at the limit is not cut",
+      LogSummary.oneLine("abcde", 5),
+      "abcde"
+    )
     same("0 means no limit", LogSummary.oneLine("a" * 500, 0), "a" * 500)
 
     check(

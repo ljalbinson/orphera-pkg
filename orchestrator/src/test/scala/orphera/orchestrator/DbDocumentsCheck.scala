@@ -55,7 +55,10 @@ object DbDocumentsCheck:
       """[{"group_name":"ceph","node_name":"tst1"},
         | {"group_name":"hypervisors","node_name":"gs1"}]""".stripMargin
     ),
-    rows("group_var", """[{"group_name":"ceph","name":"pool","value":"rbd"}]"""),
+    rows(
+      "group_var",
+      """[{"group_name":"ceph","name":"pool","value":"rbd"}]"""
+    ),
     rows(
       "vm_config",
       """[{"hostname":"tst1","hypervisor":"gs1","domainname":"example","os":"ubuntu",
@@ -101,7 +104,9 @@ object DbDocumentsCheck:
 
   def main(args: Array[String]): Unit =
     // The locations
-    val ok = MariaDbSource.parse("mariadb://orphera_ro@dbhost.example.com/orphera/inventory")
+    val ok = MariaDbSource.parse(
+      "mariadb://orphera_ro@dbhost.example.com/orphera/inventory"
+    )
     check(
       "an inventory location is understood",
       ok == Right(
@@ -144,53 +149,77 @@ object DbDocumentsCheck:
     )
     check(
       "the scheme is registered with Sources",
-      Sources.read("mariadb://u@h/orphera/other").swap.exists(!_.contains("unsupported"))
+      Sources
+        .read("mariadb://u@h/orphera/other")
+        .swap
+        .exists(!_.contains("unsupported"))
     )
 
     // The inventory
     val inventory = DbDocuments.inventory(data)
     val nodes = at(inventory, "nodes")
-    check("nodes are sorted by name", strings(nodes, "name") == List("gs1", "tst1"))
+    check(
+      "nodes are sorted by name",
+      strings(nodes, "name") == List("gs1", "tst1")
+    )
     check(
       "a non-default port is kept, the default left out",
       at(inventory, "nodes").flatMap(_.asArray).exists { ns =>
-        ns.toList.map(_.hcursor.get[Int]("port").toOption) == List(Some(50052), None)
+        ns.toList
+          .map(_.hcursor.get[Int]("port").toOption) == List(Some(50052), None)
       }
     )
     check(
       "never-reboot comes through for nodes and groups",
-      at(inventory, "nodes").flatMap(_.asArray).exists(
-        _.toList.map(_.hcursor.get[Boolean]("never-reboot").toOption) ==
-          List(Some(true), None)
-      ) && at(inventory, "groups").flatMap(_.asArray).exists(
-        _.toList.map(_.hcursor.get[Boolean]("never-reboot").toOption) ==
-          List(None, Some(true))
-      )
+      at(inventory, "nodes")
+        .flatMap(_.asArray)
+        .exists(
+          _.toList.map(_.hcursor.get[Boolean]("never-reboot").toOption) ==
+            List(Some(true), None)
+        ) && at(inventory, "groups")
+        .flatMap(_.asArray)
+        .exists(
+          _.toList.map(_.hcursor.get[Boolean]("never-reboot").toOption) ==
+            List(None, Some(true))
+        )
     )
     check(
       "node vars are kept",
-      at(inventory, "nodes").flatMap(_.asArray).exists(
-        _.toList.exists(_.hcursor.downField("vars").get[String]("cluster_ip") == Right("10.0.0.2"))
-      )
+      at(inventory, "nodes")
+        .flatMap(_.asArray)
+        .exists(
+          _.toList.exists(
+            _.hcursor.downField("vars").get[String]("cluster_ip") == Right(
+              "10.0.0.2"
+            )
+          )
+        )
     )
     check(
       "group members and vars are kept",
-      at(inventory, "groups").flatMap(_.asArray).exists(
-        _.toList.exists(g =>
-          g.hcursor.get[List[String]]("members") == Right(List("tst1")) &&
-            g.hcursor.downField("vars").get[String]("pool") == Right("rbd")
+      at(inventory, "groups")
+        .flatMap(_.asArray)
+        .exists(
+          _.toList.exists(g =>
+            g.hcursor.get[List[String]]("members") == Right(List("tst1")) &&
+              g.hcursor.downField("vars").get[String]("pool") == Right("rbd")
+          )
         )
-      )
     )
     // The real readers, fed the documents through a stand-in scheme (there is no server here)
     Sources.register(
       "dbcheck",
       loc =>
         if loc.endsWith("inventory") then
-          MariaDbSource.document(data, MariaDbSource.InventoryDoc).map(_.noSpaces)
+          MariaDbSource
+            .document(data, MariaDbSource.InventoryDoc)
+            .map(_.noSpaces)
         else
           MariaDbSource
-            .document(data, MariaDbSource.ConfigDoc(loc.stripPrefix("dbcheck://")))
+            .document(
+              data,
+              MariaDbSource.ConfigDoc(loc.stripPrefix("dbcheck://"))
+            )
             .map(_.noSpaces)
     )
     val loaded = InventoryYaml.load("dbcheck://inventory")
@@ -214,20 +243,32 @@ object DbDocumentsCheck:
     check("a VM config is found", vm.isRight, vm.toString)
     check(
       "disk, memory and cpu are strings, as in the files",
-      at(params.getOrElse(Json.Null), "disk").flatMap(_.asString).contains("32") &&
-        at(params.getOrElse(Json.Null), "memory").flatMap(_.asString).contains("16384") &&
+      at(params.getOrElse(Json.Null), "disk")
+        .flatMap(_.asString)
+        .contains("32") &&
+        at(params.getOrElse(Json.Null), "memory")
+          .flatMap(_.asString)
+          .contains("16384") &&
         at(params.getOrElse(Json.Null), "cpu").flatMap(_.asString).contains("4")
     )
     check(
       "nic0 keeps cidr and the numbers",
-      at(params.getOrElse(Json.Null), "nic0", "cidr").flatMap(_.asString).contains("24") &&
-        at(params.getOrElse(Json.Null), "nic0", "mtu").flatMap(_.asNumber).flatMap(_.toInt).contains(1500)
+      at(params.getOrElse(Json.Null), "nic0", "cidr")
+        .flatMap(_.asString)
+        .contains("24") &&
+        at(params.getOrElse(Json.Null), "nic0", "mtu")
+          .flatMap(_.asNumber)
+          .flatMap(_.toInt)
+          .contains(1500)
     )
     check(
       "disks follow their ordinal",
-      at(params.getOrElse(Json.Null), "disks").flatMap(_.asArray).map(
-        _.toList.flatMap(_.hcursor.get[Int]("disk").toOption)
-      ).contains(List(256, 128))
+      at(params.getOrElse(Json.Null), "disks")
+        .flatMap(_.asArray)
+        .map(
+          _.toList.flatMap(_.hcursor.get[Int]("disk").toOption)
+        )
+        .contains(List(256, 128))
     )
     check(
       "an extra NIC keeps a non-default mtu and leaves out the rest",
@@ -238,26 +279,38 @@ object DbDocumentsCheck:
     )
     check(
       "packages are split by phase and ordered",
-      at(params.getOrElse(Json.Null), "basic_packages").flatMap(_.as[List[String]].toOption) ==
+      at(params.getOrElse(Json.Null), "basic_packages")
+        .flatMap(_.as[List[String]].toOption) ==
         Some(List("curl", "vim")) &&
-        at(params.getOrElse(Json.Null), "pre_basic_packages").flatMap(_.as[List[String]].toOption) ==
+        at(params.getOrElse(Json.Null), "pre_basic_packages")
+          .flatMap(_.as[List[String]].toOption) ==
         Some(List("gnupg"))
     )
     check(
       "extension keys come through with their types",
-      at(params.getOrElse(Json.Null), "custom_port").flatMap(_.asNumber).flatMap(_.toInt).contains(8080) &&
-        at(params.getOrElse(Json.Null), "flag").flatMap(_.asBoolean).contains(true)
+      at(params.getOrElse(Json.Null), "custom_port")
+        .flatMap(_.asNumber)
+        .flatMap(_.toInt)
+        .contains(8080) &&
+        at(params.getOrElse(Json.Null), "flag")
+          .flatMap(_.asBoolean)
+          .contains(true)
     )
     check(
       "pdisks is empty",
-      at(params.getOrElse(Json.Null), "pdisks").flatMap(_.asArray).exists(_.isEmpty)
+      at(params.getOrElse(Json.Null), "pdisks")
+        .flatMap(_.asArray)
+        .exists(_.isEmpty)
     )
     val loadedVm = ConfigYaml.load("dbcheck://tst1")
     check(
       "the config reader accepts the VM document",
       loadedVm.exists(v =>
         v.hostname == "tst1" && v.disk == "32" && v.nic0.cidr == "24" &&
-          v.disks == List("256", "128") && v.basicPackages == List("curl", "vim")
+          v.disks == List("256", "128") && v.basicPackages == List(
+            "curl",
+            "vim"
+          )
       ),
       loadedVm.toString
     )
@@ -265,11 +318,20 @@ object DbDocumentsCheck:
     // A free-form document and a miss
     check(
       "a config_document is wrapped in params",
-      DbDocuments.config(data, "dns").exists(d => at(d, "params", "zone").flatMap(_.asString).contains("example"))
+      DbDocuments
+        .config(data, "dns")
+        .exists(d =>
+          at(d, "params", "zone").flatMap(_.asString).contains("example")
+        )
     )
     check(
       "an unknown config names what exists",
-      DbDocuments.config(data, "nope").swap.exists(e => e.contains("nope") && e.contains("tst1") && e.contains("dns"))
+      DbDocuments
+        .config(data, "nope")
+        .swap
+        .exists(e =>
+          e.contains("nope") && e.contains("tst1") && e.contains("dns")
+        )
     )
     check(
       "a document is picked by what the location asks for",
@@ -282,9 +344,11 @@ object DbDocumentsCheck:
         .config(
           data.updated(
             "vm_config",
-            data.getOrElse("vm_config", Nil).map(r =>
-              r.mapObject(_.add("extensions", Json.fromString("{not json")))
-            )
+            data
+              .getOrElse("vm_config", Nil)
+              .map(r =>
+                r.mapObject(_.add("extensions", Json.fromString("{not json")))
+              )
           ),
           "tst1"
         )

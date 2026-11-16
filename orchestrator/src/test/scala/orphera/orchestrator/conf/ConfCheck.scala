@@ -415,7 +415,7 @@ object ConfCheck:
       )
       val chk = r.check(wf) match
         case Task.RunCommand(List("sh", "-c", script), _, _) => script
-        case other                                        => other.toString
+        case other                                           => other.toString
       check(
         "the check command contains no secret value",
         !chk.contains(secretPw) && !chk.contains("dbsecretpw") && !chk.contains(

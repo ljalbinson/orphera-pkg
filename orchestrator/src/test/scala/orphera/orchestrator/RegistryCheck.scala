@@ -9,8 +9,8 @@ import scala.util.Try
 
 /** Every playbook compiled into the orchestrator (an `object` extending
   * OrpheraPlaybook in its sources, not a .scala script in manifests/) is in
-  * PlaybookRegistry.all, under its own name, so `orphera playbook <name>`
-  * finds it. Scala cannot list the objects of a trait at compile time (and
+  * PlaybookRegistry.all, under its own name, so `orphera playbook <name>` finds
+  * it. Scala cannot list the objects of a trait at compile time (and
   * OrpheraPlaybook cannot be sealed, since the scripts extend it too), so this
   * finds them among the compiled classes instead. Run with
   * `sbt "orchestrator/Test/runMain orphera.orchestrator.RegistryCheck"`.
@@ -34,12 +34,15 @@ object RegistryCheck:
       .getResources("orphera/orchestrator")
       .asScala
       .toList
-      .filterNot(u => u.toString.contains("test-classes") || u.toString.contains("-tests.jar"))
+      .filterNot(u =>
+        u.toString.contains("test-classes") || u.toString.contains("-tests.jar")
+      )
       .flatMap { url =>
         url.getProtocol match
           case "file" =>
             val dir = Paths.get(url.toURI)
-            val root = dir.getParent.getParent // the directory that holds orphera/
+            val root =
+              dir.getParent.getParent // the directory that holds orphera/
             Files
               .walk(dir)
               .iterator
@@ -47,11 +50,15 @@ object RegistryCheck:
               .map(p => root.relativize(p).toString.replace('\\', '/'))
               .toList
           case "jar" =>
-            val jar = url.openConnection.asInstanceOf[java.net.JarURLConnection].getJarFile
+            val jar = url.openConnection
+              .asInstanceOf[java.net.JarURLConnection]
+              .getJarFile
             jar.entries.asScala.map(_.getName).toList
           case _ => Nil
       }
-      .filter(n => n.startsWith("orphera/orchestrator/") && n.endsWith("$.class"))
+      .filter(n =>
+        n.startsWith("orphera/orchestrator/") && n.endsWith("$.class")
+      )
       .map(_.stripSuffix(".class").replace('/', '.'))
       .distinct
 
@@ -69,10 +76,18 @@ object RegistryCheck:
     check(
       "the compiled orchestrator classes are found",
       names.contains("orphera.orchestrator.PlaybookRegistry$"),
-      getClass.getClassLoader.getResources("orphera/orchestrator").asScala.toList.toString
+      getClass.getClassLoader
+        .getResources("orphera/orchestrator")
+        .asScala
+        .toList
+        .toString
     )
     val found = playbookObjects.distinct
-    check("at least one compiled playbook is found (WebBaseline)", found.exists(_ eq WebBaseline), found.toString)
+    check(
+      "at least one compiled playbook is found (WebBaseline)",
+      found.exists(_ eq WebBaseline),
+      found.toString
+    )
 
     val registered = PlaybookRegistry.all
     found.foreach { pb =>
@@ -94,4 +109,7 @@ object RegistryCheck:
     if failures > 0 then
       println(s"$failures check(s) failed")
       sys.exit(1)
-    else println(s"RegistryCheck: all $passes checks passed (${found.length} compiled playbook(s))")
+    else
+      println(
+        s"RegistryCheck: all $passes checks passed (${found.length} compiled playbook(s))"
+      )

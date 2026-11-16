@@ -61,24 +61,43 @@ object InventoryCheck:
     check("never-reboot: true on a node is read", node("a").neverReboot)
     check("a node without it is not protected", !node("b").neverReboot)
     check("never-reboot: false is read", !node("c").neverReboot)
-    check("never-reboot: true on a group is read", groups.exists(g => g.name == "hypervisors" && g.neverReboot))
-    check("a group without it is not protected", groups.exists(g => g.name == "others" && !g.neverReboot))
+    check(
+      "never-reboot: true on a group is read",
+      groups.exists(g => g.name == "hypervisors" && g.neverReboot)
+    )
+    check(
+      "a group without it is not protected",
+      groups.exists(g => g.name == "others" && !g.neverReboot)
+    )
     check("a node's own setting protects it", protectedNode("a"))
     check("a node in a protected group is protected", protectedNode("d"))
-    check("a node in an unprotected group is not protected", !protectedNode("b"))
+    check(
+      "a node in an unprotected group is not protected",
+      !protectedNode("b")
+    )
     check("an explicit false does not protect", !protectedNode("c"))
 
     // shutdown must refuse a protected node before it opens any connection, and the
     // orchestrator must skip it and carry on (an empty remainder here, so nothing is contacted)
-    val guarded = Node("guarded-host", "guarded-host.invalid", neverReboot = true)
-    val refused = NodeClient.shutdown(guarded, 0, _ => IO.unit).attempt.unsafeRunSync()
+    val guarded =
+      Node("guarded-host", "guarded-host.invalid", neverReboot = true)
+    val refused =
+      NodeClient.shutdown(guarded, 0, _ => IO.unit).attempt.unsafeRunSync()
     check(
       "shutdown refuses a never-reboot node without contacting it",
-      refused.left.exists(e => e.isInstanceOf[IllegalStateException] && e.getMessage.contains("never-reboot")),
+      refused.left.exists(e =>
+        e.isInstanceOf[IllegalStateException] && e.getMessage.contains(
+          "never-reboot"
+        )
+      ),
       refused.toString
     )
     val skipped = Orchestrator.shutdown(List(guarded)).attempt.unsafeRunSync()
-    check("Orchestrator.shutdown skips a never-reboot node instead of failing", skipped.isRight, skipped.toString)
+    check(
+      "Orchestrator.shutdown skips a never-reboot node instead of failing",
+      skipped.isRight,
+      skipped.toString
+    )
 
     // --exclude-nodes: a group with some members left out
     val grp = List(
@@ -94,7 +113,15 @@ object InventoryCheck:
     )
     check(
       "an exclusion applies to the union of --nodes and groups",
-      expanded("uptime", "--nodes", "z", "--node-groups", "mons,osds", "--exclude-nodes", "c,z") ==
+      expanded(
+        "uptime",
+        "--nodes",
+        "z",
+        "--node-groups",
+        "mons,osds",
+        "--exclude-nodes",
+        "c,z"
+      ) ==
         Right(List("uptime", "--nodes", "a,b,d"))
     )
     check(
@@ -115,7 +142,9 @@ object InventoryCheck:
     )
     check(
       "excluding a node that is not in the inventory is refused",
-      expanded("uptime", "--exclude-nodes", "zzz").swap.exists(_.contains("not selected"))
+      expanded("uptime", "--exclude-nodes", "zzz").swap.exists(
+        _.contains("not selected")
+      )
     )
     check(
       "excluding a node that was not selected is refused",
@@ -124,67 +153,127 @@ object InventoryCheck:
     )
     check(
       "excluding every selected node is refused",
-      expanded("uptime", "--node-groups", "osds", "--exclude-nodes", "c,d").isLeft
+      expanded(
+        "uptime",
+        "--node-groups",
+        "osds",
+        "--exclude-nodes",
+        "c,d"
+      ).isLeft
     )
     check(
       "args without the options pass through unchanged",
-      expanded("uptime", "--nodes", "a") == Right(List("uptime", "--nodes", "a"))
+      expanded("uptime", "--nodes", "a") == Right(
+        List("uptime", "--nodes", "a")
+      )
     )
     check(
       "an unknown group is still refused with an exclusion present",
-      expanded("uptime", "--node-groups", "nope", "--exclude-nodes", "a").swap.exists(_.contains("Unknown node group"))
+      expanded("uptime", "--node-groups", "nope", "--exclude-nodes", "a").swap
+        .exists(_.contains("Unknown node group"))
     )
     check(
       "apply takes --node-groups (expanded to --nodes before parsing)",
-      expanded("apply", "d.yaml", "--node-groups", "mons", "--check").flatMap(Cli.parse) ==
-        Right(Command.Apply("d.yaml", check = true, nodes = Some(List("a", "b", "c")), stopOnFailure = false))
+      expanded("apply", "d.yaml", "--node-groups", "mons", "--check").flatMap(
+        Cli.parse
+      ) ==
+        Right(
+          Command.Apply(
+            "d.yaml",
+            check = true,
+            nodes = Some(List("a", "b", "c")),
+            stopOnFailure = false
+          )
+        )
     )
     check(
       "apply takes a group with a member excluded",
-      expanded("apply", "d.yaml", "--node-groups", "mons", "--exclude-nodes", "b").flatMap(Cli.parse) ==
-        Right(Command.Apply("d.yaml", check = false, nodes = Some(List("a", "c")), stopOnFailure = false))
+      expanded(
+        "apply",
+        "d.yaml",
+        "--node-groups",
+        "mons",
+        "--exclude-nodes",
+        "b"
+      ).flatMap(Cli.parse) ==
+        Right(
+          Command.Apply(
+            "d.yaml",
+            check = false,
+            nodes = Some(List("a", "c")),
+            stopOnFailure = false
+          )
+        )
     )
     check(
       "a pipeline step may not give --exclude-nodes",
-      Cli.parse(List("pipeline", "uptime --exclude-nodes a", "--nodes", "a,b")).isLeft
+      Cli
+        .parse(List("pipeline", "uptime --exclude-nodes a", "--nodes", "a,b"))
+        .isLeft
     )
 
     // orphera nodes: the same expansion, printed
     val all4 = List("a", "b", "c", "d")
-    check("nodes with no selection is every node", ListNodes.select(Nil, grp, all4) == Right(all4))
+    check(
+      "nodes with no selection is every node",
+      ListNodes.select(Nil, grp, all4) == Right(all4)
+    )
     check(
       "nodes expands a group",
-      ListNodes.select(List("--node-groups", "osds"), grp, all4) == Right(List("c", "d"))
+      ListNodes.select(List("--node-groups", "osds"), grp, all4) == Right(
+        List("c", "d")
+      )
     )
     check(
       "nodes with a group and an exclusion",
-      ListNodes.select(List("--node-groups", "mons,osds", "--exclude-nodes", "a"), grp, all4) ==
+      ListNodes.select(
+        List("--node-groups", "mons,osds", "--exclude-nodes", "a"),
+        grp,
+        all4
+      ) ==
         Right(List("b", "c", "d"))
     )
     check(
       "nodes --exclude-nodes alone is every node but those",
-      ListNodes.select(List("--exclude-nodes", "a,b"), grp, all4) == Right(List("c", "d"))
+      ListNodes.select(List("--exclude-nodes", "a,b"), grp, all4) == Right(
+        List("c", "d")
+      )
     )
     check(
       "nodes refuses a node name that is not in the inventory",
-      ListNodes.select(List("--nodes", "a,zz"), grp, all4).swap.exists(_.contains("zz"))
+      ListNodes
+        .select(List("--nodes", "a,zz"), grp, all4)
+        .swap
+        .exists(_.contains("zz"))
     )
     check(
       "nodes refuses an unknown group",
-      ListNodes.select(List("--node-groups", "nope"), grp, all4).swap.exists(_.contains("Unknown node group"))
+      ListNodes
+        .select(List("--node-groups", "nope"), grp, all4)
+        .swap
+        .exists(_.contains("Unknown node group"))
     )
-    check("nodes refuses a stray argument", ListNodes.select(List("a"), grp, all4).isLeft)
+    check(
+      "nodes refuses a stray argument",
+      ListNodes.select(List("a"), grp, all4).isLeft
+    )
 
     val bad = Files.createTempFile("inventory-check", ".yaml")
-    Files.writeString(bad, "nodes:\n  - name: x\n    host: x\n    never-reboot: sometimes\n")
-    check("a value that is not true or false is refused", InventoryYaml.load(bad.toString).isLeft)
+    Files.writeString(
+      bad,
+      "nodes:\n  - name: x\n    host: x\n    never-reboot: sometimes\n"
+    )
+    check(
+      "a value that is not true or false is refused",
+      InventoryYaml.load(bad.toString).isLeft
+    )
     Files.delete(bad)
 
     // The agent package option: --agent, with --file still accepted
     def agentOf(args: String*): Option[String] = Cli.parse(args.toList) match
       case Right(Command.DeployAgent(f, _, _, _, _, _)) => f
-      case Right(Command.Bootstrap(f, _, _, _, _, _)) => f
-      case _                                          => None
+      case Right(Command.Bootstrap(f, _, _, _, _, _))   => f
+      case _                                            => None
     check(
       "deploy-agent takes --agent",
       agentOf("deploy-agent", "--agent", "x.deb").contains("x.deb")
@@ -196,7 +285,9 @@ object InventoryCheck:
     check(
       "--file is still accepted for the same thing",
       agentOf("deploy-agent", "--file", "x.deb").contains("x.deb") &&
-        agentOf("bootstrap", "--file", "x.rpm", "--nodes", "a").contains("x.rpm")
+        agentOf("bootstrap", "--file", "x.rpm", "--nodes", "a").contains(
+          "x.rpm"
+        )
     )
 
     // The Go agent is the default; --scala selects the Scala agent, never together with --agent
@@ -231,7 +322,9 @@ object InventoryCheck:
     )
     check(
       "an explicit --agent is used as given",
-      AgentPackages.resolve(Some("x.deb")) == Right(AgentPackages(Some("x.deb"), None))
+      AgentPackages.resolve(Some("x.deb")) == Right(
+        AgentPackages(Some("x.deb"), None)
+      )
     )
     check(
       "deploy-agent --force and --parallel are parsed",

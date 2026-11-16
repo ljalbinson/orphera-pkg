@@ -143,7 +143,7 @@ object ContainerCheck:
       "a container without a read-write mount gives no log hint",
       scala.util.Try(placement.copy(mounts = Nil).start).toOption.exists {
         case Task.RunCommand(List(_, _, s), _, _) => !s.contains(" and /");
-        case _                                 => false
+        case _                                    => false
       }
     )
 
@@ -270,7 +270,9 @@ object ContainerCheck:
     val asRoot = placement.copy(user = Some("root"))
     check(
       "a container with a user is started with --user, and one without is not",
-      asRoot.render.contains("--network host --user root -e KOLLA_CONFIG_STRATEGY=COPY_ALWAYS") &&
+      asRoot.render.contains(
+        "--network host --user root -e KOLLA_CONFIG_STRATEGY=COPY_ALWAYS"
+      ) &&
         !placement.render.contains("--user")
     )
 
@@ -494,7 +496,7 @@ object ContainerCheck:
       )
       val checked = r.check(placement) match
         case Task.RunCommand(List("sh", "-c", script), _, _) => script
-        case other                                        => other.toString
+        case other                                           => other.toString
       check(
         "the check command diffs the unit path against the rendered unit",
         checked.contains(

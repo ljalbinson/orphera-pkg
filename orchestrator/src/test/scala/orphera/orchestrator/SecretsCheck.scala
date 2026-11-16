@@ -193,47 +193,122 @@ object SecretsCheck:
     Secrets.clear()
 
     // The agent token: environment first, then the store, nothing else.
-    check("AgentToken uses the environment first", AgentToken.resolve(Some("from-env"), Some("from-store")) == Some("from-env"))
-    check("AgentToken falls back to the store", AgentToken.resolve(None, Some("from-store")) == Some("from-store") && AgentToken.resolve(Some(""), Some("from-store")) == Some("from-store"))
-    check("AgentToken has nothing when neither is set", AgentToken.resolve(None, None).isEmpty && AgentToken.resolve(Some(""), Some("")).isEmpty)
-    check("AgentToken does not read the store when the environment has a value", { var read = false; AgentToken.resolve(Some("x"), { read = true; Some("y") }); !read })
+    check(
+      "AgentToken uses the environment first",
+      AgentToken.resolve(Some("from-env"), Some("from-store")) == Some(
+        "from-env"
+      )
+    )
+    check(
+      "AgentToken falls back to the store",
+      AgentToken.resolve(None, Some("from-store")) == Some(
+        "from-store"
+      ) && AgentToken.resolve(Some(""), Some("from-store")) == Some(
+        "from-store"
+      )
+    )
+    check(
+      "AgentToken has nothing when neither is set",
+      AgentToken.resolve(None, None).isEmpty && AgentToken
+        .resolve(Some(""), Some(""))
+        .isEmpty
+    )
+    check(
+      "AgentToken does not read the store when the environment has a value", {
+        var read = false;
+        AgentToken.resolve(Some("x"), { read = true; Some("y") }); !read
+      }
+    )
 
     // An agent will not run without a token of its own, nor with the built-in one.
-    check("an agent refuses to start with no token, or an empty one", Auth.requireToken(None).isLeft && Auth.requireToken(Some("")).isLeft)
-    check("an agent refuses the built-in token and says so", Auth.requireToken(Some(Auth.DevToken)).swap.exists(_.contains("built-in")))
-    check("an agent starts with a token of its own", Auth.requireToken(Some("a-real-token")) == Right("a-real-token"))
-    check("the agent accepts the token it holds", Auth.accepts("a-real-token", Some("a-real-token")))
+    check(
+      "an agent refuses to start with no token, or an empty one",
+      Auth.requireToken(None).isLeft && Auth.requireToken(Some("")).isLeft
+    )
+    check(
+      "an agent refuses the built-in token and says so",
+      Auth.requireToken(Some(Auth.DevToken)).swap.exists(_.contains("built-in"))
+    )
+    check(
+      "an agent starts with a token of its own",
+      Auth.requireToken(Some("a-real-token")) == Right("a-real-token")
+    )
+    check(
+      "the agent accepts the token it holds",
+      Auth.accepts("a-real-token", Some("a-real-token"))
+    )
     check(
       "the agent rejects a wrong, missing, shorter or longer token",
-      !Auth.accepts("a-real-token", Some("another-token")) && !Auth.accepts("a-real-token", None) &&
-        !Auth.accepts("a-real-token", Some("a-real")) && !Auth.accepts("a-real-token", Some("a-real-token-2"))
+      !Auth.accepts("a-real-token", Some("another-token")) && !Auth
+        .accepts("a-real-token", None) &&
+        !Auth.accepts("a-real-token", Some("a-real")) && !Auth.accepts(
+          "a-real-token",
+          Some("a-real-token-2")
+        )
     )
 
     // The CLI tells a rejected token apart from a node that did not answer.
-    val rejected = new StatusRuntimeException(Status.UNAUTHENTICATED.withDescription("missing or invalid token"))
-    check("a rejected token is reported as unauthenticated", NodeError.line(rejected).startsWith("unauthenticated"))
-    check("a rejected token is found under another exception", NodeError.line(new RuntimeException("call failed", rejected)).startsWith("unauthenticated"))
-    check(
-      "an unavailable node is reported as unreachable with its status",
-      { val l = NodeError.line(new StatusRuntimeException(Status.UNAVAILABLE.withDescription("io exception"))); l.startsWith("unreachable") && l.contains("UNAVAILABLE") }
+    val rejected = new StatusRuntimeException(
+      Status.UNAUTHENTICATED.withDescription("missing or invalid token")
     )
-    check("any other failure is reported as unreachable", NodeError.line(new java.io.IOException("no route to host")).startsWith("unreachable"))
+    check(
+      "a rejected token is reported as unauthenticated",
+      NodeError.line(rejected).startsWith("unauthenticated")
+    )
+    check(
+      "a rejected token is found under another exception",
+      NodeError
+        .line(new RuntimeException("call failed", rejected))
+        .startsWith("unauthenticated")
+    )
+    check(
+      "an unavailable node is reported as unreachable with its status", {
+        val l = NodeError.line(
+          new StatusRuntimeException(
+            Status.UNAVAILABLE.withDescription("io exception")
+          )
+        );
+        l.startsWith("unreachable") && l.contains("UNAVAILABLE")
+      }
+    )
+    check(
+      "any other failure is reported as unreachable",
+      NodeError
+        .line(new java.io.IOException("no route to host"))
+        .startsWith("unreachable")
+    )
 
     // The file is decrypted once while it is unchanged, and read again when another store changes it.
     var decrypts = 0
     object CountingCipher extends Cipher:
-      def encrypt(plain: String): Either[String, Array[Byte]] = ReverseCipher.encrypt(plain)
-      def decrypt(data: Array[Byte]): Either[String, String] = { decrypts += 1; ReverseCipher.decrypt(data) }
+      def encrypt(plain: String): Either[String, Array[Byte]] =
+        ReverseCipher.encrypt(plain)
+      def decrypt(data: Array[Byte]): Either[String, String] = {
+        decrypts += 1; ReverseCipher.decrypt(data)
+      }
     val counted = dir.resolve("counted.age")
     new SecretStore(counted, ReverseCipher).set("a/b", "first-value")
     val cs = new SecretStore(counted, CountingCipher)
     val reads = List(cs.get("a/b"), cs.get("a/b"), cs.names)
-    check("an unchanged file is decrypted once for several reads", decrypts == 1 && reads.forall(_.isRight), s"$decrypts decrypts")
+    check(
+      "an unchanged file is decrypted once for several reads",
+      decrypts == 1 && reads.forall(_.isRight),
+      s"$decrypts decrypts"
+    )
     Thread.sleep(20)
     new SecretStore(counted, ReverseCipher).set("a/b", "second-value")
-    check("a file changed by another store is read again", cs.get("a/b") == Right(Some("second-value")) && decrypts == 2, s"$decrypts decrypts")
+    check(
+      "a file changed by another store is read again",
+      cs.get("a/b") == Right(Some("second-value")) && decrypts == 2,
+      s"$decrypts decrypts"
+    )
     val c2 = cs.set("c/d", "third-value")
-    check("a write after reading keeps the other store's change", c2.isRight && new SecretStore(counted, ReverseCipher).get("a/b") == Right(Some("second-value")))
+    check(
+      "a write after reading keeps the other store's change",
+      c2.isRight && new SecretStore(counted, ReverseCipher).get("a/b") == Right(
+        Some("second-value")
+      )
+    )
 
     // The agent: a socket another machine (the one with the YubiKey) serves, as ssh-agent forwarding does.
     def serving(sock: java.nio.file.Path, c: Cipher): Unit =
@@ -244,16 +319,31 @@ object SecretsCheck:
       while !Files.exists(sock) && i < 100 do { Thread.sleep(20); i += 1 }
     val sock = dir.resolve("agent.sock")
     serving(sock, ReverseCipher)
-    val sealedText = ReverseCipher.encrypt("{\"x\":\"through the agent\"}").getOrElse(Array.emptyByteArray)
-    check("agent: decrypts what is sent through the socket", AgeAgent.decrypt(sock, sealedText) == Right("{\"x\":\"through the agent\"}"))
+    val sealedText = ReverseCipher
+      .encrypt("{\"x\":\"through the agent\"}")
+      .getOrElse(Array.emptyByteArray)
+    check(
+      "agent: decrypts what is sent through the socket",
+      AgeAgent.decrypt(sock, sealedText) == Right(
+        "{\"x\":\"through the agent\"}"
+      )
+    )
     object NoCipher extends Cipher:
       def encrypt(plain: String): Either[String, Array[Byte]] = Left("no")
-      def decrypt(data: Array[Byte]): Either[String, String] = Left("no PIN given")
+      def decrypt(data: Array[Byte]): Either[String, String] = Left(
+        "no PIN given"
+      )
     val refusing = dir.resolve("refusing.sock")
     serving(refusing, NoCipher)
-    check("agent: its failure comes back as refused, with its reason", AgeAgent.decrypt(refusing, sealedText) == Left(AgeAgent.Failure.Refused("no PIN given")))
+    check(
+      "agent: its failure comes back as refused, with its reason",
+      AgeAgent.decrypt(refusing, sealedText) == Left(
+        AgeAgent.Failure.Refused("no PIN given")
+      )
+    )
     val stale = dir.resolve("stale.sock")
-    val dead = java.nio.channels.ServerSocketChannel.open(java.net.StandardProtocolFamily.UNIX)
+    val dead = java.nio.channels.ServerSocketChannel
+      .open(java.net.StandardProtocolFamily.UNIX)
     dead.bind(java.net.UnixDomainSocketAddress.of(stale))
     dead.close()
     check(
@@ -264,7 +354,9 @@ object SecretsCheck:
     )
     object SlowCipher extends Cipher:
       def encrypt(plain: String): Either[String, Array[Byte]] = Left("no")
-      def decrypt(data: Array[Byte]): Either[String, String] = { Thread.sleep(5000); Right("late") }
+      def decrypt(data: Array[Byte]): Either[String, String] = {
+        Thread.sleep(5000); Right("late")
+      }
     val slow = dir.resolve("slow.sock")
     serving(slow, SlowCipher)
     val started = System.nanoTime
@@ -280,20 +372,48 @@ object SecretsCheck:
     // A cache: the same encrypted text is decrypted once; a different one is decrypted afresh.
     var agentDecrypts = 0
     object CountedCipher extends Cipher:
-      def encrypt(plain: String): Either[String, Array[Byte]] = ReverseCipher.encrypt(plain)
-      def decrypt(data: Array[Byte]): Either[String, String] = { agentDecrypts += 1; ReverseCipher.decrypt(data) }
+      def encrypt(plain: String): Either[String, Array[Byte]] =
+        ReverseCipher.encrypt(plain)
+      def decrypt(data: Array[Byte]): Either[String, String] = {
+        agentDecrypts += 1; ReverseCipher.decrypt(data)
+      }
     val cached = dir.resolve("cached.sock")
-    val ct = new Thread(() => { val _ = AgeAgent.serve(cached, CountedCipher, _ => (), cacheMinutes = 10) })
+    val ct = new Thread(() => {
+      val _ = AgeAgent.serve(cached, CountedCipher, _ => (), cacheMinutes = 10)
+    })
     ct.setDaemon(true)
     ct.start()
     var w = 0
     while !Files.exists(cached) && w < 100 do { Thread.sleep(20); w += 1 }
-    val firstTwo = List(AgeAgent.decrypt(cached, sealedText), AgeAgent.decrypt(cached, sealedText))
-    check("agent cache: the same store twice asks the key once", firstTwo.forall(_ == Right("{\"x\":\"through the agent\"}")) && agentDecrypts == 1, s"$agentDecrypts")
-    val other = ReverseCipher.encrypt("{\"x\":\"changed\"}").getOrElse(Array.emptyByteArray)
-    check("agent cache: a changed store is decrypted afresh", AgeAgent.decrypt(cached, other) == Right("{\"x\":\"changed\"}") && agentDecrypts == 2, s"$agentDecrypts")
+    val firstTwo = List(
+      AgeAgent.decrypt(cached, sealedText),
+      AgeAgent.decrypt(cached, sealedText)
+    )
+    check(
+      "agent cache: the same store twice asks the key once",
+      firstTwo.forall(
+        _ == Right("{\"x\":\"through the agent\"}")
+      ) && agentDecrypts == 1,
+      s"$agentDecrypts"
+    )
+    val other = ReverseCipher
+      .encrypt("{\"x\":\"changed\"}")
+      .getOrElse(Array.emptyByteArray)
+    check(
+      "agent cache: a changed store is decrypted afresh",
+      AgeAgent.decrypt(cached, other) == Right(
+        "{\"x\":\"changed\"}"
+      ) && agentDecrypts == 2,
+      s"$agentDecrypts"
+    )
     val big = "y" * 300000
-    check("agent: a large store comes back whole", AgeAgent.decrypt(sock, ReverseCipher.encrypt(big).getOrElse(Array.emptyByteArray)) == Right(big))
+    check(
+      "agent: a large store comes back whole",
+      AgeAgent.decrypt(
+        sock,
+        ReverseCipher.encrypt(big).getOrElse(Array.emptyByteArray)
+      ) == Right(big)
+    )
 
     // The real thing, when age is installed.
     if haveAge then
@@ -344,38 +464,78 @@ object SecretsCheck:
       val pub1 = AgeCipher.createIdentity(dir.resolve("first.key"))
       val pub2 = AgeCipher.createIdentity(id2)
       val rfile = dir.resolve("recipients")
-      val before = new SecretStore(dir.resolve("rk.age"), new AgeCipher(dir.resolve("first.key")))
+      val before = new SecretStore(
+        dir.resolve("rk.age"),
+        new AgeCipher(dir.resolve("first.key"))
+      )
       before.set("k/v", "rekeyed-value")
-      check("before rekey, the second identity cannot read the store", new SecretStore(dir.resolve("rk.age"), new AgeCipher(id2)).get("k/v").isLeft)
-      Files.writeString(rfile, s"# both keys\n${pub1.getOrElse("")}\n${pub2.getOrElse("")}\n")
+      check(
+        "before rekey, the second identity cannot read the store",
+        new SecretStore(dir.resolve("rk.age"), new AgeCipher(id2))
+          .get("k/v")
+          .isLeft
+      )
+      Files.writeString(
+        rfile,
+        s"# both keys\n${pub1.getOrElse("")}\n${pub2.getOrElse("")}\n"
+      )
       val withList = new AgeCipher(dir.resolve("first.key"), Some(rfile))
-      check("the recipients are the file's lines, comments left out", withList.recipients == Right(List(pub1.getOrElse(""), pub2.getOrElse(""))), withList.recipients.toString)
+      check(
+        "the recipients are the file's lines, comments left out",
+        withList.recipients == Right(
+          List(pub1.getOrElse(""), pub2.getOrElse(""))
+        ),
+        withList.recipients.toString
+      )
       val rekeyed = new SecretStore(dir.resolve("rk.age"), withList).rekey()
-      check("rekey re-encrypts every secret and keeps the old file", rekeyed == Right(1) && Files.exists(dir.resolve("rk.age.before-rekey")), rekeyed.toString)
+      check(
+        "rekey re-encrypts every secret and keeps the old file",
+        rekeyed == Right(1) && Files.exists(dir.resolve("rk.age.before-rekey")),
+        rekeyed.toString
+      )
       check(
         "after rekey, each identity reads the store",
-        new SecretStore(dir.resolve("rk.age"), new AgeCipher(id2)).get("k/v") == Right(Some("rekeyed-value")) &&
-          new SecretStore(dir.resolve("rk.age"), new AgeCipher(dir.resolve("first.key"))).get("k/v") == Right(Some("rekeyed-value"))
+        new SecretStore(dir.resolve("rk.age"), new AgeCipher(id2))
+          .get("k/v") == Right(Some("rekeyed-value")) &&
+          new SecretStore(
+            dir.resolve("rk.age"),
+            new AgeCipher(dir.resolve("first.key"))
+          ).get("k/v") == Right(Some("rekeyed-value"))
       )
-      check("without a recipients file, the identity's own key is the recipient", new AgeCipher(id2, Some(dir.resolve("none"))).recipients == pub2.map(List(_)))
+      check(
+        "without a recipients file, the identity's own key is the recipient",
+        new AgeCipher(id2, Some(dir.resolve("none"))).recipients == pub2.map(
+          List(_)
+        )
+      )
       // Decrypting through an agent that holds the identity, with none here (as on the orphera host
       // when the YubiKey is on the Mac); and falling back to a local identity when the agent is gone.
       val agentSock = dir.resolve("age-agent.sock")
       serving(agentSock, new AgeCipher(dir.resolve("first.key")))
-      val remoteOnly = new AgeCipher(dir.resolve("no-identity-here.key"), Some(rfile), Some(agentSock))
+      val remoteOnly = new AgeCipher(
+        dir.resolve("no-identity-here.key"),
+        Some(rfile),
+        Some(agentSock)
+      )
       check(
         "agent: a store is read through the agent with no identity here",
-        new SecretStore(dir.resolve("rk.age"), remoteOnly).get("k/v") == Right(Some("rekeyed-value"))
+        new SecretStore(dir.resolve("rk.age"), remoteOnly).get("k/v") == Right(
+          Some("rekeyed-value")
+        )
       )
       val viaStale = new AgeCipher(id2, Some(rfile), Some(stale))
       check(
         "agent: an unreachable agent falls back to the identity here",
-        new SecretStore(dir.resolve("rk.age"), viaStale).get("k/v") == Right(Some("rekeyed-value"))
+        new SecretStore(dir.resolve("rk.age"), viaStale).get("k/v") == Right(
+          Some("rekeyed-value")
+        )
       )
       check(
         "agent: unreachable with no identity here says both",
-        new SecretStore(dir.resolve("rk.age"), new AgeCipher(dir.resolve("none.key"), Some(rfile), Some(stale))).get("k/v")
-          .left.exists(_.contains("not answering"))
+        new SecretStore(
+          dir.resolve("rk.age"),
+          new AgeCipher(dir.resolve("none.key"), Some(rfile), Some(stale))
+        ).get("k/v").left.exists(_.contains("not answering"))
       )
     else println("age is not installed: the age checks were skipped")
 

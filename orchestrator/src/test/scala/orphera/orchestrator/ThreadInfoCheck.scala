@@ -86,7 +86,11 @@ object ThreadInfoCheck:
     check(
       "an undefined heap limit is left out",
       ThreadReport
-        .lines(sample.copy(heapMaxBytes = -1L), detail = false, resetPeak = false)
+        .lines(
+          sample.copy(heapMaxBytes = -1L),
+          detail = false,
+          resetPeak = false
+        )
         .headOption
         .exists(_.endsWith("heap 48 MB"))
     )
@@ -101,7 +105,9 @@ object ThreadInfoCheck:
     check(
       "--detail adds the java thread facts, states and threads by name",
       full.size == 4 &&
-        full.contains("  java threads: 24 daemon, 120 started since the JVM began") &&
+        full.contains(
+          "  java threads: 24 daemon, 120 started since the JVM began"
+        ) &&
         full.contains("  java thread states: WAITING 15, RUNNABLE 5") &&
         full.contains("  threads by name: ioapp-compute 4, GC Thread 3"),
       full.toString
@@ -128,7 +134,9 @@ object ThreadInfoCheck:
     // The command line.
     check(
       "thread-info with no arguments",
-      Cli.parse(List("thread-info")) == Right(Command.Threads(None, false, false))
+      Cli.parse(List("thread-info")) == Right(
+        Command.Threads(None, false, false)
+      )
     )
     check(
       "thread-info with all its options",
@@ -138,7 +146,10 @@ object ThreadInfoCheck:
     )
     check(
       "thread-info refuses an unknown option",
-      Cli.parse(List("thread-info", "--verbose")).swap.exists(_.contains("thread-info"))
+      Cli
+        .parse(List("thread-info", "--verbose"))
+        .swap
+        .exists(_.contains("thread-info"))
     )
     check(
       "thread-info can be a pipeline step",
