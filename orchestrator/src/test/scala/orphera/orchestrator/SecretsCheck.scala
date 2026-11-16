@@ -262,6 +262,21 @@ object SecretsCheck:
         case Left(AgeAgent.Failure.Unreachable(_)) => true
         case _                                     => false
     )
+    object SlowCipher extends Cipher:
+      def encrypt(plain: String): Either[String, Array[Byte]] = Left("no")
+      def decrypt(data: Array[Byte]): Either[String, String] = { Thread.sleep(5000); Right("late") }
+    val slow = dir.resolve("slow.sock")
+    serving(slow, SlowCipher)
+    val started = System.nanoTime
+    val late = AgeAgent.decrypt(slow, sealedText, timeout = 1)
+    check(
+      "agent: no answer within the time limit is refused, after about that long",
+      late.left.exists {
+        case AgeAgent.Failure.Refused(m) => m.contains("within 1s")
+        case _                           => false
+      } && (System.nanoTime - started) < 4000000000L,
+      late.toString
+    )
     val big = "y" * 300000
     check("agent: a large store comes back whole", AgeAgent.decrypt(sock, ReverseCipher.encrypt(big).getOrElse(Array.emptyByteArray)) == Right(big))
 
