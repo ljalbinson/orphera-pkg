@@ -182,6 +182,95 @@ object ApplyResource:
     protected def relinked(n: List[String], t: List[String]): ApplyResource =
       copy(needs = n, triggers = t)
 
+  /** A kernel parameter: set now (`sysctl -w`) and, with `persist`, in
+    * /etc/sysctl.d/60-orphera-<key>.conf so that it survives a reboot.
+    */
+  final case class Sysctl(
+      key: String,
+      value: String,
+      persist: Boolean,
+      needs: List[String] = Nil,
+      triggers: List[String] = Nil
+  ) extends ApplyResource:
+    def id: String = s"sysctl[$key]"
+    protected def relinked(n: List[String], t: List[String]): ApplyResource =
+      copy(needs = n, triggers = t)
+
+  /** A kernel module, loaded now (`modprobe`) and, with `persist`, listed in
+    * /etc/modules-load.d/orphera-<name>.conf so that it is loaded at boot.
+    */
+  final case class KernelModule(
+      name: String,
+      persist: Boolean,
+      needs: List[String] = Nil,
+      triggers: List[String] = Nil
+  ) extends ApplyResource:
+    def id: String = s"kernel_module[$name]"
+    protected def relinked(n: List[String], t: List[String]): ApplyResource =
+      copy(needs = n, triggers = t)
+
+  /** One line in a text file. Present: the line is there (with `match`, a
+    * regular expression (awk ERE): the first line it matches is replaced by
+    * `line` and other matches are dropped; with none, `line` is appended; the
+    * file is created if missing). Absent: lines equal to `line`, or matching
+    * `match`, are removed.
+    */
+  final case class LineInFile(
+      path: String,
+      line: String,
+      matching: String,
+      present: Boolean,
+      needs: List[String] = Nil,
+      triggers: List[String] = Nil
+  ) extends ApplyResource:
+    def id: String = s"line[$path: ${LineInFile.shown(line)}]"
+    protected def relinked(n: List[String], t: List[String]): ApplyResource =
+      copy(needs = n, triggers = t)
+
+  object LineInFile:
+    def shown(s: String): String = if s.length > 40 then s.take(37) + "..." else s
+
+  /** A public key in a user's ~/.ssh/authorized_keys, found by its type and
+    * key (the comment may differ).
+    */
+  final case class AuthorizedKey(
+      user: String,
+      key: String,
+      present: Boolean,
+      needs: List[String] = Nil,
+      triggers: List[String] = Nil
+  ) extends ApplyResource:
+    def id: String = s"authorized_key[$user: ${AuthorizedKey.shown(key)}]"
+    def keyId: String = key.trim.split("\\s+").take(2).mkString(" ")
+    protected def relinked(n: List[String], t: List[String]): ApplyResource =
+      copy(needs = n, triggers = t)
+
+  object AuthorizedKey:
+    def shown(key: String): String =
+      val f = key.trim.split("\\s+").toList
+      f match
+        case t :: b :: rest =>
+          s"$t ...${b.takeRight(8)}${rest.headOption.fold("")(" " + _)}"
+        case _ => key
+
+  /** A mount: its /etc/fstab entry (device, type, options) and whether it is
+    * mounted now (`mounted` None: left as it is). Absent: unmounted and removed
+    * from fstab; the directory stays.
+    */
+  final case class Mount(
+      path: String,
+      device: String,
+      fstype: String,
+      options: String,
+      mounted: Option[Boolean],
+      present: Boolean,
+      needs: List[String] = Nil,
+      triggers: List[String] = Nil
+  ) extends ApplyResource:
+    def id: String = s"mount[$path]"
+    protected def relinked(n: List[String], t: List[String]): ApplyResource =
+      copy(needs = n, triggers = t)
+
 /** The functions a description is written with. `mode` is octal text ("0644");
   * an empty `mode`, `owner` or `group` is left as it is.
   */
@@ -298,6 +387,43 @@ object Resources:
   def absentGroup(name: String): ApplyResource =
     Group(name, -1, system = false, present = false)
 
+  /** A kernel parameter, set now and (`persist`) at boot. */
+  def sysctl(key: String, value: String, persist: Boolean = true): ApplyResource =
+    Sysctl(key, value, persist)
+
+  /** A kernel module, loaded now and (`persist`) at boot. */
+  def kernelModule(name: String, persist: Boolean = true): ApplyResource =
+    KernelModule(name, persist)
+
+  /** `line` is in the file; `matching` (a regular expression) names the line it
+    * replaces.
+    */
+  def lineInFile(path: String, line: String, matching: String = ""): ApplyResource =
+    LineInFile(path, line, matching, present = true)
+
+  /** Lines equal to `line`, or matching `matching`, are not in the file. */
+  def absentLine(path: String, line: String, matching: String = ""): ApplyResource =
+    LineInFile(path, line, matching, present = false)
+
+  def authorizedKey(user: String, key: String): ApplyResource =
+    AuthorizedKey(user, key, present = true)
+
+  def absentAuthorizedKey(user: String, key: String): ApplyResource =
+    AuthorizedKey(user, key, present = false)
+
+  /** An fstab entry, mounted by default; `mounted = None` leaves that alone. */
+  def mount(
+      path: String,
+      device: String,
+      fstype: String,
+      options: String = "defaults",
+      mounted: Option[Boolean] = Some(true)
+  ): ApplyResource =
+    Mount(path, device, fstype, options, mounted, present = true)
+
+  def absentMount(path: String): ApplyResource =
+    Mount(path, "", "", "", None, present = false)
+
   def command(
       label: String,
       run: String,
@@ -380,6 +506,33 @@ object ApplyPlan:
       case g: ApplyResource.Group =>
         if !g.name.matches("[a-z_][a-z0-9_-]*[$]?") then
           problems += s"${g.id}: not a group name"
+      case s: ApplyResource.Sysctl =>
+        if !s.key.matches("[A-Za-z0-9_-]+([./][A-Za-z0-9_-]+)*") then
+          problems += s"${s.id}: not a sysctl key"
+        if s.value.trim.isEmpty || s.value.exists(_ < ' ') then
+          problems += s"${s.id}: the value must be one line of text"
+      case m: ApplyResource.KernelModule =>
+        if !m.name.matches("[A-Za-z0-9_-]+") then
+          problems += s"${m.id}: not a module name"
+      case l: ApplyResource.LineInFile =>
+        checkPath(l.id, l.path)
+        if l.line.contains('\n') then problems += s"${l.id}: a line has no newline"
+        if l.present && l.line.isEmpty then problems += s"${l.id}: the line is empty"
+        if !l.present && l.line.isEmpty && l.matching.isEmpty then
+          problems += s"${l.id}: give the line or a match"
+      case k: ApplyResource.AuthorizedKey =>
+        if !k.user.matches("[a-z_][a-z0-9_-]*[$]?") then
+          problems += s"${k.id}: not a user name"
+        if k.key.contains('\n') || k.key.trim.split("\\s+").length < 2 then
+          problems += s"${k.id}: a key is one line: type, key, optional comment"
+      case m: ApplyResource.Mount =>
+        checkPath(m.id, m.path)
+        if m.present && (m.device.isEmpty || m.fstype.isEmpty || m.options.isEmpty)
+        then problems += s"${m.id}: device, fstype and options are needed"
+        if List(m.path, m.device, m.fstype, m.options).exists(
+            _.exists(_.isWhitespace)
+          )
+        then problems += s"${m.id}: no whitespace in an fstab field"
       case c: ApplyResource.Command =>
         if c.label.trim.isEmpty then problems += "a command has no label"
         if c.run.trim.isEmpty then problems += s"${c.id}: nothing to run"
@@ -429,7 +582,8 @@ object ApplyPlan:
           List(d.owner).filter(_.nonEmpty).map(o => s"user[$o]") ++ List(
             d.group
           ).filter(_.nonEmpty).map(g => s"group[$g]")
-        case _ => Nil
+        case k: ApplyResource.AuthorizedKey => List(s"user[${k.user}]")
+        case _                              => Nil
       val needs: Map[Int, Set[Int]] =
         rs.indices
           .map(i =>
@@ -496,6 +650,9 @@ enum Observed:
 
   /** A group that exists. */
   case GroupEntry(gid: Int)
+
+  /** What a resource's observe snippet printed, as it printed it (key=value). */
+  case Facts(values: Map[String, String])
   case Unreadable(text: String)
 
 /** How a resource ended. */
@@ -819,6 +976,11 @@ object Apply:
           case u: Service => IO.pure(compareService(u, seen, check, notifiedBy))
           case u: User    => IO.pure(compareUser(u, seen))
           case g: Group   => IO.pure(compareGroup(g, seen))
+          case v: Sysctl  => IO.pure(compareSysctl(v, seen))
+          case m: KernelModule  => IO.pure(compareModule(m, seen))
+          case l: LineInFile    => IO.pure(compareLine(l, seen))
+          case k: AuthorizedKey => IO.pure(compareKey(k, seen))
+          case m: Mount         => IO.pure(compareMount(m, seen))
 
   private def shellOf(
       changes: List[String],
@@ -1020,6 +1182,197 @@ object Apply:
         shellOf(List(s"gid $gid -> ${g.gid}"), s"groupmod -g ${g.gid} $n")
       case _: Observed.GroupEntry => Right(NoDifference)
       case other                  => Left(s"unexpected state: $other")
+
+  // ---- sysctl, kernel modules, lines, keys, mounts --------------------------
+
+  private val Mode0644 = Integer.parseInt("644", 8)
+
+  private def squash(s: String): String = s.trim.split("\\s+").mkString(" ")
+
+  private def sysctlFile(key: String): String =
+    s"/etc/sysctl.d/60-orphera-${key.replace('/', '.')}.conf"
+
+  private def compareSysctl(
+      v: ApplyResource.Sysctl,
+      seen: Observed
+  ): Either[String, Difference] =
+    seen match
+      case Observed.Facts(kv) =>
+        if !kv.get("found").contains("yes") then
+          Left(
+            s"the node has no sysctl ${v.key} (is its module loaded? put kernelModule before it)"
+          )
+        else
+          val now = kv.getOrElse("runtime", "")
+          val text = s"${v.key} = ${squash(v.value)}"
+          val live = squash(now) != squash(v.value)
+          val stored = v.persist && kv.getOrElse("persisted", "") != text
+          val actions = List(
+            Option.when(live)(
+              Action.Shell(s"sysctl -w ${quote(s"${v.key}=${squash(v.value)}")}")
+            ),
+            Option.when(stored)(
+              Action.Write(sysctlFile(v.key), text + "\n", "", "", Mode0644)
+            )
+          ).flatten
+          val changes = List(
+            Option.when(live)(s"$now -> ${squash(v.value)}"),
+            Option.when(stored)(s"persisted in ${sysctlFile(v.key)}")
+          ).flatten
+          if actions.isEmpty then Right(NoDifference)
+          else Right(Difference(changes, actions, Nil))
+      case other => Left(s"unexpected state: $other")
+
+  private def compareModule(
+      m: ApplyResource.KernelModule,
+      seen: Observed
+  ): Either[String, Difference] =
+    seen match
+      case Observed.Facts(kv) =>
+        val file = s"/etc/modules-load.d/orphera-${m.name}.conf"
+        val live = !kv.get("loaded").contains("yes")
+        val stored = m.persist && kv.getOrElse("persisted", "") != m.name
+        val actions = List(
+          Option.when(live)(Action.Shell(s"modprobe ${quote(m.name)}")),
+          Option.when(stored)(
+            Action.Write(file, m.name + "\n", "", "", Mode0644)
+          )
+        ).flatten
+        val changes = List(
+          Option.when(live)("loaded"),
+          Option.when(stored)(s"listed in $file")
+        ).flatten
+        if actions.isEmpty then Right(NoDifference)
+        else Right(Difference(changes, actions, Nil))
+      case other => Left(s"unexpected state: $other")
+
+  // awk reads the line and pattern from the environment, so no quoting reaches the awk program.
+  private def awkEdit(path: String, line: String, re: String, program: String): String =
+    val p = quote(path)
+    s"t=$$(mktemp) && LN=${quote(line)} RE=${quote(re)} awk ${quote(program)} $p > \"$$t\" && cat \"$$t\" > $p; rc=$$?; rm -f \"$$t\"; [ $$rc -eq 0 ]"
+
+  private val AwkPut =
+    "BEGIN{l=ENVIRON[\"LN\"];r=ENVIRON[\"RE\"]} r!=\"\" && $0~r {if(!d){print l;d=1};next} {print} END{if(!d)print l}"
+  private val AwkDrop =
+    "BEGIN{l=ENVIRON[\"LN\"];r=ENVIRON[\"RE\"]} $0==l || (r!=\"\" && $0~r) {next} {print}"
+
+  private def compareLine(
+      l: ApplyResource.LineInFile,
+      seen: Observed
+  ): Either[String, Difference] =
+    seen match
+      case Observed.Facts(kv) =>
+        val exists = kv.get("exists").contains("yes")
+        val exact = kv.get("exact").flatMap(_.toIntOption).getOrElse(0)
+        val matches = kv.get("matches").flatMap(_.toIntOption).getOrElse(0)
+        if l.present then
+          if exact >= 1 && matches <= exact then Right(NoDifference)
+          else
+            val create = if exists then "" else s"touch -- ${quote(l.path)} && "
+            val what =
+              if matches > 0 && l.matching.nonEmpty then "replaced" else "added"
+            shellOf(
+              List(s"line $what"),
+              create + awkEdit(l.path, l.line, l.matching, AwkPut)
+            )
+        else if !exists || exact + matches == 0 then Right(NoDifference)
+        else
+          shellOf(
+            List(s"${math.max(exact, matches)} line(s) removed"),
+            awkEdit(l.path, l.line, l.matching, AwkDrop)
+          )
+      case other => Left(s"unexpected state: $other")
+
+  private def compareKey(
+      k: ApplyResource.AuthorizedKey,
+      seen: Observed
+  ): Either[String, Difference] =
+    seen match
+      case Observed.Facts(kv) if !kv.get("exists").contains("yes") =>
+        Left(s"user ${k.user} does not exist")
+      case Observed.Facts(kv) =>
+        val count = kv.get("count").flatMap(_.toIntOption).getOrElse(0)
+        val u = quote(k.user)
+        val file = "\"$h/.ssh/authorized_keys\""
+        val home = s"h=$$(getent passwd $u | cut -d: -f6); g=$$(id -gn $u)"
+        if k.present then
+          if count >= 1 then Right(NoDifference)
+          else
+            shellOf(
+              List("key added"),
+              s"""$home; mkdir -p "$$h/.ssh" && chmod 700 "$$h/.ssh" && touch $file && chmod 600 $file && """ +
+                s"""{ [ -z "$$(tail -c1 $file)" ] || echo >> $file; } && printf '%s\\n' ${quote(k.key.trim)} >> $file && """ +
+                s"""chown $u:"$$g" "$$h/.ssh" $file"""
+            )
+        else if count == 0 then Right(NoDifference)
+        else
+          shellOf(
+            List("key removed"),
+            s"""$home; f=$file; t=$$(mktemp) && K=${quote(k.keyId)} awk ${quote(
+                "$1\" \"$2==ENVIRON[\"K\"]{next}{print}"
+              )} "$$f" > "$$t" && cat "$$t" > "$$f"; rc=$$?; rm -f "$$t"; [ $$rc -eq 0 ]"""
+          )
+      case other => Left(s"unexpected state: $other")
+
+  private def compareMount(
+      m: ApplyResource.Mount,
+      seen: Observed
+  ): Either[String, Difference] =
+    seen match
+      case Observed.Facts(kv) =>
+        val inFstab = kv.get("fstab").contains("yes")
+        val isMounted = kv.get("mounted").contains("yes")
+        val p = quote(m.path)
+        val entry = s"${m.device} ${m.path} ${m.fstype} ${m.options} 0 0"
+        val awkSet =
+          "BEGIN{p=ENVIRON[\"P\"];l=ENVIRON[\"LN\"]} $1!~/^#/ && $2==p {if(!d){print l;d=1};next} {print} END{if(!d)print l}"
+        val awkDel = "BEGIN{p=ENVIRON[\"P\"]} $1!~/^#/ && $2==p {next} {print}"
+        def fstabEdit(program: String): String =
+          s"t=$$(mktemp) && P=$p LN=${quote(entry)} awk ${quote(program)} /etc/fstab > \"$$t\" && cat \"$$t\" > /etc/fstab; rc=$$?; rm -f \"$$t\"; [ $$rc -eq 0 ]"
+        if !m.present then
+          val parts = List(
+            Option.when(isMounted)(("unmounted", s"umount $p")),
+            Option.when(inFstab)(("removed from fstab", fstabEdit(awkDel)))
+          ).flatten
+          if parts.isEmpty then Right(NoDifference)
+          else
+            Right(
+              Difference(
+                parts.map(_._1),
+                parts.map((_, s) => Action.Shell(s)),
+                Nil
+              )
+            )
+        else
+          val same =
+            kv.getOrElse("dev", "") == m.device &&
+              kv.getOrElse("fstype", "") == m.fstype &&
+              kv.getOrElse("opts", "") == m.options
+          val fstabPart =
+            Option.when(!inFstab || !same)(
+              (
+                if inFstab then "fstab entry changed" else "added to fstab",
+                fstabEdit(awkSet)
+              )
+            )
+          val mountPart = m.mounted match
+            case Some(true) if !isMounted =>
+              Some(("mounted", s"mkdir -p -- $p && mount $p"))
+            case Some(true) if isMounted && inFstab && !same =>
+              Some(("remounted", s"mount -o remount $p"))
+            case Some(false) if isMounted => Some(("unmounted", s"umount $p"))
+            case _                        => None
+          val parts = List(fstabPart, mountPart).flatten
+          if parts.isEmpty then Right(NoDifference)
+          else
+            Right(
+              Difference(
+                parts.map(_._1),
+                parts.map((_, s) => Action.Shell(s)),
+                Nil
+              )
+            )
+      case other => Left(s"unexpected state: $other")
 
   /** Applies `plan` to `target` (with `check`: only reads and compares),
     * printing each resource's line through `say`, and returns the report. A
@@ -1288,6 +1641,36 @@ object Apply:
       val n = quote(g.name)
       s"""echo '$Marker$i'
          |if e=$$(getent group $n); then echo exists=yes; echo "gid=$$(echo "$$e" | cut -d: -f3)"; else echo exists=no; fi""".stripMargin
+    def sysctlObs(i: Int, v: ApplyResource.Sysctl): String =
+      val k = quote(v.key)
+      s"""echo '$Marker$i'
+         |if x=$$(sysctl -n $k 2>/dev/null); then echo found=yes; echo "runtime=$$(echo $$x | tr -s '[:space:]' ' ')"; else echo found=no; fi
+         |echo "persisted=$$(head -n1 ${quote(sysctlFile(v.key))} 2>/dev/null)"""".stripMargin
+    def moduleObs(i: Int, m: ApplyResource.KernelModule): String =
+      val sys = quote(s"/sys/module/${m.name.replace('-', '_')}")
+      s"""echo '$Marker$i'
+         |if [ -d $sys ]; then echo loaded=yes; else echo loaded=no; fi
+         |echo "persisted=$$(head -n1 ${quote(
+          s"/etc/modules-load.d/orphera-${m.name}.conf"
+        )} 2>/dev/null)"""".stripMargin
+    def lineObs(i: Int, l: ApplyResource.LineInFile): String =
+      s"""echo '$Marker$i'
+         |if [ -f ${quote(l.path)} ]; then echo exists=yes
+         |  LN=${quote(l.line)} RE=${quote(l.matching)} awk 'BEGIN{l=ENVIRON["LN"];r=ENVIRON["RE"]} $$0==l{e++} r!="" && $$0~r{m++} END{print "exact=" (e+0); print "matches=" (m+0)}' ${quote(
+          l.path
+        )}
+         |else echo exists=no; fi""".stripMargin
+    def keyObs(i: Int, k: ApplyResource.AuthorizedKey): String =
+      val u = quote(k.user)
+      s"""echo '$Marker$i'
+         |if e=$$(getent passwd $u); then echo exists=yes; h=$$(echo "$$e" | cut -d: -f6)
+         |  if [ -f "$$h/.ssh/authorized_keys" ]; then K=${quote(k.keyId)} awk '$$1" "$$2==ENVIRON["K"]{c++} END{print "count=" (c+0)}' "$$h/.ssh/authorized_keys"; else echo count=0; fi
+         |else echo exists=no; fi""".stripMargin
+    def mountObs(i: Int, m: ApplyResource.Mount): String =
+      s"""echo '$Marker$i'
+         |echo fstab=no
+         |P=${quote(m.path)} awk '$$1!~/^#/ && $$2==ENVIRON["P"]{print "fstab=yes"; print "dev=" $$1; print "fstype=" $$3; print "opts=" $$4; exit}' /etc/fstab 2>/dev/null
+         |if mountpoint -q ${quote(m.path)} 2>/dev/null; then echo mounted=yes; else echo mounted=no; fi""".stripMargin
     ("set +e" :: resources.map {
       case (i, f: ApplyResource.File)      => pathState(i, f.path)
       case (i, d: ApplyResource.Directory) => pathState(i, d.path)
@@ -1297,6 +1680,11 @@ object Apply:
       case (i, u: ApplyResource.Service)   => unit(i, u)
       case (i, u: ApplyResource.User)      => user(i, u)
       case (i, g: ApplyResource.Group)     => group(i, g)
+      case (i, v: ApplyResource.Sysctl)    => sysctlObs(i, v)
+      case (i, m: ApplyResource.KernelModule)  => moduleObs(i, m)
+      case (i, l: ApplyResource.LineInFile)    => lineObs(i, l)
+      case (i, k: ApplyResource.AuthorizedKey) => keyObs(i, k)
+      case (i, m: ApplyResource.Mount)         => mountObs(i, m)
     }).mkString("\n")
 
   /** The states in `observeScript`'s output. */
@@ -1381,6 +1769,10 @@ object Apply:
                   kv.get("gid").flatMap(_.toIntOption).getOrElse(-1)
                 )
               case _ => Observed.Unreadable(kv.mkString(" "))
+          case _: ApplyResource.Sysctl | _: ApplyResource.KernelModule |
+              _: ApplyResource.LineInFile | _: ApplyResource.AuthorizedKey |
+              _: ApplyResource.Mount =>
+            Observed.Facts(kv)
           case _ =>
             kv.get("type") match
               case Some("absent") => Observed.Absent

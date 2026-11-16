@@ -103,6 +103,11 @@ write for part of a node.
 | `package` | name | installed (any version, or a version), or absent | `dpkg-query` / `rpm -q`, by the node's `os_id` fact (Debian and Ubuntu, or Rocky and the RHEL family) |
 | `service` | unit | enabled or not, running or not | `systemctl is-enabled`, `is-active` |
 | `user`, `group` | name | uid/gid, groups, home, shell, system or not | `getent` |
+| `sysctl` | key | value, now and persisted | `sysctl -n`, the `sysctl.d` file |
+| `kernel_module` | name | loaded, and listed to load at boot | `/sys/module`, the `modules-load.d` file |
+| `line` | path and line | a line present (replacing the first match of a pattern) or absent | `awk` counts of equal and matching lines |
+| `authorized_key` | user and key | a public key present or absent | `awk` on the user's `authorized_keys` |
+| `mount` | path | the fstab entry, mounted or not | `/etc/fstab`, `mountpoint` |
 | `command` | a label | a shell command, guarded by `onlyIf` / `unless` (a command whose exit code decides) or `creates` (a path), or run only when notified (`onChangeOnly`) | runs the guard |
 
 `command` is the way out for anything without a kind of its own, but it must say when it is needed: an

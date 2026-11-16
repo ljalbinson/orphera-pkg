@@ -1189,6 +1189,11 @@ Resources (`import Resources.*`), each named by kind and path or label (`file[/e
 | `service(unit, enabled, running)` | a systemd unit enabled and running (each `Some(true)`, `Some(false)`, or `None` to leave it); a resource that notifies it restarts it once, unless this run starts it anyway |
 | `user(name, uid, group, groups, home, shell, system)`, `absentUser(name)` | a local user; `groups` are added to, never taken from; removing one leaves its home |
 | `group(name, gid, system)`, `absentGroup(name)` | a local group |
+| `sysctl(key, value, persist = true)` | a kernel parameter, set now (`sysctl -w`) and kept in `/etc/sysctl.d/60-orphera-<key>.conf`; a key the node does not have fails (load its module first) |
+| `kernelModule(name, persist = true)` | a module loaded now (`modprobe`) and listed in `/etc/modules-load.d/orphera-<name>.conf` |
+| `lineInFile(path, line, matching = "")`, `absentLine(path, line, matching = "")` | one line in a text file: the first line `matching` (an awk regular expression) matches is replaced by `line` and other matches dropped, else `line` is appended; the file is created if missing; the absent form removes lines equal to `line` or matching |
+| `authorizedKey(user, key)`, `absentAuthorizedKey(user, key)` | a public key in the user's `~/.ssh/authorized_keys`, found by type and key (the comment may differ) |
+| `mount(path, device, fstype, options = "defaults", mounted = Some(true))`, `absentMount(path)` | an `/etc/fstab` entry and whether it is mounted (`None`: leave that alone); the absent form unmounts and removes the entry, and leaves the directory |
 | `command(label, run, onlyIf / unless / creates, onChangeOnly)` | a shell command, run when its guard says it is needed or, with `onChangeOnly`, when a resource that notifies it changed; one with neither is refused, since it would run every time |
 
 - **Order:** as listed, except that `r.after(other)` puts `r` after `other` wherever it stands, a command or

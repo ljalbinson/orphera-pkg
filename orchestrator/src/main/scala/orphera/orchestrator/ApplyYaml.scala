@@ -26,7 +26,8 @@ import io.circe.yaml.parser
   * }}}
   *
   * Each resource has one kind key (`file`, `directory`, `symlink`, `package`,
-  * `service`, `user`, `group`, `command`) naming it, the options of that kind,
+  * `service`, `user`, `group`, `sysctl`, `kernel_module`, `line`, `authorized_key`, `mount`,
+  * `command`) naming it, the options of that kind,
   * and `requires` / `notify` (resource ids, as in `file[/etc/x]`). `state:
   * absent` removes a file, directory, symlink, package, user or group. A
   * `source` path is relative to the directory orphera runs in, as `src:` is in
@@ -49,6 +50,11 @@ object ApplyYaml:
     "service",
     "user",
     "group",
+    "sysctl",
+    "kernel_module",
+    "line",
+    "authorized_key",
+    "mount",
     "command"
   )
 
@@ -63,6 +69,11 @@ object ApplyYaml:
     "service" -> Set("enabled", "running"),
     "user" -> Set("uid", "group", "groups", "home", "shell", "system"),
     "group" -> Set("gid", "system"),
+    "sysctl" -> Set("value", "runtime_only"),
+    "kernel_module" -> Set("runtime_only"),
+    "line" -> Set("path", "match"),
+    "authorized_key" -> Set("key"),
+    "mount" -> Set("device", "fstype", "options", "mounted"),
     "command" -> Set(
       "run",
       "only_if",
@@ -252,6 +263,35 @@ object ApplyYaml:
           gid <- f.optInt("gid")
           system <- f.bool("system")
         yield group(key, gid.getOrElse(-1), system)
+      case "sysctl" | "kernel_module" if absent =>
+        Left(s"$kind[$key]: state absent is not supported: set another value")
+      case "sysctl" =>
+        for
+          value <- f.str("value")
+          runtimeOnly <- f.bool("runtime_only")
+        yield sysctl(key, value, persist = !runtimeOnly)
+      case "kernel_module" =>
+        f.bool("runtime_only").map(ro => kernelModule(key, persist = !ro))
+      case "line" =>
+        for
+          path <- f.str("path")
+          matching <- f.optStr("match")
+        yield
+          if absent then absentLine(path, key, matching.getOrElse(""))
+          else lineInFile(path, key, matching.getOrElse(""))
+      case "authorized_key" =>
+        f.str("key").map(k =>
+          if absent then absentAuthorizedKey(key, k) else authorizedKey(key, k)
+        )
+      case "mount" if absent =>
+        onlyPresent("device", "fstype", "options", "mounted").as(absentMount(key))
+      case "mount" =>
+        for
+          device <- f.str("device")
+          fstype <- f.str("fstype")
+          options <- f.optStr("options")
+          mounted <- f.tristate("mounted")
+        yield mount(key, device, fstype, options.getOrElse("defaults"), mounted)
       case _ => // command
         if absent then Left(s"command[$key]: a command has no state")
         else

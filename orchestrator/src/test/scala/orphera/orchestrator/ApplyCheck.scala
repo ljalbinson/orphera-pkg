@@ -799,6 +799,92 @@ object ApplyCheck:
         .exists(_.contains("no such unit"))
     )
 
+  private def newKindChecks(): Unit =
+    check(
+      "new kinds: a good description has no problems",
+      problems(
+        List(
+          kernelModule("br_netfilter"),
+          sysctl("net.bridge.bridge-nf-call-iptables", "1")
+            .afterIds("kernel_module[br_netfilter]"),
+          lineInFile("/etc/ssh/sshd_config", "PermitRootLogin no", "^PermitRootLogin"),
+          user("alice"),
+          authorizedKey("alice", "ssh-ed25519 AAAAC3Nza alice@x"),
+          mount("/mnt/data", "UUID=abc", "ext4")
+        )
+      ).isEmpty
+    )
+    check(
+      "new kinds: bad sysctl key, module, path, key and mount are named",
+      problems(
+        List(
+          sysctl("bad key", "1"),
+          sysctl("net.x", ""),
+          kernelModule("a b"),
+          lineInFile("relative", "x"),
+          lineInFile("/etc/x", "a\nb"),
+          authorizedKey("alice", "justonefield"),
+          mount("/mnt/x", "", "ext4"),
+          mount("/mnt/y", "/dev/sdb 1", "ext4")
+        )
+      ).size >= 8
+    )
+    val parsed = yaml(
+      """name: kinds
+        |resources:
+        |  - kernel_module: br_netfilter
+        |  - sysctl: net.ipv4.ip_forward
+        |    value: 1
+        |    requires: ["kernel_module[br_netfilter]"]
+        |  - line: "PermitRootLogin no"
+        |    path: /etc/ssh/sshd_config
+        |    match: "^#?PermitRootLogin"
+        |  - line: "old"
+        |    path: /etc/x
+        |    state: absent
+        |  - user: alice
+        |  - authorized_key: alice
+        |    key: ssh-ed25519 AAAAC3Nza alice@x
+        |  - mount: /mnt/data
+        |    device: UUID=abc
+        |    fstype: ext4
+        |    options: noatime
+        |    mounted: any
+        |  - mount: /mnt/old
+        |    state: absent
+        |""".stripMargin
+    )
+    check(
+      "new kinds: YAML reads them",
+      parsed.map(_.resources.map(_.id)) == Right(
+        List(
+          "kernel_module[br_netfilter]",
+          "sysctl[net.ipv4.ip_forward]",
+          "line[/etc/ssh/sshd_config: PermitRootLogin no]",
+          "line[/etc/x: old]",
+          "user[alice]",
+          "authorized_key[alice: ssh-ed25519 ...AAAC3Nza alice@x]",
+          "mount[/mnt/data]",
+          "mount[/mnt/old]"
+        )
+      ),
+      parsed.toString
+    )
+    check(
+      "new kinds: YAML mount options and mounted: any",
+      parsed.exists(
+        _.resources.contains(
+          ApplyResource.Mount("/mnt/data", "UUID=abc", "ext4", "noatime", None, present = true)
+        )
+      )
+    )
+    check(
+      "new kinds: sysctl in YAML needs a value; state absent is refused",
+      yamlError("name: x\nresources:\n  - sysctl: a.b\n").contains("value") &&
+        yamlError("name: x\nresources:\n  - sysctl: a.b\n    value: 1\n    state: absent\n").contains("absent") &&
+        yamlError("name: x\nresources:\n  - line: x\n").contains("path")
+    )
+
   private def yaml(text: String): Either[String, ApplyDescription] =
     io.circe.yaml.parser
       .parse(text)
@@ -1252,6 +1338,73 @@ object ApplyCheck:
         ),
         kl
       )
+
+      // Lines and keys, edited by the real scripts on this machine.
+      val cfg = s"$base/sshd_config"
+      Files.writeString(cfg, "Port 22\n#PermitRootLogin yes\nPermitRootLogin prohibit-password\nUseDNS yes")
+      val wantLine = lineInFile(cfg, "PermitRootLogin no", "^#?PermitRootLogin")
+      val lineRun1 = run(List(wantLine), check = true)
+      check(
+        "local line: check mode would replace and changes nothing",
+        lineRun1.report.changed && Files.readString(Paths.get(cfg)).contains("prohibit-password"),
+        lineRun1.lines.mkString("\n")
+      )
+      val lineRun2 = run(List(wantLine), check = false)
+      check(
+        "local line: replaces the first match and drops the others",
+        !lineRun2.report.failed &&
+          Files.readString(Paths.get(cfg)) == "Port 22\nPermitRootLogin no\nUseDNS yes\n",
+        lineRun2.lines.mkString("\n") + Files.readString(Paths.get(cfg))
+      )
+      check(
+        "local line: second run changes nothing",
+        !run(List(wantLine), check = false).report.changed
+      )
+      val addLine = lineInFile(cfg, "it's here")
+      check(
+        "local line: appends a line with a quote in it, once",
+        !run(List(addLine), check = false).report.failed &&
+          !run(List(addLine), check = false).report.changed &&
+          Files.readString(Paths.get(cfg)).endsWith("UseDNS yes\nit's here\n"),
+        Files.readString(Paths.get(cfg))
+      )
+      check(
+        "local line: removes it",
+        !run(List(absentLine(cfg, "it's here")), check = false).report.failed &&
+          !Files.readString(Paths.get(cfg)).contains("it's here") &&
+          !run(List(absentLine(cfg, "it's here")), check = false).report.changed
+      )
+      val fresh = s"$base/new.conf"
+      check(
+        "local line: a missing file is created",
+        !run(List(lineInFile(fresh, "a = 1")), check = false).report.failed &&
+          Files.readString(Paths.get(fresh)) == "a = 1\n"
+      )
+      // Read by the real observe script (check mode): what this machine has, and what it has not.
+      val others = run(
+        List(
+          sysctl("orphera.no.such.key", "1"),
+          kernelModule("orphera_no_such_module"),
+          authorizedKey("orphera-nobody", "ssh-ed25519 AAAA x"),
+          mount("/orphera-no-such-mount", "/dev/orphera", "ext4"),
+          absentMount("/orphera-no-such-mount-either")
+        ),
+        check = true
+      )
+      val ol = others.lines.mkString("\n")
+      check(
+        "local: sysctl without a key and a key for a missing user fail in check mode",
+        outcome(others.report, "sysctl[orphera.no.such.key]").exists(_.isInstanceOf[ApplyOutcome.Failed]) &&
+          outcome(others.report, "authorized_key[orphera-nobody: ssh-ed25519 ...AAAA x]").exists(_.isInstanceOf[ApplyOutcome.Failed]),
+        ol
+      )
+      check(
+        "local: a missing module and mount would change; an absent mount is unchanged",
+        outcome(others.report, "kernel_module[orphera_no_such_module]").exists(_.isInstanceOf[ApplyOutcome.WouldChange]) &&
+          outcome(others.report, "mount[/orphera-no-such-mount]").exists(_.isInstanceOf[ApplyOutcome.WouldChange]) &&
+          outcome(others.report, "mount[/orphera-no-such-mount-either]").exists(_.isInstanceOf[ApplyOutcome.Unchanged]),
+        ol
+      )
     finally
       new ProcessBuilder("rm", "-rf", base).start().waitFor()
       ()
@@ -1261,6 +1414,7 @@ object ApplyCheck:
     runChecks()
     kindChecks()
     yamlChecks()
+    newKindChecks()
     totalChecks()
     diffChecks()
     localChecks()
