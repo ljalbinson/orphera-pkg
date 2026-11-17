@@ -26,7 +26,7 @@ resources:
     path: /opt/orphera-kinds/demo.conf
     match: "^alpha"
     requires: ["directory[/opt/orphera-kinds]"]
-  - line: "beta = 2"
+  - line: "beta = 3"
     path: /opt/orphera-kinds/demo.conf
     match: "^beta"
     requires: ["directory[/opt/orphera-kinds]"]

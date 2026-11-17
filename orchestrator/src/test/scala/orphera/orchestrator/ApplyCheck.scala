@@ -819,8 +819,7 @@ object ApplyCheck:
       ).isEmpty
     )
     check(
-      "new kinds: removing a key, then its user and group, is a valid order",
-      {
+      "new kinds: removing a key, then its user and group, is a valid order", {
         val key = absentAuthorizedKey("alice", "ssh-ed25519 AAAAC3Nza alice@x")
         val gone = absentUser("alice").after(key)
         problems(List(key, gone, absentGroup("alice").after(gone))).isEmpty
