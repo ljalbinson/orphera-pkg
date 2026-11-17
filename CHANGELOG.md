@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+- `k8s_kubeadm_config`: kubelet's `resolvConf` line is set with an apply description (`lineInFile`) instead of `sed -i`/`echo >>`, as its own task between writing the resolver file and restarting kubelet. `lustre_cluster`: SELinux permissive in `/etc/selinux/config` is a `lineInFile` description (any `SELINUX=` line is replaced, where the script changed only `enforcing`). `lustre_cluster_script` still has its `sed`. Not yet run on the lab.
+
 ### Added
 - `docs/ACCESS-CONTROL-DESIGN.md`: a proposal for limits on what an authenticated caller may do: per-operator client certificates carrying a role, a policy in `config/access.yaml` enforced at the agent (read-only, files and packages, reboot, run, per node group and path), operator and role in the audit log. Not built.
 ### Changed

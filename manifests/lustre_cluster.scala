@@ -196,6 +196,18 @@ object lustre_cluster extends OrpheraClusterPlaybook:
       |echo "installed: $(rpm -q lustre-client kmod-lustre-client | tr '\n' ' ')"""".stripMargin
   )
 
+  // SELinux permissive on the servers (setenforce 0 in packagesScript does it
+  // for the running system): an apply description, kind lineInFile. Any
+  // SELINUX= line is replaced; the old script changed only `enforcing`.
+  private val selinuxPlan: ApplyPlan =
+    import Resources.*
+    ApplyPlan.orFail(
+      "selinux-permissive",
+      List(
+        lineInFile("/etc/selinux/config", "SELINUX=permissive", "^SELINUX=")
+      )
+    )
+
   private val packagesScript = fill(
     helpers +
       """set -e
@@ -226,7 +238,6 @@ object lustre_cluster extends OrpheraClusterPlaybook:
       |dnf -y upgrade --repo orphera-e2fsprogs-wc e2fsprogs e2fsprogs-libs libcom_err libss || true
       |rpm -q e2fsprogs | grep -q wc || fail "e2fsprogs is $(rpm -q e2fsprogs), not the Lustre (wc) build"
       |setenforce 0 2>/dev/null || true
-      |sed -i 's/^SELINUX=enforcing/SELINUX=permissive/' /etc/selinux/config
       |echo "installed: $(rpm -q lustre kmod-lustre e2fsprogs | tr '\n' ' ')"""".stripMargin
   )
 
@@ -431,6 +442,9 @@ object lustre_cluster extends OrpheraClusterPlaybook:
       stage("packages", servers*)
         .task("Lustre repositories, kernel and server packages")(
           sh(packagesScript, 1800)
+        )
+        .task("SELinux permissive in /etc/selinux/config")(
+          Task.Apply(selinuxPlan)
         )
         .build
     ) ++ (if clientOnly.isEmpty then Nil

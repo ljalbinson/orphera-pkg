@@ -113,11 +113,26 @@ print(json.dumps(cm))
        |grep -q '^nameserver' $resolvFile.new || { echo "no nameserver found in $$SRC" >&2; exit 1; }
        |mv $resolvFile.new $resolvFile
        |chmod 644 $resolvFile
-       |if grep -q '^resolvConf:' /var/lib/kubelet/config.yaml; then
-       |  sed -i 's|^resolvConf:.*|resolvConf: $resolvFile|' /var/lib/kubelet/config.yaml
-       |else
-       |  echo 'resolvConf: $resolvFile' >> /var/lib/kubelet/config.yaml
-       |fi
+       |echo "resolver file $resolvFile written"
+       |""".stripMargin
+
+  // kubelet's config names the resolver file: an apply description (kind
+  // lineInFile) that replaces the resolvConf line, or adds it.
+  private val kubeletResolvPlan: ApplyPlan =
+    import Resources.*
+    ApplyPlan.orFail(
+      "kubelet-resolv-conf",
+      List(
+        lineInFile(
+          "/var/lib/kubelet/config.yaml",
+          s"resolvConf: $resolvFile",
+          "^resolvConf:"
+        )
+      )
+    )
+
+  private val kubeletRestartScript =
+    s"""set -e
        |systemctl restart kubelet
        |for I in $$(seq 1 30); do systemctl is-active --quiet kubelet && break; sleep 2; done
        |systemctl is-active --quiet kubelet || { echo "kubelet did not restart" >&2; exit 1; }
@@ -318,6 +333,13 @@ sys.exit(1 if bad else 0)
         .task("give kubelet a resolver file with each server once")(
           Task.RunCommand(
             List("sh", "-c", kubeletResolvScript),
+            timeoutSeconds = 180
+          )
+        )
+        .task("point kubelet's config at it")(Task.Apply(kubeletResolvPlan))
+        .task("restart kubelet and wait for it")(
+          Task.RunCommand(
+            List("sh", "-c", kubeletRestartScript),
             timeoutSeconds = 180
           )
         )
