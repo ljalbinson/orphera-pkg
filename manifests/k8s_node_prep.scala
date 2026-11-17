@@ -146,6 +146,19 @@ object k8s_node_prep extends OrpheraClusterPlaybook:
        |apt-cache policy kubeadm | grep -q 'pkgs.k8s.io' || { echo "kubeadm not offered by pkgs.k8s.io for $k8sMinor" >&2; exit 1; }
        |echo "kubernetes apt repository $k8sMinor configured"""".stripMargin
 
+  // Only when one of them is missing. The packages are held (apt-mark hold,
+  // below) so that nothing moves the cluster's version; a second run with
+  // Task.Install failed on the nodes already prepared ("Held packages were
+  // changed and -y was used"), because the repository had a newer cri-tools.
+  private val installKubernetesScript =
+    """set -e
+      |PKGS="kubelet kubeadm kubectl cri-tools"
+      |if dpkg -s $PKGS >/dev/null 2>&1; then
+      |  echo "already installed (held): $(dpkg-query -W -f='${Package} ${Version}; ' $PKGS)"
+      |else
+      |  DEBIAN_FRONTEND=noninteractive apt-get install -y $PKGS
+      |fi""".stripMargin
+
   private val kubeletScript =
     """apt-mark hold kubelet kubeadm kubectl cri-tools
       |echo "KUBELET_EXTRA_ARGS=--node-ip={{cluster_ip}}" > /etc/default/kubelet
@@ -186,9 +199,9 @@ object k8s_node_prep extends OrpheraClusterPlaybook:
           Task.RunCommand(List("sh", "-c", repoScript), timeoutSeconds = 180)
         )
         .task("install kubeadm, kubelet, kubectl, crictl")(
-          Task.Install(
-            packages = List("kubelet", "kubeadm", "kubectl", "cri-tools"),
-            updateCache = false
+          Task.RunCommand(
+            List("sh", "-c", installKubernetesScript),
+            timeoutSeconds = 900
           )
         )
         .task("hold the packages, set the kubelet node IP")(
