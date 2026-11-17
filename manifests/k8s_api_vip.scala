@@ -67,12 +67,20 @@ object k8s_api_vip extends OrpheraClusterPlaybook:
        |echo "$vip is not answered by anything outside the control-plane nodes (replies from: $${FOUND:-none})"
        |""".stripMargin
 
+  // HAProxy binds the VIP on every control-plane node, including the ones
+  // that do not hold it yet, which needs net.ipv4.ip_nonlocal_bind. An apply
+  // description (kind sysctl); the file this manifest used to write
+  // (99-orphera-k8s-vip.conf) is removed once the new one is in place.
+  private val nonlocalBindPlan: ApplyPlan =
+    import Resources.*
+    val bind = sysctl("net.ipv4.ip_nonlocal_bind", "1")
+    ApplyPlan.orFail(
+      "k8s-vip-sysctl",
+      List(bind, absentFile("/etc/sysctl.d/99-orphera-k8s-vip.conf").after(bind))
+    )
+
   private val haproxyScript =
-    s"""cat > /etc/sysctl.d/99-orphera-k8s-vip.conf <<'EOF'
-       |net.ipv4.ip_nonlocal_bind=1
-       |EOF
-       |sysctl -p /etc/sysctl.d/99-orphera-k8s-vip.conf >/dev/null
-       |cat > /etc/haproxy/haproxy.cfg <<'EOF'
+    s"""cat > /etc/haproxy/haproxy.cfg <<'EOF'
        |global
        |    daemon
        |    maxconn 2048
@@ -168,6 +176,9 @@ object k8s_api_vip extends OrpheraClusterPlaybook:
         )
         .build,
       stage("write-haproxy-config", cpNodes*)
+        .task("allow binding the VIP before this node holds it")(
+          Task.Apply(nonlocalBindPlan)
+        )
         .task("write /etc/haproxy/haproxy.cfg and (re)start haproxy")(
           Task.RunCommand(List("sh", "-c", haproxyScript), timeoutSeconds = 60)
         )

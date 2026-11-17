@@ -26,8 +26,9 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 // pkgs.k8s.io is HTTPS, which the apt cache cannot cache, so the packages
 // (about 100 MB) come straight from the internet.
 //
-// Re-runnable: every step rewrites the same files and apt only installs what
-// is missing.
+// Re-runnable: the kernel modules and sysctls are an apply description, so
+// a node that is already right is left alone; the other steps rewrite the
+// same files and apt only installs what is missing.
 //
 // Not compiled where this was written; the first run on scala0 is the first
 // compile. `k8sMinor` is a version I could not check against the live
@@ -61,23 +62,42 @@ object k8s_node_prep extends OrpheraClusterPlaybook:
     ("ghcr.io", "https://ghcr.io", 5003)
   )
 
-  private val kernelScript =
+  // Swap stays a command: commenting out the swap line of fstab is a
+  // selective edit that no apply kind describes.
+  private val swapScript =
     """swapoff -a
       |sed -i -E '/\sswap\s/ s/^([^#])/#\1/' /etc/fstab
-      |cat > /etc/modules-load.d/k8s.conf <<'EOF'
-      |overlay
-      |br_netfilter
-      |EOF
-      |modprobe overlay
-      |modprobe br_netfilter
-      |cat > /etc/sysctl.d/99-k8s.conf <<'EOF'
-      |net.bridge.bridge-nf-call-iptables = 1
-      |net.bridge.bridge-nf-call-ip6tables = 1
-      |net.ipv4.ip_forward = 1
-      |EOF
-      |sysctl --system >/dev/null
       |if swapon --show | grep -q .; then echo "swap is still on" >&2; exit 1; fi
-      |echo "swap off, overlay and br_netfilter loaded, forwarding on"""".stripMargin
+      |echo "swap off"""".stripMargin
+
+  // The modules and sysctls as a declarative description (apply kinds
+  // kernelModule and sysctl): changed only where the node differs, and listed
+  // in modules-load.d and sysctl.d under orphera- names. The files this
+  // manifest used to write (k8s.conf, 99-k8s.conf) are removed once the new
+  // ones are in place.
+  private val kernelPlan: ApplyPlan =
+    import Resources.*
+    val overlay = kernelModule("overlay")
+    val bridge = kernelModule("br_netfilter")
+    val iptables =
+      sysctl("net.bridge.bridge-nf-call-iptables", "1").after(bridge)
+    val ip6tables =
+      sysctl("net.bridge.bridge-nf-call-ip6tables", "1").after(bridge)
+    val forward = sysctl("net.ipv4.ip_forward", "1")
+    ApplyPlan.orFail(
+      "k8s-kernel",
+      List(
+        overlay,
+        bridge,
+        iptables,
+        ip6tables,
+        forward,
+        absentFile("/etc/modules-load.d/k8s.conf")
+          .after(overlay, bridge),
+        absentFile("/etc/sysctl.d/99-k8s.conf")
+          .after(iptables, ip6tables, forward)
+      )
+    )
 
   private val mirrorFiles: String =
     mirrors
@@ -142,9 +162,10 @@ object k8s_node_prep extends OrpheraClusterPlaybook:
   val playbook: ClusterPlaybook =
     clusterPlaybook("k8s-node-prep")(
       stage("prepare-kernel", nodes*)
-        .task("swap off, kernel modules, sysctls")(
-          Task.RunCommand(List("sh", "-c", kernelScript), timeoutSeconds = 60)
+        .task("swap off")(
+          Task.RunCommand(List("sh", "-c", swapScript), timeoutSeconds = 60)
         )
+        .task("kernel modules and sysctls")(Task.Apply(kernelPlan))
         .build,
       stage("install-containerd", nodes*)
         .task("install containerd and curl")(

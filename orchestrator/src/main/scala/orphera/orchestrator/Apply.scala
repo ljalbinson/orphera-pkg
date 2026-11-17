@@ -464,6 +464,16 @@ final case class ApplyPlan private (
 
 object ApplyPlan:
 
+  /** For a manifest: the plan, or an exception naming every problem when the
+    * manifest is loaded, so a mistake in a description is reported before any
+    * node is touched.
+    */
+  def orFail(name: String, resources: List[ApplyResource]): ApplyPlan =
+    apply(name, resources) match
+      case Right(plan) => plan
+      case Left(ps) =>
+        sys.error(s"description '$name': ${ps.mkString("; ")}")
+
   /** Checks a description and works out its order, or lists every problem: a
     * name used twice, a relative path, a bad mode, a command with no guard and
     * not `onChangeOnly`, a reference to a resource that is not described, a
@@ -1214,31 +1224,30 @@ object Apply:
   ): Either[String, Difference] =
     seen match
       case Observed.Facts(kv) =>
-        if !kv.get("found").contains("yes") then
-          Left(
-            s"the node has no sysctl ${v.key} (is its module loaded? put kernelModule before it)"
-          )
-        else
-          val now = kv.getOrElse("runtime", "")
-          val text = s"${v.key} = ${squash(v.value)}"
-          val live = squash(now) != squash(v.value)
-          val stored = v.persist && kv.getOrElse("persisted", "") != text
-          val actions = List(
-            Option.when(live)(
-              Action.Shell(
-                s"sysctl -w ${quote(s"${v.key}=${squash(v.value)}")}"
-              )
-            ),
-            Option.when(stored)(
-              Action.Write(sysctlFile(v.key), text + "\n", "", "", Mode0644)
+        // A key the node does not have yet (its module is not loaded) is a
+        // change to make, not a failure: the module resource before it may
+        // provide it, and if nothing does, `sysctl -w` fails when it runs.
+        val present = kv.get("found").contains("yes")
+        val now = if present then kv.getOrElse("runtime", "") else "(absent)"
+        val text = s"${v.key} = ${squash(v.value)}"
+        val live = !present || squash(now) != squash(v.value)
+        val stored = v.persist && kv.getOrElse("persisted", "") != text
+        val actions = List(
+          Option.when(live)(
+            Action.Shell(
+              s"sysctl -w ${quote(s"${v.key}=${squash(v.value)}")}"
             )
-          ).flatten
-          val changes = List(
-            Option.when(live)(s"$now -> ${squash(v.value)}"),
-            Option.when(stored)(s"persisted in ${sysctlFile(v.key)}")
-          ).flatten
-          if actions.isEmpty then Right(NoDifference)
-          else Right(Difference(changes, actions, Nil))
+          ),
+          Option.when(stored)(
+            Action.Write(sysctlFile(v.key), text + "\n", "", "", Mode0644)
+          )
+        ).flatten
+        val changes = List(
+          Option.when(live)(s"$now -> ${squash(v.value)}"),
+          Option.when(stored)(s"persisted in ${sysctlFile(v.key)}")
+        ).flatten
+        if actions.isEmpty then Right(NoDifference)
+        else Right(Difference(changes, actions, Nil))
       case other => Left(s"unexpected state: $other")
 
   private def compareModule(

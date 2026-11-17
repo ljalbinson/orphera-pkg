@@ -204,12 +204,19 @@ object mariadb_haproxy_keepalived extends OrpheraClusterPlaybook:
   // start on the backup nodes with "Cannot assign requested address"
   // instead. Researched before writing, not assumed:
   // https://www.cyberciti.biz/faq/linux-bind-ip-that-doesnt-exist-with-net-ipv4-ip_nonlocal_bind/
+  // The sysctl is an apply description (kind sysctl), run as the task before
+  // the one that writes haproxy.cfg; the file this manifest used to write
+  // (99-orphera-haproxy-vip.conf) is removed once the new one is in place.
+  private val nonlocalBindPlan: ApplyPlan =
+    import Resources.*
+    val bind = sysctl("net.ipv4.ip_nonlocal_bind", "1")
+    ApplyPlan.orFail(
+      "haproxy-vip-sysctl",
+      List(bind, absentFile("/etc/sysctl.d/99-orphera-haproxy-vip.conf").after(bind))
+    )
+
   private val haproxyConfigScript =
-    s"""cat > /etc/sysctl.d/99-orphera-haproxy-vip.conf <<'EOF'
-       |net.ipv4.ip_nonlocal_bind=1
-       |EOF
-       |sysctl -p /etc/sysctl.d/99-orphera-haproxy-vip.conf
-       |cat > /etc/haproxy/haproxy.cfg <<'EOF'
+    s"""cat > /etc/haproxy/haproxy.cfg <<'EOF'
        |global
        |    daemon
        |    maxconn 256
@@ -406,6 +413,9 @@ object mariadb_haproxy_keepalived extends OrpheraClusterPlaybook:
         .build,
 
       stage("write-haproxy-config", "tst3", "tst4", "tst5")
+        .task("allow binding the VIP before this node holds it")(
+          Task.Apply(nonlocalBindPlan)
+        )
         .task("write /etc/haproxy/haproxy.cfg and (re)start haproxy")(
           Task.RunCommand(List("sh", "-c", haproxyConfigScript))
         )

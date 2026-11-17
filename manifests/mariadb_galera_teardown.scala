@@ -56,7 +56,7 @@ object mariadb_galera_teardown extends OrpheraClusterPlaybook:
       |systemctl disable clustercheck.socket 2>/dev/null || true
       |rm -f /usr/local/bin/galera-clustercheck /etc/systemd/system/clustercheck.socket /etc/systemd/system/clustercheck@.service
       |systemctl daemon-reload
-      |rm -f /etc/sysctl.d/99-orphera-haproxy-vip.conf
+      |rm -f /etc/sysctl.d/99-orphera-haproxy-vip.conf /etc/sysctl.d/60-orphera-net.ipv4.ip_nonlocal_bind.conf
       |sysctl -w net.ipv4.ip_nonlocal_bind=0 2>/dev/null || true
       |IFACE=$(ip -4 route show default | awk '{print $5; exit}')
       |ip addr del 10.10.5.100/24 dev "$IFACE" 2>/dev/null || true

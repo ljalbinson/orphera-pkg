@@ -1413,9 +1413,9 @@ object ApplyCheck:
       )
       val ol = others.lines.mkString("\n")
       check(
-        "local: sysctl without a key and a key for a missing user fail in check mode",
+        "local: a sysctl key the node lacks would change; a key for a missing user fails in check mode",
         outcome(others.report, "sysctl[orphera.no.such.key]")
-          .exists(_.isInstanceOf[ApplyOutcome.Failed]) &&
+          .exists(_.isInstanceOf[ApplyOutcome.WouldChange]) &&
           outcome(
             others.report,
             "authorized_key[orphera-nobody: ssh-ed25519 ...AAAA x]"
