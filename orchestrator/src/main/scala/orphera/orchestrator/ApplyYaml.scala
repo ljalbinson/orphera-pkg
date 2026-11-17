@@ -26,8 +26,8 @@ import io.circe.yaml.parser
   * }}}
   *
   * Each resource has one kind key (`file`, `directory`, `symlink`, `package`,
-  * `service`, `user`, `group`, `sysctl`, `kernel_module`, `line`, `authorized_key`, `mount`,
-  * `command`) naming it, the options of that kind,
+  * `service`, `user`, `group`, `sysctl`, `kernel_module`, `line`,
+  * `authorized_key`, `mount`, `command`) naming it, the options of that kind,
   * and `requires` / `notify` (resource ids, as in `file[/etc/x]`). `state:
   * absent` removes a file, directory, symlink, package, user or group. A
   * `source` path is relative to the directory orphera runs in, as `src:` is in
@@ -280,11 +280,15 @@ object ApplyYaml:
           if absent then absentLine(path, key, matching.getOrElse(""))
           else lineInFile(path, key, matching.getOrElse(""))
       case "authorized_key" =>
-        f.str("key").map(k =>
-          if absent then absentAuthorizedKey(key, k) else authorizedKey(key, k)
-        )
+        f.str("key")
+          .map(k =>
+            if absent then absentAuthorizedKey(key, k)
+            else authorizedKey(key, k)
+          )
       case "mount" if absent =>
-        onlyPresent("device", "fstype", "options", "mounted").as(absentMount(key))
+        onlyPresent("device", "fstype", "options", "mounted").as(
+          absentMount(key)
+        )
       case "mount" =>
         for
           device <- f.str("device")

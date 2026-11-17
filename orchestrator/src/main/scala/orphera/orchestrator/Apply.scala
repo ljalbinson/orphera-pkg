@@ -228,10 +228,11 @@ object ApplyResource:
       copy(needs = n, triggers = t)
 
   object LineInFile:
-    def shown(s: String): String = if s.length > 40 then s.take(37) + "..." else s
+    def shown(s: String): String =
+      if s.length > 40 then s.take(37) + "..." else s
 
-  /** A public key in a user's ~/.ssh/authorized_keys, found by its type and
-    * key (the comment may differ).
+  /** A public key in a user's ~/.ssh/authorized_keys, found by its type and key
+    * (the comment may differ).
     */
   final case class AuthorizedKey(
       user: String,
@@ -388,7 +389,11 @@ object Resources:
     Group(name, -1, system = false, present = false)
 
   /** A kernel parameter, set now and (`persist`) at boot. */
-  def sysctl(key: String, value: String, persist: Boolean = true): ApplyResource =
+  def sysctl(
+      key: String,
+      value: String,
+      persist: Boolean = true
+  ): ApplyResource =
     Sysctl(key, value, persist)
 
   /** A kernel module, loaded now and (`persist`) at boot. */
@@ -398,11 +403,19 @@ object Resources:
   /** `line` is in the file; `matching` (a regular expression) names the line it
     * replaces.
     */
-  def lineInFile(path: String, line: String, matching: String = ""): ApplyResource =
+  def lineInFile(
+      path: String,
+      line: String,
+      matching: String = ""
+  ): ApplyResource =
     LineInFile(path, line, matching, present = true)
 
   /** Lines equal to `line`, or matching `matching`, are not in the file. */
-  def absentLine(path: String, line: String, matching: String = ""): ApplyResource =
+  def absentLine(
+      path: String,
+      line: String,
+      matching: String = ""
+  ): ApplyResource =
     LineInFile(path, line, matching, present = false)
 
   def authorizedKey(user: String, key: String): ApplyResource =
@@ -516,8 +529,10 @@ object ApplyPlan:
           problems += s"${m.id}: not a module name"
       case l: ApplyResource.LineInFile =>
         checkPath(l.id, l.path)
-        if l.line.contains('\n') then problems += s"${l.id}: a line has no newline"
-        if l.present && l.line.isEmpty then problems += s"${l.id}: the line is empty"
+        if l.line.contains('\n') then
+          problems += s"${l.id}: a line has no newline"
+        if l.present && l.line.isEmpty then
+          problems += s"${l.id}: the line is empty"
         if !l.present && l.line.isEmpty && l.matching.isEmpty then
           problems += s"${l.id}: give the line or a match"
       case k: ApplyResource.AuthorizedKey =>
@@ -651,7 +666,8 @@ enum Observed:
   /** A group that exists. */
   case GroupEntry(gid: Int)
 
-  /** What a resource's observe snippet printed, as it printed it (key=value). */
+  /** What a resource's observe snippet printed, as it printed it (key=value).
+    */
   case Facts(values: Map[String, String])
   case Unreadable(text: String)
 
@@ -1209,7 +1225,9 @@ object Apply:
           val stored = v.persist && kv.getOrElse("persisted", "") != text
           val actions = List(
             Option.when(live)(
-              Action.Shell(s"sysctl -w ${quote(s"${v.key}=${squash(v.value)}")}")
+              Action.Shell(
+                s"sysctl -w ${quote(s"${v.key}=${squash(v.value)}")}"
+              )
             ),
             Option.when(stored)(
               Action.Write(sysctlFile(v.key), text + "\n", "", "", Mode0644)
@@ -1247,7 +1265,12 @@ object Apply:
       case other => Left(s"unexpected state: $other")
 
   // awk reads the line and pattern from the environment, so no quoting reaches the awk program.
-  private def awkEdit(path: String, line: String, re: String, program: String): String =
+  private def awkEdit(
+      path: String,
+      line: String,
+      re: String,
+      program: String
+  ): String =
     val p = quote(path)
     s"t=$$(mktemp) && LN=${quote(line)} RE=${quote(re)} awk ${quote(program)} $p > \"$$t\" && cat \"$$t\" > $p; rc=$$?; rm -f \"$$t\"; [ $$rc -eq 0 ]"
 
@@ -1301,7 +1324,9 @@ object Apply:
             shellOf(
               List("key added"),
               s"""$home; mkdir -p "$$h/.ssh" && chmod 700 "$$h/.ssh" && touch $file && chmod 600 $file && """ +
-                s"""{ [ -z "$$(tail -c1 $file)" ] || echo >> $file; } && printf '%s\\n' ${quote(k.key.trim)} >> $file && """ +
+                s"""{ [ -z "$$(tail -c1 $file)" ] || echo >> $file; } && printf '%s\\n' ${quote(
+                    k.key.trim
+                  )} >> $file && """ +
                 s"""chown $u:"$$g" "$$h/.ssh" $file"""
             )
         else if count == 0 then Right(NoDifference)
@@ -1645,7 +1670,9 @@ object Apply:
       val k = quote(v.key)
       s"""echo '$Marker$i'
          |if x=$$(sysctl -n $k 2>/dev/null); then echo found=yes; echo "runtime=$$(echo $$x | tr -s '[:space:]' ' ')"; else echo found=no; fi
-         |echo "persisted=$$(head -n1 ${quote(sysctlFile(v.key))} 2>/dev/null)"""".stripMargin
+         |echo "persisted=$$(head -n1 ${quote(
+          sysctlFile(v.key)
+        )} 2>/dev/null)"""".stripMargin
     def moduleObs(i: Int, m: ApplyResource.KernelModule): String =
       val sys = quote(s"/sys/module/${m.name.replace('-', '_')}")
       s"""echo '$Marker$i'
@@ -1656,7 +1683,9 @@ object Apply:
     def lineObs(i: Int, l: ApplyResource.LineInFile): String =
       s"""echo '$Marker$i'
          |if [ -f ${quote(l.path)} ]; then echo exists=yes
-         |  LN=${quote(l.line)} RE=${quote(l.matching)} awk 'BEGIN{l=ENVIRON["LN"];r=ENVIRON["RE"]} $$0==l{e++} r!="" && $$0~r{m++} END{print "exact=" (e+0); print "matches=" (m+0)}' ${quote(
+         |  LN=${quote(l.line)} RE=${quote(
+          l.matching
+        )} awk 'BEGIN{l=ENVIRON["LN"];r=ENVIRON["RE"]} $$0==l{e++} r!="" && $$0~r{m++} END{print "exact=" (e+0); print "matches=" (m+0)}' ${quote(
           l.path
         )}
          |else echo exists=no; fi""".stripMargin
@@ -1664,23 +1693,29 @@ object Apply:
       val u = quote(k.user)
       s"""echo '$Marker$i'
          |if e=$$(getent passwd $u); then echo exists=yes; h=$$(echo "$$e" | cut -d: -f6)
-         |  if [ -f "$$h/.ssh/authorized_keys" ]; then K=${quote(k.keyId)} awk '$$1" "$$2==ENVIRON["K"]{c++} END{print "count=" (c+0)}' "$$h/.ssh/authorized_keys"; else echo count=0; fi
+         |  if [ -f "$$h/.ssh/authorized_keys" ]; then K=${quote(
+          k.keyId
+        )} awk '$$1" "$$2==ENVIRON["K"]{c++} END{print "count=" (c+0)}' "$$h/.ssh/authorized_keys"; else echo count=0; fi
          |else echo exists=no; fi""".stripMargin
     def mountObs(i: Int, m: ApplyResource.Mount): String =
       s"""echo '$Marker$i'
          |echo fstab=no
-         |P=${quote(m.path)} awk '$$1!~/^#/ && $$2==ENVIRON["P"]{print "fstab=yes"; print "dev=" $$1; print "fstype=" $$3; print "opts=" $$4; exit}' /etc/fstab 2>/dev/null
-         |if mountpoint -q ${quote(m.path)} 2>/dev/null; then echo mounted=yes; else echo mounted=no; fi""".stripMargin
+         |P=${quote(
+          m.path
+        )} awk '$$1!~/^#/ && $$2==ENVIRON["P"]{print "fstab=yes"; print "dev=" $$1; print "fstype=" $$3; print "opts=" $$4; exit}' /etc/fstab 2>/dev/null
+         |if mountpoint -q ${quote(
+          m.path
+        )} 2>/dev/null; then echo mounted=yes; else echo mounted=no; fi""".stripMargin
     ("set +e" :: resources.map {
-      case (i, f: ApplyResource.File)      => pathState(i, f.path)
-      case (i, d: ApplyResource.Directory) => pathState(i, d.path)
-      case (i, s: ApplyResource.Symlink)   => pathState(i, s.path)
-      case (i, c: ApplyResource.Command)   => guard(i, c)
-      case (i, p: ApplyResource.Package)   => pkg(i, p)
-      case (i, u: ApplyResource.Service)   => unit(i, u)
-      case (i, u: ApplyResource.User)      => user(i, u)
-      case (i, g: ApplyResource.Group)     => group(i, g)
-      case (i, v: ApplyResource.Sysctl)    => sysctlObs(i, v)
+      case (i, f: ApplyResource.File)          => pathState(i, f.path)
+      case (i, d: ApplyResource.Directory)     => pathState(i, d.path)
+      case (i, s: ApplyResource.Symlink)       => pathState(i, s.path)
+      case (i, c: ApplyResource.Command)       => guard(i, c)
+      case (i, p: ApplyResource.Package)       => pkg(i, p)
+      case (i, u: ApplyResource.Service)       => unit(i, u)
+      case (i, u: ApplyResource.User)          => user(i, u)
+      case (i, g: ApplyResource.Group)         => group(i, g)
+      case (i, v: ApplyResource.Sysctl)        => sysctlObs(i, v)
       case (i, m: ApplyResource.KernelModule)  => moduleObs(i, m)
       case (i, l: ApplyResource.LineInFile)    => lineObs(i, l)
       case (i, k: ApplyResource.AuthorizedKey) => keyObs(i, k)

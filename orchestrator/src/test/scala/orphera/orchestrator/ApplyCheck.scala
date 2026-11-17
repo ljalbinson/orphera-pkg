@@ -807,7 +807,11 @@ object ApplyCheck:
           kernelModule("br_netfilter"),
           sysctl("net.bridge.bridge-nf-call-iptables", "1")
             .afterIds("kernel_module[br_netfilter]"),
-          lineInFile("/etc/ssh/sshd_config", "PermitRootLogin no", "^PermitRootLogin"),
+          lineInFile(
+            "/etc/ssh/sshd_config",
+            "PermitRootLogin no",
+            "^PermitRootLogin"
+          ),
           user("alice"),
           authorizedKey("alice", "ssh-ed25519 AAAAC3Nza alice@x"),
           mount("/mnt/data", "UUID=abc", "ext4")
@@ -874,14 +878,23 @@ object ApplyCheck:
       "new kinds: YAML mount options and mounted: any",
       parsed.exists(
         _.resources.contains(
-          ApplyResource.Mount("/mnt/data", "UUID=abc", "ext4", "noatime", None, present = true)
+          ApplyResource.Mount(
+            "/mnt/data",
+            "UUID=abc",
+            "ext4",
+            "noatime",
+            None,
+            present = true
+          )
         )
       )
     )
     check(
       "new kinds: sysctl in YAML needs a value; state absent is refused",
       yamlError("name: x\nresources:\n  - sysctl: a.b\n").contains("value") &&
-        yamlError("name: x\nresources:\n  - sysctl: a.b\n    value: 1\n    state: absent\n").contains("absent") &&
+        yamlError(
+          "name: x\nresources:\n  - sysctl: a.b\n    value: 1\n    state: absent\n"
+        ).contains("absent") &&
         yamlError("name: x\nresources:\n  - line: x\n").contains("path")
     )
 
@@ -1341,19 +1354,26 @@ object ApplyCheck:
 
       // Lines and keys, edited by the real scripts on this machine.
       val cfg = s"$base/sshd_config"
-      Files.writeString(Paths.get(cfg), "Port 22\n#PermitRootLogin yes\nPermitRootLogin prohibit-password\nUseDNS yes")
+      Files.writeString(
+        Paths.get(cfg),
+        "Port 22\n#PermitRootLogin yes\nPermitRootLogin prohibit-password\nUseDNS yes"
+      )
       val wantLine = lineInFile(cfg, "PermitRootLogin no", "^#?PermitRootLogin")
       val lineRun1 = run(List(wantLine), check = true)
       check(
         "local line: check mode would replace and changes nothing",
-        lineRun1.report.changed && Files.readString(Paths.get(cfg)).contains("prohibit-password"),
+        lineRun1.report.changed && Files
+          .readString(Paths.get(cfg))
+          .contains("prohibit-password"),
         lineRun1.lines.mkString("\n")
       )
       val lineRun2 = run(List(wantLine), check = false)
       check(
         "local line: replaces the first match and drops the others",
         !lineRun2.report.failed &&
-          Files.readString(Paths.get(cfg)) == "Port 22\nPermitRootLogin no\nUseDNS yes\n",
+          Files.readString(
+            Paths.get(cfg)
+          ) == "Port 22\nPermitRootLogin no\nUseDNS yes\n",
         lineRun2.lines.mkString("\n") + Files.readString(Paths.get(cfg))
       )
       check(
@@ -1394,15 +1414,22 @@ object ApplyCheck:
       val ol = others.lines.mkString("\n")
       check(
         "local: sysctl without a key and a key for a missing user fail in check mode",
-        outcome(others.report, "sysctl[orphera.no.such.key]").exists(_.isInstanceOf[ApplyOutcome.Failed]) &&
-          outcome(others.report, "authorized_key[orphera-nobody: ssh-ed25519 ...AAAA x]").exists(_.isInstanceOf[ApplyOutcome.Failed]),
+        outcome(others.report, "sysctl[orphera.no.such.key]")
+          .exists(_.isInstanceOf[ApplyOutcome.Failed]) &&
+          outcome(
+            others.report,
+            "authorized_key[orphera-nobody: ssh-ed25519 ...AAAA x]"
+          ).exists(_.isInstanceOf[ApplyOutcome.Failed]),
         ol
       )
       check(
         "local: a missing module and mount would change; an absent mount is unchanged",
-        outcome(others.report, "kernel_module[orphera_no_such_module]").exists(_.isInstanceOf[ApplyOutcome.WouldChange]) &&
-          outcome(others.report, "mount[/orphera-no-such-mount]").exists(_.isInstanceOf[ApplyOutcome.WouldChange]) &&
-          outcome(others.report, "mount[/orphera-no-such-mount-either]").exists(_.isInstanceOf[ApplyOutcome.Unchanged]),
+        outcome(others.report, "kernel_module[orphera_no_such_module]")
+          .exists(_.isInstanceOf[ApplyOutcome.WouldChange]) &&
+          outcome(others.report, "mount[/orphera-no-such-mount]")
+            .exists(_.isInstanceOf[ApplyOutcome.WouldChange]) &&
+          outcome(others.report, "mount[/orphera-no-such-mount-either]")
+            .exists(_.isInstanceOf[ApplyOutcome.Unchanged]),
         ol
       )
     finally
