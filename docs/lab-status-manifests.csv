@@ -1,0 +1,6 @@
+Manifest,Status,What was verified,Not yet seen
+k8s_node_prep,Verified,"First run changed all 10 nodes; second run 0 changed, 7 unchanged.",
+k8s_api_vip,Verified (first run),"sysctl persisted to 60-orphera-net.ipv4.ip_nonlocal_bind.conf; old 99-orphera-k8s-vip.conf removed; all stages completed.",Repeat run (expect 0 changed).
+k8s_kubeadm_config,End state verified,"One resolvConf line on tst30, tst31 and tst32; Prometheus, Alertmanager, Grafana and Loki running on new Ceph volumes; etcd, scheduler and controller manager scraped on all three nodes.",The changed or unchanged status line of the kubelet task.
+mariadb_haproxy_keepalived,Verified,"First run: sysctl changed, old 99-orphera-haproxy-vip.conf removed, VIP connection served by tst3. Second run: 0 changed, 2 unchanged on tst3, tst4 and tst5.",
+lustre_cluster,Verified (repeat run),"Second run: SELinux lineInFile task 0 changed, 1 unchanged on tst43 to tst48; all stages completed, tst50 mounted lfs0 and sees every MDT and OST.",The first-run status line of the SELinux task.
