@@ -76,7 +76,10 @@ object k8s_api_vip extends OrpheraClusterPlaybook:
     val bind = sysctl("net.ipv4.ip_nonlocal_bind", "1")
     ApplyPlan.orFail(
       "k8s-vip-sysctl",
-      List(bind, absentFile("/etc/sysctl.d/99-orphera-k8s-vip.conf").after(bind))
+      List(
+        bind,
+        absentFile("/etc/sysctl.d/99-orphera-k8s-vip.conf").after(bind)
+      )
     )
 
   private val haproxyScript =

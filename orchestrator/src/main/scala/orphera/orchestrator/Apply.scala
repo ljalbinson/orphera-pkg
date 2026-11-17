@@ -471,7 +471,7 @@ object ApplyPlan:
   def orFail(name: String, resources: List[ApplyResource]): ApplyPlan =
     apply(name, resources) match
       case Right(plan) => plan
-      case Left(ps) =>
+      case Left(ps)    =>
         sys.error(s"description '$name': ${ps.mkString("; ")}")
 
   /** Checks a description and works out its order, or lists every problem: a

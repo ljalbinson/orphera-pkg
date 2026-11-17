@@ -212,7 +212,10 @@ object mariadb_haproxy_keepalived extends OrpheraClusterPlaybook:
     val bind = sysctl("net.ipv4.ip_nonlocal_bind", "1")
     ApplyPlan.orFail(
       "haproxy-vip-sysctl",
-      List(bind, absentFile("/etc/sysctl.d/99-orphera-haproxy-vip.conf").after(bind))
+      List(
+        bind,
+        absentFile("/etc/sysctl.d/99-orphera-haproxy-vip.conf").after(bind)
+      )
     )
 
   private val haproxyConfigScript =
