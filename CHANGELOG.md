@@ -7,7 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
-- `manifests/apply_demo_kinds.yaml` and `apply_demo_kinds_remove.yaml`: the new kinds (line, authorized key, mount, sysctl) on a node, touching only things of their own. Fixed on the way: removing the key of a user that no longer exists is no longer a failure.
+- `manifests/apply_demo_kinds.yaml` and `apply_demo_kinds_remove.yaml`: the new kinds (line, authorized key, mount, sysctl) on a node, touching only things of their own. Fixed on the way: removing the key of a user that no longer exists is no longer a failure; a key to add for a user that is created earlier in the same description is a change, not a failure, in `--check`; and a key's implicit wait for its user applies only when adding it (so a removal description can remove the key, then the user).
 
 ### Fixed
 - `k8s_node_prep`: the second run failed on nodes already prepared, because installing kubelet, kubeadm, kubectl and cri-tools again with `-y` cannot change held packages and the repository had a newer cri-tools. The install is now skipped when all four are installed, so a re-run does not move the held versions.

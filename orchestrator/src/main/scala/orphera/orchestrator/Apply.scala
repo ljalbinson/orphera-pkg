@@ -607,8 +607,9 @@ object ApplyPlan:
           List(d.owner).filter(_.nonEmpty).map(o => s"user[$o]") ++ List(
             d.group
           ).filter(_.nonEmpty).map(g => s"group[$g]")
-        case k: ApplyResource.AuthorizedKey => List(s"user[${k.user}]")
-        case _                              => Nil
+        case k: ApplyResource.AuthorizedKey if k.present =>
+          List(s"user[${k.user}]")
+        case _ => Nil
       val needs: Map[Int, Set[Int]] =
         rs.indices
           .map(i =>
@@ -1323,9 +1324,10 @@ object Apply:
       case Observed.Facts(kv)
           if !kv.get("exists").contains("yes") && !k.present =>
         Right(NoDifference)
-      case Observed.Facts(kv) if !kv.get("exists").contains("yes") =>
-        Left(s"user ${k.user} does not exist")
       case Observed.Facts(kv) =>
+        // A user that does not exist yet is not a failure when the key is to
+        // be added: the user resource before it makes it (check mode reads
+        // before that happens), and if nothing does, the script says so.
         val count = kv.get("count").flatMap(_.toIntOption).getOrElse(0)
         val u = quote(k.user)
         val file = "\"$h/.ssh/authorized_keys\""
@@ -1335,13 +1337,15 @@ object Apply:
           else
             shellOf(
               List("key added"),
-              s"""$home; mkdir -p "$$h/.ssh" && chmod 700 "$$h/.ssh" && touch $file && chmod 600 $file && """ +
+              s"""$home; [ -n "$$h" ] || { echo "user ${k.user} does not exist" >&2; exit 1; }; """ +
+                s"""mkdir -p "$$h/.ssh" && chmod 700 "$$h/.ssh" && touch $file && chmod 600 $file && """ +
                 s"""{ [ -z "$$(tail -c1 $file)" ] || echo >> $file; } && printf '%s\\n' ${quote(
                     k.key.trim
                   )} >> $file && """ +
                 s"""chown $u:"$$g" "$$h/.ssh" $file"""
             )
-        else if count == 0 then Right(NoDifference)
+        else if count == 0 || !kv.get("exists").contains("yes") then
+          Right(NoDifference)
         else
           shellOf(
             List("key removed"),

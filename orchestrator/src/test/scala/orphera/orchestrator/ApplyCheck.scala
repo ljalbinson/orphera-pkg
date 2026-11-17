@@ -819,6 +819,14 @@ object ApplyCheck:
       ).isEmpty
     )
     check(
+      "new kinds: removing a key, then its user and group, is a valid order",
+      {
+        val key = absentAuthorizedKey("alice", "ssh-ed25519 AAAAC3Nza alice@x")
+        val gone = absentUser("alice").after(key)
+        problems(List(key, gone, absentGroup("alice").after(gone))).isEmpty
+      }
+    )
+    check(
       "new kinds: bad sysctl key, module, path, key and mount are named",
       problems(
         List(
@@ -1413,13 +1421,13 @@ object ApplyCheck:
       )
       val ol = others.lines.mkString("\n")
       check(
-        "local: a sysctl key the node lacks would change; a key for a missing user fails in check mode",
+        "local: a sysctl key the node lacks would change; so does a key for a user that does not exist yet",
         outcome(others.report, "sysctl[orphera.no.such.key]")
           .exists(_.isInstanceOf[ApplyOutcome.WouldChange]) &&
           outcome(
             others.report,
             "authorized_key[orphera-nobody: ssh-ed25519 ...AAAA x]"
-          ).exists(_.isInstanceOf[ApplyOutcome.Failed]),
+          ).exists(_.isInstanceOf[ApplyOutcome.WouldChange]),
         ol
       )
       check(
