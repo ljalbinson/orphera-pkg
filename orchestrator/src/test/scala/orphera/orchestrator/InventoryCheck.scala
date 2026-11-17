@@ -257,6 +257,28 @@ object InventoryCheck:
       "nodes refuses a stray argument",
       ListNodes.select(List("a"), grp, all4).isLeft
     )
+    check(
+      "nodes --groups with no name lists every group",
+      ListNodes.groupLines(Nil, grp) match
+        case Right(lines) => lines.size == grp.size
+        case Left(_)      => false
+    )
+    check(
+      "nodes --groups osds lists only that group, members after the colon",
+      ListNodes.groupLines(List("osds"), grp) == Right(List("osds: c d"))
+    )
+    check(
+      "nodes --groups takes several names, in the order given",
+      ListNodes.groupLines(List("osds,mons"), grp).map(_.map(_.takeWhile(_ != ':'))) ==
+        Right(List("osds", "mons"))
+    )
+    check(
+      "nodes --groups refuses an unknown group",
+      ListNodes
+        .groupLines(List("nope"), grp)
+        .swap
+        .exists(_.contains("Unknown node group"))
+    )
 
     val bad = Files.createTempFile("inventory-check", ".yaml")
     Files.writeString(
