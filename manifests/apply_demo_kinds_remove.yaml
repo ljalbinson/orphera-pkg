@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: Apache-2.0
+
+# Undoes apply_demo_kinds.yaml. A second run finds nothing to do.
+#
+#   orphera apply manifests/apply_demo_kinds_remove.yaml --nodes tst39
+name: apply-kinds-demo-remove
+nodes: [tst39]
+resources:
+  - mount: /opt/orphera-kinds/ram
+    state: absent
+  - authorized_key: orphera-kinds
+    key: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOrpheraDemoKeyNotARealKeyAAAAAAAAAAAA orphera-demo
+    state: absent
+  - user: orphera-kinds
+    state: absent
+    requires: ["authorized_key[orphera-kinds: ssh-ed25519 ...AAAAAAAA orphera-demo]"]
+  - group: orphera-kinds
+    state: absent
+    requires: ["user[orphera-kinds]"]
+  - file: /etc/sysctl.d/60-orphera-net.ipv4.tcp_syncookies.conf
+    state: absent
+  - command: remove the demo directory
+    run: rm -rf /opt/orphera-kinds
+    only_if: test -d /opt/orphera-kinds
+    requires: ["mount[/opt/orphera-kinds/ram]"]

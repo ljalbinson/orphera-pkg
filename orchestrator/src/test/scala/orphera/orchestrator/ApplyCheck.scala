@@ -1432,6 +1432,18 @@ object ApplyCheck:
             .exists(_.isInstanceOf[ApplyOutcome.Unchanged]),
         ol
       )
+      val goneKey = run(
+        List(absentAuthorizedKey("orphera-nobody", "ssh-ed25519 AAAA x")),
+        check = true
+      )
+      check(
+        "local: removing a key of a user that does not exist is not a failure",
+        outcome(
+          goneKey.report,
+          "authorized_key[orphera-nobody: ssh-ed25519 ...AAAA x]"
+        ).exists(_.isInstanceOf[ApplyOutcome.Unchanged]),
+        goneKey.lines.mkString("\n")
+      )
     finally
       new ProcessBuilder("rm", "-rf", base).start().waitFor()
       ()

@@ -1320,6 +1320,9 @@ object Apply:
       seen: Observed
   ): Either[String, Difference] =
     seen match
+      case Observed.Facts(kv)
+          if !kv.get("exists").contains("yes") && !k.present =>
+        Right(NoDifference)
       case Observed.Facts(kv) if !kv.get("exists").contains("yes") =>
         Left(s"user ${k.user} does not exist")
       case Observed.Facts(kv) =>

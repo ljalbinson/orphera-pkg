@@ -1,0 +1,39 @@
+# SPDX-License-Identifier: Apache-2.0
+
+# The kinds added in November 2026 as a YAML description: a line in a file, an
+# authorized key, a mount, a sysctl. Touches only things of its own: a user and
+# group named orphera-kinds, a directory /opt/orphera-kinds with a config file
+# in it and a small tmpfs mount, and one sysctl (net.ipv4.tcp_syncookies, which
+# is 1 already, so only its sysctl.d file is new).
+#
+#   orphera apply manifests/apply_demo_kinds.yaml --check --nodes tst39
+#   orphera apply manifests/apply_demo_kinds.yaml --nodes tst39      # creates
+#   orphera apply manifests/apply_demo_kinds.yaml --nodes tst39      # changes nothing
+#   (change "beta = 2" below to "beta = 3" and run again: that one line is replaced)
+#   orphera apply manifests/apply_demo_kinds_remove.yaml --nodes tst39   # takes it all away
+name: apply-kinds-demo
+nodes: [tst39]
+resources:
+  - group: orphera-kinds
+  - user: orphera-kinds
+    group: orphera-kinds
+    shell: /bin/bash
+  - authorized_key: orphera-kinds
+    key: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOrpheraDemoKeyNotARealKeyAAAAAAAAAAAA orphera-demo
+    requires: ["user[orphera-kinds]"]
+  - directory: /opt/orphera-kinds
+  - line: "alpha = 1"
+    path: /opt/orphera-kinds/demo.conf
+    match: "^alpha"
+    requires: ["directory[/opt/orphera-kinds]"]
+  - line: "beta = 2"
+    path: /opt/orphera-kinds/demo.conf
+    match: "^beta"
+    requires: ["directory[/opt/orphera-kinds]"]
+  - mount: /opt/orphera-kinds/ram
+    device: tmpfs
+    fstype: tmpfs
+    options: size=8m,mode=0755
+    requires: ["directory[/opt/orphera-kinds]"]
+  - sysctl: net.ipv4.tcp_syncookies
+    value: 1
