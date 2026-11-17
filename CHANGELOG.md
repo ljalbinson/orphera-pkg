@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- `docs/ACCESS-CONTROL-DESIGN.md`: a proposal for limits on what an authenticated caller may do: per-operator client certificates carrying a role, a policy in `config/access.yaml` enforced at the agent (read-only, files and packages, reboot, run, per node group and path), operator and role in the audit log. Not built.
 ### Changed
 - A forwarded agent socket with no agent at the far end (logged in with the `RemoteForward` while `orphera secrets agent` was not running on the Mac) now counts as no agent: orphera notes it and decrypts with the identity on the host, a YubiKey attached there, instead of stopping with `the agent on ...: Connection reset`. ssh accepts the connection and closes it, so a connection closed before the first byte of a reply is taken as nothing answering; once the agent has begun to answer, a failure still stops the run. The agent answers `PING` with `PONG`, and the README's login check for `~/.profile` uses it: it said the agent answered whenever the socket accepted a connection. `SecretsCheck`: the forwarded socket with nothing behind it, and `PING`.
 - `SecretsCheck` no longer prints the age-agent fallback note (`(age agent: nothing answers on ...; decrypting here with ...)`) during the build, which sbt showed as `[error]` though every check passed; it now checks that note instead (`AgeCipher` takes where the note goes).
