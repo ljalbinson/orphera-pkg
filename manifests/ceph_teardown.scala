@@ -3,6 +3,9 @@
 import orphera.orchestrator.*
 import orphera.orchestrator.ClusterPlaybookDsl.*
 
+// A rebuilt Ceph cluster starts empty: the pool `k8s-rbd` and the user
+// `client.k8s` that Kubernetes volumes depend on are gone. After a rebuild, run
+// k8s_ceph_csi.scala to make both again; volumes on the old cluster are lost.
 object ceph_teardown extends OrpheraClusterPlaybook:
 
   private val stopMonServiceScript =

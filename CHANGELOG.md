@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- `cephadm_teardown.scala` ends with a reminder, and `ceph_teardown.scala` carries the same note: a rebuilt Ceph cluster has no `k8s-rbd` pool and no `client.k8s` user, so run `k8s_ceph_csi.scala` after rebuilding, and expect the old Kubernetes volumes to be gone. (Found when a rebuild left volumes failing to attach with `rados: ret=-13`.)
 - `orphera nodes --groups g1,g2` lists only the named groups (`<group>: <members>`); an unknown name is an error. The bare `--groups` still lists every group, so the utilities that read it are unchanged. Typing a group after `--groups` used to fail with the usage text.
 - `manifests/apply_demo_kinds.yaml` and `apply_demo_kinds_remove.yaml`: the new kinds (line, authorized key, mount, sysctl) on a node, touching only things of their own. Fixed on the way: removing the key of a user that no longer exists is no longer a failure; a key to add for a user that is created earlier in the same description is a change, not a failure, in `--check`; and a key's implicit wait for its user applies only when adding it (so a removal description can remove the key, then the user).
 

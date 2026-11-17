@@ -201,7 +201,23 @@ object cephadm_teardown extends OrpheraClusterPlaybook:
       )
       .build
 
+  // A rebuilt Ceph cluster starts empty: the pool `k8s-rbd` and the user
+  // `client.k8s` that the Kubernetes volumes depend on are gone, and so is the
+  // data in them. Nothing in Kubernetes notices; attaching a volume then fails
+  // with "rados: ret=-13, Permission denied" until k8s_ceph_csi.scala has made
+  // both again. This reminder is the last thing the playbook prints.
+  private val rebuildNote: String =
+    "Ceph is torn down. After the cluster is rebuilt, run " +
+      "manifests/k8s_ceph_csi.scala to recreate the k8s-rbd pool and the " +
+      "client.k8s user. Kubernetes volumes that were on the old cluster are " +
+      "lost: delete their claims and let the workloads create new ones."
+
+  private val reminderStage =
+    stage("after-teardown", "tst0")
+      .task("what to do after a rebuild")(Task.Debug(rebuildNote))
+      .build
+
   val playbook: ClusterPlaybook =
     clusterPlaybook("cephadm-teardown")(
-      hosts.map(teardownStage)*
+      (hosts.map(teardownStage) :+ reminderStage)*
     )
