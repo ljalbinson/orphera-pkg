@@ -30,9 +30,8 @@ The honest limit comes first, because it decides the shape of the roles.
   that, so there is no command allowlist in this design.
 - **`apply` is also `run` at the agent today.** The apply engine reads a node and changes it by sending `sh -c` scripts
   through `ExecuteCommand`. So at the level of calls the agent sees, "may apply a description" and "may run any command"
-  are the same permission. Separating them needs either an apply engine inside the agent (the agent reads and changes
-  its own node from a structured description) or signed descriptions the agent can check. Neither is small. Phase 4
-  describes the first; this design does not pretend the roles below separate them before then.
+  are the same permission. Separating them needs the changes to reach the agent as typed actions it performs itself
+  instead of scripts (rollout step 4); this design does not pretend the roles below separate them before then.
 - What can be separated now: read-only access (facts, version, uptime, file checks, fetch) from anything that changes a
   node; changing files and packages (`CopyFile`, `Install`, `Remove`, `InstallDebPackage`) from running commands; reboot
   and shutdown from both; which nodes a role can reach at all; and which paths copy and fetch may touch.
@@ -145,11 +144,25 @@ open to any role) so a node left on an older policy shows.
 2. **Policy at the agent.** The interceptor, `config/access.yaml`, `issue-policy`, `policy-info`, `revoked`. Rolled out a
    few nodes at a time, with a role that is deliberately too wide at first, tightened from the journal.
 3. **Orchestrator checks.** Early, clear refusals; `viewer` and `--check` working end to end.
-4. **Apply without run.** Only if wanted. The apply engine moves its change step into the agent (a structured
-   `ApplyResources` call: the agent compares and changes its own node and returns the outcome per resource), after which
-   `apply` is a separate operation from `run` and a role can hold one without the other. The Scala and Go agents would
-   each need the resource kinds, which is real work and the reason this is last. Without it, a role that can apply can
-   run.
+4. **Apply without run: typed actions.** Only if wanted, and after the apply kinds are tested on the lab. The
+   orchestrator keeps the engine as it is: it observes (read-only calls), compares with the pure `compare` functions, and
+   produces a `Difference`. What changes is how a `Difference` is carried out. Today its actions are `Write` (a file) and
+   `Shell` (a script run by `ExecuteCommand`). They become a typed vocabulary the agent interprets itself: write a file with
+   this content, owner and mode; make a directory or link; set a sysctl; load a module; add, replace or remove a line in
+   a file; add or remove an authorized key; edit an fstab entry; mount or unmount; install or remove a package; start,
+   stop, enable or restart a service; create or change a user or group. Each is a message in a new `ApplyActions` call;
+   `Shell` stays for the few things no typed action covers (a guarded `command` resource, odd package steps), as an
+   action of its own that needs the `run` permission. The observe step is likewise a fixed set of reads (`ObserveNode`)
+   instead of a script, so a viewer can run `--check` without `run`.
+
+   Why this and not an engine in the agent: the rules (what counts as unchanged, how a line is replaced, what a mount
+   change does) stay in one place, in pure Scala, and are not written a second time in Go. The agent becomes an
+   interpreter of a small instruction set, which is easier to keep identical in the Scala and Go agents, and to test with
+   one table of cases. It also gives access control its separation: a role can hold `apply` (the typed actions) without
+   `run`, because the agent performs only those actions and not an arbitrary script. The cost is a second step in the
+   migration: each kind needs its typed action and an interpreter in each agent before the `Shell` form can go, and a
+   node whose agent lacks the call keeps the shell path (the agent reports its capabilities in `GetVersion`).
+   A side benefit is that actions as data replace string-built shell, which is where quoting mistakes live.
 
 Tests: the agent's guard check (`AgentGuardCheck`) gains the policy cases (a role allowed, a role refused, a path outside
 the role's prefixes, a revoked serial, an unparseable policy, a certificate with no role); the Go agent's unit tests the
@@ -173,4 +186,4 @@ then on two lab nodes.
    there operations a role needs per node (say, reboot on tst0 but not tst1)?
 2. 30 days for operator certificates, or longer?
 3. Is step 1 (identity and logging only) worth shipping on its own first? I would, for the audit log's sake.
-4. Is "apply without run" (step 4) wanted, or is "may run" the line that matters?
+4. Is "apply without run" (step 4, typed actions) wanted, or is "may run" the line that matters?
