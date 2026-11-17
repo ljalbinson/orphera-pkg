@@ -1341,7 +1341,7 @@ object ApplyCheck:
 
       // Lines and keys, edited by the real scripts on this machine.
       val cfg = s"$base/sshd_config"
-      Files.writeString(cfg, "Port 22\n#PermitRootLogin yes\nPermitRootLogin prohibit-password\nUseDNS yes")
+      Files.writeString(Paths.get(cfg), "Port 22\n#PermitRootLogin yes\nPermitRootLogin prohibit-password\nUseDNS yes")
       val wantLine = lineInFile(cfg, "PermitRootLogin no", "^#?PermitRootLogin")
       val lineRun1 = run(List(wantLine), check = true)
       check(
