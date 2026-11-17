@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- `docs/ACCESS-CONTROL-DESIGN.md`: a proposal for limits on what an authenticated caller may do: per-operator client certificates carrying a role, a policy in `config/access.yaml` enforced at the agent (read-only, files and packages, reboot, run, per node group and path), operator and role in the audit log. Not built.
 ### Changed
 - `k8s_node_prep`, `k8s_api_vip` and `mariadb_haproxy_keepalived` set their kernel modules and sysctls (overlay, br_netfilter, the bridge and forwarding settings, `ip_nonlocal_bind`) with apply descriptions (`kernelModule`, `sysctl`) instead of shell: a node that is already right is left alone. The persisted files are now `/etc/modules-load.d/orphera-<module>.conf` and `/etc/sysctl.d/60-orphera-<key>.conf`; the files the manifests used to write are removed. `mariadb_galera_teardown` removes the new sysctl file too. Swap stays a command. Not yet run on the lab.
 - Apply: a `sysctl` whose key the node does not have yet is a change, not a failure (a module before it in the description may provide it). New `ApplyPlan.orFail` for manifests.
