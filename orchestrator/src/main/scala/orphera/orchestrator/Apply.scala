@@ -1644,7 +1644,7 @@ object Apply:
         val (before, rest) = lines.span(!fstabMatches(_, path))
         if rest.isEmpty then before :+ e
         else (before :+ e) ++ rest.drop(1).filterNot(fstabMatches(_, path))
-    kept.mkString("", "\n", "\n")
+    if kept.isEmpty then "" else kept.mkString("", "\n", "\n")
 
   private def compareMount(
       m: ApplyResource.Mount,
