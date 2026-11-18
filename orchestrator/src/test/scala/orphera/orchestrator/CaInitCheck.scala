@@ -312,14 +312,14 @@ object CaInitCheck:
 
       // An operator's certificate: CN=<name>, OU=<role>, in operators/
       val alice = orphera.common.Operator("alice", "deployer")
-      val made = ClientCert.create(
+      val opMade = ClientCert.create(
         dir,
         ClientCert.Options(10, false, Some(alice))
       )
       check(
         "an operator certificate is made with the name and role",
-        made.contains("CN=alice/OU=deployer"),
-        made.toString
+        opMade.contains("CN=alice/OU=deployer"),
+        opMade.toString
       )
       val opCrt = dir.resolve("operators").resolve("alice.crt")
       val opKey = dir.resolve("operators").resolve("alice.key")
