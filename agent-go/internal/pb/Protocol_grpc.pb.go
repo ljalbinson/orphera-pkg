@@ -38,6 +38,7 @@ const (
 	Agent_GetUptime_FullMethodName         = "/orphera.common.Agent/GetUptime"
 	Agent_GetThreadInfo_FullMethodName     = "/orphera.common.Agent/GetThreadInfo"
 	Agent_ExecuteCommand_FullMethodName    = "/orphera.common.Agent/ExecuteCommand"
+	Agent_ObserveNode_FullMethodName       = "/orphera.common.Agent/ObserveNode"
 )
 
 // AgentClient is the client API for Agent service.
@@ -61,6 +62,7 @@ type AgentClient interface {
 	GetUptime(ctx context.Context, in *UptimeRequest, opts ...grpc.CallOption) (*UptimeInfo, error)
 	GetThreadInfo(ctx context.Context, in *ThreadInfoRequest, opts ...grpc.CallOption) (*ThreadInfo, error)
 	ExecuteCommand(ctx context.Context, in *RunCommandRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[Event], error)
+	ObserveNode(ctx context.Context, in *ObserveRequest, opts ...grpc.CallOption) (*ObserveReply, error)
 }
 
 type agentClient struct {
@@ -307,6 +309,16 @@ func (c *agentClient) ExecuteCommand(ctx context.Context, in *RunCommandRequest,
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type Agent_ExecuteCommandClient = grpc.ServerStreamingClient[Event]
 
+func (c *agentClient) ObserveNode(ctx context.Context, in *ObserveRequest, opts ...grpc.CallOption) (*ObserveReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ObserveReply)
+	err := c.cc.Invoke(ctx, Agent_ObserveNode_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AgentServer is the server API for Agent service.
 // All implementations must embed UnimplementedAgentServer
 // for forward compatibility.
@@ -328,6 +340,7 @@ type AgentServer interface {
 	GetUptime(context.Context, *UptimeRequest) (*UptimeInfo, error)
 	GetThreadInfo(context.Context, *ThreadInfoRequest) (*ThreadInfo, error)
 	ExecuteCommand(*RunCommandRequest, grpc.ServerStreamingServer[Event]) error
+	ObserveNode(context.Context, *ObserveRequest) (*ObserveReply, error)
 	mustEmbedUnimplementedAgentServer()
 }
 
@@ -389,6 +402,9 @@ func (UnimplementedAgentServer) GetThreadInfo(context.Context, *ThreadInfoReques
 func (UnimplementedAgentServer) ExecuteCommand(*RunCommandRequest, grpc.ServerStreamingServer[Event]) error {
 	return status.Errorf(codes.Unimplemented, "method ExecuteCommand not implemented")
 }
+func (UnimplementedAgentServer) ObserveNode(context.Context, *ObserveRequest) (*ObserveReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ObserveNode not implemented")
+}
 func (UnimplementedAgentServer) mustEmbedUnimplementedAgentServer() {}
 func (UnimplementedAgentServer) testEmbeddedByValue()               {}
 
@@ -400,7 +416,7 @@ type UnsafeAgentServer interface {
 }
 
 func RegisterAgentServer(s grpc.ServiceRegistrar, srv AgentServer) {
-	// If the following call panics, it indicates UnimplementedAgentServer was
+	// If the following call pancis, it indicates UnimplementedAgentServer was
 	// embedded by pointer and is nil.  This will cause panics if an
 	// unimplemented method is ever invoked, so we test this at initialization
 	// time to prevent it from happening at runtime later due to I/O.
@@ -656,6 +672,24 @@ func _Agent_ExecuteCommand_Handler(srv interface{}, stream grpc.ServerStream) er
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type Agent_ExecuteCommandServer = grpc.ServerStreamingServer[Event]
 
+func _Agent_ObserveNode_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ObserveRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServer).ObserveNode(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Agent_ObserveNode_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServer).ObserveNode(ctx, req.(*ObserveRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Agent_ServiceDesc is the grpc.ServiceDesc for Agent service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -698,6 +732,10 @@ var Agent_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetThreadInfo",
 			Handler:    _Agent_GetThreadInfo_Handler,
+		},
+		{
+			MethodName: "ObserveNode",
+			Handler:    _Agent_ObserveNode_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{
