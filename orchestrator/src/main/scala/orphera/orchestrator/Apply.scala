@@ -1601,12 +1601,12 @@ object Apply:
             accessOf(
               List("key added"),
               List(List(AccessChange.AddAuthorizedKey(k.user, k.key.trim)) ->
-              s"""$home; [ -n "$$h" ] || { echo "user ${k.user} does not exist" >&2; exit 1; }; """ +
+              (s"""$home; [ -n "$$h" ] || { echo "user ${k.user} does not exist" >&2; exit 1; }; """ +
                 s"""mkdir -p "$$h/.ssh" && chmod 700 "$$h/.ssh" && touch $file && chmod 600 $file && """ +
                 s"""{ [ -z "$$(tail -c1 $file)" ] || echo >> $file; } && printf '%s\\n' ${quote(
                     k.key.trim
                   )} >> $file && """ +
-                s"""chown $u:"$$g" "$$h/.ssh" $file""")
+                s"""chown $u:"$$g" "$$h/.ssh" $file"""))
             )
         else if count == 0 || !kv.get("exists").contains("yes") then
           Right(NoDifference)
