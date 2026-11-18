@@ -2,7 +2,10 @@
 
 # A package and a unit, for a role that holds apply-software but not run: it
 # installs nginx (which starts it), then stops and disables the unit. A second
-# run changes nothing. apply_demo_software_remove.yaml takes it away.
+# run changes nothing. apply_demo_software_remove.yaml takes it away. (Debian
+# remembers that a unit was disabled across a package remove, so after a remove
+# and a reinstall the unit is already disabled and stopped: the service line says
+# unchanged. That is right, not a missed change.)
 #
 #   orphera apply manifests/apply_demo_software.yaml --nodes tst39
 name: apply-software-demo
