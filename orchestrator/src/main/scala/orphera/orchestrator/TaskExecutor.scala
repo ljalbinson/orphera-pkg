@@ -121,8 +121,8 @@ object TaskExecutor:
         (node, items) => NodeClient.observeNode(node, items),
       // The agent's ApplyFiles: the changes made in order, raising when one
       // fails. Checks without an agent replace it.
-      applyFiles: (Node, List[FileChange]) => IO[Unit] =
-        (node, changes) => NodeClient.applyFiles(node, changes)
+      applyFiles: (Node, List[FileChange]) => IO[Unit] = (node, changes) =>
+        NodeClient.applyFiles(node, changes)
   )
 
   /** A direct command's Env: no facts, no templating, console output. */
@@ -919,7 +919,8 @@ object TaskExecutor:
         timeout: Int
     ): IO[Unit] =
       env.applyFiles(n, changes).handleErrorWith {
-        case e if NodeError.isUnimplemented(e) => shell(label, fallback, timeout)
+        case e if NodeError.isUnimplemented(e) =>
+          shell(label, fallback, timeout)
         case e => IO.raiseError(new RuntimeException(s"$label: ${describe(e)}"))
       }
 

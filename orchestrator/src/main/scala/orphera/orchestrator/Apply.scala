@@ -977,22 +977,24 @@ object Apply:
               case _ =>
                 IO.pure(Left(s"$path is not a regular file: not replaced"))
           case d: Directory if !d.present =>
-            IO.pure(seen match
-              case Observed.Absent       => Right(NoDifference)
-              case Observed.Dir(_, _, _) =>
-                Right(
-                  Difference(
-                    List("removed"),
-                    List(
-                      Action.Typed(
-                        List(FileChange.RemovePath(path, true)),
-                        s"rmdir -- $q"
-                      )
-                    ),
-                    Nil
+            IO.pure(
+              seen match
+                case Observed.Absent       => Right(NoDifference)
+                case Observed.Dir(_, _, _) =>
+                  Right(
+                    Difference(
+                      List("removed"),
+                      List(
+                        Action.Typed(
+                          List(FileChange.RemovePath(path, true)),
+                          s"rmdir -- $q"
+                        )
+                      ),
+                      Nil
+                    )
                   )
-                )
-              case _ => Left(s"$path is not a directory: not removed"))
+                case _ => Left(s"$path is not a directory: not removed")
+            )
           case d: Directory =>
             IO.pure(seen match
               case Observed.Absent =>
@@ -1022,22 +1024,24 @@ object Apply:
               case _ =>
                 Left(s"$path exists and is not a directory: not replaced"))
           case s: Symlink if !s.present =>
-            IO.pure(seen match
-              case Observed.Absent  => Right(NoDifference)
-              case Observed.Link(_) =>
-                Right(
-                  Difference(
-                    List("removed"),
-                    List(
-                      Action.Typed(
-                        List(FileChange.RemovePath(path, false)),
-                        s"rm -f -- $q"
-                      )
-                    ),
-                    Nil
+            IO.pure(
+              seen match
+                case Observed.Absent  => Right(NoDifference)
+                case Observed.Link(_) =>
+                  Right(
+                    Difference(
+                      List("removed"),
+                      List(
+                        Action.Typed(
+                          List(FileChange.RemovePath(path, false)),
+                          s"rm -f -- $q"
+                        )
+                      ),
+                      Nil
+                    )
                   )
-                )
-              case _ => Left(s"$path is not a symlink: not removed"))
+                case _ => Left(s"$path is not a symlink: not removed")
+            )
           case s: Symlink =>
             val link = Action.Typed(
               List(FileChange.MakeSymlink(s.path, s.target)),

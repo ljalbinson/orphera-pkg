@@ -1765,8 +1765,7 @@ object ApplyCheck:
         )._1 == Vector(FileChange.RemovePath("/f", false))
     )
     check(
-      "a sysctl that differs is set through the agent, and persisted as a file write",
-      {
+      "a sysctl that differs is set through the agent, and persisted as a file write", {
         val t = new TypedTarget(
           Map(
             "net.ipv4.ip_forward" -> Map(
