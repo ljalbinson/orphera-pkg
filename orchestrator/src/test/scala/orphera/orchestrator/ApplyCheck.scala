@@ -1220,9 +1220,14 @@ object ApplyCheck:
           ),
           templating = false,
           perform = localRunner,
-          // No agent here: ObserveNode is unimplemented, so the engine reads
-          // the node with its script, as it does on a Scala agent.
+          // No agent here: ObserveNode and ApplyFiles are unimplemented, so the
+          // engine reads and changes the node with scripts, as it does on a
+          // Scala agent.
           observe = (_, _) =>
+            IO.raiseError(
+              _root_.io.grpc.Status.UNIMPLEMENTED.asRuntimeException()
+            ),
+          applyFiles = (_, _) =>
             IO.raiseError(
               _root_.io.grpc.Status.UNIMPLEMENTED.asRuntimeException()
             )
@@ -1574,10 +1579,17 @@ object ApplyCheck:
           "content" -> "alpha = 1\nbeta = 2\nbeta = 3\n"
         )
       ).contains(
-        Observed.Facts(Map("exists" -> "yes", "exact" -> "1", "matches" -> "2"))
+        Observed.Facts(
+          Map(
+            "exists" -> "yes",
+            "exact" -> "1",
+            "matches" -> "2",
+            "content" -> "alpha = 1\nbeta = 2\nbeta = 3\n"
+          )
+        )
       ) &&
         one(line, Map("exists" -> "no"))
-          .contains(Observed.Facts(Map("exists" -> "no")))
+          .contains(Observed.Facts(Map("exists" -> "no", "content" -> "")))
     )
     check(
       "a file too large to read, or a bad regular expression, is not read at all",
@@ -1612,7 +1624,196 @@ object ApplyCheck:
           .contains(Observed.Facts(Map("fstab" -> "no", "mounted" -> "no")))
     )
 
+  // ---- typed changes ---------------------------------------------------------
+
+  // A node as the agent's ObserveNode reports it (values by what is read), that
+  // records the typed changes asked of it and refuses to run a script.
+  private class TypedTarget(values: Map[String, Map[String, String]])
+      extends ApplyTarget:
+    var seen: Vector[FileChange] = Vector.empty
+    var written: Vector[String] = Vector.empty
+    def node = "typed"
+    def observe(rs: List[(Int, ApplyResource)]): IO[Map[Int, Observed]] =
+      IO.pure(
+        rs.flatMap { (i, r) =>
+          Apply
+            .probe(r)
+            .flatMap(p => values.get(p.target))
+            .flatMap(kv =>
+              Apply.observedFromAgent(List(i -> r), Map(i -> kv)).get(i)
+            )
+            .map(i -> _)
+        }.toMap
+      )
+    def readText(path: String): IO[Option[String]] = IO.pure(None)
+    def source(path: String, vars: Map[String, String]): IO[String] =
+      IO.pure("")
+    def write(
+        path: String,
+        content: String,
+        owner: String,
+        group: String,
+        mode: Int
+    ): IO[Unit] = IO { written :+= path }
+    def shell(label: String, script: String, timeout: Int): IO[Unit] =
+      IO.raiseError(new RuntimeException(s"a script ran: $script"))
+    override def typed(
+        label: String,
+        changes: List[FileChange],
+        fallback: String,
+        timeout: Int
+    ): IO[Unit] = IO { seen ++= changes }
+
+  private def shaOf(t: String): String =
+    java.security.MessageDigest
+      .getInstance("SHA-256")
+      .digest(t.getBytes(StandardCharsets.UTF_8))
+      .map(b => f"${b & 0xff}%02x")
+      .mkString
+
+  private def typedChecks(): Unit =
+    def seenFor(
+        values: Map[String, Map[String, String]],
+        r: ApplyResource
+    ): (Vector[FileChange], Ran) =
+      val t = new TypedTarget(values)
+      val ran = applyTo(t, List(r))
+      (t.seen, ran)
+
+    val old = "alpha = 1\nbeta = 2\n"
+    val fileOf = (c: String) =>
+      Map("exists" -> "yes", "truncated" -> "no", "content" -> c)
+    val (put, ran) = seenFor(
+      Map("/etc/x.conf" -> fileOf(old)),
+      lineInFile("/etc/x.conf", "beta = 3", "^beta")
+    )
+    check(
+      "a line replaced: the new text is worked out here and sent with the old hash",
+      put == Vector(
+        FileChange.ReplaceText(
+          "/etc/x.conf",
+          "alpha = 1\nbeta = 3\n",
+          shaOf(old),
+          "0644"
+        )
+      ) && !ran.report.failed,
+      s"$put ${ran.lines}"
+    )
+    check(
+      "a line in a file that is not there: the file is created",
+      seenFor(
+        Map("/etc/x.conf" -> Map("exists" -> "no")),
+        lineInFile("/etc/x.conf", "alpha = 1")
+      )._1 == Vector(
+        FileChange.ReplaceText("/etc/x.conf", "alpha = 1\n", "", "0644")
+      )
+    )
+    check(
+      "a line removed: it and the lines that match go",
+      seenFor(
+        Map("/f" -> fileOf("a\nb\nc\n")),
+        absentLine("/f", "b")
+      )._1 == Vector(
+        FileChange.ReplaceText("/f", "a\nc\n", shaOf("a\nb\nc\n"), "0644")
+      )
+    )
+    check(
+      "a line already there changes nothing",
+      seenFor(
+        Map("/f" -> fileOf("a\nb\n")),
+        lineInFile("/f", "b", "^b")
+      )._1.isEmpty
+    )
+    check(
+      "a directory that is not there is made with its mode, owner and group",
+      seenFor(
+        Map("/opt/d" -> Map("type" -> "absent")),
+        directory("/opt/d", mode = "0750")
+      )._1 == Vector(FileChange.MakeDirectory("/opt/d", "0750", "", ""))
+    )
+    check(
+      "a directory with the wrong mode: only the mode is set",
+      seenFor(
+        Map(
+          "/opt/d" -> Map(
+            "type" -> "directory",
+            "mode" -> "755",
+            "owner" -> "root",
+            "group" -> "root"
+          )
+        ),
+        directory("/opt/d", mode = "0750")
+      )._1 == Vector(FileChange.SetAttributes("/opt/d", "0750", "", ""))
+    )
+    check(
+      "a link to somewhere else is made again; a file is removed",
+      seenFor(
+        Map("/l" -> Map("type" -> "link", "target" -> "/old")),
+        symlink("/l", "/new")
+      )._1 == Vector(FileChange.MakeSymlink("/l", "/new")) &&
+        seenFor(
+          Map(
+            "/f" -> Map(
+              "type" -> "file",
+              "mode" -> "644",
+              "owner" -> "root",
+              "group" -> "root",
+              "sha256" -> "ab"
+            )
+          ),
+          absentFile("/f")
+        )._1 == Vector(FileChange.RemovePath("/f", false))
+    )
+    check(
+      "a sysctl that differs is set through the agent, and persisted as a file write",
+      {
+        val t = new TypedTarget(
+          Map(
+            "net.ipv4.ip_forward" -> Map(
+              "found" -> "yes",
+              "runtime" -> "0",
+              "persisted" -> ""
+            )
+          )
+        )
+        applyTo(t, List(sysctl("net.ipv4.ip_forward", "1")))
+        t.seen == Vector(FileChange.SetSysctl("net.ipv4.ip_forward", "1")) &&
+        t.written == Vector(
+          "/etc/sysctl.d/60-orphera-net.ipv4.ip_forward.conf"
+        )
+      }
+    )
+    check(
+      "a module that is not loaded is loaded through the agent",
+      seenFor(
+        Map("overlay" -> Map("loaded" -> "no", "persisted" -> "overlay")),
+        kernelModule("overlay")
+      )._1 == Vector(FileChange.LoadModule("overlay"))
+    )
+
+    def edited(l: ApplyResource, text: String): String = l match
+      case x: ApplyResource.LineInFile => Apply.editedText(x, text)
+      case _                           => ""
+    check(
+      "the text a line resource makes: replace the first match, drop the others, or add",
+      edited(lineInFile("/f", "k = 1", "^k"), "a\nk = 0\nb\nk = 9\n") ==
+        "a\nk = 1\nb\n" &&
+        edited(lineInFile("/f", "k = 1", "^k"), "a\nb\n") == "a\nb\nk = 1\n" &&
+        edited(lineInFile("/f", "k = 1"), "a\n") == "a\nk = 1\n" &&
+        edited(absentLine("/f", "x", "^y"), "x\ny1\nz\n") == "z\n" &&
+        edited(absentLine("/f", "z"), "z\n") == "" &&
+        edited(lineInFile("/f", "n"), "a") == "a\nn\n"
+    )
+    check(
+      "records are split on newline only, as awk does",
+      Apply.records("a\r\nb\n") == List("a\r", "b") &&
+        Apply.records("a\nb") == List("a", "b") &&
+        Apply.records("") == Nil &&
+        Apply.records("\n") == List("")
+    )
+
   def main(args: Array[String]): Unit =
+    typedChecks()
     observeChecks()
     planChecks()
     runChecks()

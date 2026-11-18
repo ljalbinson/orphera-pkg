@@ -60,7 +60,7 @@ Each phase is its own branch, is verified on the lab, and is merged before the n
    UNIMPLEMENTED and the orchestrator falls back to its script.) The messages, the capability list in `GetVersion`, `ObserveNode` in the Go
    agent, the orchestrator reading it in place of the observe script, the `observe` operation. `--check` works for a
    viewer. Verify: every manifest's `--check` gives the same plan with the script and with `ObserveNode`.
-2. **File kinds.** `ApplyActions` for directory, symlink, mode/owner/group, write with a hash precondition (which carries
+2. **File kinds.** (Built as one call, `ApplyFiles`, with the operation `apply-files`; line edits are `ReplaceText` with a hash guard; fstab edits go with mounts in phase 3.) `ApplyActions` for directory, symlink, mode/owner/group, write with a hash precondition (which carries
    line and fstab edits), sysctl, kernel module; `paths` applied to each. `apply-files`. Verify with `k8s_node_prep`,
    `k8s_api_vip`, `k8s_kubeadm_config`, `mariadb_haproxy_keepalived`.
 3. **Access kinds.** Authorized key, user, group, mount. Verify with `apply_demo_kinds.yaml` and its removal form.

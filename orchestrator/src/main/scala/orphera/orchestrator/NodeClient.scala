@@ -675,6 +675,48 @@ object NodeClient:
         )
       }
 
+  private def fileAction(c: FileChange): FileAction =
+    import FileChange.*
+    FileAction(c match
+      case MakeDirectory(p, m, o, g) =>
+        FileAction.Action.MakeDirectory(
+          orphera.common.MakeDirectory(p, m, o, g)
+        )
+      case SetAttributes(p, m, o, g) =>
+        FileAction.Action.SetAttributes(
+          orphera.common.SetAttributes(p, m, o, g)
+        )
+      case RemovePath(p, d) =>
+        FileAction.Action.RemovePath(orphera.common.RemovePath(p, d))
+      case MakeSymlink(p, t) =>
+        FileAction.Action.MakeSymlink(orphera.common.MakeSymlink(p, t))
+      case SetSysctl(k, v) =>
+        FileAction.Action.SetSysctl(orphera.common.SetSysctl(k, v))
+      case LoadModule(n) =>
+        FileAction.Action.LoadModule(orphera.common.LoadModule(n))
+      case ReplaceText(p, c, h, m) =>
+        FileAction.Action.ReplaceText(orphera.common.ReplaceText(p, c, h, m))
+    )
+
+  /** The agent's `ApplyFiles`: makes the changes in order and raises, naming
+    * the one that failed, if one does. Raises UNIMPLEMENTED on an agent that
+    * does not have it.
+    */
+  def applyFiles(node: Node, changes: List[FileChange]): IO[Unit] =
+    channelBuilder(node)
+      .resource[IO]
+      .flatMap(AgentFs2Grpc.stubResource[IO])
+      .use { stub =>
+        stub.applyFiles(
+          ApplyFilesRequest(changes.map(fileAction)),
+          authMetadata()
+        )
+      }
+      .flatMap(reply =>
+        if reply.error.isEmpty then IO.unit
+        else IO.raiseError(new RuntimeException(reply.error))
+      )
+
   def getThreadInfo(node: Node, resetPeak: Boolean): IO[ThreadInfo] =
     channelBuilder(node)
       .resource[IO]
