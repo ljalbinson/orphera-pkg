@@ -942,6 +942,44 @@ object TaskExecutor:
         case e => IO.raiseError(new RuntimeException(s"$label: ${describe(e)}"))
       }
 
+    // A file's text goes through ApplyFiles, a replacement guarded by the hash
+    // that was read; larger than the agent takes, or on an agent without the
+    // call (UNIMPLEMENTED, before anything is changed), it is copied as it was.
+    override def writeText(
+        path: String,
+        content: String,
+        owner: String,
+        group: String,
+        mode: Int,
+        expectedSha: String,
+        overwrite: Boolean
+    ): IO[Unit] =
+      val bytes = content.getBytes(java.nio.charset.StandardCharsets.UTF_8)
+      if bytes.length > 4 * 1024 * 1024 then
+        write(path, content, owner, group, mode)
+      else
+        env
+          .applyFiles(
+            n,
+            Apply.writeChanges(
+              path,
+              content,
+              owner,
+              group,
+              mode,
+              expectedSha,
+              overwrite
+            )
+          )
+          .handleErrorWith {
+            case e if NodeError.isUnimplemented(e) =>
+              write(path, content, owner, group, mode)
+            case e =>
+              IO.raiseError(
+                new RuntimeException(s"writing $path: ${describe(e)}")
+              )
+          }
+
     override def access(
         label: String,
         changes: List[AccessChange],

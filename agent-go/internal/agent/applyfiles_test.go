@@ -33,6 +33,10 @@ func textA(path, content, sha, mode string) *pb.FileAction {
 	return &pb.FileAction{Action: &pb.FileAction_ReplaceText{ReplaceText: &pb.ReplaceText{Path: path, Content: content, ExpectedSha256: sha, CreateMode: mode}}}
 }
 
+func overwriteA(path, content string) *pb.FileAction {
+	return &pb.FileAction{Action: &pb.FileAction_ReplaceText{ReplaceText: &pb.ReplaceText{Path: path, Content: content, Overwrite: true}}}
+}
+
 func applyFiles(t *testing.T, actions ...*pb.FileAction) *pb.ApplyReply {
 	t.Helper()
 	reply, err := NewService().ApplyFiles(context.Background(), &pb.ApplyFilesRequest{Actions: actions})
@@ -125,6 +129,27 @@ func TestApplySymlink(t *testing.T) {
 	left, _ := filepath.Glob(filepath.Join(dir, ".*orphera*"))
 	if len(left) != 0 {
 		t.Errorf("temporary links left: %v", left)
+	}
+}
+
+func TestApplyReplaceTextOverwrite(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "sysctl.conf")
+	if r := applyFiles(t, overwriteA(f, "a = 1\n")); r.Error != "" {
+		t.Fatalf("overwrite of a missing file creates it: %+v", r)
+	}
+	os.Chmod(f, 0o600)
+	if r := applyFiles(t, overwriteA(f, "a = 2\n")); r.Error != "" {
+		t.Fatalf("overwrite: %+v", r)
+	}
+	if got, _ := os.ReadFile(f); string(got) != "a = 2\n" {
+		t.Errorf("content %q", got)
+	}
+	if fi, _ := os.Stat(f); fi.Mode().Perm() != 0o600 {
+		t.Errorf("mode %v, want 0600 kept", fi.Mode())
+	}
+	if r := applyFiles(t, overwriteA(dir, "x")); r.Error == "" {
+		t.Error("a directory is not overwritten")
 	}
 }
 

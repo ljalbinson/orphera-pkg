@@ -298,15 +298,17 @@ func replaceText(r *pb.ReplaceText) error {
 		if !fi.Mode().IsRegular() {
 			return fmt.Errorf("%s is not a regular file", r.Path)
 		}
-		if r.ExpectedSha256 == "" {
+		if r.ExpectedSha256 == "" && !r.Overwrite {
 			return fmt.Errorf("the file exists now (expected it not to)")
 		}
-		sum, err := sha256File(r.Path)
-		if err != nil {
-			return err
-		}
-		if sum != r.ExpectedSha256 {
-			return fmt.Errorf("the file has changed since it was read (hash %s, expected %s): not edited", sum, r.ExpectedSha256)
+		if r.ExpectedSha256 != "" {
+			sum, err := sha256File(r.Path)
+			if err != nil {
+				return err
+			}
+			if sum != r.ExpectedSha256 {
+				return fmt.Errorf("the file has changed since it was read (hash %s, expected %s): not edited", sum, r.ExpectedSha256)
+			}
 		}
 		mode = fi.Mode()
 		if st, ok := fi.Sys().(*syscall.Stat_t); ok {

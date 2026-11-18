@@ -694,8 +694,10 @@ object NodeClient:
         FileAction.Action.SetSysctl(orphera.common.SetSysctl(k, v))
       case LoadModule(n) =>
         FileAction.Action.LoadModule(orphera.common.LoadModule(n))
-      case ReplaceText(p, c, h, m) =>
-        FileAction.Action.ReplaceText(orphera.common.ReplaceText(p, c, h, m)))
+      case ReplaceText(p, c, h, m, o) =>
+        FileAction.Action.ReplaceText(
+          orphera.common.ReplaceText(p, c, h, m, o)
+        ))
 
   /** The agent's `ApplyFiles`: makes the changes in order and raises, naming
     * the one that failed, if one does. Raises UNIMPLEMENTED on an agent that

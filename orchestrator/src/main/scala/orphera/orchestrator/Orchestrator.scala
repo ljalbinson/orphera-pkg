@@ -427,6 +427,16 @@ object Orchestrator:
                               "Nothing was changed"
                           )
                         )
+                        _ <- IO.raiseUnless(
+                          AccessPolicy.unknownOperations(policy, version).isEmpty
+                        )(
+                          new RuntimeException(
+                            s"its agent is $version, which does not know the operation " +
+                              s"${AccessPolicy.unknownOperations(policy, version).mkString(", ")} " +
+                              "and would refuse every call under this policy: orphera deploy-agent first. " +
+                              "Nothing was changed"
+                          )
+                        )
                         _ <- AccessPolicy.placeOn(
                           node,
                           sshUser,

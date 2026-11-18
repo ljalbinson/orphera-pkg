@@ -750,7 +750,8 @@ enum FileChange:
       path: String,
       content: String,
       expectedSha256: String,
-      createMode: String
+      createMode: String,
+      overwrite: Boolean = false
   )
 
 /** A change the agent's `ApplyAccess` makes itself: accounts, authorized keys
@@ -823,6 +824,19 @@ trait ApplyTarget:
       mode: Int
   ): IO[Unit]
 
+  /** The same through the agent's `ApplyFiles` (a replacement guarded by the
+    * hash of what was read), on an agent that has it; otherwise `write`.
+    */
+  def writeText(
+      path: String,
+      content: String,
+      owner: String,
+      group: String,
+      mode: Int,
+      @scala.annotation.unused expectedSha: String,
+      @scala.annotation.unused overwrite: Boolean
+  ): IO[Unit] = write(path, content, owner, group, mode)
+
   /** Runs a change; raises, with what it printed, when it fails. */
   def shell(label: String, script: String, timeout: Int): IO[Unit]
 
@@ -873,6 +887,31 @@ object Apply:
       .map(b => f"${b & 0xff}%02x")
       .mkString
 
+  /** The typed changes that write a file's text: the replacement, then its
+    * mode, owner and group when they are given.
+    */
+  private[orchestrator] def writeChanges(
+      path: String,
+      text: String,
+      owner: String,
+      group: String,
+      mode: Int,
+      expectedSha: String,
+      overwrite: Boolean
+  ): List[FileChange] =
+    val create = if mode > 0 then "0" + Integer.toOctalString(mode) else "0644"
+    FileChange.ReplaceText(path, text, expectedSha, create, overwrite) ::
+      (if mode > 0 || owner.nonEmpty || group.nonEmpty then
+         List(
+           FileChange.SetAttributes(
+             path,
+             if mode > 0 then "0" + Integer.toOctalString(mode) else "",
+             owner,
+             group
+           )
+         )
+       else Nil)
+
   private[orchestrator] def octal(mode: String): Int =
     if mode.isEmpty then 0 else Integer.parseInt(mode, 8)
 
@@ -883,12 +922,17 @@ object Apply:
 
   // A change: a file written through the agent, or a shell command.
   private enum Action:
+    /** A file's whole text. `expectedSha` is the hash of what was read ("":
+      * there was no file); `overwrite` replaces a file whatever it holds.
+      */
     case Write(
         path: String,
         content: String,
         owner: String,
         group: String,
-        mode: Int
+        mode: Int,
+        expectedSha: String,
+        overwrite: Boolean
     )
     case Shell(script: String)
 
@@ -1004,11 +1048,21 @@ object Apply:
             val wanted = content.getOrElse(("", false))
             val text = wanted._1
             val secret = wanted._2
-            val write =
-              Action.Write(f.path, text, f.owner, f.group, octal(f.mode))
+            def write(sha: String) =
+              Action.Write(
+                f.path,
+                text,
+                f.owner,
+                f.group,
+                octal(f.mode),
+                sha,
+                false
+              )
             seen match
               case Observed.Absent =>
-                IO.pure(Right(Difference(List("created"), List(write), Nil)))
+                IO.pure(
+                  Right(Difference(List("created"), List(write("")), Nil))
+                )
               case Observed.RegularFile(m, o, g, sum) =>
                 val fix = attrs(f.path, f.mode, f.owner, f.group, m, o, g)
                 if f.content.nonEmpty && sum != sha256(text) then
@@ -1027,7 +1081,7 @@ object Apply:
                       Difference(
                         List(if secret then "content (secret: not shown)"
                         else "content") ++ fix.changes,
-                        List(write),
+                        List(write(sum)),
                         if secret then Nil else d
                       )
                     )
@@ -1479,7 +1533,15 @@ object Apply:
             )
           ),
           Option.when(stored)(
-            Action.Write(sysctlFile(v.key), text + "\n", "", "", Mode0644)
+            Action.Write(
+              sysctlFile(v.key),
+              text + "\n",
+              "",
+              "",
+              Mode0644,
+              "",
+              true
+            )
           )
         ).flatten
         val changes = List(
@@ -1507,7 +1569,7 @@ object Apply:
             )
           ),
           Option.when(stored)(
-            Action.Write(file, m.name + "\n", "", "", Mode0644)
+            Action.Write(file, m.name + "\n", "", "", Mode0644, "", true)
           )
         ).flatten
         val changes = List(
@@ -1966,8 +2028,8 @@ object Apply:
                                 case _                        => 120
                               d.actions
                                 .traverse_ {
-                                  case Action.Write(p, t, o, g, m) =>
-                                    target.write(p, t, o, g, m)
+                                  case Action.Write(p, t, o, g, m, h, ow) =>
+                                    target.writeText(p, t, o, g, m, h, ow)
                                   case Action.Shell(script) =>
                                     target.shell(r.id, script, timeout)
                                   case Action.Typed(changes, fallback) =>
