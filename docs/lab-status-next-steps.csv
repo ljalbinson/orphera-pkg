@@ -1,4 +1,4 @@
 Item,Type,Needs first,Command or action
-"Mutual TLS, the 0.1.211 agent and a policy on the hypervisors",Decision,"All 49 nodes in the inventory are done and verified. The hypervisors (gs1, gs2, gs3, gs9, st0) are not in the all group and were not touched; it is not known whether they run agents.","Check first: orphera version --nodes gs1,gs2,gs3,gs9,st0. Only if wanted."
+"Mutual TLS, the 0.1.211 agent and a policy on the 8 nodes outside the all group",Decision,"The 49 nodes of the all group are done and verified. tst51, tst52, scala1 and the hypervisors (gs1, gs2, gs3, gs9, st0) are not in it and were not touched; it is not known whether they run agents.","Check first: orphera version --nodes tst51,tst52,scala1,gs1,gs2,gs3,gs9,st0. Only if wanted."
 Access control: what is left,Decision,"Steps 1 to 3 are merged and verified. Not built: path limits, policy-info, viewer-safe apply --check (typed actions, step 4).",Only if wanted.
 Retire lustre_cluster.scala,Decision,lustre_cluster_script.scala has now run cleanly; its header says the playbook stays until then.,
