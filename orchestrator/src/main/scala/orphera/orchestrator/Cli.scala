@@ -84,14 +84,16 @@ enum Command:
       clientAuth: Option[Boolean] = None
   )
   // Puts the access policy (access.yaml, beside the inventory) on each node over SSH, or takes
-  // it off (--remove). --dry-run only prints each node's policy.
+  // it off (--remove). --dry-run only prints each node's policy. check (the policy-info command)
+  // only reads what each node holds and compares it with access.yaml.
   case IssuePolicy(
       nodes: Option[List[String]],
       sshUser: String,
       sshKeyPath: Option[String],
       policyFile: Option[String] = None,
       remove: Boolean = false,
-      dryRun: Boolean = false
+      dryRun: Boolean = false,
+      check: Boolean = false
   )
   case Teardown(
       nodes: List[String],
@@ -394,6 +396,11 @@ object Cli:
         parseIssueCerts(rest, None, "root", None)
       case "issue-policy" :: rest =>
         parseIssuePolicy(rest, Command.IssuePolicy(None, "root", None))
+      case "policy-info" :: rest =>
+        parseIssuePolicy(
+          rest,
+          Command.IssuePolicy(None, "root", None, check = true)
+        )
       case "teardown" :: rest =>
         parseTeardown(rest, Nil, "root", None, purge = false, confirmed = false)
       case "fetch" :: remote :: rest => parseFetch(rest, remote, ".", None)
@@ -1158,7 +1165,9 @@ object Cli:
   ): Either[String, Command] =
     args match
       case Nil =>
-        if acc.remove && acc.dryRun then
+        if acc.check && (acc.remove || acc.dryRun) then
+          Left("policy-info changes nothing; it takes no --remove or --dry-run")
+        else if acc.remove && acc.dryRun then
           Left("--remove and --dry-run cannot both be given")
         else if acc.remove && acc.policyFile.nonEmpty then
           Left("--remove and --policy cannot both be given")
@@ -1179,7 +1188,11 @@ object Cli:
       case "--dry-run" :: rest =>
         parseIssuePolicy(rest, acc.copy(dryRun = true))
       case other :: _ =>
-        Left(s"Unknown argument to issue-policy: $other")
+        Left(
+          s"Unknown argument to ${
+              if acc.check then "policy-info" else "issue-policy"
+            }: $other"
+        )
 
   private def parseTeardown(
       args: List[String],
@@ -1488,6 +1501,11 @@ object Cli:
       |                      (issue-certs --client-auth) and run an agent that applies a
       |                      policy. --dry-run prints each node's policy and changes
       |                      nothing; --remove takes the policy off (every call allowed again)
+      |  policy-info       [--nodes host1,host2] [--policy access.yaml]
+      |                    [--ssh-user root] [--ssh-key ~/.ssh/id_ed25519]
+      |                    — reads the policy each node holds, over SSH, and says whether it is
+      |                      the one access.yaml gives that node, so a node left on an older
+      |                      policy shows. Changes nothing; exit 1 if any node differs
       |  issue-client-cert [--days 825] [--force]
       |                    [--operator <name> --role <role>]
       |                    — makes this orchestrator's client certificate, certs/client.crt

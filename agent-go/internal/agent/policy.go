@@ -3,13 +3,19 @@
 package agent
 
 import (
+	"context"
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"log"
 	"math/big"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // The access policy of this node: /etc/orphera-agent/policy, made for the node
@@ -19,6 +25,8 @@ import (
 //
 //	default_role admin            # the role of a certificate with no role in it
 //	role viewer facts,version     # operations, comma-separated
+//	role deployer copy,fetch
+//	paths deployer /etc/ceph/,/srv/   # copy, check-file and fetch only under these
 //	role admin all
 //
 // A node with no policy file allows every call, as before. With one, a call is
@@ -53,6 +61,9 @@ var Operations = map[string][]string{
 type Policy struct {
 	DefaultRole string
 	Roles       map[string]map[string]bool
+	// Paths limits a role's CopyFile, CheckFile and RemoteFetchFile to these
+	// prefixes. A role with no entry is not limited.
+	Paths map[string][]string
 }
 
 func operationOf(method string) string {
@@ -101,10 +112,60 @@ func (p *Policy) Refusal(role, method string) string {
 		role, method, operationOf(method), strings.Join(names, ", "))
 }
 
+// PathRefusal says why role may not use path with copy, check-file or fetch,
+// or is "" when it may: the role has no paths, or path is one of them or under
+// one, after making it absolute, resolving "..", and following symbolic links
+// (as isProtected does), so another name for the same place counts too.
+func (p *Policy) PathRefusal(role, path string) string {
+	prefixes := p.Paths[role]
+	if len(prefixes) == 0 {
+		return ""
+	}
+	resolved := resolvePath(path)
+	sep := string(filepath.Separator)
+	for _, pre := range prefixes {
+		d := realPath(pre)
+		if d == sep || resolved == d || strings.HasPrefix(resolved, d+sep) {
+			return ""
+		}
+	}
+	return fmt.Sprintf("role '%s' may copy, check and fetch files only under %s; %s is outside",
+		role, strings.Join(prefixes, ", "), path)
+}
+
+// pathDeniedBy is nil when the caller with certificate cert may use path with
+// copy, check-file or fetch, else the refusal to send. The interceptor has
+// already refused a caller with no role or a policy that does not parse, so
+// those are not refused again here.
+func pathDeniedBy(files PolicyFiles, cert *x509.Certificate, path string) error {
+	if !files.Present || cert == nil {
+		return nil
+	}
+	p, err := ParsePolicy(files.Policy)
+	if err != nil {
+		return nil
+	}
+	role, err := RoleOf(cert, p.DefaultRole)
+	if err != nil {
+		return nil
+	}
+	why := p.PathRefusal(role, path)
+	if why == "" {
+		return nil
+	}
+	log.Printf("path %s as %s REFUSED: %s", DescribeCert(cert), role, why)
+	return status.Error(codes.PermissionDenied, "refused: "+why)
+}
+
+// pathDenied is pathDeniedBy for the caller of ctx, by this node's policy.
+func pathDenied(ctx context.Context, path string) error {
+	return pathDeniedBy(ReadPolicyFiles(PolicyPath, RevokedPath), peerCertificate(ctx), path)
+}
+
 // ParsePolicy reads the file; an agent with a file it cannot parse refuses
 // every call rather than allowing them.
 func ParsePolicy(text string) (*Policy, error) {
-	p := &Policy{Roles: map[string]map[string]bool{}}
+	p := &Policy{Roles: map[string]map[string]bool{}, Paths: map[string][]string{}}
 	for _, raw := range strings.Split(text, "\n") {
 		line := raw
 		if i := strings.Index(line, "#"); i >= 0 {
@@ -133,6 +194,28 @@ func ParsePolicy(text string) (*Policy, error) {
 				return nil, fmt.Errorf("role %s has no operations", fields[1])
 			}
 			p.Roles[fields[1]] = ops
+		case len(fields) == 3 && fields[0] == "paths" && validName.MatchString(fields[1]):
+			if _, ok := p.Roles[fields[1]]; !ok {
+				return nil, fmt.Errorf("paths for role %s, which is not defined above it", fields[1])
+			}
+			if _, again := p.Paths[fields[1]]; again {
+				return nil, fmt.Errorf("role %s has two paths lines", fields[1])
+			}
+			var prefixes []string
+			for _, pre := range strings.Split(fields[2], ",") {
+				pre = strings.TrimSpace(pre)
+				if pre == "" {
+					continue
+				}
+				if !strings.HasPrefix(pre, "/") {
+					return nil, fmt.Errorf("role %s: the path %s is not absolute", fields[1], pre)
+				}
+				prefixes = append(prefixes, pre)
+			}
+			if len(prefixes) == 0 {
+				return nil, fmt.Errorf("role %s has no paths", fields[1])
+			}
+			p.Paths[fields[1]] = prefixes
 		default:
 			return nil, fmt.Errorf("cannot read the policy line: %s", strings.TrimSpace(raw))
 		}

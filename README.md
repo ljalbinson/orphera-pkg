@@ -356,7 +356,9 @@ and "may change files and packages" from "may run commands", not "may apply" fro
 numbers (in quotes, hexadecimal; `openssl x509 -noout -serial -in certs/operators/alice.crt`) to refuse before the
 certificate expires. A node must already require client certificates, and run an agent from 0.1.211 on, before
 `issue-policy` will place a policy on it. A policy the agent cannot read refuses everything, and says why in its
-journal. Limiting a role to paths is not supported yet.
+journal. `paths: [/etc/ceph/, /srv/]` in a role limits `copy`, `check-file` and `fetch` to those prefixes (the Go agent
+0.1.212 or later only; `issue-policy` refuses a node with another agent, and a role that can `run` cannot have paths).
+`orphera policy-info [--nodes ...]` shows whether each node holds the policy `access.yaml` gives it.
 
 **Early refusal.** With `ORPHERA_OPERATOR` set and an `access.yaml` beside the inventory, the orchestrator checks the
 command against the operator's role before it contacts any node, and refuses with the agent's own words for every node

@@ -416,6 +416,17 @@ object Orchestrator:
                               "orphera deploy-agent first. Nothing was changed"
                           )
                         )
+                        _ <- IO.raiseUnless(
+                          !AccessPolicy.limitsPaths(policy) ||
+                            AccessPolicy.agentCanLimitPaths(version)
+                        )(
+                          new RuntimeException(
+                            s"its agent is $version, which cannot limit roles to paths (the Go agent " +
+                              s"${AccessPolicy.MinAgentForPaths} or later can, the Scala agent cannot): " +
+                              "orphera deploy-agent first, or take paths out of access.yaml for this node. " +
+                              "Nothing was changed"
+                          )
+                        )
                         _ <- AccessPolicy.placeOn(
                           node,
                           sshUser,
@@ -429,6 +440,72 @@ object Orchestrator:
               }
             }
             .flatMap(summary(_, if dryRun then "Checked" else "Policy placed"))
+
+  /** `orphera policy-info`: reads the policy each node holds over SSH and says
+    * whether it is the one `access.yaml` gives that node. Changes nothing;
+    * returns whether every node matches.
+    */
+  def policyInfo(
+      nodes: List[Node],
+      sshUser: String,
+      sshKeyPath: Option[String],
+      policyFile: Option[String]
+  ): IO[Boolean] =
+    val path = policyFile
+      .map(java.nio.file.Paths.get(_))
+      .getOrElse(AccessPolicy.defaultFile)
+    val names = Inventory.all.map(_.name)
+    AccessPolicy
+      .read(path)
+      .flatMap(spec =>
+        AccessPolicy.check(spec, Inventory.groups, names).map(_ => spec)
+      ) match
+      case Left(err)   => IO.println(s"Error: $err.").as(false)
+      case Right(spec) =>
+        val expectedRevoked =
+          spec.revoked.map(orphera.common.Policy.normaliseSerial(_)).toSet
+        def verdict(
+            outcome: Either[Throwable, Either[String, List[String]]]
+        ): (Boolean, List[String]) =
+          outcome match
+            case Right(Right(Nil))   => (true, List("in step with access.yaml"))
+            case Right(Right(diffs)) => (false, diffs)
+            case Right(Left(err))    => (false, List(err))
+            case Left(e)             =>
+              (false, List(s"could not read the policy: ${e.getMessage}"))
+        nodes
+          .parTraverse { node =>
+            for
+              version <- NodeClient
+                .getVersion(node)
+                .attempt
+                .map(_.getOrElse("unknown"))
+              outcome <- (for
+                expected <- IO.fromEither(
+                  AccessPolicy
+                    .policyFor(spec, node.name, Inventory.groups, names)
+                    .left
+                    .map(new RuntimeException(_))
+                )
+                held <- AccessPolicy.heldOn(node, sshUser, sshKeyPath)
+              yield held.map(h =>
+                AccessPolicy.compare(expected, expectedRevoked, h)
+              )).attempt
+              result = verdict(outcome)
+              _ <- IO.println(
+                (s"agent $version" :: result._2)
+                  .map(l => s"[${node.name}] $l")
+                  .mkString("\n")
+              )
+            yield result._1
+          }
+          .flatMap { oks =>
+            val bad = oks.count(!_)
+            IO.println(
+              s"${oks.size - bad} of ${oks.size} nodes match access.yaml" +
+                (if bad > 0 then s"; $bad do not" else "")
+            ).as(bad == 0)
+          }
 
   def teardownAgent(
       nodes: List[Node],

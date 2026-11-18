@@ -27,6 +27,7 @@ import orphera.common.{Operator, Policy}
   *   deployer:
   *     allow: [facts, copy, packages]
   *     nodes: [group:ceph, tst7]  # only these nodes; else every node
+  *     paths: ["/etc/ceph/"]      # copy, check-file and fetch only under these
   *   admin:
   *     allow: all
   * revoked: ["1a2b3c"]            # serial numbers, in quotes of certificates not to accept
@@ -39,10 +40,17 @@ object AccessPolicy:
     */
   val MinAgentVersion = "0.1.211"
 
+  /** The first agent version that limits a role to `paths`. Only the Go agent
+    * does; an agent that cannot read a `paths` line refuses every call, so a
+    * policy with one is not placed on it.
+    */
+  val MinAgentForPaths = "0.1.212"
+
   final case class Role(
       name: String,
       allow: Set[String],
-      nodes: Option[List[String]]
+      nodes: Option[List[String]],
+      paths: Option[List[String]] = None
   )
 
   final case class Spec(
@@ -51,7 +59,7 @@ object AccessPolicy:
       revoked: List[String]
   )
 
-  private val RoleKeys = Set("allow", "nodes")
+  private val RoleKeys = Set("allow", "nodes", "paths")
 
   /** The policy in `text` (YAML), or what is wrong with it. */
   def parse(text: String): Either[String, Spec] =
@@ -114,12 +122,7 @@ object AccessPolicy:
         s"role $name: expected allow: and optionally nodes:"
       )
       _ <- obj.keys.toList.filterNot(RoleKeys.contains) match
-        case Nil          => Right(())
-        case "paths" :: _ =>
-          Left(
-            s"role $name: paths is not supported yet, so a role cannot be limited to paths; " +
-              "limit it by operations and nodes"
-          )
+        case Nil     => Right(())
         case unknown =>
           Left(s"role $name: unknown key(s): ${unknown.mkString(", ")}")
       allow <- obj("allow") match
@@ -150,7 +153,34 @@ object AccessPolicy:
             .toRight(
               s"role $name: nodes: is a list of node names and group:<name>"
             )
-    yield Role(name, allow.toSet, nodes)
+      paths <- obj("paths") match
+        case None    => Right(None)
+        case Some(j) =>
+          j.asArray
+            .flatMap(_.toList.traverse(_.asString))
+            .filter(l => l.nonEmpty && l.forall(validPath))
+            .map(Some(_))
+            .toRight(
+              s"role $name: paths: is a list of absolute paths, each starting with / " +
+                "and with no spaces, commas or #"
+            )
+      _ <- Either.cond(
+        paths.isEmpty || !(allow.contains(Policy.All) || allow.contains("run")),
+        (),
+        s"role $name: paths limits copy, check-file and fetch, but a role that can " +
+          "run commands can reach any path anyway; take paths or run out"
+      )
+      _ <- Either.cond(
+        paths.isEmpty || allow.exists(op =>
+          op == Policy.All || op == "copy" || op == "check-file" || op == "fetch"
+        ),
+        (),
+        s"role $name: paths limits copy, check-file and fetch, and this role allows none of them"
+      )
+    yield Role(name, allow.toSet, nodes, paths)
+
+  private def validPath(p: String): Boolean =
+    p.startsWith("/") && !p.exists(c => c == ',' || c == '#' || c.isWhitespace)
 
   /** The node names a selector means: `group:<name>` or a node's own name. */
   def members(
@@ -203,11 +233,12 @@ object AccessPolicy:
       }
       .map(_.collect { case (r, true) => r })
       .map { applying =>
-        val lines = applying.map { r =>
+        val lines = applying.flatMap { r =>
           val ops =
             if r.allow.contains(Policy.All) then Policy.All
             else r.allow.toList.sorted.mkString(",")
-          s"role ${r.name} $ops"
+          s"role ${r.name} $ops" ::
+            r.paths.map(ps => s"paths ${r.name} ${ps.mkString(",")}").toList
         }
         (List(
           s"# Made by orphera issue-policy for $node from the access policy. Do not edit: it is replaced the next time.",
@@ -377,9 +408,107 @@ object AccessPolicy:
         (a.toIntOption, b.toIntOption, c.toIntOption).tupled
       case _ => None
 
-  def agentIsNewEnough(agentVersion: String): Boolean =
-    (versionOf(agentVersion), versionOf(MinAgentVersion)).tupled.exists {
+  private def atLeast(agentVersion: String, minimum: String): Boolean =
+    (versionOf(agentVersion), versionOf(minimum)).tupled.exists {
       case (have, need) => Ordering[(Int, Int, Int)].gteq(have, need)
+    }
+
+  def agentIsNewEnough(agentVersion: String): Boolean =
+    atLeast(agentVersion, MinAgentVersion)
+
+  /** Whether `policy` (a node's policy file) limits any role to paths. */
+  def limitsPaths(policy: String): Boolean =
+    policy.linesIterator.exists(_.startsWith("paths "))
+
+  /** The Go agent from `MinAgentForPaths` on; the Scala agent never. */
+  def agentCanLimitPaths(agentVersion: String): Boolean =
+    agentVersion.contains("+go") && atLeast(agentVersion, MinAgentForPaths)
+
+  // `orphera policy-info`: what a node holds, read over SSH as the files are
+  // placed, between markers so that a login banner does not matter.
+  private val readHeld: String =
+    """sudo sh -c 'cd /etc/orphera-agent; if [ -f policy ]; then echo @@POLICY@@; cat policy; echo @@REVOKED@@; cat revoked 2>/dev/null; echo @@END@@; else echo @@NONE@@; fi'"""
+
+  /** The policy and revoked list a node holds, from the lines `readHeld`
+    * printed: None when it has no policy (every call is allowed).
+    */
+  def parseHeld(lines: List[String]): Either[String, Option[(String, String)]] =
+    if lines.exists(_.trim == "@@NONE@@") then Right(None)
+    else
+      lines.dropWhile(_.trim != "@@POLICY@@") match
+        case _ :: afterStart =>
+          val (policy, rest) = afterStart.span(_.trim != "@@REVOKED@@")
+          rest match
+            case _ :: afterMarker =>
+              val revoked = afterMarker.takeWhile(_.trim != "@@END@@")
+              Right(
+                Some(
+                  (
+                    policy.mkString("", "\n", "\n"),
+                    revoked.mkString("", "\n", "\n")
+                  )
+                )
+              )
+            case Nil => Left("the node's answer was cut short")
+        case Nil => Left("the node did not answer with its policy")
+
+  private def significant(text: String): List[String] =
+    text.linesIterator
+      .map(_.takeWhile(_ != '#').trim)
+      .filter(_.nonEmpty)
+      .toList
+
+  /** How what a node holds compares with what access.yaml gives it: no lines
+    * when they are the same, else what differs.
+    */
+  def compare(
+      expectedPolicy: String,
+      expectedRevoked: Set[String],
+      held: Option[(String, String)]
+  ): List[String] =
+    held match
+      case None =>
+        List(
+          "no policy: every call is allowed (orphera issue-policy puts one on)"
+        )
+      case Some((policy, revoked)) =>
+        val want = significant(expectedPolicy)
+        val have = significant(policy)
+        val missing = want.filterNot(have.contains)
+        val extra = have.filterNot(want.contains)
+        val policyLines =
+          if want == have then Nil
+          else
+            List("policy differs from access.yaml") ++
+              missing.map(l => s"  missing: $l") ++
+              extra.map(l => s"  extra:   $l") ++
+              (if missing.isEmpty && extra.isEmpty then
+                 List("  the same lines, in another order")
+               else Nil)
+        val heldRevoked = Policy.parseRevoked(revoked)
+        val revokedLines =
+          if heldRevoked == expectedRevoked then Nil
+          else
+            List(
+              s"revoked list differs from access.yaml: the node has ${heldRevoked.size} serial(s), access.yaml ${expectedRevoked.size}"
+            )
+        policyLines ++ revokedLines
+
+  def heldOn(
+      node: Node,
+      sshUser: String,
+      sshKeyPath: Option[String]
+  ): IO[Either[String, Option[(String, String)]]] =
+    Ref.of[IO, List[String]](Nil).flatMap { seen =>
+      SshDeployer
+        .sshRunWithInput(
+          node,
+          sshUser,
+          sshKeyPath,
+          readHeld,
+          "",
+          line => seen.update(line :: _)
+        ) >> seen.get.map(newestFirst => parseHeld(newestFirst.reverse))
     }
 
   private val Marker = "@@REVOKED@@"

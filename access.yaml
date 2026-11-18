@@ -19,6 +19,7 @@ roles:
   deployer:
     allow: [facts, version, uptime, check-file, fetch, copy, packages]
     nodes: [group:ceph]
+    # paths: [/etc/ceph/, /srv/]   # limits copy, check-file and fetch to these prefixes (Go agent 0.1.212+)
   rebooter:
     allow: [facts, version, uptime, check-file, reboot, shutdown]
     nodes: [group:ceph]

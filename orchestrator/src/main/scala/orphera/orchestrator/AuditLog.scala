@@ -77,18 +77,19 @@ object AuditLog:
 
   def isAuditable(command: Command): Boolean =
     command match
-      case Command.Install(_, _, _)                     => true
-      case Command.Remove(_, _, _)                      => true
-      case Command.AutoRemove(_, _)                     => true
-      case Command.DistUpgrade(_, _)                    => true
-      case Command.Copy(_, _, _, _, _, _)               => true
-      case Command.WriteFile(_, _, _, _, _, _)          => true
-      case Command.NetworkApply(_, _)                   => true
-      case Command.DeployAgent(_, _, _, _, _, _)        => true
-      case Command.Bootstrap(_, _, _, _, _, _)          => true
-      case Command.Teardown(_, _, _, _, _)              => true
-      case Command.IssueCerts(_, _, _, _)               => true
-      case Command.IssuePolicy(_, _, _, _, _, dryRun)   => !dryRun
+      case Command.Install(_, _, _)                          => true
+      case Command.Remove(_, _, _)                           => true
+      case Command.AutoRemove(_, _)                          => true
+      case Command.DistUpgrade(_, _)                         => true
+      case Command.Copy(_, _, _, _, _, _)                    => true
+      case Command.WriteFile(_, _, _, _, _, _)               => true
+      case Command.NetworkApply(_, _)                        => true
+      case Command.DeployAgent(_, _, _, _, _, _)             => true
+      case Command.Bootstrap(_, _, _, _, _, _)               => true
+      case Command.Teardown(_, _, _, _, _)                   => true
+      case Command.IssueCerts(_, _, _, _)                    => true
+      case Command.IssuePolicy(_, _, _, _, _, dryRun, check) =>
+        !dryRun && !check
       case Command.RunPlaybook(_, _, _)                 => true
       case Command.Apply(_, check, _, _)                => !check
       case Command.Reboot(_, _, _, _)                   => true
@@ -253,7 +254,7 @@ object AuditLog:
           "ssh_user" -> sshUser,
           "nodes" -> nodesField(nodes)
         ) ++ clientAuth.map(on => "client_auth" -> (if on then "on" else "off"))
-      case Command.IssuePolicy(nodes, sshUser, _, policyFile, remove, _) =>
+      case Command.IssuePolicy(nodes, sshUser, _, policyFile, remove, _, _) =>
         List(
           "command" -> "issue-policy",
           "ssh_user" -> sshUser,

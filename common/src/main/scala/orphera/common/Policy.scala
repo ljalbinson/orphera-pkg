@@ -16,11 +16,15 @@ import scala.jdk.CollectionConverters.*
   * {{{
   * default_role admin            # the role of a certificate with no role in it
   * role viewer facts,version     # operations, comma-separated
+  * role deployer copy,fetch
+  * paths deployer /etc/ceph/,/srv/   # the Go agent limits copy, check-file and fetch to these
   * role admin all
   * }}}
-  * A node with no policy file allows every call, as before. With one, a call is
-  * allowed only to a role that lists an operation containing it; a role not
-  * listed, or a certificate that names no valid role, is refused.
+  * The Scala agent cannot limit paths: a policy with a `paths` line does not
+  * parse here, so it refuses every call and says why. A node with no policy
+  * file allows every call, as before. With one, a call is allowed only to a
+  * role that lists an operation containing it; a role not listed, or a
+  * certificate that names no valid role, is refused.
   */
 final case class Policy(defaultRole: String, roles: Map[String, Set[String]]):
 
@@ -102,6 +106,11 @@ object Policy:
               else if unknown.nonEmpty then
                 Left(s"role $name: unknown operation ${unknown.mkString(", ")}")
               else Right(p.copy(roles = p.roles + (name -> names.toSet)))
+            case "paths" :: _ =>
+              Left(
+                "the policy limits some roles to paths, which this agent cannot apply " +
+                  "(only the Go agent can): " + line
+              )
             case _ => Left(s"cannot read the policy line: $line")
         }
       }
