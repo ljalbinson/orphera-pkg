@@ -42,8 +42,11 @@ object keystone_teardown extends OrpheraApply:
        |if command -v podman >/dev/null 2>&1; then podman rm -f keystone 2>/dev/null || true; fi
        |echo "keystone container and unit removed"""".stripMargin
 
+  // True when ANY of them exists (`ls -d` with several arguments fails if one
+  // is missing, which is the opposite).
   private val filesExist =
-    "ls -d /etc/kolla/keystone /etc/kolla/keystone-ca /var/lib/orphera/keystone /var/log/kolla/keystone /usr/local/sbin/keystone-admin-token /usr/local/share/ca-certificates/orphera-test-ca.crt /etc/pki/ca-trust/source/anchors/orphera-test-ca.crt >/dev/null 2>&1"
+    "for p in /etc/kolla/keystone /etc/kolla/keystone-ca /var/lib/orphera/keystone /var/log/kolla/keystone /usr/local/sbin/keystone-admin-token /usr/local/share/ca-certificates/orphera-test-ca.crt /etc/pki/ca-trust/source/anchors/orphera-test-ca.crt; do [ -e \"$p\" ] && exit 0; done; exit 1"
+
   private val cleanupScript =
     s"""rm -rf /etc/kolla/keystone /etc/kolla/keystone-ca /var/lib/orphera/keystone /var/log/kolla/keystone
        |rm -f /usr/local/sbin/keystone-admin-token

@@ -456,8 +456,11 @@ object keystone_single_node extends OrpheraApply:
        |exit $$R""".stripMargin
 
   private val initStamp = Resource.sha256(initScript + keystoneConfText)
+  // Current when the stamp matches AND the database is at the current schema
+  // (`db_sync --check` exits 0), so a database dropped or replaced since the
+  // stamp was written is initialised again.
   private val initCurrent =
-    s"""[ "$$(cat $dataDir/init.stamp 2>/dev/null)" = "$initStamp" ]"""
+    s"""[ "$$(cat $dataDir/init.stamp 2>/dev/null)" = "$initStamp" ] && podman run --rm --network host --user root --entrypoint keystone-manage -v $confDir/keystone.conf:/etc/keystone/keystone.conf:ro,z -v $logDir:/var/log/kolla/keystone:z $image db_sync --check >/dev/null 2>&1"""
   private val initWithStamp =
     s"""$initScript
        |echo $initStamp > $dataDir/init.stamp""".stripMargin
