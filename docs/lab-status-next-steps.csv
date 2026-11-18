@@ -1,5 +1,5 @@
 Item,Type,Needs first,Command or action
 Re-run k8s_api_vip,Test,,orphera cluster-playbook manifests/k8s_api_vip.scala (expect 0 changed on the converted task)
-Galera cold-start recovery manifest,Build,Check whether the repo already has a Galera bootstrap playbook.,"Compare wsrep-recover positions on tst3, tst4 and tst5, then bootstrap the highest and start the others one at a time."
+Test galera_cold_start.scala on the lab,Test,"Written but never run. Do the check run first, then a clean full stop, then an unclean one.","ORPHERA_GALERA_CHECK=1 orphera cluster-playbook manifests/galera_cold_start.scala, then stop or kill mariadb on tst3, tst4 and tst5 and run it without the variable."
 Note in the Ceph rebuild playbooks,Docs,,"After any Ceph rebuild, re-run k8s_ceph_csi.scala; a rebuild leaves the Kubernetes volumes orphaned."
 Owner of the stale ARP entry for 10.10.3.20,Investigate,What was found on tst0.,"If the Cilium operator crash-loops again, compare tst32's ARP entry for 10.10.3.20 with tst30's MAC (52:54:00:be:27:b1)."
