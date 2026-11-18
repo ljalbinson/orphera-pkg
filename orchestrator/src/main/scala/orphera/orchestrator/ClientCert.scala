@@ -266,7 +266,8 @@ object ClientCert:
                 println(
                   s"Keep $base.key private, and give it to ${op.name} only. Agents that require " +
                     "client certificates (orphera issue-certs --client-auth) log this name and role " +
-                    "for every call, and so does the audit log here; nothing is refused on them yet."
+                    "for every call, and so does the audit log here. What the role may do is set in " +
+                    "access.yaml (orphera issue-policy); a node with no policy allows every role."
                 )
               case None =>
                 println(
