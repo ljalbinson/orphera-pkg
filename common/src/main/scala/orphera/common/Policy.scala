@@ -59,6 +59,7 @@ object Policy:
     "uptime" -> Set("GetUptime"),
     "thread-info" -> Set("GetThreadInfo"),
     "check-file" -> Set("CheckFile"),
+    "observe" -> Set("ObserveNode"),
     "fetch" -> Set("RemoteFetchFile"),
     "copy" -> Set("CopyFile", "CheckFile"),
     "packages" -> Set(

@@ -56,7 +56,8 @@ the interpreter unless wanted; this halves the work and costs nothing the lab us
 
 Each phase is its own branch, is verified on the lab, and is merged before the next.
 
-1. **Protocol, capabilities, `ObserveNode`.** The messages, the capability list in `GetVersion`, `ObserveNode` in the Go
+1. **Protocol, capabilities, `ObserveNode`.** (Built as: no separate capability list yet; an agent without the call answers
+   UNIMPLEMENTED and the orchestrator falls back to its script.) The messages, the capability list in `GetVersion`, `ObserveNode` in the Go
    agent, the orchestrator reading it in place of the observe script, the `observe` operation. `--check` works for a
    viewer. Verify: every manifest's `--check` gives the same plan with the script and with `ObserveNode`.
 2. **File kinds.** `ApplyActions` for directory, symlink, mode/owner/group, write with a hash precondition (which carries

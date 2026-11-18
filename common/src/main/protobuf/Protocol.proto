@@ -196,6 +196,37 @@ message Event {
   bool success = 4;
 }
 
+// One thing to read on the node, from a fixed list: the agent reads it itself
+// (no script is run), so a role that may only look can make this call.
+// kind is one of path, package, unit, user, group, sysctl, module, file_text,
+// key, mount; target is what to read (a path, a package, a unit, a user, a
+// group, a sysctl key, a module name, a mount point); extra is a second
+// argument for sysctl and module (the file the setting is persisted in) and for
+// key (the key's "type base64"). An agent that does not know a kind answers
+// that item with an error.
+message Observation {
+  int32 id = 1;
+  string kind = 2;
+  string target = 3;
+  string extra = 4;
+}
+
+message ObserveRequest {
+  repeated Observation items = 1;
+}
+
+// What was read: values by name (type, mode, owner, group, sha256, installed,
+// ... as the kind defines), or an error when this item could not be read.
+message ObservedItem {
+  int32 id = 1;
+  map<string, string> values = 2;
+  string error = 3;
+}
+
+message ObserveReply {
+  repeated ObservedItem items = 1;
+}
+
 service Agent {
   rpc Install(InstallPackages) returns (stream Event);
   rpc Remove(RemovePackages) returns (stream Event);
@@ -214,5 +245,6 @@ service Agent {
   rpc GetUptime(UptimeRequest) returns (UptimeInfo);
   rpc GetThreadInfo(ThreadInfoRequest) returns (ThreadInfo);
   rpc ExecuteCommand(RunCommandRequest) returns (stream Event);
+  rpc ObserveNode(ObserveRequest) returns (ObserveReply);
 }
 

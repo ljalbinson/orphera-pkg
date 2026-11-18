@@ -394,7 +394,24 @@ object AccessPolicyCheck:
     )
     check(
       "a viewer may not apply, which runs commands on the node",
-      refusal(Command.Apply("x.scala", true, None, false), viewer).isDefined
+      refusal(Command.Apply("x.scala", false, None, false), viewer).isDefined
+    )
+    check(
+      "apply --check makes only the ObserveNode call; a real apply runs commands too",
+      AccessPolicy
+        .callsOf(Command.Apply("x.yaml", true, None, false))
+        .map(_._1) == Some(List("ObserveNode")) &&
+        AccessPolicy
+          .callsOf(Command.Apply("x.yaml", false, None, false))
+          .exists(_._1.contains("ExecuteCommand"))
+    )
+    check(
+      "a policy may name the observe operation",
+      AccessPolicy
+        .parse("roles:\n  v:\n    allow: [observe]\n  admin:\n    allow: all\n")
+        .isRight &&
+        orphera.common.Policy.allows(Set("observe"), "ObserveNode") &&
+        !orphera.common.Policy.allows(Set("facts", "uptime"), "ObserveNode")
     )
     check(
       "a deployer may install on a Ceph node, not on a Galera node (where it has no role)",

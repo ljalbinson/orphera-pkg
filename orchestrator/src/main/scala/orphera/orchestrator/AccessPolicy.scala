@@ -319,11 +319,16 @@ object AccessPolicy:
         Some((List("TriggerShutdown"), nodes, "shut down"))
       case Command.RunCommand(_, nodes, _, _) =>
         Some((List("ExecuteCommand"), nodes, "run commands"))
-      // An apply reads and changes a node by running scripts there.
-      case Command.Apply(_, _, nodes, _) =>
+      // A check reads the node with ObserveNode, which runs nothing; a
+      // description with a command's guard in it also needs ExecuteCommand,
+      // which the agent refuses to a role without `run` when it comes to it.
+      // A real apply still changes the node by running scripts.
+      case Command.Apply(_, true, nodes, _) =>
+        Some((List("ObserveNode"), nodes, "check descriptions"))
+      case Command.Apply(_, false, nodes, _) =>
         Some(
           (
-            List("ExecuteCommand"),
+            List("ObserveNode", "ExecuteCommand"),
             nodes,
             "apply descriptions (which run commands on the node)"
           )

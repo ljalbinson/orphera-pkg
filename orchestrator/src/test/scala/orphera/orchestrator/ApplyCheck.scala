@@ -1219,7 +1219,13 @@ object ApplyCheck:
             (_, _, _) => IO.unit
           ),
           templating = false,
-          perform = localRunner
+          perform = localRunner,
+          // No agent here: ObserveNode is unimplemented, so the engine reads
+          // the node with its script, as it does on a Scala agent.
+          observe = (_, _) =>
+            IO.raiseError(
+              _root_.io.grpc.Status.UNIMPLEMENTED.asRuntimeException()
+            )
         )
         plan <- Apply.plan("local", rs)
         report <- TaskExecutor.applyOn(
@@ -1455,7 +1461,159 @@ object ApplyCheck:
       new ProcessBuilder("rm", "-rf", base).start().waitFor()
       ()
 
+  // ---- what the agent's ObserveNode reads -----------------------------------
+
+  private def observeChecks(): Unit =
+    val line = lineInFile("/etc/x.conf", "beta = 3", "^beta")
+    val kinds = List(
+      file("/etc/a", "x") -> Apply.Probe("path", "/etc/a"),
+      directory("/opt/d") -> Apply.Probe("path", "/opt/d"),
+      symlink("/opt/l", "/opt/d") -> Apply.Probe("path", "/opt/l"),
+      pkg("tree") -> Apply.Probe("package", "tree"),
+      service("sshd") -> Apply.Probe("unit", "sshd"),
+      user("bob") -> Apply.Probe("user", "bob"),
+      group("grp") -> Apply.Probe("group", "grp"),
+      sysctl("net.ipv4.ip_forward", "1") -> Apply.Probe(
+        "sysctl",
+        "net.ipv4.ip_forward",
+        "/etc/sysctl.d/60-orphera-net.ipv4.ip_forward.conf"
+      ),
+      kernelModule("overlay") -> Apply.Probe(
+        "module",
+        "overlay",
+        "/etc/modules-load.d/orphera-overlay.conf"
+      ),
+      line -> Apply.Probe("file_text", "/etc/x.conf"),
+      authorizedKey("bob", "ssh-ed25519 AAAA x") -> Apply.Probe(
+        "key",
+        "bob",
+        "ssh-ed25519 AAAA"
+      ),
+      mount("/opt/ram", "tmpfs", "tmpfs") -> Apply.Probe("mount", "/opt/ram")
+    )
+    kinds.foreach { (r, p) =>
+      check(
+        s"probe of ${r.id}",
+        Apply.probe(r) == Some(p),
+        s"${Apply.probe(r)}"
+      )
+    }
+    check(
+      "a command's guard has no typed read",
+      Apply.probe(command("c", "true")).isEmpty
+    )
+
+    def one(r: ApplyResource, kv: Map[String, String]): Option[Observed] =
+      Apply.observedFromAgent(List(0 -> r), Map(0 -> kv)).get(0)
+    check(
+      "a file as the agent reads it",
+      one(
+        file("/etc/a", "x"),
+        Map(
+          "type" -> "file",
+          "mode" -> "644",
+          "owner" -> "root",
+          "group" -> "root",
+          "sha256" -> "ab"
+        )
+      ).contains(
+        Observed.RegularFile(Integer.parseInt("644", 8), "root", "root", "ab")
+      )
+    )
+    check(
+      "an absent path, a link and a directory",
+      one(file("/e", "x"), Map("type" -> "absent")).contains(Observed.Absent) &&
+        one(symlink("/l", "/t"), Map("type" -> "link", "target" -> "/t"))
+          .contains(Observed.Link("/t")) &&
+        one(
+          directory("/d"),
+          Map(
+            "type" -> "directory",
+            "mode" -> "750",
+            "owner" -> "a",
+            "group" -> "b"
+          )
+        ).contains(Observed.Dir(Integer.parseInt("750", 8), "a", "b"))
+    )
+    check(
+      "a package and a unit",
+      one(
+        pkg("tree"),
+        Map("manager" -> "apt", "installed" -> "yes", "versions" -> "2.1-1")
+      ).contains(Observed.Pkg("apt", true, List("2.1-1"))) &&
+        one(service("sshd"), Map("enabled" -> "enabled", "active" -> "active"))
+          .contains(Observed.ServiceState("enabled", "active"))
+    )
+    check(
+      "a user, an absent user and a group",
+      one(
+        user("bob"),
+        Map(
+          "exists" -> "yes",
+          "uid" -> "1001",
+          "home" -> "/home/bob",
+          "shell" -> "/bin/sh",
+          "group" -> "bob",
+          "groups" -> "bob,adm"
+        )
+      ).contains(
+        Observed
+          .Account(1001, "bob", List("bob", "adm"), "/home/bob", "/bin/sh")
+      ) &&
+        one(user("bob"), Map("exists" -> "no")).contains(Observed.Absent) &&
+        one(group("g"), Map("exists" -> "yes", "gid" -> "50"))
+          .contains(Observed.GroupEntry(50))
+    )
+    check(
+      "a line resource: the counts are worked out from the file's text",
+      one(
+        line,
+        Map(
+          "exists" -> "yes",
+          "truncated" -> "no",
+          "content" -> "alpha = 1\nbeta = 2\nbeta = 3\n"
+        )
+      ).contains(
+        Observed.Facts(Map("exists" -> "yes", "exact" -> "1", "matches" -> "2"))
+      ) &&
+        one(line, Map("exists" -> "no"))
+          .contains(Observed.Facts(Map("exists" -> "no")))
+    )
+    check(
+      "a file too large to read, or a bad regular expression, is not read at all",
+      one(
+        line,
+        Map("exists" -> "yes", "truncated" -> "yes", "content" -> "")
+      ).isEmpty &&
+        one(
+          lineInFile("/etc/x", "a", "("),
+          Map("exists" -> "yes", "truncated" -> "no", "content" -> "a\n")
+        ).isEmpty
+    )
+    check(
+      "a resource the agent could not read is missing from the answer",
+      Apply.observedFromAgent(List(0 -> pkg("tree")), Map.empty).isEmpty
+    )
+    check(
+      "sysctl, module, key and mount values pass through as facts",
+      one(
+        sysctl("k", "1"),
+        Map("found" -> "yes", "runtime" -> "1", "persisted" -> "")
+      )
+        .contains(
+          Observed.Facts(
+            Map("found" -> "yes", "runtime" -> "1", "persisted" -> "")
+          )
+        ) &&
+        one(
+          mount("/m", "tmpfs", "tmpfs"),
+          Map("fstab" -> "no", "mounted" -> "no")
+        )
+          .contains(Observed.Facts(Map("fstab" -> "no", "mounted" -> "no")))
+    )
+
   def main(args: Array[String]): Unit =
+    observeChecks()
     planChecks()
     runChecks()
     kindChecks()

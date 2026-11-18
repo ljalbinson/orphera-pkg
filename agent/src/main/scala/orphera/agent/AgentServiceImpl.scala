@@ -121,6 +121,15 @@ class AgentServiceImpl(
   ): IO[ThreadInfo] =
     ThreadReader.read(request.resetPeak)
 
+  // Typed reads belong to the Go agent; the orchestrator falls back to its
+  // script on this answer.
+  def observeNode(request: ObserveRequest, ctx: Metadata): IO[ObserveReply] =
+    IO.raiseError(
+      _root_.io.grpc.Status.UNIMPLEMENTED
+        .withDescription("ObserveNode is not in the Scala agent")
+        .asRuntimeException()
+    )
+
   def executeCommand(
       request: RunCommandRequest,
       ctx: Metadata

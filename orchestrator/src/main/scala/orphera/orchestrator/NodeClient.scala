@@ -641,6 +641,40 @@ object NodeClient:
         stub.getUptime(UptimeRequest(), authMetadata())
       }
 
+  /** The agent's `ObserveNode`: what it read for each item, by the item's id
+    * (an item that could not be read is left out, with its error in the second
+    * map). Raises UNIMPLEMENTED on an agent that does not have it.
+    */
+  def observeNode(
+      node: Node,
+      items: List[(Int, Apply.Probe)]
+  ): IO[(Map[Int, Map[String, String]], Map[Int, String])] =
+    channelBuilder(node)
+      .resource[IO]
+      .flatMap(AgentFs2Grpc.stubResource[IO])
+      .use { stub =>
+        stub.observeNode(
+          ObserveRequest(
+            items.map((i, p) =>
+              Observation(
+                id = i,
+                kind = p.kind,
+                target = p.target,
+                extra = p.extra
+              )
+            )
+          ),
+          authMetadata()
+        )
+      }
+      .map { reply =>
+        val (bad, good) = reply.items.partition(_.error.nonEmpty)
+        (
+          good.map(o => o.id -> o.values).toMap,
+          bad.map(o => o.id -> o.error).toMap
+        )
+      }
+
   def getThreadInfo(node: Node, resetPeak: Boolean): IO[ThreadInfo] =
     channelBuilder(node)
       .resource[IO]
