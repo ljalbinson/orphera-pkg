@@ -787,7 +787,7 @@ trait ApplyTarget:
     */
   def typed(
       label: String,
-      changes: List[FileChange],
+      @scala.annotation.unused changes: List[FileChange],
       fallback: String,
       timeout: Int
   ): IO[Unit] = shell(label, fallback, timeout)
