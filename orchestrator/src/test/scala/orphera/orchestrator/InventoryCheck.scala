@@ -269,7 +269,9 @@ object InventoryCheck:
     )
     check(
       "nodes --groups takes several names, in the order given",
-      ListNodes.groupLines(List("osds,mons"), grp).map(_.map(_.takeWhile(_ != ':'))) ==
+      ListNodes
+        .groupLines(List("osds,mons"), grp)
+        .map(_.map(_.takeWhile(_ != ':'))) ==
         Right(List("osds", "mons"))
     )
     check(

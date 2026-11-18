@@ -40,7 +40,8 @@ object ListNodes:
       val unknown = names.filterNot(n => groups.exists(_.name == n))
       if unknown.nonEmpty then
         Left(s"Unknown node group(s): ${unknown.mkString(", ")}")
-      else Right(names.distinct.flatMap(n => groups.find(_.name == n)).map(line))
+      else
+        Right(names.distinct.flatMap(n => groups.find(_.name == n)).map(line))
 
   /** The node names `args` (everything after `nodes`) select. Names given with
     * `--nodes` must be inventory nodes: a typo is an error, not a line of
