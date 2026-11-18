@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: Apache-2.0
+
+# A package and a unit, for a role that holds apply-software but not run: it
+# installs nginx (which starts it), then stops and disables the unit. A second
+# run changes nothing. apply_demo_software_remove.yaml takes it away.
+#
+#   orphera apply manifests/apply_demo_software.yaml --nodes tst39
+name: apply-software-demo
+nodes: [tst39]
+resources:
+  - package: nginx
+    update_cache: true
+  - service: nginx.service
+    enabled: false
+    running: false
+    requires: ["package[nginx]"]
