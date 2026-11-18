@@ -86,7 +86,7 @@ object AgentGuardCheck:
       method: String
   ): Option[String] =
     AuthInterceptor.decide(policy, cert, method) match
-      case AuthInterceptor.Decision.Allow(_)       => None
+      case AuthInterceptor.Decision.Allow(_, _)    => None
       case AuthInterceptor.Decision.Refuse(_, why) => Some(why)
 
   private def policyChecks(): Unit =

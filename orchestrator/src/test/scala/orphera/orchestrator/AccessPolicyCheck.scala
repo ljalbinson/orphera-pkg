@@ -142,17 +142,46 @@ object AccessPolicyCheck:
         !AccessPolicy.limitsPaths("default_role a\nrole a all\n")
     )
     check(
-      "only the Go agent from 0.1.212 can limit paths",
+      "the Go agent from 0.1.212 and the Scala agent from 0.1.218 can limit paths",
       AccessPolicy.agentCanLimitPaths("0.1.212+go") &&
         AccessPolicy.agentCanLimitPaths("0.1.230+go") &&
         !AccessPolicy.agentCanLimitPaths("0.1.211+go") &&
-        !AccessPolicy.agentCanLimitPaths("0.1.212")
+        !AccessPolicy.agentCanLimitPaths("0.1.212") &&
+        !AccessPolicy.agentCanLimitPaths("0.1.217") &&
+        AccessPolicy.agentCanLimitPaths("0.1.218") &&
+        AccessPolicy.agentCanLimitPaths("0.1.230")
     )
     check(
-      "the Scala agent's policy parser fails closed on a paths line",
+      "the policy parser reads paths lines and fails closed on a bad one",
       orphera.common.Policy
-        .parse("default_role a\nrole a copy\npaths a /etc/\n")
-        .isLeft
+        .parse("default_role a\nrole a copy\npaths a /etc/,/srv/\n")
+        .exists(_.paths == Map("a" -> List("/etc/", "/srv/"))) &&
+        orphera.common.Policy.parse("default_role a\npaths a /etc/\n").isLeft &&
+        orphera.common.Policy
+          .parse("default_role a\nrole a copy\npaths a etc\n")
+          .isLeft &&
+        orphera.common.Policy
+          .parse(
+            "default_role a\nrole a copy\npaths a /etc/\npaths a /srv/\n"
+          )
+          .isLeft
+    )
+    check(
+      "pathRefusal: inside, outside, `..`, no paths, and /",
+      {
+        val p = orphera.common.Policy(
+          "a",
+          Map("a" -> Set("copy"), "b" -> Set("copy"), "c" -> Set("copy")),
+          Map("a" -> List("/etc/ceph/"), "c" -> List("/"))
+        )
+        p.pathRefusal("a", "/etc/ceph/ceph.conf").isEmpty &&
+        p.pathRefusal("a", "/etc/ceph/new/file").isEmpty &&
+        p.pathRefusal("a", "/etc/passwd").isDefined &&
+        p.pathRefusal("a", "/etc/ceph/../passwd").isDefined &&
+        p.pathRefusal("a", "/etc/cephx/x").isDefined &&
+        p.pathRefusal("b", "/etc/passwd").isEmpty &&
+        p.pathRefusal("c", "/anything").isEmpty
+      }
     )
     check(
       "parseHeld: no policy, a policy, and a cut-off answer",

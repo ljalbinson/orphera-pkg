@@ -2487,6 +2487,8 @@ many checks passed and exits non-zero on a failure:
 - `AgentGuardCheck`: the agent refuses a reboot and a shutdown on a host with the marker; it never calls the
   unprotected path, which would really reboot the test machine. Also that `copy`, `fetch` and the check before a copy
   refuse `/etc/orphera-agent`, including through `..` and symbolic links
+- `AgentTypedCheck`: the Scala agent's typed calls (`ObserveNode`, `ApplyFiles`, and the refusals of `ApplyAccess` and
+  `ApplySoftware`) in a temporary directory, and a role's path limits (inside, outside, `..`, a link out); needs no root
 - In `agent-go/` (`go test ./...`), `TestProtectedPaths` is the same for the Go agent, and `TestServerTLSConfigMutual`
   runs TLS handshakes against it with `tls/ca.crt`: no client certificate and one from another CA are refused, one from
   the CA is accepted, and a `ca.crt` with no certificate in it is an error rather than an open door

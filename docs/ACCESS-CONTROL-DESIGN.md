@@ -1,6 +1,6 @@
 # Orphera: access control (design)
 
-Status: proposed 2026-11-17. Step 1 (identity) built and run on the lab 2026-11-18; step 2 (policy at the agent) built and run on tst0 2026-11-18. Differences from the text below: the policy is `access.yaml` beside the inventory, not `config/access.yaml` (that directory holds the VM configs, which the schema checks and the database tools read as such); `paths` is built (Go agent 0.1.212 or later; the Scala agent refuses a policy that has it); `policy-info` is built and reads the files over SSH, not through an agent call. Closes the first governance gap in the README's known gaps: "no limits on what an
+Status: proposed 2026-11-17. Step 1 (identity) built and run on the lab 2026-11-18; step 2 (policy at the agent) built and run on tst0 2026-11-18. Differences from the text below: the policy is `access.yaml` beside the inventory, not `config/access.yaml` (that directory holds the VM configs, which the schema checks and the database tools read as such); `paths` is built (Go agent 0.1.212 or later, Scala agent 0.1.218 or later; an older Scala agent refuses a policy that has it); `policy-info` is built and reads the files over SSH, not through an agent call. Closes the first governance gap in the README's known gaps: "no limits on what an
 authenticated caller may do".
 
 ## Summary
@@ -33,7 +33,7 @@ The honest limit comes first, because it decides the shape of the roles.
   and changes with `ApplyFiles`, `ApplyAccess` and `ApplySoftware` (operations `observe`, `apply-files`, `apply-access`,
   `apply-software`), which the Go agent performs itself from a fixed list of actions, so a role can hold them without
   `run`. A `command` resource (and the guard on one) still runs a script, and so still needs `run`; an agent without a
-  typed call (the Scala agent, a Go agent older than 0.1.216) is sent the script as before, which needs `run` too. Every
+  typed call (a Scala agent older than 0.1.218, a Go agent older than 0.1.216) is sent the script as before, which needs `run` too. Every
   apply also needs `facts`. `apply-software` installs packages, whose own scripts run as root, so it is the widest of the
   three: hold it as deliberately as `packages`.
 - What can be separated now: read-only access (facts, version, uptime, file checks, fetch) from anything that changes a

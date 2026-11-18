@@ -49,8 +49,8 @@ Scala and Go agents behave the same.
 agent before the change) gets the shell path, which needs `run`, so nothing breaks while nodes are upgraded one group at a
 time. `policy-info` already shows who is on what.
 
-**Go agent first.** The Go agent is the default for `deploy-agent`. The Scala agent keeps the shell path and is not given
-the interpreter unless wanted; this halves the work and costs nothing the lab uses.
+**Go agent first.** The Go agent is the default for `deploy-agent`. The Scala agent was left on the shell path at first;
+it has had the same typed calls and path limits since 0.1.218 (see Status), so a node on either agent behaves the same.
 
 ## Phases
 
@@ -92,3 +92,4 @@ you on the lab as path limits were.
 - Phase 3 (users, groups, authorized keys, mounts, fstab): built as `ApplyAccess` (operation `apply-access`), agent 0.1.215. The fstab text is computed in the orchestrator from the text `ObserveNode` returns for a mount and sent with the hash of what was read.
 - Phase 4 (packages, services): built as `ApplySoftware` (operation `apply-software`), agent 0.1.216.
 - Phase 5 (policy, file content, docs): file text through `ApplyFiles` (`ReplaceText.overwrite`), early refusal by resource kind, issue-policy refuses a policy naming operations the agent predates, docs corrected; agent 0.1.217.
+- Scala agent parity: `ObserveNode`, `ApplyFiles`, `ApplyAccess`, `ApplySoftware` and `paths` enforcement ported to the Scala agent, 0.1.218 (`Observe`, `TypedFiles`, `TypedAccess`, `TypedSoftware`, `PathLimits`). Built and checked by `AgentTypedCheck`; not yet run on a node.

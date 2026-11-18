@@ -17,16 +17,38 @@ import scala.jdk.CollectionConverters.*
   * default_role admin            # the role of a certificate with no role in it
   * role viewer facts,version     # operations, comma-separated
   * role deployer copy,fetch
-  * paths deployer /etc/ceph/,/srv/   # the Go agent limits copy, check-file and fetch to these
+  * paths deployer /etc/ceph/,/srv/   # limits the files that role's calls may name
   * role admin all
   * }}}
-  * The Scala agent cannot limit paths: a policy with a `paths` line does not
-  * parse here, so it refuses every call and says why. A node with no policy
+  * `paths` limits a role's copy, check-file, fetch, observe and apply-* calls to
+  * the files under those prefixes (Go agent 0.1.212 or later, Scala agent 0.1.218 or
+  * later; an older Scala agent does not parse the line and so refuses every call). A node with no policy
   * file allows every call, as before. With one, a call is allowed only to a
   * role that lists an operation containing it; a role not listed, or a
   * certificate that names no valid role, is refused.
   */
-final case class Policy(defaultRole: String, roles: Map[String, Set[String]]):
+final case class Policy(
+    defaultRole: String,
+    roles: Map[String, Set[String]],
+    paths: Map[String, List[String]] = Map.empty
+):
+
+  /** Why `role` may not use `path` with a call that names a file, or None: the
+    * role has no `paths`, or `path` is one of them or under one, after making
+    * it absolute, resolving `..` and following symbolic links, so another name
+    * for the same place counts too.
+    */
+  def pathRefusal(role: String, path: String): Option[String] =
+    paths.get(role).filter(_.nonEmpty).flatMap { prefixes =>
+      val resolved = Policy.resolvePath(path)
+      val allowed = prefixes.exists { pre =>
+        val d = Policy.realPath(pre)
+        Option(d.getParent).isEmpty || resolved.startsWith(d)
+      }
+      Option.unless(allowed)(
+        s"role '$role' may copy, check and fetch files only under ${prefixes.mkString(", ")}; $path is outside"
+      )
+    }
 
   /** Why `role` may not make the call `method` (its bare name, `Install`), or
     * None when it may.
@@ -110,11 +132,19 @@ object Policy:
               else if unknown.nonEmpty then
                 Left(s"role $name: unknown operation ${unknown.mkString(", ")}")
               else Right(p.copy(roles = p.roles + (name -> names.toSet)))
-            case "paths" :: _ =>
-              Left(
-                "the policy limits some roles to paths, which this agent cannot apply " +
-                  "(only the Go agent can): " + line
-              )
+            case "paths" :: name :: list :: Nil if Operator.validName(name) =>
+              val prefixes =
+                list.split(",").toList.map(_.trim).filter(_.nonEmpty)
+              if !p.roles.contains(name) then
+                Left(s"paths for role $name, which is not defined above it")
+              else if p.paths.contains(name) then
+                Left(s"role $name has two paths lines")
+              else if prefixes.isEmpty then Left(s"role $name has no paths")
+              else
+                prefixes.find(!_.startsWith("/")) match
+                  case Some(bad) =>
+                    Left(s"role $name: the path $bad is not absolute")
+                  case None => Right(p.copy(paths = p.paths + (name -> prefixes)))
             case _ => Left(s"cannot read the policy line: $line")
         }
       }
@@ -123,6 +153,25 @@ object Policy:
           Left("the policy has no default_role line")
         else Right(p)
       )
+
+  /** `path` made absolute, `..` resolved, and symbolic links followed (for a
+    * file that does not exist yet, those in its directory).
+    */
+  def resolvePath(path: String): java.nio.file.Path =
+    val abs = java.nio.file.Paths.get(path).toAbsolutePath.normalize
+    if java.nio.file.Files.exists(abs) then realPath(abs)
+    else
+      Option(abs.getParent) match
+        case Some(parent) => realPath(parent).resolve(abs.getFileName)
+        case None         => abs
+
+  def realPath(path: String): java.nio.file.Path =
+    realPath(java.nio.file.Paths.get(path))
+
+  private def realPath(path: java.nio.file.Path): java.nio.file.Path =
+    scala.util
+      .Try(path.toRealPath())
+      .getOrElse(path.toAbsolutePath.normalize)
 
   /** The serial numbers in a `revoked` file: hexadecimal, one per line, `#`
     * starts a comment. Lower-case, no leading zeros.

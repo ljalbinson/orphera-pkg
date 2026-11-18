@@ -29,6 +29,8 @@ class AuthInterceptor(
       headers: Metadata,
       next: ServerCallHandler[ReqT, RespT]
   ): ServerCall.Listener[ReqT] =
+    // The role reaches the handlers in this header; a caller cannot supply it.
+    headers.discardAll(PathLimits.RoleKey)
     val provided = Option(headers.get(Auth.TokenKey))
     if !Auth.accepts(token, provided) then
       call.close(
@@ -44,8 +46,9 @@ class AuthInterceptor(
         method
       )
       decision match
-        case AuthInterceptor.Decision.Allow(who) =>
+        case AuthInterceptor.Decision.Allow(who, role) =>
           println(s"${Instant.now} $method $who allowed")
+          role.foreach(headers.put(PathLimits.RoleKey, _))
           next.startCall(call, headers)
         case AuthInterceptor.Decision.Refuse(who, why) =>
           println(s"${Instant.now} $method $who REFUSED: $why")
@@ -62,7 +65,7 @@ object AuthInterceptor:
   val RevokedPath: Path = Paths.get("revoked")
 
   enum Decision:
-    case Allow(who: String)
+    case Allow(who: String, role: Option[String] = None)
     case Refuse(who: String, why: String)
 
   /** The policy file and the revoked list, as text; None when the node has no
@@ -130,5 +133,6 @@ object AuthInterceptor:
                     case Left(why)   => Decision.Refuse(who, why)
                     case Right(role) =>
                       p.refusal(role, method) match
-                        case None      => Decision.Allow(s"$who as $role")
+                        case None =>
+                          Decision.Allow(s"$who as $role", Some(role))
                         case Some(why) => Decision.Refuse(s"$who as $role", why)

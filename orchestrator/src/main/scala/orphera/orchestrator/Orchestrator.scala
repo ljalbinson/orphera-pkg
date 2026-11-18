@@ -422,7 +422,8 @@ object Orchestrator:
                         )(
                           new RuntimeException(
                             s"its agent is $version, which cannot limit roles to paths (the Go agent " +
-                              s"${AccessPolicy.MinAgentForPaths} or later can, the Scala agent cannot): " +
+                              s"${AccessPolicy.MinAgentForPaths} or later can, and the Scala agent " +
+                              s"${AccessPolicy.MinScalaAgentForPaths} or later): " +
                               "orphera deploy-agent first, or take paths out of access.yaml for this node. " +
                               "Nothing was changed"
                           )

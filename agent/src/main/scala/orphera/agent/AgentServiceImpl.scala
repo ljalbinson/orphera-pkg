@@ -59,10 +59,10 @@ class AgentServiceImpl(
       request: Stream[IO, FileChunk],
       ctx: Metadata
   ): Stream[IO, Event] =
-    streamTask(queue => FileTransfer.receive(request, queue))
+    streamTask(queue => FileTransfer.receive(request, queue, ctx))
 
   def checkFile(request: FileCheck, ctx: Metadata): IO[FileCheckResult] =
-    FileTransfer.check(request)
+    PathLimits.check(ctx, List(request.destPath)) >> FileTransfer.check(request)
 
   def reloadNetwork(
       request: NetworkReload,
@@ -95,7 +95,8 @@ class AgentServiceImpl(
     }
 
   def remoteFetchFile(request: FetchFile, ctx: Metadata): Stream[IO, FileData] =
-    FileTransfer.send(request)
+    Stream.eval(PathLimits.check(ctx, List(request.path))) >>
+      FileTransfer.send(request)
 
   def gatherFacts(request: FactsRequest, ctx: Metadata): IO[Facts] =
     FactGatherer.gather()
@@ -121,41 +122,41 @@ class AgentServiceImpl(
   ): IO[ThreadInfo] =
     ThreadReader.read(request.resetPeak)
 
-  // Typed reads belong to the Go agent; the orchestrator falls back to its
-  // script on this answer.
+  // The typed calls: a fixed set of reads and changes the agent makes itself,
+  // as the Go agent does (Observe, TypedFiles, TypedAccess, TypedSoftware). A
+  // path the caller's role may not reach (its `paths`) refuses the whole call
+  // before anything is read or changed.
   def observeNode(request: ObserveRequest, ctx: Metadata): IO[ObserveReply] =
-    IO.raiseError(
-      _root_.io.grpc.Status.UNIMPLEMENTED
-        .withDescription("ObserveNode is not in the Scala agent")
-        .asRuntimeException()
-    )
+    if request.items.size > Observe.MaxItems then
+      IO.raiseError(
+        _root_.io.grpc.Status.INVALID_ARGUMENT
+          .withDescription(s"at most ${Observe.MaxItems} items in one call")
+          .asRuntimeException()
+      )
+    else
+      val items = request.items.toList
+      PathLimits.check(ctx, items.flatMap(Observe.paths)) >>
+        IO.blocking(ObserveReply(items = items.map(Observe.item)))
 
   def applyFiles(request: ApplyFilesRequest, ctx: Metadata): IO[ApplyReply] =
-    IO.raiseError(
-      _root_.io.grpc.Status.UNIMPLEMENTED
-        .withDescription("ApplyFiles is not in the Scala agent")
-        .asRuntimeException()
-    )
+    val actions = request.actions.toList
+    PathLimits.check(ctx, actions.flatMap(TypedFiles.paths)) >>
+      IO.blocking(TypedFiles.apply(actions))
 
   def applyAccess(
       request: ApplyAccessRequest,
       ctx: Metadata
   ): IO[ApplyReply] =
-    IO.raiseError(
-      _root_.io.grpc.Status.UNIMPLEMENTED
-        .withDescription("ApplyAccess is not in the Scala agent")
-        .asRuntimeException()
-    )
+    val actions = request.actions.toList
+    IO.blocking(actions.flatMap(TypedAccess.paths))
+      .flatMap(PathLimits.check(ctx, _)) >>
+      IO.blocking(TypedAccess.apply(actions))
 
   def applySoftware(
       request: ApplySoftwareRequest,
       ctx: Metadata
   ): IO[ApplyReply] =
-    IO.raiseError(
-      _root_.io.grpc.Status.UNIMPLEMENTED
-        .withDescription("ApplySoftware is not in the Scala agent")
-        .asRuntimeException()
-    )
+    IO.blocking(TypedSoftware.apply(request.actions.toList))
 
   def executeCommand(
       request: RunCommandRequest,

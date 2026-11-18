@@ -40,11 +40,16 @@ object AccessPolicy:
     */
   val MinAgentVersion = "0.1.211"
 
-  /** The first agent version that limits a role to `paths`. Only the Go agent
-    * does; an agent that cannot read a `paths` line refuses every call, so a
-    * policy with one is not placed on it.
+  /** The first Go agent version that limits a role to `paths`; an agent that
+    * cannot read a `paths` line refuses every call, so a policy with one is not
+    * placed on it.
     */
   val MinAgentForPaths = "0.1.212"
+
+  /** The same for the Scala agent, which gained the typed calls and path
+    * limits to match the Go agent in 0.1.218.
+    */
+  val MinScalaAgentForPaths = "0.1.218"
 
   final case class Role(
       name: String,
@@ -486,9 +491,12 @@ object AccessPolicy:
         OperationSince.get(op).exists(since => !atLeast(agentVersion, since))
       )
 
-  /** The Go agent from `MinAgentForPaths` on; the Scala agent never. */
+  /** The Go agent from `MinAgentForPaths` on, the Scala agent from
+    * `MinScalaAgentForPaths`.
+    */
   def agentCanLimitPaths(agentVersion: String): Boolean =
-    agentVersion.contains("+go") && atLeast(agentVersion, MinAgentForPaths)
+    if agentVersion.contains("+go") then atLeast(agentVersion, MinAgentForPaths)
+    else atLeast(agentVersion, MinScalaAgentForPaths)
 
   // `orphera policy-info`: what a node holds, read over SSH as the files are
   // placed, between markers so that a login banner does not matter.

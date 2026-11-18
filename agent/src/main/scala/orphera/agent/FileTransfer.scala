@@ -19,7 +19,8 @@ object FileTransfer:
 
   def receive(
       chunks: Stream[IO, FileChunk],
-      queue: Queue[IO, Event]
+      queue: Queue[IO, Event],
+      headers: io.grpc.Metadata
   ): IO[Unit] =
     chunks.compile.toList.flatMap { all =>
       all.headOption.flatMap(_.payload.metadata) match
@@ -41,8 +42,18 @@ object FileTransfer:
                 Event(Event.Kind.RESULT, reason, exitCode = 1, success = false)
               )
             case None =>
-              val contentChunks = all.drop(1).flatMap(_.payload.content)
-              write(metadata, contentChunks, queue)
+              // A path outside the role's `paths` is the call's own failure
+              // (PERMISSION_DENIED), as on the Go agent.
+              PathLimits.refusal(headers, metadata.destPath) match
+                case Some(why) =>
+                  IO.raiseError(
+                    io.grpc.Status.PERMISSION_DENIED
+                      .withDescription(s"refused: $why")
+                      .asRuntimeException()
+                  )
+                case None =>
+                  val contentChunks = all.drop(1).flatMap(_.payload.content)
+                  write(metadata, contentChunks, queue)
     }
 
   private def write(
