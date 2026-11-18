@@ -21,14 +21,12 @@ default_role: admin
 
 roles:
   viewer:
-    allow: [facts, version, uptime, thread-info, check-file, fetch]
+    allow: [facts, version, uptime, thread-info, check-file, observe, fetch]
   deployer:
     allow: [facts, version, uptime, check-file, fetch, copy, packages]
     nodes: [group:ceph]
     # paths: [/etc/ceph/, /srv/]   # limits copy, check-file and fetch to these prefixes (Go agent 0.1.212+)
-  # A viewer that may also `apply --check` needs observe too, once every node
-  # runs agent 0.1.213 or later:  allow: [facts, observe, version, ...]
-  # Applying descriptions without run, tried on tst39 (agent 0.1.216):
+  # Applying descriptions without run, tried on tst39 (agent 0.1.217):
   applier:
     allow: [facts, version, observe, apply-files, apply-access, apply-software]
     nodes: [tst39]
