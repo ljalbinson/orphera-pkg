@@ -1219,7 +1219,11 @@ object ApplyCheck:
             (_, _, _) => IO.unit
           ),
           templating = false,
-          perform = localRunner
+          perform = localRunner,
+          // No agent here: ObserveNode is unimplemented, so the engine reads
+          // the node with its script, as it does on a Scala agent.
+          observe = (_, _) =>
+            IO.raiseError(_root_.io.grpc.Status.UNIMPLEMENTED.asRuntimeException())
         )
         plan <- Apply.plan("local", rs)
         report <- TaskExecutor.applyOn(

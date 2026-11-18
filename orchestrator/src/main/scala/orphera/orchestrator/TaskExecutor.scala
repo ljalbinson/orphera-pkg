@@ -111,7 +111,14 @@ object TaskExecutor:
       // the template vars). Separate from `templating`, which is for `{{...}}`
       // in a task's own strings: a script (OrpheraScript) renders files but
       // not strings, a direct command neither.
-      templateFiles: Boolean = true
+      templateFiles: Boolean = true,
+      // The agent's ObserveNode: what it read for each item, and the errors of
+      // those it could not read. Checks without an agent replace it.
+      observe: (
+          Node,
+          List[(Int, Apply.Probe)]
+      ) => IO[(Map[Int, Map[String, String]], Map[Int, String])] =
+        (node, items) => NodeClient.observeNode(node, items)
   )
 
   /** A direct command's Env: no facts, no templating, console output. */
@@ -874,8 +881,8 @@ object TaskExecutor:
       val fromAgent: IO[(Map[Int, Observed], List[(Int, ApplyResource)])] =
         if typed.isEmpty then IO.pure((Map.empty, Nil))
         else
-          NodeClient
-            .observeNode(n, typed.map((i, _, p) => (i, p)))
+          env
+            .observe(n, typed.map((i, _, p) => (i, p)))
             .attempt
             .flatMap {
               case Right((read, _)) =>

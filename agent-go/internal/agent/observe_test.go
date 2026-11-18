@@ -131,12 +131,12 @@ func TestObservePersistedLocations(t *testing.T) {
 
 func TestObserveNames(t *testing.T) {
 	for _, bad := range []string{"", "-rf", "a b", "a\nb", "a\x00b"} {
-		if validName(bad) {
+		if validArg(bad) {
 			t.Errorf("%q should not be a valid name", bad)
 		}
 	}
 	for _, good := range []string{"nginx", "net.ipv4.ip_forward", "systemd-resolved.service", "libc6:amd64"} {
-		if !validName(good) {
+		if !validArg(good) {
 			t.Errorf("%q should be a valid name", good)
 		}
 	}

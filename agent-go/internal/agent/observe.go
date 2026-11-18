@@ -106,9 +106,9 @@ func observeOne(it *pb.Observation) (map[string]string, error) {
 	return nil, fmt.Errorf("unknown kind of observation: %q", it.Kind)
 }
 
-// validName is a name safe to pass to a program as one argument: not empty,
+// validArg is a name safe to pass to a program as one argument: not empty,
 // not an option, no white space or control characters.
-func validName(s string) bool {
+func validArg(s string) bool {
 	if s == "" || strings.HasPrefix(s, "-") {
 		return false
 	}
@@ -121,7 +121,7 @@ func validName(s string) bool {
 }
 
 func needName(what, s string) error {
-	if !validName(s) {
+	if !validArg(s) {
 		return fmt.Errorf("not a valid %s: %q", what, s)
 	}
 	return nil
