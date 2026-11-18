@@ -1,3 +1,2 @@
 Item,Type,Needs first,Command or action
-Typed actions: viewer policy and apply --check,Action,"Agent 0.1.217 is on all 53 rolled-out nodes. access.yaml now gives viewer observe, but the nodes still hold the old policy.","orphera issue-policy --node-groups all --dry-run, then without --dry-run; the same for --nodes gs1,gs2,gs3,st0. Then, as a viewer: ORPHERA_OPERATOR=<viewer> orphera apply manifests/apply_demo_kinds.yaml --nodes tst39 --check (allowed), and without --check (refused before any node is contacted)."
 Unit read before its package,Decision,"apply reads every resource before changing any, so a service whose package is installed in the same description is not planned until the second run.",Only if wanted: read again after a package resource.
