@@ -20,8 +20,8 @@
 # cluster UUIDs, it stops and says so. `--bootstrap <node>` is the deliberate override.
 # `--check` only reports what it would do.
 #
-# Not a playbook because a playbook cannot pass one node's output to a decision about another
-# (Task.SetFact takes literals, there is no capture of command output); see the README.
+# The playbook form is manifests/galera_cold_start.scala (it keeps each node's state with
+# Task.RunCommand's `register`); this script stays.
 set -uo pipefail
 NODES=(tst3 tst4 tst5)
 FORCE="" CHECK=""
