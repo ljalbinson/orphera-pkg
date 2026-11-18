@@ -1,2 +1,1 @@
 Item,Type,Needs first,Command or action
-Unit read before its package,Decision,"apply reads every resource before changing any, so a service whose package is installed in the same description is not planned until the second run.",Only if wanted: read again after a package resource.
