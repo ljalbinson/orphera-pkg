@@ -1,2 +1,2 @@
 Item,Type,Needs first,Command or action
-Access control: what is left,Decision,"Steps 1 to 3 are merged and verified. Not built: path limits, policy-info, viewer-safe apply --check (typed actions, step 4).",Only if wanted.
+Access control: what is left,Decision,"Steps 1 to 3, path limits and policy-info are merged and verified. Not built: viewer-safe apply --check (typed actions, step 4).",Only if wanted.
