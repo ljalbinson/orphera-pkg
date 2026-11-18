@@ -58,10 +58,13 @@ assert_not_contains() {
 }
 
 log "teardown (failures here are tolerated: nothing may be installed yet)"
-orphera cluster-playbook keystone_teardown.scala || true
+orphera apply keystone_teardown.scala || true
 
 log "install"
-if ! orphera cluster-playbook keystone_single_node.scala; then
+if ! orphera apply keystone_database.scala; then
+  log "FAIL: keystone_database.scala did not complete"; exit 1
+fi
+if ! orphera apply keystone_single_node.scala; then
   log "FAIL: keystone_single_node.scala did not complete"; exit 1
 fi
 
@@ -96,9 +99,12 @@ assert_contains "token authorises GET /v3/users and lists admin" '"name": "admin
 # fernet keys must still be there.
 FP1=$(run_on "openssl x509 -in $CA -noout -fingerprint -sha256")
 log "re-apply (idempotence)"
-if ! orphera cluster-playbook keystone_single_node.scala; then
+SECOND=$(orphera apply keystone_single_node.scala 2>&1); RC=$?
+printf '%s\n' "$SECOND"
+if [ "$RC" -ne 0 ]; then
   log "FAIL: second run of keystone_single_node.scala failed"; FAIL=$((FAIL + 1))
 fi
+assert_contains "second run changed nothing" "0 changed" "$SECOND"
 FP2=$(run_on "openssl x509 -in $CA -noout -fingerprint -sha256")
 if [ "$FP1" = "$FP2" ] && printf '%s' "$FP1" | grep -q Fingerprint; then
   log "PASS: CA unchanged by the second run"; PASS=$((PASS + 1))

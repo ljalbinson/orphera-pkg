@@ -1,17 +1,23 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import orphera.orchestrator.*
-import orphera.orchestrator.ClusterPlaybookDsl.*
 import orphera.orchestrator.kolla.*
 import orphera.orchestrator.conf.*
 
 // OpenStack Keystone (identity service), one node, TLS from the start, run
-// from the Kolla container image rather than distro packages.
+// from the Kolla container image rather than distro packages, as a declarative
+// description (OrpheraApply, docs/APPLY-DESIGN.md). It replaced the cluster
+// playbook of the same name; a second run now changes nothing and restarts
+// nothing, and `--check` shows what would change.
 //
-// Same shape as wordpress_site.scala: an ordinary application on top of the
-// already-working Galera cluster behind the 10.10.5.100 VIP. Prerequisite,
-// not checked here: mariadb_galera_cluster.scala AND
-// mariadb_haproxy_keepalived.scala are applied and healthy on tst3-tst5.
+//   orphera apply manifests/keystone_database.scala     # first: the database and user (tst3)
+//   orphera apply manifests/keystone_single_node.scala --check
+//   orphera apply manifests/keystone_single_node.scala
+//
+// Prerequisite, not checked here: mariadb_galera_cluster.scala AND
+// mariadb_haproxy_keepalived.scala are applied and healthy on tst3-tst5, and
+// keystone_database.scala has run (one description cannot order its nodes, and
+// db_sync needs the database).
 //
 // Why Kolla: a pinned, tested image replaces the distro package (no
 // package-owned Apache site or debconf questions to fight), and the same image
@@ -20,18 +26,26 @@ import orphera.orchestrator.conf.*
 // container. See https://docs.openstack.org/kolla/latest/admin/kolla_api.html
 // (config.json at /var/lib/kolla/config_files, KOLLA_CONFIG_STRATEGY).
 //
-// Stages:
-//   - create-keystone-database (tst3): `keystone` database and user, via the
-//     unix-socket root login, same as wordpress_site.scala.
-//   - install-keystone (keystoneNode): podman, pull the image, a test CA and
-//     server certificate, keystone.conf, the Apache vhost and Kolla
-//     config.json (written after inspecting the image, so the WSGI script path
-//     and the Apache flavour are detected, not assumed), one-off containers for
-//     db_sync / fernet / credential setup / bootstrap, a systemd unit that runs
-//     the long-lived container, and a small helper that prints an admin token.
-//   - confirm-keystone-healthy (keystoneNode): a separate stage because a
-//     stage's waitFor is checked BEFORE its own tasks run (see wordpress_site.scala).
-//     Polls GET /v3/ over TLS, then authenticates for real.
+// Resources, in order: podman and the TLS tools; the Kolla cache as a mirror
+// for quay.io; the image (pulled once); the test CA and server certificate
+// (made once and then reused); the directories; keystone.conf and the WebSSO
+// page; the Apache vhost and Kolla config.json; db_sync, the fernet and
+// credential keys and bootstrap; the container's unit and service; the admin
+// token helper; and two checks (Keystone answers over TLS, the admin can
+// authenticate).
+//
+// What is a command, and why. The certificates, the vhost and config.json, and
+// the init step have no declarative kind: each is a command with a guard that
+// says whether it is already done, so it runs only when it is needed.
+//   - The vhost and config.json are worked out from the image (where
+//     keystone-wsgi-public lives, the Apache flavour, where mod_ssl and
+//     mod_auth_openidc are), so the guard generates them into a temporary
+//     directory and compares: they are rewritten, and Keystone restarted, only
+//     when the image or a setting changed them.
+//   - db_sync, key setup and bootstrap run again when the image, keystone.conf
+//     or the admin password changed (a stamp on the node holds the hash of
+//     what they last ran with); the key setups keep existing keys.
+//   - Anything that changes the container's files restarts it, once.
 //
 // Scope, deliberately small: one node, no memcached, no HAProxy frontend.
 // Fernet keys live on this node only (/var/lib/orphera/keystone/fernet-keys).
@@ -40,7 +54,7 @@ import orphera.orchestrator.conf.*
 //   /etc/kolla/keystone/        mounted read-only into the container
 //       config.json keystone.conf wsgi-keystone.conf ssl/{server.crt,server.key,ca.crt}
 //   /etc/kolla/keystone-ca/     CA key and certificate (NOT mounted)
-//   /var/lib/orphera/keystone/  fernet-keys, credential-keys (bind-mounted rw)
+//   /var/lib/orphera/keystone/  fernet-keys, credential-keys (bind-mounted rw), init.stamp
 //   /var/log/kolla/keystone/    logs
 //   /etc/systemd/system/orphera-keystone.service
 //   /usr/local/sbin/keystone-admin-token
@@ -56,7 +70,10 @@ import orphera.orchestrator.conf.*
 // Test-only hardcoded credentials, same convention and caveat as
 // wordpress_site.scala. Not compiled where this was written (no Scala
 // toolchain there); the first run on scala0 is the first compile.
-object keystone_single_node extends OrpheraClusterPlaybook:
+object keystone_single_node extends OrpheraApply:
+  import Resources.*
+
+  override def nodes: List[String] = List(node)
 
   // Change these to move Keystone to another node. The node must be in
   // inventory.yaml and have the agent installed.
@@ -122,79 +139,6 @@ object keystone_single_node extends OrpheraClusterPlaybook:
   // first and falls back to quay.io if it is unreachable, so the manifest
   // still works with the cache down or not yet built.
   private val cacheHostPort = "tst9.ljalbinson.com:5000"
-
-  private val useCacheScript =
-    s"""mkdir -p /etc/containers/registries.conf.d
-       |cat > /etc/containers/registries.conf.d/orphera-kolla-cache.conf <<'REG'
-       |[[registry]]
-       |prefix = "quay.io"
-       |location = "quay.io"
-       |
-       |[[registry.mirror]]
-       |location = "tst21.ljalbinson.com:5000"
-       |insecure = true
-       |
-       |[[registry.mirror]]
-       |location = "$cacheHostPort"
-       |insecure = true
-       |REG
-       |echo "podman will try tst21.ljalbinson.com:5000 (built images), then $cacheHostPort, before quay.io"""".stripMargin
-
-  // tst3 only. IF NOT EXISTS / re-GRANT make a re-run a no-op. `@'%'` for the
-  // same reason as wordpress_site.scala: haproxy's tcp mode hides the real
-  // client address.
-  private val createDatabaseScript =
-    s"""mariadb -N -e "CREATE DATABASE IF NOT EXISTS $dbName; CREATE USER IF NOT EXISTS '$dbUser'@'%' IDENTIFIED BY '${dbPassword.reveal}'; GRANT ALL PRIVILEGES ON $dbName.* TO '$dbUser'@'%'; FLUSH PRIVILEGES;""""
-
-  private val pullScript =
-    s"""${Pull.shellFunction(
-        "the registry path and tag, the Image(...) in keystoneContainer in keystone_single_node.scala"
-      )}
-       |pull_retry $image || exit 1
-       |echo "image ready: $image"""".stripMargin
-
-  // CA and server certificate are created once and then reused, so the CA
-  // clients already trust never changes under them. SAN: FQDN, short name, IP.
-  // Trust-store step covers both Debian-family and Red Hat-family hosts.
-  private val tlsScript =
-    s"""set -e
-       |mkdir -p $caDir $sslDir
-       |chmod 700 $caDir
-       |cd $caDir
-       |if [ ! -f ca.key ] || [ ! -f ca.crt ]; then
-       |  openssl req -x509 -newkey rsa:4096 -nodes -keyout ca.key -out ca.crt -days 3650 -subj "/CN=Orphera Test CA"
-       |  chmod 600 ca.key
-       |fi
-       |cd $sslDir
-       |if [ ! -f server.key ] || [ ! -f server.crt ]; then
-       |  cat > server.ext <<EXT
-       |subjectAltName=DNS:$fqdn,DNS:$node,IP:$nodeIp
-       |basicConstraints=CA:FALSE
-       |keyUsage=digitalSignature,keyEncipherment
-       |extendedKeyUsage=serverAuth
-       |EXT
-       |  openssl req -newkey rsa:2048 -nodes -keyout server.key -out server.csr -subj "/CN=$fqdn"
-       |  openssl x509 -req -in server.csr -CA $caDir/ca.crt -CAkey $caDir/ca.key -CAcreateserial -out server.crt -days 825 -extfile server.ext
-       |  chmod 600 server.key
-       |fi
-       |cp $caDir/ca.crt $sslDir/ca.crt
-       |cat $sslDir/server.crt $caDir/ca.crt > $sslDir/server-chain.crt
-       |openssl verify -CAfile $caDir/ca.crt $sslDir/server.crt
-       |if command -v update-ca-certificates >/dev/null 2>&1; then
-       |  cp $caDir/ca.crt /usr/local/share/ca-certificates/orphera-test-ca.crt
-       |  update-ca-certificates
-       |else
-       |  cp $caDir/ca.crt /etc/pki/ca-trust/source/anchors/orphera-test-ca.crt
-       |  update-ca-trust
-       |fi
-       |echo "TLS material ready in $sslDir"""".stripMargin
-
-  // The directories keystone.conf and the logs go in. keystone.conf itself is
-  // written below from a typed value; the container sees it at /etc/keystone
-  // (copied by kolla_set_configs).
-  private val keystoneDirsScript =
-    s"""mkdir -p $confDir $logDir
-       |echo "directories ready"""".stripMargin
 
   // The option lists of the image (keystone), from catalogues/. Every section and key of the
   // files below is checked against them when this manifest is built.
@@ -286,12 +230,11 @@ object keystone_single_node extends OrpheraClusterPlaybook:
       |  </body>
       |</html>
       |""".stripMargin
-
   // Inspects the image for the two things that differ between builds: where
   // keystone-wsgi-public lives (a venv under /var/lib/kolla in recent images),
   // and whether Apache is the Debian (apache2, conf-enabled) or Red Hat
   // (httpd, conf.d) flavour. Then writes the vhost and Kolla's config.json.
-  private val kollaConfigScript =
+  private def kollaConfigScript(out: String): String =
     s"""set -e
        |WSGI=$$(podman run --rm --entrypoint sh $image -c 'command -v keystone-wsgi-public')
        |if [ -z "$$WSGI" ]; then echo "keystone-wsgi-public not found in $image" >&2; exit 1; fi
@@ -358,7 +301,7 @@ object keystone_single_node extends OrpheraClusterPlaybook:
        |  echo "WARNING: mod_auth_openidc not found in $image; Keystone is set up without federation" >&2
        |fi
        |echo "wsgi script: $$WSGI; apache config: $$APACHE_CONF; mod_ssl: $$SSLMOD"
-       |cat > $confDir/wsgi-keystone.conf <<WSGICONF
+       |cat > $out/wsgi-keystone.conf <<WSGICONF
        |<IfModule !ssl_module>
        |LoadModule ssl_module $$SSLMOD
        |</IfModule>
@@ -389,8 +332,8 @@ object keystone_single_node extends OrpheraClusterPlaybook:
        |</VirtualHost>
        |WSGICONF
        |# It holds the OIDC client secret and passphrase.
-       |chmod 600 $confDir/wsgi-keystone.conf
-       |cat > $confDir/config.json <<JSON
+       |chmod 600 $out/wsgi-keystone.conf
+       |cat > $out/config.json <<JSON
        |{
        |  "command": "$$APACHE_CMD",
        |  "config_files": [
@@ -408,7 +351,7 @@ object keystone_single_node extends OrpheraClusterPlaybook:
        |  ]
        |}
        |JSON
-       |echo "kolla config written to $confDir"""".stripMargin
+       |echo "kolla config written to $out"""".stripMargin
 
   // One-off containers run keystone-manage directly (entrypoint overridden, so
   // kolla_set_configs does not run) with keystone.conf, the key directories and
@@ -434,112 +377,239 @@ object keystone_single_node extends OrpheraClusterPlaybook:
        |ks bootstrap --bootstrap-password '${adminPassword.reveal}' --bootstrap-admin-url $endpoint --bootstrap-internal-url $endpoint --bootstrap-public-url $endpoint --bootstrap-region-id RegionOne
        |echo "keystone database, keys and bootstrap done"""".stripMargin
 
-  // Prints a scoped admin token on stdout. Used by the confirm stage and by
+  // The Kolla cache as a mirror of quay.io (podman registries.conf.d drop-in).
+  private val registryMirror =
+    s"""[[registry]]
+       |prefix = "quay.io"
+       |location = "quay.io"
+       |
+       |[[registry.mirror]]
+       |location = "tst21.ljalbinson.com:5000"
+       |insecure = true
+       |
+       |[[registry.mirror]]
+       |location = "$cacheHostPort"
+       |insecure = true
+       |""".stripMargin
+
+  private val pullScript =
+    s"""${Pull.shellFunction(
+        "the registry path and tag, the Image(...) in keystoneContainer in keystone_single_node.scala"
+      )}
+       |pull_retry $image || exit 1
+       |echo "image ready: $image"""".stripMargin
+
+  // CA and server certificate are created once and then reused, so the CA
+  // clients already trust never changes under them. SAN: FQDN, short name, IP.
+  private val caExists = s"[ -f $caDir/ca.key ] && [ -f $caDir/ca.crt ]"
+  private val caScript =
+    s"""set -e
+       |cd $caDir
+       |openssl req -x509 -newkey rsa:4096 -nodes -keyout ca.key -out ca.crt -days 3650 -subj "/CN=Orphera Test CA"
+       |chmod 600 ca.key
+       |echo "test CA made in $caDir"""".stripMargin
+
+  private val serverExists =
+    s"[ -f $sslDir/server.key ] && [ -f $sslDir/server.crt ]"
+  private val serverScript =
+    s"""set -e
+       |cd $sslDir
+       |cat > server.ext <<EXT
+       |subjectAltName=DNS:$fqdn,DNS:$node,IP:$nodeIp
+       |basicConstraints=CA:FALSE
+       |keyUsage=digitalSignature,keyEncipherment
+       |extendedKeyUsage=serverAuth
+       |EXT
+       |openssl req -newkey rsa:2048 -nodes -keyout server.key -out server.csr -subj "/CN=$fqdn"
+       |openssl x509 -req -in server.csr -CA $caDir/ca.crt -CAkey $caDir/ca.key -CAcreateserial -out server.crt -days 825 -extfile server.ext
+       |chmod 600 server.key
+       |echo "server certificate made in $sslDir"""".stripMargin
+
+  // The CA next to the key Apache serves, and the chain Apache serves (the
+  // server certificate, then the CA).
+  private val chainCurrent =
+    s"""cmp -s $caCert $sslDir/ca.crt && [ -f $sslDir/server-chain.crt ] && cat $sslDir/server.crt $caCert | cmp -s - $sslDir/server-chain.crt"""
+  private val chainScript =
+    s"""set -e
+       |cp $caCert $sslDir/ca.crt
+       |cat $sslDir/server.crt $caCert > $sslDir/server-chain.crt
+       |openssl verify -CAfile $caCert $sslDir/server.crt""".stripMargin
+
+  // The trust-store step covers both Debian-family and Red Hat-family hosts.
+  private val trustTarget =
+    """if command -v update-ca-certificates >/dev/null 2>&1; then t=/usr/local/share/ca-certificates/orphera-test-ca.crt; else t=/etc/pki/ca-trust/source/anchors/orphera-test-ca.crt; fi"""
+  private val trustCurrent = s"""$trustTarget; cmp -s $caCert "$$t""""
+  private val trustScript =
+    s"""set -e
+       |$trustTarget
+       |cp $caCert "$$t"
+       |if command -v update-ca-certificates >/dev/null 2>&1; then update-ca-certificates; else update-ca-trust; fi""".stripMargin
+
+  // The vhost and config.json are generated into `out` (the real directory, or
+  // a temporary one for the guard to compare with).
+  private val kollaFilesCurrent =
+    s"""T=$$(mktemp -d)
+       |${kollaConfigScript("$T")}
+       |R=0
+       |cmp -s $$T/wsgi-keystone.conf $confDir/wsgi-keystone.conf && cmp -s $$T/config.json $confDir/config.json || R=1
+       |rm -rf $$T
+       |exit $$R""".stripMargin
+
+  private val initStamp = Resource.sha256(initScript + keystoneConfText)
+  private val initCurrent =
+    s"""[ "$$(cat $dataDir/init.stamp 2>/dev/null)" = "$initStamp" ]"""
+  private val initWithStamp =
+    s"""$initScript
+       |echo $initStamp > $dataDir/init.stamp""".stripMargin
+
+  // Prints a scoped admin token on stdout. Used by the check below and by
   // test_keystone.sh; root only, since it embeds the admin password.
-  private val tokenHelperScript =
-    s"""cat > /usr/local/sbin/keystone-admin-token <<'HELPER'
-       |#!/bin/sh
+  private val tokenHelper =
+    s"""#!/bin/sh
        |curl -s --cacert $caCert -D - -o /dev/null -H 'Content-Type: application/json' -d '{"auth":{"identity":{"methods":["password"],"password":{"user":{"name":"admin","domain":{"name":"Default"},"password":"${adminPassword.reveal}"}}},"scope":{"project":{"name":"admin","domain":{"name":"Default"}}}}}' https://$fqdn:5000/v3/auth/tokens | tr -d '\\r' | awk -F': ' 'tolower($$1)=="x-subject-token"{print $$2}'
-       |HELPER
-       |chmod 700 /usr/local/sbin/keystone-admin-token
-       |echo "wrote /usr/local/sbin/keystone-admin-token"""".stripMargin
+       |""".stripMargin
 
   // Over TLS with the test CA, and the body must look like the v3 version
   // document, so a 200 from some unrelated listener does not pass.
-  private val healthScript =
-    s"""CODE=$$(curl -s --cacert $caCert -o /tmp/ks-check.json -w '%{http_code}' https://$fqdn:5000/v3/)
-       |if [ "$$CODE" = "200" ] && grep -q '"version"' /tmp/ks-check.json; then
-       |  exit 0
-       |else
-       |  exit 1
-       |fi""".stripMargin
+  private val healthy =
+    s"""CODE=$$(curl -s --cacert $caCert -o /tmp/ks-check.json -w '%{http_code}' https://$fqdn:5000/v3/); [ "$$CODE" = "200" ] && grep -q '"version"' /tmp/ks-check.json"""
+
+  // Up to 90 s for Keystone to answer after a (re)start.
+  private val waitHealthy =
+    s"""for i in $$(seq 1 18); do
+       |  $healthy && exit 0
+       |  sleep 5
+       |done
+       |echo "keystone does not answer on $endpoint - see 'journalctl -xeu ${keystoneContainer.unitName}' and $logDir" >&2
+       |exit 1""".stripMargin
 
   // A real authentication against the database, not just a reachable port.
-  // Prints only the token length, never the token.
-  private val tokenScript =
-    """T=$(/usr/local/sbin/keystone-admin-token)
-      |if [ -z "$T" ]; then
-      |  echo "no token returned by keystone" >&2
-      |  exit 1
-      |fi
-      |echo "admin token issued (${#T} characters)"""".stripMargin
+  private val canAuthenticate =
+    """[ -n "$(/usr/local/sbin/keystone-admin-token)" ]"""
 
-  val playbook: ClusterPlaybook =
-    clusterPlaybook("keystone-single-node")(
-      stage("create-keystone-database", "tst3")
-        .task(s"create $dbName database and $dbUser on the Galera cluster")(
-          Task.RunCommand(List("sh", "-c", createDatabaseScript))
-        )
-        .build,
+  def describe(target: Node): List[ApplyResource] =
+    val tools = hostPackages.map(p => pkg(p, updateCache = true))
+    val podman = tools(0)
+    val unit = keystoneContainer.unitName
 
-      stage("install-keystone", node)
-        .task("install podman and the TLS tools")(
-          Task.Install(packages = hostPackages, updateCache = true)
-        )
-        .task("use the Kolla cache as a mirror for quay.io")(
-          Task.RunCommand(List("sh", "-c", useCacheScript))
-        )
-        .task("pull the Kolla keystone image")(
-          Task.RunCommand(List("sh", "-c", pullScript), timeoutSeconds = 1200)
-        )
-        .task("create the test CA and server certificate")(
-          Task.RunCommand(List("sh", "-c", tlsScript), timeoutSeconds = 120)
-        )
-        .task("create the Keystone directories")(
-          Task.RunCommand(List("sh", "-c", keystoneDirsScript))
-        )
-        .task("write keystone.conf")(
-          Task.WriteFile(
-            content = keystoneConfText,
-            dest = s"$confDir/keystone.conf",
-            owner = "root",
-            group = "root",
-            mode = 416 // 0640: it holds the database password
-          )
-        )
-        .task("write the WebSSO callback page")(
-          Task.WriteFile(
-            content = ssoCallbackTemplate,
-            dest = s"$confDir/sso_callback_template.html",
-            owner = "root",
-            group = "root",
-            mode = 420 // 0644
-          )
-        )
-        .task("write the Apache vhost and Kolla config.json")(
-          Task.RunCommand(
-            List("sh", "-c", kollaConfigScript),
-            timeoutSeconds = 120
-          )
-        )
-        .task("db_sync, fernet and credential keys, bootstrap")(
-          Task.RunCommand(List("sh", "-c", initScript), timeoutSeconds = 600)
-        )
-        .task(s"write ${keystoneContainer.unitName}")(
-          keystoneContainer.writeUnit
-        )
-        .task(s"start ${keystoneContainer.unitName}")(keystoneContainer.start)
-        .task("write the admin token helper")(
-          Task.RunCommand(List("sh", "-c", tokenHelperScript))
-        )
-        .build,
+    val unitService = service(unit)
 
-      stage("confirm-keystone-healthy", node)
-        .waitFor(
-          HealthCheck.Command(
-            onNode = node,
-            command = List("sh", "-c", healthScript),
-            pollIntervalSeconds = 5,
-            timeoutSeconds = 90
-          )
-        )
-        .task("authenticate as admin")(
-          Task.RunCommand(List("sh", "-c", tokenScript), timeoutSeconds = 60)
-        )
-        .task("keystone confirmed")(
-          Task.Debug(
-            s"Keystone ($image) up at $endpoint ($nodeIp), database on the Galera cluster via $vip:3306. CA certificate: $caCert on $node."
-          )
-        )
-        .build
+    val mirrorDir = directory("/etc/containers/registries.conf.d").after(podman)
+    val mirror = file(
+      "/etc/containers/registries.conf.d/orphera-kolla-cache.conf",
+      registryMirror,
+      mode = "0644"
+    ).after(mirrorDir)
+    val pulled = command(
+      "pull the Kolla keystone image",
+      pullScript,
+      unless = s"podman image exists $image",
+      timeout = 1200
+    ).after(podman, mirror)
+
+    val caDirectory = directory(caDir, mode = "0700").after(podman)
+    val confDirectory = directory(confDir, mode = "0755")
+    val sslDirectory = directory(sslDir, mode = "0755").after(confDirectory)
+    val logDirectory = directory(logDir, mode = "0755")
+    val ca = command(
+      "create the test CA",
+      caScript,
+      unless = caExists,
+      timeout = 120
+    ).after(caDirectory, podman)
+    val server = command(
+      "create the server certificate",
+      serverScript,
+      unless = serverExists,
+      timeout = 120
+    ).after(ca, sslDirectory)
+    val chain = command(
+      "put the CA and the certificate chain beside the key",
+      chainScript,
+      unless = chainCurrent
+    ).after(server).notifies(unitService)
+    val trust = command(
+      "add the test CA to the system trust store",
+      trustScript,
+      unless = trustCurrent,
+      timeout = 120
+    ).after(ca)
+
+    val conf = secretFile(
+      s"$confDir/keystone.conf",
+      Secret(keystoneConfText), // it holds the database password
+      mode = "0640",
+      owner = "root",
+      group = "root"
+    ).after(confDirectory).notifies(unitService)
+    val ssoPage = file(
+      s"$confDir/sso_callback_template.html",
+      ssoCallbackTemplate,
+      mode = "0644",
+      owner = "root",
+      group = "root"
+    ).after(confDirectory).notifies(unitService)
+    val kollaFiles = command(
+      "write the Apache vhost and Kolla config.json",
+      kollaConfigScript(confDir),
+      unless = kollaFilesCurrent,
+      timeout = 300
+    ).after(pulled, confDirectory, sslDirectory, logDirectory).notifies(unitService)
+
+    val init = command(
+      "db_sync, fernet and credential keys, bootstrap",
+      initWithStamp,
+      unless = initCurrent,
+      timeout = 600
+    ).after(pulled, conf, logDirectory)
+
+    val unitFile = file(
+      keystoneContainer.unitPath,
+      keystoneContainer.render,
+      mode = "0644",
+      owner = "root",
+      group = "root"
+    ).notifies(unitService)
+    val running = unitService.after(init, unitFile, kollaFiles, chain, conf, ssoPage)
+
+    val tokenHelperFile = secretFile(
+      "/usr/local/sbin/keystone-admin-token",
+      Secret(tokenHelper), // it holds the admin password
+      mode = "0700",
+      owner = "root",
+      group = "root"
+    )
+    val answering = command(
+      "keystone answers over TLS",
+      waitHealthy,
+      unless = healthy,
+      timeout = 120
+    ).after(running, ca)
+    val authenticating = command(
+      "the admin can authenticate",
+      "echo 'no token returned by keystone: see the database, keystone.conf and the logs' >&2; exit 1",
+      unless = canAuthenticate
+    ).after(answering, tokenHelperFile)
+
+    tools ++ List(
+      mirrorDir,
+      mirror,
+      pulled,
+      caDirectory,
+      confDirectory,
+      sslDirectory,
+      logDirectory,
+      ca,
+      server,
+      chain,
+      trust,
+      conf,
+      ssoPage,
+      kollaFiles,
+      init,
+      unitFile,
+      running,
+      tokenHelperFile,
+      answering,
+      authenticating
     )
