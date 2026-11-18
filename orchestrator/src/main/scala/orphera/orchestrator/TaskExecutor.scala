@@ -864,7 +864,41 @@ object TaskExecutor:
             }")
         case Some(other) => new RuntimeException(s"$label: ${describe(other)}")
 
+    // What the agent can read itself goes through ObserveNode (no script, so
+    // a role that may only look can use it); a command's guard is a script,
+    // and so is everything on an agent that does not have ObserveNode.
     def observe(resources: List[(Int, ApplyResource)]): IO[Map[Int, Observed]] =
+      val typed = resources.flatMap((i, r) => Apply.probe(r).map(p => (i, r, p)))
+      val typedIds = typed.map(_._1).toSet
+      val scripted = resources.filterNot((i, _) => typedIds.contains(i))
+      val fromAgent: IO[(Map[Int, Observed], List[(Int, ApplyResource)])] =
+        if typed.isEmpty then IO.pure((Map.empty, Nil))
+        else
+          NodeClient
+            .observeNode(n, typed.map((i, _, p) => (i, p)))
+            .attempt
+            .flatMap {
+              case Right((read, _)) =>
+                IO.pure(
+                  (
+                    Apply.observedFromAgent(
+                      typed.map((i, r, _) => (i, r)),
+                      read
+                    ),
+                    Nil
+                  )
+                )
+              case Left(e) if NodeError.isUnimplemented(e) =>
+                IO.pure((Map.empty, typed.map((i, r, _) => (i, r))))
+              case Left(e) => IO.raiseError(e)
+            }
+      fromAgent.flatMap { (agentSaw, fallback) =>
+        observeByScript(scripted ++ fallback).map(_ ++ agentSaw)
+      }
+
+    private def observeByScript(
+        resources: List[(Int, ApplyResource)]
+    ): IO[Map[Int, Observed]] =
       if resources.isEmpty then IO.pure(Map.empty)
       else
         quietly(

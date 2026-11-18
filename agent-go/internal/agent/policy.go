@@ -48,6 +48,7 @@ var Operations = map[string][]string{
 	"uptime":      {"GetUptime"},
 	"thread-info": {"GetThreadInfo"},
 	"check-file":  {"CheckFile"},
+	"observe":     {"ObserveNode"},
 	"fetch":       {"RemoteFetchFile"},
 	"copy":        {"CopyFile", "CheckFile"},
 	"packages":    {"Install", "Remove", "RunAutoRemove", "RunDistUpgrade", "InstallDebPackage"},

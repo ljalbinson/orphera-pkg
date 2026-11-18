@@ -1764,6 +1764,84 @@ object Apply:
                 case None => (current, acc)
         }
         ._2
+    observedFrom(resources, blocks)
+
+  /** One thing to read on a node by the agent's `ObserveNode`, with no script:
+    * `kind` is one of path, package, unit, user, group, sysctl, module,
+    * file_text, key, mount (see Protocol.proto).
+    */
+  final case class Probe(kind: String, target: String, extra: String = "")
+
+  /** What `ObserveNode` reads for a resource, or None for one that has no typed
+    * read (a command's guard is a script, so it is read by `observeScript`).
+    */
+  def probe(r: ApplyResource): Option[Probe] = r match
+    case f: ApplyResource.File      => Some(Probe("path", f.path))
+    case d: ApplyResource.Directory => Some(Probe("path", d.path))
+    case s: ApplyResource.Symlink   => Some(Probe("path", s.path))
+    case p: ApplyResource.Package   => Some(Probe("package", p.name))
+    case u: ApplyResource.Service   => Some(Probe("unit", u.unit))
+    case u: ApplyResource.User      => Some(Probe("user", u.name))
+    case g: ApplyResource.Group     => Some(Probe("group", g.name))
+    case v: ApplyResource.Sysctl    =>
+      Some(Probe("sysctl", v.key, sysctlFile(v.key)))
+    case m: ApplyResource.KernelModule =>
+      Some(Probe("module", m.name, s"/etc/modules-load.d/orphera-${m.name}.conf"))
+    case l: ApplyResource.LineInFile => Some(Probe("file_text", l.path))
+    case k: ApplyResource.AuthorizedKey =>
+      Some(Probe("key", k.user, k.keyId))
+    case m: ApplyResource.Mount => Some(Probe("mount", m.path))
+    case _: ApplyResource.Command => None
+
+  /** What the agent read for a line resource, as the lines `observeScript`
+    * counts: how many are exactly the wanted line and how many match.
+    */
+  private def lineValues(
+      l: ApplyResource.LineInFile,
+      values: Map[String, String]
+  ): Either[String, Map[String, String]] =
+    if !values.get("exists").contains("yes") then Right(Map("exists" -> "no"))
+    else if values.get("truncated").contains("yes") then
+      Left(s"${l.path} is too large to read here")
+    else
+      val lines = values.getOrElse("content", "").linesIterator.toList
+      Try(
+        if l.matching.isEmpty then None
+        else Some(java.util.regex.Pattern.compile(l.matching))
+      ).toEither.left
+        .map(e => s"match: not a regular expression: ${e.getMessage}")
+        .map { re =>
+          Map(
+            "exists" -> "yes",
+            "exact" -> lines.count(_ == l.line).toString,
+            "matches" -> re
+              .fold(0)(p => lines.count(x => p.matcher(x).find()))
+              .toString
+          )
+        }
+
+  /** The states for what `ObserveNode` read: values by resource index, as the
+    * script's lines come out. A resource whose read failed is left out of
+    * `read`, which the engine reports as one that could not be read.
+    */
+  def observedFromAgent(
+      resources: List[(Int, ApplyResource)],
+      read: Map[Int, Map[String, String]]
+  ): Map[Int, Observed] =
+    val values = resources.flatMap { (i, r) =>
+      read.get(i).flatMap { kv =>
+        r match
+          case l: ApplyResource.LineInFile =>
+            lineValues(l, kv).toOption.map(i -> _)
+          case _ => Some(i -> kv)
+      }
+    }.toMap
+    observedFrom(resources, values)
+
+  private def observedFrom(
+      resources: List[(Int, ApplyResource)],
+      blocks: Map[Int, Map[String, String]]
+  ): Map[Int, Observed] =
     resources.flatMap { (i, r) =>
       blocks.get(i).map { kv =>
         def mode = kv
