@@ -264,8 +264,9 @@ object AccessPolicyCheck:
 
     // Early refusals
     val op = orphera.common.Operator
-    val early = AccessPolicy.parse(
-      """roles:
+    val early = AccessPolicy
+      .parse(
+        """roles:
         |  viewer:
         |    allow: [facts, version, uptime]
         |  deployer:
@@ -274,7 +275,9 @@ object AccessPolicyCheck:
         |  admin:
         |    allow: all
         |""".stripMargin
-    ).toOption.get
+      )
+      .toOption
+      .get
     def refusal(c: Command, who: orphera.common.Operator) =
       AccessPolicy.earlyRefusal(c, who, early, groups, names)
     val viewer = op("alice", "viewer")
@@ -303,9 +306,19 @@ object AccessPolicyCheck:
     )
     check(
       "a deployer may install on a Ceph node, not on a Galera node (where it has no role)",
-      refusal(Command.Install(List("tree"), Some(List("tst0")), true), deployer).isEmpty &&
-        refusal(Command.Install(List("tree"), Some(List("tst3")), true), deployer)
-          .exists(m => m.contains("tst3:") && m.contains("not in this node's access policy"))
+      refusal(
+        Command.Install(List("tree"), Some(List("tst0")), true),
+        deployer
+      ).isEmpty &&
+        refusal(
+          Command.Install(List("tree"), Some(List("tst3")), true),
+          deployer
+        )
+          .exists(m =>
+            m.contains("tst3:") && m.contains(
+              "not in this node's access policy"
+            )
+          )
     )
     check(
       "a deployer may not run",
@@ -324,8 +337,12 @@ object AccessPolicyCheck:
     )
     check(
       "a reboot that waits needs the calls it waits with",
-      AccessPolicy.callsOf(Command.Reboot(None, 5, true, 300)).exists(_._1.contains("GetUptime")) &&
-        AccessPolicy.callsOf(Command.Reboot(None, 5, false, 300)).exists(!_._1.contains("GetUptime"))
+      AccessPolicy
+        .callsOf(Command.Reboot(None, 5, true, 300))
+        .exists(_._1.contains("GetUptime")) &&
+        AccessPolicy
+          .callsOf(Command.Reboot(None, 5, false, 300))
+          .exists(!_._1.contains("GetUptime"))
     )
     check(
       "commands over SSH, playbooks and reports are not checked early",

@@ -229,9 +229,9 @@ object AccessPolicy:
   /** The agent calls (bare method names) `command` makes on its nodes, which
     * nodes (None: every node), and what to call it in a message. None for a
     * command that makes no call the policy governs: one that goes over SSH
-    * (`bootstrap`, `issue-certs`, `issue-policy`, `teardown`), one that runs
-    * on this machine, and a playbook or pipeline, whose calls are only known
-    * as it runs (the agent refuses those).
+    * (`bootstrap`, `issue-certs`, `issue-policy`, `teardown`), one that runs on
+    * this machine, and a playbook or pipeline, whose calls are only known as it
+    * runs (the agent refuses those).
     */
   def callsOf(
       command: Command
@@ -267,9 +267,12 @@ object AccessPolicy:
         )
       case Command.Fetch(_, _, nodes) =>
         Some((List("RemoteFetchFile"), nodes, "fetch files"))
-      case Command.Facts(nodes)   => Some((List("GatherFacts"), nodes, "read facts"))
-      case Command.Version(nodes) => Some((List("GetVersion"), nodes, "read versions"))
-      case Command.Uptime(nodes)  => Some((List("GetUptime"), nodes, "read uptime"))
+      case Command.Facts(nodes) =>
+        Some((List("GatherFacts"), nodes, "read facts"))
+      case Command.Version(nodes) =>
+        Some((List("GetVersion"), nodes, "read versions"))
+      case Command.Uptime(nodes) =>
+        Some((List("GetUptime"), nodes, "read uptime"))
       case Command.Threads(nodes, _, _) =>
         Some((List("GetThreadInfo"), nodes, "read thread information"))
       case Command.Reboot(nodes, _, wait, _) =>
@@ -287,7 +290,13 @@ object AccessPolicy:
         Some((List("ExecuteCommand"), nodes, "run commands"))
       // An apply reads and changes a node by running scripts there.
       case Command.Apply(_, _, nodes, _) =>
-        Some((List("ExecuteCommand"), nodes, "apply descriptions (which run commands on the node)"))
+        Some(
+          (
+            List("ExecuteCommand"),
+            nodes,
+            "apply descriptions (which run commands on the node)"
+          )
+        )
       case _ => None
 
   /** Why `operator` may not run `command`, by the policy `spec`, or None. The
@@ -307,13 +316,18 @@ object AccessPolicy:
       val refused = targets.flatMap { node =>
         policyFor(spec, node, groups, nodeNames).toOption
           .flatMap(text => Policy.parse(text).toOption)
-          .flatMap(p => methods.flatMap(m => p.refusal(operator.role, m)).headOption)
+          .flatMap(p =>
+            methods.flatMap(m => p.refusal(operator.role, m)).headOption
+          )
           .map(node -> _)
       }
       if refused.isEmpty then None
       else
         val byReason =
-          refused.map(_._2).distinct.map(why => why -> refused.filter(_._2 == why).map(_._1))
+          refused
+            .map(_._2)
+            .distinct
+            .map(why => why -> refused.filter(_._2 == why).map(_._1))
         Some(
           s"${operator.name} (${operator.role}) may not $what (access.yaml); " +
             "no node was contacted:\n" +
@@ -331,8 +345,7 @@ object AccessPolicy:
     * that cannot be read is a warning, not a refusal: the agent decides.
     */
   def early(command: Command): Option[String] =
-    if sys.env.get("ORPHERA_ACCESS_CHECK").map(_.trim).contains("off") then
-      None
+    if sys.env.get("ORPHERA_ACCESS_CHECK").map(_.trim).contains("off") then None
     else
       CurrentOperator.current.flatMap { operator =>
         if !Files.isRegularFile(defaultFile) then None
