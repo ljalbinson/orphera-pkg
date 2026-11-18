@@ -1786,11 +1786,13 @@ object Apply:
     case v: ApplyResource.Sysctl    =>
       Some(Probe("sysctl", v.key, sysctlFile(v.key)))
     case m: ApplyResource.KernelModule =>
-      Some(Probe("module", m.name, s"/etc/modules-load.d/orphera-${m.name}.conf"))
-    case l: ApplyResource.LineInFile => Some(Probe("file_text", l.path))
+      Some(
+        Probe("module", m.name, s"/etc/modules-load.d/orphera-${m.name}.conf")
+      )
+    case l: ApplyResource.LineInFile    => Some(Probe("file_text", l.path))
     case k: ApplyResource.AuthorizedKey =>
       Some(Probe("key", k.user, k.keyId))
-    case m: ApplyResource.Mount => Some(Probe("mount", m.path))
+    case m: ApplyResource.Mount   => Some(Probe("mount", m.path))
     case _: ApplyResource.Command => None
 
   /** What the agent read for a line resource, as the lines `observeScript`

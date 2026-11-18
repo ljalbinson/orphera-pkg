@@ -875,7 +875,8 @@ object TaskExecutor:
     // a role that may only look can use it); a command's guard is a script,
     // and so is everything on an agent that does not have ObserveNode.
     def observe(resources: List[(Int, ApplyResource)]): IO[Map[Int, Observed]] =
-      val typed = resources.flatMap((i, r) => Apply.probe(r).map(p => (i, r, p)))
+      val typed =
+        resources.flatMap((i, r) => Apply.probe(r).map(p => (i, r, p)))
       val typedIds = typed.map(_._1).toSet
       val scripted = resources.filterNot((i, _) => typedIds.contains(i))
       val fromAgent: IO[(Map[Int, Observed], List[(Int, ApplyResource)])] =

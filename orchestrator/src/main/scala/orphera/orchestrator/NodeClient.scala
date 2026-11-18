@@ -642,8 +642,8 @@ object NodeClient:
       }
 
   /** The agent's `ObserveNode`: what it read for each item, by the item's id
-    * (an item that could not be read is left out, with its error in the
-    * second map). Raises UNIMPLEMENTED on an agent that does not have it.
+    * (an item that could not be read is left out, with its error in the second
+    * map). Raises UNIMPLEMENTED on an agent that does not have it.
     */
   def observeNode(
       node: Node,
@@ -656,7 +656,12 @@ object NodeClient:
         stub.observeNode(
           ObserveRequest(
             items.map((i, p) =>
-              Observation(id = i, kind = p.kind, target = p.target, extra = p.extra)
+              Observation(
+                id = i,
+                kind = p.kind,
+                target = p.target,
+                extra = p.extra
+              )
             )
           ),
           authMetadata()

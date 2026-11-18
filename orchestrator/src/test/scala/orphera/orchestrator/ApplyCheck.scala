@@ -1223,7 +1223,9 @@ object ApplyCheck:
           // No agent here: ObserveNode is unimplemented, so the engine reads
           // the node with its script, as it does on a Scala agent.
           observe = (_, _) =>
-            IO.raiseError(_root_.io.grpc.Status.UNIMPLEMENTED.asRuntimeException())
+            IO.raiseError(
+              _root_.io.grpc.Status.UNIMPLEMENTED.asRuntimeException()
+            )
         )
         plan <- Apply.plan("local", rs)
         report <- TaskExecutor.applyOn(
@@ -1490,7 +1492,11 @@ object ApplyCheck:
       mount("/opt/ram", "tmpfs", "tmpfs") -> Apply.Probe("mount", "/opt/ram")
     )
     kinds.foreach { (r, p) =>
-      check(s"probe of ${r.id}", Apply.probe(r) == Some(p), s"${Apply.probe(r)}")
+      check(
+        s"probe of ${r.id}",
+        Apply.probe(r) == Some(p),
+        s"${Apply.probe(r)}"
+      )
     }
     check(
       "a command's guard has no typed read",
@@ -1503,8 +1509,16 @@ object ApplyCheck:
       "a file as the agent reads it",
       one(
         file("/etc/a", "x"),
-        Map("type" -> "file", "mode" -> "644", "owner" -> "root", "group" -> "root", "sha256" -> "ab")
-      ).contains(Observed.RegularFile(Integer.parseInt("644", 8), "root", "root", "ab"))
+        Map(
+          "type" -> "file",
+          "mode" -> "644",
+          "owner" -> "root",
+          "group" -> "root",
+          "sha256" -> "ab"
+        )
+      ).contains(
+        Observed.RegularFile(Integer.parseInt("644", 8), "root", "root", "ab")
+      )
     )
     check(
       "an absent path, a link and a directory",
@@ -1513,7 +1527,12 @@ object ApplyCheck:
           .contains(Observed.Link("/t")) &&
         one(
           directory("/d"),
-          Map("type" -> "directory", "mode" -> "750", "owner" -> "a", "group" -> "b")
+          Map(
+            "type" -> "directory",
+            "mode" -> "750",
+            "owner" -> "a",
+            "group" -> "b"
+          )
         ).contains(Observed.Dir(Integer.parseInt("750", 8), "a", "b"))
     )
     check(
@@ -1529,22 +1548,43 @@ object ApplyCheck:
       "a user, an absent user and a group",
       one(
         user("bob"),
-        Map("exists" -> "yes", "uid" -> "1001", "home" -> "/home/bob", "shell" -> "/bin/sh", "group" -> "bob", "groups" -> "bob,adm")
-      ).contains(Observed.Account(1001, "bob", List("bob", "adm"), "/home/bob", "/bin/sh")) &&
+        Map(
+          "exists" -> "yes",
+          "uid" -> "1001",
+          "home" -> "/home/bob",
+          "shell" -> "/bin/sh",
+          "group" -> "bob",
+          "groups" -> "bob,adm"
+        )
+      ).contains(
+        Observed
+          .Account(1001, "bob", List("bob", "adm"), "/home/bob", "/bin/sh")
+      ) &&
         one(user("bob"), Map("exists" -> "no")).contains(Observed.Absent) &&
-        one(group("g"), Map("exists" -> "yes", "gid" -> "50")).contains(Observed.GroupEntry(50))
+        one(group("g"), Map("exists" -> "yes", "gid" -> "50"))
+          .contains(Observed.GroupEntry(50))
     )
     check(
       "a line resource: the counts are worked out from the file's text",
       one(
         line,
-        Map("exists" -> "yes", "truncated" -> "no", "content" -> "alpha = 1\nbeta = 2\nbeta = 3\n")
-      ).contains(Observed.Facts(Map("exists" -> "yes", "exact" -> "1", "matches" -> "2"))) &&
-        one(line, Map("exists" -> "no")).contains(Observed.Facts(Map("exists" -> "no")))
+        Map(
+          "exists" -> "yes",
+          "truncated" -> "no",
+          "content" -> "alpha = 1\nbeta = 2\nbeta = 3\n"
+        )
+      ).contains(
+        Observed.Facts(Map("exists" -> "yes", "exact" -> "1", "matches" -> "2"))
+      ) &&
+        one(line, Map("exists" -> "no"))
+          .contains(Observed.Facts(Map("exists" -> "no")))
     )
     check(
       "a file too large to read, or a bad regular expression, is not read at all",
-      one(line, Map("exists" -> "yes", "truncated" -> "yes", "content" -> "")).isEmpty &&
+      one(
+        line,
+        Map("exists" -> "yes", "truncated" -> "yes", "content" -> "")
+      ).isEmpty &&
         one(
           lineInFile("/etc/x", "a", "("),
           Map("exists" -> "yes", "truncated" -> "no", "content" -> "a\n")
@@ -1556,9 +1596,19 @@ object ApplyCheck:
     )
     check(
       "sysctl, module, key and mount values pass through as facts",
-      one(sysctl("k", "1"), Map("found" -> "yes", "runtime" -> "1", "persisted" -> ""))
-        .contains(Observed.Facts(Map("found" -> "yes", "runtime" -> "1", "persisted" -> ""))) &&
-        one(mount("/m", "tmpfs", "tmpfs"), Map("fstab" -> "no", "mounted" -> "no"))
+      one(
+        sysctl("k", "1"),
+        Map("found" -> "yes", "runtime" -> "1", "persisted" -> "")
+      )
+        .contains(
+          Observed.Facts(
+            Map("found" -> "yes", "runtime" -> "1", "persisted" -> "")
+          )
+        ) &&
+        one(
+          mount("/m", "tmpfs", "tmpfs"),
+          Map("fstab" -> "no", "mounted" -> "no")
+        )
           .contains(Observed.Facts(Map("fstab" -> "no", "mounted" -> "no")))
     )
 
