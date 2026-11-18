@@ -1,6 +1,6 @@
 Item,Type,Needs first,Command or action
 Finish testing galera_cold_start.scala,Test,The cold start from failed nodes and the healthy check have passed.,"Clean full stop (systemctl stop mariadb on tst5, tst4, tst3, then run it), a partial state, and galera-cold-start --help."
 Owner of the stale ARP entry for 10.10.3.20,Investigate,Which device on hypervisor st0 holds 10.10.3.20 (MAC 16:3b:84:f0:ef:4f).,On st0: ip -br addr | grep 10.10.3.20 and ip -br link | grep -i 16:3b:84:f0:ef:4f. Matters if the Cilium operator crash-loops again.
-Put the other nodes on mutual TLS and operator identity,Rollout,tst0 runs the 0.1.210+go agent with --client-auth and logs operator and role (verified). Other nodes have not been changed.,"orphera deploy-agent, then orphera issue-certs --nodes <nodes> --client-auth, a few nodes at a time."
-Access control step 2: policy at the agent,Decision,Whether to start; design in docs/ACCESS-CONTROL-DESIGN.md.,
+"Roll mutual TLS, the 0.1.211 agent and a policy out to the other nodes",Rollout,tst0 is done and verified. Other nodes run 0.1.210 agents without client certificates.,"orphera deploy-agent, orphera issue-certs --nodes <nodes> --client-auth, then orphera issue-policy --nodes <nodes>, a few nodes at a time (start with group ceph)."
+Access control step 3: orchestrator-side early refusals,Decision,Steps 1 and 2 are merged and verified on tst0.,"A role refused before any node is touched, with --check usable by a viewer; also path limits and policy-info if wanted."
 Retire lustre_cluster.scala,Decision,lustre_cluster_script.scala has now run cleanly; its header says the playbook stays until then.,
