@@ -513,7 +513,9 @@ object Orchestrator:
             val bad = oks.count(!_)
             IO.println(
               s"${oks.size - bad} of ${oks.size} nodes match access.yaml" +
-                (if bad > 0 then s"; $bad do not" else "")
+                (if bad > 1 then s"; $bad do not"
+                 else if bad == 1 then "; 1 does not"
+                 else "")
             ).as(bad == 0)
           }
 
