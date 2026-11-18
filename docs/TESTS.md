@@ -278,8 +278,9 @@ See I8a.  PASSED.
 Written without a Scala toolchain, so the first run on scala0 is also the first
 compile.  Prerequisites: Galera + VIP healthy (J, now on tst3-tst5, see L), agent on tst6.
 
-    git pull && git checkout keystone
-    orphera cluster-playbook manifests/keystone_single_node.scala
+    git pull origin main
+    orphera apply manifests/keystone_database.scala
+    orphera apply manifests/keystone_single_node.scala
     manifests/test_keystone.sh 2>&1 | tee /tmp/keystone.log
 Expect: all stages complete, `GET /v3/` over TLS returns 200, password auth
 returns 201, plain HTTP and TLS without the CA do not return the API, the
@@ -290,7 +291,8 @@ Most likely to need a fix on the first run: the image path/tag (the pull task
 prints a hint; `registry`/`release`/`baseTag` are at the top of the manifest),
 the SSL module being present in the image's Apache, and Kolla's `config.json`
 behaviour (check `journalctl -u orphera-keystone` and /var/log/kolla/keystone).
-Teardown: `orphera cluster-playbook manifests/keystone_teardown.scala`.
+Teardown: `orphera apply manifests/keystone_teardown.scala`.
+Since the move to `orphera apply` (the Keystone database and the Keystone node are two descriptions, since one description cannot order its nodes), the second run must report `0 changed`; `test_keystone.sh` asserts it. The dated results below were made with the cluster playbook.
 
 Result (2026-10-10): image `quay.io/openstack.kolla/keystone:2025.1-ubuntu-noble`
 pulls from quay.io as assumed (the tst9 cache did not exist yet, so podman fell back).

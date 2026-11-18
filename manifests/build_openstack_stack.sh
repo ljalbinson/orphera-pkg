@@ -289,7 +289,8 @@ step_galera() {
 }
 
 step_keystone() {
-  playbook keystone_single_node.scala
+  apply_desc keystone_database.scala
+  apply_desc keystone_single_node.scala
   local out
   out=$(run_on tst6 "curl -s --cacert /etc/kolla/keystone/ssl/ca.crt https://tst6.ljalbinson.com:5000/v3")
   check "Keystone answers a version document over TLS" contains '"version"' "$out"
