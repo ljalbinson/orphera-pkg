@@ -1088,10 +1088,9 @@ script's `Playbook` value has already been built.
   set with `set_fact`, often from a command's output): use
   `.when("key" === "value")`, since the decision has to be made after
   the playbook was built. It takes the same keys as YAML's `when:`
-  (see `when:` conditions above). `lustre_cluster.scala` is an example:
-  an earlier task sets `lustre_reboot` from what it finds on the node,
-  and `.when("lustre_reboot" === "yes")` decides whether the reboot
-  runs.
+  (see `when:` conditions above). An example is a reboot that depends on
+  what an earlier task finds on the node: it sets `lustre_reboot`, and
+  `.when("lustre_reboot" === "yes")` decides whether the reboot runs.
 
 ```scala
 // Known before the run: plain Scala.
@@ -1171,7 +1170,7 @@ parallel.
 
 `manifests/script_demo.scala` tries it on tst0 and tst1 (only `/tmp` and
 the `tree` package). `manifests/lustre_cluster_script.scala` is
-`lustre_cluster.scala` as a script: the reboot decision is a query and an
+the Lustre build as a script: the reboot decision is a query and an
 `if`, and each node's `cluster_ip` and `lustre_targets` are read from
 `inventory.yaml` in Scala and checked before anything runs. The fluent DSL stays for playbooks whose steps do not
 depend on what is found: a script's later steps are known only by running
@@ -3150,7 +3149,7 @@ A Lustre file system `lfs0` (ldiskfs targets, LNet over TCP) on six Rocky Linux 
 | tst44-tst47 (10.10.5.56-59) | OSS | two OSTs each, OST0000-OST0007 (128 GB each) |
 | tst48 (10.10.5.60) | MDS | MDT1 (128 GB) |
 | tst49 (10.10.5.61) | Ubuntu 24.04 client (`/mnt/lfs0`), `lustre_client.scala` | none |
-| tst50 (10.10.5.62) | Rocky 9 client (`/mnt/lfs0`), built by `lustre_cluster.scala` | none |
+| tst50 (10.10.5.62) | Rocky 9 client (`/mnt/lfs0`), built by `lustre_cluster_script.scala` | none |
 
 Rocky 9, not 10: Lustre 2.17 builds its servers for EL9 only; EL10 servers come with Lustre 2.18. Which
 disk holds which target is the `lustre_targets` var of each node in `inventory.yaml` (`<role>:<by-id path>`,
@@ -3169,7 +3168,7 @@ from the Rocky vault when it has left the current repositories. SELinux is left 
     # once: the Rocky 9 cloud image on the hypervisors the VMs go on
     orphera run sh -c 'cd /var/lib/libvirt/boot && { [ -e Rocky-9-GenericCloud-Base.latest.x86_64.qcow2 ] || curl -fsSLO https://dl.rockylinux.org/pub/rocky/9/images/x86_64/Rocky-9-GenericCloud-Base.latest.x86_64.qcow2; }' --nodes gs1,gs2,gs3,st0
     manifests/par-mk-new-and-empty.sh -q -j 7 tst43 tst44 tst45 tst46 tst47 tst48 tst50
-    orphera cluster-playbook manifests/lustre_cluster.scala     # build (repeatable)
+    orphera playbook manifests/lustre_cluster_script.scala      # build (repeatable)
     manifests/test_lustre.sh                                     # teardown, build, checks (wipes the disks)
     orphera cluster-playbook manifests/lustre_teardown.scala    # unmount and wipe; packages stay
 
@@ -3187,12 +3186,12 @@ anyway, re-running the playbook rebuilds. Settings: `LUSTRE_UBUNTU_CLIENTS` (def
 `LUSTRE_SERVERS` as below. `lustre_teardown.scala` unmounts tst49 first (`LUSTRE_UBUNTU_CLIENTS=""` when it
 is down); after a teardown and rebuild of the servers, run `lustre_client.scala` again to remount it.
 
-`lustre_cluster.scala` installs the Lustre server packages from Whamcloud's repository (and its kernel, when
+`lustre_cluster_script.scala` installs the Lustre server packages from Whamcloud's repository (and its kernel, when
 the repository has one), makes the kernel that has the Lustre modules the default and version-locks it with
 the Lustre packages, reboots only the nodes not already on it, brings up LNet, formats the blank targets and
 mounts them in order: MGT, MDT0, the other MDTs, OSTs, then the client. A disk that already carries the expected Lustre label
 is left alone; a disk with any other signature stops the run. Nothing goes into `/etc/fstab`: after the VMs
-have been off, run `lustre_cluster.scala` again, which mounts everything in the right order. SELinux is set
+have been off, run `lustre_cluster_script.scala` again, which mounts everything in the right order. SELinux is set
 to permissive on the servers.
 
 After a restart, two stages matter. `lnet.service` (enabled by the LNet stage) starts LNet at boot from
@@ -3390,7 +3389,7 @@ playbooks marked DRAFT there have been written but not all run on the lab.
 | `cephadm_add_mons.scala`, `cephadm_mon_rolling_upgrade.scala` | The cephadm path: adding monitors on tst1 and tst2, and a package-based rolling monitor upgrade with tst0 first (for a cephadm cluster, use `ceph_upgrade.scala`) |
 | `ceph_upgrade.scala` | Staged cephadm upgrade of the whole cluster to a new release, health-checked between stages (see [upgrading the Ceph cluster](#example-upgrading-the-ceph-cluster-cephadm)) |
 | `ceph_client_upgrade.scala`, `ceph_key_rotation.scala` | Ceph's own client for the OpenStack services and compute hosts, then their keys rotated to `aes256k` and the monitors set to `aes256k` only |
-| `lustre_cluster_script.scala` | `lustre_cluster.scala` as an `OrpheraScript` |
+| `lustre_cluster_script.scala` | the Lustre build as an `OrpheraScript` (replaces `lustre_cluster.scala`) |
 | `apt_cache_teardown.scala`, `rpm_cache_teardown.scala`, `kolla_cache_teardown.scala` | Undo the apt cache (tst11) and its clients, the RPM cache (tst12) and its clients, and the Kolla image cache (tst9) |
 | `keystone_teardown.scala`, `glance_teardown.scala`, `placement_teardown.scala`, `cinder_teardown.scala`, `nova_teardown.scala`, `neutron_teardown.scala`, `horizon_teardown.scala` | Undo the matching `*_single_node.scala` playbook (see the OpenStack example below) |
 

@@ -1,3 +1,2 @@
 Item,Type,Needs first,Command or action
 Access control: what is left,Decision,"Steps 1 to 3 are merged and verified. Not built: path limits, policy-info, viewer-safe apply --check (typed actions, step 4).",Only if wanted.
-Retire lustre_cluster.scala,Decision,lustre_cluster_script.scala has now run cleanly; its header says the playbook stays until then.,

@@ -3,7 +3,7 @@
 import orphera.orchestrator.*
 import orphera.orchestrator.ClusterPlaybookDsl.*
 
-// Lustre clients on Ubuntu 24.04, for the file system lustre_cluster.scala
+// Lustre clients on Ubuntu 24.04, for the file system lustre_cluster_script.scala
 // builds (run that first). Default client: tst49, mounting lfs0 at /mnt/lfs0.
 //
 // Run:   orphera cluster-playbook manifests/lustre_client.scala
@@ -38,7 +38,7 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 //   LUSTRE_MGS             the node with the MGT                    default tst43
 //   LUSTRE_SERVERS         nodes with targets, for the verify count default tst43-tst48
 //   LUSTRE_VERSION         Lustre version to build; keep it equal to the servers'
-//                          (lustre_cluster.scala LUSTRE_RELEASE)     default 2.17.0
+//                          (lustre_cluster_script.scala LUSTRE_RELEASE)     default 2.17.0
 //
 // Needs outbound HTTPS from the clients to downloads.whamcloud.com.
 //

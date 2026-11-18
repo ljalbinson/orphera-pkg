@@ -1,4 +1,4 @@
-# tst51: Lustre client on Rocky Linux 9, no targets (lustre_cluster.scala, LUSTRE_CLIENTS); mounts lfs0 at /mnt/lfs0.
+# tst51: Lustre client on Rocky Linux 9, no targets (lustre_cluster_script.scala, LUSTRE_CLIENTS); mounts lfs0 at /mnt/lfs0.
 # Rocky Linux 9 (Lustre 2.17 servers are built for EL9; EL10 servers need Lustre 2.18).
 params:
   # Rocky package names (the Ubuntu-only ones are left out).

@@ -33,6 +33,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - A forwarded agent socket with no agent at the far end (logged in with the `RemoteForward` while `orphera secrets agent` was not running on the Mac) now counts as no agent: orphera notes it and decrypts with the identity on the host, a YubiKey attached there, instead of stopping with `the agent on ...: Connection reset`. ssh accepts the connection and closes it, so a connection closed before the first byte of a reply is taken as nothing answering; once the agent has begun to answer, a failure still stops the run. The agent answers `PING` with `PONG`, and the README's login check for `~/.profile` uses it: it said the agent answered whenever the socket accepted a connection. `SecretsCheck`: the forwarded socket with nothing behind it, and `PING`.
 - `SecretsCheck` no longer prints the age-agent fallback note (`(age agent: nothing answers on ...; decrypting here with ...)`) during the build, which sbt showed as `[error]` though every check passed; it now checks that note instead (`AgeCipher` takes where the note goes).
 
+### Removed
+- `manifests/lustre_cluster.scala`, the fluent playbook that builds the Lustre file system, is gone: `manifests/lustre_cluster_script.scala` (the same build written as a script, which has run cleanly on the lab) replaces it, and carries its header (layout, stages, settings). Run it with `orphera playbook manifests/lustre_cluster_script.scala` instead of `orphera cluster-playbook manifests/lustre_cluster.scala`; `manifests/test_lustre.sh`, the comments in `config/` and `inventory.yaml`, and the README say so too.
+
+
 ## [0.1.210] - 2026-11-16
 
 New: declarative apply (`orphera apply`, in Scala or YAML: files, directories, symlinks, commands, packages, services, users and groups; the cache servers and clients now described this way), the secret store on YubiKeys with `orphera secrets agent` for a key on another machine, scripts as plain Cats Effect (`OrpheraScript`), the Ceph upgrade to Tentacle and the cephx key rotation to `aes256k`, `start-vm` retries and stale OVS port cleanup, and a formatting check in CI.

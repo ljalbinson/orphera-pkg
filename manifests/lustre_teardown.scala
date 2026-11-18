@@ -3,19 +3,19 @@
 import orphera.orchestrator.*
 import orphera.orchestrator.ClusterPlaybookDsl.*
 
-// Removes the Lustre file system that lustre_cluster.scala builds: unmounts the
+// Removes the Lustre file system that lustre_cluster_script.scala builds: unmounts the
 // clients, then the OSTs, then the MDTs and the MGT, and wipes the signatures
 // off every disk listed in each server's `lustre_targets` (inventory.yaml).
 // ALL DATA IN THE FILE SYSTEM IS LOST.
 //
 // Left in place, because they are slow to redo and harmless: the Lustre
 // packages and kernel, the version locks, the repository file, LNet and its
-// modprobe file, SELinux permissive. lustre_cluster.scala then rebuilds from
+// modprobe file, SELinux permissive. lustre_cluster_script.scala then rebuilds from
 // the format stage on.
 //
 // Run:   orphera cluster-playbook manifests/lustre_teardown.scala
 // Uses the same LUSTRE_FSNAME, LUSTRE_SERVERS and LUSTRE_CLIENTS settings as
-// lustre_cluster.scala, and unmounts the Ubuntu clients of lustre_client.scala
+// lustre_cluster_script.scala, and unmounts the Ubuntu clients of lustre_client.scala
 // first too (LUSTRE_UBUNTU_CLIENTS, default tst49; set it to "" when that node is
 // down, or the first stage fails there and nothing is wiped). The clients keep
 // their Lustre build. A disk that is still mounted after the unmounts (or is

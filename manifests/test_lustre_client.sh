@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # End-to-end test for the Ubuntu Lustre client (lustre_client.scala) on tst49,
-# against the file system lustre_cluster.scala built on tst43-tst48.
+# against the file system lustre_cluster_script.scala built on tst43-tst48.
 #
 # Runs lustre_client.scala, then independent checks over `orphera run`:
 #   - tst49 runs Ubuntu, its LNet NID is its cluster_ip on tcp, and its kernel
@@ -14,7 +14,7 @@
 #   - lustre_client.scala run again does not rebuild and leaves the mount.
 # The servers are not torn down; the test directory is removed at the end.
 #
-# Prerequisites: the servers are built (lustre_cluster.scala or
+# Prerequisites: the servers are built (lustre_cluster_script.scala or
 # test_lustre.sh), tst49 exists with an agent (Ubuntu 24.04) and reaches
 # downloads.whamcloud.com. The first run builds the client: allow a few minutes.
 #

@@ -1,4 +1,4 @@
-# tst47: Lustre OSS: data1 and data2 are OSTs (lustre_cluster.scala).
+# tst47: Lustre OSS: data1 and data2 are OSTs (lustre_cluster_script.scala).
 # Rocky Linux 9 (Lustre 2.17 servers are built for EL9; EL10 servers need Lustre 2.18).
 params:
   # Rocky package names (the Ubuntu-only ones are left out).

@@ -20,7 +20,7 @@ before the run starts (see *What it gives up*).
 
 ## Before and after
 
-**1. A decision made on the node (from `lustre_cluster.scala`).** Today the answer to "is a reboot needed" is
+**1. A decision made on the node (from `lustre_cluster.scala`, the fluent playbook, since replaced by `lustre_cluster_script.scala`).** Today the answer to "is a reboot needed" is
 registered as a set fact and read back by a `.when` in the next stage:
 
 ```scala

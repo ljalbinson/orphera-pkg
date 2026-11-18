@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# End-to-end test for the Lustre file system (lustre_cluster.scala,
+# End-to-end test for the Lustre file system (lustre_cluster_script.scala,
 # lustre_teardown.scala) on tst43-tst48.
 #
 # Lifecycle: lustre_teardown -> lustre_cluster, then independent checks run
@@ -15,7 +15,7 @@
 #   - the Rocky client tst50 (no targets): EL9, its NID, the Lustre client
 #     packages version-locked, 2 MDTs and 8 OSTs, and files written on tst43
 #     and tst50 read back identically on the other;
-#   - lustre_cluster.scala run again changes nothing: the targets are reported
+#   - lustre_cluster_script.scala run again changes nothing: the targets are reported
 #     as already formatted and the file is still there, unchanged.
 # The file system is left built; the test file is removed at the end.
 #
@@ -76,8 +76,8 @@ log "teardown (wipes the target disks)"
 orphera cluster-playbook lustre_teardown.scala || true
 
 log "build"
-if ! orphera cluster-playbook lustre_cluster.scala; then
-  log "FAIL: lustre_cluster.scala"
+if ! orphera playbook lustre_cluster_script.scala; then
+  log "FAIL: lustre_cluster_script.scala"
   FAIL=$((FAIL + 1))
   finish
 fi
@@ -144,9 +144,9 @@ assert_equals "file in a directory on MDT1 has its metadata on MDT1" "1" "$(valu
 assert_equals "files in a directory striped over $WANT_MDT MDTs use all $WANT_MDT" "$WANT_MDT" "$(value_of SPREAD "$out")" "$out"
 
 log "re-run (idempotence)"
-rerun=$(orphera cluster-playbook lustre_cluster.scala 2>&1)
+rerun=$(orphera playbook lustre_cluster_script.scala 2>&1)
 rc=$?
-assert_equals "lustre_cluster.scala re-run succeeds" "0" "$rc" "$(printf '%s\n' "$rerun" | tail -20)"
+assert_equals "lustre_cluster_script.scala re-run succeeds" "0" "$rc" "$(printf '%s\n' "$rerun" | tail -20)"
 # Count the formatter's own report lines ("<role> on <disk>: already formatted"),
 # not the script text the playbook runner prints, which contains the phrase too.
 skipped=$(printf '%s\n' "$rerun" | grep -c 'on /dev/.*: already formatted (')

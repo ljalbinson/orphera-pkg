@@ -4,26 +4,76 @@ import cats.effect.IO
 
 import orphera.orchestrator.*
 
-// lustre_cluster.scala written as a script (OrpheraScript,
-// docs/SCRIPT-DSL-DESIGN.md): the same file system, the same shell scripts,
-// the same order. What changes:
-//   - the reboot decision is a value: "is a reboot needed" is a query whose
-//     answer decides, with an `if`, whether the node reboots (the fluent
-//     version registers a fact and reads it back with `.when`);
-//   - each node's cluster_ip and lustre_targets, and the MGS NID, are read
-//     from inventory.yaml in Scala and put into the scripts, instead of being
-//     rendered as templates by the orchestrator; a node without them stops
-//     the run before anything is changed;
-//   - each stage is a `nodes.each`, a barrier as a stage is: every node
-//     finishes it before any starts the next, and a node that fails stops the
-//     run, named.
-// The layout, settings (LUSTRE_FSNAME, LUSTRE_MGS, LUSTRE_SERVERS,
-// LUSTRE_CLIENTS, LUSTRE_RELEASE, LUSTRE_EL), what each stage does and why are
-// as in lustre_cluster.scala, which stays until this one has run cleanly.
+// A Lustre file system (ldiskfs backend, LNet over TCP) on Rocky Linux 9, written as a
+// script (OrpheraScript, docs/SCRIPT-DSL-DESIGN.md). It replaces lustre_cluster.scala,
+// the fluent playbook it was converted from (see CHANGELOG.md).
+//
+// Layout (inventory.yaml, var `lustre_targets` on each server):
+//   tst43        MGS + MDS: MGT on data1, MDT0 on data2; also the test client
+//   tst44-tst47  OSS: two OSTs each (OST0000-OST0007)
+//   tst48        MDS: MDT1, the second metadata target (DNE)
+// The client mount is /mnt/<fsname> on the client nodes (default tst43 and
+// tst50). A client that is not a server (tst50, Rocky 9, no targets) gets the
+// Lustre client packages instead of the server ones, and the same kernel,
+// reboot and LNet stages. Ubuntu clients: lustre_client.scala.
 //
 // Run:   orphera playbook manifests/lustre_cluster_script.scala
 //        (--resume picks up after a failure: the steps done are skipped;
 //        "is a reboot needed" is a query and always runs again)
+//
+// Stages, in order. Each is a `nodes.each`, a barrier: every node finishes it before
+// any starts the next, and a node that fails stops the run, named.
+//   check OS, target disks and repositories   every server: EL9, its target disks
+//                    exist, the Lustre and e2fsprogs repositories answer. Nothing is changed.
+//   check OS and the client repository   every client that is not a server: EL9, the
+//                    Lustre client repository answers. Nothing is changed.
+//   Lustre repositories, kernel and server packages   repository file, the Lustre
+//                    server packages and, when the Lustre repository has one, its own
+//                    kernel; SELinux set to permissive (Lustre servers are not run enforcing)
+//   Lustre client repository and packages   the client repository, the kernel
+//                    kmod-lustre-client is built for (from the Rocky vault if it has left
+//                    the current repositories), lustre-client and kmod-lustre-client
+//                    (SELinux left as it is: the client supports enforcing)
+//   default to the Lustre kernel and lock the packages   makes the newest installed
+//                    kernel that has the Lustre modules the default (when none has,
+//                    installs the kernel the modules were built for, from the Rocky
+//                    vault if it is no longer in the current repositories), and locks
+//                    the kernel and Lustre packages with dnf versionlock so a later
+//                    `dnf upgrade` cannot move them apart
+//   reboot           only the nodes not already running that kernel; "is a reboot
+//                    needed" is a query whose answer decides, with an `if`
+//   LNet on tcp0     on the interface that holds cluster_ip; port 988/tcp opened when
+//                    firewalld is running
+//   reach the MGS over LNet   every node reaches the MGS
+//   mkfs.lustre the blank targets   see below
+//   mount the MGT, then MDT0; mount the other MDTs (MDT0 first, so they register
+//                    behind it); mount the OSTs
+//   wait for MDT and OST recovery, then the client mount
+//   every MDT and OST is visible to the client   the client sees every target in the inventory
+//
+// Repeatable. A target whose disk already carries the expected Lustre label is
+// left alone; a disk with any other signature stops the run instead of being
+// formatted (lustre_teardown.scala wipes the listed disks). A mounted target is
+// left mounted. Nothing goes into /etc/fstab: after the VMs have been off,
+// running this script again mounts everything in the right order (MGS, MDTs,
+// OSTs, clients), which a boot-time mount on each node cannot guarantee.
+//
+// Each node's cluster_ip and lustre_targets, and the MGS NID, are read from
+// inventory.yaml in Scala and put into the scripts; a node without them stops the
+// run before anything is changed.
+//
+// Settings (environment variables):
+//   LUSTRE_FSNAME    file system name, at most 8 characters      default lfs0
+//   LUSTRE_MGS       the node with the MGT                        default tst43
+//   LUSTRE_SERVERS   every node with targets (space separated)    default tst43-tst48
+//   LUSTRE_CLIENTS   nodes that mount the file system: servers, or Rocky 9
+//                    nodes with no targets                       default tst43 tst50
+//   LUSTRE_RELEASE   directory under .../public/lustre/           default lustre-2.17.0
+//   LUSTRE_EL        EL build directory of that release            default el9.7
+//
+// Needs outbound HTTPS from the servers to downloads.whamcloud.com (the rpm
+// cache on tst12 mirrors only Rocky and EPEL). Whamcloud's packages are not
+// GPG-signed, so the repository file has gpgcheck=0; the download is over HTTPS.
 //
 // Nodes (the defaults): tst43-tst48 (servers), tst50 (Rocky client), and
 // tst12 (the rpm cache the Rocky nodes use for Rocky and EPEL packages).
