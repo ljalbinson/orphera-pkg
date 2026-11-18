@@ -35,6 +35,10 @@ roles:
     nodes: [group:ceph]
   admin:
     allow: all
+  pathtest:
+    allow: [facts, version, observe, apply-files, check-file, fetch, copy]
+    nodes: [tst39]
+    paths: [/tmp/orphera-pathtest/]
 
 # Serial numbers (hexadecimal) of operator certificates to refuse before they
 # expire: openssl x509 -noout -serial -in certs/operators/alice.crt
