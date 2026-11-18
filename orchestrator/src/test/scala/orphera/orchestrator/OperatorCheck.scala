@@ -41,7 +41,7 @@ object OperatorCheck:
       Operator.fromDn("OU=deployer,CN=alice") ==
         Some(Operator("alice", "deployer")) &&
         Operator.fromDn("CN=alice,OU=deployer") ==
-          Some(Operator("alice", "deployer"))
+        Some(Operator("alice", "deployer"))
     )
     check(
       "the orchestrator's own certificate is not an operator",

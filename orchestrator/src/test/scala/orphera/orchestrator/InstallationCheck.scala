@@ -126,7 +126,7 @@ object InstallationCheck:
         Map("ORPHERA_OPERATOR" -> "alice", Installation.CertsEnv -> "/ca").get
       ) == "/ca/operators/alice" &&
         Installation.clientStemOf(Map("ORPHERA_OPERATOR" -> " ").get) ==
-          "certs/client"
+        "certs/client"
     )
     check(
       "ORPHERA_CERTS_DIR moves it, and a trailing slash does not matter",

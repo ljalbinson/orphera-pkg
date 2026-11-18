@@ -35,10 +35,10 @@ object CurrentOperator:
         case _ => Left(s"$path is not an X.509 certificate")
       }
 
-  /** Why `ORPHERA_OPERATOR` cannot be acted on, or None when it is unset or
-    * its certificate is there and names that operator. Checked before any
-    * command runs: an operator who is named but cannot be proved must not fall
-    * back to the shared client certificate.
+  /** Why `ORPHERA_OPERATOR` cannot be acted on, or None when it is unset or its
+    * certificate is there and names that operator. Checked before any command
+    * runs: an operator who is named but cannot be proved must not fall back to
+    * the shared client certificate.
     */
   def problem: Option[String] =
     Installation.operatorName.flatMap { name =>
@@ -54,7 +54,7 @@ object CurrentOperator:
         )
       else
         fromFile(Paths.get(Installation.clientCert)) match
-          case Left(why)                      => Some(why)
+          case Left(why)                    => Some(why)
           case Right(op) if op.name != name =>
             Some(
               s"${Installation.clientCert} is for operator ${op.name}, not $name"

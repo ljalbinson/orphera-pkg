@@ -68,7 +68,8 @@ object Installation:
   def clientKey: String = s"${clientStemOf(name => sys.env.get(name))}.key"
 
   /** The operator this orchestrator acts as, from `ORPHERA_OPERATOR`. */
-  def operatorName: Option[String] = set(name => sys.env.get(name), Operator.Env)
+  def operatorName: Option[String] =
+    set(name => sys.env.get(name), Operator.Env)
 
   /** Why the CA certificate cannot be used, or `None` when the file is there
     * and readable. The TLS library only says "File does not contain valid

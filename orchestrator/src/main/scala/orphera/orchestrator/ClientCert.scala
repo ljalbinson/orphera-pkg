@@ -64,8 +64,8 @@ object ClientCert:
     @scala.annotation.tailrec
     def go(rest: List[String], st: State): Either[String, State] =
       rest match
-        case Nil                       => Right(st)
-        case "--force" :: tail         =>
+        case Nil               => Right(st)
+        case "--force" :: tail =>
           go(tail, st.copy(o = st.o.copy(force = true)))
         case "--days" :: value :: tail =>
           value.toIntOption.filter(_ > 0) match
@@ -74,10 +74,12 @@ object ClientCert:
             case None =>
               Left(s"--days needs a positive number of days, got '$value'")
         case "--operator" :: value :: tail =>
-          if Operator.validName(value) then go(tail, st.copy(name = Some(value)))
+          if Operator.validName(value) then
+            go(tail, st.copy(name = Some(value)))
           else Left(badName("--operator", value))
         case "--role" :: value :: tail =>
-          if Operator.validName(value) then go(tail, st.copy(role = Some(value)))
+          if Operator.validName(value) then
+            go(tail, st.copy(role = Some(value)))
           else Left(badName("--role", value))
         case other :: _ =>
           Left(s"Unknown argument to issue-client-cert: $other")

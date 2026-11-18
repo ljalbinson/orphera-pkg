@@ -321,9 +321,8 @@ object AuditLog:
     IO.blocking {
       Files.createDirectories(auditDir)
       rotateIfNeeded()
-      val who = CurrentOperator.current.toList.flatMap(o =>
-        List("operator" -> o.name, "role" -> o.role)
-      )
+      val who = CurrentOperator.current.toList
+        .flatMap(o => List("operator" -> o.name, "role" -> o.role))
       val line = toJson((fields ++ who) :+ ("ts" -> Instant.now().toString))
       Files.write(
         auditFile,

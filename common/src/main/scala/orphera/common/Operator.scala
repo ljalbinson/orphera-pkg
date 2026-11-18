@@ -10,9 +10,9 @@ import scala.util.Try
 
 /** Who is calling: a person (`name`) acting in a `role`, taken from the client
   * certificate they present, whose subject is `CN=<name>, OU=<role>` (made by
-  * `orphera issue-client-cert --operator <name> --role <role>`). The orchestrator
-  * records it in its audit log and an agent in its own log. Nothing is refused
-  * on it yet.
+  * `orphera issue-client-cert --operator <name> --role <role>`). The
+  * orchestrator records it in its audit log and an agent in its own log.
+  * Nothing is refused on it yet.
   */
 final case class Operator(name: String, role: String)
 
