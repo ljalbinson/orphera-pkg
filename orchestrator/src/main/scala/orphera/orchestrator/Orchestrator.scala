@@ -374,9 +374,11 @@ object Orchestrator:
         )
         .flatMap(summary(_, "Policy removed"))
     else
-      val path = policyFile.map(java.nio.file.Paths.get(_)).getOrElse(
-        AccessPolicy.defaultFile
-      )
+      val path = policyFile
+        .map(java.nio.file.Paths.get(_))
+        .getOrElse(
+          AccessPolicy.defaultFile
+        )
       val names = Inventory.all.map(_.name)
       AccessPolicy
         .read(path)

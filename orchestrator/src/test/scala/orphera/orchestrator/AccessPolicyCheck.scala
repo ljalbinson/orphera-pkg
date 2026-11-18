@@ -63,23 +63,37 @@ object AccessPolicyCheck:
     )
     check(
       "default_role defaults to admin",
-      AccessPolicy.parse("roles:\n  admin:\n    allow: all\n").exists(_.defaultRole == "admin")
+      AccessPolicy
+        .parse("roles:\n  admin:\n    allow: all\n")
+        .exists(_.defaultRole == "admin")
     )
     check(
       "the default role must be a role",
-      rejects("default_role: boss\nroles:\n  admin:\n    allow: all\n", "not one of the roles")
+      rejects(
+        "default_role: boss\nroles:\n  admin:\n    allow: all\n",
+        "not one of the roles"
+      )
     )
     check(
       "an unknown operation is refused, naming the known ones",
-      rejects("roles:\n  admin:\n    allow: [all]\n  v:\n    allow: [lookatit]\n", "unknown operation(s) lookatit")
+      rejects(
+        "roles:\n  admin:\n    allow: [all]\n  v:\n    allow: [lookatit]\n",
+        "unknown operation(s) lookatit"
+      )
     )
     check(
       "paths is refused for now, not silently ignored",
-      rejects("roles:\n  admin:\n    allow: all\n    paths: [/etc/]\n", "paths is not supported yet")
+      rejects(
+        "roles:\n  admin:\n    allow: all\n    paths: [/etc/]\n",
+        "paths is not supported yet"
+      )
     )
     check(
       "an unknown key in a role is refused",
-      rejects("roles:\n  admin:\n    allow: all\n    colour: red\n", "unknown key")
+      rejects(
+        "roles:\n  admin:\n    allow: all\n    colour: red\n",
+        "unknown key"
+      )
     )
     check(
       "an unknown top-level key is refused",
@@ -99,11 +113,17 @@ object AccessPolicyCheck:
     )
     check(
       "a revoked entry must be a serial number",
-      rejects("roles:\n  admin:\n    allow: all\nrevoked: [nope!]\n", "not a serial number")
+      rejects(
+        "roles:\n  admin:\n    allow: all\nrevoked: [nope!]\n",
+        "not a serial number"
+      )
     )
     check(
       "a serial written without quotes (YAML would make it a number) is refused",
-      rejects("roles:\n  admin:\n    allow: all\nrevoked: [0x0f]\n", "in quotes")
+      rejects(
+        "roles:\n  admin:\n    allow: all\nrevoked: [0x0f]\n",
+        "in quotes"
+      )
     )
     check("not YAML", AccessPolicy.parse("a: [").isLeft)
 
@@ -112,7 +132,9 @@ object AccessPolicyCheck:
       AccessPolicy.check(s, groups, names).isRight &&
         AccessPolicy
           .check(
-            s.copy(roles = s.roles.map(r => r.copy(nodes = Some(List("group:cef"))))),
+            s.copy(roles =
+              s.roles.map(r => r.copy(nodes = Some(List("group:cef"))))
+            ),
             groups,
             names
           )
@@ -120,7 +142,9 @@ object AccessPolicyCheck:
           .exists(_.contains("no node group 'cef'")) &&
         AccessPolicy
           .check(
-            s.copy(roles = s.roles.map(r => r.copy(nodes = Some(List("tst99"))))),
+            s.copy(roles =
+              s.roles.map(r => r.copy(nodes = Some(List("tst99"))))
+            ),
             groups,
             names
           )
@@ -149,7 +173,9 @@ object AccessPolicyCheck:
       "another node does not get it, so there the role is refused",
       AccessPolicy
         .policyFor(s, "tst4", groups, names)
-        .exists(t => !t.contains("role deployer") && t.contains("role admin all"))
+        .exists(t =>
+          !t.contains("role deployer") && t.contains("role admin all")
+        )
     )
     check(
       "the file is what the agent parses",
@@ -161,9 +187,12 @@ object AccessPolicyCheck:
     )
     check(
       "the revoked list is normalised, sorted and commented",
-      AccessPolicy.revokedText(s).linesIterator.toList.drop(1) == List("1a2b", "f") &&
+      AccessPolicy.revokedText(s).linesIterator.toList.drop(1) == List(
+        "1a2b",
+        "f"
+      ) &&
         orphera.common.Policy.parseRevoked(AccessPolicy.revokedText(s)) ==
-          Set("1a2b", "f")
+        Set("1a2b", "f")
     )
 
     check(
@@ -185,23 +214,52 @@ object AccessPolicyCheck:
 
     check(
       "issue-policy parses",
-      Cli.parse(List("issue-policy", "--nodes", "tst0,tst1", "--ssh-user", "localadmin", "--dry-run")) ==
+      Cli.parse(
+        List(
+          "issue-policy",
+          "--nodes",
+          "tst0,tst1",
+          "--ssh-user",
+          "localadmin",
+          "--dry-run"
+        )
+      ) ==
         Right(
-          Command.IssuePolicy(Some(List("tst0", "tst1")), "localadmin", None, None, false, true)
+          Command.IssuePolicy(
+            Some(List("tst0", "tst1")),
+            "localadmin",
+            None,
+            None,
+            false,
+            true
+          )
         ) &&
         Cli.parse(List("issue-policy", "--remove", "--nodes", "tst0")) ==
-          Right(Command.IssuePolicy(Some(List("tst0")), "root", None, None, true, false))
+        Right(
+          Command.IssuePolicy(
+            Some(List("tst0")),
+            "root",
+            None,
+            None,
+            true,
+            false
+          )
+        )
     )
     check(
       "--remove and --dry-run, or --policy, do not go together",
       Cli.parse(List("issue-policy", "--remove", "--dry-run")).isLeft &&
-        Cli.parse(List("issue-policy", "--remove", "--policy", "x.yaml")).isLeft &&
+        Cli
+          .parse(List("issue-policy", "--remove", "--policy", "x.yaml"))
+          .isLeft &&
         Cli.parse(List("issue-policy", "--bogus")).isLeft
     )
     check(
       "a placed policy is audited, a dry run is not",
       AuditLog.isAuditable(Command.IssuePolicy(None, "root", None)) &&
-        !AuditLog.isAuditable(Command.IssuePolicy(None, "root", None, None, false, true))
+        !AuditLog.isAuditable(
+          Command.IssuePolicy(None, "root", None, None, false, true)
+        )
     )
 
     if failures > 0 then

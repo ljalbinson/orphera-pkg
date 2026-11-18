@@ -86,26 +86,30 @@ object Policy:
       .map(_.takeWhile(_ != '#').trim)
       .filter(_.nonEmpty)
       .toList
-    lines.foldLeft[Either[String, Policy]](
-      Right(Policy("", Map.empty))
-    ) { (acc, line) =>
-      acc.flatMap { p =>
-        line.split("\\s+").toList match
-          case "default_role" :: role :: Nil if Operator.validName(role) =>
-            Right(p.copy(defaultRole = role))
-          case "role" :: name :: ops :: Nil if Operator.validName(name) =>
-            val names = ops.split(",").toList.map(_.trim).filter(_.nonEmpty)
-            val unknown = names.filterNot(n => n == All || Operations.contains(n))
-            if names.isEmpty then Left(s"role $name has no operations")
-            else if unknown.nonEmpty then
-              Left(s"role $name: unknown operation ${unknown.mkString(", ")}")
-            else Right(p.copy(roles = p.roles + (name -> names.toSet)))
-          case _ => Left(s"cannot read the policy line: $line")
+    lines
+      .foldLeft[Either[String, Policy]](
+        Right(Policy("", Map.empty))
+      ) { (acc, line) =>
+        acc.flatMap { p =>
+          line.split("\\s+").toList match
+            case "default_role" :: role :: Nil if Operator.validName(role) =>
+              Right(p.copy(defaultRole = role))
+            case "role" :: name :: ops :: Nil if Operator.validName(name) =>
+              val names = ops.split(",").toList.map(_.trim).filter(_.nonEmpty)
+              val unknown =
+                names.filterNot(n => n == All || Operations.contains(n))
+              if names.isEmpty then Left(s"role $name has no operations")
+              else if unknown.nonEmpty then
+                Left(s"role $name: unknown operation ${unknown.mkString(", ")}")
+              else Right(p.copy(roles = p.roles + (name -> names.toSet)))
+            case _ => Left(s"cannot read the policy line: $line")
+        }
       }
-    }.flatMap(p =>
-      if p.defaultRole.isEmpty then Left("the policy has no default_role line")
-      else Right(p)
-    )
+      .flatMap(p =>
+        if p.defaultRole.isEmpty then
+          Left("the policy has no default_role line")
+        else Right(p)
+      )
 
   /** The serial numbers in a `revoked` file: hexadecimal, one per line, `#`
     * starts a comment. Lower-case, no leading zeros.
@@ -130,7 +134,7 @@ object Policy:
     */
   def roleOf(c: X509Certificate, defaultRole: String): Either[String, String] =
     Operator.fromCertificate(c) match
-      case Some(op)                                      => Right(op.role)
+      case Some(op)                                         => Right(op.role)
       case None if hasOu(c.getSubjectX500Principal.getName) =>
         Left(
           s"the client certificate ${c.getSubjectX500Principal.getName} names no valid operator and role"

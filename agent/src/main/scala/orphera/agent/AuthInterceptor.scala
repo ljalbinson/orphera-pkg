@@ -105,7 +105,7 @@ object AuthInterceptor:
   ): Decision =
     val who = cert.fold("no client certificate")(Operator.describe)
     policy match
-      case None => Decision.Allow(who)
+      case None                      => Decision.Allow(who)
       case Some((text, revokedText)) =>
         Policy.parse(text) match
           case Left(why) =>
@@ -118,9 +118,13 @@ object AuthInterceptor:
               case None =>
                 Decision.Refuse(who, "no client certificate, so no role")
               case Some(c) =>
-                val revoked = revokedText.map(Policy.parseRevoked).getOrElse(Set.empty)
+                val revoked =
+                  revokedText.map(Policy.parseRevoked).getOrElse(Set.empty)
                 if revoked.contains(Policy.serialOf(c)) then
-                  Decision.Refuse(who, "the client certificate has been revoked")
+                  Decision.Refuse(
+                    who,
+                    "the client certificate has been revoked"
+                  )
                 else
                   Policy.roleOf(c, p.defaultRole) match
                     case Left(why)   => Decision.Refuse(who, why)

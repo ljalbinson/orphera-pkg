@@ -54,8 +54,20 @@ object AgentGuardCheck:
       val key = dir.resolve("k.pem")
       val crt = dir.resolve("c.pem")
       val p = new ProcessBuilder(
-        "openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout",
-        key.toString, "-out", crt.toString, "-subj", subject, "-days", "1"
+        "openssl",
+        "req",
+        "-x509",
+        "-newkey",
+        "rsa:2048",
+        "-nodes",
+        "-keyout",
+        key.toString,
+        "-out",
+        crt.toString,
+        "-subj",
+        subject,
+        "-days",
+        "1"
       ).redirectErrorStream(true).start()
       p.getInputStream.readAllBytes()
       require(p.waitFor() == 0)
@@ -81,9 +93,9 @@ object AgentGuardCheck:
     val pol = Some((testPolicy, Some("")))
     check(
       "the policy parses",
-      Policy.parse(testPolicy).exists(p =>
-        p.defaultRole == "admin" && p.roles.size == 3
-      )
+      Policy
+        .parse(testPolicy)
+        .exists(p => p.defaultRole == "admin" && p.roles.size == 3)
     )
     check(
       "a policy with no default_role, an unknown operation, no operations or a stray line is refused",
@@ -107,7 +119,9 @@ object AgentGuardCheck:
     )
     check(
       "a call with no certificate has no role and is refused",
-      verdict(pol, None, "GatherFacts").exists(_.contains("no client certificate"))
+      verdict(pol, None, "GatherFacts").exists(
+        _.contains("no client certificate")
+      )
     )
     if !opensslInstalled then
       println("openssl is not installed: skipped the certificate cases")
@@ -151,7 +165,9 @@ object AgentGuardCheck:
       )
       check(
         "another role may not make a call no operation lists",
-        verdict(pol, deployer, "SomethingNew").exists(_.contains("operation (none)"))
+        verdict(pol, deployer, "SomethingNew").exists(
+          _.contains("operation (none)")
+        )
       )
       check(
         "the orchestrator's own certificate has the default role",
@@ -215,13 +231,15 @@ object AgentGuardCheck:
       Files.deleteIfExists(dir)
 
   private def opensslInstalled: Boolean =
-    scala.util.Try {
-      val p = new ProcessBuilder("openssl", "version")
-        .redirectErrorStream(true)
-        .start()
-      p.getInputStream.readAllBytes()
-      p.waitFor() == 0
-    }.getOrElse(false)
+    scala.util
+      .Try {
+        val p = new ProcessBuilder("openssl", "version")
+          .redirectErrorStream(true)
+          .start()
+        p.getInputStream.readAllBytes()
+        p.waitFor() == 0
+      }
+      .getOrElse(false)
 
   def main(args: Array[String]): Unit =
     check(

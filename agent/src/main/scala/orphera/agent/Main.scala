@@ -26,11 +26,11 @@ object Main extends IOApp.Simple:
           case None => start(token)
 
   private def start(token: String): IO[Unit] =
-        TlsFiles.choose match
-          case None =>
-            IO.println(TlsFiles.Missing) >>
-              IO.raiseError(new RuntimeException("no TLS certificate"))
-          case Some((certFile, keyFile)) => serve(token, certFile, keyFile)
+    TlsFiles.choose match
+      case None =>
+        IO.println(TlsFiles.Missing) >>
+          IO.raiseError(new RuntimeException("no TLS certificate"))
+      case Some((certFile, keyFile)) => serve(token, certFile, keyFile)
 
   private def serve(
       token: String,

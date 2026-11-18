@@ -13,11 +13,11 @@ import io.circe.yaml.parser
 
 import orphera.common.{Operator, Policy}
 
-/** `orphera issue-policy`: what each role may do, from `access.yaml`, put
-  * on each node as `/etc/orphera-agent/policy` (and `revoked`) over SSH. The
-  * agent applies it to every call, by the role in the caller's client
-  * certificate (see docs/ACCESS-CONTROL-DESIGN.md). A node with no policy file
-  * allows every call, as before.
+/** `orphera issue-policy`: what each role may do, from `access.yaml`, put on
+  * each node as `/etc/orphera-agent/policy` (and `revoked`) over SSH. The agent
+  * applies it to every call, by the role in the caller's client certificate
+  * (see docs/ACCESS-CONTROL-DESIGN.md). A node with no policy file allows every
+  * call, as before.
   *
   * {{{
   * default_role: admin            # for a certificate with no role in it
@@ -55,12 +55,14 @@ object AccessPolicy:
 
   /** The policy in `text` (YAML), or what is wrong with it. */
   def parse(text: String): Either[String, Spec] =
-    parser.parse(text).left.map(e => s"not valid YAML: ${e.getMessage}").flatMap {
-      json =>
+    parser
+      .parse(text)
+      .left
+      .map(e => s"not valid YAML: ${e.getMessage}")
+      .flatMap { json =>
         json.asObject.toRight("expected a mapping at the top").flatMap { top =>
-          val unknown = top.keys.toList.filterNot(k =>
-            Set("default_role", "roles", "revoked").contains(k)
-          )
+          val unknown = top.keys.toList
+            .filterNot(k => Set("default_role", "roles", "revoked").contains(k))
           if unknown.nonEmpty then
             Left(s"unknown key(s): ${unknown.mkString(", ")}")
           else
@@ -82,13 +84,15 @@ object AccessPolicy:
                 case Some(json) =>
                   json.asArray
                     .toRight("revoked must be a list of serial numbers")
-                    .flatMap(_.toList.traverse(j =>
-                      j.asString
-                        .filter(_.matches("(0x)?[0-9a-fA-F]+"))
-                        .toRight(
-                          s"revoked: not a serial number: $j (write each one in quotes, as hexadecimal)"
-                        )
-                    ))
+                    .flatMap(
+                      _.toList.traverse(j =>
+                        j.asString
+                          .filter(_.matches("(0x)?[0-9a-fA-F]+"))
+                          .toRight(
+                            s"revoked: not a serial number: $j (write each one in quotes, as hexadecimal)"
+                          )
+                      )
+                    )
               _ <- Either.cond(
                 roles.exists(_.name == default),
                 (),
@@ -97,7 +101,7 @@ object AccessPolicy:
               _ <- Either.cond(roles.nonEmpty, (), "roles: none given")
             yield Spec(default, roles, revoked)
         }
-    }
+      }
 
   private def role(name: String, body: Json): Either[String, Role] =
     for
@@ -106,20 +110,23 @@ object AccessPolicy:
         (),
         s"role '$name' is not a usable name (lower-case letters, digits, '.', '_' and '-')"
       )
-      obj <- body.asObject.toRight(s"role $name: expected allow: and optionally nodes:")
+      obj <- body.asObject.toRight(
+        s"role $name: expected allow: and optionally nodes:"
+      )
       _ <- obj.keys.toList.filterNot(RoleKeys.contains) match
-        case Nil                    => Right(())
-        case "paths" :: _           =>
+        case Nil          => Right(())
+        case "paths" :: _ =>
           Left(
             s"role $name: paths is not supported yet, so a role cannot be limited to paths; " +
               "limit it by operations and nodes"
           )
-        case unknown                =>
+        case unknown =>
           Left(s"role $name: unknown key(s): ${unknown.mkString(", ")}")
       allow <- obj("allow") match
-        case None => Left(s"role $name: allow: is needed")
+        case None    => Left(s"role $name: allow: is needed")
         case Some(j) =>
-          j.asString.map(List(_))
+          j.asString
+            .map(List(_))
             .orElse(j.asArray.flatMap(_.toList.traverse(_.asString)))
             .toRight(s"role $name: allow: is a list of operations, or all")
       unknownOps = allow.filterNot(op =>
@@ -140,7 +147,9 @@ object AccessPolicy:
             .flatMap(_.toList.traverse(_.asString))
             .filter(_.nonEmpty)
             .map(Some(_))
-            .toRight(s"role $name: nodes: is a list of node names and group:<name>")
+            .toRight(
+              s"role $name: nodes: is a list of node names and group:<name>"
+            )
     yield Role(name, allow.toSet, nodes)
 
   /** The node names a selector means: `group:<name>` or a node's own name. */
@@ -158,8 +167,8 @@ object AccessPolicy:
     else if nodeNames.contains(selector) then Right(List(selector))
     else Left(s"no node '$selector' in the inventory")
 
-  /** Checks every `nodes:` selector against the inventory, so a typo is an error
-    * here and not a role that silently applies nowhere.
+  /** Checks every `nodes:` selector against the inventory, so a typo is an
+    * error here and not a role that silently applies nowhere.
     */
   def check(
       spec: Spec,
@@ -207,8 +216,15 @@ object AccessPolicy:
       }
 
   def revokedText(spec: Spec): String =
-    spec.revoked.map(Policy.normaliseSerial(_)).distinct.sorted
-      .mkString("# Serial numbers (hexadecimal) of client certificates not accepted.\n", "\n", "\n")
+    spec.revoked
+      .map(Policy.normaliseSerial(_))
+      .distinct
+      .sorted
+      .mkString(
+        "# Serial numbers (hexadecimal) of client certificates not accepted.\n",
+        "\n",
+        "\n"
+      )
 
   /** `1.2.3` or `1.2.3+go` as numbers, for comparing. */
   def versionOf(text: String): Option[(Int, Int, Int)] =
@@ -226,9 +242,9 @@ object AccessPolicy:
 
   /** Reads the policy and the revoked list from stdin (separated by a line
     * `@@REVOKED@@`) and puts each in place if it differs. It does not touch a
-    * node that does not require client certificates, since the agent would
-    * have no caller role to check. The agent reads the files on every call, so
-    * no restart is needed.
+    * node that does not require client certificates, since the agent would have
+    * no caller role to check. The agent reads the files on every call, so no
+    * restart is needed.
     */
   private val install: String =
     """sudo sh -c 'set -e; d=/etc/orphera-agent; t=$(mktemp -d); trap "rm -rf $t" EXIT;
