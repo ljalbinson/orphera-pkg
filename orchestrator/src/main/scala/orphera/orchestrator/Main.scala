@@ -335,7 +335,8 @@ object Main extends IOApp:
               sshKeyPath,
               policyFile,
               remove,
-              dryRun
+              dryRun,
+              check
             )
           ) =>
         val targets = nodeNames match
@@ -345,6 +346,10 @@ object Main extends IOApp:
           IO.println("No matching nodes found in inventory.") >> IO.pure(
             ExitCode.Error
           )
+        else if check then
+          Orchestrator
+            .policyInfo(targets, sshUser, sshKeyPath, policyFile)
+            .map(allOk => if allOk then ExitCode.Success else ExitCode.Error)
         else
           Orchestrator
             .issuePolicy(

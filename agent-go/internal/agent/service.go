@@ -71,7 +71,10 @@ func (s *Service) CopyFile(stream grpc.BidiStreamingServer[pb.FileChunk, pb.Even
 	return streamTask(stream, func(q *queue) error { return receiveFile(stream, q) })
 }
 
-func (s *Service) CheckFile(_ context.Context, req *pb.FileCheck) (*pb.FileCheckResult, error) {
+func (s *Service) CheckFile(ctx context.Context, req *pb.FileCheck) (*pb.FileCheckResult, error) {
+	if err := pathDenied(ctx, req.DestPath); err != nil {
+		return nil, err
+	}
 	return checkFile(req), nil
 }
 

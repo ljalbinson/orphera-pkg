@@ -60,6 +60,9 @@ func receiveFile(stream grpc.BidiStreamingServer[pb.FileChunk, pb.Event], q *que
 		q.result("No metadata received", 1, false)
 		return nil
 	}
+	if err := pathDenied(stream.Context(), meta.DestPath); err != nil {
+		return err
+	}
 	if reason := protectedRefusal(meta.DestPath); reason != "" {
 		q.result(reason, 1, false)
 		return nil
@@ -153,6 +156,9 @@ func sendFile(req *pb.FetchFile, stream grpc.ServerStreamingServer[pb.FileData])
 		return stream.Send(&pb.FileData{Payload: &pb.FileData_Error{Error: validUTF8(msg)}})
 	}
 	path := javaPath(req.Path)
+	if err := pathDenied(stream.Context(), path); err != nil {
+		return err
+	}
 	if reason := protectedRefusal(path); reason != "" {
 		return sendErr(reason)
 	}

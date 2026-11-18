@@ -82,11 +82,82 @@ object AccessPolicyCheck:
       )
     )
     check(
-      "paths is refused for now, not silently ignored",
+      "paths limit a role: parsed, and emitted as a paths line after its role line",
+      {
+        val text =
+          "default_role: admin\nroles:\n  deployer:\n    allow: [copy, fetch]\n    paths: [/etc/ceph/, /srv/]\n  admin:\n    allow: all\n"
+        AccessPolicy
+          .parse(text)
+          .flatMap(s => AccessPolicy.policyFor(s, "tst0", groups, names))
+          .exists(p =>
+            p.linesIterator.toList.containsSlice(
+              List(
+                "role deployer copy,fetch",
+                "paths deployer /etc/ceph/,/srv/"
+              )
+            )
+          )
+      }
+    )
+    check(
+      "paths must be absolute",
       rejects(
-        "roles:\n  admin:\n    allow: all\n    paths: [/etc/]\n",
-        "paths is not supported yet"
+        "roles:\n  d:\n    allow: [copy]\n    paths: [etc/]\n",
+        "absolute paths"
       )
+    )
+    check(
+      "paths are refused for a role that can run commands",
+      rejects(
+        "roles:\n  d:\n    allow: [run, copy]\n    paths: [/etc/]\n",
+        "run"
+      )
+    )
+    check(
+      "paths are refused for a role that allows no file operation",
+      rejects(
+        "roles:\n  d:\n    allow: [facts]\n    paths: [/etc/]\n",
+        "allows none of them"
+      )
+    )
+    check(
+      "limitsPaths sees a paths line",
+      AccessPolicy.limitsPaths("default_role a\nrole a copy\npaths a /etc/\n") &&
+        !AccessPolicy.limitsPaths("default_role a\nrole a all\n")
+    )
+    check(
+      "only the Go agent from 0.1.212 can limit paths",
+      AccessPolicy.agentCanLimitPaths("0.1.212+go") &&
+        AccessPolicy.agentCanLimitPaths("0.1.230+go") &&
+        !AccessPolicy.agentCanLimitPaths("0.1.211+go") &&
+        !AccessPolicy.agentCanLimitPaths("0.1.212")
+    )
+    check(
+      "the Scala agent's policy parser fails closed on a paths line",
+      orphera.common.Policy.parse("default_role a\nrole a copy\npaths a /etc/\n").isLeft
+    )
+    check(
+      "parseHeld: no policy, a policy, and a cut-off answer",
+      AccessPolicy.parseHeld(List("banner", "@@NONE@@")) == Right(None) &&
+        AccessPolicy.parseHeld(
+          List("x", "@@POLICY@@", "default_role a", "@@REVOKED@@", "ab", "@@END@@")
+        ) == Right(Some(("default_role a\n", "ab\n"))) &&
+        AccessPolicy.parseHeld(List("@@POLICY@@", "default_role a")).isLeft &&
+        AccessPolicy.parseHeld(List("nothing useful")).isLeft
+    )
+    check(
+      "compare: same, comments ignored; differing lines and revoked list named",
+      {
+        val want = "# made\ndefault_role a\nrole a all\n"
+        AccessPolicy.compare(want, Set("ab"), Some(("default_role a\nrole a all # x\n", "ab\n"))).isEmpty &&
+          AccessPolicy.compare(want, Set.empty, None).exists(_.contains("no policy")) &&
+          AccessPolicy
+            .compare(want, Set.empty, Some(("default_role a\nrole a facts\n", "")))
+            .exists(_.contains("missing: role a all")) &&
+          AccessPolicy
+            .compare(want, Set("ab"), Some((want, "")))
+            .exists(_.contains("revoked list differs"))
+      }
     )
     check(
       "an unknown key in a role is refused",
@@ -350,6 +421,7 @@ object AccessPolicyCheck:
         Command.Bootstrap(None, None, "root", None, "/tmp/x.deb"),
         Command.IssueCerts(None, "root", None),
         Command.IssuePolicy(None, "root", None),
+        Command.IssuePolicy(None, "root", None, check = true),
         Command.RunPlaybook("x.scala", false, None),
         Command.ShowAuditLog(20),
         Command.Help
