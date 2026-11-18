@@ -83,6 +83,16 @@ enum Command:
       sshKeyPath: Option[String],
       clientAuth: Option[Boolean] = None
   )
+  // Puts the access policy (access.yaml, beside the inventory) on each node over SSH, or takes
+  // it off (--remove). --dry-run only prints each node's policy.
+  case IssuePolicy(
+      nodes: Option[List[String]],
+      sshUser: String,
+      sshKeyPath: Option[String],
+      policyFile: Option[String] = None,
+      remove: Boolean = false,
+      dryRun: Boolean = false
+  )
   case Teardown(
       nodes: List[String],
       sshUser: String,
@@ -382,6 +392,8 @@ object Cli:
         )
       case "issue-certs" :: rest =>
         parseIssueCerts(rest, None, "root", None)
+      case "issue-policy" :: rest =>
+        parseIssuePolicy(rest, Command.IssuePolicy(None, "root", None))
       case "teardown" :: rest =>
         parseTeardown(rest, Nil, "root", None, purge = false, confirmed = false)
       case "fetch" :: remote :: rest => parseFetch(rest, remote, ".", None)
@@ -1140,6 +1152,35 @@ object Cli:
       case other :: _ =>
         Left(s"Unknown argument to issue-certs: $other")
 
+  private def parseIssuePolicy(
+      args: List[String],
+      acc: Command.IssuePolicy
+  ): Either[String, Command] =
+    args match
+      case Nil =>
+        if acc.remove && acc.dryRun then
+          Left("--remove and --dry-run cannot both be given")
+        else if acc.remove && acc.policyFile.nonEmpty then
+          Left("--remove and --policy cannot both be given")
+        else Right(acc)
+      case "--nodes" :: value :: rest =>
+        parseIssuePolicy(
+          rest,
+          acc.copy(nodes = Some(value.split(",").toList.map(_.trim)))
+        )
+      case "--ssh-user" :: value :: rest =>
+        parseIssuePolicy(rest, acc.copy(sshUser = value))
+      case "--ssh-key" :: value :: rest =>
+        parseIssuePolicy(rest, acc.copy(sshKeyPath = Some(value)))
+      case "--policy" :: value :: rest =>
+        parseIssuePolicy(rest, acc.copy(policyFile = Some(value)))
+      case "--remove" :: rest =>
+        parseIssuePolicy(rest, acc.copy(remove = true))
+      case "--dry-run" :: rest =>
+        parseIssuePolicy(rest, acc.copy(dryRun = true))
+      case other :: _ =>
+        Left(s"Unknown argument to issue-policy: $other")
+
   private def parseTeardown(
       args: List[String],
       nodes: List[String],
@@ -1437,7 +1478,18 @@ object Cli:
       |                      its agent accepts only callers with a client certificate
       |                      from that CA (mutual TLS; see issue-client-cert);
       |                      --no-client-auth takes it off again
+      |  issue-policy      [--nodes host1,host2] [--policy access.yaml] [--dry-run | --remove]
+      |                    [--ssh-user root] [--ssh-key ~/.ssh/id_ed25519]
+      |                    — puts what each role may do (access.yaml, beside the inventory) on each node
+      |                      as /etc/orphera-agent/policy, over SSH. The agent then allows
+      |                      each call only to a role that may make it, by the role in the
+      |                      caller's client certificate (issue-client-cert --operator
+      |                      --role); the node must already require client certificates
+      |                      (issue-certs --client-auth) and run an agent that applies a
+      |                      policy. --dry-run prints each node's policy and changes
+      |                      nothing; --remove takes the policy off (every call allowed again)
       |  issue-client-cert [--days 825] [--force]
+      |                    [--operator <name> --role <role>]
       |                    — makes this orchestrator's client certificate, certs/client.crt
       |                      and client.key, signed by certs/ca.key; orphera presents it to
       |                      every agent. Needed before issue-certs --client-auth

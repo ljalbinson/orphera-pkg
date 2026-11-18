@@ -12,6 +12,7 @@ import (
 	"log"
 	"os"
 	"regexp"
+	"strings"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -85,36 +86,62 @@ func DescribeCert(c *x509.Certificate) string {
 	return "client=" + c.Subject.String()
 }
 
-// callerOf is who made the call, from the certificate the connection presented
-// (verified against the CA when the agent requires client certificates).
-func callerOf(ctx context.Context) string {
+// peerCertificate is the certificate the connection presented, if any (verified
+// against the CA when the agent requires client certificates).
+func peerCertificate(ctx context.Context) *x509.Certificate {
 	p, ok := peer.FromContext(ctx)
 	if !ok {
-		return "no client certificate"
+		return nil
 	}
 	info, ok := p.AuthInfo.(credentials.TLSInfo)
 	if !ok || len(info.State.PeerCertificates) == 0 {
-		return "no client certificate"
+		return nil
 	}
-	return DescribeCert(info.State.PeerCertificates[0])
+	return info.State.PeerCertificates[0]
 }
 
-// AuthInterceptors let a call through only when it carries the token, and log
-// each call let through with who made it.
+// bareMethod is "Install" for "/orphera.common.Agent/Install".
+func bareMethod(full string) string {
+	if i := strings.LastIndex(full, "/"); i >= 0 {
+		return full[i+1:]
+	}
+	return full
+}
+
+// admit allows the call, or refuses it by the node's access policy; the log line
+// carries the same words as the refusal.
+func admit(ctx context.Context, fullMethod string) error {
+	method := bareMethod(fullMethod)
+	d := Decide(ReadPolicyFiles(PolicyPath, RevokedPath), peerCertificate(ctx), method)
+	if d.Allow {
+		log.Printf("%s %s allowed", method, d.Who)
+		return nil
+	}
+	log.Printf("%s %s REFUSED: %s", method, d.Who, d.Why)
+	return status.Error(codes.PermissionDenied, "refused: "+d.Why)
+}
+
+// AuthInterceptors let a call through only when it carries the token and, on a
+// node that has a policy file, only when the caller's role may make it. Each
+// call is logged with who made it and whether it was allowed.
 func AuthInterceptors(token string) []grpc.ServerOption {
 	return []grpc.ServerOption{
 		grpc.UnaryInterceptor(func(ctx context.Context, req any, info *grpc.UnaryServerInfo, h grpc.UnaryHandler) (any, error) {
 			if !authorised(ctx, token) {
 				return nil, errUnauthenticated
 			}
-			log.Printf("%s %s", info.FullMethod, callerOf(ctx))
+			if err := admit(ctx, info.FullMethod); err != nil {
+				return nil, err
+			}
 			return h(ctx, req)
 		}),
 		grpc.StreamInterceptor(func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, h grpc.StreamHandler) error {
 			if !authorised(ss.Context(), token) {
 				return errUnauthenticated
 			}
-			log.Printf("%s %s", info.FullMethod, callerOf(ss.Context()))
+			if err := admit(ss.Context(), info.FullMethod); err != nil {
+				return err
+			}
 			return h(srv, ss)
 		}),
 	}

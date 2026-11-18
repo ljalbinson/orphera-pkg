@@ -324,6 +324,35 @@ object Main extends IOApp:
             .map(allOk => if allOk then ExitCode.Success else ExitCode.Error)
 
       case Right(
+            Command.IssuePolicy(
+              nodeNames,
+              sshUser,
+              sshKeyPath,
+              policyFile,
+              remove,
+              dryRun
+            )
+          ) =>
+        val targets = nodeNames match
+          case Some(names) => Inventory.all.filter(n => names.contains(n.name))
+          case None        => Inventory.all
+        if targets.isEmpty then
+          IO.println("No matching nodes found in inventory.") >> IO.pure(
+            ExitCode.Error
+          )
+        else
+          Orchestrator
+            .issuePolicy(
+              targets,
+              sshUser,
+              sshKeyPath,
+              policyFile,
+              remove,
+              dryRun
+            )
+            .map(allOk => if allOk then ExitCode.Success else ExitCode.Error)
+
+      case Right(
             Command.Teardown(nodeNames, sshUser, sshKeyPath, purge, confirmed)
           ) =>
         if !confirmed then

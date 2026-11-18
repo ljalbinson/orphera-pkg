@@ -32,17 +32,16 @@ object Operator:
   def subject(o: Operator): String = s"/CN=${o.name}/OU=${o.role}"
 
   /** The operator in a distinguished name such as `CN=alice,OU=deployer`, if it
-    * has a valid CN and OU.
+    * has exactly one CN and one OU, both valid.
     */
   def fromDn(dn: String): Option[Operator] =
     Try(new LdapName(dn).getRdns.asScala.toList).toOption.flatMap { rdns =>
-      def value(kind: String): Option[String] =
-        rdns.find(_.getType.equalsIgnoreCase(kind)).map(_.getValue.toString)
-      for
-        n <- value("CN")
-        r <- value("OU")
-        if validName(n) && validName(r)
-      yield Operator(n, r)
+      def values(kind: String): List[String] =
+        rdns.filter(_.getType.equalsIgnoreCase(kind)).map(_.getValue.toString)
+      (values("CN"), values("OU")) match
+        case (List(n), List(r)) if validName(n) && validName(r) =>
+          Some(Operator(n, r))
+        case _ => None
     }
 
   def fromCertificate(c: X509Certificate): Option[Operator] =

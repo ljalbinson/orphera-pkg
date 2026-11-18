@@ -1,0 +1,30 @@
+# Who may do what on the nodes. `orphera issue-policy` puts it on each node;
+# the agent then allows each call only to a role that may make it. The role is
+# in the operator's client certificate (orphera issue-client-cert --operator X
+# --role R). See docs/ACCESS-CONTROL-DESIGN.md.
+#
+# A role with `run` (or `all`) is root on the node: no list of operations
+# changes that, and `apply` is `run` until typed actions exist (design, step 4).
+#
+# Operations: facts version uptime thread-info check-file fetch copy packages
+#             run reboot shutdown network, or all.
+
+# The role of a certificate with no role in it: the orchestrator's own
+# client.crt. admin keeps everything working as before for it.
+default_role: admin
+
+roles:
+  viewer:
+    allow: [facts, version, uptime, thread-info, check-file, fetch]
+  deployer:
+    allow: [facts, version, uptime, check-file, fetch, copy, packages]
+    nodes: [group:ceph]
+  rebooter:
+    allow: [facts, version, uptime, check-file, reboot, shutdown]
+    nodes: [group:ceph]
+  admin:
+    allow: all
+
+# Serial numbers (hexadecimal) of operator certificates to refuse before they
+# expire: openssl x509 -noout -serial -in certs/operators/alice.crt
+revoked: []   # in quotes, e.g. ["1a2b3c"]
