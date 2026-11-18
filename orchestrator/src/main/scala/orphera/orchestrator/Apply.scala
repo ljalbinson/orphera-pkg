@@ -1372,7 +1372,7 @@ object Apply:
     if text.isEmpty then Nil
     else
       val parts = text.split("\n", -1).toList
-      if text.endsWith("\n") then parts.init else parts
+      if text.endsWith("\n") then parts.dropRight(1) else parts
 
   /** The text a line resource makes of `content`, as the awk programs do: with
     * `present`, the line replaces the first line that matches (the other
