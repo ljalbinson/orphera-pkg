@@ -28,10 +28,14 @@ The honest limit comes first, because it decides the shape of the roles.
 
 - `run` is a root shell. A role that may run commands may do anything on that node. No list of allowed commands changes
   that, so there is no command allowlist in this design.
-- **`apply` is also `run` at the agent today.** The apply engine reads a node and changes it by sending `sh -c` scripts
-  through `ExecuteCommand`. So at the level of calls the agent sees, "may apply a description" and "may run any command"
-  are the same permission. Separating them needs the changes to reach the agent as typed actions it performs itself
-  instead of scripts (rollout step 4); this design does not pretend the roles below separate them before then.
+- **`apply` is `run` only for a `command` resource, and only on an agent that lacks the typed calls.** The apply engine
+  used to read a node and change it by sending `sh -c` scripts through `ExecuteCommand`. It now reads with `ObserveNode`
+  and changes with `ApplyFiles`, `ApplyAccess` and `ApplySoftware` (operations `observe`, `apply-files`, `apply-access`,
+  `apply-software`), which the Go agent performs itself from a fixed list of actions, so a role can hold them without
+  `run`. A `command` resource (and the guard on one) still runs a script, and so still needs `run`; an agent without a
+  typed call (the Scala agent, a Go agent older than 0.1.216) is sent the script as before, which needs `run` too. Every
+  apply also needs `facts`. `apply-software` installs packages, whose own scripts run as root, so it is the widest of the
+  three: hold it as deliberately as `packages`.
 - What can be separated now: read-only access (facts, version, uptime, file checks, fetch) from anything that changes a
   node; changing files and packages (`CopyFile`, `Install`, `Remove`, `InstallDebPackage`) from running commands; reboot
   and shutdown from both; which nodes a role can reach at all; and which paths copy and fetch may touch.
@@ -118,8 +122,10 @@ open to any role) so a node left on an older policy shows.
   with the same message the agent would give, before any node is touched: `alice (deployer) may not run commands;
   manifests/x.scala uses run on tst3`. For a Scala manifest this check is partial (the commands are only known when the
   manifest runs), so the agent's refusal stays the real one, and the orchestrator reports it as the reason a task failed.
-- `--check` runs with the read calls only, so a viewer can run `orphera apply --check` and see what would change on every
-  node. That is the safest use of the apply design for people who must not change anything, and it works now.
+- `--check` runs with the read calls only (`facts` and `observe`), so a viewer given those can run `orphera apply --check`
+  and see what would change on every node. That is the safest use of the apply design for people who must not change
+  anything. A description with a `command` resource that has a guard (`only_if`, `unless`, `creates`) also needs `run` to
+  check, since the guard is a script.
 - The audit log gains `operator` and `role` on every record. Where there was only "someone on this host", `orphera
   log-summary` can show who did what.
 
@@ -144,7 +150,9 @@ open to any role) so a node left on an older policy shows.
 2. **Policy at the agent.** The interceptor, `config/access.yaml`, `issue-policy`, `policy-info`, `revoked`. Rolled out a
    few nodes at a time, with a role that is deliberately too wide at first, tightened from the journal.
 3. **Orchestrator checks.** Early, clear refusals; `viewer` and `--check` working end to end.
-4. **Apply without run: typed actions.** Only if wanted, and after the apply kinds are tested on the lab. The
+4. **Apply without run: typed actions.** Built, in five phases (see `docs/TYPED-ACTIONS-PLAN.md`) as `ObserveNode`,
+   `ApplyFiles`, `ApplyAccess` and `ApplySoftware` rather than the single `ApplyActions` call described next, so that each
+   is its own policy operation. The original design follows. The
    orchestrator keeps the engine as it is: it observes (read-only calls), compares with the pure `compare` functions, and
    produces a `Difference`. What changes is how a `Difference` is carried out. Today its actions are `Write` (a file) and
    `Shell` (a script run by `ExecuteCommand`). They become a typed vocabulary the agent interprets itself: write a file with

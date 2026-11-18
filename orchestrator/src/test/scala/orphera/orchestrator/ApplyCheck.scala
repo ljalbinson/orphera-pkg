@@ -1914,6 +1914,21 @@ object ApplyCheck:
       ApplyResource.Service("ssh.service", Some(true), Some(true))
     )
     check("typed software: a unit as wanted is left", steady.isEmpty, s"$steady")
+    check(
+      "typed write: the replacement, then mode, owner and group",
+      Apply.writeChanges("/etc/a", "x", "root", "", 416, "abc", false) ==
+        List(
+          FileChange.ReplaceText("/etc/a", "x", "abc", "0640", false),
+          FileChange.SetAttributes("/etc/a", "0640", "root", "")
+        ) &&
+        Apply.writeChanges("/etc/s", "k = 1\n", "", "", 420, "", true) ==
+        List(
+          FileChange.ReplaceText("/etc/s", "k = 1\n", "", "0644", true),
+          FileChange.SetAttributes("/etc/s", "0644", "", "")
+        ) &&
+        Apply.writeChanges("/etc/a", "x", "", "", 0, "", false) ==
+        List(FileChange.ReplaceText("/etc/a", "x", "", "0644", false))
+    )
 
   // Accounts, keys and mounts go through ApplyAccess, with fstab worked out here.
   private def accessChecks(): Unit =

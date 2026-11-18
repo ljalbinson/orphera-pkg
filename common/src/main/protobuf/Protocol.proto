@@ -275,6 +275,9 @@ message ReplaceText {
   string content = 2;
   string expected_sha256 = 3;
   string create_mode = 4;
+  // With no expected_sha256: replace a regular file that exists, whatever it
+  // holds (a file the orchestrator owns, such as one it persists a setting in).
+  bool overwrite = 5;
 }
 
 message FileAction {

@@ -319,21 +319,58 @@ object AccessPolicy:
         Some((List("TriggerShutdown"), nodes, "shut down"))
       case Command.RunCommand(_, nodes, _, _) =>
         Some((List("ExecuteCommand"), nodes, "run commands"))
-      // A check reads the node with ObserveNode, which runs nothing; a
-      // description with a command's guard in it also needs ExecuteCommand,
-      // which the agent refuses to a role without `run` when it comes to it.
-      // A real apply still changes the node by running scripts.
-      case Command.Apply(_, true, nodes, _) =>
-        Some((List("ObserveNode"), nodes, "check descriptions"))
-      case Command.Apply(_, false, nodes, _) =>
+      // An apply reads the node with GatherFacts and ObserveNode, and changes
+      // it with the typed calls its kinds need (ApplyFiles, ApplyAccess,
+      // ApplySoftware); only a `command` resource, or a guard on one, runs
+      // anything (ExecuteCommand). A description that cannot be read here (a
+      // Scala one) is taken to need it.
+      case Command.Apply(path, check, nodes, _) =>
         Some(
           (
-            List("ObserveNode", "ExecuteCommand"),
+            applyMethods(path, check),
             nodes,
-            "apply descriptions (which run commands on the node)"
+            if check then "check descriptions" else "apply descriptions"
           )
         )
       case _ => None
+
+  /** The agent calls applying the description at `path` makes (with `check`:
+    * only the reading ones), from the kinds of its resources.
+    */
+  private[orchestrator] def applyMethods(
+      path: String,
+      check: Boolean
+  ): List[String] =
+    val reads = List("GatherFacts", "ObserveNode")
+    ApplyYaml.load(path).toOption match
+      case None => if check then reads else reads :+ "ExecuteCommand"
+      case Some(d) =>
+        import ApplyResource.*
+        val rs = d.resources
+        val runs = rs.exists {
+          case c: Command => !check || c.guarded
+          case _          => false
+        }
+        val files = !check && rs.exists {
+          case _: File | _: Directory | _: Symlink | _: Sysctl |
+              _: KernelModule | _: LineInFile =>
+            true
+          case _ => false
+        }
+        val access = !check && rs.exists {
+          case _: User | _: Group | _: AuthorizedKey | _: Mount => true
+          case _                                                => false
+        }
+        val software = !check && rs.exists {
+          case _: Package | _: Service => true
+          case _                       => false
+        }
+        reads ++ List(
+          Option.when(files)("ApplyFiles"),
+          Option.when(access)("ApplyAccess"),
+          Option.when(software)("ApplySoftware"),
+          Option.when(runs)("ExecuteCommand")
+        ).flatten
 
   /** Why `operator` may not run `command`, by the policy `spec`, or None. The
     * same words as the agent's refusal, but before any node is contacted, and
@@ -424,6 +461,30 @@ object AccessPolicy:
   /** Whether `policy` (a node's policy file) limits any role to paths. */
   def limitsPaths(policy: String): Boolean =
     policy.linesIterator.exists(_.startsWith("paths "))
+
+  /** The first agent version that knows each operation added after the policy
+    * itself. An agent that does not know an operation refuses the whole policy
+    * file (so every call), so a policy that names one is not placed on it.
+    */
+  val OperationSince: Map[String, String] = Map(
+    "observe" -> "0.1.213",
+    "apply-files" -> "0.1.214",
+    "apply-access" -> "0.1.215",
+    "apply-software" -> "0.1.216"
+  )
+
+  /** The operations in `policy` (a node's policy file) that an agent of
+    * `agentVersion` does not know.
+    */
+  def unknownOperations(policy: String, agentVersion: String): List[String] =
+    policy.linesIterator
+      .filter(_.startsWith("role "))
+      .flatMap(_.split("\\s+").drop(2).flatMap(_.split(",")))
+      .toList
+      .distinct
+      .filter(op =>
+        OperationSince.get(op).exists(since => !atLeast(agentVersion, since))
+      )
 
   /** The Go agent from `MinAgentForPaths` on; the Scala agent never. */
   def agentCanLimitPaths(agentVersion: String): Boolean =

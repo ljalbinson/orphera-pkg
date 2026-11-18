@@ -120,6 +120,21 @@ object AccessPolicyCheck:
       )
     )
     check(
+      "a policy naming an operation the agent predates is not placed on it",
+      AccessPolicy.unknownOperations(
+        "default_role a\nrole a all\nrole v facts,observe\nrole f apply-files,apply-software\n",
+        "0.1.213+go"
+      ) == List("apply-files", "apply-software") &&
+        AccessPolicy
+          .unknownOperations("role v facts,observe\n", "0.1.212+go") == List(
+          "observe"
+        ) &&
+        AccessPolicy.unknownOperations(
+          "role a all\nrole f apply-access\n",
+          "0.1.216"
+        ) == Nil
+    )
+    check(
       "limitsPaths sees a paths line",
       AccessPolicy.limitsPaths(
         "default_role a\nrole a copy\npaths a /etc/\n"
@@ -400,11 +415,49 @@ object AccessPolicyCheck:
       "apply --check makes only the ObserveNode call; a real apply runs commands too",
       AccessPolicy
         .callsOf(Command.Apply("x.yaml", true, None, false))
-        .map(_._1) == Some(List("ObserveNode")) &&
+        .map(_._1) == Some(List("GatherFacts", "ObserveNode")) &&
         AccessPolicy
           .callsOf(Command.Apply("x.yaml", false, None, false))
           .exists(_._1.contains("ExecuteCommand"))
     )
+    val demo = java.nio.file.Files.createTempFile("orphera-apply", ".yaml")
+    java.nio.file.Files.writeString(
+      demo,
+      """name: d
+        |nodes: [tst0]
+        |resources:
+        |  - directory: /opt/d
+        |  - package: tree
+        |  - group: g
+        |  - command: c
+        |    run: "true"
+        |    only_if: "test -d /opt/d"
+        |""".stripMargin
+    )
+    check(
+      "an apply makes the typed calls its kinds need, and runs only for a command",
+      AccessPolicy.applyMethods(demo.toString, false) ==
+        List(
+          "GatherFacts",
+          "ObserveNode",
+          "ApplyFiles",
+          "ApplyAccess",
+          "ApplySoftware",
+          "ExecuteCommand"
+        ) &&
+        AccessPolicy.applyMethods(demo.toString, true) ==
+        List("GatherFacts", "ObserveNode", "ExecuteCommand")
+    )
+    java.nio.file.Files.writeString(
+      demo,
+      "name: d\nnodes: [tst0]\nresources:\n  - directory: /opt/d\n  - package: tree\n"
+    )
+    check(
+      "a description with no command needs no ExecuteCommand: a role without run may apply it",
+      AccessPolicy.applyMethods(demo.toString, false) ==
+        List("GatherFacts", "ObserveNode", "ApplyFiles", "ApplySoftware")
+    )
+    java.nio.file.Files.deleteIfExists(demo)
     check(
       "a policy may name the observe operation",
       AccessPolicy

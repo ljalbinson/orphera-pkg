@@ -349,10 +349,14 @@ which nodes; `orphera issue-policy --nodes tst0` puts the part for that node on 
 (`--dry-run` only prints it, `--remove` takes it off again, which allows every call as before). The agent then refuses
 a call, with `PERMISSION_DENIED` and a message naming the role and what it may do, unless the role in the caller's
 certificate may make it; the orchestrator's own `client.crt` has the policy's `default_role`. Operations are `facts`,
-`version`, `uptime`, `thread-info`, `check-file`, `fetch`, `copy`, `packages`, `run`, `reboot`, `shutdown`, `network`,
-or `all`; a call that no operation lists is refused to every role but one with `all`. A role with `run` is root on the
-node, and `apply` is `run` at the agent until typed actions exist, so the roles separate "may look" from "may change"
-and "may change files and packages" from "may run commands", not "may apply" from "may run". `revoked:` lists serial
+`version`, `uptime`, `thread-info`, `check-file`, `observe`, `apply-files`, `apply-access`, `apply-software`, `fetch`,
+`copy`, `packages`, `run`, `reboot`, `shutdown`, `network`, or `all`; a call that no operation lists is refused to every
+role but one with `all`. A role with `run` is root on the node. `orphera apply` reads with `observe` and `facts` and
+changes with `apply-files` (files, directories, links, lines, sysctl, modules), `apply-access` (users, groups, keys,
+mounts) and `apply-software` (packages, services), which the Go agent 0.1.216 performs itself from a fixed list of
+actions, so a role can apply descriptions without `run`; only a `command` resource, or a guard on one, needs `run`.
+`orphera issue-policy` will not place a policy that names one of these operations on an agent that predates it (it would
+refuse every call). `revoked:` lists serial
 numbers (in quotes, hexadecimal; `openssl x509 -noout -serial -in certs/operators/alice.crt`) to refuse before the
 certificate expires. A node must already require client certificates, and run an agent from 0.1.211 on, before
 `issue-policy` will place a policy on it. A policy the agent cannot read refuses everything, and says why in its
@@ -367,8 +371,9 @@ make the call ExecuteCommand (operation run); ...`). It covers the commands that
 `copy`, `reboot`, `facts`, `apply`, ...), not those that go over SSH (`bootstrap`, `issue-certs`, `issue-policy`,
 `teardown`) or a playbook, whose calls are known only as it runs: for those the agent's refusal is still the real one.
 It is advice, not enforcement: a node may hold an older policy than `access.yaml`, so `ORPHERA_ACCESS_CHECK=off` skips
-it, and the agent decides either way. `apply`, including `apply --check`, needs `run` for now, because the apply
-engine reads and changes a node by running scripts; a viewer cannot yet use `--check` (that needs typed actions).
+it, and the agent decides either way. For a `.yaml` description the check names the calls its resource kinds need, so a
+role with `observe`, `facts` and `apply-files` is allowed to apply a description of directories and lines and refused one
+with a `command`; a viewer with `facts` and `observe` can use `apply --check`.
 
 `issue-certs --client-auth` renews the node's certificate as usual and also puts `certs/ca.crt` on the node as
 `/etc/orphera-agent/tls/ca.crt`. While that file is there, the agent (Scala or Go) refuses a caller without a client
