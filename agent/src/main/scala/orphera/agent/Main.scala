@@ -20,11 +20,17 @@ object Main extends IOApp.Simple:
         IO.println(why) >>
           IO.raiseError(new RuntimeException("no usable ORPHERA_TOKEN"))
       case Right(token) =>
-        TlsFiles.choose match
-          case None =>
-            IO.println(TlsFiles.Missing) >>
-              IO.raiseError(new RuntimeException("no TLS certificate"))
-          case Some((certFile, keyFile)) => serve(token, certFile, keyFile)
+        TlsFiles.policyProblem match
+          case Some(why) =>
+            IO.println(why) >> IO.raiseError(new RuntimeException(why))
+          case None => start(token)
+
+  private def start(token: String): IO[Unit] =
+    TlsFiles.choose match
+      case None =>
+        IO.println(TlsFiles.Missing) >>
+          IO.raiseError(new RuntimeException("no TLS certificate"))
+      case Some((certFile, keyFile)) => serve(token, certFile, keyFile)
 
   private def serve(
       token: String,

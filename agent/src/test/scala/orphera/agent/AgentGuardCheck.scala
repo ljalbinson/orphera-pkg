@@ -38,12 +38,217 @@ object AgentGuardCheck:
         s.getStatus.getCode == Status.Code.FAILED_PRECONDITION
       case _ => false
 
+  private val testPolicy =
+    """# a policy
+      |default_role admin
+      |role viewer facts,version,uptime,thread-info,check-file,fetch
+      |role deployer facts,copy,packages   # no run
+      |role admin all
+      |""".stripMargin
+
+  private def certFor(
+      dir: java.nio.file.Path,
+      subject: String
+  ): Option[java.security.cert.X509Certificate] =
+    scala.util.Try {
+      val key = dir.resolve("k.pem")
+      val crt = dir.resolve("c.pem")
+      val p = new ProcessBuilder(
+        "openssl",
+        "req",
+        "-x509",
+        "-newkey",
+        "rsa:2048",
+        "-nodes",
+        "-keyout",
+        key.toString,
+        "-out",
+        crt.toString,
+        "-subj",
+        subject,
+        "-days",
+        "1"
+      ).redirectErrorStream(true).start()
+      p.getInputStream.readAllBytes()
+      require(p.waitFor() == 0)
+      val in = Files.newInputStream(crt)
+      try
+        java.security.cert.CertificateFactory
+          .getInstance("X.509")
+          .generateCertificate(in)
+          .asInstanceOf[java.security.cert.X509Certificate]
+      finally in.close()
+    }.toOption
+
+  private def verdict(
+      policy: Option[(String, Option[String])],
+      cert: Option[java.security.cert.X509Certificate],
+      method: String
+  ): Option[String] =
+    AuthInterceptor.decide(policy, cert, method) match
+      case AuthInterceptor.Decision.Allow(_)       => None
+      case AuthInterceptor.Decision.Refuse(_, why) => Some(why)
+
+  private def policyChecks(): Unit =
+    val pol = Some((testPolicy, Some("")))
+    check(
+      "the policy parses",
+      Policy
+        .parse(testPolicy)
+        .exists(p => p.defaultRole == "admin" && p.roles.size == 3)
+    )
+    check(
+      "a policy with no default_role, an unknown operation, no operations or a stray line is refused",
+      List(
+        "role viewer facts\n",
+        "default_role admin\nrole v nonsense\n",
+        "default_role admin\nrole v\n",
+        "default_role admin\nwhat is this\n",
+        "default_role Admin\nrole admin all\n",
+        ""
+      ).forall(t => Policy.parse(t).isLeft)
+    )
+    check(
+      "a node with no policy allows everything, certificate or not",
+      verdict(None, None, "ExecuteCommand").isEmpty
+    )
+    check(
+      "an unparseable policy refuses every call",
+      verdict(Some(("rubbish\n", Some(""))), None, "GatherFacts")
+        .exists(_.contains("cannot be read"))
+    )
+    check(
+      "a call with no certificate has no role and is refused",
+      verdict(pol, None, "GatherFacts").exists(
+        _.contains("no client certificate")
+      )
+    )
+    if !opensslInstalled then
+      println("openssl is not installed: skipped the certificate cases")
+    else
+      val dir = Files.createTempDirectory("agent-policy-check")
+      val viewer = certFor(dir, "/CN=alice/OU=viewer")
+      val deployer = certFor(dir, "/CN=bob/OU=deployer")
+      val admin = certFor(dir, "/CN=carol/OU=admin")
+      val orch = certFor(dir, "/CN=orphera-orchestrator@scala0")
+      val stranger = certFor(dir, "/CN=dave/OU=auditor")
+      val badOu = certFor(dir, "/CN=mallory/OU=Not A Role")
+      check(
+        "the certificates for the cases were made",
+        List(viewer, deployer, admin, orch, stranger, badOu).forall(_.isDefined)
+      )
+      check(
+        "a viewer may read",
+        verdict(pol, viewer, "GatherFacts").isEmpty
+      )
+      check(
+        "a viewer may not run, and is told the operation",
+        verdict(pol, viewer, "ExecuteCommand").exists(w =>
+          w.contains("ExecuteCommand") && w.contains("operation run")
+        )
+      )
+      check(
+        "a viewer may not copy",
+        verdict(pol, viewer, "CopyFile").isDefined
+      )
+      check(
+        "a deployer may copy, check a file and install, but not reboot",
+        verdict(pol, deployer, "CopyFile").isEmpty &&
+          verdict(pol, deployer, "CheckFile").isEmpty &&
+          verdict(pol, deployer, "Install").isEmpty &&
+          verdict(pol, deployer, "TriggerReboot").isDefined
+      )
+      check(
+        "an admin may make any call, one no operation lists too",
+        verdict(pol, admin, "ExecuteCommand").isEmpty &&
+          verdict(pol, admin, "SomethingNew").isEmpty
+      )
+      check(
+        "another role may not make a call no operation lists",
+        verdict(pol, deployer, "SomethingNew").exists(
+          _.contains("operation (none)")
+        )
+      )
+      check(
+        "the orchestrator's own certificate has the default role",
+        verdict(pol, orch, "ExecuteCommand").isEmpty
+      )
+      check(
+        "a role the policy does not list is refused",
+        verdict(pol, stranger, "GatherFacts")
+          .exists(_.contains("not in this node's access policy"))
+      )
+      check(
+        "an OU that is no valid role is refused, not given the default",
+        verdict(pol, badOu, "GatherFacts")
+          .exists(_.contains("no valid operator and role"))
+      )
+      val serial = admin.map(c => Policy.serialOf(c)).getOrElse("")
+      check(
+        "a revoked serial is refused",
+        verdict(
+          Some((testPolicy, Some(s"# gone\n$serial\n"))),
+          admin,
+          "GatherFacts"
+        ).exists(_.contains("revoked"))
+      )
+      check(
+        "a revoked serial in upper case with a 0x prefix is refused too",
+        verdict(
+          Some((testPolicy, Some(s"0x${serial.toUpperCase}\n"))),
+          admin,
+          "GatherFacts"
+        ).exists(_.contains("revoked"))
+      )
+      check(
+        "another serial is not revoked",
+        verdict(Some((testPolicy, Some("1\n"))), admin, "GatherFacts").isEmpty
+      )
+      // The files, as the interceptor reads them
+      val policyFile = dir.resolve("policy")
+      val revokedFile = dir.resolve("revoked")
+      check(
+        "no policy file: no policy",
+        AuthInterceptor.readPolicy(policyFile, revokedFile).isEmpty
+      )
+      Files.writeString(policyFile, testPolicy)
+      check(
+        "a policy file without a revoked file reads with an empty list",
+        AuthInterceptor
+          .readPolicy(policyFile, revokedFile)
+          .contains((testPolicy, Some("")))
+      )
+      Files.writeString(revokedFile, "5\n")
+      check(
+        "and with one",
+        AuthInterceptor
+          .readPolicy(policyFile, revokedFile)
+          .contains((testPolicy, Some("5\n")))
+      )
+      List("k.pem", "c.pem", "policy", "revoked").foreach(f =>
+        Files.deleteIfExists(dir.resolve(f))
+      )
+      Files.deleteIfExists(dir)
+
+  private def opensslInstalled: Boolean =
+    scala.util
+      .Try {
+        val p = new ProcessBuilder("openssl", "version")
+          .redirectErrorStream(true)
+          .start()
+        p.getInputStream.readAllBytes()
+        p.waitFor() == 0
+      }
+      .getOrElse(false)
+
   def main(args: Array[String]): Unit =
     check(
       "a call with no TLS session is logged as having no client certificate",
       AuthInterceptor.callerOf(io.grpc.Attributes.EMPTY) ==
         "no client certificate"
     )
+
+    policyChecks()
 
     val dir = Files.createTempDirectory("agent-guard-check")
     val marker = dir.resolve("never-reboot")

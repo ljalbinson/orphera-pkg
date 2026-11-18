@@ -35,6 +35,18 @@ object TlsFiles:
 
   def clientCa: Option[File] = Some(new File(ClientCaPath)).filter(_.isFile)
 
+  /** A node with an access policy (`policy`, placed by `orphera issue-policy`)
+    * must also require client certificates: without one there is no role to
+    * check. Why the agent should not start, or None.
+    */
+  def policyProblem: Option[String] =
+    Option.when(AuthInterceptor.PolicyPath.toFile.isFile && clientCa.isEmpty)(
+      "Refusing to start: this node has an access policy (/etc/orphera-agent/policy) but does not " +
+        "require client certificates (no tls/ca.crt), so there is no caller role to check. From the " +
+        "orchestrator run: orphera issue-certs --nodes <this node> --client-auth, or remove the policy: " +
+        "orphera issue-policy --nodes <this node> --remove"
+    )
+
   val Missing: String =
     "No TLS certificate in /etc/orphera-agent/tls: this node has not been issued one. " +
       "From the orchestrator run: orphera issue-certs --nodes <this node> --ssh-user <user>"

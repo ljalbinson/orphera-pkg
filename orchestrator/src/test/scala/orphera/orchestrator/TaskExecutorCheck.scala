@@ -415,6 +415,17 @@ object TaskExecutorCheck:
         .describe(Status.UNAUTHENTICATED.asRuntimeException())
         .startsWith("unauthenticated:")
     )
+    val refusedByPolicy = Status.PERMISSION_DENIED
+      .withDescription(
+        "refused: role 'viewer' may not make the call ExecuteCommand (operation run); it may: facts"
+      )
+      .asRuntimeException()
+    check(
+      "a call refused by the node's access policy says so, not unreachable",
+      NodeError.line(refusedByPolicy) ==
+        "refused by the node's access policy: role 'viewer' may not make the call ExecuteCommand (operation run); it may: facts",
+      NodeError.line(refusedByPolicy)
+    )
     // What the orchestrator saw on scala0 from a node with tls/ca.crt, with no
     // client certificate.
     val noClientCert = Status.UNAVAILABLE

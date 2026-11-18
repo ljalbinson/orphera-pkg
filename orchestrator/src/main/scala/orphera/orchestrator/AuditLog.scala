@@ -88,6 +88,7 @@ object AuditLog:
       case Command.Bootstrap(_, _, _, _, _, _)          => true
       case Command.Teardown(_, _, _, _, _)              => true
       case Command.IssueCerts(_, _, _, _)               => true
+      case Command.IssuePolicy(_, _, _, _, _, dryRun)   => !dryRun
       case Command.RunPlaybook(_, _, _)                 => true
       case Command.Apply(_, check, _, _)                => !check
       case Command.Reboot(_, _, _, _)                   => true
@@ -252,6 +253,13 @@ object AuditLog:
           "ssh_user" -> sshUser,
           "nodes" -> nodesField(nodes)
         ) ++ clientAuth.map(on => "client_auth" -> (if on then "on" else "off"))
+      case Command.IssuePolicy(nodes, sshUser, _, policyFile, remove, _) =>
+        List(
+          "command" -> "issue-policy",
+          "ssh_user" -> sshUser,
+          "nodes" -> nodesField(nodes),
+          "action" -> (if remove then "remove" else "place")
+        ) ++ policyFile.map("policy" -> _).toList
       case Command.Teardown(nodes, sshUser, sshKeyPath, purge, confirmed) =>
         List(
           "command" -> "teardown",

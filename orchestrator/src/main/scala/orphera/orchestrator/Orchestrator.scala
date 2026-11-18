@@ -335,6 +335,101 @@ object Orchestrator:
           ).as(failed == 0)
         }
 
+  /** `orphera issue-policy`: puts each node's access policy on it over SSH (see
+    * AccessPolicy), or with `remove` takes it off, or with `dryRun` only prints
+    * it. Nodes are done in parallel and independently; returns whether every
+    * node succeeded. A node whose agent is too old to apply a policy is left
+    * alone, since the agent would ignore the file and allow everything.
+    */
+  def issuePolicy(
+      nodes: List[Node],
+      sshUser: String,
+      sshKeyPath: Option[String],
+      policyFile: Option[String],
+      remove: Boolean,
+      dryRun: Boolean
+  ): IO[Boolean] =
+    def report(node: Node)(result: IO[Unit]): IO[Boolean] =
+      result.attempt.flatMap {
+        case Left(e) =>
+          IO.println(s"[${node.name}] FAILED: ${e.getMessage}").as(false)
+        case Right(_) => IO.pure(true)
+      }
+    def say(node: Node)(line: String): IO[Unit] =
+      IO.println(s"[${node.name}] $line")
+    def summary(oks: List[Boolean], what: String): IO[Boolean] =
+      val failed = oks.count(!_)
+      IO.println(
+        s"$what on ${oks.size - failed} of ${oks.size} nodes" +
+          (if failed > 0 then s"; $failed failed (nothing was changed on those)"
+           else "")
+      ).as(failed == 0)
+
+    if remove then
+      nodes
+        .parTraverse(node =>
+          report(node)(
+            AccessPolicy.removeFrom(node, sshUser, sshKeyPath, say(node))
+          )
+        )
+        .flatMap(summary(_, "Policy removed"))
+    else
+      val path = policyFile
+        .map(java.nio.file.Paths.get(_))
+        .getOrElse(
+          AccessPolicy.defaultFile
+        )
+      val names = Inventory.all.map(_.name)
+      AccessPolicy
+        .read(path)
+        .flatMap(spec =>
+          AccessPolicy.check(spec, Inventory.groups, names).map(_ => spec)
+        ) match
+        case Left(err) =>
+          IO.println(s"Error: $err. Nothing was changed.").as(false)
+        case Right(spec) =>
+          nodes
+            .parTraverse { node =>
+              report(node) {
+                for
+                  policy <- IO.fromEither(
+                    AccessPolicy
+                      .policyFor(spec, node.name, Inventory.groups, names)
+                      .left
+                      .map(new RuntimeException(_))
+                  )
+                  _ <-
+                    if dryRun then
+                      IO.println(
+                        s"[${node.name}] would get:\n$policy" +
+                          s"revoked: ${spec.revoked.size} serial(s)"
+                      )
+                    else
+                      for
+                        version <- NodeClient.getVersion(node)
+                        _ <- IO.raiseUnless(
+                          AccessPolicy.agentIsNewEnough(version)
+                        )(
+                          new RuntimeException(
+                            s"its agent is $version, which predates the access policy (needs " +
+                              s"${AccessPolicy.MinAgentVersion} or later) and would ignore it: " +
+                              "orphera deploy-agent first. Nothing was changed"
+                          )
+                        )
+                        _ <- AccessPolicy.placeOn(
+                          node,
+                          sshUser,
+                          sshKeyPath,
+                          policy,
+                          AccessPolicy.revokedText(spec),
+                          say(node)
+                        )
+                      yield ()
+                yield ()
+              }
+            }
+            .flatMap(summary(_, if dryRun then "Checked" else "Policy placed"))
+
   def teardownAgent(
       nodes: List[Node],
       sshUser: String,

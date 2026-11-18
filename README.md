@@ -342,7 +342,21 @@ alice, who sets `ORPHERA_OPERATOR=alice`; the orchestrator then presents that ce
 (and stops with an error if it is missing, rather than falling back to the shared one). The audit log (`orphera
 audit-log`) shows `operator=alice role=deployer` on each entry, and an agent that requires client certificates logs
 every call with the same name and role (`journalctl -u orphera-agent`). Names and roles are lower-case letters, digits,
-`.`, `_` and `-`. This records who; it does not yet refuse anything (see `docs/ACCESS-CONTROL-DESIGN.md`).
+`.`, `_` and `-`. This records who.
+
+**What each role may do.** `access.yaml` (beside `inventory.yaml`) says which operations each role may use, and on
+which nodes; `orphera issue-policy --nodes tst0` puts the part for that node on it as `/etc/orphera-agent/policy`
+(`--dry-run` only prints it, `--remove` takes it off again, which allows every call as before). The agent then refuses
+a call, with `PERMISSION_DENIED` and a message naming the role and what it may do, unless the role in the caller's
+certificate may make it; the orchestrator's own `client.crt` has the policy's `default_role`. Operations are `facts`,
+`version`, `uptime`, `thread-info`, `check-file`, `fetch`, `copy`, `packages`, `run`, `reboot`, `shutdown`, `network`,
+or `all`; a call that no operation lists is refused to every role but one with `all`. A role with `run` is root on the
+node, and `apply` is `run` at the agent until typed actions exist, so the roles separate "may look" from "may change"
+and "may change files and packages" from "may run commands", not "may apply" from "may run". `revoked:` lists serial
+numbers (in quotes, hexadecimal; `openssl x509 -noout -serial -in certs/operators/alice.crt`) to refuse before the
+certificate expires. A node must already require client certificates, and run an agent from 0.1.211 on, before
+`issue-policy` will place a policy on it. A policy the agent cannot read refuses everything, and says why in its
+journal. Limiting a role to paths is not supported yet.
 
 `issue-certs --client-auth` renews the node's certificate as usual and also puts `certs/ca.crt` on the node as
 `/etc/orphera-agent/tls/ca.crt`. While that file is there, the agent (Scala or Go) refuses a caller without a client

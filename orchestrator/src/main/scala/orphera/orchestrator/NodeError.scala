@@ -65,7 +65,13 @@ object NodeError:
   def isUnimplemented(e: Throwable): Boolean =
     Status.fromThrowable(e).getCode == Status.Code.UNIMPLEMENTED
 
-  /** One line for a node's output, starting with `unauthenticated`,
+  /** True when the agent answered and refused the call under its access policy
+    * (`orphera issue-policy`): the caller's role may not make it.
+    */
+  def isPermissionDenied(e: Throwable): Boolean =
+    Status.fromThrowable(e).getCode == Status.Code.PERMISSION_DENIED
+
+  /** One line for a node's output, starting with `unauthenticated`, `refused`,
     * `unsupported` or `unreachable`.
     */
   def line(e: Throwable): String =
@@ -85,6 +91,11 @@ object NodeError:
     else if isUnauthenticated(e) then
       "unauthenticated: the node rejected this orchestrator's token " +
         "(utils/set-agent-token.sh <node> sets it)"
+    else if isPermissionDenied(e) then
+      "refused by the node's access policy: " +
+        Option(Status.fromThrowable(e).getDescription)
+          .map(_.stripPrefix("refused: "))
+          .getOrElse("permission denied")
     else if isUnimplemented(e) then
       "unsupported: this agent is older than the orchestrator and does not know the " +
         "command (upgrade it with deploy-agent)"

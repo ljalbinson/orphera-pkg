@@ -7,6 +7,7 @@ package main
 
 import (
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -59,6 +60,16 @@ func run() error {
 	agent.Version = version
 	svc := agent.NewService()
 	svc.Init()
+
+	if _, err := os.Stat(agent.PolicyPath); err == nil {
+		if _, mutual := agent.ClientCA(); !mutual {
+			//lint:ignore ST1005 printed to the operator as a sentence, as by the Scala agent
+			return errors.New("Refusing to start: this node has an access policy (/etc/orphera-agent/policy) but does not " +
+				"require client certificates (no tls/ca.crt), so there is no caller role to check. From the " +
+				"orchestrator run: orphera issue-certs --nodes <this node> --client-auth, or remove the policy: " +
+				"orphera issue-policy --nodes <this node> --remove")
+		}
+	}
 
 	caFile, mutual := agent.ClientCA()
 	if !mutual {

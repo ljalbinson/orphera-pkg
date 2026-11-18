@@ -1,6 +1,6 @@
 # Orphera: access control (design)
 
-Status: proposed 2026-11-17, not built. Closes the first governance gap in the README's known gaps: "no limits on what an
+Status: proposed 2026-11-17. Step 1 (identity) built and run on the lab 2026-11-18; step 2 (policy at the agent) built and run on tst0 2026-11-18. Differences from the text below: the policy is `access.yaml` beside the inventory, not `config/access.yaml` (that directory holds the VM configs, which the schema checks and the database tools read as such); `paths` is refused for now; `policy-info` is not built. Closes the first governance gap in the README's known gaps: "no limits on what an
 authenticated caller may do".
 
 ## Summary
