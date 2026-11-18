@@ -28,6 +28,7 @@ if __name__ == "__main__":
     with open(sys.argv[1]) as f:
         doc = json.load(f)
     with open(sys.argv[2], "w") as f:
-        json.dump(slim(doc), f, separators=(",", ":"), sort_keys=True)
+        json.dump(slim(doc), f, indent=2, sort_keys=True)
+        f.write("\n")
     n = sum(len(b["opts"]) for b in doc["options"].values())
     print(f"{sys.argv[2]}: {n} options in {len(doc['options'])} sections")
