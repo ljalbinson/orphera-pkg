@@ -44,6 +44,8 @@ certs/*.srl
 certs/*.csr
 # This orchestrator's client certificate (`orphera issue-client-cert`): one per machine
 certs/client.crt
+# Operators' certificates and keys (`orphera issue-client-cert --operator`): theirs, not the repository's
+certs/operators/
 __pycache__/
 github-files/
 
