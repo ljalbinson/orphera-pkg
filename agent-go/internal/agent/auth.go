@@ -9,11 +9,15 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"log"
 	"os"
+	"regexp"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 )
 
@@ -63,19 +67,54 @@ func authorised(ctx context.Context, token string) bool {
 	return ok && accepts(token, md)
 }
 
-// AuthInterceptors let a call through only when it carries the token.
+// validName is what an operator's name or role may be: as in the Scala agent
+// and `orphera issue-client-cert`.
+var validName = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
+
+// DescribeCert names a caller from its client certificate: the operator and
+// role in a subject of CN=<name>, OU=<role>, else the whole subject. As in the
+// Scala agent. It is for the log only; no call is refused on it.
+func DescribeCert(c *x509.Certificate) string {
+	cn := c.Subject.CommonName
+	if len(c.Subject.OrganizationalUnit) == 1 {
+		ou := c.Subject.OrganizationalUnit[0]
+		if validName.MatchString(cn) && validName.MatchString(ou) {
+			return "operator=" + cn + " role=" + ou
+		}
+	}
+	return "client=" + c.Subject.String()
+}
+
+// callerOf is who made the call, from the certificate the connection presented
+// (verified against the CA when the agent requires client certificates).
+func callerOf(ctx context.Context) string {
+	p, ok := peer.FromContext(ctx)
+	if !ok {
+		return "no client certificate"
+	}
+	info, ok := p.AuthInfo.(credentials.TLSInfo)
+	if !ok || len(info.State.PeerCertificates) == 0 {
+		return "no client certificate"
+	}
+	return DescribeCert(info.State.PeerCertificates[0])
+}
+
+// AuthInterceptors let a call through only when it carries the token, and log
+// each call let through with who made it.
 func AuthInterceptors(token string) []grpc.ServerOption {
 	return []grpc.ServerOption{
-		grpc.UnaryInterceptor(func(ctx context.Context, req any, _ *grpc.UnaryServerInfo, h grpc.UnaryHandler) (any, error) {
+		grpc.UnaryInterceptor(func(ctx context.Context, req any, info *grpc.UnaryServerInfo, h grpc.UnaryHandler) (any, error) {
 			if !authorised(ctx, token) {
 				return nil, errUnauthenticated
 			}
+			log.Printf("%s %s", info.FullMethod, callerOf(ctx))
 			return h(ctx, req)
 		}),
-		grpc.StreamInterceptor(func(srv any, ss grpc.ServerStream, _ *grpc.StreamServerInfo, h grpc.StreamHandler) error {
+		grpc.StreamInterceptor(func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, h grpc.StreamHandler) error {
 			if !authorised(ss.Context(), token) {
 				return errUnauthenticated
 			}
+			log.Printf("%s %s", info.FullMethod, callerOf(ss.Context()))
 			return h(srv, ss)
 		}),
 	}

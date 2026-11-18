@@ -336,6 +336,14 @@ agent; an agent that does not ask for one ignores it. Each orchestrator needs on
 needs `ca.key`) or copy `client.crt` and `client.key` from scala0. Keep `client.key` as private as `ca.key`: with the
 token, it is what gets into a node.
 
+**Who is acting.** A certificate can also name a person: `orphera issue-client-cert --operator alice --role deployer`
+makes `certs/operators/alice.crt` and `.key` (subject `CN=alice, OU=deployer`, valid 30 days, `--days N`). Give them to
+alice, who sets `ORPHERA_OPERATOR=alice`; the orchestrator then presents that certificate in place of `client.crt`
+(and stops with an error if it is missing, rather than falling back to the shared one). The audit log (`orphera
+audit-log`) shows `operator=alice role=deployer` on each entry, and an agent that requires client certificates logs
+every call with the same name and role (`journalctl -u orphera-agent`). Names and roles are lower-case letters, digits,
+`.`, `_` and `-`. This records who; it does not yet refuse anything (see `docs/ACCESS-CONTROL-DESIGN.md`).
+
 `issue-certs --client-auth` renews the node's certificate as usual and also puts `certs/ca.crt` on the node as
 `/etc/orphera-agent/tls/ca.crt`. While that file is there, the agent (Scala or Go) refuses a caller without a client
 certificate from that CA, and its start line says `client certificates required`. It refuses to run if this
@@ -641,7 +649,7 @@ Verbs that act on nodes (`install`, `remove`, `dist-upgrade`, `run`, `copy`, `wr
 | `show-config <name>...` | Print each per-VM config as Orphera reads it, one line per config, from the `-c` / `ORPHERA_CONFIG_DIR` location (a directory or a `mariadb://` location), to compare two sources; read-only, contacts no node |
 | `cert-info [--nodes ...]` | Show the TLS certificate each agent presents, read from the TLS handshake (no SSH or token needed): per-node or wildcard, the names it covers, whether it names the host and is signed by `certs/ca.crt`, expiry and days left, serial, SHA-256 fingerprint. Exits non-zero if any node has a problem or cannot be reached — see [Per-node certificates](#per-node-certificates) |
 | `issue-certs [--nodes ...] [--ssh-user] [--ssh-key] [--client-auth \| --no-client-auth]` | Give each node a TLS certificate of its own over SSH: the node generates its key (it never leaves the node), the orchestrator signs the request with `certs/ca.key`, and the agent is restarted. A failure changes nothing. Also the way to renew (825 days) or to re-issue after replacing the CA — see [Replacing the CA](#replacing-the-ca). `--client-auth` also puts the CA on the node, which then requires a client certificate; `--no-client-auth` removes it — see [Mutual TLS](#mutual-tls) |
-| `issue-client-cert [--days 825] [--force]` | Make this orchestrator's client certificate (`certs/client.crt` and `client.key`, signed by `certs/ca.key`), which it presents to every agent; needed before `issue-certs --client-auth`. Runs on this machine only — see [Mutual TLS](#mutual-tls) |
+| `issue-client-cert [--days 825] [--force]`, `issue-client-cert --operator <name> --role <role> [--days 30]` | Make this orchestrator's client certificate (`certs/client.crt` and `client.key`, signed by `certs/ca.key`), which it presents to every agent; needed before `issue-certs --client-auth`. Runs on this machine only — see [Mutual TLS](#mutual-tls) |
 | `audit-log [--limit 20] [--full]` | List recent invocations of mutating commands (install, copy, bootstrap, teardown, playbooks, ...) from `.orphera-audit/audit.jsonl`: the command, its nodes, outcome and duration. Node lists are shown as runs (`tst0-7,tst9-20`), and a `run` script is put on one line; both are cut at 40 and 100 characters unless `--full`. The status is OK, FAILED (exit n, with the error when the command threw), INTERRUPTED (Ctrl-C), RUNNING (its process is still alive), or NO END RECORD (the process ended without writing one: killed, or a record from before 0.1.204). Read-only commands are not recorded, and there is no per-operator identity — only that someone holding the token ran it from this host. The file rotates by size |
 | `thread-info [--nodes ...] [--detail] [--reset-peak]` | Report each agent process's thread count: all OS threads, the Java threads and the most there have been since the agent started, CPUs, resident memory and heap. `--detail` adds the Java thread states and the threads grouped by name (`ioapp-compute`, `grpc-default-ex`, `GC Thread`, ...); `--reset-peak` starts the peak again after reading it, so the next call shows the highest count for one piece of work. An agent older than the orchestrator answers `unsupported` |
 | `pipeline <step>... (--nodes ... \| --node-groups ...) [--parallel N] [--quiet]` | Run a chain of verbs on each node, the nodes in parallel. Each step is one quoted verb line, e.g. `orphera pipeline "install tree" "dist-upgrade" "reboot --wait" --node-groups mons`. Steps run in order per node and a failure stops that node only; output is prefixed `[node]`, logged to `.orphera-build-logs/<time>/<node>.log`, and followed by a summary table; exit 1 if any node failed. A step may be any node verb (`install`, `remove`, `autoremove`, `dist-upgrade`, `copy`, `write-file`, `network-apply`, `deploy-agent`, `run`, `fetch`, `facts`, `version`, `uptime`, `thread-info`, `reboot`, `shutdown`) but may not give its own `--nodes` |
@@ -2443,7 +2451,8 @@ many checks passed and exits non-zero on a failure:
 - `LocationsCheck`: `-I`/`-c`, the environment variables, config names, reading through a URI
 - `InstallationCheck`: where the scripting jar is looked for
 - `CaInitCheck`: `init-ca`; `issue-client-cert` (made, verified by openssl as a TLS client certificate from the CA,
-  loaded by the gRPC client as `NodeClient` loads it, not replaced without `--force`); `issue-certs --client-auth` parsing
+  loaded by the gRPC client as `NodeClient` loads it, not replaced without `--force`); `issue-certs --client-auth` parsing; operator certificates (name and role in the subject, read back, signed by the CA, not replaced without `--force`)
+- `OperatorCheck`: which operator names and roles are usable, and how a certificate subject becomes an operator and role
 - `DbDocumentsCheck`: the `mariadb://` locations and the rows-to-documents conversion, with no database
 - `AgentGuardCheck`: the agent refuses a reboot and a shutdown on a host with the marker; it never calls the
   unprotected path, which would really reboot the test machine. Also that `copy`, `fetch` and the check before a copy

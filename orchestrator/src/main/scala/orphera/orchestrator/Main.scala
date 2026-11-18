@@ -67,9 +67,13 @@ object Main extends IOApp:
         IO.blocking(ClientCert.run(rest))
           .map(code => if code == 0 then ExitCode.Success else ExitCode.Error)
       case _ =>
-        Cli.parse(args).toOption.filter(AuditLog.isAuditable) match
-          case Some(command) => auditedRun(command, args)
-          case None          => dispatchCommand(args)
+        CurrentOperator.problem match
+          case Some(why) =>
+            IO.println(s"Error: $why") >> IO.pure(ExitCode.Error)
+          case None =>
+            Cli.parse(args).toOption.filter(AuditLog.isAuditable) match
+              case Some(command) => auditedRun(command, args)
+              case None          => dispatchCommand(args)
 
   private def auditedRun(command: Command, args: List[String]): IO[ExitCode] =
     for

@@ -117,6 +117,18 @@ object InstallationCheck:
       Installation.certsDirOf(_ => None) == "certs"
     )
     check(
+      "the client certificate is certs/client by default",
+      Installation.clientStemOf(_ => None) == "certs/client"
+    )
+    check(
+      "ORPHERA_OPERATOR selects that operator's certificate",
+      Installation.clientStemOf(
+        Map("ORPHERA_OPERATOR" -> "alice", Installation.CertsEnv -> "/ca").get
+      ) == "/ca/operators/alice" &&
+        Installation.clientStemOf(Map("ORPHERA_OPERATOR" -> " ").get) ==
+          "certs/client"
+    )
+    check(
       "ORPHERA_CERTS_DIR moves it, and a trailing slash does not matter",
       Installation.certsDirOf(
         Map(Installation.CertsEnv -> "/etc/orphera/ca/").get

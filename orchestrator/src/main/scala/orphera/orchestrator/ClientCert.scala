@@ -10,6 +10,8 @@ import java.security.SecureRandom
 
 import scala.util.Try
 
+import orphera.common.Operator
+
 /** `orphera issue-client-cert [--days N] [--force]`: this orchestrator's own
   * client certificate, `client.crt` and `client.key` beside the CA (in
   * `ORPHERA_CERTS_DIR`, default `certs`), signed by `ca.key`. The orchestrator
@@ -21,17 +23,31 @@ import scala.util.Try
   * copy `client.crt` and `client.key` from another (the key is the
   * orchestrator's identity, so keep it as private as `ca.key`). It runs on this
   * machine only and sends nothing to a node.
+  *
+  * `--operator <name> --role <role>` makes a certificate for a person instead:
+  * `operators/<name>.crt` and `.key` in the same directory, subject `CN=<name>,
+  * OU=<role>`, valid 30 days unless `--days` says otherwise. Setting
+  * `ORPHERA_OPERATOR=<name>` makes this orchestrator present it in place of
+  * `client.crt`; the agents and the audit log then record who acted.
   */
 object ClientCert:
 
   val DefaultDays = 825
 
+  val DefaultOperatorDays = 30
+
   val Usage: String =
     "Usage: orphera issue-client-cert [--days <n>] [--force]   " +
       s"(makes client.crt and client.key in ${Installation.DefaultCertsDir}, or ORPHERA_CERTS_DIR, " +
-      s"signed by ca.key; default $DefaultDays days; --force replaces an existing pair)"
+      s"signed by ca.key; default $DefaultDays days; --force replaces an existing pair)\n" +
+      "       orphera issue-client-cert --operator <name> --role <role> [--days <n>] [--force]   " +
+      s"(a person's certificate, operators/<name>.crt and .key; default $DefaultOperatorDays days)"
 
-  final case class Options(days: Int, force: Boolean)
+  final case class Options(
+      days: Int,
+      force: Boolean,
+      operator: Option[Operator] = None
+  )
 
   /** Whether this orchestrator has a client certificate and key. */
   def present: Boolean =
@@ -39,29 +55,62 @@ object ClientCert:
       Files.isRegularFile(Paths.get(Installation.clientKey))
 
   def parse(args: List[String]): Either[String, Options] =
+    final case class State(
+        o: Options,
+        name: Option[String],
+        role: Option[String],
+        daysGiven: Boolean
+    )
     @scala.annotation.tailrec
-    def go(rest: List[String], o: Options): Either[String, Options] =
+    def go(rest: List[String], st: State): Either[String, State] =
       rest match
-        case Nil                       => Right(o)
-        case "--force" :: tail         => go(tail, o.copy(force = true))
+        case Nil                       => Right(st)
+        case "--force" :: tail         =>
+          go(tail, st.copy(o = st.o.copy(force = true)))
         case "--days" :: value :: tail =>
           value.toIntOption.filter(_ > 0) match
-            case Some(n) => go(tail, o.copy(days = n))
-            case None    =>
+            case Some(n) =>
+              go(tail, st.copy(o = st.o.copy(days = n), daysGiven = true))
+            case None =>
               Left(s"--days needs a positive number of days, got '$value'")
+        case "--operator" :: value :: tail =>
+          if Operator.validName(value) then go(tail, st.copy(name = Some(value)))
+          else Left(badName("--operator", value))
+        case "--role" :: value :: tail =>
+          if Operator.validName(value) then go(tail, st.copy(role = Some(value)))
+          else Left(badName("--role", value))
         case other :: _ =>
           Left(s"Unknown argument to issue-client-cert: $other")
-    go(args, Options(DefaultDays, force = false))
+    go(args, State(Options(DefaultDays, force = false), None, None, false))
+      .flatMap { st =>
+        (st.name, st.role) match
+          case (Some(n), Some(r)) =>
+            Right(
+              st.o.copy(
+                days = if st.daysGiven then st.o.days else DefaultOperatorDays,
+                operator = Some(Operator(n, r))
+              )
+            )
+          case (None, None) => Right(st.o)
+          case _            => Left("--operator and --role go together")
+      }
+
+  private def badName(flag: String, value: String): String =
+    s"$flag '$value' is not usable: lower-case letters, digits, '.', '_' and '-' only, " +
+      "starting with a letter or digit, at most 64 characters"
 
   /** Why no client certificate may be made in `dir`, or None. */
   def refusal(
       dir: Path,
       force: Boolean,
-      exists: Path => Boolean
+      exists: Path => Boolean,
+      outDir: Option[Path] = None,
+      stem: String = "client"
   ): Option[String] =
+    val target = outDir.getOrElse(dir)
     val missingCa = List("ca.crt", "ca.key").map(dir.resolve).filterNot(exists)
     val present =
-      List("client.crt", "client.key").map(dir.resolve).filter(exists)
+      List(s"$stem.crt", s"$stem.key").map(target.resolve).filter(exists)
     if missingCa.nonEmpty then
       Some(
         s"${missingCa.mkString(" and ")} not found: the client certificate is signed by the CA " +
@@ -98,13 +147,22 @@ object ClientCert:
     * failure leaves the current pair (if any) as it was.
     */
   def create(dir: Path, o: Options): Either[String, String] =
-    refusal(dir, o.force, p => Files.exists(p)) match
+    val host =
+      Try(InetAddress.getLocalHost.getHostName).getOrElse("orchestrator")
+    val (outDir, stem, subject) = o.operator match
+      case Some(op) => (dir.resolve("operators"), op.name, Operator.subject(op))
+      case None     => (dir, "client", s"/CN=orphera-orchestrator@$host")
+    refusal(
+      dir,
+      o.force,
+      p => Files.exists(p),
+      Some(outDir),
+      stem
+    ) match
       case Some(why) => Left(why)
       case None      =>
-        val host =
-          Try(InetAddress.getLocalHost.getHostName).getOrElse("orchestrator")
-        val subject = s"/CN=orphera-orchestrator@$host"
-        val work = Files.createTempDirectory(dir, ".client-cert")
+        Files.createDirectories(outDir)
+        val work = Files.createTempDirectory(outDir, ".client-cert")
         val key = work.resolve("client.key")
         val csr = work.resolve("client.csr")
         val ext = work.resolve("client.ext")
@@ -165,16 +223,16 @@ object ClientCert:
             _ <- Try {
               Files.move(
                 key,
-                dir.resolve("client.key"),
+                outDir.resolve(s"$stem.key"),
                 StandardCopyOption.REPLACE_EXISTING
               )
               Files.move(
                 cert,
-                dir.resolve("client.crt"),
+                outDir.resolve(s"$stem.crt"),
                 StandardCopyOption.REPLACE_EXISTING
               )
             }.toEither.left.map(e =>
-              s"cannot move the new pair into $dir: ${e.getMessage}"
+              s"cannot move the new pair into $outDir: ${e.getMessage}"
             )
           yield subject.stripPrefix("/")
         Try {
@@ -196,12 +254,25 @@ object ClientCert:
             System.err.println(s"Error: $err")
             1
           case Right(subject) =>
-            println(
-              s"Made ${dir.resolve("client.crt")} and ${dir.resolve("client.key")} " +
-                s"($subject, valid ${options.days} days). This orchestrator now presents it to every agent."
-            )
-            println(
-              s"Keep ${dir.resolve("client.key")} private. Next, to require it on nodes: " +
-                "orphera issue-certs --nodes <nodes> --client-auth"
-            )
+            options.operator match
+              case Some(op) =>
+                val base = dir.resolve("operators").resolve(op.name)
+                println(
+                  s"Made $base.crt and $base.key ($subject, valid ${options.days} days). " +
+                    s"To act as ${op.name}: export ${Operator.Env}=${op.name}"
+                )
+                println(
+                  s"Keep $base.key private, and give it to ${op.name} only. Agents that require " +
+                    "client certificates (orphera issue-certs --client-auth) log this name and role " +
+                    "for every call, and so does the audit log here; nothing is refused on them yet."
+                )
+              case None =>
+                println(
+                  s"Made ${dir.resolve("client.crt")} and ${dir.resolve("client.key")} " +
+                    s"($subject, valid ${options.days} days). This orchestrator now presents it to every agent."
+                )
+                println(
+                  s"Keep ${dir.resolve("client.key")} private. Next, to require it on nodes: " +
+                    "orphera issue-certs --nodes <nodes> --client-auth"
+                )
             0

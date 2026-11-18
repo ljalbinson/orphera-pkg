@@ -181,6 +181,36 @@ object CaInitCheck:
         )
       )
       check(
+        "issue-client-cert --operator and --role",
+        ClientCert.parse(List("--operator", "alice", "--role", "deployer")) ==
+          Right(
+            ClientCert.Options(
+              30,
+              false,
+              Some(orphera.common.Operator("alice", "deployer"))
+            )
+          )
+      )
+      check(
+        "an operator certificate keeps --days when it is given",
+        ClientCert
+          .parse(
+            List("--role", "admin", "--days", "7", "--operator", "bob.smith")
+          )
+          .exists(o => o.days == 7 && o.operator.exists(_.name == "bob.smith"))
+      )
+      check(
+        "--operator and --role go together",
+        ClientCert.parse(List("--operator", "alice")).isLeft &&
+          ClientCert.parse(List("--role", "admin")).isLeft
+      )
+      check(
+        "an operator name must be safe as a file name and in a subject",
+        List("../x", "Alice", "a b", "a/b", "-x", "").forall(n =>
+          ClientCert.parse(List("--operator", n, "--role", "admin")).isLeft
+        )
+      )
+      check(
         "issue-client-cert refuses an unknown argument",
         ClientCert.parse(List("--bogus")).isLeft
       )
@@ -280,6 +310,77 @@ object CaInitCheck:
           .forall(n => !n.contains(".client-cert"))
       )
 
+      // An operator's certificate: CN=<name>, OU=<role>, in operators/
+      val alice = orphera.common.Operator("alice", "deployer")
+      val made = ClientCert.create(
+        dir,
+        ClientCert.Options(10, false, Some(alice))
+      )
+      check(
+        "an operator certificate is made with the name and role",
+        made.contains("CN=alice/OU=deployer"),
+        made.toString
+      )
+      val opCrt = dir.resolve("operators").resolve("alice.crt")
+      val opKey = dir.resolve("operators").resolve("alice.key")
+      check(
+        "it is in operators/, and the orchestrator's own pair is untouched",
+        Files.isRegularFile(opCrt) && Files.isRegularFile(opKey) &&
+          Files.readString(dir.resolve("client.crt")).nonEmpty
+      )
+      check(
+        "its key is private to its owner",
+        Files.getPosixFilePermissions(
+          opKey
+        ) == PosixFilePermissions.fromString("rw-------")
+      )
+      val opVerified = out(
+        "openssl",
+        "verify",
+        "-CAfile",
+        dir.resolve("ca.crt").toString,
+        "-purpose",
+        "sslclient",
+        opCrt.toString
+      )
+      check(
+        "it is signed by the CA, for use as a TLS client",
+        opVerified.trim.endsWith(": OK"),
+        opVerified
+      )
+      check(
+        "the orchestrator reads the operator back from the certificate",
+        CurrentOperator.fromFile(opCrt) == Right(alice),
+        CurrentOperator.fromFile(opCrt).toString
+      )
+      check(
+        "the orchestrator's own certificate names no operator",
+        CurrentOperator.fromFile(dir.resolve("client.crt")).isLeft
+      )
+      check(
+        "a second certificate for the operator is refused without --force",
+        ClientCert
+          .create(dir, ClientCert.Options(10, false, Some(alice)))
+          .left
+          .exists(_.contains("alice.crt"))
+      )
+      check(
+        "with --force it is replaced",
+        ClientCert
+          .create(dir, ClientCert.Options(10, true, Some(alice)))
+          .isRight
+      )
+      check(
+        "no work files are left in operators/",
+        Files
+          .list(dir.resolve("operators"))
+          .toArray
+          .map(_.toString)
+          .forall(n => !n.contains(".client-cert"))
+      )
+
+      List(opCrt, opKey).foreach(Files.deleteIfExists)
+      Files.deleteIfExists(dir.resolve("operators"))
       List("ca.crt", "ca.key", "client.crt", "client.key").foreach(f =>
         Files.deleteIfExists(dir.resolve(f))
       )

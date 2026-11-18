@@ -32,10 +32,12 @@ import cats.effect.IO
   * fetch) are NOT recorded — this is an audit trail of changes, not a general
   * access log.
   *
-  * Real limitation, worth being upfront about: this project has no per-operator
-  * identity, only the shared `ORPHERA_TOKEN`. This records WHAT ran, WHEN,
-  * against WHICH nodes, and its OUTCOME — not reliably WHO ran it, beyond
-  * "someone with the token from this control host."
+  * Who ran it: with `ORPHERA_OPERATOR` set (see CurrentOperator), every record
+  * carries `operator` and `role`, taken from that operator's certificate.
+  * Without it there is no name, only "someone on this control host with the
+  * token", as before. The names come from this host's own environment, so they
+  * are as good as the access to it; the agents, which see the certificate the
+  * orchestrator presented, record the same names independently.
   *
   * Rotated by size (see `maxSizeBytes`/`maxRotatedFiles` below) rather than
   * growing `audit.jsonl` forever — classic logrotate-style numbering:
@@ -319,7 +321,10 @@ object AuditLog:
     IO.blocking {
       Files.createDirectories(auditDir)
       rotateIfNeeded()
-      val line = toJson(fields :+ ("ts" -> Instant.now().toString))
+      val who = CurrentOperator.current.toList.flatMap(o =>
+        List("operator" -> o.name, "role" -> o.role)
+      )
+      val line = toJson((fields ++ who) :+ ("ts" -> Instant.now().toString))
       Files.write(
         auditFile,
         List(line).asJava,

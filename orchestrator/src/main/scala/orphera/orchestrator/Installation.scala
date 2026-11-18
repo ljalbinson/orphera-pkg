@@ -5,6 +5,8 @@ package orphera.orchestrator
 import java.io.File
 import java.nio.file.{Files, Path, Paths}
 
+import orphera.common.Operator
+
 /** Where the files `orphera` itself needs are, when it is not run from a
   * checkout of the repository: the jar that compiles and runs `.scala`
   * playbooks, the certificate authority, and the directories it writes run
@@ -53,12 +55,20 @@ object Installation:
   def caKey: String = s"${certsDirOf(name => sys.env.get(name))}/ca.key"
 
   /** This orchestrator's client certificate and key (`orphera
-    * issue-client-cert`), presented to every agent when both are present.
+    * issue-client-cert`), presented to every agent when both are present. With
+    * `ORPHERA_OPERATOR=<name>` they are that operator's, `operators/<name>.crt`
+    * and `.key`, instead.
     */
-  def clientCert: String =
-    s"${certsDirOf(name => sys.env.get(name))}/client.crt"
-  def clientKey: String =
-    s"${certsDirOf(name => sys.env.get(name))}/client.key"
+  def clientStemOf(env: String => Option[String]): String =
+    set(env, Operator.Env) match
+      case Some(name) => s"${certsDirOf(env)}/operators/$name"
+      case None       => s"${certsDirOf(env)}/client"
+
+  def clientCert: String = s"${clientStemOf(name => sys.env.get(name))}.crt"
+  def clientKey: String = s"${clientStemOf(name => sys.env.get(name))}.key"
+
+  /** The operator this orchestrator acts as, from `ORPHERA_OPERATOR`. */
+  def operatorName: Option[String] = set(name => sys.env.get(name), Operator.Env)
 
   /** Why the CA certificate cannot be used, or `None` when the file is there
     * and readable. The TLS library only says "File does not contain valid

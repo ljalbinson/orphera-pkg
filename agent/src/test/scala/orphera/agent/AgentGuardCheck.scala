@@ -39,6 +39,12 @@ object AgentGuardCheck:
       case _ => false
 
   def main(args: Array[String]): Unit =
+    check(
+      "a call with no TLS session is logged as having no client certificate",
+      AuthInterceptor.callerOf(io.grpc.Attributes.EMPTY) ==
+        "no client certificate"
+    )
+
     val dir = Files.createTempDirectory("agent-guard-check")
     val marker = dir.resolve("never-reboot")
     val env = Map(NeverReboot.EnvVar -> marker.toString)
