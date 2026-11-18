@@ -528,13 +528,15 @@ object Orchestrator:
       remotePath: String,
       localDir: java.nio.file.Path
   ): IO[Unit] =
-    IO.blocking(java.nio.file.Files.createDirectories(localDir)).attempt.flatMap {
-      case Left(e) =>
-        IO.println(
-          s"Error: cannot create the output directory $localDir: ${Option(e.getMessage).getOrElse(e.toString)}. Nothing was fetched."
-        )
-      case Right(_) => fetchInto(nodes, remotePath, localDir)
-    }
+    IO.blocking(java.nio.file.Files.createDirectories(localDir))
+      .attempt
+      .flatMap {
+        case Left(e) =>
+          IO.println(
+            s"Error: cannot create the output directory $localDir: ${Option(e.getMessage).getOrElse(e.toString)}. Nothing was fetched."
+          )
+        case Right(_) => fetchInto(nodes, remotePath, localDir)
+      }
 
   private def fetchInto(
       nodes: List[Node],
