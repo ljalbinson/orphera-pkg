@@ -90,3 +90,4 @@ you on the lab as path limits were.
 ## Status
 
 - Phase 3 (users, groups, authorized keys, mounts, fstab): built as `ApplyAccess` (operation `apply-access`), agent 0.1.215. The fstab text is computed in the orchestrator from the text `ObserveNode` returns for a mount and sent with the hash of what was read.
+- Phase 4 (packages, services): built as `ApplySoftware` (operation `apply-software`), agent 0.1.216.

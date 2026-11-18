@@ -1234,6 +1234,10 @@ object ApplyCheck:
           applyAccess = (_, _) =>
             IO.raiseError(
               _root_.io.grpc.Status.UNIMPLEMENTED.asRuntimeException()
+            ),
+          applySoftware = (_, _) =>
+            IO.raiseError(
+              _root_.io.grpc.Status.UNIMPLEMENTED.asRuntimeException()
             )
         )
         plan <- Apply.plan("local", rs)
@@ -1638,6 +1642,7 @@ object ApplyCheck:
     var written: Vector[String] = Vector.empty
     var access: Vector[AccessChange] = Vector.empty
     var scripts: Vector[String] = Vector.empty
+    var software: Vector[SoftwareChange] = Vector.empty
     def node = "typed"
     def observe(rs: List[(Int, ApplyResource)]): IO[Map[Int, Observed]] =
       IO.pure(
@@ -1669,6 +1674,12 @@ object ApplyCheck:
         fallback: String,
         timeout: Int
     ): IO[Unit] = IO { seen ++= changes }
+    override def software(
+        label: String,
+        changes: List[SoftwareChange],
+        fallback: String,
+        timeout: Int
+    ): IO[Unit] = IO { software ++= changes }
     override def access(
         label: String,
         changes: List[AccessChange],
@@ -1823,6 +1834,87 @@ object ApplyCheck:
         Apply.records("\n") == List("")
     )
 
+  // Packages and units go through ApplySoftware.
+  private def softwareChecks(): Unit =
+    def softFor(
+        values: Map[String, Map[String, String]],
+        r: ApplyResource
+    ): (Vector[SoftwareChange], Ran) =
+      val t = new TypedTarget(values)
+      val ran = applyTo(t, List(r))
+      (t.software, ran)
+
+    val absentPkg = Map("manager" -> "apt", "installed" -> "no")
+    val (inst, r1) = softFor(
+      Map("curl" -> absentPkg),
+      ApplyResource.Package("curl", "7.1-2", true, true)
+    )
+    check(
+      "typed software: a missing package is installed at its version",
+      inst == Vector(SoftwareChange.InstallPackage("curl", "7.1-2", true)) &&
+        !r1.report.failed,
+      s"$inst ${r1.lines}"
+    )
+    val (up, _) = softFor(
+      Map(
+        "curl" -> Map(
+          "manager" -> "dnf",
+          "installed" -> "yes",
+          "versions" -> "7.0-1"
+        )
+      ),
+      ApplyResource.Package("curl", "7.1-2", false, true)
+    )
+    check(
+      "typed software: another installed version is replaced",
+      up == Vector(SoftwareChange.InstallPackage("curl", "7.1-2", false)),
+      s"$up"
+    )
+    val (rm, _) = softFor(
+      Map(
+        "curl" -> Map(
+          "manager" -> "apt",
+          "installed" -> "yes",
+          "versions" -> "7.0-1"
+        )
+      ),
+      ApplyResource.Package("curl", "", false, false)
+    )
+    check(
+      "typed software: an installed package is removed",
+      rm == Vector(SoftwareChange.RemovePackage("curl")),
+      s"$rm"
+    )
+    val (same, _) = softFor(
+      Map(
+        "curl" -> Map(
+          "manager" -> "apt",
+          "installed" -> "yes",
+          "versions" -> "7.1-2"
+        )
+      ),
+      ApplyResource.Package("curl", "7.1-2", false, true)
+    )
+    check("typed software: the right version is left", same.isEmpty, s"$same")
+    val (unit, _) = softFor(
+      Map("ssh.service" -> Map("enabled" -> "disabled", "active" -> "inactive")),
+      ApplyResource.Service("ssh.service", Some(true), Some(true))
+    )
+    check(
+      "typed software: a unit is reloaded, enabled and started",
+      unit == Vector(
+        SoftwareChange.ReloadUnits,
+        SoftwareChange.ControlUnit("ssh.service", "enable"),
+        SoftwareChange.ControlUnit("ssh.service", "start")
+      ),
+      s"$unit"
+    )
+    val (steady, _) = softFor(
+      Map("ssh.service" -> Map("enabled" -> "enabled", "active" -> "active")),
+      ApplyResource.Service("ssh.service", Some(true), Some(true))
+    )
+    check("typed software: a unit as wanted is left", steady.isEmpty, s"$steady")
+
   // Accounts, keys and mounts go through ApplyAccess, with fstab worked out here.
   private def accessChecks(): Unit =
     def accessFor(
@@ -1974,6 +2066,7 @@ object ApplyCheck:
   def main(args: Array[String]): Unit =
     typedChecks()
     accessChecks()
+    softwareChecks()
     observeChecks()
     planChecks()
     runChecks()

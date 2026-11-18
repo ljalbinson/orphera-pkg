@@ -43,21 +43,22 @@ const (
 // Operations are the operations a policy may name, each a fixed set of agent
 // calls (bare method names). A call in no operation is allowed only by "all".
 var Operations = map[string][]string{
-	"facts":        {"GatherFacts"},
-	"version":      {"GetVersion"},
-	"uptime":       {"GetUptime"},
-	"thread-info":  {"GetThreadInfo"},
-	"check-file":   {"CheckFile"},
-	"observe":      {"ObserveNode"},
-	"apply-files":  {"ApplyFiles"},
-	"apply-access": {"ApplyAccess"},
-	"fetch":        {"RemoteFetchFile"},
-	"copy":         {"CopyFile", "CheckFile"},
-	"packages":     {"Install", "Remove", "RunAutoRemove", "RunDistUpgrade", "InstallDebPackage"},
-	"run":          {"ExecuteCommand"},
-	"reboot":       {"TriggerReboot"},
-	"shutdown":     {"TriggerShutdown"},
-	"network":      {"ReloadNetwork", "ConfirmNetwork"},
+	"facts":          {"GatherFacts"},
+	"version":        {"GetVersion"},
+	"uptime":         {"GetUptime"},
+	"thread-info":    {"GetThreadInfo"},
+	"check-file":     {"CheckFile"},
+	"observe":        {"ObserveNode"},
+	"apply-files":    {"ApplyFiles"},
+	"apply-access":   {"ApplyAccess"},
+	"apply-software": {"ApplySoftware"},
+	"fetch":          {"RemoteFetchFile"},
+	"copy":           {"CopyFile", "CheckFile"},
+	"packages":       {"Install", "Remove", "RunAutoRemove", "RunDistUpgrade", "InstallDebPackage"},
+	"run":            {"ExecuteCommand"},
+	"reboot":         {"TriggerReboot"},
+	"shutdown":       {"TriggerShutdown"},
+	"network":        {"ReloadNetwork", "ConfirmNetwork"},
 }
 
 // Policy is what each role may do on this node.

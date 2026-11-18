@@ -740,6 +740,38 @@ object NodeClient:
       case Remount(p)      => AccessAction.Action.Remount(pb.Remount(p))
       case Unmount(p)      => AccessAction.Action.Unmount(pb.Unmount(p)))
 
+  private def softwareAction(c: SoftwareChange): SoftwareAction =
+    import SoftwareChange.*
+    import orphera.common as pb
+    SoftwareAction(c match
+      case InstallPackage(n, v, u) =>
+        SoftwareAction.Action.PackageInstall(pb.PackageInstall(n, v, u))
+      case RemovePackage(n) =>
+        SoftwareAction.Action.PackageRemove(pb.PackageRemove(n))
+      case ControlUnit(u, v) =>
+        SoftwareAction.Action.UnitControl(pb.UnitControl(u, v))
+      case ReloadUnits =>
+        SoftwareAction.Action.ReloadUnits(pb.ReloadUnits()))
+
+  /** The agent's `ApplySoftware`: makes the changes in order and raises,
+    * naming the one that failed, if one does. Raises UNIMPLEMENTED on an agent
+    * that does not have it.
+    */
+  def applySoftware(node: Node, changes: List[SoftwareChange]): IO[Unit] =
+    channelBuilder(node)
+      .resource[IO]
+      .flatMap(AgentFs2Grpc.stubResource[IO])
+      .use { stub =>
+        stub.applySoftware(
+          ApplySoftwareRequest(changes.map(softwareAction)),
+          authMetadata()
+        )
+      }
+      .flatMap(reply =>
+        if reply.error.isEmpty then IO.unit
+        else IO.raiseError(new RuntimeException(reply.error))
+      )
+
   /** The agent's `ApplyAccess`: makes the changes in order and raises, naming
     * the one that failed, if one does. Raises UNIMPLEMENTED on an agent that
     * does not have it.

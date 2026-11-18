@@ -789,6 +789,16 @@ enum AccessChange:
   case Remount(path: String)
   case Unmount(path: String)
 
+/** A change the agent's `ApplySoftware` makes itself: packages and systemd
+  * units (see Protocol.proto). `verb` is enable, disable, start, stop, restart
+  * or try-restart.
+  */
+enum SoftwareChange:
+  case InstallPackage(name: String, version: String, updateCache: Boolean)
+  case RemovePackage(name: String)
+  case ControlUnit(unit: String, verb: String)
+  case ReloadUnits
+
 /** One node, as the engine sees it: how to read it and change it. The real one
   * runs shell commands and writes files through the agent; checks use a fake.
   */
@@ -824,6 +834,14 @@ trait ApplyTarget:
   def typed(
       label: String,
       @scala.annotation.unused changes: List[FileChange],
+      fallback: String,
+      timeout: Int
+  ): IO[Unit] = shell(label, fallback, timeout)
+
+  /** The same for packages and units (`ApplySoftware`). */
+  def software(
+      label: String,
+      @scala.annotation.unused changes: List[SoftwareChange],
       fallback: String,
       timeout: Int
   ): IO[Unit] = shell(label, fallback, timeout)
@@ -881,6 +899,9 @@ object Apply:
 
     /** The same through `ApplyAccess`. */
     case Access(changes: List[AccessChange], fallback: String)
+
+    /** The same through `ApplySoftware`. */
+    case Software(changes: List[SoftwareChange], fallback: String)
 
   // What it takes to bring a resource to its wanted state: what differs (for
   // the plan), the actions, and the lines of a content diff.
@@ -1150,6 +1171,8 @@ object Apply:
       seen: Observed
   ): Either[String, Difference] =
     val n = quote(p.name)
+    val installChange =
+      SoftwareChange.InstallPackage(p.name, p.version, p.updateCache)
     seen match
       case Observed.Pkg("none", _, _) =>
         Left("neither apt nor dnf on this node")
@@ -1166,24 +1189,33 @@ object Apply:
         if !p.present then
           if !installed then Right(NoDifference)
           else if apt then
-            shellOf(
+            softwareOf(
               List("removed"),
-              s"DEBIAN_FRONTEND=noninteractive apt-get remove -y -q -o DPkg::Lock::Timeout=300 $n"
+              List(
+                List(SoftwareChange.RemovePackage(p.name)) ->
+                  s"DEBIAN_FRONTEND=noninteractive apt-get remove -y -q -o DPkg::Lock::Timeout=300 $n"
+              )
             )
-          else shellOf(List("removed"), s"dnf -y -q remove $n")
+          else
+            softwareOf(
+              List("removed"),
+              List(
+                List(SoftwareChange.RemovePackage(p.name)) -> s"dnf -y -q remove $n"
+              )
+            )
         else if !installed then
-          shellOf(
+          softwareOf(
             List(if p.version.isEmpty then "installed"
             else s"installed ${p.version}"),
-            install
+            List(List(installChange) -> install)
           )
         else if p.version.nonEmpty && !versions.exists(
             versionMatches(_, p.version)
           )
         then
-          shellOf(
+          softwareOf(
             List(s"version ${versions.mkString(",")} -> ${p.version}"),
-            install
+            List(List(installChange) -> install)
           )
         else Right(NoDifference)
       case other => Left(s"unexpected state: $other")
@@ -1217,10 +1249,10 @@ object Apply:
             case true if missing => Some(Left("no such unit"))
             case true if masked  => Some(Left("the unit is masked"))
             case true if !Enabledish(enabled) =>
-              Some(Right("enabled" -> s"systemctl enable $n"))
+              Some(Right("enabled" -> "enable"))
             case false
                 if enabled == "enabled" || enabled == "enabled-runtime" =>
-              Some(Right("disabled" -> s"systemctl disable $n"))
+              Some(Right("disabled" -> "disable"))
             case _ => None
           }
         val running = Activeish(active)
@@ -1228,9 +1260,9 @@ object Apply:
           case true if missing  => Some(Left("no such unit"))
           case true if masked   => Some(Left("the unit is masked"))
           case true if !running =>
-            Some(Right("started" -> s"systemctl start $n"))
+            Some(Right("started" -> "start"))
           case false if running =>
-            Some(Right("stopped" -> s"systemctl stop $n"))
+            Some(Right("stopped" -> "stop"))
           case _ => None
         }
         val starting = run.exists(_.exists(_._1 == "started"))
@@ -1241,10 +1273,10 @@ object Apply:
             val by = s"(notified by ${notifiedBy.mkString(", ")})"
             u.running match
               case Some(true) =>
-                Some(Right(s"restarted $by" -> s"systemctl restart $n"))
+                Some(Right(s"restarted $by" -> "restart"))
               case _ =>
                 Option.when(running)(
-                  Right(s"restarted $by" -> s"systemctl try-restart $n")
+                  Right(s"restarted $by" -> "try-restart")
                 )
         val steps = List(enable, run, restart).flatten
         steps.collectFirst { case Left(e) => e } match
@@ -1256,11 +1288,32 @@ object Apply:
             val ok = steps.collect { case Right(x) => x }
             if ok.isEmpty then Right(NoDifference)
             else
-              shellOf(
+              softwareOf(
                 ok.map(_._1),
-                ("systemctl daemon-reload" :: ok.map(_._2)).mkString(" && ")
+                List(
+                  (SoftwareChange.ReloadUnits ::
+                    ok.map((_, verb) =>
+                      SoftwareChange.ControlUnit(u.unit, verb)
+                    )) ->
+                    ("systemctl daemon-reload" :: ok.map((_, verb) =>
+                      s"systemctl $verb $n"
+                    )).mkString(" && ")
+                )
               )
       case other => Left(s"unexpected state: $other")
+
+  // One typed software change, with its script as the fallback.
+  private def softwareOf(
+      labels: List[String],
+      parts: List[(List[SoftwareChange], String)]
+  ): Either[String, Difference] =
+    Right(
+      Difference(
+        labels,
+        parts.map((c, script) => Action.Software(c, script)),
+        Nil
+      )
+    )
 
   // One typed access change, with its script as the fallback.
   private def accessOf(
@@ -1919,6 +1972,13 @@ object Apply:
                                     target.shell(r.id, script, timeout)
                                   case Action.Typed(changes, fallback) =>
                                     target.typed(
+                                      r.id,
+                                      changes,
+                                      fallback,
+                                      timeout
+                                    )
+                                  case Action.Software(changes, fallback) =>
+                                    target.software(
                                       r.id,
                                       changes,
                                       fallback,

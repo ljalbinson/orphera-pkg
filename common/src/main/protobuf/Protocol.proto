@@ -398,6 +398,40 @@ message ApplyAccessRequest {
   repeated AccessAction actions = 1;
 }
 
+// Installs a package, at `version` if given (as the package manager names it;
+// an installed other version is replaced, a lower one downgraded).
+message PackageInstall {
+  string name = 1;
+  string version = 2;
+  bool update_cache = 3;
+}
+
+message PackageRemove {
+  string name = 1;
+}
+
+// verb: enable, disable, start, stop, restart or try-restart.
+message UnitControl {
+  string unit = 1;
+  string verb = 2;
+}
+
+// systemctl daemon-reload
+message ReloadUnits {}
+
+message SoftwareAction {
+  oneof action {
+    PackageInstall package_install = 1;
+    PackageRemove package_remove = 2;
+    UnitControl unit_control = 3;
+    ReloadUnits reload_units = 4;
+  }
+}
+
+message ApplySoftwareRequest {
+  repeated SoftwareAction actions = 1;
+}
+
 service Agent {
   rpc Install(InstallPackages) returns (stream Event);
   rpc Remove(RemovePackages) returns (stream Event);
@@ -419,5 +453,6 @@ service Agent {
   rpc ObserveNode(ObserveRequest) returns (ObserveReply);
   rpc ApplyFiles(ApplyFilesRequest) returns (ApplyReply);
   rpc ApplyAccess(ApplyAccessRequest) returns (ApplyReply);
+  rpc ApplySoftware(ApplySoftwareRequest) returns (ApplyReply);
 }
 
