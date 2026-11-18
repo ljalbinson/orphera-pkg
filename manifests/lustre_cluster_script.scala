@@ -201,7 +201,6 @@ object lustre_cluster_script extends OrpheraScript:
       |dnf -y upgrade --repo orphera-e2fsprogs-wc e2fsprogs e2fsprogs-libs libcom_err libss || true
       |rpm -q e2fsprogs | grep -q wc || fail "e2fsprogs is $(rpm -q e2fsprogs), not the Lustre (wc) build"
       |setenforce 0 2>/dev/null || true
-      |sed -i 's/^SELINUX=enforcing/SELINUX=permissive/' /etc/selinux/config
       |echo "installed: $(rpm -q lustre kmod-lustre e2fsprogs | tr '\n' ' ')"""".stripMargin
   )
 
@@ -426,6 +425,23 @@ object lustre_cluster_script extends OrpheraScript:
         packagesScript,
         1800
       )
+      // SELinux permissive on the servers (setenforce 0 in packagesScript does
+      // it for the running system): an apply description, kind lineInFile. Any
+      // SELINUX= line is replaced; the old sed changed only `enforcing`.
+      _ <- serverNodes
+        .each(node =>
+          node.apply(
+            "selinux-permissive",
+            List(
+              Resources.lineInFile(
+                "/etc/selinux/config",
+                "SELINUX=permissive",
+                "^SELINUX="
+              )
+            )
+          )
+        )
+        .void
       _ <- IO.whenA(clientOnly.nonEmpty)(
         stage(
           clientOnlyNodes,
