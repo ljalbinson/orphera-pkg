@@ -1230,6 +1230,10 @@ object ApplyCheck:
           applyFiles = (_, _) =>
             IO.raiseError(
               _root_.io.grpc.Status.UNIMPLEMENTED.asRuntimeException()
+            ),
+          applyAccess = (_, _) =>
+            IO.raiseError(
+              _root_.io.grpc.Status.UNIMPLEMENTED.asRuntimeException()
             )
         )
         plan <- Apply.plan("local", rs)
@@ -1632,6 +1636,8 @@ object ApplyCheck:
       extends ApplyTarget:
     var seen: Vector[FileChange] = Vector.empty
     var written: Vector[String] = Vector.empty
+    var access: Vector[AccessChange] = Vector.empty
+    var scripts: Vector[String] = Vector.empty
     def node = "typed"
     def observe(rs: List[(Int, ApplyResource)]): IO[Map[Int, Observed]] =
       IO.pure(
@@ -1663,6 +1669,12 @@ object ApplyCheck:
         fallback: String,
         timeout: Int
     ): IO[Unit] = IO { seen ++= changes }
+    override def access(
+        label: String,
+        changes: List[AccessChange],
+        fallback: String,
+        timeout: Int
+    ): IO[Unit] = IO { access ++= changes }
 
   private def shaOf(t: String): String =
     java.security.MessageDigest
@@ -1811,8 +1823,157 @@ object ApplyCheck:
         Apply.records("\n") == List("")
     )
 
+  // Accounts, keys and mounts go through ApplyAccess, with fstab worked out here.
+  private def accessChecks(): Unit =
+    def accessFor(
+        values: Map[String, Map[String, String]],
+        r: ApplyResource
+    ): (Vector[AccessChange], Ran) =
+      val t = new TypedTarget(values)
+      val ran = applyTo(t, List(r))
+      (t.access, ran)
+
+    val (made, r1) = accessFor(
+      Map("svc" -> Map("exists" -> "no")),
+      ApplyResource.User("svc", 501, "", List("adm"), "", "/bin/sh", true, true)
+    )
+    check(
+      "typed access: a missing user is created by the agent",
+      made == Vector(
+        AccessChange.CreateUser(
+          "svc",
+          "501",
+          "",
+          List("adm"),
+          "",
+          "/bin/sh",
+          true,
+          false
+        )
+      ) && !r1.report.failed,
+      s"$made ${r1.lines}"
+    )
+    val (mod, _) = accessFor(
+      Map(
+        "svc" -> Map(
+          "exists" -> "yes",
+          "uid" -> "501",
+          "group" -> "svc",
+          "groups" -> "svc",
+          "home" -> "/home/svc",
+          "shell" -> "/bin/bash"
+        )
+      ),
+      ApplyResource.User("svc", -1, "", List("adm"), "", "/bin/sh", false, true)
+    )
+    check(
+      "typed access: only what differs is modified",
+      mod == Vector(
+        AccessChange.ModifyUser("svc", "", "", List("adm"), "", "/bin/sh")
+      ),
+      s"$mod"
+    )
+    val (gone, _) = accessFor(
+      Map("svc" -> Map("exists" -> "no")),
+      ApplyResource.Group("svc", 700, false, true)
+    )
+    check(
+      "typed access: a group is created with its gid",
+      gone == Vector(AccessChange.CreateGroup("svc", "700", false)),
+      s"$gone"
+    )
+    val (key, _) = accessFor(
+      Map("alice" -> Map("exists" -> "yes", "count" -> "0")),
+      ApplyResource.AuthorizedKey("alice", "ssh-ed25519 AAAA c", true)
+    )
+    check(
+      "typed access: a key is added",
+      key == Vector(AccessChange.AddAuthorizedKey("alice", "ssh-ed25519 AAAA c")),
+      s"$key"
+    )
+    val (unkey, _) = accessFor(
+      Map("alice" -> Map("exists" -> "yes", "count" -> "1")),
+      ApplyResource.AuthorizedKey("alice", "ssh-ed25519 AAAA c", false)
+    )
+    check(
+      "typed access: a key is removed by its id",
+      unkey == Vector(
+        AccessChange.RemoveAuthorizedKey("alice", "ssh-ed25519 AAAA")
+      ),
+      s"$unkey"
+    )
+    val tab = "# c\n/dev/sda1 / ext4 defaults 0 1\n"
+    val mnt =
+      ApplyResource.Mount("/mnt/x", "tmpfs", "tmpfs", "size=8m", Some(true), true)
+    val (mounted, _) = accessFor(
+      Map(
+        "/mnt/x" -> Map(
+          "fstab" -> "no",
+          "mounted" -> "no",
+          "fstab_text" -> tab
+        )
+      ),
+      mnt
+    )
+    check(
+      "typed access: fstab text is worked out here, hash-guarded, then mounted",
+      mounted == Vector(
+        AccessChange.ReplaceFstab(
+          tab + "tmpfs /mnt/x tmpfs size=8m 0 0\n",
+          shaOf(tab)
+        ),
+        AccessChange.MountPath("/mnt/x", true)
+      ),
+      s"$mounted"
+    )
+    val (unmounted, _) = accessFor(
+      Map(
+        "/mnt/x" -> Map(
+          "fstab" -> "yes",
+          "mounted" -> "yes",
+          "dev" -> "tmpfs",
+          "fstype" -> "tmpfs",
+          "opts" -> "size=8m",
+          "fstab_text" -> (tab + "tmpfs /mnt/x tmpfs size=8m 0 0\n")
+        )
+      ),
+      mnt.copy(present = false)
+    )
+    check(
+      "typed access: a mount is unmounted and its fstab line dropped",
+      unmounted == Vector(
+        AccessChange.Unmount("/mnt/x"),
+        AccessChange.ReplaceFstab(
+          tab,
+          shaOf(tab + "tmpfs /mnt/x tmpfs size=8m 0 0\n")
+        )
+      ),
+      s"$unmounted"
+    )
+    check(
+      "fstab edits: first match replaced, duplicates and comments handled",
+      Apply.fstabEdited("a /m x 0 0\n#b /m y\nc /m z\nd /o e\n", "/m", Some("N /m t o 0 0")) ==
+        "N /m t o 0 0\n#b /m y\nd /o e\n" &&
+        Apply.fstabEdited("a /m x\nb /m y\n", "/m", None) == "" &&
+        Apply.fstabEdited("a /o x", "/m", Some("N")) == "a /o x\nN\n"
+    )
+    // No fstab text read (a Scala agent): the script edits the file.
+    val sh = new TypedTarget(
+      Map("/mnt/x" -> Map("fstab" -> "no", "mounted" -> "yes"))
+    ):
+      override def shell(l: String, script: String, t: Int): IO[Unit] =
+        IO { scripts :+= script }
+    val r = applyTo(sh, List(mnt))
+    check(
+      "no fstab text: the fstab edit is the script",
+      sh.scripts.exists(_.contains("/etc/fstab")) && sh.access.isEmpty && !r.report.failed,
+      s"${sh.scripts} ${r.lines}"
+    )
+
+
   def main(args: Array[String]): Unit =
     typedChecks()
+    accessChecks()
     observeChecks()
     planChecks()
     runChecks()

@@ -122,7 +122,10 @@ object TaskExecutor:
       // The agent's ApplyFiles: the changes made in order, raising when one
       // fails. Checks without an agent replace it.
       applyFiles: (Node, List[FileChange]) => IO[Unit] = (node, changes) =>
-        NodeClient.applyFiles(node, changes)
+        NodeClient.applyFiles(node, changes),
+      // The agent's ApplyAccess, likewise.
+      applyAccess: (Node, List[AccessChange]) => IO[Unit] = (node, changes) =>
+        NodeClient.applyAccess(node, changes)
   )
 
   /** A direct command's Env: no facts, no templating, console output. */
@@ -919,6 +922,18 @@ object TaskExecutor:
         timeout: Int
     ): IO[Unit] =
       env.applyFiles(n, changes).handleErrorWith {
+        case e if NodeError.isUnimplemented(e) =>
+          shell(label, fallback, timeout)
+        case e => IO.raiseError(new RuntimeException(s"$label: ${describe(e)}"))
+      }
+
+    override def access(
+        label: String,
+        changes: List[AccessChange],
+        fallback: String,
+        timeout: Int
+    ): IO[Unit] =
+      env.applyAccess(n, changes).handleErrorWith {
         case e if NodeError.isUnimplemented(e) =>
           shell(label, fallback, timeout)
         case e => IO.raiseError(new RuntimeException(s"$label: ${describe(e)}"))

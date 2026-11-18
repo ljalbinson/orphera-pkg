@@ -137,6 +137,16 @@ class AgentServiceImpl(
         .asRuntimeException()
     )
 
+  def applyAccess(
+      request: ApplyAccessRequest,
+      ctx: Metadata
+  ): IO[ApplyReply] =
+    IO.raiseError(
+      _root_.io.grpc.Status.UNIMPLEMENTED
+        .withDescription("ApplyAccess is not in the Scala agent")
+        .asRuntimeException()
+    )
+
   def executeCommand(
       request: RunCommandRequest,
       ctx: Metadata

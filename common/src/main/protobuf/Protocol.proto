@@ -300,6 +300,104 @@ message ApplyReply {
   string error = 2;
 }
 
+// Changes to users, groups, authorized keys and mounts, from a fixed list, that
+// the agent makes itself. These give or take away ways to log in and what is
+// mounted where, so they are a separate call (and policy operation) from
+// ApplyFiles. A string that names a number (uid, gid) is empty when it is not
+// asked for.
+message CreateUser {
+  string name = 1;
+  string uid = 2;
+  string group = 3;
+  repeated string groups = 4;
+  string home = 5;
+  string shell = 6;
+  bool system = 7;
+  bool create_home = 8;
+}
+
+// Changes what is set; add_groups are added to the user's groups, not replaced.
+message ModifyUser {
+  string name = 1;
+  string uid = 2;
+  string group = 3;
+  repeated string add_groups = 4;
+  string home = 5;
+  string shell = 6;
+}
+
+message DeleteUser {
+  string name = 1;
+}
+
+message CreateGroup {
+  string name = 1;
+  string gid = 2;
+  bool system = 3;
+}
+
+message ModifyGroup {
+  string name = 1;
+  string gid = 2;
+}
+
+message DeleteGroup {
+  string name = 1;
+}
+
+// Adds a line to the user's ~/.ssh/authorized_keys (made, with the right owner
+// and mode, if needed).
+message AddAuthorizedKey {
+  string user = 1;
+  string key = 2;
+}
+
+// Removes the lines whose first two fields are key_id ("type base64").
+message RemoveAuthorizedKey {
+  string user = 1;
+  string key_id = 2;
+}
+
+// Replaces /etc/fstab, only if it still has expected_sha256.
+message ReplaceFstab {
+  string content = 1;
+  string expected_sha256 = 2;
+}
+
+message MountPath {
+  string path = 1;
+  bool make_directory = 2;
+}
+
+message Remount {
+  string path = 1;
+}
+
+message Unmount {
+  string path = 1;
+}
+
+message AccessAction {
+  oneof action {
+    CreateUser create_user = 1;
+    ModifyUser modify_user = 2;
+    DeleteUser delete_user = 3;
+    CreateGroup create_group = 4;
+    ModifyGroup modify_group = 5;
+    DeleteGroup delete_group = 6;
+    AddAuthorizedKey add_authorized_key = 7;
+    RemoveAuthorizedKey remove_authorized_key = 8;
+    ReplaceFstab replace_fstab = 9;
+    MountPath mount_path = 10;
+    Remount remount = 11;
+    Unmount unmount = 12;
+  }
+}
+
+message ApplyAccessRequest {
+  repeated AccessAction actions = 1;
+}
+
 service Agent {
   rpc Install(InstallPackages) returns (stream Event);
   rpc Remove(RemovePackages) returns (stream Event);
@@ -320,5 +418,6 @@ service Agent {
   rpc ExecuteCommand(RunCommandRequest) returns (stream Event);
   rpc ObserveNode(ObserveRequest) returns (ObserveReply);
   rpc ApplyFiles(ApplyFilesRequest) returns (ApplyReply);
+  rpc ApplyAccess(ApplyAccessRequest) returns (ApplyReply);
 }
 

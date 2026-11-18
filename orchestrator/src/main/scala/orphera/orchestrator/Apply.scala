@@ -753,6 +753,42 @@ enum FileChange:
       createMode: String
   )
 
+/** A change the agent's `ApplyAccess` makes itself: accounts, authorized keys
+  * and mounts (see Protocol.proto). Strings that name a number are decimal;
+  * empty is "leave it".
+  */
+enum AccessChange:
+  case CreateUser(
+      name: String,
+      uid: String,
+      group: String,
+      groups: List[String],
+      home: String,
+      shell: String,
+      system: Boolean,
+      createHome: Boolean
+  )
+  case ModifyUser(
+      name: String,
+      uid: String,
+      group: String,
+      addGroups: List[String],
+      home: String,
+      shell: String
+  )
+  case DeleteUser(name: String)
+  case CreateGroup(name: String, gid: String, system: Boolean)
+  case ModifyGroup(name: String, gid: String)
+  case DeleteGroup(name: String)
+  case AddAuthorizedKey(user: String, key: String)
+  case RemoveAuthorizedKey(user: String, keyId: String)
+
+  /** `expectedSha256`: the hash of the /etc/fstab the new text was made from. */
+  case ReplaceFstab(content: String, expectedSha256: String)
+  case MountPath(path: String, makeDirectory: Boolean)
+  case Remount(path: String)
+  case Unmount(path: String)
+
 /** One node, as the engine sees it: how to read it and change it. The real one
   * runs shell commands and writes files through the agent; checks use a fake.
   */
@@ -788,6 +824,14 @@ trait ApplyTarget:
   def typed(
       label: String,
       @scala.annotation.unused changes: List[FileChange],
+      fallback: String,
+      timeout: Int
+  ): IO[Unit] = shell(label, fallback, timeout)
+
+  /** The same for accounts, keys and mounts (`ApplyAccess`). */
+  def access(
+      label: String,
+      @scala.annotation.unused changes: List[AccessChange],
       fallback: String,
       timeout: Int
   ): IO[Unit] = shell(label, fallback, timeout)
@@ -834,6 +878,9 @@ object Apply:
       * agent that cannot.
       */
     case Typed(changes: List[FileChange], fallback: String)
+
+    /** The same through `ApplyAccess`. */
+    case Access(changes: List[AccessChange], fallback: String)
 
   // What it takes to bring a resource to its wanted state: what differs (for
   // the plan), the actions, and the lines of a content diff.
@@ -1215,6 +1262,20 @@ object Apply:
               )
       case other => Left(s"unexpected state: $other")
 
+  // One typed access change, with its script as the fallback.
+  private def accessOf(
+      labels: List[String],
+      parts: List[(List[AccessChange], String)],
+      detail: List[String] = Nil
+  ): Either[String, Difference] =
+    Right(
+      Difference(
+        labels,
+        parts.map((c, script) => Action.Access(c, script)),
+        detail
+      )
+    )
+
   private def compareUser(
       u: ApplyResource.User,
       seen: Observed
@@ -1234,9 +1295,28 @@ object Apply:
           Option.when(u.shell.nonEmpty)(s"-s ${quote(u.shell)}"),
           Option.when(u.system)("-r")
         ).flatten
-        shellOf(List("created"), (("useradd" :: flags) :+ n).mkString(" "))
+        accessOf(
+          List("created"),
+          List(
+            List(
+              AccessChange.CreateUser(
+                u.name,
+                if u.uid >= 0 then u.uid.toString else "",
+                u.group,
+                u.groups,
+                u.home,
+                u.shell,
+                u.system,
+                !u.system || u.home.nonEmpty
+              )
+            ) -> (("useradd" :: flags) :+ n).mkString(" ")
+          )
+        )
       case _: Observed.Account if !u.present =>
-        shellOf(List("removed"), s"userdel $n")
+        accessOf(
+          List("removed"),
+          List(List(AccessChange.DeleteUser(u.name)) -> s"userdel $n")
+        )
       case Observed.Account(uid, group, groups, home, shell) =>
         val missing = u.groups.filterNot(groups.contains)
         val wanted = List(
@@ -1258,9 +1338,20 @@ object Apply:
         ).flatten
         if wanted.isEmpty then Right(NoDifference)
         else
-          shellOf(
+          accessOf(
             wanted.map(_._1),
-            (("usermod" :: wanted.map(_._2)) :+ n).mkString(" ")
+            List(
+              List(
+                AccessChange.ModifyUser(
+                  u.name,
+                  if u.uid >= 0 && u.uid != uid then u.uid.toString else "",
+                  if u.group.nonEmpty && u.group != group then u.group else "",
+                  missing,
+                  if u.home.nonEmpty && u.home != home then u.home else "",
+                  if u.shell.nonEmpty && u.shell != shell then u.shell else ""
+                )
+              ) -> (("usermod" :: wanted.map(_._2)) :+ n).mkString(" ")
+            )
           )
       case other => Left(s"unexpected state: $other")
 
@@ -1276,11 +1367,31 @@ object Apply:
           Option.when(g.gid >= 0)(s"-g ${g.gid}"),
           Option.when(g.system)("-r")
         ).flatten
-        shellOf(List("created"), (("groupadd" :: flags) :+ n).mkString(" "))
+        accessOf(
+          List("created"),
+          List(
+            List(
+              AccessChange.CreateGroup(
+                g.name,
+                if g.gid >= 0 then g.gid.toString else "",
+                g.system
+              )
+            ) -> (("groupadd" :: flags) :+ n).mkString(" ")
+          )
+        )
       case _: Observed.GroupEntry if !g.present =>
-        shellOf(List("removed"), s"groupdel $n")
+        accessOf(
+          List("removed"),
+          List(List(AccessChange.DeleteGroup(g.name)) -> s"groupdel $n")
+        )
       case Observed.GroupEntry(gid) if g.gid >= 0 && g.gid != gid =>
-        shellOf(List(s"gid $gid -> ${g.gid}"), s"groupmod -g ${g.gid} $n")
+        accessOf(
+          List(s"gid $gid -> ${g.gid}"),
+          List(
+            List(AccessChange.ModifyGroup(g.name, g.gid.toString)) ->
+              s"groupmod -g ${g.gid} $n"
+          )
+        )
       case _: Observed.GroupEntry => Right(NoDifference)
       case other                  => Left(s"unexpected state: $other")
 
@@ -1487,25 +1598,53 @@ object Apply:
         if k.present then
           if count >= 1 then Right(NoDifference)
           else
-            shellOf(
+            accessOf(
               List("key added"),
+              List(List(AccessChange.AddAuthorizedKey(k.user, k.key.trim)) ->
               s"""$home; [ -n "$$h" ] || { echo "user ${k.user} does not exist" >&2; exit 1; }; """ +
                 s"""mkdir -p "$$h/.ssh" && chmod 700 "$$h/.ssh" && touch $file && chmod 600 $file && """ +
                 s"""{ [ -z "$$(tail -c1 $file)" ] || echo >> $file; } && printf '%s\\n' ${quote(
                     k.key.trim
                   )} >> $file && """ +
-                s"""chown $u:"$$g" "$$h/.ssh" $file"""
+                s"""chown $u:"$$g" "$$h/.ssh" $file""")
             )
         else if count == 0 || !kv.get("exists").contains("yes") then
           Right(NoDifference)
         else
-          shellOf(
+          accessOf(
             List("key removed"),
+            List(List(AccessChange.RemoveAuthorizedKey(k.user, k.keyId)) ->
             s"""$home; f=$file; t=$$(mktemp) && K=${quote(k.keyId)} awk ${quote(
                 "$1\" \"$2==ENVIRON[\"K\"]{next}{print}"
-              )} "$$f" > "$$t" && cat "$$t" > "$$f"; rc=$$?; rm -f "$$t"; [ $$rc -eq 0 ]"""
+              )} "$$f" > "$$t" && cat "$$t" > "$$f"; rc=$$?; rm -f "$$t"; [ $$rc -eq 0 ]""")
           )
       case other => Left(s"unexpected state: $other")
+
+  // The lines of an /etc/fstab text, as awk reads them.
+  private def fstabLines(text: String): List[String] =
+    if text.isEmpty then Nil else text.stripSuffix("\n").split("\n", -1).toList
+
+  private def fstabMatches(line: String, path: String): Boolean =
+    val f = line.trim.split("\\s+").toList
+    f.size >= 2 && !f.lift(0).exists(_.startsWith("#")) && f.lift(1).contains(path)
+
+  /** The fstab with `path`'s entry set to `entry` (the first match replaced,
+    * any others dropped, or appended when there is none), or, with `entry`
+    * None, without it: what the awk programs of the script do.
+    */
+  private[orchestrator] def fstabEdited(
+      text: String,
+      path: String,
+      entry: Option[String]
+  ): String =
+    val lines = fstabLines(text)
+    val kept = entry match
+      case None => lines.filterNot(fstabMatches(_, path))
+      case Some(e) =>
+        val (before, rest) = lines.span(!fstabMatches(_, path))
+        if rest.isEmpty then before :+ e
+        else (before :+ e) ++ rest.drop(1).filterNot(fstabMatches(_, path))
+    kept.mkString("", "\n", "\n")
 
   private def compareMount(
       m: ApplyResource.Mount,
@@ -1515,6 +1654,7 @@ object Apply:
       case Observed.Facts(kv) =>
         val inFstab = kv.get("fstab").contains("yes")
         val isMounted = kv.get("mounted").contains("yes")
+        val fstabText = kv.get("fstab_text").filter(_.nonEmpty)
         val p = quote(m.path)
         val entry = s"${m.device} ${m.path} ${m.fstype} ${m.options} 0 0"
         val awkSet =
@@ -1522,20 +1662,41 @@ object Apply:
         val awkDel = "BEGIN{p=ENVIRON[\"P\"]} $1!~/^#/ && $2==p {next} {print}"
         def fstabEdit(program: String): String =
           s"t=$$(mktemp) && P=$p LN=${quote(entry)} awk ${quote(program)} /etc/fstab > \"$$t\" && cat \"$$t\" > /etc/fstab; rc=$$?; rm -f \"$$t\"; [ $$rc -eq 0 ]"
-        if !m.present then
-          val parts = List(
-            Option.when(isMounted)(("unmounted", s"umount $p")),
-            Option.when(inFstab)(("removed from fstab", fstabEdit(awkDel)))
-          ).flatten
-          if parts.isEmpty then Right(NoDifference)
-          else
-            Right(
-              Difference(
-                parts.map(_._1),
-                parts.map((_, s) => Action.Shell(s)),
-                Nil
+        // The agent replaces the file only if it is still the text read; with
+        // no text read (a Scala agent, a large file) the script edits it.
+        def fstabAction(wanted: Option[String], program: String): Action =
+          fstabText match
+            case Some(text) =>
+              Action.Access(
+                List(
+                  AccessChange.ReplaceFstab(
+                    fstabEdited(text, m.path, wanted),
+                    sha256(text)
+                  )
+                ),
+                fstabEdit(program)
               )
-            )
+            case None => Action.Shell(fstabEdit(program))
+        def done(parts: List[(String, Action)]) =
+          if parts.isEmpty then Right(NoDifference)
+          else Right(Difference(parts.map(_._1), parts.map(_._2), Nil))
+        if !m.present then
+          done(
+            List(
+              Option.when(isMounted)(
+                (
+                  "unmounted",
+                  Action.Access(
+                    List(AccessChange.Unmount(m.path)),
+                    s"umount $p"
+                  )
+                )
+              ),
+              Option.when(inFstab)(
+                ("removed from fstab", fstabAction(None, awkDel))
+              )
+            ).flatten
+          )
         else
           val same =
             kv.getOrElse("dev", "") == m.device &&
@@ -1545,26 +1706,42 @@ object Apply:
             Option.when(!inFstab || !same)(
               (
                 if inFstab then "fstab entry changed" else "added to fstab",
-                fstabEdit(awkSet)
+                fstabAction(Some(entry), awkSet)
               )
             )
           val mountPart = m.mounted match
             case Some(true) if !isMounted =>
-              Some(("mounted", s"mkdir -p -- $p && mount $p"))
-            case Some(true) if isMounted && inFstab && !same =>
-              Some(("remounted", s"mount -o remount $p"))
-            case Some(false) if isMounted => Some(("unmounted", s"umount $p"))
-            case _                        => None
-          val parts = List(fstabPart, mountPart).flatten
-          if parts.isEmpty then Right(NoDifference)
-          else
-            Right(
-              Difference(
-                parts.map(_._1),
-                parts.map((_, s) => Action.Shell(s)),
-                Nil
+              Some(
+                (
+                  "mounted",
+                  Action.Access(
+                    List(AccessChange.MountPath(m.path, true)),
+                    s"mkdir -p -- $p && mount $p"
+                  )
+                )
               )
-            )
+            case Some(true) if isMounted && inFstab && !same =>
+              Some(
+                (
+                  "remounted",
+                  Action.Access(
+                    List(AccessChange.Remount(m.path)),
+                    s"mount -o remount $p"
+                  )
+                )
+              )
+            case Some(false) if isMounted =>
+              Some(
+                (
+                  "unmounted",
+                  Action.Access(
+                    List(AccessChange.Unmount(m.path)),
+                    s"umount $p"
+                  )
+                )
+              )
+            case _ => None
+          done(List(fstabPart, mountPart).flatten)
       case other => Left(s"unexpected state: $other")
 
   /** Applies `plan` to `target` (with `check`: only reads and compares),
@@ -1742,6 +1919,13 @@ object Apply:
                                     target.shell(r.id, script, timeout)
                                   case Action.Typed(changes, fallback) =>
                                     target.typed(
+                                      r.id,
+                                      changes,
+                                      fallback,
+                                      timeout
+                                    )
+                                  case Action.Access(changes, fallback) =>
+                                    target.access(
                                       r.id,
                                       changes,
                                       fallback,

@@ -61,6 +61,7 @@ object Policy:
     "check-file" -> Set("CheckFile"),
     "observe" -> Set("ObserveNode"),
     "apply-files" -> Set("ApplyFiles"),
+    "apply-access" -> Set("ApplyAccess"),
     "fetch" -> Set("RemoteFetchFile"),
     "copy" -> Set("CopyFile", "CheckFile"),
     "packages" -> Set(

@@ -86,3 +86,7 @@ so the two cannot drift; the policy cases of `AccessPolicyCheck` and `TestDecide
 Phase 1 is the largest single piece (a protocol change, a new read path in the agent and the orchestrator). Phases 2 to 4
 are each smaller and alike. Phase 5 is policy and documentation. Roughly: five branches, each built, then verified by
 you on the lab as path limits were.
+
+## Status
+
+- Phase 3 (users, groups, authorized keys, mounts, fstab): built as `ApplyAccess` (operation `apply-access`), agent 0.1.215. The fstab text is computed in the orchestrator from the text `ObserveNode` returns for a mount and sent with the hash of what was read.
