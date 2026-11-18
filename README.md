@@ -358,6 +358,16 @@ certificate expires. A node must already require client certificates, and run an
 `issue-policy` will place a policy on it. A policy the agent cannot read refuses everything, and says why in its
 journal. Limiting a role to paths is not supported yet.
 
+**Early refusal.** With `ORPHERA_OPERATOR` set and an `access.yaml` beside the inventory, the orchestrator checks the
+command against the operator's role before it contacts any node, and refuses with the agent's own words for every node
+at once (`alice (viewer) may not run commands (access.yaml); no node was contacted: tst3, tst4: role 'viewer' may not
+make the call ExecuteCommand (operation run); ...`). It covers the commands that make agent calls (`run`, `install`,
+`copy`, `reboot`, `facts`, `apply`, ...), not those that go over SSH (`bootstrap`, `issue-certs`, `issue-policy`,
+`teardown`) or a playbook, whose calls are known only as it runs: for those the agent's refusal is still the real one.
+It is advice, not enforcement: a node may hold an older policy than `access.yaml`, so `ORPHERA_ACCESS_CHECK=off` skips
+it, and the agent decides either way. `apply`, including `apply --check`, needs `run` for now, because the apply
+engine reads and changes a node by running scripts; a viewer cannot yet use `--check` (that needs typed actions).
+
 `issue-certs --client-auth` renews the node's certificate as usual and also puts `certs/ca.crt` on the node as
 `/etc/orphera-agent/tls/ca.crt`. While that file is there, the agent (Scala or Go) refuses a caller without a client
 certificate from that CA, and its start line says `client certificates required`. It refuses to run if this

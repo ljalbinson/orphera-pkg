@@ -226,6 +226,136 @@ object AccessPolicy:
         "\n"
       )
 
+  /** The agent calls (bare method names) `command` makes on its nodes, which
+    * nodes (None: every node), and what to call it in a message. None for a
+    * command that makes no call the policy governs: one that goes over SSH
+    * (`bootstrap`, `issue-certs`, `issue-policy`, `teardown`), one that runs
+    * on this machine, and a playbook or pipeline, whose calls are only known
+    * as it runs (the agent refuses those).
+    */
+  def callsOf(
+      command: Command
+  ): Option[(List[String], Option[List[String]], String)] =
+    command match
+      case Command.Install(_, nodes, _) =>
+        Some((List("Install"), nodes, "install packages"))
+      case Command.Remove(_, nodes, _) =>
+        Some((List("Remove"), nodes, "remove packages"))
+      case Command.AutoRemove(nodes, _) =>
+        Some((List("RunAutoRemove"), nodes, "remove unused packages"))
+      case Command.DistUpgrade(nodes, _) =>
+        Some((List("RunDistUpgrade"), nodes, "upgrade packages"))
+      case Command.Copy(_, _, nodes, _, _, _) =>
+        Some((List("CheckFile", "CopyFile"), nodes, "copy files"))
+      case Command.WriteFile(_, _, nodes, _, _, _) =>
+        Some((List("CheckFile", "CopyFile"), nodes, "write files"))
+      case Command.NetworkApply(nodes, _) =>
+        Some(
+          (
+            List("ReloadNetwork", "ConfirmNetwork", "CheckFile"),
+            nodes,
+            "reload the network"
+          )
+        )
+      case Command.DeployAgent(_, _, nodes, _, _, _) =>
+        Some(
+          (
+            List("CheckFile", "CopyFile", "InstallDebPackage", "GetVersion"),
+            nodes,
+            "deploy the agent"
+          )
+        )
+      case Command.Fetch(_, _, nodes) =>
+        Some((List("RemoteFetchFile"), nodes, "fetch files"))
+      case Command.Facts(nodes)   => Some((List("GatherFacts"), nodes, "read facts"))
+      case Command.Version(nodes) => Some((List("GetVersion"), nodes, "read versions"))
+      case Command.Uptime(nodes)  => Some((List("GetUptime"), nodes, "read uptime"))
+      case Command.Threads(nodes, _, _) =>
+        Some((List("GetThreadInfo"), nodes, "read thread information"))
+      case Command.Reboot(nodes, _, wait, _) =>
+        Some(
+          (
+            List("TriggerReboot") ++
+              (if wait then List("CheckFile", "GetUptime") else Nil),
+            nodes,
+            "reboot"
+          )
+        )
+      case Command.Shutdown(nodes, _, _) =>
+        Some((List("TriggerShutdown"), nodes, "shut down"))
+      case Command.RunCommand(_, nodes, _, _) =>
+        Some((List("ExecuteCommand"), nodes, "run commands"))
+      // An apply reads and changes a node by running scripts there.
+      case Command.Apply(_, _, nodes, _) =>
+        Some((List("ExecuteCommand"), nodes, "apply descriptions (which run commands on the node)"))
+      case _ => None
+
+  /** Why `operator` may not run `command`, by the policy `spec`, or None. The
+    * same words as the agent's refusal, but before any node is contacted, and
+    * for every node at once. Only advice: the agent is what enforces, and a
+    * node may hold an older policy than `access.yaml`.
+    */
+  def earlyRefusal(
+      command: Command,
+      operator: Operator,
+      spec: Spec,
+      groups: List[Group],
+      nodeNames: List[String]
+  ): Option[String] =
+    callsOf(command).flatMap { case (methods, nodes, what) =>
+      val targets = nodes.getOrElse(nodeNames).filter(nodeNames.contains)
+      val refused = targets.flatMap { node =>
+        policyFor(spec, node, groups, nodeNames).toOption
+          .flatMap(text => Policy.parse(text).toOption)
+          .flatMap(p => methods.flatMap(m => p.refusal(operator.role, m)).headOption)
+          .map(node -> _)
+      }
+      if refused.isEmpty then None
+      else
+        val byReason = refused.groupBy(_._2).toList.sortBy(_._2.head._1)
+        Some(
+          s"${operator.name} (${operator.role}) may not $what (access.yaml); " +
+            "no node was contacted:\n" +
+            byReason
+              .map { case (why, nodes) =>
+                s"  ${nodes.map(_._1).mkString(", ")}: $why"
+              }
+              .mkString("\n")
+        )
+    }
+
+  /** The early check for a command this orchestrator is about to run: only when
+    * `ORPHERA_OPERATOR` is set (otherwise there is no role to check) and an
+    * `access.yaml` is there; `ORPHERA_ACCESS_CHECK=off` turns it off. A policy
+    * that cannot be read is a warning, not a refusal: the agent decides.
+    */
+  def early(command: Command): Option[String] =
+    if sys.env.get("ORPHERA_ACCESS_CHECK").map(_.trim).contains("off") then
+      None
+    else
+      CurrentOperator.current.flatMap { operator =>
+        if !Files.isRegularFile(defaultFile) then None
+        else
+          read(defaultFile)
+            .flatMap(spec =>
+              check(spec, Inventory.groups, Inventory.all.map(_.name))
+                .map(_ => spec)
+            ) match
+            case Left(err) =>
+              Console.err.println(
+                s"Warning: early access checks skipped: $err"
+              )
+              None
+            case Right(spec) =>
+              earlyRefusal(
+                command,
+                operator,
+                spec,
+                Inventory.groups,
+                Inventory.all.map(_.name)
+              )
+      }
+
   /** `1.2.3` or `1.2.3+go` as numbers, for comparing. */
   def versionOf(text: String): Option[(Int, Int, Int)] =
     text.takeWhile(c => c.isDigit || c == '.').split('.').toList match

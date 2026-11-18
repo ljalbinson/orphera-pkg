@@ -262,6 +262,87 @@ object AccessPolicyCheck:
         )
     )
 
+    // Early refusals
+    val op = orphera.common.Operator
+    val early = AccessPolicy.parse(
+      """roles:
+        |  viewer:
+        |    allow: [facts, version, uptime]
+        |  deployer:
+        |    allow: [facts, copy, packages]
+        |    nodes: [group:ceph]
+        |  admin:
+        |    allow: all
+        |""".stripMargin
+    ).toOption.get
+    def refusal(c: Command, who: orphera.common.Operator) =
+      AccessPolicy.earlyRefusal(c, who, early, groups, names)
+    val viewer = op("alice", "viewer")
+    val deployer = op("bob", "deployer")
+    val boss = op("carol", "admin")
+    val runOn = (n: List[String]) =>
+      Command.RunCommand(List("true"), Some(n), 60)
+    check(
+      "a viewer may read",
+      refusal(Command.Facts(None), viewer).isEmpty &&
+        refusal(Command.Uptime(Some(List("tst0"))), viewer).isEmpty
+    )
+    check(
+      "a viewer may not run, and the refusal names who, what and the nodes",
+      refusal(runOn(List("tst0", "tst1")), viewer).exists(m =>
+        m.contains("alice (viewer) may not run commands") &&
+          m.contains("tst0, tst1:") &&
+          m.contains("operation run") &&
+          m.contains("no node was contacted")
+      ),
+      refusal(runOn(List("tst0", "tst1")), viewer).toString
+    )
+    check(
+      "a viewer may not apply, which runs commands on the node",
+      refusal(Command.Apply("x.scala", true, None, false), viewer).isDefined
+    )
+    check(
+      "a deployer may install on a Ceph node, not on a Galera node (where it has no role)",
+      refusal(Command.Install(List("tree"), Some(List("tst0")), true), deployer).isEmpty &&
+        refusal(Command.Install(List("tree"), Some(List("tst3")), true), deployer)
+          .exists(m => m.contains("tst3:") && m.contains("not in this node's access policy"))
+    )
+    check(
+      "a deployer may not run",
+      refusal(runOn(List("tst0")), deployer).isDefined
+    )
+    check(
+      "a command for every node is checked against every node",
+      refusal(Command.Install(List("tree"), None, true), deployer).exists(m =>
+        m.contains("tst3, tst4, tst5:") && !m.contains("tst0")
+      )
+    )
+    check(
+      "an admin may do all of it",
+      refusal(runOn(names), boss).isEmpty &&
+        refusal(Command.Reboot(None, 5, true, 300), boss).isEmpty
+    )
+    check(
+      "a reboot that waits needs the calls it waits with",
+      AccessPolicy.callsOf(Command.Reboot(None, 5, true, 300)).exists(_._1.contains("GetUptime")) &&
+        AccessPolicy.callsOf(Command.Reboot(None, 5, false, 300)).exists(!_._1.contains("GetUptime"))
+    )
+    check(
+      "commands over SSH, playbooks and reports are not checked early",
+      List(
+        Command.Bootstrap(None, None, "root", None, "/tmp/x.deb"),
+        Command.IssueCerts(None, "root", None),
+        Command.IssuePolicy(None, "root", None),
+        Command.RunPlaybook("x.scala", false, None),
+        Command.ShowAuditLog(20),
+        Command.Help
+      ).forall(c => AccessPolicy.callsOf(c).isEmpty)
+    )
+    check(
+      "a node name that is not in the inventory is left to the normal error",
+      refusal(runOn(List("nope")), viewer).isEmpty
+    )
+
     if failures > 0 then
       println(s"$failures check(s) failed, $passes passed")
       sys.exit(1)

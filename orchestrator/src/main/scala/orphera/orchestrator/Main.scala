@@ -71,9 +71,14 @@ object Main extends IOApp:
           case Some(why) =>
             IO.println(s"Error: $why") >> IO.pure(ExitCode.Error)
           case None =>
-            Cli.parse(args).toOption.filter(AuditLog.isAuditable) match
-              case Some(command) => auditedRun(command, args)
-              case None          => dispatchCommand(args)
+            val parsed = Cli.parse(args).toOption
+            parsed.flatMap(AccessPolicy.early) match
+              case Some(why) =>
+                IO.println(s"Error: $why") >> IO.pure(ExitCode.Error)
+              case None =>
+                parsed.filter(AuditLog.isAuditable) match
+                  case Some(command) => auditedRun(command, args)
+                  case None          => dispatchCommand(args)
 
   private def auditedRun(command: Command, args: List[String]): IO[ExitCode] =
     for
