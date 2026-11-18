@@ -96,7 +96,7 @@ _orphera_completions() {
   _init_completion || return
 
   local verbs="install remove autoremove dist-upgrade copy write-file network-apply reboot shutdown uptime thread-info run
-    apply playbook cluster-playbook deploy-agent bootstrap issue-certs teardown fetch facts
+    apply playbook cluster-playbook deploy-agent bootstrap issue-certs issue-policy policy-info issue-client-cert teardown fetch facts
     version cert-info log-summary audit-log pipeline secrets show-config nodes init-ca os10 ilo help"
 
   # Flags common to most verbs that take --nodes
@@ -409,7 +409,26 @@ _orphera_completions() {
         --node-groups) COMPREPLY=($(compgen -W "$(_orphera_groups)" -- "$cur")) ;;
         --ssh-user) COMPREPLY=() ;;
         --ssh-key) COMPREPLY=($(compgen -f -- "$cur")) ;;
-        *) COMPREPLY=($(compgen -W "--nodes --node-groups --exclude-nodes --ssh-user --ssh-key" -- "$cur")) ;;
+        *) COMPREPLY=($(compgen -W "--nodes --node-groups --exclude-nodes --ssh-user --ssh-key --client-auth --no-client-auth" -- "$cur")) ;;
+      esac
+      ;;
+
+    issue-policy|policy-info)
+      # access.yaml is beside the inventory; policy-info only reads, so it has
+      # no --dry-run or --remove.
+      local policy_flags="--nodes --policy --ssh-user --ssh-key"
+      [[ "${words[1]}" == issue-policy ]] && policy_flags="$policy_flags --dry-run --remove"
+      case "$prev" in
+        --nodes|--ssh-user) COMPREPLY=() ;;
+        --policy|--ssh-key) COMPREPLY=($(compgen -f -- "$cur")) ;;
+        *) COMPREPLY=($(compgen -W "$policy_flags" -- "$cur")) ;;
+      esac
+      ;;
+
+    issue-client-cert)
+      case "$prev" in
+        --days|--operator|--role) COMPREPLY=() ;;
+        *) COMPREPLY=($(compgen -W "--days --force --operator --role" -- "$cur")) ;;
       esac
       ;;
 
