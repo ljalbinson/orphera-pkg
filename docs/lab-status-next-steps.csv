@@ -1,5 +1,5 @@
 Item,Type,Needs first,Command or action
-Test galera_cold_start.scala on the lab,Test,"Written but never run. Do the check run first, then a clean full stop, then an unclean one.","ORPHERA_GALERA_CHECK=1 orphera cluster-playbook manifests/galera_cold_start.scala, then stop or kill mariadb on tst3, tst4 and tst5 and run it without the variable."
+Finish testing galera_cold_start.scala,Test,The cold start from failed nodes and the healthy check have passed.,"Clean full stop (systemctl stop mariadb on tst5, tst4, tst3, then run it), a partial state, and galera-cold-start --help."
 Owner of the stale ARP entry for 10.10.3.20,Investigate,Which device on hypervisor st0 holds 10.10.3.20 (MAC 16:3b:84:f0:ef:4f).,On st0: ip -br addr | grep 10.10.3.20 and ip -br link | grep -i 16:3b:84:f0:ef:4f. Matters if the Cilium operator crash-loops again.
 Put the other nodes on mutual TLS and operator identity,Rollout,tst0 runs the 0.1.210+go agent with --client-auth and logs operator and role (verified). Other nodes have not been changed.,"orphera deploy-agent, then orphera issue-certs --nodes <nodes> --client-auth, a few nodes at a time."
 Access control step 2: policy at the agent,Decision,Whether to start; design in docs/ACCESS-CONTROL-DESIGN.md.,
