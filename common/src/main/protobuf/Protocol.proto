@@ -227,6 +227,79 @@ message ObserveReply {
   repeated ObservedItem items = 1;
 }
 
+// Changes to files and kernel settings, from a fixed list, that the agent makes
+// itself (no script is run), so that a role may be given these and not `run`.
+// Strings that name a mode are octal ("0644"); an empty mode, owner or group
+// is left as it is.
+message MakeDirectory {
+  string path = 1;      // made with its parents if it is not there
+  string mode = 2;
+  string owner = 3;
+  string group = 4;
+}
+
+message SetAttributes {
+  string path = 1;
+  string mode = 2;
+  string owner = 3;
+  string group = 4;
+}
+
+// Removes a file or link, or (directory) an empty directory. Never a tree.
+message RemovePath {
+  string path = 1;
+  bool directory = 2;
+}
+
+// path becomes a symbolic link to target, replacing a file or another link.
+message MakeSymlink {
+  string path = 1;
+  string target = 2;
+}
+
+message SetSysctl {
+  string key = 1;
+  string value = 2;
+}
+
+message LoadModule {
+  string name = 1;
+}
+
+// Replaces a file's text, keeping its mode and owner (or creating it, with
+// create_mode and as root). When expected_sha256 is not empty the file must
+// still have that hash, so an edit worked out from an earlier read cannot
+// overwrite a change made since; empty means the file must not exist yet.
+message ReplaceText {
+  string path = 1;
+  string content = 2;
+  string expected_sha256 = 3;
+  string create_mode = 4;
+}
+
+message FileAction {
+  oneof action {
+    MakeDirectory make_directory = 1;
+    SetAttributes set_attributes = 2;
+    RemovePath remove_path = 3;
+    MakeSymlink make_symlink = 4;
+    SetSysctl set_sysctl = 5;
+    LoadModule load_module = 6;
+    ReplaceText replace_text = 7;
+  }
+}
+
+message ApplyFilesRequest {
+  repeated FileAction actions = 1;
+}
+
+// How far it got: the actions are made in order and it stops at the first that
+// fails, naming it in error.
+message ApplyReply {
+  int32 completed = 1;
+  string error = 2;
+}
+
 service Agent {
   rpc Install(InstallPackages) returns (stream Event);
   rpc Remove(RemovePackages) returns (stream Event);
@@ -246,5 +319,6 @@ service Agent {
   rpc GetThreadInfo(ThreadInfoRequest) returns (ThreadInfo);
   rpc ExecuteCommand(RunCommandRequest) returns (stream Event);
   rpc ObserveNode(ObserveRequest) returns (ObserveReply);
+  rpc ApplyFiles(ApplyFilesRequest) returns (ApplyReply);
 }
 

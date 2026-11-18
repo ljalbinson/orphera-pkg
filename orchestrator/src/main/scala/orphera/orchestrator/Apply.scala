@@ -734,6 +734,25 @@ final case class ApplyReport(
     if check then s"${parts.mkString(", ")} (check: nothing changed)"
     else parts.mkString(", ")
 
+/** A change the agent's `ApplyFiles` makes itself, with no script (see
+  * Protocol.proto). Strings that name a mode are octal; empty is "leave it".
+  */
+enum FileChange:
+  case MakeDirectory(path: String, mode: String, owner: String, group: String)
+  case SetAttributes(path: String, mode: String, owner: String, group: String)
+  case RemovePath(path: String, directory: Boolean)
+  case MakeSymlink(path: String, target: String)
+  case SetSysctl(key: String, value: String)
+  case LoadModule(name: String)
+
+  /** `expectedSha256` empty: the file must not exist yet. */
+  case ReplaceText(
+      path: String,
+      content: String,
+      expectedSha256: String,
+      createMode: String
+  )
+
 /** One node, as the engine sees it: how to read it and change it. The real one
   * runs shell commands and writes files through the agent; checks use a fake.
   */
@@ -760,6 +779,18 @@ trait ApplyTarget:
 
   /** Runs a change; raises, with what it printed, when it fails. */
   def shell(label: String, script: String, timeout: Int): IO[Unit]
+
+  /** Makes these changes in order through the agent's typed call, or, on an
+    * agent that does not have it, runs `fallback` (the same changes as a
+    * script). Raises when it fails. A target that only runs scripts need not
+    * override it.
+    */
+  def typed(
+      label: String,
+      @scala.annotation.unused changes: List[FileChange],
+      fallback: String,
+      timeout: Int
+  ): IO[Unit] = shell(label, fallback, timeout)
 
 object Apply:
 
@@ -799,6 +830,11 @@ object Apply:
     )
     case Shell(script: String)
 
+    /** Changes the agent makes itself, with `fallback` as the script for an
+      * agent that cannot.
+      */
+    case Typed(changes: List[FileChange], fallback: String)
+
   // What it takes to bring a resource to its wanted state: what differs (for
   // the plan), the actions, and the lines of a content diff.
   private final case class Difference(
@@ -810,7 +846,15 @@ object Apply:
   private val NoDifference = Difference(Nil, Nil, Nil)
 
   // What differs in a path's mode, owner and group, and the commands that fix it.
-  private final case class Attrs(changes: List[String], commands: List[String])
+  private final case class Attrs(
+      changes: List[String],
+      commands: List[String],
+      set: FileChange.SetAttributes
+  ):
+    /** The change that makes them right, none when they already are. */
+    def actions: List[Action] =
+      if commands.isEmpty then Nil
+      else List(Action.Typed(List(set), commands.mkString(" && ")))
 
   private def attrs(
       path: String,
@@ -821,18 +865,30 @@ object Apply:
       o: String,
       g: String
   ): Attrs =
+    val modeWrong = mode.nonEmpty && octal(mode) != m
+    val ownerWrong = owner.nonEmpty && owner != o
+    val groupWrong = group.nonEmpty && group != g
     val wanted = List(
-      Option.when(mode.nonEmpty && octal(mode) != m)(
+      Option.when(modeWrong)(
         s"mode ${modeText(m)} -> ${modeText(octal(mode))}" -> s"chmod $mode ${quote(path)}"
       ),
-      Option.when(owner.nonEmpty && owner != o)(
+      Option.when(ownerWrong)(
         s"owner $o -> $owner" -> s"chown ${quote(owner)} ${quote(path)}"
       ),
-      Option.when(group.nonEmpty && group != g)(
+      Option.when(groupWrong)(
         s"group $g -> $group" -> s"chgrp ${quote(group)} ${quote(path)}"
       )
     ).flatten
-    Attrs(wanted.map(_._1), wanted.map(_._2))
+    Attrs(
+      wanted.map(_._1),
+      wanted.map(_._2),
+      FileChange.SetAttributes(
+        path,
+        if modeWrong then mode else "",
+        if ownerWrong then owner else "",
+        if groupWrong then group else ""
+      )
+    )
 
   // The difference for one resource, or why it cannot be brought there.
   private def compare(
@@ -864,7 +920,12 @@ object Apply:
                 Right(
                   Difference(
                     List("removed"),
-                    List(Action.Shell(s"rm -f -- $q")),
+                    List(
+                      Action.Typed(
+                        List(FileChange.RemovePath(path, false)),
+                        s"rm -f -- $q"
+                      )
+                    ),
                     Nil
                   )
                 )
@@ -905,13 +966,7 @@ object Apply:
                   )
                 else
                   IO.pure(
-                    Right(
-                      Difference(
-                        fix.changes,
-                        fix.commands.map(Action.Shell(_)),
-                        Nil
-                      )
-                    )
+                    Right(Difference(fix.changes, fix.actions, Nil))
                   )
               case Observed.Dir(_, _, _) =>
                 IO.pure(Left(s"$path is a directory: not replaced by a file"))
@@ -922,17 +977,24 @@ object Apply:
               case _ =>
                 IO.pure(Left(s"$path is not a regular file: not replaced"))
           case d: Directory if !d.present =>
-            IO.pure(seen match
-              case Observed.Absent       => Right(NoDifference)
-              case Observed.Dir(_, _, _) =>
-                Right(
-                  Difference(
-                    List("removed"),
-                    List(Action.Shell(s"rmdir -- $q")),
-                    Nil
+            IO.pure(
+              seen match
+                case Observed.Absent       => Right(NoDifference)
+                case Observed.Dir(_, _, _) =>
+                  Right(
+                    Difference(
+                      List("removed"),
+                      List(
+                        Action.Typed(
+                          List(FileChange.RemovePath(path, true)),
+                          s"rmdir -- $q"
+                        )
+                      ),
+                      Nil
+                    )
                   )
-                )
-              case _ => Left(s"$path is not a directory: not removed"))
+                case _ => Left(s"$path is not a directory: not removed")
+            )
           case d: Directory =>
             IO.pure(seen match
               case Observed.Absent =>
@@ -941,7 +1003,15 @@ object Apply:
                   Difference(
                     List("created"),
                     List(
-                      Action.Shell(
+                      Action.Typed(
+                        List(
+                          FileChange.MakeDirectory(
+                            d.path,
+                            d.mode,
+                            d.owner,
+                            d.group
+                          )
+                        ),
                         (s"mkdir -p -- $q" :: fix.commands).mkString(" && ")
                       )
                     ),
@@ -950,29 +1020,33 @@ object Apply:
                 )
               case Observed.Dir(m, o, g) =>
                 val fix = attrs(d.path, d.mode, d.owner, d.group, m, o, g)
-                Right(
-                  Difference(
-                    fix.changes,
-                    fix.commands.map(Action.Shell(_)),
-                    Nil
-                  )
-                )
+                Right(Difference(fix.changes, fix.actions, Nil))
               case _ =>
                 Left(s"$path exists and is not a directory: not replaced"))
           case s: Symlink if !s.present =>
-            IO.pure(seen match
-              case Observed.Absent  => Right(NoDifference)
-              case Observed.Link(_) =>
-                Right(
-                  Difference(
-                    List("removed"),
-                    List(Action.Shell(s"rm -f -- $q")),
-                    Nil
+            IO.pure(
+              seen match
+                case Observed.Absent  => Right(NoDifference)
+                case Observed.Link(_) =>
+                  Right(
+                    Difference(
+                      List("removed"),
+                      List(
+                        Action.Typed(
+                          List(FileChange.RemovePath(path, false)),
+                          s"rm -f -- $q"
+                        )
+                      ),
+                      Nil
+                    )
                   )
-                )
-              case _ => Left(s"$path is not a symlink: not removed"))
+                case _ => Left(s"$path is not a symlink: not removed")
+            )
           case s: Symlink =>
-            val link = Action.Shell(s"ln -sfn -- ${quote(s.target)} $q")
+            val link = Action.Typed(
+              List(FileChange.MakeSymlink(s.path, s.target)),
+              s"ln -sfn -- ${quote(s.target)} $q"
+            )
             IO.pure(seen match
               case Observed.Absent =>
                 Right(
@@ -1235,7 +1309,8 @@ object Apply:
         val stored = v.persist && kv.getOrElse("persisted", "") != text
         val actions = List(
           Option.when(live)(
-            Action.Shell(
+            Action.Typed(
+              List(FileChange.SetSysctl(v.key, squash(v.value))),
               s"sysctl -w ${quote(s"${v.key}=${squash(v.value)}")}"
             )
           ),
@@ -1261,7 +1336,12 @@ object Apply:
         val live = !kv.get("loaded").contains("yes")
         val stored = m.persist && kv.getOrElse("persisted", "") != m.name
         val actions = List(
-          Option.when(live)(Action.Shell(s"modprobe ${quote(m.name)}")),
+          Option.when(live)(
+            Action.Typed(
+              List(FileChange.LoadModule(m.name)),
+              s"modprobe ${quote(m.name)}"
+            )
+          ),
           Option.when(stored)(
             Action.Write(file, m.name + "\n", "", "", Mode0644)
           )
@@ -1289,6 +1369,74 @@ object Apply:
   private val AwkDrop =
     "BEGIN{l=ENVIRON[\"LN\"];r=ENVIRON[\"RE\"]} $0==l || (r!=\"\" && $0~r) {next} {print}"
 
+  /** The lines of a file as awk reads them: split on newline only, the last one
+    * with or without a newline after it.
+    */
+  private[orchestrator] def records(text: String): List[String] =
+    if text.isEmpty then Nil
+    else
+      val parts = text.split("\n", -1).toList
+      if text.endsWith("\n") then parts.dropRight(1) else parts
+
+  /** The text a line resource makes of `content`, as the awk programs do: with
+    * `present`, the line replaces the first line that matches (the other
+    * matches go) or is added at the end; otherwise the line and every match are
+    * dropped.
+    */
+  private[orchestrator] def editedText(
+      l: ApplyResource.LineInFile,
+      content: String
+  ): String =
+    val re = Option.when(l.matching.nonEmpty)(
+      java.util.regex.Pattern.compile(l.matching)
+    )
+    def hit(x: String): Boolean = re.exists(_.matcher(x).find())
+    val lines = records(content)
+    val out =
+      if l.present then
+        val (done, kept) =
+          lines.foldLeft((false, List.empty[String])) { case ((d, acc), x) =>
+            if hit(x) then (true, if d then acc else acc :+ l.line)
+            else (d, acc :+ x)
+          }
+        if done then kept else kept :+ l.line
+      else lines.filterNot(x => x == l.line || hit(x))
+    if out.isEmpty then "" else out.mkString("", "\n", "\n")
+
+  // The agent read the file's text: the edit is made there as a typed change
+  // (guarded by the hash of what was read), with the awk script as the
+  // fallback for an agent that cannot. Without the text, only the script.
+  private def lineEdit(
+      l: ApplyResource.LineInFile,
+      kv: Map[String, String],
+      changes: List[String],
+      script: String
+  ): Either[String, Difference] =
+    kv.get("content") match
+      case Some(content) =>
+        val expected =
+          if kv.get("exists").contains("yes") then sha256(content) else ""
+        Right(
+          Difference(
+            changes,
+            List(
+              Action.Typed(
+                List(
+                  FileChange.ReplaceText(
+                    l.path,
+                    editedText(l, content),
+                    expected,
+                    "0644"
+                  )
+                ),
+                script
+              )
+            ),
+            Nil
+          )
+        )
+      case None => shellOf(changes, script)
+
   private def compareLine(
       l: ApplyResource.LineInFile,
       seen: Observed
@@ -1304,13 +1452,17 @@ object Apply:
             val create = if exists then "" else s"touch -- ${quote(l.path)} && "
             val what =
               if matches > 0 && l.matching.nonEmpty then "replaced" else "added"
-            shellOf(
+            lineEdit(
+              l,
+              kv,
               List(s"line $what"),
               create + awkEdit(l.path, l.line, l.matching, AwkPut)
             )
         else if !exists || exact + matches == 0 then Right(NoDifference)
         else
-          shellOf(
+          lineEdit(
+            l,
+            kv,
             List(s"${math.max(exact, matches)} line(s) removed"),
             awkEdit(l.path, l.line, l.matching, AwkDrop)
           )
@@ -1588,6 +1740,13 @@ object Apply:
                                     target.write(p, t, o, g, m)
                                   case Action.Shell(script) =>
                                     target.shell(r.id, script, timeout)
+                                  case Action.Typed(changes, fallback) =>
+                                    target.typed(
+                                      r.id,
+                                      changes,
+                                      fallback,
+                                      timeout
+                                    )
                                 }
                                 .attempt
                                 .flatMap {
@@ -1802,11 +1961,13 @@ object Apply:
       l: ApplyResource.LineInFile,
       values: Map[String, String]
   ): Either[String, Map[String, String]] =
-    if !values.get("exists").contains("yes") then Right(Map("exists" -> "no"))
+    if !values.get("exists").contains("yes") then
+      Right(Map("exists" -> "no", "content" -> ""))
     else if values.get("truncated").contains("yes") then
       Left(s"${l.path} is too large to read here")
     else
-      val lines = values.getOrElse("content", "").linesIterator.toList
+      val content = values.getOrElse("content", "")
+      val lines = records(content)
       Try(
         if l.matching.isEmpty then None
         else Some(java.util.regex.Pattern.compile(l.matching))
@@ -1818,7 +1979,8 @@ object Apply:
             "exact" -> lines.count(_ == l.line).toString,
             "matches" -> re
               .fold(0)(p => lines.count(x => p.matcher(x).find()))
-              .toString
+              .toString,
+            "content" -> content
           )
         }
 

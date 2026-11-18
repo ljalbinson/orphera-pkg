@@ -60,6 +60,7 @@ object Policy:
     "thread-info" -> Set("GetThreadInfo"),
     "check-file" -> Set("CheckFile"),
     "observe" -> Set("ObserveNode"),
+    "apply-files" -> Set("ApplyFiles"),
     "fetch" -> Set("RemoteFetchFile"),
     "copy" -> Set("CopyFile", "CheckFile"),
     "packages" -> Set(

@@ -118,7 +118,11 @@ object TaskExecutor:
           Node,
           List[(Int, Apply.Probe)]
       ) => IO[(Map[Int, Map[String, String]], Map[Int, String])] =
-        (node, items) => NodeClient.observeNode(node, items)
+        (node, items) => NodeClient.observeNode(node, items),
+      // The agent's ApplyFiles: the changes made in order, raising when one
+      // fails. Checks without an agent replace it.
+      applyFiles: (Node, List[FileChange]) => IO[Unit] = (node, changes) =>
+        NodeClient.applyFiles(node, changes)
   )
 
   /** A direct command's Env: no facts, no templating, console output. */
@@ -902,6 +906,22 @@ object TaskExecutor:
             }
       fromAgent.flatMap { (agentSaw, fallback) =>
         observeByScript(scripted ++ fallback).map(_ ++ agentSaw)
+      }
+
+    // The changes the agent can make itself go through ApplyFiles; on an agent
+    // that does not have it (UNIMPLEMENTED, before anything is changed) the
+    // same changes run as the script. A failure is the failure of the first
+    // change that did not go through.
+    override def typed(
+        label: String,
+        changes: List[FileChange],
+        fallback: String,
+        timeout: Int
+    ): IO[Unit] =
+      env.applyFiles(n, changes).handleErrorWith {
+        case e if NodeError.isUnimplemented(e) =>
+          shell(label, fallback, timeout)
+        case e => IO.raiseError(new RuntimeException(s"$label: ${describe(e)}"))
       }
 
     private def observeByScript(

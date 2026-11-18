@@ -130,6 +130,13 @@ class AgentServiceImpl(
         .asRuntimeException()
     )
 
+  def applyFiles(request: ApplyFilesRequest, ctx: Metadata): IO[ApplyReply] =
+    IO.raiseError(
+      _root_.io.grpc.Status.UNIMPLEMENTED
+        .withDescription("ApplyFiles is not in the Scala agent")
+        .asRuntimeException()
+    )
+
   def executeCommand(
       request: RunCommandRequest,
       ctx: Metadata
