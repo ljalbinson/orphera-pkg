@@ -27,6 +27,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `k8s_node_prep`: the second run failed on nodes already prepared, because installing kubelet, kubeadm, kubectl and cri-tools again with `-y` cannot change held packages and the repository had a newer cri-tools. The install is now skipped when all four are installed, so a re-run does not move the held versions.
 
 ### Changed
+- A path-limit refusal now reads "role 'R' may reach files only under P; X is outside" (it said "may copy, check and fetch", which was wrong for an observe or an apply). Both agents and `Policy` say the same.
 - `k8s_kubeadm_config`: kubelet's `resolvConf` line is set with an apply description (`lineInFile`) instead of `sed -i`/`echo >>`, as its own task between writing the resolver file and restarting kubelet. `lustre_cluster`: SELinux permissive in `/etc/selinux/config` is a `lineInFile` description (any `SELINUX=` line is replaced, where the script changed only `enforcing`). `lustre_cluster_script` still has its `sed`. Not yet run on the lab.
 
 ### Added

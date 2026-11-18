@@ -181,7 +181,7 @@ func TestPolicyPaths(t *testing.T) {
 		if (why != "") != c.refused {
 			t.Errorf("%s: refusal %q, want refused=%v", c.name, why, c.refused)
 		}
-		if c.refused && !strings.Contains(why, "role 'deployer' may copy, check and fetch files only under") {
+		if c.refused && !strings.Contains(why, "role 'deployer' may reach files only under") {
 			t.Errorf("%s: reason %q", c.name, why)
 		}
 	}

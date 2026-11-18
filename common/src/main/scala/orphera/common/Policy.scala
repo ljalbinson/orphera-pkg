@@ -46,7 +46,7 @@ final case class Policy(
         Option(d.getParent).isEmpty || resolved.startsWith(d)
       }
       Option.unless(allowed)(
-        s"role '$role' may copy, check and fetch files only under ${prefixes.mkString(", ")}; $path is outside"
+        s"role '$role' may reach files only under ${prefixes.mkString(", ")}; $path is outside"
       )
     }
 

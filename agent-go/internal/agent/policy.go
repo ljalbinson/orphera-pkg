@@ -133,7 +133,7 @@ func (p *Policy) PathRefusal(role, path string) string {
 			return ""
 		}
 	}
-	return fmt.Sprintf("role '%s' may copy, check and fetch files only under %s; %s is outside",
+	return fmt.Sprintf("role '%s' may reach files only under %s; %s is outside",
 		role, strings.Join(prefixes, ", "), path)
 }
 
