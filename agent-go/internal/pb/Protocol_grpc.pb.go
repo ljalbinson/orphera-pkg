@@ -41,6 +41,7 @@ const (
 	Agent_ObserveNode_FullMethodName       = "/orphera.common.Agent/ObserveNode"
 	Agent_ApplyFiles_FullMethodName        = "/orphera.common.Agent/ApplyFiles"
 	Agent_ApplyAccess_FullMethodName       = "/orphera.common.Agent/ApplyAccess"
+	Agent_ApplySoftware_FullMethodName     = "/orphera.common.Agent/ApplySoftware"
 )
 
 // AgentClient is the client API for Agent service.
@@ -67,6 +68,7 @@ type AgentClient interface {
 	ObserveNode(ctx context.Context, in *ObserveRequest, opts ...grpc.CallOption) (*ObserveReply, error)
 	ApplyFiles(ctx context.Context, in *ApplyFilesRequest, opts ...grpc.CallOption) (*ApplyReply, error)
 	ApplyAccess(ctx context.Context, in *ApplyAccessRequest, opts ...grpc.CallOption) (*ApplyReply, error)
+	ApplySoftware(ctx context.Context, in *ApplySoftwareRequest, opts ...grpc.CallOption) (*ApplyReply, error)
 }
 
 type agentClient struct {
@@ -343,6 +345,16 @@ func (c *agentClient) ApplyAccess(ctx context.Context, in *ApplyAccessRequest, o
 	return out, nil
 }
 
+func (c *agentClient) ApplySoftware(ctx context.Context, in *ApplySoftwareRequest, opts ...grpc.CallOption) (*ApplyReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ApplyReply)
+	err := c.cc.Invoke(ctx, Agent_ApplySoftware_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AgentServer is the server API for Agent service.
 // All implementations must embed UnimplementedAgentServer
 // for forward compatibility.
@@ -367,6 +379,7 @@ type AgentServer interface {
 	ObserveNode(context.Context, *ObserveRequest) (*ObserveReply, error)
 	ApplyFiles(context.Context, *ApplyFilesRequest) (*ApplyReply, error)
 	ApplyAccess(context.Context, *ApplyAccessRequest) (*ApplyReply, error)
+	ApplySoftware(context.Context, *ApplySoftwareRequest) (*ApplyReply, error)
 	mustEmbedUnimplementedAgentServer()
 }
 
@@ -436,6 +449,9 @@ func (UnimplementedAgentServer) ApplyFiles(context.Context, *ApplyFilesRequest) 
 }
 func (UnimplementedAgentServer) ApplyAccess(context.Context, *ApplyAccessRequest) (*ApplyReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ApplyAccess not implemented")
+}
+func (UnimplementedAgentServer) ApplySoftware(context.Context, *ApplySoftwareRequest) (*ApplyReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ApplySoftware not implemented")
 }
 func (UnimplementedAgentServer) mustEmbedUnimplementedAgentServer() {}
 func (UnimplementedAgentServer) testEmbeddedByValue()               {}
@@ -758,6 +774,24 @@ func _Agent_ApplyAccess_Handler(srv interface{}, ctx context.Context, dec func(i
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Agent_ApplySoftware_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ApplySoftwareRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServer).ApplySoftware(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Agent_ApplySoftware_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServer).ApplySoftware(ctx, req.(*ApplySoftwareRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Agent_ServiceDesc is the grpc.ServiceDesc for Agent service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -812,6 +846,10 @@ var Agent_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ApplyAccess",
 			Handler:    _Agent_ApplyAccess_Handler,
+		},
+		{
+			MethodName: "ApplySoftware",
+			Handler:    _Agent_ApplySoftware_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{
