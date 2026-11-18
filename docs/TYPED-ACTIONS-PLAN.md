@@ -92,4 +92,4 @@ you on the lab as path limits were.
 - Phase 3 (users, groups, authorized keys, mounts, fstab): built as `ApplyAccess` (operation `apply-access`), agent 0.1.215. The fstab text is computed in the orchestrator from the text `ObserveNode` returns for a mount and sent with the hash of what was read.
 - Phase 4 (packages, services): built as `ApplySoftware` (operation `apply-software`), agent 0.1.216.
 - Phase 5 (policy, file content, docs): file text through `ApplyFiles` (`ReplaceText.overwrite`), early refusal by resource kind, issue-policy refuses a policy naming operations the agent predates, docs corrected; agent 0.1.217.
-- Scala agent parity: `ObserveNode`, `ApplyFiles`, `ApplyAccess`, `ApplySoftware` and `paths` enforcement ported to the Scala agent, 0.1.218 (`Observe`, `TypedFiles`, `TypedAccess`, `TypedSoftware`, `PathLimits`). Built and checked by `AgentTypedCheck`; not yet run on a node.
+- Scala agent parity: `ObserveNode`, `ApplyFiles`, `ApplyAccess`, `ApplySoftware` and `paths` enforcement ported to the Scala agent, 0.1.218 (`Observe`, `TypedFiles`, `TypedAccess`, `TypedSoftware`, `PathLimits`). Built, checked by `AgentTypedCheck` and run on tst39.
