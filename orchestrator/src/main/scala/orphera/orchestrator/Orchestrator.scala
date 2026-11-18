@@ -528,6 +528,19 @@ object Orchestrator:
       remotePath: String,
       localDir: java.nio.file.Path
   ): IO[Unit] =
+    IO.blocking(java.nio.file.Files.createDirectories(localDir)).attempt.flatMap {
+      case Left(e) =>
+        IO.println(
+          s"Error: cannot create the output directory $localDir: ${Option(e.getMessage).getOrElse(e.toString)}. Nothing was fetched."
+        )
+      case Right(_) => fetchInto(nodes, remotePath, localDir)
+    }
+
+  private def fetchInto(
+      nodes: List[Node],
+      remotePath: String,
+      localDir: java.nio.file.Path
+  ): IO[Unit] =
     nodes.parTraverse_ { node =>
       val localPath = localDir.resolve(
         s"${node.name}-${java.nio.file.Paths.get(remotePath).getFileName}"
@@ -537,7 +550,7 @@ object Orchestrator:
         .flatMap {
           case Right(metadata) =>
             IO.println(
-              s"[${node.name}] Fetched ${remotePath} -> $localPath (owner=${metadata.owner}, mode=${metadata.mode}%o)"
+              s"[${node.name}] Fetched ${remotePath} -> $localPath (owner=${metadata.owner}, mode=0${java.lang.Long.toOctalString(metadata.mode.toLong)})"
             )
           case Left(err) =>
             ConsoleRenderer.nodeFailed(node, s"FAILED: $err")
