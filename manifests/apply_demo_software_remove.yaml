@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: Apache-2.0
+
+# Undoes apply_demo_software.yaml. A second run finds nothing to do.
+#
+#   orphera apply manifests/apply_demo_software_remove.yaml --nodes tst39
+name: apply-software-demo-remove
+nodes: [tst39]
+resources:
+  - package: nginx
+    state: absent

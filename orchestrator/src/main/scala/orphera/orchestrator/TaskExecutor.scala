@@ -125,7 +125,10 @@ object TaskExecutor:
         NodeClient.applyFiles(node, changes),
       // The agent's ApplyAccess, likewise.
       applyAccess: (Node, List[AccessChange]) => IO[Unit] = (node, changes) =>
-        NodeClient.applyAccess(node, changes)
+        NodeClient.applyAccess(node, changes),
+      // The agent's ApplySoftware, likewise.
+      applySoftware: (Node, List[SoftwareChange]) => IO[Unit] =
+        (node, changes) => NodeClient.applySoftware(node, changes)
   )
 
   /** A direct command's Env: no facts, no templating, console output. */
@@ -922,6 +925,18 @@ object TaskExecutor:
         timeout: Int
     ): IO[Unit] =
       env.applyFiles(n, changes).handleErrorWith {
+        case e if NodeError.isUnimplemented(e) =>
+          shell(label, fallback, timeout)
+        case e => IO.raiseError(new RuntimeException(s"$label: ${describe(e)}"))
+      }
+
+    override def software(
+        label: String,
+        changes: List[SoftwareChange],
+        fallback: String,
+        timeout: Int
+    ): IO[Unit] =
+      env.applySoftware(n, changes).handleErrorWith {
         case e if NodeError.isUnimplemented(e) =>
           shell(label, fallback, timeout)
         case e => IO.raiseError(new RuntimeException(s"$label: ${describe(e)}"))
