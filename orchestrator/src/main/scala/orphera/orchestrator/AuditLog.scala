@@ -77,17 +77,17 @@ object AuditLog:
 
   def isAuditable(command: Command): Boolean =
     command match
-      case Command.Install(_, _, _)                     => true
-      case Command.Remove(_, _, _)                      => true
-      case Command.AutoRemove(_, _)                     => true
-      case Command.DistUpgrade(_, _)                    => true
-      case Command.Copy(_, _, _, _, _, _)               => true
-      case Command.WriteFile(_, _, _, _, _, _)          => true
-      case Command.NetworkApply(_, _)                   => true
-      case Command.DeployAgent(_, _, _, _, _, _)        => true
-      case Command.Bootstrap(_, _, _, _, _, _)          => true
-      case Command.Teardown(_, _, _, _, _)              => true
-      case Command.IssueCerts(_, _, _, _)               => true
+      case Command.Install(_, _, _)                          => true
+      case Command.Remove(_, _, _)                           => true
+      case Command.AutoRemove(_, _)                          => true
+      case Command.DistUpgrade(_, _)                         => true
+      case Command.Copy(_, _, _, _, _, _)                    => true
+      case Command.WriteFile(_, _, _, _, _, _)               => true
+      case Command.NetworkApply(_, _)                        => true
+      case Command.DeployAgent(_, _, _, _, _, _)             => true
+      case Command.Bootstrap(_, _, _, _, _, _)               => true
+      case Command.Teardown(_, _, _, _, _)                   => true
+      case Command.IssueCerts(_, _, _, _)                    => true
       case Command.IssuePolicy(_, _, _, _, _, dryRun, check) =>
         !dryRun && !check
       case Command.RunPlaybook(_, _, _)                 => true

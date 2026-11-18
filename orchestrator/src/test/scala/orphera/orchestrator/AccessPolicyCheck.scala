@@ -82,8 +82,7 @@ object AccessPolicyCheck:
       )
     )
     check(
-      "paths limit a role: parsed, and emitted as a paths line after its role line",
-      {
+      "paths limit a role: parsed, and emitted as a paths line after its role line", {
         val text =
           "default_role: admin\nroles:\n  deployer:\n    allow: [copy, fetch]\n    paths: [/etc/ceph/, /srv/]\n  admin:\n    allow: all\n"
         AccessPolicy
@@ -122,7 +121,9 @@ object AccessPolicyCheck:
     )
     check(
       "limitsPaths sees a paths line",
-      AccessPolicy.limitsPaths("default_role a\nrole a copy\npaths a /etc/\n") &&
+      AccessPolicy.limitsPaths(
+        "default_role a\nrole a copy\npaths a /etc/\n"
+      ) &&
         !AccessPolicy.limitsPaths("default_role a\nrole a all\n")
     )
     check(
@@ -134,29 +135,49 @@ object AccessPolicyCheck:
     )
     check(
       "the Scala agent's policy parser fails closed on a paths line",
-      orphera.common.Policy.parse("default_role a\nrole a copy\npaths a /etc/\n").isLeft
+      orphera.common.Policy
+        .parse("default_role a\nrole a copy\npaths a /etc/\n")
+        .isLeft
     )
     check(
       "parseHeld: no policy, a policy, and a cut-off answer",
       AccessPolicy.parseHeld(List("banner", "@@NONE@@")) == Right(None) &&
         AccessPolicy.parseHeld(
-          List("x", "@@POLICY@@", "default_role a", "@@REVOKED@@", "ab", "@@END@@")
+          List(
+            "x",
+            "@@POLICY@@",
+            "default_role a",
+            "@@REVOKED@@",
+            "ab",
+            "@@END@@"
+          )
         ) == Right(Some(("default_role a\n", "ab\n"))) &&
         AccessPolicy.parseHeld(List("@@POLICY@@", "default_role a")).isLeft &&
         AccessPolicy.parseHeld(List("nothing useful")).isLeft
     )
     check(
-      "compare: same, comments ignored; differing lines and revoked list named",
-      {
+      "compare: same, comments ignored; differing lines and revoked list named", {
         val want = "# made\ndefault_role a\nrole a all\n"
-        AccessPolicy.compare(want, Set("ab"), Some(("default_role a\nrole a all # x\n", "ab\n"))).isEmpty &&
-          AccessPolicy.compare(want, Set.empty, None).exists(_.contains("no policy")) &&
-          AccessPolicy
-            .compare(want, Set.empty, Some(("default_role a\nrole a facts\n", "")))
-            .exists(_.contains("missing: role a all")) &&
-          AccessPolicy
-            .compare(want, Set("ab"), Some((want, "")))
-            .exists(_.contains("revoked list differs"))
+        AccessPolicy
+          .compare(
+            want,
+            Set("ab"),
+            Some(("default_role a\nrole a all # x\n", "ab\n"))
+          )
+          .isEmpty &&
+        AccessPolicy
+          .compare(want, Set.empty, None)
+          .exists(_.contains("no policy")) &&
+        AccessPolicy
+          .compare(
+            want,
+            Set.empty,
+            Some(("default_role a\nrole a facts\n", ""))
+          )
+          .exists(_.contains("missing: role a all")) &&
+        AccessPolicy
+          .compare(want, Set("ab"), Some((want, "")))
+          .exists(_.contains("revoked list differs"))
       }
     )
     check(

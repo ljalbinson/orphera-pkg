@@ -1189,7 +1189,9 @@ object Cli:
         parseIssuePolicy(rest, acc.copy(dryRun = true))
       case other :: _ =>
         Left(
-          s"Unknown argument to ${if acc.check then "policy-info" else "issue-policy"}: $other"
+          s"Unknown argument to ${
+              if acc.check then "policy-info" else "issue-policy"
+            }: $other"
         )
 
   private def parseTeardown(

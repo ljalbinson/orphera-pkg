@@ -460,7 +460,7 @@ object Orchestrator:
       .flatMap(spec =>
         AccessPolicy.check(spec, Inventory.groups, names).map(_ => spec)
       ) match
-      case Left(err) => IO.println(s"Error: $err.").as(false)
+      case Left(err)   => IO.println(s"Error: $err.").as(false)
       case Right(spec) =>
         val expectedRevoked =
           spec.revoked.map(orphera.common.Policy.normaliseSerial(_)).toSet
@@ -471,12 +471,15 @@ object Orchestrator:
             case Right(Right(Nil))   => (true, List("in step with access.yaml"))
             case Right(Right(diffs)) => (false, diffs)
             case Right(Left(err))    => (false, List(err))
-            case Left(e) =>
+            case Left(e)             =>
               (false, List(s"could not read the policy: ${e.getMessage}"))
         nodes
           .parTraverse { node =>
             for
-              version <- NodeClient.getVersion(node).attempt.map(_.getOrElse("unknown"))
+              version <- NodeClient
+                .getVersion(node)
+                .attempt
+                .map(_.getOrElse("unknown"))
               outcome <- (for
                 expected <- IO.fromEither(
                   AccessPolicy

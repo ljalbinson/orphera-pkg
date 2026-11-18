@@ -180,9 +180,7 @@ object AccessPolicy:
     yield Role(name, allow.toSet, nodes, paths)
 
   private def validPath(p: String): Boolean =
-    p.startsWith("/") && !p.exists(c =>
-      c == ',' || c == '#' || c.isWhitespace
-    )
+    p.startsWith("/") && !p.exists(c => c == ',' || c == '#' || c.isWhitespace)
 
   /** The node names a selector means: `group:<name>` or a node's own name. */
   def members(

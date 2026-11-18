@@ -21,10 +21,10 @@ import scala.jdk.CollectionConverters.*
   * role admin all
   * }}}
   * The Scala agent cannot limit paths: a policy with a `paths` line does not
-  * parse here, so it refuses every call and says why.
-  * A node with no policy file allows every call, as before. With one, a call is
-  * allowed only to a role that lists an operation containing it; a role not
-  * listed, or a certificate that names no valid role, is refused.
+  * parse here, so it refuses every call and says why. A node with no policy
+  * file allows every call, as before. With one, a call is allowed only to a
+  * role that lists an operation containing it; a role not listed, or a
+  * certificate that names no valid role, is refused.
   */
 final case class Policy(defaultRole: String, roles: Map[String, Set[String]]):
 
