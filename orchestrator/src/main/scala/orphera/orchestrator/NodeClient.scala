@@ -716,6 +716,49 @@ object NodeClient:
         else IO.raiseError(new RuntimeException(reply.error))
       )
 
+  private def accessAction(c: AccessChange): AccessAction =
+    import AccessChange.*
+    import orphera.common as pb
+    AccessAction(c match
+      case CreateUser(n, u, g, gs, h, sh, sys, ch) =>
+        AccessAction.Action.CreateUser(pb.CreateUser(n, u, g, gs, h, sh, sys, ch))
+      case ModifyUser(n, u, g, gs, h, sh) =>
+        AccessAction.Action.ModifyUser(pb.ModifyUser(n, u, g, gs, h, sh))
+      case DeleteUser(n) => AccessAction.Action.DeleteUser(pb.DeleteUser(n))
+      case CreateGroup(n, g, sys) =>
+        AccessAction.Action.CreateGroup(pb.CreateGroup(n, g, sys))
+      case ModifyGroup(n, g) =>
+        AccessAction.Action.ModifyGroup(pb.ModifyGroup(n, g))
+      case DeleteGroup(n) => AccessAction.Action.DeleteGroup(pb.DeleteGroup(n))
+      case AddAuthorizedKey(u, k) =>
+        AccessAction.Action.AddAuthorizedKey(pb.AddAuthorizedKey(u, k))
+      case RemoveAuthorizedKey(u, k) =>
+        AccessAction.Action.RemoveAuthorizedKey(pb.RemoveAuthorizedKey(u, k))
+      case ReplaceFstab(c, h) =>
+        AccessAction.Action.ReplaceFstab(pb.ReplaceFstab(c, h))
+      case MountPath(p, d) => AccessAction.Action.MountPath(pb.MountPath(p, d))
+      case Remount(p)      => AccessAction.Action.Remount(pb.Remount(p))
+      case Unmount(p)      => AccessAction.Action.Unmount(pb.Unmount(p)))
+
+  /** The agent's `ApplyAccess`: makes the changes in order and raises, naming
+    * the one that failed, if one does. Raises UNIMPLEMENTED on an agent that
+    * does not have it.
+    */
+  def applyAccess(node: Node, changes: List[AccessChange]): IO[Unit] =
+    channelBuilder(node)
+      .resource[IO]
+      .flatMap(AgentFs2Grpc.stubResource[IO])
+      .use { stub =>
+        stub.applyAccess(
+          ApplyAccessRequest(changes.map(accessAction)),
+          authMetadata()
+        )
+      }
+      .flatMap(reply =>
+        if reply.error.isEmpty then IO.unit
+        else IO.raiseError(new RuntimeException(reply.error))
+      )
+
   def getThreadInfo(node: Node, resetPeak: Boolean): IO[ThreadInfo] =
     channelBuilder(node)
       .resource[IO]

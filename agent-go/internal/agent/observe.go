@@ -262,6 +262,9 @@ func firstLine(s string) string {
 	return strings.TrimSpace(s)
 }
 
+// passwdLookup finds a user's passwd fields; tests replace it.
+var passwdLookup = passwdEntry
+
 // passwdEntry is a user's `getent passwd` line, split.
 func passwdEntry(name string) ([]string, bool) {
 	out, code := observeRun("getent", "passwd", name)
@@ -424,7 +427,7 @@ func observeKey(userName, keyID string) (map[string]string, error) {
 	if err := needName("user name", userName); err != nil {
 		return nil, err
 	}
-	f, ok := passwdEntry(userName)
+	f, ok := passwdLookup(userName)
 	if !ok {
 		return map[string]string{"exists": "no"}, nil
 	}
@@ -452,6 +455,9 @@ func observeMount(path string) (map[string]string, error) {
 	}
 	vals := map[string]string{"fstab": "no", "mounted": "no"}
 	if data, err := os.ReadFile(fstabPath); err == nil {
+		if len(data) <= maxObservedText {
+			vals["fstab_text"] = validUTF8(string(data))
+		}
 		for _, line := range strings.Split(string(data), "\n") {
 			f := strings.Fields(line)
 			if len(f) >= 4 && !strings.HasPrefix(f[0], "#") && f[1] == path {
