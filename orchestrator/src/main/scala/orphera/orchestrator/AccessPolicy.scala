@@ -312,13 +312,14 @@ object AccessPolicy:
       }
       if refused.isEmpty then None
       else
-        val byReason = refused.groupBy(_._2).toList.sortBy(_._2.head._1)
+        val byReason =
+          refused.map(_._2).distinct.map(why => why -> refused.filter(_._2 == why).map(_._1))
         Some(
           s"${operator.name} (${operator.role}) may not $what (access.yaml); " +
             "no node was contacted:\n" +
             byReason
               .map { case (why, nodes) =>
-                s"  ${nodes.map(_._1).mkString(", ")}: $why"
+                s"  ${nodes.mkString(", ")}: $why"
               }
               .mkString("\n")
         )
