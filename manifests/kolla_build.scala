@@ -52,8 +52,8 @@ import orphera.orchestrator.kolla.*
 // kolla-build.conf option names (base_image, tag, namespace, registry, push, build_args); the section
 // names for source locations ([<project>-base], [horizon], [openstack-base] for the requirements); the
 // opendev branch tarball URLs; that build_args is a list of key:value pairs. Not compiled where this
-// was written. Not yet run on the lab in either form: the first build is likely to need the kolla-build
-// options checked.
+// was written. A build of keystone from the cached sources has been run on the lab and pushed to the
+// registry, so the options in the helper's kolla-build.conf work for it; the other images are not built yet.
 object kolla_build extends OrpheraApply:
   import Resources.*
 

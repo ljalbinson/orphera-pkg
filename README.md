@@ -2854,7 +2854,8 @@ From scala0: `orphera run sudo orphera-kolla-build build --nodes tst21`. A build
 until you refresh; `/srv/kolla-sources/MANIFEST` and `/var/lib/orphera/kolla-build/last-build.txt` record their checksums. Built images
 are pushed as `tst21.ljalbinson.com:5000/openstack.kolla/<name>:2025.1-ubuntu-noble`, the same name the playbooks pull from quay.io; the
 playbooks point podman at tst21 first, then tst9, then quay.io, so an image that has not been built is taken from quay.io as before. The
-description and its test have not been run; the first build is likely to need adjustments to the kolla-build options (see the header of
+description and its test pass on the lab, including a build of keystone from the cached sources that a node then pulled; the
+rest of the image list has not been built yet, so it may still need adjustments to the kolla-build options (see the header of
 the description).
 
 Separately, `manifests/apt_cache.scala`, a description (`orphera apply apt_cache.scala`), builds an apt package cache
