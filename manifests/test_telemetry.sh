@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# DRAFT end-to-end test for telemetry_single_node.scala.
+# End-to-end test for telemetry_single_node.scala.
 #
-# Applies the playbook, then checks independently of its own health check:
+# Applies the five descriptions (telemetry_database, telemetry_rabbitmq, telemetry_prometheus,
+# telemetry_compute, telemetry_single_node), then checks independently of its own health check:
 #  - the four units on tst24 (ceilometer-central, aodh-evaluator, aodh-notifier, aodh-api) and
 #    ceilometer-compute on tst17 and tst18 are active,
 #  - the Ceilometer exporters answer on 9101 on tst24, tst17 and tst18, the Aodh API answers its version document on 8042 without a token and
@@ -13,13 +14,13 @@
 #  - two PromQL alarms made through Aodh reach the states alarm and ok, and are deleted,
 #  - Keystone lists the service types alarming and prometheus,
 #  - the observability playbooks still carry the scrape_config_files line,
-#  - a second run of the playbook succeeds (idempotence), and the alarms still work afterwards.
+#  - a second run of all five descriptions changes nothing, and the alarms still work afterwards.
 #
 # Prerequisites: Galera + VIP, Keystone, RabbitMQ (tst10), Prometheus on tst7 and nova_compute on tst17 and
 # tst18; tst24 exists and has an agent; the Ceilometer and Aodh images are available (built on tst21 or on
 # quay.io).
 # Run from scala0, in orphera-pkg:   manifests/test_telemetry.sh
-# NO_APPLY=1 skips the playbook runs and only checks.
+# NO_APPLY=1 skips the apply runs and only checks.
 # Exit code: 0 if every assertion passes, 1 otherwise.
 
 set -uo pipefail
@@ -50,9 +51,11 @@ assert_contains() {
 
 if [ -z "${NO_APPLY:-}" ]; then
   log "install"
-  if ! orphera cluster-playbook telemetry_single_node.scala; then
-    log "FAIL: telemetry_single_node.scala did not complete"; exit 1
-  fi
+  for d in telemetry_database.scala telemetry_rabbitmq.scala telemetry_prometheus.scala telemetry_compute.scala telemetry_single_node.scala; do
+    if ! orphera apply "$d"; then
+      log "FAIL: $d did not complete"; exit 1
+    fi
+  done
 fi
 
 for u in ceilometer-central aodh-evaluator aodh-notifier aodh-api; do
@@ -110,11 +113,12 @@ done
 
 if [ -z "${NO_APPLY:-}" ]; then
   log "re-apply (idempotence)"
-  if orphera cluster-playbook telemetry_single_node.scala; then
-    log "PASS: second run completed"; PASS=$((PASS + 1))
-  else
-    log "FAIL: second run of telemetry_single_node.scala failed"; FAIL=$((FAIL + 1))
-  fi
+  for d in telemetry_database.scala telemetry_rabbitmq.scala telemetry_prometheus.scala telemetry_compute.scala telemetry_single_node.scala; do
+    SECOND=$(orphera apply "$d" 2>&1); RC=$?
+    printf '%s\n' "$SECOND"
+    if [ "$RC" -ne 0 ]; then log "FAIL: second run of $d failed"; FAIL=$((FAIL + 1)); fi
+    assert_contains "second run of $d changed nothing" "0 changed" "$SECOND"
+  done
   OUT=$(RUN_TIMEOUT=480 run_on "sudo $HELPER alarm-cycle")
   assert_contains "the alarms still work after the second run" "alarm cycle ok" "$OUT"
 fi

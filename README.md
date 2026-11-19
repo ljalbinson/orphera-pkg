@@ -2714,13 +2714,13 @@ load balancer is an amphora) and compute capacity for a control-plane node, a wo
 `CREATE_COMPLETE`, `openstack coe cluster config demo` writes a kubeconfig. Two settings matter in this lab: the template's DNS server
 (`MAGNUM_DNS`, default 192.168.1.70) has to resolve the Keystone name, and the addon provider is pinned to 0.15.1 (see the CHANGELOG).
 
-**Telemetry** (`manifests/telemetry_single_node.scala`, undone by `telemetry_teardown.scala`, checked by `test_telemetry.sh`) is Ceilometer and Aodh
+**Telemetry** (descriptions applied with `orphera apply` in this order: `manifests/telemetry_database.scala` on tst3, `telemetry_rabbitmq.scala` on tst10, `telemetry_prometheus.scala` on tst7, `telemetry_compute.scala` on tst17 and tst18, `telemetry_single_node.scala` on tst24; undone by `telemetry_teardown.scala`, checked by `test_telemetry.sh`) is Ceilometer and Aodh
 on a new VM, tst24 (`config/tst24.yaml`, 10.10.5.36), with the existing Prometheus on tst7 as the metrics store; Gnocchi is not used. The Ceilometer
 central agent (tst24) and the compute agents (tst17, tst18, reading libvirt) poll every 60 s and expose what they collect themselves in Prometheus format on port 9101 (`[polling] enable_prometheus_exporter`; no
 notification agent, no pipeline.yaml). Prometheus scrapes the three exporters as `job="ceilometer"`, with a target per node, through `/etc/prometheus/scrape.d/openstack-telemetry.yml`, which `scrape_config_files` in `prometheus.yml` names (needs Prometheus 2.43 or later;
 `observability_stack.scala` and `observability_extended.scala` now write that line, so re-running them keeps the job). The series names are Ceilometer's own; the playbook prints the names it finds. Aodh runs
 PromQL alarms against that Prometheus, whose address the Aodh containers get in `PROMETHEUS_HOST` and `PROMETHEUS_PORT` (the library the
-evaluator uses reads it from nowhere else; the playbook also registers it in the Keystone catalog as service type `prometheus`). Run on the lab: `test_telemetry.sh` 18 of 18; only the image and volume
+evaluator uses reads it from nowhere else; the playbook also registers it in the Keystone catalog as service type `prometheus`). Run on the lab: `test_telemetry.sh` 18 of 18 (against the playbook the descriptions replaced; the descriptions have not been run on the lab yet; the teardown has not been run); only the image and volume
 metrics (`ceilometer_image_size`, `ceilometer_volume_size`) have been seen so far, the instance metrics appear once a VM runs on tst17 or tst18:
 
     source ~/.config/openstack/admin-openrc.sh
@@ -3405,7 +3405,7 @@ playbooks marked DRAFT there have been written but not all run on the lab.
 | `ceph_client_upgrade.scala`, `ceph_key_rotation.scala` | Ceph's own client for the OpenStack services and compute hosts, then their keys rotated to `aes256k` and the monitors set to `aes256k` only |
 | `lustre_cluster_script.scala` | the Lustre build as an `OrpheraScript` (replaces `lustre_cluster.scala`) |
 | `apt_cache_teardown.scala`, `rpm_cache_teardown.scala`, `kolla_cache_teardown.scala` (a description) | Undo the apt cache (tst11) and its clients, the RPM cache (tst12) and its clients, and the Kolla image cache (tst9) |
-| `keystone_teardown.scala`, `glance_teardown.scala`, `placement_teardown.scala`, `cinder_teardown.scala`, `rabbitmq_teardown.scala`, `heat_teardown.scala`, `nova_teardown.scala`, `neutron_teardown.scala`, `horizon_teardown.scala`, `barbican_teardown.scala`, `designate_teardown.scala`, `nova_compute_teardown.scala`, `skyline_teardown.scala`, `rgw_teardown.scala`, `trove_teardown.scala`, `trove_guest_image_teardown.scala` | Undo the matching `*_single_node.scala` playbook (see the OpenStack example below) |
+| `keystone_teardown.scala`, `glance_teardown.scala`, `placement_teardown.scala`, `cinder_teardown.scala`, `rabbitmq_teardown.scala`, `heat_teardown.scala`, `nova_teardown.scala`, `neutron_teardown.scala`, `horizon_teardown.scala`, `barbican_teardown.scala`, `designate_teardown.scala`, `nova_compute_teardown.scala`, `skyline_teardown.scala`, `rgw_teardown.scala`, `trove_teardown.scala`, `trove_guest_image_teardown.scala`, `telemetry_teardown.scala` | Undo the matching `*_single_node.scala` playbook (see the OpenStack example below) |
 
 ## Known gaps / not yet built
 
