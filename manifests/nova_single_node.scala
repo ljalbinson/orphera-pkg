@@ -25,10 +25,10 @@ import orphera.orchestrator.conf.*
 // nova_teardown.scala and test_nova.sh.
 //
 // Messaging: Nova gets its own vhost (`nova`) and user (`nova`) on the RabbitMQ
-// that cinder_single_node.scala runs on tst10, rather than a second broker.
+// that rabbitmq_single_node.scala runs on tst10, rather than a second broker.
 //
 // Prerequisites, not checked here: Galera + VIP healthy, Keystone up on tst6
-// serving the CA chain, RabbitMQ running on tst10 (cinder_single_node.scala),
+// serving the CA chain, RabbitMQ running on tst10 (rabbitmq_single_node.scala),
 // Placement up on tst13 (placement_single_node.scala), the agent on tst14.
 // tst9's Kolla cache is optional. Ceph is not involved.
 //

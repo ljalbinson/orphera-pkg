@@ -1,18 +1,24 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# DRAFT end-to-end test for cinder_single_node.scala.
+# End-to-end test for cinder_single_node.scala (with cinder_database.scala,
+# cinder_ceph.scala and rabbitmq_single_node.scala, which it applies first).
 #
-# Applies the playbook, then checks independently of its own health check:
+# Tears Cinder down (cinder_teardown.scala: it drops the cinder database and
+# deletes the `volumes` pool, so every volume is lost; the RabbitMQ broker is not
+# touched), applies the four descriptions, then checks independently of their own
+# health checks:
 #  - the three services and RabbitMQ are running as systemd units,
 #  - scheduler and volume report `up` through the Cinder API,
 #  - a 1 GB volume can be created through the API and really exists as an RBD
 #    image in Ceph (checked on tst0 with `rbd ls`), then deletes cleanly and the
 #    image is gone,
-#  - a second run of the playbook succeeds (idempotence).
+#  - Cinder is in the Keystone catalog (service type volumev3),
+#  - a second run of the description changes nothing (idempotence).
 #
 # Prerequisites: Galera + VIP, Ceph with OSDs, Keystone (keystone_single_node)
 # all healthy.  Run from scala0, in orphera-pkg:   manifests/test_cinder.sh
+# NO_APPLY=1 skips the teardown and the apply runs and only checks.
 # Exit code: 0 if every assertion passes, 1 otherwise.
 
 set -uo pipefail
@@ -50,9 +56,16 @@ assert_not_contains() {
   fi
 }
 
-log "install"
-if ! orphera cluster-playbook cinder_single_node.scala; then
-  log "FAIL: cinder_single_node.scala did not complete"; exit 1
+if [ -z "${NO_APPLY:-}" ]; then
+  log "teardown (failures here are tolerated: nothing may be installed yet)"
+  orphera apply cinder_teardown.scala || true
+
+  log "install"
+  for d in cinder_database.scala cinder_ceph.scala rabbitmq_single_node.scala cinder_single_node.scala; do
+    if ! orphera apply "$d"; then
+      log "FAIL: $d did not complete"; exit 1
+    fi
+  done
 fi
 
 for u in rabbitmq cinder-api cinder-scheduler cinder-volume; do
@@ -80,11 +93,17 @@ else
   assert_not_contains "RBD image removed from pool $POOL" "volume-$VID" "$OUT"
 fi
 
-log "re-apply (idempotence)"
-if orphera cluster-playbook cinder_single_node.scala; then
-  log "PASS: second run completed"; PASS=$((PASS + 1))
-else
-  log "FAIL: second run of cinder_single_node.scala failed"; FAIL=$((FAIL + 1))
+OUT=$(run_on "sudo $HELPER catalog")
+assert_contains "the catalog lists service type volumev3" "volumev3" "$OUT"
+
+if [ -z "${NO_APPLY:-}" ]; then
+  log "re-apply (idempotence)"
+  SECOND=$(orphera apply cinder_single_node.scala 2>&1); RC=$?
+  printf '%s\n' "$SECOND"
+  if [ "$RC" -ne 0 ]; then
+    log "FAIL: second run of cinder_single_node.scala failed"; FAIL=$((FAIL + 1))
+  fi
+  assert_contains "second run changed nothing" "0 changed" "$SECOND"
 fi
 
 log "passed=$PASS failed=$FAIL"

@@ -45,7 +45,7 @@ import orphera.orchestrator.kolla.*
 // existing user is changed only if a login with the stored one fails (a change revokes its tokens).
 //
 // Prerequisites, not checked here:
-//   - Galera + VIP, Keystone, RabbitMQ (tst10, cinder_single_node.scala) healthy
+//   - Galera + VIP, Keystone, RabbitMQ (tst10, rabbitmq_single_node.scala) healthy
 //   - Nova, Glance and Neutron working, with compute nodes (nova_compute.scala) and the Neutron L3 and DHCP
 //     agents on tst19 (neutron_single_node.scala): the test boots a real VM
 //   - the agent on tst19; the Octavia images (octavia-api, octavia-worker, octavia-health-manager,
@@ -191,7 +191,7 @@ object octavia_single_node extends OrpheraClusterPlaybook:
   private val rabbitScript =
     s"""set -e
        |if ! podman ps -q --filter 'name=^rabbitmq$$' | grep -q .; then
-       |  echo "no running 'rabbitmq' container on this node - run cinder_single_node.scala first" >&2
+       |  echo "no running 'rabbitmq' container on this node - apply rabbitmq_single_node.scala first" >&2
        |  exit 1
        |fi
        |if ! podman exec rabbitmq rabbitmqctl list_vhosts -q | grep -qx '$rabbitVhost'; then

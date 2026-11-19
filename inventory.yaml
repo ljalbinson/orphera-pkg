@@ -108,7 +108,7 @@ nodes:
       cluster_ip: "10.10.5.21"
 
   # Cinder (OpenStack block storage, Ceph RBD backend) with its RabbitMQ:
-  # manifests/cinder_single_node.scala.
+  # manifests/rabbitmq_single_node.scala, manifests/cinder_single_node.scala.
   - name: tst10
     host: tst10.ljalbinson.com
     vars:

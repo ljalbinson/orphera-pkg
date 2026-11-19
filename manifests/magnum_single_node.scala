@@ -198,7 +198,7 @@ object magnum_single_node extends OrpheraClusterPlaybook:
   private val rabbitScript =
     s"""set -e
        |if ! podman ps -q --filter 'name=^rabbitmq$$' | grep -q .; then
-       |  echo "no running 'rabbitmq' container on this node - run cinder_single_node.scala first" >&2
+       |  echo "no running 'rabbitmq' container on this node - apply rabbitmq_single_node.scala first" >&2
        |  exit 1
        |fi
        |if ! podman exec rabbitmq rabbitmqctl list_vhosts -q | grep -qx '$rabbitVhost'; then

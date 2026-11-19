@@ -38,7 +38,7 @@ import orphera.orchestrator.kolla.*
 // Prerequisites, not checked here:
 //   - Galera + VIP healthy (mariadb_galera_cluster.scala, mariadb_haproxy_keepalived.scala)
 //   - Keystone up on tst6 (keystone_single_node.scala), serving the CA chain
-//   - RabbitMQ running on tst10 (cinder_single_node.scala)
+//   - RabbitMQ running on tst10 (rabbitmq_single_node.scala)
 //   - Ceph healthy with OSDs and the mgr (cephadm_*.scala); tst0 has cephadm
 //   - the agent on tst22; tst21's built images or tst9's Kolla cache are optional (quay.io works)
 //   - the Manila images (manila-api, manila-scheduler, manila-share) are in tst21's build list, but need
@@ -188,7 +188,7 @@ object manila_single_node extends OrpheraClusterPlaybook:
   private val rabbitScript =
     s"""set -e
        |if ! podman ps -q --filter 'name=^rabbitmq$$' | grep -q .; then
-       |  echo "no running 'rabbitmq' container on this node - run cinder_single_node.scala first" >&2
+       |  echo "no running 'rabbitmq' container on this node - apply rabbitmq_single_node.scala first" >&2
        |  exit 1
        |fi
        |if ! podman exec rabbitmq rabbitmqctl list_vhosts -q | grep -qx '$rabbitVhost'; then

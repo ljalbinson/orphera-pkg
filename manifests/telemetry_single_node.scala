@@ -39,7 +39,7 @@ import orphera.orchestrator.kolla.*
 // http://<fqdn>:8042; the service `prometheus` of type `prometheus` with the endpoint of Prometheus on tst7.
 //
 // Prerequisites, not checked here:
-//   - Galera + VIP healthy, Keystone up on tst6, RabbitMQ running on tst10 (cinder_single_node.scala)
+//   - Galera + VIP healthy, Keystone up on tst6, RabbitMQ running on tst10 (rabbitmq_single_node.scala)
 //   - Prometheus running on tst7 (observability_stack.scala), version 2.43 or later (scrape_config_files)
 //   - Nova compute running on tst17 and tst18 (nova_compute.scala): libvirtd with its socket open to all
 //   - the agent on tst24; tst21's built images or tst9's Kolla cache are optional (quay.io works)
@@ -211,7 +211,7 @@ object telemetry_single_node extends OrpheraClusterPlaybook:
   private val rabbitScript =
     s"""set -e
        |if ! podman ps -q --filter 'name=^rabbitmq$$' | grep -q .; then
-       |  echo "no running 'rabbitmq' container on this node - run cinder_single_node.scala first" >&2
+       |  echo "no running 'rabbitmq' container on this node - apply rabbitmq_single_node.scala first" >&2
        |  exit 1
        |fi
        |${rabbitPart("aodh", aodhRabbitPassword.reveal)}

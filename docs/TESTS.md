@@ -345,7 +345,7 @@ Likeliest first-run problems: the Kolla image names/tags and config.json
 behaviour for cinder-api/scheduler/volume; `cephadm shell --mount` placing the
 keyring at /mnt/cinder.keyring; RabbitMQ not reachable by the services at
 10.10.5.22:5672; the Ceph pool replication size vs the OSD layout.
-Teardown (destroys the `volumes` pool): `orphera cluster-playbook manifests/cinder_teardown.scala`.
+Teardown (destroys the `volumes` pool; leaves the RabbitMQ broker): `orphera apply manifests/cinder_teardown.scala`.
 
 ### K3. apt cache on tst11 - 12/12 on 2026-10-10; with the concurrency check added (2026-10-11): 13 passed, 1 failed
 The failing check: after `VfileUseRangeOps: 0`, ten simultaneous `apt update` runs all completed

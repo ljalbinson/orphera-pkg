@@ -13,7 +13,7 @@
 #   galera   tst3-tst5   mariadb_galera_cluster, mariadb_haproxy_keepalived
 #                        (VIP 10.10.5.100)
 #   keystone tst6        keystone_single_node
-#   cinder   tst10       cinder_single_node (pool `volumes`)
+#   cinder   tst10       rabbitmq_single_node, cinder_single_node (pool `volumes`)
 #   glance   tst13       glance_single_node (pool `images`)
 #   placement tst13      placement_single_node (port 8780, shares tst13 with Glance)
 #   nova     tst14       nova_single_node (API, scheduler, conductor, noVNC proxy; RabbitMQ
@@ -297,7 +297,10 @@ step_keystone() {
 }
 
 step_cinder() {
-  playbook cinder_single_node.scala
+  apply_desc cinder_database.scala
+  apply_desc cinder_ceph.scala
+  apply_desc rabbitmq_single_node.scala
+  apply_desc cinder_single_node.scala
   local out
   out=$(run_on tst10 "sudo /usr/local/sbin/orphera-openstack-api volume-services")
   check "cinder-scheduler and cinder-volume are up" contains "state=up" "$out"

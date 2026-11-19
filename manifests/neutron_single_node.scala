@@ -41,7 +41,7 @@ import orphera.orchestrator.conf.*
 // Nova (neutron_rabbitmq.scala).
 //
 // Prerequisites, not checked here: Galera + VIP healthy, Keystone up on tst6
-// (serving the CA chain), RabbitMQ running on tst10 (cinder_single_node.scala),
+// (serving the CA chain), RabbitMQ running on tst10 (rabbitmq_single_node.scala),
 // Nova registered (nova_single_node.scala): Neutron tells Nova about port events
 // as the `nova` service user, and Nova calls Neutron as the `neutron` user this
 // description registers. The agent on tst19; tst9's Kolla cache is optional.

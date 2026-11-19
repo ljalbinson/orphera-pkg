@@ -30,7 +30,7 @@ import orphera.orchestrator.kolla.*
 // http://<fqdn>:8779/v1.0/$(tenant_id)s.
 //
 // Prerequisites, not checked here:
-//   - Galera + VIP healthy, Keystone up on tst6, RabbitMQ on tst10 (cinder_single_node.scala), Glance, Nova with
+//   - Galera + VIP healthy, Keystone up on tst6, RabbitMQ on tst10 (rabbitmq_single_node.scala), Glance, Nova with
 //     compute nodes, Neutron with the flat network `provider` (neutron_single_node.scala), Cinder
 //   - the agent on tst25; tst21's built images or tst9's Kolla cache are optional (quay.io works)
 //   - the Trove images (trove-api, trove-conductor, trove-taskmanager) are in tst21's build list, but need
@@ -152,7 +152,7 @@ object trove_single_node extends OrpheraClusterPlaybook:
   private val rabbitScript =
     s"""set -e
        |if ! podman ps -q --filter 'name=^rabbitmq$$' | grep -q .; then
-       |  echo "no running 'rabbitmq' container on this node - run cinder_single_node.scala first" >&2
+       |  echo "no running 'rabbitmq' container on this node - apply rabbitmq_single_node.scala first" >&2
        |  exit 1
        |fi
        |if ! podman exec rabbitmq rabbitmqctl list_vhosts -q | grep -qx 'trove'; then

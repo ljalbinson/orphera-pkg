@@ -2,7 +2,7 @@
 
 import orphera.orchestrator.*
 
-// The `nova` vhost and user on the RabbitMQ that cinder_single_node.scala runs
+// The `nova` vhost and user on the RabbitMQ that rabbitmq_single_node.scala runs
 // on tst10, as a declarative description (OrpheraApply, docs/APPLY-DESIGN.md).
 // It was a stage of nova_single_node.scala when that was a cluster playbook; the
 // description for the Nova node needs this to have run first, and one
@@ -18,7 +18,7 @@ import orphera.orchestrator.*
 // set, and its permissions are set, so a rotated password is applied by running
 // this again. The broker itself (and Cinder's use of it) is untouched: with no
 // running `rabbitmq` container on the node the step fails and says to apply
-// cinder_single_node.scala first.
+// rabbitmq_single_node.scala first.
 //
 // Test-only credentials from the secret store (`orphera secrets`), as before.
 object nova_rabbitmq extends OrpheraApply:
@@ -36,7 +36,7 @@ object nova_rabbitmq extends OrpheraApply:
   private val createVhostAndUser =
     s"""set -e
        |if ! podman ps -q --filter 'name=^rabbitmq$$' | grep -q .; then
-       |  echo "no running 'rabbitmq' container on this node - apply cinder_single_node.scala first" >&2
+       |  echo "no running 'rabbitmq' container on this node - apply rabbitmq_single_node.scala first" >&2
        |  exit 1
        |fi
        |if ! podman exec rabbitmq rabbitmqctl list_vhosts -q | grep -qx '$rabbitVhost'; then
