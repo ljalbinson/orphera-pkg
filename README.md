@@ -1189,7 +1189,8 @@ A third way to change nodes, beside playbooks (steps in order) and scripts (step
 **description** of how a node should be, as resources. Orphera reads each resource on the node, compares it
 with what is wanted, and changes only what differs, so a second run changes nothing and says so. `--check`
 reads and compares only, and shows what would change, with a diff for files. Design:
-[docs/APPLY-DESIGN.md](docs/APPLY-DESIGN.md).
+[docs/APPLY-DESIGN.md](docs/APPLY-DESIGN.md). A walk-through of one description, `kolla_cache.scala`:
+[docs/TUTORIAL-APPLY-KOLLA-CACHE.md](docs/TUTORIAL-APPLY-KOLLA-CACHE.md).
 
 ```scala
 object chrony extends OrpheraApply:
