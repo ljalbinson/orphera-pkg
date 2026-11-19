@@ -28,6 +28,13 @@ import scala.util.Try
   */
 object AgeAgent:
 
+  private val clockFormat = java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss")
+
+  /** A time of day as HH:mm:ss. LocalTime's own text leaves the seconds out when
+    * they are zero ("15:16"), which breaks the column of a log.
+    */
+  def clock(t: java.time.LocalTime): String = clockFormat.format(t)
+
   /** Where the agent listens, and where orphera looks for it:
     * $ORPHERA_AGE_AGENT, or ~/.config/orphera/agent.sock.
     */
@@ -204,7 +211,7 @@ object AgeAgent:
                     cache.get(k) match
                       case Some((text, until)) =>
                         say(
-                          s"request $n: from the cache (until ${java.time.LocalTime.ofInstant(until, java.time.ZoneId.systemDefault).withNano(0)})"
+                          s"request $n: from the cache (until ${AgeAgent.clock(java.time.LocalTime.ofInstant(until, java.time.ZoneId.systemDefault))})"
                         )
                         answer(out, Right(text))
                       case None =>
