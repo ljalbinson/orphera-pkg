@@ -2839,7 +2839,7 @@ use path-style addressing and region `us-east-1`). After it is up, with the CLIs
 Each project gets its own namespace (implicit tenants). The RGW options and the service password are kept in Ceph's configuration database (set with
 `ceph config set client.rgw.orphera`), and the daemon is restarted only when they change. `rgw_teardown.scala` keeps the RGW pools and their data;
 `RGW_PURGE_POOLS=yes` deletes them. Not set up: a second daemon or a load balancer, TLS on the gateway, quotas, multisite, and the use of object
-storage by Glance or Cinder backup. The description and its test have not been run.
+storage by Glance or Cinder backup. Run on the lab: `test_rgw.sh` 10 of 10; the teardown has not been run.
 
 **Building the images from source** (`manifests/kolla_build.scala`, a description applied with `orphera apply`, undone by `kolla_build_teardown.scala`, checked by `test_kolla_build.sh`)
 sets up tst21 as a builder, so the OpenStack containers do not have to come from quay.io. It keeps four caches: the OpenStack source
