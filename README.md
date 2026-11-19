@@ -2958,7 +2958,7 @@ Worth knowing:
   inspection. Two descriptions, applied in this order: `nova_compute.scala` (tst17 and tst18, in parallel;
   each node's name and management address come from the inventory) and `nova_compute_discover.scala` (tst14,
   maps the hosts into cell1). Teardown: `nova_compute_teardown.scala`, which also removes the node's
-  nova-compute service and Neutron agents. The description and its test have not been run on the lab yet.
+  nova-compute service and Neutron agents. The test passed 29 of 29 on the lab; the teardown has not been run.
 - **Utilities** in `utils/`: `list-vms.sh [hv...]` lists every VM on each hypervisor with state,
   vCPUs and memory; `scan-vm-sizes.sh [vm...]` compares each VM's CPU and memory in its config file, in libvirt
   and inside the running guest, and exits 1 on a difference; `start-vm.sh <vm>...` starts VMs, finding each one's hypervisor and domain name in
