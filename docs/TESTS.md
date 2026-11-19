@@ -313,7 +313,7 @@ tst9 (10.10.5.21) is created by the user from `config/tst9.yaml` (check the
 hypervisor: st0 is assumed), then:
 
     orphera @bootstrap ... tst9   (as for the other Ubuntu nodes)
-    orphera cluster-playbook manifests/kolla_cache.scala
+    orphera apply manifests/kolla_cache.scala    (since the move to `orphera apply`; manifests/test_kolla_cache.sh passed 6 of 6 on 2026-11-19)
     orphera run sh -c "curl -s http://localhost:5000/v2/_catalog; sudo du -sh /var/lib/orphera/kolla-cache" --nodes tst9
 Expect: the catalog lists `openstack.kolla/keystone` after the warm-up, and the
 data directory is non-empty.  Then run K (keystone): its pull should come from
