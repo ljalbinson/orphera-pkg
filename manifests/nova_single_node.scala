@@ -739,7 +739,7 @@ if __name__ == '__main__':
       waitServicesUp,
       unless = servicesUp,
       timeout = 180
-    ).after(answering, running*)
+    ).after((answering :: running)*)
 
     tools ++ List(
       aptWait,
