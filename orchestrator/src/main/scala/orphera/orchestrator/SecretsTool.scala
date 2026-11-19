@@ -137,7 +137,7 @@ object SecretsTool:
                 sock,
                 new AgeCipher(id),
                 line =>
-                  println(s"[${java.time.LocalTime.now.withNano(0)}] $line"),
+                  println(s"[${AgeAgent.clock(java.time.LocalTime.now)}] $line"),
                 cacheMinutes
               ) match
                 case Right(_)  => 0
