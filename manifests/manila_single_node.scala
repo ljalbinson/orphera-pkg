@@ -1,15 +1,23 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import orphera.orchestrator.*
-import orphera.orchestrator.ClusterPlaybookDsl.*
 import orphera.orchestrator.kolla.*
 
-// DRAFT. OpenStack Manila (shared file systems: NFS shares on demand), Kolla images under podman, with
-// CephFS exported over NFS by NFS-Ganesha as the share backend. Modelled on barbican_single_node.scala and
-// cinder_single_node.scala; read their headers for the conventions.
+// OpenStack Manila (shared file systems: NFS shares on demand), Kolla images under podman, with CephFS exported
+// over NFS by NFS-Ganesha as the share backend, as a declarative description (OrpheraApply,
+// docs/APPLY-DESIGN.md). It replaced the cluster playbook of the same name; a second run changes nothing and
+// restarts nothing, and `--check` shows what would change. Modelled on cinder_single_node.scala and
+// trove_single_node.scala, which explain the conventions.
 //
-// Where it runs: tst22 (10.10.5.34), a new VM provisioned from config/tst22.yaml. To move it, change `node`,
-// `fqdn` and `nodeIp` below (and the teardown's `node`); nothing else depends on the location.
+// Four descriptions, since one description cannot order its nodes. Apply them in this order:
+//
+//   orphera apply manifests/manila_database.scala      # the manila database and user (tst3)
+//   orphera apply manifests/manila_rabbitmq.scala      # the `manila` vhost and user on RabbitMQ (tst10)
+//   orphera apply manifests/manila_ceph.scala          # CephFS, the NFS cluster and client.manila (tst0)
+//   orphera apply manifests/manila_single_node.scala   # this one (tst22)
+//
+// Where it runs: tst22 (10.10.5.34), a VM provisioned from config/tst22.yaml. To move it, change `node`, `fqdn`
+// and `nodeIp` below (and the teardown's `node`); nothing else depends on the location.
 //
 // What it builds:
 //   - manila-api        the REST API, port 8786, plain HTTP like the other APIs here. Behind Apache + mod_wsgi
@@ -19,17 +27,12 @@ import orphera.orchestrator.kolla.*
 //                       export for every share
 // The data service (share migration and backups) is left out.
 //
-// What it does on the Ceph cluster (stage manila-ceph, on tst0, through `cephadm shell`; every step is
-// repeatable):
-//   - the CephFS filesystem `cephfs` (`ceph fs volume create`, which also starts the MDS daemons)
-//   - the NFS cluster `manila`, one NFS-Ganesha daemon placed on the Ceph host with the address `nfsIp`
-//     (`ceph nfs cluster create`); shares are exported from there, port 2049
-//   - the cephx user `client.manila` with caps mon "allow r" and mgr "allow rw", imported with a key derived
-//     from the secret `manila/ceph-key` (a valid cephx key is a fixed header plus 16 bytes; the 16 bytes are
-//     taken from a SHA-256 of the secret). The cephx cipher setting is the same compromise as in
-//     cinder_single_node.scala (the Kolla images carry an older Ceph client).
-// Clients of a share need only NFS (v4.1) and a route to nfsIp; they need no Ceph client and no key. Access
-// is by client IP (access rules of type `ip`).
+// What manila_ceph.scala does on the Ceph cluster (on tst0, through `cephadm shell`): the CephFS filesystem
+// `cephfs`, the NFS cluster `manila` (one NFS-Ganesha daemon on the Ceph host with the address `nfsIp`; shares
+// are exported from there, port 2049) and the cephx user `client.manila` with caps mon "allow r" and mgr
+// "allow rw", with the key of the secret `manila/ceph-key` (see that file for how the key is made). Clients of a
+// share need only NFS (v4.1) and a route to nfsIp; they need no Ceph client and no key. Access is by client IP
+// (access rules of type `ip`).
 //
 // What it adds to Keystone (done by the helper's `register`, repeatable): user `manila` in project `service`
 // with the admin role; the service `manilav2` of type `sharev2` with the endpoint http://<fqdn>:8786/v2. The
@@ -44,50 +47,54 @@ import orphera.orchestrator.kolla.*
 //   - the Manila images (manila-api, manila-scheduler, manila-share) are in tst21's build list, but need
 //     `orphera-kolla-build sources refresh` and a build of those three the first time
 //
-// Stages:
-//   - manila-database (tst3, a Galera node): the `manila` database + user.
-//   - manila-rabbitmq (tst10): vhost and user, idempotent.
-//   - manila-ceph (tst0): CephFS, the NFS cluster and client.manila, as above.
-//   - install-manila (tst22): packages, cache mirror, image pulls, a check that the share image has the Ceph
-//     Python bindings, Keystone's CA, the helper and the registration, manila.conf, Ceph client files, Kolla
-//     config, `manila-manage db sync`, then the units.
-//   - confirm-manila-healthy (tst22): the API answers, the share type exists, and a share is made, mounted
-//     over NFS, written and read back, and deleted.
+// How it stays idempotent (as for Trove and Cinder):
+//   - Keystone's CA is compared as a certificate with the installed copy each run; the copies in the three
+//     Kolla directories are compared with it, and a service restarts when its copy changes.
+//   - Each service has its own `manila.conf` (a secret file; it holds the database, message bus and service
+//     passwords), CA copy and `config.json` in its Kolla directory. The API's Apache vhost and config.json depend
+//     on the image (manila-wsgi, the Apache flavour); they are generated into a temporary directory and compared
+//     with the installed ones.
+//   - The Ceph client files of the share service (ceph.conf with the monitors' addresses from inventory.yaml,
+//     and the keyring) are declared files; a new key restarts manila-share.
+//   - `manila-manage db sync` is skipped while its stamp matches and the `shares` table exists (a query as the
+//     manila user, through the VIP).
+//   - Manila is registered in Keystone before the units start, skipped while the helper's `registered` passes.
+//   - The last steps (the scheduler and share service report up, the share type exists, and a share is made,
+//     mounted over NFS, written, read back and deleted) each run only while they do not hold; the share round
+//     trip is its own guard.
 //
-// Check mode: `ORPHERA_CHECK=1 orphera cluster-playbook manifests/manila_single_node.scala` changes nothing
-// and reports whether the units on the node match what this playbook writes.
-//
-// Facts about Manila this was written from, to check if the first run fails: the CephFS driver is
+// Facts about Manila this was written from, to check if a run fails: the CephFS driver is
 // manila.share.drivers.cephfs.driver.CephFSDriver with cephfs_protocol_helper_type = NFS and
 // cephfs_nfs_cluster_id (it drives `ceph nfs export` through the mgr, so the cephx user needs mgr caps);
 // cephfs_ganesha_server_ip and cephfs_ganesha_export_ips are given too and ignored if unknown; the API
 // microversion used by the helper is 2.45 (access rules list); the share image has python3 `rados` and
-// `cephfs` (the run stops with a message if not); the Kolla images are the 2025.1 ubuntu-noble ones;
+// `cephfs` (a step checks, and stops with a message if not); the Kolla images are the 2025.1 ubuntu-noble ones;
 // manila.conf is plain text, a typed version needs a catalogue of the image's options
 // (manifests/dump_oslo_options.sh manila-api).
 //
-// Test-only credentials come from the secret store (manila/db, manila/service, manila/rabbit,
-// manila/ceph-key), made on first use. Not compiled where this was written; the first run on scala0 is the
-// first compile.
-object manila_single_node extends OrpheraClusterPlaybook:
+// Test-only credentials come from the secret store (manila/db, manila/service, manila/rabbit, manila/ceph-key),
+// made on first use.
+object manila_single_node extends OrpheraApply:
+  import Resources.*
 
   private val node = "tst22"
   private val fqdn = "tst22.ljalbinson.com"
   private val nodeIp = "10.10.5.34"
   private val apiPort = 8786
 
+  override def nodes: List[String] = List(node)
+
   private val ksFqdn = "tst6.ljalbinson.com"
   private val vip = "10.10.5.100"
 
-  private val rabbitNode = "tst10"
   private val rabbitIp = "10.10.5.22"
   private val rabbitUser = "manila"
   private val rabbitPassword = Secrets.secret("manila/rabbit")
   private val rabbitVhost = "manila"
 
-  // The Ceph host that runs NFS-Ganesha; its address is what clients mount. Keep in step with inventory.yaml.
-  private val cephNode = "tst0"
-  private val nfsNode = "tst0"
+  // The Ceph hosts and the host that runs NFS-Ganesha; its address is what clients mount. Keep in step with
+  // manila_ceph.scala and inventory.yaml.
+  private val cephMons = List("tst0", "tst1", "tst2")
   private val nfsIp = "10.10.5.12"
   private val cephFs = "cephfs"
   private val nfsCluster = "manila"
@@ -102,11 +109,8 @@ object manila_single_node extends OrpheraClusterPlaybook:
   private val dbPassword = Secrets.secret("manila/db")
   private val manilaPassword = Secrets.secret("manila/service")
 
-  // The key of client.manila. The secret `manila/ceph-key` holds either a whole cephx key, as
-  // ceph_key_rotation.scala stores after rotating client.manila to aes256k, used as it is, or (from before)
-  // any text, from which an old `aes` key is derived: base64 of a 12 byte header (type 1 = AES as a
-  // little-endian u16, a creation time as two u32, the key length 16 as a u16) and 16 key bytes from a
-  // SHA-256 of the text, the same on every run. Test infrastructure only.
+  // The key of client.manila: the secret `manila/ceph-key` as it is when it is a whole cephx key, otherwise the
+  // key derived from it (see manila_ceph.scala, which must make the same one).
   private val cephKey: String =
     val stored = Secrets.secret("manila/ceph-key").reveal
     if CephKeys.isKey(stored) then stored
@@ -123,14 +127,24 @@ object manila_single_node extends OrpheraClusterPlaybook:
         .putInt(0)
         .putShort(16.toShort)
         .array()
-      java.util.Base64.getEncoder.encodeToString(header ++ keyBytes)
+      val derived = java.util.Base64.getEncoder.encodeToString(header ++ keyBytes)
+      Secrets.register(derived)
+      derived
 
   private val confRoot = "/etc/kolla"
-  private val srcDir = "/etc/kolla/manila"
+  private val caDir = "/etc/kolla/manila-ca"
+  private val caCert = s"$caDir/ca.crt"
   private val logDir = "/var/log/kolla/manila"
   private val stateDir = "/var/lib/orphera/manila"
-  private val caDir = "/etc/kolla/manila-ca"
   private val ksUrl = s"https://$ksFqdn:5000"
+  private val helperPath = "/usr/local/sbin/orphera-manila-api"
+
+  private def kolla(service: String): Image =
+    Image(service, Release.R2025_1, Base.UbuntuNoble, registry)
+
+  // The scheduler and the share service first, the API last.
+  private val serviceNames =
+    List("manila-scheduler", "manila-share", "manila-api")
 
   // The three containers as data: the unit file text and the start task come from Container
   // (orchestrator/.../kolla/Container.scala), checked by ContainerCheck. Defined after confRoot, logDir and
@@ -138,7 +152,7 @@ object manila_single_node extends OrpheraClusterPlaybook:
   private def manilaContainer(service: String): Container =
     Container(
       name = ContainerName(service),
-      image = Image(service, Release.R2025_1, Base.UbuntuNoble, registry),
+      image = kolla(service),
       mounts = List(
         Mount(s"$confRoot/$service", "/var/lib/kolla/config_files"),
         Mount(logDir, "/var/log/kolla/manila", Access.ReadWrite),
@@ -148,13 +162,10 @@ object manila_single_node extends OrpheraClusterPlaybook:
       // The API image may set a non-root USER, which cannot open Apache's log files; start it as root.
       user = if service == "manila-api" then Some("root") else None
     )
-  private val manilaServices: List[Container] =
-    List("manila-scheduler", "manila-share", "manila-api").map(manilaContainer)
+  private val containers: List[Container] = serviceNames.map(manilaContainer)
 
-  private val apiImage =
-    Image("manila-api", Release.R2025_1, Base.UbuntuNoble, registry).ref
-  private val shareImage =
-    Image("manila-share", Release.R2025_1, Base.UbuntuNoble, registry).ref
+  private val apiImage = kolla("manila-api").ref
+  private val shareImage = kolla("manila-share").ref
 
   private val hostPackages =
     List(
@@ -166,100 +177,24 @@ object manila_single_node extends OrpheraClusterPlaybook:
       "nfs-common"
     )
 
+  // A fresh VM may still be running unattended-upgrades; when it finishes needrestart restarts the agent and
+  // kills the running task. Wait for it before touching packages.
+  private val aptIdle =
+    """! pgrep -f '^/usr/bin/python3 /usr/bin/unattended-upgrade$' >/dev/null && ! pgrep -x apt-get >/dev/null && ! pgrep -x apt >/dev/null && ! pgrep -x dpkg >/dev/null"""
   private val waitAptIdleScript =
-    """for i in $(seq 1 180); do
-      |  if pgrep -f '^/usr/bin/python3 /usr/bin/unattended-upgrade$' >/dev/null || pgrep -x apt-get >/dev/null || pgrep -x apt >/dev/null || pgrep -x dpkg >/dev/null; then
-      |    sleep 5
-      |  else
-      |    echo "apt and dpkg are idle"
-      |    exit 0
-      |  fi
-      |done
-      |echo "apt/dpkg still busy after 15 minutes (unattended-upgrades?)" >&2
-      |exit 1""".stripMargin
-
-  // ---- tst3 (Galera) ---------------------------------------------------
-
-  private val createDatabaseScript =
-    s"""mariadb -N -e "CREATE DATABASE IF NOT EXISTS $dbName; CREATE USER IF NOT EXISTS '$dbUser'@'%' IDENTIFIED BY '${dbPassword.reveal}'; GRANT ALL PRIVILEGES ON $dbName.* TO '$dbUser'@'%'; FLUSH PRIVILEGES;""""
-
-  // ---- tst10 (RabbitMQ) ------------------------------------------------
-
-  private val rabbitScript =
-    s"""set -e
-       |if ! podman ps -q --filter 'name=^rabbitmq$$' | grep -q .; then
-       |  echo "no running 'rabbitmq' container on this node - apply rabbitmq_single_node.scala first" >&2
-       |  exit 1
-       |fi
-       |if ! podman exec rabbitmq rabbitmqctl list_vhosts -q | grep -qx '$rabbitVhost'; then
-       |  podman exec rabbitmq rabbitmqctl add_vhost '$rabbitVhost'
-       |fi
-       |if podman exec rabbitmq rabbitmqctl list_users -q | awk '{print $$1}' | grep -qx '$rabbitUser'; then
-       |  podman exec rabbitmq rabbitmqctl change_password '$rabbitUser' '${rabbitPassword.reveal}'
-       |else
-       |  podman exec rabbitmq rabbitmqctl add_user '$rabbitUser' '${rabbitPassword.reveal}'
-       |fi
-       |podman exec rabbitmq rabbitmqctl set_permissions -p '$rabbitVhost' '$rabbitUser' '.*' '.*' '.*'
-       |echo "rabbitmq vhost $rabbitVhost and user $rabbitUser ready"""".stripMargin
-
-  // ---- tst0 (Ceph) -----------------------------------------------------
-
-  // Every command can be repeated: the filesystem and the NFS cluster are made only if they are not listed,
-  // and `auth import` replaces the entity with the same key and caps. `cephadm shell --mount FILE` makes
-  // FILE visible at /mnt/<name> inside the shell container.
-  private val cephScript =
-    s"""set -e
-       |# Same cephx cipher rule as cinder_single_node.scala: `aes` is allowed only for an `aes` key.
-       |${CephKeys.allowCiphersFor(cephKey, "client.manila")}
-       |if ! cephadm shell -- ceph fs ls 2>/dev/null | grep -q '^name: $cephFs,'; then
-       |  cephadm shell -- ceph fs volume create $cephFs
-       |fi
-       |for i in $$(seq 1 60); do
-       |  if cephadm shell -- ceph mds stat 2>/dev/null | grep -q 'up:active'; then break; fi
+    s"""for i in $$(seq 1 180); do
+       |  if $aptIdle; then
+       |    echo "apt and dpkg are idle"
+       |    exit 0
+       |  fi
        |  sleep 5
        |done
-       |if ! cephadm shell -- ceph mds stat 2>/dev/null | grep -q 'up:active'; then
-       |  echo "no active MDS for $cephFs after 5 minutes - check 'ceph fs status'" >&2
-       |  exit 1
-       |fi
-       |HOST=$$(cephadm shell -- ceph orch host ls --format json 2>/dev/null | python3 -c "import sys, json
-       |for h in json.load(sys.stdin):
-       |    if h.get('addr') == '$nfsIp' or h.get('hostname', '').split('.')[0] == '$nfsNode':
-       |        print(h['hostname'])
-       |        break")
-       |if [ -z "$$HOST" ]; then
-       |  echo "no Ceph orchestrator host with address $nfsIp or name $nfsNode (ceph orch host ls)" >&2
-       |  exit 1
-       |fi
-       |if ! cephadm shell -- ceph nfs cluster ls 2>/dev/null | grep -qx '$nfsCluster'; then
-       |  cephadm shell -- ceph nfs cluster create $nfsCluster "$$HOST"
-       |fi
-       |nfs_up() { python3 -c "import socket; socket.create_connection(('$nfsIp', 2049), 3).close()" 2>/dev/null; }
-       |for i in $$(seq 1 60); do
-       |  if nfs_up; then break; fi
-       |  sleep 5
-       |done
-       |if ! nfs_up; then
-       |  echo "NFS-Ganesha does not answer on $nfsIp:2049 after 5 minutes - check 'ceph nfs cluster info $nfsCluster'" >&2
-       |  exit 1
-       |fi
-       |cat > /tmp/manila.keyring <<'KEYRING'
-       |[client.manila]
-       |    key = $cephKey
-       |    caps mon = "allow r"
-       |    caps mgr = "allow rw"
-       |KEYRING
-       |cephadm shell --mount /tmp/manila.keyring -- ceph auth import -i /mnt/manila.keyring
-       |rm -f /tmp/manila.keyring
-       |cephadm shell -- ceph auth get client.manila >/dev/null
-       |echo "filesystem $cephFs, NFS cluster $nfsCluster ($$HOST, $nfsIp:2049) and client.manila ready"""".stripMargin
+       |echo "apt/dpkg still busy after 15 minutes (unattended-upgrades?)" >&2
+       |exit 1""".stripMargin
 
-  // ---- the node --------------------------------------------------------
-
-  private val useCacheScript =
-    s"""mkdir -p /etc/containers/registries.conf.d
-       |cat > /etc/containers/registries.conf.d/orphera-kolla-cache.conf <<'REG'
-       |[[registry]]
+  // The Kolla cache as a mirror of quay.io (podman registries.conf.d drop-in).
+  private val registryMirror =
+    s"""[[registry]]
        |prefix = "quay.io"
        |location = "quay.io"
        |
@@ -270,19 +205,23 @@ object manila_single_node extends OrpheraClusterPlaybook:
        |[[registry.mirror]]
        |location = "$cacheHostPort"
        |insecure = true
-       |REG
-       |echo "podman will try tst21.ljalbinson.com:5000 (built images), then $cacheHostPort, before quay.io"""".stripMargin
+       |""".stripMargin
 
+  private val images = containers.map(_.image.ref)
   private val pullScript =
     s"""${Pull.shellFunction(
         "the Image(...) values in manila_single_node.scala"
       )}
-       |for img in ${manilaServices.map(_.image.ref).mkString(" ")}; do
+       |for img in ${images.mkString(" ")}; do
        |  pull_retry $$img || exit 1
        |done
        |echo "images ready"""".stripMargin
+  private val imagesPresent =
+    s"""for img in ${images.mkString(" ")}; do podman image exists $$img || exit 1; done"""
 
   // The share service imports rados and cephfs; without them it starts and then fails with an import error.
+  private val shareImageHasCeph =
+    s"""podman run --rm --entrypoint python3 $shareImage -c 'import rados, cephfs' >/dev/null 2>&1"""
   private val shareImageCheckScript =
     s"""if ! podman run --rm --entrypoint python3 $shareImage -c 'import rados, cephfs' 2>/tmp/manila-import.err; then
        |  cat /tmp/manila-import.err >&2
@@ -291,36 +230,52 @@ object manila_single_node extends OrpheraClusterPlaybook:
        |fi
        |echo "the share image has the Ceph Python bindings"""".stripMargin
 
-  // Same method as placement_single_node.scala: the last certificate Keystone presents is its CA; trust on
-  // first use.
-  private val fetchCaScript =
+  // Keystone's CA: the last certificate it presents (trust on first use), which must be self-signed.
+  // `chainTo DIR` leaves DIR/c1.pem ... DIR/cN.pem, each holding the certificate only: the text s_client
+  // prints after the last one differs on every handshake, and would make the comparison fail.
+  private val chainTo =
+    s"""chainTo() { openssl s_client -connect $ksFqdn:5000 -servername $ksFqdn -showcerts </dev/null 2>/dev/null | awk -v d="$$1" '/-----BEGIN CERTIFICATE-----/{n++; p=1} p{print > (d "/c" n ".pem")} /-----END CERTIFICATE-----/{p=0}'; }"""
+
+  private val trustTarget =
+    """if command -v update-ca-certificates >/dev/null 2>&1; then t=/usr/local/share/ca-certificates/orphera-test-ca.crt; else t=/etc/pki/ca-trust/source/anchors/orphera-test-ca.crt; fi"""
+
+  // Current when the installed CA is the one Keystone presents now, and is in the system trust store.
+  private val caCurrent =
+    s"""$chainTo
+       |D=$$(mktemp -d)
+       |chainTo $$D
+       |N=$$(ls $$D/c*.pem 2>/dev/null | wc -l)
+       |R=1
+       |if [ "$$N" -ge 2 ]; then
+       |  $trustTarget
+       |  cmp -s $$D/c$$N.pem $caCert && cmp -s $caCert "$$t" && R=0
+       |fi
+       |rm -rf $$D
+       |exit $$R""".stripMargin
+
+  private val caScript =
     s"""set -e
+       |$chainTo
        |mkdir -p $caDir
-       |rm -f /tmp/ks-chain-*.pem
-       |openssl s_client -connect $ksFqdn:5000 -servername $ksFqdn -showcerts </dev/null 2>/dev/null | awk '/-----BEGIN CERTIFICATE-----/{n++} n>0{print > ("/tmp/ks-chain-" n ".pem")}'
-       |COUNT=$$(ls /tmp/ks-chain-*.pem 2>/dev/null | wc -l)
+       |D=$$(mktemp -d)
+       |trap 'rm -rf $$D' EXIT
+       |chainTo $$D
+       |COUNT=$$(ls $$D/c*.pem 2>/dev/null | wc -l)
        |if [ "$$COUNT" -lt 2 ]; then
-       |  echo "keystone at $ksFqdn:5000 presented $$COUNT certificate(s); expected leaf + CA - re-run keystone_single_node.scala (it must serve server-chain.crt)" >&2
+       |  echo "keystone at $ksFqdn:5000 presented $$COUNT certificate(s); expected leaf + CA - apply keystone_single_node.scala (it must serve server-chain.crt)" >&2
        |  exit 1
        |fi
-       |cp /tmp/ks-chain-$$COUNT.pem $caDir/ca.crt
-       |openssl verify -CAfile $caDir/ca.crt /tmp/ks-chain-1.pem
-       |SUBJ=$$(openssl x509 -in $caDir/ca.crt -noout -subject | sed 's/^subject=//')
-       |ISS=$$(openssl x509 -in $caDir/ca.crt -noout -issuer | sed 's/^issuer=//')
+       |cp $$D/c$$COUNT.pem $caCert
+       |openssl verify -CAfile $caCert $$D/c1.pem
+       |SUBJ=$$(openssl x509 -in $caCert -noout -subject | sed 's/^subject=//')
+       |ISS=$$(openssl x509 -in $caCert -noout -issuer | sed 's/^issuer=//')
        |if [ "$$SUBJ" != "$$ISS" ]; then echo "last certificate is not self-signed: $$SUBJ / $$ISS" >&2; exit 1; fi
-       |rm -f /tmp/ks-chain-*.pem
-       |if command -v update-ca-certificates >/dev/null 2>&1; then
-       |  cp $caDir/ca.crt /usr/local/share/ca-certificates/orphera-test-ca.crt
-       |  update-ca-certificates
-       |else
-       |  cp $caDir/ca.crt /etc/pki/ca-trust/source/anchors/orphera-test-ca.crt
-       |  update-ca-trust
-       |fi
+       |$trustTarget
+       |cp $caCert "$$t"
+       |if command -v update-ca-certificates >/dev/null 2>&1; then update-ca-certificates; else update-ca-trust; fi
        |echo "Keystone CA installed: $$SUBJ"""".stripMargin
 
-  private val dirsScript =
-    s"""mkdir -p $srcDir $logDir $stateDir $stateDir/tmp
-       |echo "directories ready"""".stripMargin
+  // ---- configuration ---------------------------------------------------
 
   // manila.conf, plain text (see the header). The same file goes to all three containers.
   private val manilaConf: String =
@@ -371,35 +326,42 @@ object manila_single_node extends OrpheraClusterPlaybook:
        |cephfs_ganesha_export_ips = $nfsIp
        |""".stripMargin
 
-  // ceph.conf needs only the monitors for a client. The only task whose script contains template
-  // expressions, kept separate on purpose so the runner's template pass does not touch the large scripts
-  // elsewhere.
-  private val cephClientScript =
-    s"""mkdir -p $srcDir
-       |cat > $srcDir/ceph.conf <<'CEPHCONF'
-       |[global]
-       |mon_host = {{nodes.tst0.cluster_ip}},{{nodes.tst1.cluster_ip}},{{nodes.tst2.cluster_ip}}
-       |CEPHCONF
-       |cat > $srcDir/ceph.client.manila.keyring <<'KEYRING'
-       |[client.manila]
-       |    key = $cephKey
-       |KEYRING
-       |chmod 640 $srcDir/ceph.client.manila.keyring
-       |echo "ceph client config written"""".stripMargin
+  // ceph.conf needs only the monitors for a client; their addresses come from the inventory (`cluster_ip`), as
+  // the playbook's {{nodes.tst0.cluster_ip}} did.
+  private val cephConf: String =
+    val ips = cephMons.map { n =>
+      Inventory.all
+        .find(_.name == n)
+        .flatMap(_.vars.get("cluster_ip"))
+        .getOrElse(sys.error(s"inventory: node $n has no cluster_ip"))
+    }
+    s"""[global]
+       |mon_host = ${ips.mkString(",")}
+       |""".stripMargin
 
-  // One config directory per container (Kolla mounts it at /var/lib/kolla/config_files). The API runs behind
-  // Apache + mod_wsgi when the image has manila-wsgi (the WSGI script path and the Apache flavour are read
-  // from the image); an older image without it runs its own manila-api server.
-  private val kollaConfigScript =
+  private val cephKeyring =
+    s"""[client.manila]
+       |    key = $cephKey
+       |""".stripMargin
+
+  // The files every service's config.json copies in, and the ownership it sets.
+  private val commonFiles =
+    """{"source": "/var/lib/kolla/config_files/manila.conf", "dest": "/etc/manila/manila.conf", "owner": "manila", "perm": "0600"}, {"source": "/var/lib/kolla/config_files/ca.crt", "dest": "/etc/manila/ssl/ca.crt", "owner": "manila", "perm": "0644"}"""
+  private val permissions =
+    """"permissions": [{"path": "/var/log/kolla/manila", "owner": "manila:kolla", "recurse": true}, {"path": "/var/lib/manila", "owner": "manila:manila", "recurse": true}]"""
+  private val schedulerConfigJson =
+    s"""{"command": "manila-scheduler --config-file /etc/manila/manila.conf", "config_files": [$commonFiles], $permissions}
+       |""".stripMargin
+  private val shareConfigJson =
+    s"""{"command": "manila-share --config-file /etc/manila/manila.conf", "config_files": [$commonFiles, {"source": "/var/lib/kolla/config_files/ceph.conf", "dest": "/etc/ceph/ceph.conf", "owner": "manila", "perm": "0644"}, {"source": "/var/lib/kolla/config_files/ceph.client.manila.keyring", "dest": "/etc/ceph/ceph.client.manila.keyring", "owner": "manila", "perm": "0600"}], $permissions}
+       |""".stripMargin
+
+  // The API runs behind Apache + mod_wsgi when the image has manila-wsgi (the WSGI script path and the Apache
+  // flavour are read from the image); an older image without it runs its own manila-api server. The vhost and
+  // the API's config.json are generated into `out` (the real directory, or a temporary one for the guard to
+  // compare with).
+  private def kollaApiScript(out: String): String =
     s"""set -e
-       |for svc in api scheduler share; do
-       |  mkdir -p $confRoot/manila-$$svc
-       |  cp $srcDir/manila.conf $confRoot/manila-$$svc/manila.conf
-       |  cp $caDir/ca.crt $confRoot/manila-$$svc/ca.crt
-       |done
-       |cp $srcDir/ceph.conf $srcDir/ceph.client.manila.keyring $confRoot/manila-share/
-       |COMMON='{"source": "/var/lib/kolla/config_files/manila.conf", "dest": "/etc/manila/manila.conf", "owner": "manila", "perm": "0600"}, {"source": "/var/lib/kolla/config_files/ca.crt", "dest": "/etc/manila/ssl/ca.crt", "owner": "manila", "perm": "0644"}'
-       |PERMS='"permissions": [{"path": "/var/log/kolla/manila", "owner": "manila:kolla", "recurse": true}, {"path": "/var/lib/manila", "owner": "manila:manila", "recurse": true}]'
        |WSGI=$$(podman run --rm --entrypoint sh $apiImage -c 'command -v manila-wsgi' || true)
        |if [ -n "$$WSGI" ]; then
        |  if podman run --rm --entrypoint sh $apiImage -c 'test -d /etc/apache2/conf-enabled'; then
@@ -412,7 +374,7 @@ object manila_single_node extends OrpheraClusterPlaybook:
        |    APACHE_CMD="/usr/sbin/httpd -DFOREGROUND"
        |  fi
        |  echo "wsgi script: $$WSGI; apache config: $$APACHE_CONF"
-       |  cat > $confRoot/manila-api/manila-api.conf <<WSGICONF
+       |  cat > $out/manila-api.conf <<WSGICONF
        |Listen 0.0.0.0:$apiPort
        |ServerSignature Off
        |ServerTokens Prod
@@ -436,34 +398,60 @@ object manila_single_node extends OrpheraClusterPlaybook:
        |  API_EXTRA=", {\\"source\\": \\"/var/lib/kolla/config_files/manila-api.conf\\", \\"dest\\": \\"$$APACHE_CONF\\", \\"owner\\": \\"manila\\", \\"perm\\": \\"0600\\"}"
        |else
        |  echo "manila-wsgi not found in $apiImage: running the image's manila-api server"
+       |  rm -f $out/manila-api.conf
        |  API_CMD="manila-api --config-file /etc/manila/manila.conf"
        |  API_EXTRA=""
        |fi
-       |cat > $confRoot/manila-api/config.json <<JSON
-       |{"command": "$$API_CMD", "config_files": [$$COMMON$$API_EXTRA], $$PERMS}
+       |cat > $out/config.json <<JSON
+       |{"command": "$$API_CMD", "config_files": [$commonFiles$$API_EXTRA], $permissions}
        |JSON
-       |cat > $confRoot/manila-scheduler/config.json <<JSON
-       |{"command": "manila-scheduler --config-file /etc/manila/manila.conf", "config_files": [$$COMMON], $$PERMS}
-       |JSON
-       |cat > $confRoot/manila-share/config.json <<JSON
-       |{"command": "manila-share --config-file /etc/manila/manila.conf", "config_files": [$$COMMON, {"source": "/var/lib/kolla/config_files/ceph.conf", "dest": "/etc/ceph/ceph.conf", "owner": "manila", "perm": "0644"}, {"source": "/var/lib/kolla/config_files/ceph.client.manila.keyring", "dest": "/etc/ceph/ceph.client.manila.keyring", "owner": "manila", "perm": "0600"}], $$PERMS}
-       |JSON
-       |python3 -c "import json; [json.load(open('$confRoot/manila-' + s + '/config.json')) for s in ('api', 'scheduler', 'share')]; print('config.json files are valid JSON')"
-       |echo "kolla config written under $confRoot"""".stripMargin
+       |echo "kolla config written under $out"""".stripMargin
+
+  // Current when the files the script would write are the installed ones (a vhost that the image does not
+  // need must not be there).
+  private val kollaApiCurrent =
+    s"""T=$$(mktemp -d)
+       |${kollaApiScript("$T")} >/dev/null
+       |R=0
+       |cmp -s $$T/config.json $confRoot/manila-api/config.json || R=1
+       |if [ -f $$T/manila-api.conf ]; then cmp -s $$T/manila-api.conf $confRoot/manila-api/manila-api.conf || R=1; else [ ! -e $confRoot/manila-api/manila-api.conf ] || R=1; fi
+       |rm -rf $$T
+       |exit $$R""".stripMargin
 
   // manila-manage runs in a one-off container with manila.conf bind-mounted (entrypoint overridden, so
-  // kolla_set_configs does not run).
+  // kolla_set_configs does not run). `:z` relabels for SELinux hosts and is ignored elsewhere.
   private val dbSyncScript =
     s"""set -e
-       |podman run --rm --network host --user root --entrypoint manila-manage -v $srcDir/manila.conf:/etc/manila/manila.conf:ro,z -v $logDir:/var/log/kolla/manila:z $apiImage --config-file /etc/manila/manila.conf db sync
+       |podman run --rm --network host --user root --entrypoint manila-manage -v $confRoot/manila-api/manila.conf:/etc/manila/manila.conf:ro,z -v $logDir:/var/log/kolla/manila:z $apiImage --config-file /etc/manila/manila.conf db sync
        |echo "manila database synced"""".stripMargin
 
-  // Standard-library Python, as in the other service playbooks. Plain string filled in with replace().
-  // Subcommands:
-  //   register | unregister | catalog | services | share-type | share-cycle
-  // share-cycle makes a 1 GB NFS share on the CephFS backend, allows this node's address, reads the export
-  // location, mounts it over NFSv4.1, writes a file and reads it back, unmounts, removes the access rule
-  // and the share, and checks the share is gone.
+  // Runs a Python snippet in the manila-api image, with its own interpreter (the one named on the first line
+  // of manila-manage), which has pymysql. `body` is indented lines inside a `try`; the connection is `c`.
+  // Exit 0 when the snippet ends normally, 1 on any error.
+  private def dbProbe(body: String): String =
+    s"""podman run --rm -i --network host --entrypoint sh $apiImage -c 'exec $$(head -1 "$$(command -v manila-manage)" | sed "s/^#!//") -' >/dev/null 2>&1 <<'PYEOF'
+       |import sys, pymysql
+       |try:
+       |    c = pymysql.connect(host='$vip', user='$dbUser', password='${dbPassword.reveal}', database='$dbName')
+       |$body
+       |except Exception:
+       |    sys.exit(1)
+       |PYEOF""".stripMargin
+
+  private val dbStamp = Resource.sha256(dbSyncScript + manilaConf)
+  // True when the manila database, queried as the manila user through the VIP, has the `shares` table.
+  private val dbInState =
+    dbProbe("    c.cursor().execute('SELECT COUNT(*) FROM shares')")
+  // Current when the stamp matches AND the database is in that state.
+  private val dbCurrent =
+    s"""[ "$$(cat $stateDir/db.stamp 2>/dev/null)" = "$dbStamp" ] &&
+       |$dbInState""".stripMargin
+  private val dbSyncWithStamp =
+    s"""$dbSyncScript
+       |echo $dbStamp > $stateDir/db.stamp""".stripMargin
+
+  // ---- the helper ------------------------------------------------------
+
   private val apiHelperPython =
     """#!/usr/bin/python3
 import json, os, ssl, subprocess, sys, time, urllib.request, urllib.error
@@ -569,6 +557,21 @@ def register():
     print('registered manila in keystone (user manila, service type sharev2, 3 endpoints)')
 
 
+def registered():
+    # Exit 0 only when everything register() makes is in place: the manila user can get a token in project
+    # service, and the sharev2 service has its three endpoints at the right URL. Makes no change.
+    get_token('manila', MANILA_PW, 'service')
+    token, _ = get_token('admin', ADMIN_PW, 'admin')
+    service = find(token, '/services?type=sharev2', 'services')
+    if service is None:
+        die('no service of type sharev2')
+    for iface in ('public', 'internal', 'admin'):
+        ep = find(token, '/endpoints?service_id=%s&interface=%s' % (service['id'], iface), 'endpoints')
+        if ep is None or ep['url'] != MANILA:
+            die('endpoint %s of sharev2 missing or wrong' % iface)
+    print('manila is registered in keystone')
+
+
 def unregister():
     token, _ = get_token('admin', ADMIN_PW, 'admin')
     service = find(token, '/services?type=sharev2', 'services')
@@ -603,6 +606,15 @@ def services():
     print('services: %d' % len(svcs))
 
 
+def services_up():
+    # Exit 0 only when the scheduler and the share service both report up. Does not wait.
+    token = admin_token()
+    up = set(x.get('binary') for x in share_services(token) if x.get('state') == 'up')
+    if 'manila-scheduler' not in up or 'manila-share' not in up:
+        die('manila-scheduler and manila-share are not both up (up: %s)' % sorted(up))
+    print('manila-scheduler and manila-share are up')
+
+
 def wait_services(token):
     end = time.time() + 180
     last = []
@@ -633,6 +645,19 @@ def share_type():
     token = admin_token()
     tid = ensure_type(token)
     print('share type %s ready (%s)' % (TYPE_NAME, tid))
+
+
+def share_type_ok():
+    # Exit 0 only when the share type exists. Makes no change.
+    token = admin_token()
+    s, p, _ = mcall('GET', '/types', token)
+    if s != 200:
+        die('share type list failed: HTTP %s %s' % (s, p))
+    for t in p.get('share_types', []):
+        if t.get('name') == TYPE_NAME:
+            print('share type %s exists (%s)' % (TYPE_NAME, t['id']))
+            return
+    die('share type %s does not exist' % TYPE_NAME)
 
 
 def wait_gone(token, path, what):
@@ -724,188 +749,246 @@ if __name__ == '__main__':
     cmd = sys.argv[1] if len(sys.argv) > 1 else ''
     if cmd == 'register':
         register()
+    elif cmd == 'registered':
+        registered()
     elif cmd == 'unregister':
         unregister()
     elif cmd == 'catalog':
         catalog()
     elif cmd == 'services':
         services()
+    elif cmd == 'services-up':
+        services_up()
     elif cmd == 'share-type':
         share_type()
+    elif cmd == 'share-type-ok':
+        share_type_ok()
     elif cmd == 'share-cycle':
         share_cycle()
     else:
-        die('usage: orphera-manila-api register | unregister | catalog | services | share-type | share-cycle')
+        die('usage: orphera-manila-api register | registered | unregister | catalog | services | services-up | share-type | share-type-ok | share-cycle')
 """
 
-  private val helperScript =
-    "cat > /usr/local/sbin/orphera-manila-api <<'PYEOF'\n" +
-      apiHelperPython
-        .replace("@@KS@@", ksFqdn)
-        .replace("@@MANILA@@", s"http://$fqdn:$apiPort/v2")
-        .replace("@@NODEIP@@", nodeIp)
-        .replace("@@ADMINPW@@", adminPassword.reveal)
-        .replace("@@MANILAPW@@", manilaPassword.reveal)
-        .replace("@@CA@@", s"$caDir/ca.crt") +
-      "\nPYEOF\nchmod 700 /usr/local/sbin/orphera-manila-api\necho wrote /usr/local/sbin/orphera-manila-api\n"
+
+  private val helper =
+    apiHelperPython
+      .replace("@@KS@@", ksFqdn)
+      .replace("@@MANILA@@", s"http://$fqdn:$apiPort/v2")
+      .replace("@@NODEIP@@", nodeIp)
+      .replace("@@ADMINPW@@", adminPassword.reveal)
+      .replace("@@MANILAPW@@", manilaPassword.reveal)
+      .replace("@@CA@@", caCert)
 
   // The API answers its version document without a token (200, or 300 for a list of versions).
-  private val apiHealthScript =
-    s"""CODE=$$(curl -s -o /dev/null -w '%{http_code}' http://localhost:$apiPort/)
-       |[ "$$CODE" = "200" ] || [ "$$CODE" = "300" ]""".stripMargin
+  private val healthy =
+    s"""CODE=$$(curl -s -o /dev/null -w '%{http_code}' http://localhost:$apiPort/); [ "$$CODE" = "200" ] || [ "$$CODE" = "300" ]"""
+  private val waitHealthy =
+    s"""for i in $$(seq 1 36); do
+       |  ( $healthy ) && exit 0
+       |  sleep 5
+       |done
+       |echo "manila-api does not answer on $apiPort - see 'journalctl -xeu orphera-manila-api' and $logDir" >&2
+       |exit 1""".stripMargin
 
-  // ORPHERA_CHECK=1 turns the run into a check: it changes nothing on the node and fails, with a diff, if
-  // a unit differs from what this playbook would write. The check task comes from the same Container
-  // value as the write task (see Resource.scala).
-  private val checkMode = sys.env.get("ORPHERA_CHECK").contains("1")
+  // The scheduler and the share service report in every few seconds; give them three minutes to appear as `up`
+  // through the API.
+  private val servicesUp = s"$helperPath services-up >/dev/null 2>&1"
+  private val waitServicesUp =
+    s"""for i in $$(seq 1 36); do $helperPath services-up && exit 0; sleep 5; done
+       |echo "manila-scheduler / manila-share never reported up - see 'journalctl -xeu orphera-manila-share' (Ceph errors show there)" >&2
+       |exit 1""".stripMargin
 
-  private val unitResource = summon[Resource[Container]]
+  // One service: its resources (written before it starts), the ones that decide when it restarts.
+  private final case class Svc(
+      unit: ApplyResource,
+      resources: List[ApplyResource],
+      deps: List[ApplyResource],
+      conf: ApplyResource
+  )
 
-  // Adds one "write the unit" task per container, then one "start" task per container (the scheduler and
-  // the share service first, the API last).
-  private def withServices(b: StageBuilder): StageBuilder =
-    val written = manilaServices.foldLeft(b)((acc, c) =>
-      acc.task(s"write ${c.unitName}")(c.writeUnit)
+  def describe(target: Node): List[ApplyResource] =
+    val aptWait = command(
+      "wait for apt and dpkg to be idle",
+      waitAptIdleScript,
+      unless = aptIdle,
+      timeout = 960
     )
-    manilaServices.foldLeft(written)((acc, c) =>
-      acc.task(s"start ${c.unitName}")(c.start)
-    )
+    val tools = hostPackages.map(p => pkg(p, updateCache = true).after(aptWait))
+    val podman = tools(0)
 
-  val playbook: ClusterPlaybook =
-    if checkMode then
-      clusterPlaybook("manila-single-node-check")(
-        manilaServices
-          .foldLeft(stage("check-manila", node))((acc, c) =>
-            acc.task(s"check ${c.unitName}")(unitResource.check(c))
-          )
-          .build
-      )
-    else applyPlaybook
+    val mirrorDir = directory("/etc/containers/registries.conf.d").after(podman)
+    val mirror = file(
+      "/etc/containers/registries.conf.d/orphera-kolla-cache.conf",
+      registryMirror,
+      mode = "0644"
+    ).after(mirrorDir)
+    val pulled = command(
+      "pull the Manila images",
+      pullScript,
+      unless = imagesPresent,
+      timeout = 2400
+    ).after(podman, mirror)
+    val shareImageOk = command(
+      "check that the share image has the Ceph Python bindings",
+      shareImageCheckScript,
+      unless = shareImageHasCeph,
+      timeout = 180
+    ).after(pulled)
 
-  // The whole install stage, ending with every container started.
-  private def installManila: StageBuilder =
-    withServices(
-      stage("install-manila", node)
-        .task("wait for apt and dpkg to be idle")(
-          Task.RunCommand(
-            List("sh", "-c", waitAptIdleScript),
-            timeoutSeconds = 960
-          )
-        )
-        .task("install podman, the NFS client and tools")(
-          Task.Install(packages = hostPackages, updateCache = true)
-        )
-        .task("use the Kolla cache as a mirror for quay.io")(
-          Task.RunCommand(List("sh", "-c", useCacheScript))
-        )
-        .task("pull the Manila images")(
-          Task.RunCommand(List("sh", "-c", pullScript), timeoutSeconds = 1800)
-        )
-        .task("check that the share image has the Ceph Python bindings")(
-          Task.RunCommand(
-            List("sh", "-c", shareImageCheckScript),
-            timeoutSeconds = 120
-          )
-        )
-        .task("fetch Keystone's CA from its TLS handshake")(
-          Task.RunCommand(List("sh", "-c", fetchCaScript), timeoutSeconds = 60)
-        )
-        .task("create the Manila directories")(
-          Task.RunCommand(List("sh", "-c", dirsScript))
-        )
-        .task("write the Manila API helper")(
-          Task.RunCommand(List("sh", "-c", helperScript))
-        )
-        .task("register Manila in Keystone")(
-          Task.RunCommand(
-            List("sh", "-c", "/usr/local/sbin/orphera-manila-api register"),
-            timeoutSeconds = 120
-          )
-        )
-        .task("write manila.conf")(
-          Task.WriteFile(
-            content = manilaConf,
-            dest = s"$srcDir/manila.conf",
+    val caDirectory = directory(caDir, mode = "0755").after(podman)
+    val ca = command(
+      "fetch Keystone's CA from its TLS handshake",
+      caScript,
+      unless = caCurrent,
+      timeout = 60
+    ).after(caDirectory, tools(1))
+
+    val logDirectory = directory(logDir)
+    val stateDirectory = directory(stateDir)
+    val tmpDirectory = directory(s"$stateDir/tmp").after(stateDirectory)
+
+    // One config directory per service, mounted by Kolla at /var/lib/kolla/config_files.
+    val svcs = serviceNames.zip(containers).map { (name, c) =>
+      val dir = s"$confRoot/$name"
+      val unitService = service(c.unitName)
+      val dirRes = directory(dir, mode = "0755")
+      val conf = secretFile(
+        s"$dir/manila.conf",
+        Secret(manilaConf), // it holds the database, message bus and service passwords
+        mode = "0600",
+        owner = "root",
+        group = "root"
+      ).after(dirRes).notifies(unitService)
+      val kollaCa = command(
+        s"copy Keystone's CA to the $name config",
+        s"cp $caCert $dir/ca.crt",
+        unless = s"cmp -s $caCert $dir/ca.crt"
+      ).after(ca, dirRes).notifies(unitService)
+      val kollaJson = name match
+        case "manila-api" =>
+          command(
+            "write the Apache vhost and the API's Kolla config.json",
+            kollaApiScript(dir),
+            unless = kollaApiCurrent,
+            timeout = 180
+          ).after(pulled, dirRes, logDirectory).notifies(unitService)
+        case "manila-scheduler" =>
+          file(
+            s"$dir/config.json",
+            schedulerConfigJson,
+            mode = "0644",
             owner = "root",
-            group = "root",
-            mode = 384 // 0600
+            group = "root"
+          ).after(dirRes).notifies(unitService)
+        case _ =>
+          file(
+            s"$dir/config.json",
+            shareConfigJson,
+            mode = "0644",
+            owner = "root",
+            group = "root"
+          ).after(dirRes).notifies(unitService)
+      // The share service also gets the Ceph client config and its keyring.
+      val ceph: List[ApplyResource] =
+        if name == "manila-share" then
+          List(
+            file(
+              s"$dir/ceph.conf",
+              cephConf,
+              mode = "0644",
+              owner = "root",
+              group = "root"
+            ).after(dirRes).notifies(unitService),
+            secretFile(
+              s"$dir/ceph.client.manila.keyring",
+              Secret(cephKeyring), // the cephx key
+              mode = "0640",
+              owner = "root",
+              group = "root"
+            ).after(dirRes).notifies(unitService)
           )
-        )
-        .task("write the Ceph client files")(
-          Task.RunCommand(List("sh", "-c", cephClientScript))
-        )
-        .task("write the Kolla config and the Apache vhost")(
-          Task.RunCommand(
-            List("sh", "-c", kollaConfigScript),
-            timeoutSeconds = 240
-          )
-        )
-        .task("manila-manage db sync")(
-          Task.RunCommand(List("sh", "-c", dbSyncScript), timeoutSeconds = 600)
-        )
+        else Nil
+      val unitFile = file(
+        c.unitPath,
+        c.render,
+        mode = "0644",
+        owner = "root",
+        group = "root"
+      ).notifies(unitService)
+      val check: List[ApplyResource] =
+        if name == "manila-share" then List(shareImageOk) else Nil
+      Svc(
+        unitService,
+        List(dirRes, conf, kollaCa, kollaJson) ++ ceph :+ unitFile,
+        List(conf, kollaCa, kollaJson, unitFile) ++ ceph ++ check,
+        conf
+      )
+    }
+    val apiConf = svcs.last.conf
+
+    val dbSync = command(
+      "manila-manage db sync",
+      dbSyncWithStamp,
+      unless = dbCurrent,
+      timeout = 600
+    ).after(pulled, apiConf, logDirectory, stateDirectory)
+
+    val helperFile = secretFile(
+      helperPath,
+      Secret(helper), // it holds the admin and manila passwords
+      mode = "0700",
+      owner = "root",
+      group = "root"
     )
+    // Registration comes before the services start.
+    val registered = command(
+      "register Manila in Keystone",
+      s"$helperPath register",
+      unless = s"$helperPath registered >/dev/null 2>&1",
+      timeout = 120
+    ).after(helperFile, ca)
 
-  private def applyPlaybook: ClusterPlaybook =
-    clusterPlaybook("manila-single-node")(
-      stage("manila-database", "tst3")
-        .task(s"create $dbName database and $dbUser on the Galera cluster")(
-          Task.RunCommand(List("sh", "-c", createDatabaseScript))
-        )
-        .build,
+    val running = svcs.map { s =>
+      s.unit.after(
+        (dbSync :: registered :: pulled :: logDirectory :: tmpDirectory :: s.deps)*
+      )
+    }
 
-      stage("manila-rabbitmq", rabbitNode)
-        .task(
-          s"create the $rabbitVhost vhost and the $rabbitUser user on RabbitMQ"
-        )(
-          Task.RunCommand(List("sh", "-c", rabbitScript), timeoutSeconds = 120)
-        )
-        .build,
+    val answering = command(
+      "manila-api answers on its port",
+      waitHealthy,
+      unless = healthy,
+      timeout = 240
+    ).after(running*)
+    val reporting = command(
+      "scheduler and share service report up through the API",
+      waitServicesUp,
+      unless = servicesUp,
+      timeout = 240
+    ).after((answering :: running)*)
+    val shareType = command(
+      "make sure the default share type exists",
+      s"$helperPath share-type",
+      unless = s"$helperPath share-type-ok >/dev/null 2>&1",
+      timeout = 120
+    ).after(reporting)
+    val shareCycle = command(
+      "make a share, mount it over NFS, write and read a file, delete it",
+      s"$helperPath share-cycle",
+      unless = s"$helperPath share-cycle >/dev/null 2>&1",
+      timeout = 900
+    ).after(shareType)
 
-      stage("manila-ceph", cephNode)
-        .task(
-          s"create CephFS $cephFs, the NFS cluster $nfsCluster and client.manila"
-        )(
-          Task.RunCommand(List("sh", "-c", cephScript), timeoutSeconds = 900)
-        )
-        .build,
-
-      installManila.build,
-
-      stage("confirm-manila-healthy", node)
-        .waitFor(
-          HealthCheck.Command(
-            onNode = node,
-            command = List("sh", "-c", apiHealthScript),
-            pollIntervalSeconds = 5,
-            timeoutSeconds = 120
-          )
-        )
-        .task("make sure the default share type exists")(
-          Task.RunCommand(
-            List(
-              "sh",
-              "-c",
-              "/usr/local/sbin/orphera-manila-api share-type"
-            ),
-            timeoutSeconds = 120
-          )
-        )
-        .task(
-          "make a share, mount it over NFS, write and read a file, delete it"
-        )(
-          Task.RunCommand(
-            List(
-              "sh",
-              "-c",
-              "/usr/local/sbin/orphera-manila-api share-cycle"
-            ),
-            timeoutSeconds = 900
-          )
-        )
-        .task("manila confirmed")(
-          Task.Debug(
-            s"Manila up at http://$fqdn:$apiPort/v2 ($nodeIp): manila-api, manila-scheduler and manila-share on CephFS $cephFs, NFS cluster $nfsCluster at $nfsIp:2049, RabbitMQ vhost $rabbitVhost on $rabbitIp:5672, database $dbName via $vip:3306, identity from $ksUrl. Test: manifests/test_manila.sh"
-          )
-        )
-        .build
-    )
+    tools ++ List(
+      aptWait,
+      mirrorDir,
+      mirror,
+      pulled,
+      shareImageOk,
+      caDirectory,
+      ca,
+      logDirectory,
+      stateDirectory,
+      tmpDirectory
+    ) ++ svcs.flatMap(_.resources) ++ List(dbSync, helperFile, registered) ++
+      running ++ List(answering, reporting, shareType, shareCycle)
