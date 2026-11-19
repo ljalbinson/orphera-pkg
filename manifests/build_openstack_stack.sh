@@ -389,7 +389,9 @@ step_heat() {
 }
 
 step_barbican() {
-  playbook barbican_single_node.scala
+  apply_desc barbican_database.scala
+  apply_desc barbican_rabbitmq.scala
+  apply_desc barbican_single_node.scala
   local out
   out=$(run_on tst20 "curl -s -o /dev/null -w 'http=%{http_code}' http://localhost:9311/")
   check "the Barbican API answers its version document" contains "http=" "$out"

@@ -1,15 +1,24 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import orphera.orchestrator.*
-import orphera.orchestrator.ClusterPlaybookDsl.*
 import orphera.orchestrator.kolla.*
 
-// DRAFT. OpenStack Barbican (key manager: stores secrets, keys and certificates for other services and
-// users), Kolla images under podman. Modelled on heat_single_node.scala and designate_single_node.scala; read
-// their headers for the conventions.
+// OpenStack Barbican (key manager: stores secrets, keys and certificates for other services and users),
+// Kolla images under podman, as a declarative description (OrpheraApply, docs/APPLY-DESIGN.md). It
+// replaced the cluster playbook of the same name; a second run changes nothing and restarts nothing, and
+// `--check` shows what would change. Modelled on heat_single_node.scala, which explains the conventions.
 //
-// Where it runs: tst20, next to Heat. Both are small, and no VM is free, so they share the node. To move it,
-// change `node`, `fqdn` and `nodeIp` below (and the teardown's `node`); nothing else depends on the location.
+// Three descriptions, since one description cannot order its nodes. Apply them in this order:
+//
+//   orphera apply manifests/barbican_database.scala     # the barbican database and user (tst3)
+//   orphera apply manifests/barbican_rabbitmq.scala     # the `barbican` vhost and user on RabbitMQ (tst10)
+//   orphera apply manifests/barbican_single_node.scala  # this one (tst20)
+//
+// Where it runs: tst20, next to Heat. Both are small, and no VM is free, so they share the node. Heat's
+// description and this one each own their own directories, containers, units and ports; the Podman
+// packages, the Kolla cache mirror file and the Keystone CA in the system trust store are written by both,
+// with the same content. To move Barbican, change `node` and `fqdn` below (and the teardown's `node`);
+// nothing else depends on the location.
 //
 // What it builds:
 //   - barbican-api     the REST API, behind Apache + mod_wsgi (the image's barbican-wsgi-api), port 9311, plain
@@ -23,29 +32,29 @@ import orphera.orchestrator.kolla.*
 // `barbican/kek` in the secret store, so it is the same on every run; LOSE IT AND EVERY STORED SECRET IS
 // UNREADABLE (back up the secret store). A real deployment uses a hardware module (PKCS#11) or Vault.
 //
-// What it adds to Keystone (done by the helper's `register`, repeatable): user `barbican` in project `service`
-// with the admin role; the roles `creator`, `observer` and `audit` (the users of a project who may create,
-// read and audit secrets; admin may do all); the service `barbican` of type `key-manager`.
+// What it adds to Keystone (done by the helper's `register`, repeatable): user `barbican` in project
+// `service` with the admin role; the roles `creator`, `observer` and `audit` (the users of a project who may
+// create, read and audit secrets; admin may do all); the service `barbican` of type `key-manager`.
 //
 // Prerequisites, not checked here:
 //   - Galera + VIP healthy (mariadb_galera_cluster.scala, mariadb_haproxy_keepalived.scala)
 //   - Keystone up on tst6 (keystone_single_node.scala), serving the CA chain
 //   - RabbitMQ running on tst10 (rabbitmq_single_node.scala)
 //   - agent on the node; tst9's Kolla cache is optional
-//   Ceph is not involved. Heat on the same node is untouched (separate directories, containers and ports).
+//   Ceph is not involved. Heat on the same node is untouched.
 //
-// Stages:
-//   - barbican-database (tst3, a Galera node): the `barbican` database + user.
-//   - barbican-rabbitmq (tst10): vhost and user, idempotent.
-//   - install-barbican (the node): packages, cache mirror, image pulls, Keystone's CA from its TLS handshake,
-//     the helper and the registration in Keystone, barbican.conf, Kolla config, `barbican-manage db upgrade`,
-//     then the units.
-//   - confirm-barbican-healthy (the node): the API answers and a secret can be stored and read back.
+// How it stays idempotent (as for Heat):
+//   - Keystone's CA is compared as a certificate with the installed copy each run; each service's copy is
+//     refreshed (and the service restarted) when it changes.
+//   - barbican.conf holds secrets, so it is a secret file, one per service directory. The API's Apache vhost
+//     and config.json depend on what the image has (the WSGI script, the Apache flavour), so they are
+//     generated into a temporary directory and compared with the installed files.
+//   - `barbican-manage db upgrade` is skipped while its stamp matches and the `secrets` table exists (a query
+//     as the barbican user, through the VIP).
+//   - Barbican is registered in Keystone before the units start. The registration is skipped while the
+//     helper's `registered` check passes.
 //
-// Check mode: `ORPHERA_CHECK=1 orphera cluster-playbook manifests/barbican_single_node.scala` changes nothing
-// and reports whether the units on the node match what this playbook writes.
-//
-// Facts about Barbican this was written from, to check if the first run fails: the database connection is
+// Facts about Barbican this was written from, to check if a run fails: the database connection is
 // given in both [DEFAULT] sql_connection and [database] connection, because releases have used either;
 // [queue] enable = true makes the API hand orders to the worker (false would run them inside the API); the
 // image has barbican-wsgi-api (the run stops with a message if it does not); the Kolla images are the 2025.1
@@ -53,19 +62,19 @@ import orphera.orchestrator.kolla.*
 // catalogue of the image's options (manifests/dump_oslo_options.sh barbican-api).
 //
 // Test-only credentials come from the secret store (barbican/db, barbican/service, barbican/rabbit,
-// barbican/kek), made on first use. Not compiled where this was written; the first run on scala0 is the first
-// compile.
-object barbican_single_node extends OrpheraClusterPlaybook:
+// barbican/kek), as before.
+object barbican_single_node extends OrpheraApply:
+  import Resources.*
 
   private val node = "tst20"
   private val fqdn = "tst20.ljalbinson.com"
-  private val nodeIp = "10.10.5.32"
   private val apiPort = 9311
+
+  override def nodes: List[String] = List(node)
 
   private val ksFqdn = "tst6.ljalbinson.com"
   private val vip = "10.10.5.100"
 
-  private val rabbitNode = "tst10"
   private val rabbitIp = "10.10.5.22"
   private val rabbitUser = "barbican"
   private val rabbitPassword = Secrets.secret("barbican/rabbit")
@@ -96,15 +105,16 @@ object barbican_single_node extends OrpheraClusterPlaybook:
     )
 
   private val confRoot = "/etc/kolla"
-  private val srcDir = "/etc/kolla/barbican"
   private val logDir = "/var/log/kolla/barbican"
   private val stateDir = "/var/lib/orphera/barbican"
   private val caDir = "/etc/kolla/barbican-ca"
+  private val caCert = s"$caDir/ca.crt"
   private val ksUrl = s"https://$ksFqdn:5000"
 
-  // The two containers as data: the unit file text and the start task come from Container
-  // (orchestrator/.../kolla/Container.scala), checked by ContainerCheck. Defined after confRoot, logDir and
-  // stateDir, which they read; a val used before its definition is null in an object.
+  // The two containers as data: the unit file text comes from Container
+  // (orchestrator/.../kolla/Container.scala), checked by ContainerCheck. They share their mounts apart
+  // from their own config directory. Defined after confRoot, logDir and stateDir, which they read; a val
+  // used before its definition is null in an object.
   private def barbicanContainer(service: String): Container =
     Container(
       name = ContainerName(service),
@@ -118,8 +128,10 @@ object barbican_single_node extends OrpheraClusterPlaybook:
       // The API image may set a non-root USER, which cannot open Apache's log files; start it as root.
       user = if service == "barbican-api" then Some("root") else None
     )
+  // The API first: svcs.head below is the one whose barbican.conf the db upgrade reads.
+  private val serviceNames = List("barbican-api", "barbican-worker")
   private val barbicanServices: List[Container] =
-    List("barbican-worker", "barbican-api").map(barbicanContainer)
+    serviceNames.map(barbicanContainer)
 
   private val apiImage =
     Image("barbican-api", Release.R2025_1, Base.UbuntuNoble, registry).ref
@@ -127,100 +139,21 @@ object barbican_single_node extends OrpheraClusterPlaybook:
   private val hostPackages =
     List("podman", "openssl", "curl", "ca-certificates", "python3")
 
+  // A fresh VM may still be running unattended-upgrades (see
+  // disable_unattended_upgrades.scala); when it finishes needrestart restarts the
+  // agent and kills the running task. Wait for it before touching packages.
+  private val aptIdle =
+    """! pgrep -f '^/usr/bin/python3 /usr/bin/unattended-upgrade$' >/dev/null && ! pgrep -x apt-get >/dev/null && ! pgrep -x apt >/dev/null && ! pgrep -x dpkg >/dev/null"""
   private val waitAptIdleScript =
-    """for i in $(seq 1 180); do
-      |  if pgrep -f '^/usr/bin/python3 /usr/bin/unattended-upgrade$' >/dev/null || pgrep -x apt-get >/dev/null || pgrep -x apt >/dev/null || pgrep -x dpkg >/dev/null; then
-      |    sleep 5
-      |  else
-      |    echo "apt and dpkg are idle"
-      |    exit 0
-      |  fi
-      |done
-      |echo "apt/dpkg still busy after 15 minutes (unattended-upgrades?)" >&2
-      |exit 1""".stripMargin
-
-  // ---- tst3 (Galera) ---------------------------------------------------
-
-  private val createDatabaseScript =
-    s"""mariadb -N -e "CREATE DATABASE IF NOT EXISTS $dbName; CREATE USER IF NOT EXISTS '$dbUser'@'%' IDENTIFIED BY '${dbPassword.reveal}'; GRANT ALL PRIVILEGES ON $dbName.* TO '$dbUser'@'%'; FLUSH PRIVILEGES;""""
-
-  // ---- tst10 (RabbitMQ) ------------------------------------------------
-
-  private val rabbitScript =
-    s"""set -e
-       |if ! podman ps -q --filter 'name=^rabbitmq$$' | grep -q .; then
-       |  echo "no running 'rabbitmq' container on this node - apply rabbitmq_single_node.scala first" >&2
-       |  exit 1
-       |fi
-       |if ! podman exec rabbitmq rabbitmqctl list_vhosts -q | grep -qx '$rabbitVhost'; then
-       |  podman exec rabbitmq rabbitmqctl add_vhost '$rabbitVhost'
-       |fi
-       |if podman exec rabbitmq rabbitmqctl list_users -q | awk '{print $$1}' | grep -qx '$rabbitUser'; then
-       |  podman exec rabbitmq rabbitmqctl change_password '$rabbitUser' '${rabbitPassword.reveal}'
-       |else
-       |  podman exec rabbitmq rabbitmqctl add_user '$rabbitUser' '${rabbitPassword.reveal}'
-       |fi
-       |podman exec rabbitmq rabbitmqctl set_permissions -p '$rabbitVhost' '$rabbitUser' '.*' '.*' '.*'
-       |echo "rabbitmq vhost $rabbitVhost and user $rabbitUser ready"""".stripMargin
-
-  // ---- the node --------------------------------------------------------
-
-  private val useCacheScript =
-    s"""mkdir -p /etc/containers/registries.conf.d
-       |cat > /etc/containers/registries.conf.d/orphera-kolla-cache.conf <<'REG'
-       |[[registry]]
-       |prefix = "quay.io"
-       |location = "quay.io"
-       |
-       |[[registry.mirror]]
-       |location = "tst21.ljalbinson.com:5000"
-       |insecure = true
-       |
-       |[[registry.mirror]]
-       |location = "$cacheHostPort"
-       |insecure = true
-       |REG
-       |echo "podman will try tst21.ljalbinson.com:5000 (built images), then $cacheHostPort, before quay.io"""".stripMargin
-
-  private val pullScript =
-    s"""${Pull.shellFunction(
-        "the Image(...) values in barbican_single_node.scala"
-      )}
-       |for img in ${barbicanServices.map(_.image.ref).mkString(" ")}; do
-       |  pull_retry $$img || exit 1
+    s"""for i in $$(seq 1 180); do
+       |  if $aptIdle; then
+       |    echo "apt and dpkg are idle"
+       |    exit 0
+       |  fi
+       |  sleep 5
        |done
-       |echo "images ready"""".stripMargin
-
-  // Same method as placement_single_node.scala: the last certificate Keystone presents is its CA; trust on
-  // first use.
-  private val fetchCaScript =
-    s"""set -e
-       |mkdir -p $caDir
-       |rm -f /tmp/ks-chain-*.pem
-       |openssl s_client -connect $ksFqdn:5000 -servername $ksFqdn -showcerts </dev/null 2>/dev/null | awk '/-----BEGIN CERTIFICATE-----/{n++} n>0{print > ("/tmp/ks-chain-" n ".pem")}'
-       |COUNT=$$(ls /tmp/ks-chain-*.pem 2>/dev/null | wc -l)
-       |if [ "$$COUNT" -lt 2 ]; then
-       |  echo "keystone at $ksFqdn:5000 presented $$COUNT certificate(s); expected leaf + CA - re-run keystone_single_node.scala (it must serve server-chain.crt)" >&2
-       |  exit 1
-       |fi
-       |cp /tmp/ks-chain-$$COUNT.pem $caDir/ca.crt
-       |openssl verify -CAfile $caDir/ca.crt /tmp/ks-chain-1.pem
-       |SUBJ=$$(openssl x509 -in $caDir/ca.crt -noout -subject | sed 's/^subject=//')
-       |ISS=$$(openssl x509 -in $caDir/ca.crt -noout -issuer | sed 's/^issuer=//')
-       |if [ "$$SUBJ" != "$$ISS" ]; then echo "last certificate is not self-signed: $$SUBJ / $$ISS" >&2; exit 1; fi
-       |rm -f /tmp/ks-chain-*.pem
-       |if command -v update-ca-certificates >/dev/null 2>&1; then
-       |  cp $caDir/ca.crt /usr/local/share/ca-certificates/orphera-test-ca.crt
-       |  update-ca-certificates
-       |else
-       |  cp $caDir/ca.crt /etc/pki/ca-trust/source/anchors/orphera-test-ca.crt
-       |  update-ca-trust
-       |fi
-       |echo "Keystone CA installed: $$SUBJ"""".stripMargin
-
-  private val dirsScript =
-    s"""mkdir -p $srcDir $logDir $stateDir
-       |echo "directories ready"""".stripMargin
+       |echo "apt/dpkg still busy after 15 minutes (unattended-upgrades?)" >&2
+       |exit 1""".stripMargin
 
   // barbican.conf, plain text (see the header). The same file goes to both containers.
   private val barbicanConf: String =
@@ -263,16 +196,96 @@ object barbican_single_node extends OrpheraClusterPlaybook:
        |kek = $kek
        |""".stripMargin
 
-  // One config directory per container (Kolla mounts it at /var/lib/kolla/config_files). The API runs behind
-  // Apache + mod_wsgi like Placement and Nova; the WSGI script path and the Apache flavour are read from the
-  // image, and the run stops if the image has no barbican-wsgi-api.
-  private val kollaConfigScript =
-    s"""set -e
-       |for svc in api worker; do
-       |  mkdir -p $confRoot/barbican-$$svc
-       |  cp $srcDir/barbican.conf $confRoot/barbican-$$svc/barbican.conf
-       |  cp $caDir/ca.crt $confRoot/barbican-$$svc/ca.crt
+  // The Kolla cache as a mirror of quay.io (podman registries.conf.d drop-in).
+  private val registryMirror =
+    s"""[[registry]]
+       |prefix = "quay.io"
+       |location = "quay.io"
+       |
+       |[[registry.mirror]]
+       |location = "tst21.ljalbinson.com:5000"
+       |insecure = true
+       |
+       |[[registry.mirror]]
+       |location = "$cacheHostPort"
+       |insecure = true
+       |""".stripMargin
+
+  private val images = barbicanServices.map(_.image.ref)
+  private val pullScript =
+    s"""${Pull.shellFunction(
+        "the Image(...) values in barbican_single_node.scala"
+      )}
+       |for img in ${images.mkString(" ")}; do
+       |  pull_retry $$img || exit 1
        |done
+       |echo "images ready"""".stripMargin
+  private val imagesPresent =
+    s"""for img in ${images.mkString(" ")}; do podman image exists $$img || exit 1; done"""
+
+  // Keystone's CA: the last certificate it presents (trust on first use),
+  // which must be self-signed. `chainTo DIR` leaves DIR/c1.pem ... DIR/cN.pem,
+  // each holding the certificate only: the text s_client prints after the
+  // last one (bytes read and written, session ticket) differs on every
+  // handshake, and would make the comparison with the installed copy fail.
+  private val chainTo =
+    s"""chainTo() { openssl s_client -connect $ksFqdn:5000 -servername $ksFqdn -showcerts </dev/null 2>/dev/null | awk -v d="$$1" '/-----BEGIN CERTIFICATE-----/{n++; p=1} p{print > (d "/c" n ".pem")} /-----END CERTIFICATE-----/{p=0}'; }"""
+
+  private val trustTarget =
+    """if command -v update-ca-certificates >/dev/null 2>&1; then t=/usr/local/share/ca-certificates/orphera-test-ca.crt; else t=/etc/pki/ca-trust/source/anchors/orphera-test-ca.crt; fi"""
+
+  // Current when the installed CA is the one Keystone presents now, and is in
+  // the system trust store.
+  private val caCurrent =
+    s"""$chainTo
+       |D=$$(mktemp -d)
+       |chainTo $$D
+       |N=$$(ls $$D/c*.pem 2>/dev/null | wc -l)
+       |R=1
+       |if [ "$$N" -ge 2 ]; then
+       |  $trustTarget
+       |  cmp -s $$D/c$$N.pem $caCert && cmp -s $caCert "$$t" && R=0
+       |fi
+       |rm -rf $$D
+       |exit $$R""".stripMargin
+
+  private val caScript =
+    s"""set -e
+       |$chainTo
+       |mkdir -p $caDir
+       |D=$$(mktemp -d)
+       |trap 'rm -rf $$D' EXIT
+       |chainTo $$D
+       |COUNT=$$(ls $$D/c*.pem 2>/dev/null | wc -l)
+       |if [ "$$COUNT" -lt 2 ]; then
+       |  echo "keystone at $ksFqdn:5000 presented $$COUNT certificate(s); expected leaf + CA - apply keystone_single_node.scala (it must serve server-chain.crt)" >&2
+       |  exit 1
+       |fi
+       |cp $$D/c$$COUNT.pem $caCert
+       |openssl verify -CAfile $caCert $$D/c1.pem
+       |SUBJ=$$(openssl x509 -in $caCert -noout -subject | sed 's/^subject=//')
+       |ISS=$$(openssl x509 -in $caCert -noout -issuer | sed 's/^issuer=//')
+       |if [ "$$SUBJ" != "$$ISS" ]; then echo "last certificate is not self-signed: $$SUBJ / $$ISS" >&2; exit 1; fi
+       |$trustTarget
+       |cp $caCert "$$t"
+       |if command -v update-ca-certificates >/dev/null 2>&1; then update-ca-certificates; else update-ca-trust; fi
+       |echo "Keystone CA installed: $$SUBJ"""".stripMargin
+
+  // The files both services' config.json copy in, and the ownership it sets.
+  private val commonFiles =
+    """{"source": "/var/lib/kolla/config_files/barbican.conf", "dest": "/etc/barbican/barbican.conf", "owner": "barbican", "perm": "0600"}, {"source": "/var/lib/kolla/config_files/ca.crt", "dest": "/etc/barbican/ssl/ca.crt", "owner": "barbican", "perm": "0644"}"""
+  private val permissions =
+    """"permissions": [{"path": "/var/log/kolla/barbican", "owner": "barbican:kolla", "recurse": true}, {"path": "/var/lib/barbican", "owner": "barbican:barbican", "recurse": true}]"""
+  private val workerConfigJson =
+    s"""{"command": "barbican-worker --config-file /etc/barbican/barbican.conf", "config_files": [$commonFiles], $permissions}
+       |""".stripMargin
+
+  // The API runs behind Apache + mod_wsgi like Placement and Nova; the WSGI script path and the Apache
+  // flavour are read from the image, and the run stops if the image has no barbican-wsgi-api. The vhost and
+  // config.json are generated into `out` (the real directory, or a temporary one for the guard to compare
+  // with).
+  private def kollaApiScript(out: String): String =
+    s"""set -e
        |WSGI=$$(podman run --rm --entrypoint sh $apiImage -c 'command -v barbican-wsgi-api' || true)
        |if [ -z "$$WSGI" ]; then echo "barbican-wsgi-api not found in $apiImage - see the header of barbican_single_node.scala" >&2; exit 1; fi
        |if podman run --rm --entrypoint sh $apiImage -c 'test -d /etc/apache2/conf-enabled'; then
@@ -285,7 +298,7 @@ object barbican_single_node extends OrpheraClusterPlaybook:
        |  APACHE_CMD="/usr/sbin/httpd -DFOREGROUND"
        |fi
        |echo "wsgi script: $$WSGI; apache config: $$APACHE_CONF"
-       |cat > $confRoot/barbican-api/barbican-api.conf <<WSGICONF
+       |cat > $out/barbican-api.conf <<WSGICONF
        |Listen 0.0.0.0:$apiPort
        |ServerSignature Off
        |ServerTokens Prod
@@ -305,26 +318,51 @@ object barbican_single_node extends OrpheraClusterPlaybook:
        |    </Directory>
        |</VirtualHost>
        |WSGICONF
-       |COMMON='{"source": "/var/lib/kolla/config_files/barbican.conf", "dest": "/etc/barbican/barbican.conf", "owner": "barbican", "perm": "0600"}, {"source": "/var/lib/kolla/config_files/ca.crt", "dest": "/etc/barbican/ssl/ca.crt", "owner": "barbican", "perm": "0644"}'
-       |PERMS='"permissions": [{"path": "/var/log/kolla/barbican", "owner": "barbican:kolla", "recurse": true}, {"path": "/var/lib/barbican", "owner": "barbican:barbican", "recurse": true}]'
-       |cat > $confRoot/barbican-api/config.json <<JSON
-       |{"command": "$$APACHE_CMD", "config_files": [$$COMMON, {"source": "/var/lib/kolla/config_files/barbican-api.conf", "dest": "$$APACHE_CONF", "owner": "barbican", "perm": "0600"}], $$PERMS}
+       |cat > $out/config.json <<JSON
+       |{"command": "$$APACHE_CMD", "config_files": [$commonFiles, {"source": "/var/lib/kolla/config_files/barbican-api.conf", "dest": "$$APACHE_CONF", "owner": "barbican", "perm": "0600"}], $permissions}
        |JSON
-       |cat > $confRoot/barbican-worker/config.json <<JSON
-       |{"command": "barbican-worker --config-file /etc/barbican/barbican.conf", "config_files": [$$COMMON], $$PERMS}
-       |JSON
-       |echo "kolla config written under $confRoot"""".stripMargin
+       |echo "kolla config written under $out"""".stripMargin
+
+  // Current when every file the script generates is installed with the same content.
+  private def kollaApiCurrent(generate: String, dir: String): String =
+    s"""T=$$(mktemp -d)
+       |$generate >/dev/null
+       |R=0
+       |for f in $$T/*; do cmp -s $$f $dir/$$(basename $$f) || R=1; done
+       |rm -rf $$T
+       |exit $$R""".stripMargin
 
   // barbican-manage runs in a one-off container with barbican.conf bind-mounted (entrypoint overridden, so
   // kolla_set_configs does not run).
   private val dbSyncScript =
     s"""set -e
-       |podman run --rm --network host --user root --entrypoint barbican-manage -v $srcDir/barbican.conf:/etc/barbican/barbican.conf:ro,z -v $logDir:/var/log/kolla/barbican:z $apiImage db upgrade
+       |podman run --rm --network host --user root --entrypoint barbican-manage -v $confRoot/barbican-api/barbican.conf:/etc/barbican/barbican.conf:ro,z -v $logDir:/var/log/kolla/barbican:z $apiImage db upgrade
        |echo "barbican database upgraded"""".stripMargin
+  private val dbStamp = Resource.sha256(dbSyncScript + barbicanConf)
 
-  // Standard-library Python, as in the other service playbooks. Plain string filled in with replace().
+  // True when the barbican database, queried as the barbican user through the VIP, has the `secrets` table.
+  // The query runs with the image's own Python (the interpreter named on the first line of barbican-manage),
+  // which has pymysql.
+  private val dbInState =
+    s"""podman run --rm -i --network host --entrypoint sh $apiImage -c 'exec $$(head -1 "$$(command -v barbican-manage)" | sed "s/^#!//") -' >/dev/null 2>&1 <<'PYEOF'
+       |import sys, pymysql
+       |try:
+       |    c = pymysql.connect(host='$vip', user='$dbUser', password='${dbPassword.reveal}', database='$dbName')
+       |    c.cursor().execute('SELECT COUNT(*) FROM secrets')
+       |except Exception:
+       |    sys.exit(1)
+       |PYEOF""".stripMargin
+  // Current when the stamp matches AND the database is in that state.
+  private val dbCurrent =
+    s"""[ "$$(cat $stateDir/db.stamp 2>/dev/null)" = "$dbStamp" ] &&
+       |$dbInState""".stripMargin
+  private val dbSyncWithStamp =
+    s"""$dbSyncScript
+       |echo $dbStamp > $stateDir/db.stamp""".stripMargin
+
+  // Standard-library Python, as in the other services. Plain string filled in with replace().
   // Subcommands:
-  //   register | unregister | catalog | secret-list | secret-cycle | order-cycle
+  //   register | registered | unregister | catalog | secret-list | secret-cycle | order-cycle
   // secret-cycle stores a secret, reads its payload back, deletes it and checks it is gone. order-cycle asks
   // for a 256 bit AES key, which the WORKER has to make from the queue, waits for the order to be ACTIVE,
   // reads the 32 bytes of the key back, and deletes the secret and the order.
@@ -434,6 +472,25 @@ def register():
     print('registered barbican in keystone (user barbican, roles creator observer audit, service type key-manager, 3 endpoints)')
 
 
+def registered():
+    # Exit 0 only when everything register() makes is in place: the barbican user can get a token in project
+    # service (so it holds a role there), the three roles, and the key-manager service with its three
+    # endpoints at the right URL. Makes no change.
+    get_token('barbican', BARBICAN_PW, 'service')
+    token, _ = get_token('admin', ADMIN_PW, 'admin')
+    for role in ('creator', 'observer', 'audit'):
+        if find(token, '/roles?name=' + role, 'roles') is None:
+            die('role %s missing' % role)
+    service = find(token, '/services?type=key-manager', 'services')
+    if service is None:
+        die('no service of type key-manager')
+    for iface in ('public', 'internal', 'admin'):
+        ep = find(token, '/endpoints?service_id=%s&interface=%s' % (service['id'], iface), 'endpoints')
+        if ep is None or ep['url'] != BARBICAN:
+            die('endpoint %s of key-manager missing or wrong' % iface)
+    print('barbican is registered in keystone')
+
+
 def unregister():
     token, _ = get_token('admin', ADMIN_PW, 'admin')
     service = find(token, '/services?type=key-manager', 'services')
@@ -520,6 +577,8 @@ if __name__ == '__main__':
     cmd = sys.argv[1] if len(sys.argv) > 1 else ''
     if cmd == 'register':
         register()
+    elif cmd == 'registered':
+        registered()
     elif cmd == 'unregister':
         unregister()
     elif cmd == 'catalog':
@@ -531,146 +590,175 @@ if __name__ == '__main__':
     elif cmd == 'order-cycle':
         order_cycle()
     else:
-        die('usage: orphera-barbican-api register | unregister | catalog | secret-list | secret-cycle | order-cycle')
+        die('usage: orphera-barbican-api register | registered | unregister | catalog | secret-list | secret-cycle | order-cycle')
 """
 
-  private val helperScript =
-    "cat > /usr/local/sbin/orphera-barbican-api <<'PYEOF'\n" +
-      apiHelperPython
-        .replace("@@KS@@", ksFqdn)
-        .replace("@@BARBICAN@@", s"http://$fqdn:$apiPort")
-        .replace("@@ADMINPW@@", adminPassword.reveal)
-        .replace("@@BARBICANPW@@", barbicanPassword.reveal)
-        .replace("@@CA@@", s"$caDir/ca.crt") +
-      "\nPYEOF\nchmod 700 /usr/local/sbin/orphera-barbican-api\necho wrote /usr/local/sbin/orphera-barbican-api\n"
+  private val helper =
+    apiHelperPython
+      .replace("@@KS@@", ksFqdn)
+      .replace("@@BARBICAN@@", s"http://$fqdn:$apiPort")
+      .replace("@@ADMINPW@@", adminPassword.reveal)
+      .replace("@@BARBICANPW@@", barbicanPassword.reveal)
+      .replace("@@CA@@", caCert)
+  private val helperPath = "/usr/local/sbin/orphera-barbican-api"
 
   // The API answers its version document without a token (200, or 300 for a list of versions).
-  private val apiHealthScript =
-    s"""CODE=$$(curl -s -o /dev/null -w '%{http_code}' http://localhost:$apiPort/)
-       |[ "$$CODE" = "200" ] || [ "$$CODE" = "300" ]""".stripMargin
+  private val healthy =
+    s"""CODE=$$(curl -s -o /dev/null -w '%{http_code}' http://localhost:$apiPort/); [ "$$CODE" = "200" ] || [ "$$CODE" = "300" ]"""
+  private val waitHealthy =
+    s"""for i in $$(seq 1 24); do
+       |  ( $healthy ) && exit 0
+       |  sleep 5
+       |done
+       |echo "barbican-api does not answer on $apiPort - see 'journalctl -xeu orphera-barbican-api' and $logDir" >&2
+       |exit 1""".stripMargin
 
-  // ORPHERA_CHECK=1 turns the run into a check: it changes nothing on the node and fails, with a diff, if
-  // a unit differs from what this playbook would write. The check task comes from the same Container
-  // value as the write task (see Resource.scala).
-  private val checkMode = sys.env.get("ORPHERA_CHECK").contains("1")
+  // The API accepts an admin token from Keystone (it validated it with the barbican user's credentials) and
+  // reaches its database.
+  private val acceptsToken = s"$helperPath secret-list >/dev/null 2>&1"
+  private val waitAcceptsToken =
+    s"""for i in $$(seq 1 24); do $helperPath secret-list && exit 0; sleep 5; done
+       |$helperPath secret-list
+       |exit 1""".stripMargin
 
-  private val unitResource = summon[Resource[Container]]
+  // One service: its resources (written before it starts) and the ones that decide when it restarts.
+  private final case class Svc(
+      unit: ApplyResource,
+      resources: List[ApplyResource],
+      deps: List[ApplyResource],
+      conf: ApplyResource
+  )
 
-  // Adds one "write the unit" task per container, then one "start" task per container (the worker first).
-  private def withServices(b: StageBuilder): StageBuilder =
-    val written = barbicanServices.foldLeft(b)((acc, c) =>
-      acc.task(s"write ${c.unitName}")(c.writeUnit)
+  def describe(target: Node): List[ApplyResource] =
+    val aptWait = command(
+      "wait for apt and dpkg to be idle",
+      waitAptIdleScript,
+      unless = aptIdle,
+      timeout = 960
     )
-    barbicanServices.foldLeft(written)((acc, c) =>
-      acc.task(s"start ${c.unitName}")(c.start)
-    )
+    val tools = hostPackages.map(p => pkg(p, updateCache = true).after(aptWait))
+    val podman = tools(0)
 
-  val playbook: ClusterPlaybook =
-    if checkMode then
-      clusterPlaybook("barbican-single-node-check")(
-        barbicanServices
-          .foldLeft(stage("check-barbican", node))((acc, c) =>
-            acc.task(s"check ${c.unitName}")(unitResource.check(c))
-          )
-          .build
-      )
-    else applyPlaybook
+    val mirrorDir = directory("/etc/containers/registries.conf.d").after(podman)
+    val mirror = file(
+      "/etc/containers/registries.conf.d/orphera-kolla-cache.conf",
+      registryMirror,
+      mode = "0644"
+    ).after(mirrorDir)
+    val pulled = command(
+      "pull the Barbican images",
+      pullScript,
+      unless = imagesPresent,
+      timeout = 2400
+    ).after(podman, mirror)
 
-  // The whole install stage, ending with every container started.
-  private def installBarbican: StageBuilder =
-    withServices(
-      stage("install-barbican", node)
-        .task("wait for apt and dpkg to be idle")(
-          Task.RunCommand(
-            List("sh", "-c", waitAptIdleScript),
-            timeoutSeconds = 960
-          )
-        )
-        .task("install podman and tools")(
-          Task.Install(packages = hostPackages, updateCache = true)
-        )
-        .task("use the Kolla cache as a mirror for quay.io")(
-          Task.RunCommand(List("sh", "-c", useCacheScript))
-        )
-        .task("pull the Barbican images")(
-          Task.RunCommand(List("sh", "-c", pullScript), timeoutSeconds = 1800)
-        )
-        .task("fetch Keystone's CA from its TLS handshake")(
-          Task.RunCommand(List("sh", "-c", fetchCaScript), timeoutSeconds = 60)
-        )
-        .task("create the Barbican directories")(
-          Task.RunCommand(List("sh", "-c", dirsScript))
-        )
-        .task("write the Barbican API helper")(
-          Task.RunCommand(List("sh", "-c", helperScript))
-        )
-        .task("register Barbican in Keystone")(
-          Task.RunCommand(
-            List("sh", "-c", "/usr/local/sbin/orphera-barbican-api register"),
-            timeoutSeconds = 120
-          )
-        )
-        .task("write barbican.conf")(
-          Task.WriteFile(
-            content = barbicanConf,
-            dest = s"$srcDir/barbican.conf",
+    val caDirectory = directory(caDir, mode = "0755").after(podman)
+    val ca = command(
+      "fetch Keystone's CA from its TLS handshake",
+      caScript,
+      unless = caCurrent,
+      timeout = 60
+    ).after(caDirectory, tools(1))
+
+    val logDirectory = directory(logDir)
+    val stateDirectory = directory(stateDir)
+
+    // One config directory per service, mounted by Kolla at /var/lib/kolla/config_files.
+    val svcs = serviceNames.zip(barbicanServices).map { (name, c) =>
+      val dir = s"$confRoot/$name"
+      val unitService = service(c.unitName)
+      val dirRes = directory(dir, mode = "0755")
+      val conf = secretFile(
+        s"$dir/barbican.conf",
+        Secret(barbicanConf), // it holds the database, message bus, service and key-encrypting passwords
+        mode = "0640",
+        owner = "root",
+        group = "root"
+      ).after(dirRes).notifies(unitService)
+      val kollaCa = command(
+        s"copy Keystone's CA to the $name config",
+        s"cp $caCert $dir/ca.crt",
+        unless = s"cmp -s $caCert $dir/ca.crt"
+      ).after(ca, dirRes).notifies(unitService)
+      val kollaJson = name match
+        case "barbican-worker" =>
+          file(
+            s"$dir/config.json",
+            workerConfigJson,
+            mode = "0644",
             owner = "root",
-            group = "root",
-            mode = 384 // 0600
-          )
-        )
-        .task("write the Kolla config and the Apache vhost")(
-          Task.RunCommand(
-            List("sh", "-c", kollaConfigScript),
-            timeoutSeconds = 180
-          )
-        )
-        .task("barbican-manage db upgrade")(
-          Task.RunCommand(List("sh", "-c", dbSyncScript), timeoutSeconds = 600)
-        )
+            group = "root"
+          ).after(dirRes).notifies(unitService)
+        case _ =>
+          command(
+            s"write the Apache vhost and the Kolla config.json for $name",
+            kollaApiScript(dir),
+            unless = kollaApiCurrent(kollaApiScript("$T"), dir),
+            timeout = 180
+          ).after(pulled, dirRes, logDirectory).notifies(unitService)
+      val unitFile = file(
+        c.unitPath,
+        c.render,
+        mode = "0644",
+        owner = "root",
+        group = "root"
+      ).notifies(unitService)
+      Svc(
+        unitService,
+        List(dirRes, conf, kollaCa, kollaJson, unitFile),
+        List(conf, kollaCa, kollaJson, unitFile),
+        conf
+      )
+    }
+    val apiConf = svcs.head.conf
+
+    val dbSync = command(
+      "barbican-manage db upgrade",
+      dbSyncWithStamp,
+      unless = dbCurrent,
+      timeout = 600
+    ).after(pulled, apiConf, logDirectory, stateDirectory)
+
+    val helperFile = secretFile(
+      helperPath,
+      Secret(helper), // it holds the admin and barbican passwords
+      mode = "0700",
+      owner = "root",
+      group = "root"
     )
+    // Registration comes before the services start.
+    val registered = command(
+      "register Barbican in Keystone",
+      s"$helperPath register",
+      unless = s"$helperPath registered >/dev/null 2>&1",
+      timeout = 120
+    ).after(helperFile, ca)
 
-  private def applyPlaybook: ClusterPlaybook =
-    clusterPlaybook("barbican-single-node")(
-      stage("barbican-database", "tst3")
-        .task(s"create $dbName database and $dbUser on the Galera cluster")(
-          Task.RunCommand(List("sh", "-c", createDatabaseScript))
-        )
-        .build,
+    val running = svcs.map { s =>
+      s.unit.after((dbSync :: registered :: s.deps)*)
+    }
 
-      stage("barbican-rabbitmq", rabbitNode)
-        .task(
-          s"create the $rabbitVhost vhost and the $rabbitUser user on RabbitMQ"
-        )(
-          Task.RunCommand(List("sh", "-c", rabbitScript), timeoutSeconds = 120)
-        )
-        .build,
+    val answering = command(
+      "barbican-api answers on its port",
+      waitHealthy,
+      unless = healthy,
+      timeout = 180
+    ).after(running*)
+    val authenticating = command(
+      "the API accepts an admin token and reaches its database",
+      waitAcceptsToken,
+      unless = acceptsToken,
+      timeout = 180
+    ).after((answering :: running)*)
 
-      installBarbican.build,
-
-      stage("confirm-barbican-healthy", node)
-        .waitFor(
-          HealthCheck.Command(
-            onNode = node,
-            command = List("sh", "-c", apiHealthScript),
-            pollIntervalSeconds = 5,
-            timeoutSeconds = 120
-          )
-        )
-        .task("store a secret and read it back with an admin token")(
-          Task.RunCommand(
-            List(
-              "sh",
-              "-c",
-              "/usr/local/sbin/orphera-barbican-api secret-cycle"
-            ),
-            timeoutSeconds = 120
-          )
-        )
-        .task("barbican confirmed")(
-          Task.Debug(
-            s"Barbican up at http://$fqdn:$apiPort ($nodeIp): barbican-api and barbican-worker, RabbitMQ vhost $rabbitVhost on $rabbitIp:5672, database $dbName via $vip:3306, identity from $ksUrl. Test: manifests/test_barbican.sh"
-          )
-        )
-        .build
-    )
+    tools ++ List(
+      aptWait,
+      mirrorDir,
+      mirror,
+      pulled,
+      caDirectory,
+      ca,
+      logDirectory,
+      stateDirectory
+    ) ++ svcs.flatMap(_.resources) ++ List(dbSync, helperFile, registered) ++
+      running ++ List(answering, authenticating)

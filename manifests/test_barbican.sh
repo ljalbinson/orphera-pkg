@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# DRAFT end-to-end test for barbican_single_node.scala.
+# End-to-end test for barbican_single_node.scala (with barbican_database.scala and
+# barbican_rabbitmq.scala, which it applies first).
 #
-# Applies the playbook, then checks independently of its own health check:
+# Tears Barbican down (barbican_teardown.scala: it drops the barbican database, so every stored secret is
+# gone), applies the three descriptions, then checks independently of their own health checks:
 #  - the two Barbican units run as systemd units,
 #  - the API answers its version document without a token (9311),
 #  - an unauthenticated request to a protected path is refused (401),
@@ -12,11 +14,12 @@
 #  - a key order (256 bit AES) is made by the worker through RabbitMQ, ends ACTIVE, gives 32 bytes, and is
 #    cleaned up,
 #  - Barbican is in the Keystone catalog (service type key-manager),
-#  - a second run of the playbook succeeds (idempotence), and a stored secret still round-trips afterwards.
+#  - a second run of the description changes nothing (idempotence), and a stored secret still round-trips
+#    afterwards.
 #
 # Prerequisites: Galera + VIP, Keystone and RabbitMQ (tst10) healthy; the node (tst20) has an agent.
 # Run from scala0, in orphera-pkg:   manifests/test_barbican.sh
-# NO_APPLY=1 skips the playbook runs and only checks.
+# NO_APPLY=1 skips the teardown and the apply runs and only checks.
 # Exit code: 0 if every assertion passes, 1 otherwise.
 
 set -uo pipefail
@@ -43,10 +46,15 @@ assert_contains() {
 }
 
 if [ -z "${NO_APPLY:-}" ]; then
+  log "teardown (failures here are tolerated: nothing may be installed yet)"
+  orphera apply barbican_teardown.scala || true
+
   log "install"
-  if ! orphera cluster-playbook barbican_single_node.scala; then
-    log "FAIL: barbican_single_node.scala did not complete"; exit 1
-  fi
+  for d in barbican_database.scala barbican_rabbitmq.scala barbican_single_node.scala; do
+    if ! orphera apply "$d"; then
+      log "FAIL: $d did not complete"; exit 1
+    fi
+  done
 fi
 
 for u in barbican-worker barbican-api; do
@@ -85,11 +93,12 @@ assert_contains "the catalog lists service type key-manager" "key-manager" "$OUT
 
 if [ -z "${NO_APPLY:-}" ]; then
   log "re-apply (idempotence)"
-  if orphera cluster-playbook barbican_single_node.scala; then
-    log "PASS: second run completed"; PASS=$((PASS + 1))
-  else
+  SECOND=$(orphera apply barbican_single_node.scala 2>&1); RC=$?
+  printf '%s\n' "$SECOND"
+  if [ "$RC" -ne 0 ]; then
     log "FAIL: second run of barbican_single_node.scala failed"; FAIL=$((FAIL + 1))
   fi
+  assert_contains "second run changed nothing" "0 changed" "$SECOND"
   OUT=$(run_on "sudo $HELPER secret-cycle")
   assert_contains "a secret still round-trips after the second run" "secret cycle ok" "$OUT"
 fi
