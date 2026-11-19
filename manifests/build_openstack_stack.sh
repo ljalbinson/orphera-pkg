@@ -239,7 +239,7 @@ step_prep() {
 step_caches() {
   apply_desc apt_cache.scala
   apply_desc apt_cache_clients.scala
-  playbook kolla_cache.scala
+  apply_desc kolla_cache.scala
   out=$(run_on tst11 "curl -s -o /dev/null -w 'http=%{http_code}' http://localhost:3142/acng-report.html")
   check "apt cache answers on tst11" contains "http=200" "$out"
   out=$(run_on tst9 "curl -s http://localhost:5000/v2/")

@@ -2605,7 +2605,7 @@ result independently of the playbook's own health checks:
     orphera cluster-playbook manifests/cephadm_install.scala  # ... then mons and OSDs
     orphera cluster-playbook manifests/mariadb_galera_cluster.scala
     orphera cluster-playbook manifests/mariadb_haproxy_keepalived.scala
-    orphera cluster-playbook manifests/kolla_cache.scala        # optional, speeds up pulls
+    orphera apply manifests/kolla_cache.scala                   # optional, speeds up pulls; manifests/test_kolla_cache.sh checks it
     manifests/test_keystone.sh                                  # applies keystone_single_node.scala
     manifests/test_cinder.sh                                    # applies cinder_*.scala, rabbitmq_single_node.scala
     manifests/test_glance.sh                                    # applies glance_single_node.scala
@@ -3403,7 +3403,7 @@ playbooks marked DRAFT there have been written but not all run on the lab.
 | `ceph_upgrade.scala` | Staged cephadm upgrade of the whole cluster to a new release, health-checked between stages (see [upgrading the Ceph cluster](#example-upgrading-the-ceph-cluster-cephadm)) |
 | `ceph_client_upgrade.scala`, `ceph_key_rotation.scala` | Ceph's own client for the OpenStack services and compute hosts, then their keys rotated to `aes256k` and the monitors set to `aes256k` only |
 | `lustre_cluster_script.scala` | the Lustre build as an `OrpheraScript` (replaces `lustre_cluster.scala`) |
-| `apt_cache_teardown.scala`, `rpm_cache_teardown.scala`, `kolla_cache_teardown.scala` | Undo the apt cache (tst11) and its clients, the RPM cache (tst12) and its clients, and the Kolla image cache (tst9) |
+| `apt_cache_teardown.scala`, `rpm_cache_teardown.scala`, `kolla_cache_teardown.scala` (a description) | Undo the apt cache (tst11) and its clients, the RPM cache (tst12) and its clients, and the Kolla image cache (tst9) |
 | `keystone_teardown.scala`, `glance_teardown.scala`, `placement_teardown.scala`, `cinder_teardown.scala`, `rabbitmq_teardown.scala`, `heat_teardown.scala`, `nova_teardown.scala`, `neutron_teardown.scala`, `horizon_teardown.scala`, `barbican_teardown.scala`, `designate_teardown.scala`, `nova_compute_teardown.scala` | Undo the matching `*_single_node.scala` playbook (see the OpenStack example below) |
 
 ## Known gaps / not yet built
