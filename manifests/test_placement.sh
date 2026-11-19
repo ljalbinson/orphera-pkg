@@ -3,7 +3,8 @@
 #
 # DRAFT end-to-end test for placement_single_node.scala.
 #
-# Applies the playbook, then checks independently of its own health check:
+# Tears Placement down (placement_teardown.scala), applies placement_database.scala and
+# placement_single_node.scala, then checks independently of its own health check:
 #  - the placement-api container runs as a systemd unit,
 #  - the API answers its version document on 8780 without a token,
 #  - an unauthenticated request to a protected path is refused (401),
@@ -11,11 +12,11 @@
 #    deleted (the object Nova will register hypervisors as),
 #  - Placement is in the Keystone catalog (service type `placement`),
 #  - the Glance API on the same node still answers (no collision),
-#  - a second run of the playbook succeeds (idempotence).
+#  - a second run of the description changes nothing (idempotence).
 #
 # Prerequisites: Galera + VIP and Keystone healthy; the node (tst13) has an
 # agent. Run from scala0, in orphera-pkg:   manifests/test_placement.sh
-# NO_APPLY=1 skips the playbook runs and only checks.
+# NO_APPLY=1 skips the teardown and the apply runs and only checks.
 # Exit code: 0 if every assertion passes, 1 otherwise.
 
 set -uo pipefail
@@ -42,10 +43,15 @@ assert_contains() {
 }
 
 if [ -z "${NO_APPLY:-}" ]; then
+  log "teardown (failures here are tolerated: nothing may be installed yet)"
+  orphera apply placement_teardown.scala || true
+
   log "install"
-  if ! orphera cluster-playbook placement_single_node.scala; then
-    log "FAIL: placement_single_node.scala did not complete"; exit 1
-  fi
+  for d in placement_database.scala placement_single_node.scala; do
+    if ! orphera apply "$d"; then
+      log "FAIL: $d did not complete"; exit 1
+    fi
+  done
 fi
 
 OUT=$(run_on "systemctl is-active orphera-placement-api")
@@ -84,11 +90,12 @@ fi
 
 if [ -z "${NO_APPLY:-}" ]; then
   log "re-apply (idempotence)"
-  if orphera cluster-playbook placement_single_node.scala; then
-    log "PASS: second run completed"; PASS=$((PASS + 1))
-  else
+  SECOND=$(orphera apply placement_single_node.scala 2>&1); RC=$?
+  printf '%s\n' "$SECOND"
+  if [ "$RC" -ne 0 ]; then
     log "FAIL: second run of placement_single_node.scala failed"; FAIL=$((FAIL + 1))
   fi
+  assert_contains "second run changed nothing" "0 changed" "$SECOND"
 fi
 
 log "passed=$PASS failed=$FAIL"

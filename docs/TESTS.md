@@ -434,7 +434,7 @@ resource provider is created, read back, listed and deleted; the catalog lists `
 Glance on tst13 still answers; second run completes. The first re-apply hit the dpkg lock
 (unattended-upgrades on a fresh VM, apt exit 100 after the agent's 60 s wait); rerunning the
 playbook once the upgrade finished completed. Prerequisites: Galera + VIP, Keystone,
-agent on tst13. Teardown: `orphera cluster-playbook manifests/placement_teardown.scala`.
+agent on tst13. Teardown: `orphera apply manifests/placement_teardown.scala` (since the move to `orphera apply`).
 
 ### K9. Horizon on tst13 - PASSED (2026-10-12), 7/7 (branch `horizon`)
     manifests/test_horizon.sh 2>&1 | tee /tmp/horizon.log
