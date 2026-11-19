@@ -473,7 +473,7 @@ Nova (tst14) and Glance (tst13) still fine; second run completes. Afterwards re-
 Network should stop returning errors; then the `user_home` override can be dropped.
 Prerequisites: Galera + VIP, Keystone, RabbitMQ on tst10, Nova, agent on tst19. Still to do: the
 Nova re-apply and the Horizon check above.
-Teardown: `orphera cluster-playbook manifests/neutron_teardown.scala` (not run; does not restore
+Teardown: `orphera apply manifests/neutron_teardown.scala` (since the move to `orphera apply`; does not restore
 the address enp2s0 had).
 
 ### K12. nova-compute on tst17 and tst18 - PASSED (2026-10-12), 24/24 (branch `nova-compute`)

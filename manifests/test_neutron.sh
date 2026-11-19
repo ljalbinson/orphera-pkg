@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# DRAFT end-to-end test for neutron_single_node.scala.
+# End-to-end test for neutron_single_node.scala (with neutron_database.scala and
+# neutron_rabbitmq.scala, which it applies first).
 #
-# Applies the playbook, then checks independently of its own health check:
+# Tears Neutron down (neutron_teardown.scala: it drops the neutron database, so every
+# network, router and port is lost), applies the three descriptions, then checks independently of its own health check:
 #  - the four Neutron units (server, Open vSwitch agent, DHCP agent, L3 agent) are active,
 #  - the provider NIC (enp2s0) has no IPv4 address and is a port of br-provider,
 #    while the management NIC (enp1s0) still has its address,
@@ -18,11 +20,11 @@
 #    everything is removed again,
 #  - Neutron is in the Keystone catalog (service type `network`),
 #  - Nova (tst14) and Glance (tst13) still answer, so nothing collided,
-#  - a second run of the playbook succeeds (idempotence).
+#  - a second run of the description changes nothing (idempotence).
 #
 # Prerequisites: Galera + VIP, Keystone, RabbitMQ on tst10 and Nova healthy; tst19
 # has an agent. Run from scala0, in orphera-pkg:   manifests/test_neutron.sh
-# NO_APPLY=1 skips the playbook runs and only checks.
+# NO_APPLY=1 skips the teardown and the apply runs and only checks.
 # Exit code: 0 if every assertion passes, 1 otherwise.
 
 set -uo pipefail
@@ -52,10 +54,15 @@ assert_contains() {
 }
 
 if [ -z "${NO_APPLY:-}" ]; then
+  log "teardown (failures here are tolerated: nothing may be installed yet)"
+  orphera apply neutron_teardown.scala || true
+
   log "install"
-  if ! orphera cluster-playbook neutron_single_node.scala; then
-    log "FAIL: neutron_single_node.scala did not complete"; exit 1
-  fi
+  for d in neutron_database.scala neutron_rabbitmq.scala neutron_single_node.scala; do
+    if ! orphera apply "$d"; then
+      log "FAIL: $d did not complete"; exit 1
+    fi
+  done
 fi
 
 for u in neutron-server neutron-openvswitch-agent neutron-dhcp-agent neutron-l3-agent; do
@@ -125,11 +132,12 @@ fi
 
 if [ -z "${NO_APPLY:-}" ]; then
   log "re-apply (idempotence)"
-  if orphera cluster-playbook neutron_single_node.scala; then
-    log "PASS: second run completed"; PASS=$((PASS + 1))
-  else
+  SECOND=$(orphera apply neutron_single_node.scala 2>&1); RC=$?
+  printf '%s\n' "$SECOND"
+  if [ "$RC" -ne 0 ]; then
     log "FAIL: second run of neutron_single_node.scala failed"; FAIL=$((FAIL + 1))
   fi
+  assert_contains "second run changed nothing" "0 changed" "$SECOND"
 fi
 
 log "passed=$PASS failed=$FAIL"

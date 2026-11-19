@@ -334,7 +334,9 @@ step_nova() {
 }
 
 step_neutron() {
-  playbook neutron_single_node.scala
+  apply_desc neutron_database.scala
+  apply_desc neutron_rabbitmq.scala
+  apply_desc neutron_single_node.scala
   local out
   out=$(run_on tst19 "curl -s -o /dev/null -w 'http=%{http_code}' http://localhost:9696/")
   check "the Neutron API answers its version document" contains "http=" "$out"

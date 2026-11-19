@@ -1,66 +1,76 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import orphera.orchestrator.*
-import orphera.orchestrator.ClusterPlaybookDsl.*
 import orphera.orchestrator.kolla.*
 import orphera.orchestrator.conf.*
 
-// DRAFT. OpenStack Neutron: neutron-server, the Open vSwitch agent, the DHCP agent and
-// the L3 agent on one node, Kolla images under podman. Modelled on
-// nova_single_node.scala and placement_single_node.scala; read their headers for the
-// conventions.
+// OpenStack Neutron: neutron-server, the Open vSwitch agent, the DHCP agent and
+// the L3 agent on one node, Kolla images under podman, as a declarative
+// description (OrpheraApply, docs/APPLY-DESIGN.md). It replaced the cluster
+// playbook of the same name; a second run changes nothing and restarts nothing,
+// and `--check` shows what would change. Modelled on nova_single_node.scala and
+// placement_single_node.scala, which explain the conventions.
 //
-// Networks. Tenant networks are VXLAN (VNI 1-1000). The tunnel endpoint of each node is
-// its management address (10.10.5.x, UDP 4789 between the nodes; nothing here opens a
-// firewall), so tenant ports get an MTU of 1450 from Neutron's own calculation. The
-// flat provider network `provider` (plain layer 2 on the second NIC) is the external
-// network: routers take their gateway address from it and floating IPs come from it.
-// Mark that network external (`openstack network set --external <name>`); the
-// L3 agent does the NAT in router namespaces on this node. Instances can still be
-// plugged straight into the flat network. There is no metadata agent: Nova's metadata
-// API is not deployed, so instances use a config drive. The compute nodes need the
-// matching VXLAN settings (nova_compute.scala); apply that playbook after this one.
+// Three descriptions, since one description cannot order its nodes. Apply them
+// in this order:
+//
+//   orphera apply manifests/neutron_database.scala     # the database and user (tst3)
+//   orphera apply manifests/neutron_rabbitmq.scala     # the `neutron` vhost and user on RabbitMQ (tst10)
+//   orphera apply manifests/neutron_single_node.scala  # this one (tst19)
+//
+// Networks. Tenant networks are VXLAN (VNI 1-1000). The tunnel endpoint of each
+// node is its management address (10.10.5.x, UDP 4789 between the nodes; nothing
+// here opens a firewall), so tenant ports get an MTU of 1450 from Neutron's own
+// calculation. The flat provider network `provider` (plain layer 2 on the second
+// NIC) is the external network: routers take their gateway address from it and
+// floating IPs come from it. Mark that network external (`openstack network set
+// --external <name>`); the L3 agent does the NAT in router namespaces on this
+// node. There is no metadata agent: Nova's metadata API is not deployed, so
+// instances use a config drive. The compute nodes need the matching VXLAN
+// settings (nova_compute.scala); apply that playbook after this one.
 //
 // Where it runs: tst19, whose second NIC (enp2s0, on the hypervisor's br-net106)
-// is the provider network. This playbook first removes the address that NIC was
-// given at provisioning (10.10.6.31/24, table 2 policy routing) so it is a plain
-// layer-2 port, then makes it a port of the Open vSwitch bridge `br-provider`.
-// tst19 stays reachable on its first NIC (10.10.5.31). Keep `node`, `fqdn` and
-// `nodeIp` in step with neutron_teardown.scala and test_neutron.sh.
+// is the provider network. This description first removes the address that NIC
+// was given at provisioning (10.10.6.31/24, table 2 policy routing) so it is a
+// plain layer-2 port, then makes it a port of the Open vSwitch bridge
+// `br-provider`. tst19 stays reachable on its first NIC (10.10.5.31). Keep
+// `node`, `fqdn` and `nodeIp` in step with neutron_teardown.scala and
+// test_neutron.sh.
 //
-// Messaging: its own vhost (`neutron`) and user on the RabbitMQ on tst10, as for Nova.
+// Messaging: its own vhost (`neutron`) and user on the RabbitMQ on tst10, as for
+// Nova (neutron_rabbitmq.scala).
 //
-// Prerequisites, not checked here:
-//   - Galera + VIP healthy, Keystone up on tst6 (serving the CA chain)
-//   - RabbitMQ running on tst10 (cinder_single_node.scala)
-//   - Nova registered (nova_single_node.scala): Neutron tells Nova about port events
-//     as the `nova` service user, and Nova calls Neutron as the `neutron` user this
-//     playbook creates
-//   - agent on tst19; tst9's Kolla cache is optional
+// Prerequisites, not checked here: Galera + VIP healthy, Keystone up on tst6
+// (serving the CA chain), RabbitMQ running on tst10 (cinder_single_node.scala),
+// Nova registered (nova_single_node.scala): Neutron tells Nova about port events
+// as the `nova` service user, and Nova calls Neutron as the `neutron` user this
+// description registers. The agent on tst19; tst9's Kolla cache is optional.
 //
-// Stages:
-//   - neutron-database (tst3): the `neutron` database + user.
-//   - neutron-rabbitmq (tst10): vhost and user, idempotent.
-//   - install-neutron (tst19): wait for apt, packages (podman, openvswitch-switch),
-//     make enp2s0 an address-less layer-2 port and put it on br-provider, cache
-//     mirror, image pulls, Keystone's CA from its TLS handshake, the config files,
-//     Kolla config for the three services, `neutron-db-manage upgrade heads`, the
-//     units, then registration in Keystone (user `neutron` in project `service`,
-//     service type `network`, three endpoints).
-//   - confirm-neutron-healthy (tst19): the API answers and the Open vSwitch and DHCP
-//     agents report alive through it.
+// How it stays idempotent (as for Nova):
+//   - The provider NIC is "done" when the netplan file has no address, route,
+//     policy or nameserver for it and the kernel has no IPv4 address on it; the
+//     bridge is "done" when it exists, has the NIC as a port and is up.
+//   - Keystone's CA is compared as a certificate with the installed copy each
+//     run; each service's copy is refreshed (and the service restarts) when it
+//     changes.
+//   - neutron.conf holds secrets, so it is a secret file in each service's Kolla
+//     directory; each agent's own .ini and config.json are plain files. A service
+//     restarts only when its own files or the CA changed.
+//   - `neutron-db-manage upgrade heads` is skipped while its stamp matches and a
+//     query as the neutron user finds the `networks` table.
+//   - The Keystone registration is skipped while the helper's `registered` check
+//     passes. Registration comes before the units start.
 //
-// Test-only hardcoded credentials, same convention and caveat as the other
-// manifests. Not compiled where this was written; the first run on scala0 is the
-// first compile. The most likely things to need a fix on the first run: the
-// `neutron-server` command and `/etc/neutron/rootwrap.conf` inside the image, and
-// the privileges the two agents need in their containers.
-object neutron_single_node extends OrpheraClusterPlaybook:
+// Test-only credentials from the secret store (`orphera secrets`), as before.
+object neutron_single_node extends OrpheraApply:
+  import Resources.*
 
   private val node = "tst19"
   private val fqdn = "tst19.ljalbinson.com"
   private val nodeIp = "10.10.5.31"
   private val apiPort = 9696
+
+  override def nodes: List[String] = List(node)
 
   // Provider network: physical network name `provider`, mapped to the OVS bridge
   // `br-provider`, which has the NIC `providerNic` as its only physical port.
@@ -68,7 +78,6 @@ object neutron_single_node extends OrpheraClusterPlaybook:
   private val providerBridge = "br-provider"
   private val providerNic = "enp2s0"
 
-  private val rabbitNode = "tst10"
   private val rabbitIp = "10.10.5.22"
   private val rabbitUser = "neutron"
   private val rabbitPassword = Secrets.secret("neutron/rabbit")
@@ -90,10 +99,10 @@ object neutron_single_node extends OrpheraClusterPlaybook:
   private val novaPassword = Secrets.secret("nova/service")
 
   private val confRoot = "/etc/kolla"
-  private val srcDir = "/etc/kolla/neutron"
   private val logDir = "/var/log/kolla/neutron"
   private val stateDir = "/var/lib/orphera/neutron"
   private val caDir = "/etc/kolla/neutron-ca"
+  private val caCert = s"$caDir/ca.crt"
   private val ksUrl = s"https://$ksFqdn:5000"
 
   // The four Neutron containers as data (orchestrator/.../kolla/Container.scala, checked by
@@ -138,17 +147,15 @@ object neutron_single_node extends OrpheraClusterPlaybook:
       neutronContainer("neutron-dhcp-agent", agent = true),
       neutronContainer("neutron-l3-agent", agent = true)
     )
+  private val serviceNames =
+    List(
+      "neutron-server",
+      "neutron-openvswitch-agent",
+      "neutron-dhcp-agent",
+      "neutron-l3-agent"
+    )
   private val serverImage = neutronServer.image.ref
   private val ovsAgentImage = neutronServices(1).image.ref
-
-  // Adds one "write the unit" task per container, then one "start" task per container.
-  private def withServices(b: StageBuilder): StageBuilder =
-    val written = neutronServices.foldLeft(b)((acc, c) =>
-      acc.task(s"write ${c.unitName}")(c.writeUnit)
-    )
-    neutronServices.foldLeft(written)((acc, c) =>
-      acc.task(s"start ${c.unitName}")(c.start)
-    )
 
   private val hostPackages =
     List(
@@ -160,62 +167,37 @@ object neutron_single_node extends OrpheraClusterPlaybook:
       "openvswitch-switch"
     )
 
-  // ---- tst3 (Galera) ---------------------------------------------------
-
-  private val createDatabaseScript =
-    s"""mariadb -N -e "CREATE DATABASE IF NOT EXISTS $dbName; CREATE USER IF NOT EXISTS '$dbUser'@'%' IDENTIFIED BY '${dbPassword.reveal}'; GRANT ALL PRIVILEGES ON $dbName.* TO '$dbUser'@'%'; FLUSH PRIVILEGES;""""
-
-  // ---- tst10 (RabbitMQ) ------------------------------------------------
-
-  // No {{...}} in any command: Orphera renders those as a template before running
-  // the command (see nova_single_node.scala).
-  private val rabbitScript =
-    s"""set -e
-       |if ! podman ps -q --filter 'name=^rabbitmq$$' | grep -q .; then
-       |  echo "no running 'rabbitmq' container on this node - run cinder_single_node.scala first" >&2
-       |  exit 1
-       |fi
-       |if ! podman exec rabbitmq rabbitmqctl list_vhosts -q | grep -qx '$rabbitVhost'; then
-       |  podman exec rabbitmq rabbitmqctl add_vhost '$rabbitVhost'
-       |fi
-       |if podman exec rabbitmq rabbitmqctl list_users -q | awk '{print $$1}' | grep -qx '$rabbitUser'; then
-       |  podman exec rabbitmq rabbitmqctl change_password '$rabbitUser' '${rabbitPassword.reveal}'
-       |else
-       |  podman exec rabbitmq rabbitmqctl add_user '$rabbitUser' '${rabbitPassword.reveal}'
-       |fi
-       |podman exec rabbitmq rabbitmqctl set_permissions -p '$rabbitVhost' '$rabbitUser' '.*' '.*' '.*'
-       |echo "rabbitmq vhost $rabbitVhost and user $rabbitUser ready"""".stripMargin
-
-  // ---- the node --------------------------------------------------------
-
+  // A fresh VM may still be running unattended-upgrades (see
+  // disable_unattended_upgrades.scala); when it finishes needrestart restarts the
+  // agent and kills the running task. Wait for it before touching packages.
+  private val aptIdle =
+    """! pgrep -f '^/usr/bin/python3 /usr/bin/unattended-upgrade$' >/dev/null && ! pgrep -x apt-get >/dev/null && ! pgrep -x apt >/dev/null && ! pgrep -x dpkg >/dev/null"""
   private val waitAptIdleScript =
-    """for i in $(seq 1 180); do
-      |  if pgrep -f '^/usr/bin/python3 /usr/bin/unattended-upgrade$' >/dev/null || pgrep -x apt-get >/dev/null || pgrep -x apt >/dev/null || pgrep -x dpkg >/dev/null; then
-      |    sleep 5
-      |  else
-      |    echo "apt and dpkg are idle"
-      |    exit 0
-      |  fi
-      |done
-      |echo "apt/dpkg still busy after 15 minutes (unattended-upgrades?)" >&2
-      |exit 1""".stripMargin
+    s"""for i in $$(seq 1 180); do
+       |  if $aptIdle; then
+       |    echo "apt and dpkg are idle"
+       |    exit 0
+       |  fi
+       |  sleep 5
+       |done
+       |echo "apt/dpkg still busy after 15 minutes (unattended-upgrades?)" >&2
+       |exit 1""".stripMargin
 
   // The provisioning script gave enp2s0 an address, a table-2 route and a
   // "from <address>" rule (netplan, generated by cloud-init). Neutron needs the
   // port to be plain layer 2, so: stop cloud-init regenerating the network config,
   // strip the address, routes, routing policy and nameservers of that interface
   // from /etc/netplan/50-cloud-init.yaml (kept: name, MAC match, MTU), apply, and
-  // clear what is left in the kernel. The management NIC is not touched. Safe to
-  // re-run (nothing to strip the second time). Needs PyYAML, which cloud-init
-  // already depends on.
-  private val dropAddressScript =
-    s"""set -e
-       |mkdir -p /etc/cloud/cloud.cfg.d
-       |printf 'network: {config: disabled}\\n' > /etc/cloud/cloud.cfg.d/99-orphera-disable-network-config.cfg
-       |python3 - <<'PY'
-       |import sys, yaml
+  // clear what is left in the kernel. The management NIC is not touched. Needs
+  // PyYAML, which cloud-init already depends on.
+  //
+  // `stripPython` edits the file, or, with `check` as its argument, only says
+  // (exit status) whether there is anything to strip.
+  private val stripPython =
+    s"""import sys, yaml
        |path = '/etc/netplan/50-cloud-init.yaml'
        |nic = '$providerNic'
+       |check = len(sys.argv) > 1 and sys.argv[1] == 'check'
        |try:
        |    doc = yaml.safe_load(open(path))
        |except FileNotFoundError:
@@ -225,15 +207,31 @@ object neutron_single_node extends OrpheraClusterPlaybook:
        |    if name == nic or cfg.get('set-name') == nic:
        |        for key in ('addresses', 'routes', 'routing-policy', 'nameservers', 'gateway4', 'gateway6'):
        |            if key in cfg:
-       |                del cfg[key]; changed = True
-       |        cfg['dhcp4'] = False
-       |        cfg['dhcp6'] = False
-       |        cfg['link-local'] = []
+       |                if not check:
+       |                    del cfg[key]
+       |                changed = True
+       |        if cfg.get('dhcp4') is not False or cfg.get('dhcp6') is not False or cfg.get('link-local') != []:
+       |            if not check:
+       |                cfg['dhcp4'] = False
+       |                cfg['dhcp6'] = False
+       |                cfg['link-local'] = []
+       |            changed = True
+       |if check:
+       |    sys.exit(1 if changed else 0)
        |if changed:
        |    yaml.safe_dump(doc, open(path, 'w'), default_flow_style=False)
        |    print('removed the address and policy routing of %s from %s' % (nic, path))
        |else:
-       |    print('%s already has no address in %s' % (nic, path))
+       |    print('%s already has no address in %s' % (nic, path))""".stripMargin
+
+  private val cloudInitOff =
+    "/etc/cloud/cloud.cfg.d/99-orphera-disable-network-config.cfg"
+  private val dropAddressScript =
+    s"""set -e
+       |mkdir -p /etc/cloud/cloud.cfg.d
+       |printf 'network: {config: disabled}\\n' > $cloudInitOff
+       |python3 - <<'PY'
+       |$stripPython
        |PY
        |chmod 600 /etc/netplan/50-cloud-init.yaml
        |netplan apply
@@ -242,23 +240,29 @@ object neutron_single_node extends OrpheraClusterPlaybook:
        |ip route flush table 2 2>/dev/null || true
        |ip -4 -br addr show $providerNic
        |echo "$providerNic is an address-less layer-2 port"""".stripMargin
+  // Done when cloud-init is told to leave the network alone, the netplan file
+  // has nothing to strip, and the kernel has no IPv4 address on the NIC.
+  private val addressDropped =
+    s"""[ -f $cloudInitOff ] && python3 - check <<'PY' && ! ip -4 -o addr show dev $providerNic | grep -q inet
+       |$stripPython
+       |PY""".stripMargin
 
-  // Open vSwitch comes from the host (apt). br-provider's only physical port is the
-  // provider NIC; the OVS agent in the container creates br-int and the patch
-  // ports. Idempotent.
+  // Open vSwitch comes from the host (apt). br-provider's only physical port is
+  // the provider NIC; the OVS agent in the container creates br-int and the
+  // patch ports.
   private val bridgeScript =
     s"""set -e
-       |systemctl enable --now openvswitch-switch
        |ovs-vsctl --may-exist add-br $providerBridge
        |ovs-vsctl --may-exist add-port $providerBridge $providerNic
        |ip link set $providerBridge up
        |ovs-vsctl show
        |echo "$providerBridge has $providerNic"""".stripMargin
+  private val bridgeDone =
+    s"""ovs-vsctl br-exists $providerBridge && ovs-vsctl list-ports $providerBridge | grep -qx $providerNic && ip -o link show $providerBridge | grep -q '<[^>]*UP'"""
 
-  private val useCacheScript =
-    s"""mkdir -p /etc/containers/registries.conf.d
-       |cat > /etc/containers/registries.conf.d/orphera-kolla-cache.conf <<'REG'
-       |[[registry]]
+  // The Kolla cache as a mirror of quay.io (podman registries.conf.d drop-in).
+  private val registryMirror =
+    s"""[[registry]]
        |prefix = "quay.io"
        |location = "quay.io"
        |
@@ -269,59 +273,33 @@ object neutron_single_node extends OrpheraClusterPlaybook:
        |[[registry.mirror]]
        |location = "$cacheHostPort"
        |insecure = true
-       |REG
-       |echo "podman will try tst21.ljalbinson.com:5000 (built images), then $cacheHostPort, before quay.io"""".stripMargin
+       |""".stripMargin
 
+  private val images = neutronServices.map(_.image.ref)
   private val pullScript =
     s"""${Pull.shellFunction(
         "the Image(...) in neutronContainer in neutron_single_node.scala"
       )}
-       |for img in ${neutronServices.map(_.image.ref).mkString(" ")}; do
+       |for img in ${images.mkString(" ")}; do
        |  pull_retry $$img || exit 1
        |done
        |echo "images ready"""".stripMargin
+  private val imagesPresent =
+    s"""for img in ${images.mkString(" ")}; do podman image exists $$img || exit 1; done"""
 
-  // Same method as nova_single_node.scala: the last certificate Keystone presents
-  // is its CA; trust on first use.
-  private val fetchCaScript =
-    s"""set -e
-       |mkdir -p $caDir
-       |rm -f /tmp/ks-chain-*.pem
-       |openssl s_client -connect $ksFqdn:5000 -servername $ksFqdn -showcerts </dev/null 2>/dev/null | awk '/-----BEGIN CERTIFICATE-----/{n++} n>0{print > ("/tmp/ks-chain-" n ".pem")}'
-       |COUNT=$$(ls /tmp/ks-chain-*.pem 2>/dev/null | wc -l)
-       |if [ "$$COUNT" -lt 2 ]; then
-       |  echo "keystone at $ksFqdn:5000 presented $$COUNT certificate(s); expected leaf + CA - re-run keystone_single_node.scala (it must serve server-chain.crt)" >&2
-       |  exit 1
-       |fi
-       |cp /tmp/ks-chain-$$COUNT.pem $caDir/ca.crt
-       |openssl verify -CAfile $caDir/ca.crt /tmp/ks-chain-1.pem
-       |SUBJ=$$(openssl x509 -in $caDir/ca.crt -noout -subject | sed 's/^subject=//')
-       |ISS=$$(openssl x509 -in $caDir/ca.crt -noout -issuer | sed 's/^issuer=//')
-       |if [ "$$SUBJ" != "$$ISS" ]; then echo "last certificate is not self-signed: $$SUBJ / $$ISS" >&2; exit 1; fi
-       |rm -f /tmp/ks-chain-*.pem
-       |if command -v update-ca-certificates >/dev/null 2>&1; then
-       |  cp $caDir/ca.crt /usr/local/share/ca-certificates/orphera-test-ca.crt
-       |  update-ca-certificates
-       |else
-       |  cp $caDir/ca.crt /etc/pki/ca-trust/source/anchors/orphera-test-ca.crt
-       |  update-ca-trust
-       |fi
-       |echo "Keystone CA installed: $$SUBJ"""".stripMargin
-
-  // Four small files. The heredocs are quoted so the shell expands nothing; Scala
-  // has already filled in the values.
-  private val neutronDirsScript =
-    s"""mkdir -p $srcDir $logDir $stateDir
-       |echo "directories ready"""".stripMargin
+  // The server's command and the rootwrap config must be in the images.
+  private val imagesCarry =
+    s"""podman run --rm --entrypoint sh $serverImage -c 'command -v neutron-server >/dev/null' && podman run --rm --entrypoint sh $ovsAgentImage -c 'test -f /etc/neutron/rootwrap.conf'"""
+  private val imagesCarryFail =
+    s"""echo "neutron-server or /etc/neutron/rootwrap.conf not found in the images ($serverImage, $ovsAgentImage) - see the header of neutron_single_node.scala" >&2; exit 1"""
 
   // The option lists of the image (neutron), from catalogues/. Every section and key of the
   // files below is checked against them when this manifest is built.
   private val neutronCatalogue: Catalogue =
     Catalogues.load("neutron", Set.empty[String])
-  private val confResource = summon[Resource[ConfFile]]
 
   private val neutronConf: ConfFile =
-    ConfFile.text(s"$srcDir/neutron.conf", neutronCatalogue)(
+    ConfFile.text(s"$confRoot/neutron-server/neutron.conf", neutronCatalogue)(
       ("DEFAULT", "log_dir", "/var/log/kolla/neutron"),
       ("DEFAULT", "state_path", "/var/lib/neutron"),
       ("DEFAULT", "use_stderr", "true"),
@@ -375,7 +353,7 @@ object neutron_single_node extends OrpheraClusterPlaybook:
     )
 
   private val ml2ConfIni: ConfFile =
-    ConfFile.text(s"$srcDir/ml2_conf.ini", neutronCatalogue)(
+    ConfFile.text(s"$confRoot/neutron-server/ml2_conf.ini", neutronCatalogue)(
       ("ml2", "type_drivers", "flat,vxlan"),
       ("ml2", "tenant_network_types", "vxlan"),
       ("ml2", "mechanism_drivers", "openvswitch,l2population"),
@@ -386,7 +364,7 @@ object neutron_single_node extends OrpheraClusterPlaybook:
     )
 
   private val openvswitchAgentIni: ConfFile =
-    ConfFile.text(s"$srcDir/openvswitch_agent.ini", neutronCatalogue)(
+    ConfFile.text(s"$confRoot/neutron-server/openvswitch_agent.ini", neutronCatalogue)(
       ("ovs", "bridge_mappings", s"$physnet:$providerBridge"),
       ("ovs", "local_ip", nodeIp),
       ("securitygroup", "firewall_driver", "openvswitch"),
@@ -406,7 +384,7 @@ object neutron_single_node extends OrpheraClusterPlaybook:
     .getOrElse("192.168.1.70,192.168.1.71")
 
   private val dhcpAgentIni: ConfFile =
-    ConfFile.text(s"$srcDir/dhcp_agent.ini", neutronCatalogue)(
+    ConfFile.text(s"$confRoot/neutron-server/dhcp_agent.ini", neutronCatalogue)(
       ("DEFAULT", "interface_driver", "openvswitch"),
       ("DEFAULT", "dhcp_driver", "neutron.agent.linux.dhcp.Dnsmasq"),
       ("DEFAULT", "enable_isolated_metadata", "false"),
@@ -418,60 +396,145 @@ object neutron_single_node extends OrpheraClusterPlaybook:
   // br-provider by the Open vSwitch agent's bridge mapping. No metadata proxy (no metadata
   // agent; instances use a config drive).
   private val l3AgentIni: ConfFile =
-    ConfFile.text(s"$srcDir/l3_agent.ini", neutronCatalogue)(
+    ConfFile.text(s"$confRoot/neutron-server/l3_agent.ini", neutronCatalogue)(
       ("DEFAULT", "interface_driver", "openvswitch"),
       ("DEFAULT", "agent_mode", "legacy"),
       ("DEFAULT", "enable_metadata_proxy", "false")
     )
 
-  // One config directory per service (Kolla mounts it at
-  // /var/lib/kolla/config_files). The command for the server is checked in the
-  // image first, as the WSGI paths are in the other playbooks.
-  private val kollaConfigScript =
+  private val neutronConfText: String = neutronConf.render
+  private val ml2Text: String = ml2ConfIni.render
+  private val ovsAgentText: String = openvswitchAgentIni.render
+  private val dhcpText: String = dhcpAgentIni.render
+  private val l3Text: String = l3AgentIni.render
+
+  // Keystone's CA: the last certificate it presents (trust on first use),
+  // which must be self-signed. `chainTo DIR` leaves DIR/c1.pem ... DIR/cN.pem,
+  // each holding the certificate only: the text s_client prints after the
+  // last one (bytes read and written, session ticket) differs on every
+  // handshake, and would make the comparison with the installed copy fail.
+  private val chainTo =
+    s"""chainTo() { openssl s_client -connect $ksFqdn:5000 -servername $ksFqdn -showcerts </dev/null 2>/dev/null | awk -v d="$$1" '/-----BEGIN CERTIFICATE-----/{n++; p=1} p{print > (d "/c" n ".pem")} /-----END CERTIFICATE-----/{p=0}'; }"""
+
+  private val trustTarget =
+    """if command -v update-ca-certificates >/dev/null 2>&1; then t=/usr/local/share/ca-certificates/orphera-test-ca.crt; else t=/etc/pki/ca-trust/source/anchors/orphera-test-ca.crt; fi"""
+
+  // Current when the installed CA is the one Keystone presents now, and is in
+  // the system trust store.
+  private val caCurrent =
+    s"""$chainTo
+       |D=$$(mktemp -d)
+       |chainTo $$D
+       |N=$$(ls $$D/c*.pem 2>/dev/null | wc -l)
+       |R=1
+       |if [ "$$N" -ge 2 ]; then
+       |  $trustTarget
+       |  cmp -s $$D/c$$N.pem $caCert && cmp -s $caCert "$$t" && R=0
+       |fi
+       |rm -rf $$D
+       |exit $$R""".stripMargin
+
+  private val caScript =
     s"""set -e
-       |mkdir -p $confRoot/neutron-server $confRoot/neutron-openvswitch-agent $confRoot/neutron-dhcp-agent $confRoot/neutron-l3-agent
-       |for svc in server openvswitch-agent dhcp-agent l3-agent; do
-       |  cp $srcDir/neutron.conf $caDir/ca.crt $confRoot/neutron-$$svc/
-       |done
-       |cp $srcDir/ml2_conf.ini $confRoot/neutron-server/
-       |cp $srcDir/openvswitch_agent.ini $confRoot/neutron-openvswitch-agent/
-       |cp $srcDir/dhcp_agent.ini $confRoot/neutron-dhcp-agent/
-       |cp $srcDir/l3_agent.ini $confRoot/neutron-l3-agent/
-       |if ! podman run --rm --entrypoint sh $serverImage -c 'command -v neutron-server >/dev/null'; then
-       |  echo "neutron-server not found in $serverImage - see the header of neutron_single_node.scala" >&2
+       |$chainTo
+       |mkdir -p $caDir
+       |D=$$(mktemp -d)
+       |trap 'rm -rf $$D' EXIT
+       |chainTo $$D
+       |COUNT=$$(ls $$D/c*.pem 2>/dev/null | wc -l)
+       |if [ "$$COUNT" -lt 2 ]; then
+       |  echo "keystone at $ksFqdn:5000 presented $$COUNT certificate(s); expected leaf + CA - apply keystone_single_node.scala (it must serve server-chain.crt)" >&2
        |  exit 1
        |fi
-       |if ! podman run --rm --entrypoint sh $ovsAgentImage -c 'test -f /etc/neutron/rootwrap.conf'; then
-       |  echo "/etc/neutron/rootwrap.conf not found in $ovsAgentImage; found:" >&2
-       |  podman run --rm --entrypoint sh $ovsAgentImage -c 'find / -name "rootwrap*.conf" -path "*neutron*" 2>/dev/null | head' >&2
-       |  exit 1
-       |fi
-       |COMMON='{"source": "/var/lib/kolla/config_files/neutron.conf", "dest": "/etc/neutron/neutron.conf", "owner": "neutron", "perm": "0600"}, {"source": "/var/lib/kolla/config_files/ca.crt", "dest": "/etc/neutron/ssl/ca.crt", "owner": "neutron", "perm": "0644"}'
-       |PERMS='"permissions": [{"path": "/var/log/kolla/neutron", "owner": "neutron:kolla", "recurse": true}, {"path": "/var/lib/neutron", "owner": "neutron:neutron", "recurse": true}]'
-       |cat > $confRoot/neutron-server/config.json <<JSON
-       |{"command": "neutron-server --config-file /etc/neutron/neutron.conf --config-file /etc/neutron/plugins/ml2/ml2_conf.ini", "config_files": [$$COMMON, {"source": "/var/lib/kolla/config_files/ml2_conf.ini", "dest": "/etc/neutron/plugins/ml2/ml2_conf.ini", "owner": "neutron", "perm": "0600"}], $$PERMS}
-       |JSON
-       |cat > $confRoot/neutron-openvswitch-agent/config.json <<JSON
-       |{"command": "neutron-openvswitch-agent --config-file /etc/neutron/neutron.conf --config-file /etc/neutron/plugins/ml2/openvswitch_agent.ini", "config_files": [$$COMMON, {"source": "/var/lib/kolla/config_files/openvswitch_agent.ini", "dest": "/etc/neutron/plugins/ml2/openvswitch_agent.ini", "owner": "neutron", "perm": "0600"}], $$PERMS}
-       |JSON
-       |cat > $confRoot/neutron-dhcp-agent/config.json <<JSON
-       |{"command": "neutron-dhcp-agent --config-file /etc/neutron/neutron.conf --config-file /etc/neutron/dhcp_agent.ini", "config_files": [$$COMMON, {"source": "/var/lib/kolla/config_files/dhcp_agent.ini", "dest": "/etc/neutron/dhcp_agent.ini", "owner": "neutron", "perm": "0600"}], $$PERMS}
-       |JSON
-       |cat > $confRoot/neutron-l3-agent/config.json <<JSON
-       |{"command": "neutron-l3-agent --config-file /etc/neutron/neutron.conf --config-file /etc/neutron/l3_agent.ini", "config_files": [$$COMMON, {"source": "/var/lib/kolla/config_files/l3_agent.ini", "dest": "/etc/neutron/l3_agent.ini", "owner": "neutron", "perm": "0600"}], $$PERMS}
-       |JSON
-       |echo "kolla config written under $confRoot"""".stripMargin
+       |cp $$D/c$$COUNT.pem $caCert
+       |openssl verify -CAfile $caCert $$D/c1.pem
+       |SUBJ=$$(openssl x509 -in $caCert -noout -subject | sed 's/^subject=//')
+       |ISS=$$(openssl x509 -in $caCert -noout -issuer | sed 's/^issuer=//')
+       |if [ "$$SUBJ" != "$$ISS" ]; then echo "last certificate is not self-signed: $$SUBJ / $$ISS" >&2; exit 1; fi
+       |$trustTarget
+       |cp $caCert "$$t"
+       |if command -v update-ca-certificates >/dev/null 2>&1; then update-ca-certificates; else update-ca-trust; fi
+       |echo "Keystone CA installed: $$SUBJ"""".stripMargin
+
+  // The files every service's config.json copies in, and the ownership it sets.
+  private val commonFiles =
+    """{"source": "/var/lib/kolla/config_files/neutron.conf", "dest": "/etc/neutron/neutron.conf", "owner": "neutron", "perm": "0600"}, {"source": "/var/lib/kolla/config_files/ca.crt", "dest": "/etc/neutron/ssl/ca.crt", "owner": "neutron", "perm": "0644"}"""
+  private val permissions =
+    """"permissions": [{"path": "/var/log/kolla/neutron", "owner": "neutron:kolla", "recurse": true}, {"path": "/var/lib/neutron", "owner": "neutron:neutron", "recurse": true}]"""
+
+  // One entry per service: its command line, and the .ini it carries (source
+  // name, destination under /etc/neutron, text).
+  private final case class Svc(
+      name: String,
+      command: String,
+      ini: String,
+      iniDest: String,
+      iniText: String
+  )
+  private val svcs = List(
+    Svc(
+      "neutron-server",
+      "neutron-server --config-file /etc/neutron/neutron.conf --config-file /etc/neutron/plugins/ml2/ml2_conf.ini",
+      "ml2_conf.ini",
+      "/etc/neutron/plugins/ml2/ml2_conf.ini",
+      ml2Text
+    ),
+    Svc(
+      "neutron-openvswitch-agent",
+      "neutron-openvswitch-agent --config-file /etc/neutron/neutron.conf --config-file /etc/neutron/plugins/ml2/openvswitch_agent.ini",
+      "openvswitch_agent.ini",
+      "/etc/neutron/plugins/ml2/openvswitch_agent.ini",
+      ovsAgentText
+    ),
+    Svc(
+      "neutron-dhcp-agent",
+      "neutron-dhcp-agent --config-file /etc/neutron/neutron.conf --config-file /etc/neutron/dhcp_agent.ini",
+      "dhcp_agent.ini",
+      "/etc/neutron/dhcp_agent.ini",
+      dhcpText
+    ),
+    Svc(
+      "neutron-l3-agent",
+      "neutron-l3-agent --config-file /etc/neutron/neutron.conf --config-file /etc/neutron/l3_agent.ini",
+      "l3_agent.ini",
+      "/etc/neutron/l3_agent.ini",
+      l3Text
+    )
+  )
+  private def configJson(s: Svc): String =
+    s"""{"command": "${s.command}", "config_files": [$commonFiles, {"source": "/var/lib/kolla/config_files/${s.ini}", "dest": "${s.iniDest}", "owner": "neutron", "perm": "0600"}], $permissions}
+       |""".stripMargin
 
   // neutron-db-manage runs in a one-off container with the two config files
   // bind-mounted (entrypoint overridden, so kolla_set_configs does not run).
   private val dbSyncScript =
     s"""set -e
-       |podman run --rm --network host --user root --entrypoint neutron-db-manage -v $srcDir/neutron.conf:/etc/neutron/neutron.conf:ro,z -v $srcDir/ml2_conf.ini:/etc/neutron/plugins/ml2/ml2_conf.ini:ro,z -v $logDir:/var/log/kolla/neutron:z $serverImage --config-file /etc/neutron/neutron.conf --config-file /etc/neutron/plugins/ml2/ml2_conf.ini upgrade heads
+       |podman run --rm --network host --user root --entrypoint neutron-db-manage -v $confRoot/neutron-server/neutron.conf:/etc/neutron/neutron.conf:ro,z -v $confRoot/neutron-server/ml2_conf.ini:/etc/neutron/plugins/ml2/ml2_conf.ini:ro,z -v $logDir:/var/log/kolla/neutron:z $serverImage --config-file /etc/neutron/neutron.conf --config-file /etc/neutron/plugins/ml2/ml2_conf.ini upgrade heads
        |echo "neutron database synced"""".stripMargin
+  private val dbStamp = Resource.sha256(dbSyncScript + neutronConfText + ml2Text)
+
+  // True when the database, queried as the neutron user through the VIP, has the
+  // `networks` table. The query runs with the image's own Python (the
+  // interpreter named on the first line of neutron-db-manage), which has pymysql.
+  private val dbHasTables =
+    s"""podman run --rm -i --network host --entrypoint sh $serverImage -c 'exec $$(head -1 "$$(command -v neutron-db-manage)" | sed "s/^#!//") -' >/dev/null 2>&1 <<'PYEOF'
+       |import sys, pymysql
+       |try:
+       |    c = pymysql.connect(host='$vip', user='$dbUser', password='${dbPassword.reveal}', database='$dbName')
+       |    c.cursor().execute('SELECT COUNT(*) FROM networks')
+       |except Exception:
+       |    sys.exit(1)
+       |PYEOF""".stripMargin
+  private val dbCurrent =
+    s"""[ "$$(cat $stateDir/db.stamp 2>/dev/null)" = "$dbStamp" ] &&
+       |$dbHasTables""".stripMargin
+  private val dbSyncWithStamp =
+    s"""$dbSyncScript
+       |echo $dbStamp > $stateDir/db.stamp""".stripMargin
 
   // Standard-library Python, as in the other service playbooks. Plain string filled
   // in with replace(). Subcommands:
-  //   register | unregister | catalog | agents | agents-up |
+  //   register | registered | unregister | catalog | agents | agents-up |
   //   net-list | net-create | net-delete <id> | tenant-cycle | provider-net
   // (net-create makes a flat network on the physical network `provider` and a
   // subnet with DHCP off, net-delete removes both: that exercises the API, the
@@ -572,6 +635,22 @@ def register():
         elif ep['url'] != NEUTRON:
             call('PATCH', KS + '/endpoints/' + ep['id'], {'endpoint': {'url': NEUTRON}}, token)
     print('registered neutron in keystone (project service, user neutron, service type network, 3 endpoints)')
+
+
+def registered():
+    # Exit 0 only when everything register() makes is in place: the neutron
+    # user can get a token in project service, and service `network` has the
+    # three endpoints at NEUTRON. Makes no change.
+    get_token('neutron', NEUTRON_PW, 'service')
+    token, _ = get_token('admin', ADMIN_PW, 'admin')
+    service = find(token, '/services?type=network', 'services')
+    if service is None:
+        die('no service of type network')
+    for iface in ('public', 'internal', 'admin'):
+        ep = find(token, '/endpoints?service_id=%s&interface=%s' % (service['id'], iface), 'endpoints')
+        if ep is None or ep['url'] != NEUTRON:
+            die('endpoint %s missing or wrong' % iface)
+    print('neutron is registered in keystone')
 
 
 def unregister():
@@ -792,6 +871,8 @@ if __name__ == '__main__':
     cmd = sys.argv[1] if len(sys.argv) > 1 else ''
     if cmd == 'register':
         register()
+    elif cmd == 'registered':
+        registered()
     elif cmd == 'unregister':
         unregister()
     elif cmd == 'catalog':
@@ -811,127 +892,185 @@ if __name__ == '__main__':
     elif cmd == 'provider-net':
         provider_net()
     else:
-        die('usage: orphera-neutron-api register | unregister | catalog | agents | agents-up | net-list | net-create | net-delete <id> | tenant-cycle | provider-net')
+        die('usage: orphera-neutron-api register | registered | unregister | catalog | agents | agents-up | net-list | net-create | net-delete <id> | tenant-cycle | provider-net')
 """
 
-  private val helperScript =
-    "cat > /usr/local/sbin/orphera-neutron-api <<'PYEOF'\n" +
-      apiHelperPython
-        .replace("@@KS@@", ksFqdn)
-        .replace("@@NEUTRON@@", s"http://$fqdn:$apiPort")
-        .replace("@@ADMINPW@@", adminPassword.reveal)
-        .replace("@@NEUTRONPW@@", neutronPassword.reveal)
-        .replace("@@PHYSNET@@", physnet)
-        .replace("@@CA@@", s"$caDir/ca.crt") +
-      "\nPYEOF\nchmod 700 /usr/local/sbin/orphera-neutron-api\necho wrote /usr/local/sbin/orphera-neutron-api\n"
+  private val helper =
+    apiHelperPython
+      .replace("@@KS@@", ksFqdn)
+      .replace("@@NEUTRON@@", s"http://$fqdn:$apiPort")
+      .replace("@@ADMINPW@@", adminPassword.reveal)
+      .replace("@@NEUTRONPW@@", neutronPassword.reveal)
+      .replace("@@PHYSNET@@", physnet)
+      .replace("@@CA@@", caCert)
+  private val helperPath = "/usr/local/sbin/orphera-neutron-api"
 
   // The root answers its version document without a token (200, or 300).
-  private val apiHealthScript =
-    s"""CODE=$$(curl -s -o /dev/null -w '%{http_code}' http://localhost:$apiPort/)
-       |[ "$$CODE" = "200" ] || [ "$$CODE" = "300" ]""".stripMargin
+  private val healthy =
+    s"""CODE=$$(curl -s -o /dev/null -w '%{http_code}' http://localhost:$apiPort/); [ "$$CODE" = "200" ] || [ "$$CODE" = "300" ]"""
+  private val waitHealthy =
+    s"""for i in $$(seq 1 24); do
+       |  $healthy && exit 0
+       |  sleep 5
+       |done
+       |echo "neutron-server does not answer on http://localhost:$apiPort - see 'journalctl -xeu orphera-neutron-server' and $logDir" >&2
+       |exit 1""".stripMargin
 
-  val playbook: ClusterPlaybook =
-    clusterPlaybook("neutron-single-node")(
-      stage("neutron-database", "tst3")
-        .task(s"create $dbName database and $dbUser on the Galera cluster")(
-          Task.RunCommand(List("sh", "-c", createDatabaseScript))
-        )
-        .build,
+  private val agentsUp = s"$helperPath agents-up >/dev/null 2>&1"
+  private val waitAgentsUp =
+    s"""for i in $$(seq 1 30); do $helperPath agents-up && exit 0; sleep 5; done
+       |$helperPath agents
+       |exit 1""".stripMargin
 
-      stage("neutron-rabbitmq", rabbitNode)
-        .task(
-          s"create the $rabbitVhost vhost and the $rabbitUser user on RabbitMQ"
-        )(
-          Task.RunCommand(List("sh", "-c", rabbitScript), timeoutSeconds = 120)
-        )
-        .build,
-
-      withServices(
-        stage("install-neutron", node)
-          .task("wait for apt and dpkg to be idle")(
-            Task.RunCommand(
-              List("sh", "-c", waitAptIdleScript),
-              timeoutSeconds = 960
-            )
-          )
-          .task("install podman, Open vSwitch and tools")(
-            Task.Install(packages = hostPackages, updateCache = true)
-          )
-          .task(s"make $providerNic an address-less layer-2 port")(
-            Task.RunCommand(
-              List("sh", "-c", dropAddressScript),
-              timeoutSeconds = 120
-            )
-          )
-          .task(s"create $providerBridge with $providerNic as its port")(
-            Task.RunCommand(List("sh", "-c", bridgeScript), timeoutSeconds = 60)
-          )
-          .task("use the Kolla cache as a mirror for quay.io")(
-            Task.RunCommand(List("sh", "-c", useCacheScript))
-          )
-          .task("pull the Neutron images")(
-            Task.RunCommand(List("sh", "-c", pullScript), timeoutSeconds = 2400)
-          )
-          .task("fetch Keystone's CA from its TLS handshake")(
-            Task.RunCommand(
-              List("sh", "-c", fetchCaScript),
-              timeoutSeconds = 60
-            )
-          )
-          .task("create the Neutron directories")(
-            Task.RunCommand(List("sh", "-c", neutronDirsScript))
-          )
-          .task("write neutron.conf")(confResource.write(neutronConf))
-          .task("write ml2_conf.ini")(confResource.write(ml2ConfIni))
-          .task("write openvswitch_agent.ini")(
-            confResource.write(openvswitchAgentIni)
-          )
-          .task("write dhcp_agent.ini")(confResource.write(dhcpAgentIni))
-          .task("write l3_agent.ini")(confResource.write(l3AgentIni))
-          .task("write the Kolla config for the four services")(
-            Task.RunCommand(
-              List("sh", "-c", kollaConfigScript),
-              timeoutSeconds = 180
-            )
-          )
-          .task("neutron-db-manage upgrade heads")(
-            Task
-              .RunCommand(List("sh", "-c", dbSyncScript), timeoutSeconds = 900)
-          )
-          .task("write the Neutron API helper")(
-            Task.RunCommand(List("sh", "-c", helperScript))
-          )
-          .task("register Neutron in Keystone")(
-            Task.RunCommand(
-              List("sh", "-c", "/usr/local/sbin/orphera-neutron-api register"),
-              timeoutSeconds = 120
-            )
-          )
-      ).build,
-
-      stage("confirm-neutron-healthy", node)
-        .waitFor(
-          HealthCheck.Command(
-            onNode = node,
-            command = List("sh", "-c", apiHealthScript),
-            pollIntervalSeconds = 5,
-            timeoutSeconds = 120
-          )
-        )
-        .task("the Open vSwitch, DHCP and L3 agents report in through the API")(
-          Task.RunCommand(
-            List(
-              "sh",
-              "-c",
-              "for i in $(seq 1 30); do /usr/local/sbin/orphera-neutron-api agents-up && exit 0; sleep 5; done; /usr/local/sbin/orphera-neutron-api agents; exit 1"
-            ),
-            timeoutSeconds = 240
-          )
-        )
-        .task("neutron confirmed")(
-          Task.Debug(
-            s"Neutron up at http://$fqdn:$apiPort ($nodeIp): neutron-server, Open vSwitch agent, DHCP agent and L3 agent, VXLAN tenant networks (tunnel endpoint $nodeIp), flat provider network `$physnet` on $providerBridge/$providerNic as the external network, RabbitMQ vhost $rabbitVhost on $rabbitIp:5672, database via $vip:3306, identity from $ksUrl. No metadata agent (config drive). Test: manifests/test_neutron.sh"
-          )
-        )
-        .build
+  def describe(target: Node): List[ApplyResource] =
+    val aptWait = command(
+      "wait for apt and dpkg to be idle",
+      waitAptIdleScript,
+      unless = aptIdle,
+      timeout = 960
     )
+    val tools = hostPackages.map(p => pkg(p, updateCache = true).after(aptWait))
+    val podman = tools(0)
+    val ovsPackage = tools.last
+
+    val ovsService = service("openvswitch-switch.service").after(ovsPackage)
+    val noAddress = command(
+      s"make $providerNic an address-less layer-2 port",
+      dropAddressScript,
+      unless = addressDropped,
+      timeout = 120
+    ).after(tools*)
+    val bridge = command(
+      s"create $providerBridge with $providerNic as its port",
+      bridgeScript,
+      unless = bridgeDone,
+      timeout = 60
+    ).after(ovsService, noAddress)
+
+    val mirrorDir = directory("/etc/containers/registries.conf.d").after(podman)
+    val mirror = file(
+      "/etc/containers/registries.conf.d/orphera-kolla-cache.conf",
+      registryMirror,
+      mode = "0644"
+    ).after(mirrorDir)
+    val pulled = command(
+      "pull the Neutron images",
+      pullScript,
+      unless = imagesPresent,
+      timeout = 2400
+    ).after(podman, mirror)
+    val carried = command(
+      "check the images carry neutron-server and the rootwrap config",
+      imagesCarryFail,
+      unless = imagesCarry,
+      timeout = 120
+    ).after(pulled)
+
+    val caDirectory = directory(caDir, mode = "0755").after(podman)
+    val ca = command(
+      "fetch Keystone's CA from its TLS handshake",
+      caScript,
+      unless = caCurrent,
+      timeout = 60
+    ).after(caDirectory, tools(1))
+
+    val logDirectory = directory(logDir)
+    val stateDirectory = directory(stateDir)
+
+    // One config directory per service, mounted by Kolla at /var/lib/kolla/config_files.
+    val units = svcs.zip(neutronServices).map { (svc, c) =>
+      val dir = s"$confRoot/${svc.name}"
+      val unitService = service(c.unitName)
+      val dirRes = directory(dir, mode = "0755")
+      val conf = secretFile(
+        s"$dir/neutron.conf",
+        Secret(neutronConfText), // it holds the database, message bus and service passwords
+        mode = "0640",
+        owner = "root",
+        group = "root"
+      ).after(dirRes).notifies(unitService)
+      val ini = file(
+        s"$dir/${svc.ini}",
+        svc.iniText,
+        mode = "0644",
+        owner = "root",
+        group = "root"
+      ).after(dirRes).notifies(unitService)
+      val kollaCa = command(
+        s"copy Keystone's CA to the ${svc.name} config",
+        s"cp $caCert $dir/ca.crt",
+        unless = s"cmp -s $caCert $dir/ca.crt"
+      ).after(ca, dirRes).notifies(unitService)
+      val json = file(
+        s"$dir/config.json",
+        configJson(svc),
+        mode = "0644",
+        owner = "root",
+        group = "root"
+      ).after(dirRes).notifies(unitService)
+      val unitFile = file(
+        c.unitPath,
+        c.render,
+        mode = "0644",
+        owner = "root",
+        group = "root"
+      ).notifies(unitService)
+      (unitService, List(dirRes, conf, ini, kollaCa, json, unitFile), List(conf, ini, kollaCa, json, unitFile))
+    }
+    val serverConf = units.head._2(1)
+    val serverIni = units.head._2(2)
+
+    val dbSync = command(
+      "neutron-db-manage upgrade heads",
+      dbSyncWithStamp,
+      unless = dbCurrent,
+      timeout = 900
+    ).after(carried, serverConf, serverIni, logDirectory, stateDirectory)
+
+    val helperFile = secretFile(
+      helperPath,
+      Secret(helper), // it holds the admin and neutron passwords
+      mode = "0700",
+      owner = "root",
+      group = "root"
+    )
+    // Registration comes before the services start, as for Nova.
+    val registered = command(
+      "register Neutron in Keystone",
+      s"$helperPath register",
+      unless = s"$helperPath registered >/dev/null 2>&1",
+      timeout = 120
+    ).after(helperFile, ca)
+
+    val running = units.map { (unitService, _, deps) =>
+      unitService.after((dbSync :: registered :: bridge :: carried :: deps)*)
+    }
+
+    val answering = command(
+      "neutron-server answers on its port",
+      waitHealthy,
+      unless = healthy,
+      timeout = 180
+    ).after(running*)
+    val reporting = command(
+      "the Open vSwitch, DHCP and L3 agents report in through the API",
+      waitAgentsUp,
+      unless = agentsUp,
+      timeout = 240
+    ).after((answering :: running)*)
+
+    tools ++ List(
+      aptWait,
+      ovsService,
+      noAddress,
+      bridge,
+      mirrorDir,
+      mirror,
+      pulled,
+      carried,
+      caDirectory,
+      ca,
+      logDirectory,
+      stateDirectory
+    ) ++ units.flatMap(_._2) ++ List(dbSync, helperFile, registered) ++
+      running ++ List(answering, reporting)
