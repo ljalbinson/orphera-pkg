@@ -471,7 +471,9 @@ step_telemetry() {
 }
 
 step_trove() {
-  playbook trove_single_node.scala
+  apply_desc trove_database.scala
+  apply_desc trove_rabbitmq.scala
+  apply_desc trove_single_node.scala
   local out
   out=$(run_on tst25 "curl -s -o /dev/null -w 'http=%{http_code}' http://localhost:8779/")
   check "the Trove API answers its version document" contains "http=" "$out"
