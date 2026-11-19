@@ -416,7 +416,7 @@ step_manila() {
 }
 
 step_rgw() {
-  playbook rgw_single_node.scala
+  apply_desc rgw_single_node.scala
   local out
   out=$(run_on tst0 "curl -s -o /dev/null -w 'http=%{http_code}' http://10.10.5.12:8080/")
   check "RGW answers on 8080" contains "http=" "$out"

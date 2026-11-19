@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# DRAFT end-to-end test for rgw_single_node.scala.
+# End-to-end test for rgw_single_node.scala.
 #
-# Applies the playbook, then checks independently of its own health check:
+# Applies the description, then checks independently of its own checks:
 #  - the RGW daemon is listed as running by the Ceph orchestrator,
 #  - RGW answers on 8080,
 #  - an unauthenticated Swift request is refused (401),
@@ -11,11 +11,11 @@
 #  - a container and an object are made through the Swift API with a Keystone token, read back and deleted,
 #  - a bucket and an object are made through the S3 API with EC2 credentials from Keystone, read back and
 #    deleted,
-#  - a second run of the playbook succeeds without restarting the daemon, and both APIs still work.
+#  - a second run of the description changes nothing (so the daemon is not restarted), and both APIs still work.
 #
 # Prerequisites: Keystone and Ceph healthy; tst0 has an agent and cephadm.
 # Run from scala0, in orphera-pkg:   manifests/test_rgw.sh
-# NO_APPLY=1 skips the playbook runs and only checks.
+# NO_APPLY=1 skips the apply runs and only checks.
 # Exit code: 0 if every assertion passes, 1 otherwise.
 
 set -uo pipefail
@@ -43,7 +43,7 @@ assert_contains() {
 
 if [ -z "${NO_APPLY:-}" ]; then
   log "install"
-  if ! orphera cluster-playbook rgw_single_node.scala; then
+  if ! orphera apply rgw_single_node.scala; then
     log "FAIL: rgw_single_node.scala did not complete"; exit 1
   fi
 fi
@@ -79,12 +79,12 @@ assert_contains "a bucket and an object are made with EC2 credentials, read back
 
 if [ -z "${NO_APPLY:-}" ]; then
   log "re-apply (idempotence)"
-  if OUT=$(orphera cluster-playbook rgw_single_node.scala 2>&1); then
-    log "PASS: second run completed"; PASS=$((PASS + 1))
-    assert_contains "the second run leaves the RGW daemon alone" "RGW configuration unchanged" "$OUT"
-  else
-    log "FAIL: second run of rgw_single_node.scala failed"; printf '%s\n' "$OUT" | tail -20 | sed 's/^/    /'; FAIL=$((FAIL + 1))
+  SECOND=$(orphera apply rgw_single_node.scala 2>&1); RC=$?
+  printf '%s\n' "$SECOND"
+  if [ "$RC" -ne 0 ]; then
+    log "FAIL: second run of rgw_single_node.scala failed"; FAIL=$((FAIL + 1))
   fi
+  assert_contains "the second run changed nothing (the RGW daemon is left alone)" "0 changed" "$SECOND"
   OUT=$(run_on "sudo $HELPER swift-cycle")
   assert_contains "Swift still works after the second run" "swift cycle ok" "$OUT"
   OUT=$(run_on "sudo $HELPER s3-cycle")

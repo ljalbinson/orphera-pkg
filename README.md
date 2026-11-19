@@ -2823,7 +2823,7 @@ true in `skyline.yaml` (over plain HTTP it would drop the session cookie). Run o
 view on: `https://tst13.ljalbinson.com:9999/monitor-center/physical-node-admin` shows the node_exporter data from tst7 (CPU, memory, disk and
 file systems per node); `/monitor-center/overview-admin` expects other exporters and shows zeros here.
 
-**Object storage** (`manifests/rgw_single_node.scala`, undone by `rgw_teardown.scala`, checked by `test_rgw.sh`) is the Ceph RADOS Gateway with
+**Object storage** (`manifests/rgw_single_node.scala`, a description applied with `orphera apply`, undone by `rgw_teardown.scala`, checked by `test_rgw.sh`) is the Ceph RADOS Gateway with
 Keystone as its identity service. It is a cephadm service on the existing Ceph cluster (one daemon on tst0, `http://10.10.5.12:8080`), so it needs
 no new VM and no Kolla image. Both APIs authenticate against Keystone: **Swift** with an ordinary token (the catalog lists service type
 `object-store`; users need the role `member` or `admin` in their project), and **S3** with the EC2 credentials Keystone issues (service type `s3`;
@@ -2839,7 +2839,7 @@ use path-style addressing and region `us-east-1`). After it is up, with the CLIs
 Each project gets its own namespace (implicit tenants). The RGW options and the service password are kept in Ceph's configuration database (set with
 `ceph config set client.rgw.orphera`), and the daemon is restarted only when they change. `rgw_teardown.scala` keeps the RGW pools and their data;
 `RGW_PURGE_POOLS=yes` deletes them. Not set up: a second daemon or a load balancer, TLS on the gateway, quotas, multisite, and the use of object
-storage by Glance or Cinder backup. The playbook and its test have not been run.
+storage by Glance or Cinder backup. The description and its test have not been run.
 
 **Building the images from source** (`manifests/kolla_build.scala`, a description applied with `orphera apply`, undone by `kolla_build_teardown.scala`, checked by `test_kolla_build.sh`)
 sets up tst21 as a builder, so the OpenStack containers do not have to come from quay.io. It keeps four caches: the OpenStack source
@@ -3404,7 +3404,7 @@ playbooks marked DRAFT there have been written but not all run on the lab.
 | `ceph_client_upgrade.scala`, `ceph_key_rotation.scala` | Ceph's own client for the OpenStack services and compute hosts, then their keys rotated to `aes256k` and the monitors set to `aes256k` only |
 | `lustre_cluster_script.scala` | the Lustre build as an `OrpheraScript` (replaces `lustre_cluster.scala`) |
 | `apt_cache_teardown.scala`, `rpm_cache_teardown.scala`, `kolla_cache_teardown.scala` (a description) | Undo the apt cache (tst11) and its clients, the RPM cache (tst12) and its clients, and the Kolla image cache (tst9) |
-| `keystone_teardown.scala`, `glance_teardown.scala`, `placement_teardown.scala`, `cinder_teardown.scala`, `rabbitmq_teardown.scala`, `heat_teardown.scala`, `nova_teardown.scala`, `neutron_teardown.scala`, `horizon_teardown.scala`, `barbican_teardown.scala`, `designate_teardown.scala`, `nova_compute_teardown.scala`, `skyline_teardown.scala` | Undo the matching `*_single_node.scala` playbook (see the OpenStack example below) |
+| `keystone_teardown.scala`, `glance_teardown.scala`, `placement_teardown.scala`, `cinder_teardown.scala`, `rabbitmq_teardown.scala`, `heat_teardown.scala`, `nova_teardown.scala`, `neutron_teardown.scala`, `horizon_teardown.scala`, `barbican_teardown.scala`, `designate_teardown.scala`, `nova_compute_teardown.scala`, `skyline_teardown.scala`, `rgw_teardown.scala` | Undo the matching `*_single_node.scala` playbook (see the OpenStack example below) |
 
 ## Known gaps / not yet built
 
