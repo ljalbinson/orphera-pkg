@@ -1,49 +1,59 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import orphera.orchestrator.*
-import orphera.orchestrator.ClusterPlaybookDsl.*
 import orphera.orchestrator.kolla.*
 import orphera.orchestrator.conf.*
 
-// DRAFT. OpenStack Glance (image service), one node (tst13), Kolla image under
-// podman, images stored in the existing Ceph cluster as RBD images.
-// Modelled on cinder_single_node.scala; read its header for the conventions.
+// OpenStack Glance (image service), one node (tst13), Kolla image under podman,
+// images stored in the existing Ceph cluster as RBD images, as a declarative
+// description (OrpheraApply, docs/APPLY-DESIGN.md). It replaced the cluster
+// playbook of the same name; a second run changes nothing and restarts
+// nothing, and `--check` shows what would change. Modelled on
+// keystone_single_node.scala, which explains the conventions.
 //
-// Prerequisites, not checked here:
-//   - Galera + VIP healthy (mariadb_galera_cluster.scala,
-//     mariadb_haproxy_keepalived.scala)
-//   - Ceph healthy with OSDs (cephadm_*.scala)
-//   - Keystone up on tst6 (keystone_single_node.scala), serving the CA chain
-//   - agent on tst13; tst9's Kolla cache is optional
+// Three descriptions, since one description cannot order its nodes. Apply them
+// in this order:
 //
-// What it builds on tst13: one container, glance-api (Kolla image, plain HTTP on
-// 9292, host networking), run by systemd as orphera-glance-api.service. Unlike
-// Cinder, Glance needs no message bus here, so there is no RabbitMQ.
+//   orphera apply manifests/glance_database.scala     # the database and user (tst3)
+//   orphera apply manifests/glance_ceph.scala         # the `images` pool and client.glance (tst0)
+//   orphera apply manifests/glance_single_node.scala  # this one (tst13)
 //
-// Stages:
-//   - glance-database (tst3, a Galera node): the `glance` database and user.
-//   - ceph-pool-and-user (tst0, a Ceph node): the `images` pool and the
-//     `client.glance` cephx user with a FIXED test key (see cephKey; the reason
-//     is the same as for Cinder: a stage cannot capture another node's output).
-//   - install-glance (tst13): packages, cache mirror, image pull, Keystone's CA
-//     from its TLS handshake, ceph client config, glance-api.conf, Kolla config,
-//     `glance-manage db_sync`, the unit, then registration in Keystone (user
-//     `glance` in project `service`, service `image`, three endpoints).
-//   - confirm-glance-healthy (tst13): the API answers and an image can be
-//     listed through Keystone-authenticated access.
+// Prerequisites, not checked here: Galera + VIP healthy, Ceph healthy with
+// OSDs, Keystone up on tst6 serving the CA chain (keystone_single_node.scala),
+// the agent on tst13. tst9's Kolla cache is optional.
+//
+// What it builds on tst13: one container, glance-api (Kolla image, plain HTTP
+// on 9292, host networking), run by systemd as orphera-glance-api.service, and
+// the registration in Keystone (user `glance` in project `service`, service
+// `image`, three endpoints). No message bus is needed.
+//
+// How it stays idempotent:
+//   - Keystone's CA is fetched from its TLS handshake (trust on first use) and
+//     compared with the installed copy each run, so a Keystone rebuilt with a
+//     new CA is trusted again and Glance restarts.
+//   - glance-api.conf, the Ceph keyring and the helper hold secrets, so they
+//     are secret files (never shown in a plan or diff). The Kolla files are
+//     written straight into /etc/kolla/glance-api.
+//   - db_sync (and the stamp of what it was run with) is skipped while the stamp
+//     matches and `glance-manage db check` says the schema is current, so a
+//     database dropped since the last run is synced again.
+//   - The Keystone registration is skipped while the helper's `registered`
+//     check (a real token for the glance user, the service and three endpoint
+//     URLs) passes.
 //
 // Ceph: Glance's RBD store keeps each image as an RBD image in pool `images`
 // with a protected snapshot, so Cinder can later create volumes from it by
 // copy-on-write clone (show_image_direct_url is on for that).
 //
-// Test-only hardcoded credentials, same convention and caveat as the other
-// manifests. Not compiled where this was written; the first run on scala0 is
-// the first compile.
-object glance_single_node extends OrpheraClusterPlaybook:
+// Test-only credentials from the secret store (`orphera secrets`), as before.
+object glance_single_node extends OrpheraApply:
+  import Resources.*
 
   private val node = "tst13"
   private val fqdn = "tst13.ljalbinson.com"
   private val nodeIp = "10.10.5.25"
+
+  override def nodes: List[String] = List(node)
 
   private val ksFqdn = "tst6.ljalbinson.com"
   private val vip = "10.10.5.100"
@@ -58,141 +68,47 @@ object glance_single_node extends OrpheraClusterPlaybook:
   private val dbPassword = Secrets.secret("glance/db")
   private val glancePassword = Secrets.secret("glance/service")
 
-  // A valid cephx key (base64 of a type/timestamp/length header plus 16 random
-  // bytes), generated once and committed on purpose: test infrastructure only.
+  // Keep in step with glance_ceph.scala.
   private val cephKey = Secrets.secret("glance/ceph-key")
   private val cephPool = "images"
+  private val cephMons = List("tst0", "tst1", "tst2")
 
   private val confRoot = "/etc/kolla"
-  private val srcDir = "/etc/kolla/glance"
+  private val apiDir = "/etc/kolla/glance-api"
   private val logDir = "/var/log/kolla/glance"
   private val stateDir = "/var/lib/orphera/glance"
+  private val caDir = "/etc/kolla/glance-ca"
+  private val caCert = s"$caDir/ca.crt"
+  private val ksUrl = s"https://$ksFqdn:5000"
 
-  // The container as data: the unit file text and the start task come from it
-  // (orchestrator/.../kolla/Container.scala), and are checked by ContainerCheck.
-  // Defined after confRoot, logDir and stateDir, which it reads; a val used
-  // before its definition is null in an object.
+  // The container as data: the unit file text comes from it
+  // (orchestrator/.../kolla/Container.scala), checked by ContainerCheck. Defined
+  // after the directories it reads; a val used before its definition is null in
+  // an object.
   private val glanceApi = Container(
     name = ContainerName("glance-api"),
     image = Image("glance-api", Release.R2025_1, Base.UbuntuNoble, registry),
     mounts = List(
-      Mount(s"$confRoot/glance-api", "/var/lib/kolla/config_files"),
+      Mount(apiDir, "/var/lib/kolla/config_files"),
       Mount(logDir, "/var/log/kolla/glance", Access.ReadWrite),
       Mount(stateDir, "/var/lib/glance", Access.ReadWrite)
     ),
     env = List("KOLLA_CONFIG_STRATEGY" -> "COPY_ALWAYS")
   )
   private val apiImage = glanceApi.image.ref
-  private val caDir = "/etc/kolla/glance-ca"
-  private val ksUrl = s"https://$ksFqdn:5000"
 
   private val hostPackages =
     List("podman", "openssl", "curl", "ca-certificates", "python3")
 
-  // ---- tst3 (Galera) and tst0 (Ceph) ----------------------------------
-
-  private val createDatabaseScript =
-    s"""mariadb -N -e "CREATE DATABASE IF NOT EXISTS $dbName; CREATE USER IF NOT EXISTS '$dbUser'@'%' IDENTIFIED BY '${dbPassword.reveal}'; GRANT ALL PRIVILEGES ON $dbName.* TO '$dbUser'@'%'; FLUSH PRIVILEGES;""""
-
-  // Same cipher rule as cinder_single_node.scala: `aes` is allowed only for an `aes` key (see there).
-  private val cephScript =
-    s"""set -e
-       |${CephKeys.allowCiphersFor(cephKey.reveal, "client.glance")}
-       |cephadm shell -- ceph osd pool create $cephPool
-       |cephadm shell -- rbd pool init $cephPool
-       |cat > /tmp/glance.keyring <<'KEYRING'
-       |[client.glance]
-       |    key = ${cephKey.reveal}
-       |    caps mon = "profile rbd"
-       |    caps osd = "profile rbd pool=$cephPool"
-       |KEYRING
-       |cephadm shell --mount /tmp/glance.keyring -- ceph auth import -i /mnt/glance.keyring
-       |rm -f /tmp/glance.keyring
-       |cephadm shell -- ceph auth get client.glance >/dev/null
-       |echo "pool $cephPool and client.glance ready"""".stripMargin
-
-  // ---- tst13 ----------------------------------------------------------
-
-  private val useCacheScript =
-    s"""mkdir -p /etc/containers/registries.conf.d
-       |cat > /etc/containers/registries.conf.d/orphera-kolla-cache.conf <<'REG'
-       |[[registry]]
-       |prefix = "quay.io"
-       |location = "quay.io"
-       |
-       |[[registry.mirror]]
-       |location = "tst21.ljalbinson.com:5000"
-       |insecure = true
-       |
-       |[[registry.mirror]]
-       |location = "$cacheHostPort"
-       |insecure = true
-       |REG
-       |echo "podman will try tst21.ljalbinson.com:5000 (built images), then $cacheHostPort, before quay.io"""".stripMargin
-
-  private val pullScript =
-    s"""${Pull.shellFunction(
-        "the Image(...) in glanceApi in glance_single_node.scala"
-      )}
-       |pull_retry $apiImage || exit 1
-       |echo "image ready"""".stripMargin
-
-  // Identical in method to cinder_single_node.scala: the last certificate
-  // Keystone presents is its CA; trust on first use.
-  private val fetchCaScript =
-    s"""set -e
-       |mkdir -p $caDir
-       |rm -f /tmp/ks-chain-*.pem
-       |openssl s_client -connect $ksFqdn:5000 -servername $ksFqdn -showcerts </dev/null 2>/dev/null | awk '/-----BEGIN CERTIFICATE-----/{n++} n>0{print > ("/tmp/ks-chain-" n ".pem")}'
-       |COUNT=$$(ls /tmp/ks-chain-*.pem 2>/dev/null | wc -l)
-       |if [ "$$COUNT" -lt 2 ]; then
-       |  echo "keystone at $ksFqdn:5000 presented $$COUNT certificate(s); expected leaf + CA - re-run keystone_single_node.scala (it must serve server-chain.crt)" >&2
-       |  exit 1
-       |fi
-       |cp /tmp/ks-chain-$$COUNT.pem $caDir/ca.crt
-       |openssl verify -CAfile $caDir/ca.crt /tmp/ks-chain-1.pem
-       |SUBJ=$$(openssl x509 -in $caDir/ca.crt -noout -subject | sed 's/^subject=//')
-       |ISS=$$(openssl x509 -in $caDir/ca.crt -noout -issuer | sed 's/^issuer=//')
-       |if [ "$$SUBJ" != "$$ISS" ]; then echo "last certificate is not self-signed: $$SUBJ / $$ISS" >&2; exit 1; fi
-       |rm -f /tmp/ks-chain-*.pem
-       |if command -v update-ca-certificates >/dev/null 2>&1; then
-       |  cp $caDir/ca.crt /usr/local/share/ca-certificates/orphera-test-ca.crt
-       |  update-ca-certificates
-       |else
-       |  cp $caDir/ca.crt /etc/pki/ca-trust/source/anchors/orphera-test-ca.crt
-       |  update-ca-trust
-       |fi
-       |echo "Keystone CA installed: $$SUBJ"""".stripMargin
-
-  // The only task whose script contains template expressions, kept separate so
-  // the runner's template pass does not touch the large scripts elsewhere.
-  private val cephClientScript =
-    s"""mkdir -p $srcDir
-       |cat > $srcDir/ceph.conf <<'CEPHCONF'
-       |[global]
-       |mon_host = {{nodes.tst0.cluster_ip}},{{nodes.tst1.cluster_ip}},{{nodes.tst2.cluster_ip}}
-       |CEPHCONF
-       |cat > $srcDir/ceph.client.glance.keyring <<'KEYRING'
-       |[client.glance]
-       |    key = ${cephKey.reveal}
-       |KEYRING
-       |chmod 640 $srcDir/ceph.client.glance.keyring
-       |echo "ceph client config written"""".stripMargin
-
-  // Multi-store layout (enabled_backends), the form current Glance expects;
-  // the store is called `ceph` and is the default.
-  private val glanceDirsScript =
-    s"""mkdir -p $srcDir $logDir $stateDir
-       |echo "directories ready"""".stripMargin
-
-  // The option lists of the image (glance), from catalogues/. Every section and key of the
-  // files below is checked against them when this manifest is built.
+  // The option lists of the image (glance), from catalogues/. Every section and
+  // key of the file below is checked against them when this manifest is built.
   private val glanceCatalogue: Catalogue =
     Catalogues.load("glance", Set("ceph"))
-  private val confResource = summon[Resource[ConfFile]]
 
+  // Multi-store layout (enabled_backends), the form current Glance expects; the
+  // store is called `ceph` and is the default.
   private val glanceApiConf: ConfFile =
-    ConfFile.text(s"$srcDir/glance-api.conf", glanceCatalogue)(
+    ConfFile.text(s"$apiDir/glance-api.conf", glanceCatalogue)(
       ("DEFAULT", "log_dir", "/var/log/kolla/glance"),
       ("DEFAULT", "use_stderr", "true"),
       ("DEFAULT", "bind_host", "0.0.0.0"),
@@ -221,26 +137,119 @@ object glance_single_node extends OrpheraClusterPlaybook:
       ("ceph", "rbd_store_chunk_size", "8"),
       ("ceph", "store_description", "Ceph RBD images")
     )
+  private val glanceApiConfText: String = glanceApiConf.render
 
-  private val kollaConfigScript =
+  // The monitors' addresses come from the inventory (`cluster_ip`), as the
+  // playbook's {{nodes.tst0.cluster_ip}} did.
+  private val cephConf: String =
+    val ips = cephMons.map { n =>
+      Inventory.all
+        .find(_.name == n)
+        .flatMap(_.vars.get("cluster_ip"))
+        .getOrElse(sys.error(s"inventory: node $n has no cluster_ip"))
+    }
+    s"""[global]
+       |mon_host = ${ips.mkString(",")}
+       |""".stripMargin
+
+  private val cephKeyring =
+    s"""[client.glance]
+       |    key = ${cephKey.reveal}
+       |""".stripMargin
+
+  // What Kolla copies into the container, and where.
+  private val configJson =
+    """{"command": "glance-api", "config_files": [{"source": "/var/lib/kolla/config_files/glance-api.conf", "dest": "/etc/glance/glance-api.conf", "owner": "glance", "perm": "0600"}, {"source": "/var/lib/kolla/config_files/ca.crt", "dest": "/etc/glance/ssl/ca.crt", "owner": "glance", "perm": "0644"}, {"source": "/var/lib/kolla/config_files/ceph.conf", "dest": "/etc/ceph/ceph.conf", "owner": "glance", "perm": "0644"}, {"source": "/var/lib/kolla/config_files/ceph.client.glance.keyring", "dest": "/etc/ceph/ceph.client.glance.keyring", "owner": "glance", "perm": "0600"}], "permissions": [{"path": "/var/log/kolla/glance", "owner": "glance:kolla", "recurse": true}, {"path": "/var/lib/glance", "owner": "glance:glance", "recurse": true}]}
+      |""".stripMargin
+
+  // The Kolla cache as a mirror of quay.io (podman registries.conf.d drop-in).
+  private val registryMirror =
+    s"""[[registry]]
+       |prefix = "quay.io"
+       |location = "quay.io"
+       |
+       |[[registry.mirror]]
+       |location = "tst21.ljalbinson.com:5000"
+       |insecure = true
+       |
+       |[[registry.mirror]]
+       |location = "$cacheHostPort"
+       |insecure = true
+       |""".stripMargin
+
+  private val pullScript =
+    s"""${Pull.shellFunction(
+        "the Image(...) in glanceApi in glance_single_node.scala"
+      )}
+       |pull_retry $apiImage || exit 1
+       |echo "image ready: $apiImage"""".stripMargin
+
+  // Keystone's CA: the last certificate it presents (trust on first use),
+  // which must be self-signed. `chainTo DIR` leaves DIR/c1.pem ... DIR/cN.pem.
+  private val chainTo =
+    s"""chainTo() { openssl s_client -connect $ksFqdn:5000 -servername $ksFqdn -showcerts </dev/null 2>/dev/null | awk -v d="$$1" '/-----BEGIN CERTIFICATE-----/{n++} n>0{print > (d "/c" n ".pem")}'; }"""
+
+  private val trustTarget =
+    """if command -v update-ca-certificates >/dev/null 2>&1; then t=/usr/local/share/ca-certificates/orphera-test-ca.crt; else t=/etc/pki/ca-trust/source/anchors/orphera-test-ca.crt; fi"""
+
+  // Current when the installed CA is the one Keystone presents now, and is in
+  // the system trust store.
+  private val caCurrent =
+    s"""$chainTo
+       |D=$$(mktemp -d)
+       |chainTo $$D
+       |N=$$(ls $$D/c*.pem 2>/dev/null | wc -l)
+       |R=1
+       |if [ "$$N" -ge 2 ]; then
+       |  $trustTarget
+       |  cmp -s $$D/c$$N.pem $caCert && cmp -s $caCert "$$t" && R=0
+       |fi
+       |rm -rf $$D
+       |exit $$R""".stripMargin
+
+  private val caScript =
     s"""set -e
-       |mkdir -p $confRoot/glance-api
-       |cp $srcDir/glance-api.conf $confRoot/glance-api/glance-api.conf
-       |cp $caDir/ca.crt $confRoot/glance-api/ca.crt
-       |cp $srcDir/ceph.conf $srcDir/ceph.client.glance.keyring $confRoot/glance-api/
-       |cat > $confRoot/glance-api/config.json <<JSON
-       |{"command": "glance-api", "config_files": [{"source": "/var/lib/kolla/config_files/glance-api.conf", "dest": "/etc/glance/glance-api.conf", "owner": "glance", "perm": "0600"}, {"source": "/var/lib/kolla/config_files/ca.crt", "dest": "/etc/glance/ssl/ca.crt", "owner": "glance", "perm": "0644"}, {"source": "/var/lib/kolla/config_files/ceph.conf", "dest": "/etc/ceph/ceph.conf", "owner": "glance", "perm": "0644"}, {"source": "/var/lib/kolla/config_files/ceph.client.glance.keyring", "dest": "/etc/ceph/ceph.client.glance.keyring", "owner": "glance", "perm": "0600"}], "permissions": [{"path": "/var/log/kolla/glance", "owner": "glance:kolla", "recurse": true}, {"path": "/var/lib/glance", "owner": "glance:glance", "recurse": true}]}
-       |JSON
-       |echo "kolla config written under $confRoot/glance-api"""".stripMargin
+       |$chainTo
+       |mkdir -p $caDir
+       |D=$$(mktemp -d)
+       |trap 'rm -rf $$D' EXIT
+       |chainTo $$D
+       |COUNT=$$(ls $$D/c*.pem 2>/dev/null | wc -l)
+       |if [ "$$COUNT" -lt 2 ]; then
+       |  echo "keystone at $ksFqdn:5000 presented $$COUNT certificate(s); expected leaf + CA - apply keystone_single_node.scala (it must serve server-chain.crt)" >&2
+       |  exit 1
+       |fi
+       |cp $$D/c$$COUNT.pem $caCert
+       |openssl verify -CAfile $caCert $$D/c1.pem
+       |SUBJ=$$(openssl x509 -in $caCert -noout -subject | sed 's/^subject=//')
+       |ISS=$$(openssl x509 -in $caCert -noout -issuer | sed 's/^issuer=//')
+       |if [ "$$SUBJ" != "$$ISS" ]; then echo "last certificate is not self-signed: $$SUBJ / $$ISS" >&2; exit 1; fi
+       |$trustTarget
+       |cp $caCert "$$t"
+       |if command -v update-ca-certificates >/dev/null 2>&1; then update-ca-certificates; else update-ca-trust; fi
+       |echo "Keystone CA installed: $$SUBJ"""".stripMargin
+
+  // The kolla copy of the CA is a separate file (the container mounts apiDir).
+  // Mounts read-only; glance-manage reads the config only.
+  private val glanceManage =
+    s"podman run --rm --network host --user root --entrypoint glance-manage -v $apiDir/glance-api.conf:/etc/glance/glance-api.conf:ro,z -v $logDir:/var/log/kolla/glance:z -v $stateDir:/var/lib/glance:z $apiImage"
 
   private val dbSyncScript =
     s"""set -e
-       |podman run --rm --network host --user root --entrypoint glance-manage -v $srcDir/glance-api.conf:/etc/glance/glance-api.conf:ro,z -v $logDir:/var/log/kolla/glance:z -v $stateDir:/var/lib/glance:z $apiImage db_sync
+       |$glanceManage db_sync
        |echo "glance database synced"""".stripMargin
+  private val dbStamp = Resource.sha256(dbSyncScript + glanceApiConfText)
+  // Current when the stamp matches AND the database schema is current, so a
+  // database dropped or replaced since the stamp was written is synced again.
+  private val dbCurrent =
+    s"""[ "$$(cat $stateDir/db.stamp 2>/dev/null)" = "$dbStamp" ] && $glanceManage db check >/dev/null 2>&1"""
+  private val dbSyncWithStamp =
+    s"""$dbSyncScript
+       |echo $dbStamp > $stateDir/db.stamp""".stripMargin
 
   // Standard-library Python, as in cinder_single_node.scala. Plain string filled
   // in with replace(). Subcommands:
-  //   register | unregister | catalog | image-list | image-create | image-delete <id>
+  //   register | registered | unregister | catalog | image-list | image-create | image-delete <id>
   private val apiHelperPython =
     """#!/usr/bin/python3
 import json, ssl, sys, time, urllib.request, urllib.error
@@ -332,6 +341,22 @@ def register():
     print('registered glance in keystone (project service, user glance, service image, 3 endpoints)')
 
 
+def registered():
+    # Exit 0 only when everything register() makes is in place: the glance user
+    # can get a token in project service, and service `image` has the three
+    # endpoints at GLANCE. Makes no change.
+    get_token('glance', GLANCE_PW, 'service')
+    token = get_token('admin', ADMIN_PW, 'admin')
+    service = find(token, '/services?type=image', 'services')
+    if service is None:
+        die('no service of type image')
+    for iface in ('public', 'internal', 'admin'):
+        ep = find(token, '/endpoints?service_id=%s&interface=%s' % (service['id'], iface), 'endpoints')
+        if ep is None or ep['url'] != GLANCE:
+            die('endpoint %s missing or wrong' % iface)
+    print('glance is registered in keystone')
+
+
 def unregister():
     token = get_token('admin', ADMIN_PW, 'admin')
     service = find(token, '/services?type=image', 'services')
@@ -405,6 +430,8 @@ if __name__ == '__main__':
     cmd = sys.argv[1] if len(sys.argv) > 1 else ''
     if cmd == 'register':
         register()
+    elif cmd == 'registered':
+        registered()
     elif cmd == 'unregister':
         unregister()
     elif cmd == 'catalog':
@@ -416,99 +443,163 @@ if __name__ == '__main__':
     elif cmd == 'image-delete' and len(sys.argv) > 2:
         image_delete(sys.argv[2])
     else:
-        die('usage: orphera-glance-api register | unregister | catalog | image-list | image-create | image-delete <id>')
+        die('usage: orphera-glance-api register | registered | unregister | catalog | image-list | image-create | image-delete <id>')
 """
 
-  private val helperScript =
-    "cat > /usr/local/sbin/orphera-glance-api <<'PYEOF'\n" +
-      apiHelperPython
-        .replace("@@KS@@", ksFqdn)
-        .replace("@@GLANCE@@", s"http://$fqdn:9292")
-        .replace("@@ADMINPW@@", adminPassword.reveal)
-        .replace("@@GLANCEPW@@", glancePassword.reveal)
-        .replace("@@CA@@", s"$caDir/ca.crt") +
-      "\nPYEOF\nchmod 700 /usr/local/sbin/orphera-glance-api\necho wrote /usr/local/sbin/orphera-glance-api\n"
+  private val helper =
+    apiHelperPython
+      .replace("@@KS@@", ksFqdn)
+      .replace("@@GLANCE@@", s"http://$fqdn:9292")
+      .replace("@@ADMINPW@@", adminPassword.reveal)
+      .replace("@@GLANCEPW@@", glancePassword.reveal)
+      .replace("@@CA@@", caCert)
+  private val helperPath = "/usr/local/sbin/orphera-glance-api"
 
   // Glance answers with a version document (HTTP 200 or 300) once it is up.
-  private val apiHealthScript =
-    """CODE=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:9292/)
-      |[ "$CODE" = "200" ] || [ "$CODE" = "300" ]""".stripMargin
+  private val healthy =
+    """CODE=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:9292/); [ "$CODE" = "200" ] || [ "$CODE" = "300" ]"""
+  private val waitHealthy =
+    s"""for i in $$(seq 1 18); do
+       |  $healthy && exit 0
+       |  sleep 5
+       |done
+       |echo "glance does not answer on http://localhost:9292 - see 'journalctl -xeu ${glanceApi.unitName}' and $logDir" >&2
+       |exit 1""".stripMargin
 
-  val playbook: ClusterPlaybook =
-    clusterPlaybook("glance-single-node")(
-      stage("glance-database", "tst3")
-        .task(s"create $dbName database and $dbUser on the Galera cluster")(
-          Task.RunCommand(List("sh", "-c", createDatabaseScript))
-        )
-        .build,
+  def describe(target: Node): List[ApplyResource] =
+    val tools = hostPackages.map(p => pkg(p, updateCache = true))
+    val podman = tools(0)
+    val unit = glanceApi.unitName
+    val unitService = service(unit)
 
-      stage("ceph-pool-and-user", "tst0")
-        .task(s"create the $cephPool pool and the client.glance cephx user")(
-          Task.RunCommand(List("sh", "-c", cephScript), timeoutSeconds = 180)
-        )
-        .build,
+    val mirrorDir = directory("/etc/containers/registries.conf.d").after(podman)
+    val mirror = file(
+      "/etc/containers/registries.conf.d/orphera-kolla-cache.conf",
+      registryMirror,
+      mode = "0644"
+    ).after(mirrorDir)
+    val pulled = command(
+      "pull the Kolla glance-api image",
+      pullScript,
+      unless = s"podman image exists $apiImage",
+      timeout = 1800
+    ).after(podman, mirror)
 
-      stage("install-glance", node)
-        .task("install podman and tools")(
-          Task.Install(packages = hostPackages, updateCache = true)
-        )
-        .task("use the Kolla cache as a mirror for quay.io")(
-          Task.RunCommand(List("sh", "-c", useCacheScript))
-        )
-        .task("pull the Glance image")(
-          Task.RunCommand(List("sh", "-c", pullScript), timeoutSeconds = 1800)
-        )
-        .task("fetch Keystone's CA from its TLS handshake")(
-          Task.RunCommand(List("sh", "-c", fetchCaScript), timeoutSeconds = 60)
-        )
-        .task("write the ceph client config")(
-          Task.RunCommand(List("sh", "-c", cephClientScript))
-        )
-        .task("create the Glance directories")(
-          Task.RunCommand(List("sh", "-c", glanceDirsScript))
-        )
-        .task("write glance-api.conf")(confResource.write(glanceApiConf))
-        .task("write the Kolla config")(
-          Task.RunCommand(
-            List("sh", "-c", kollaConfigScript),
-            timeoutSeconds = 60
-          )
-        )
-        .task("glance-manage db_sync")(
-          Task.RunCommand(List("sh", "-c", dbSyncScript), timeoutSeconds = 600)
-        )
-        .task("write the Glance API helper")(
-          Task.RunCommand(List("sh", "-c", helperScript))
-        )
-        .task(s"write ${glanceApi.unitName}")(glanceApi.writeUnit)
-        .task(s"start ${glanceApi.unitName}")(glanceApi.start)
-        .task("register Glance in Keystone")(
-          Task.RunCommand(
-            List("sh", "-c", "/usr/local/sbin/orphera-glance-api register"),
-            timeoutSeconds = 120
-          )
-        )
-        .build,
+    val caDirectory = directory(caDir, mode = "0755").after(podman)
+    val ca = command(
+      "fetch Keystone's CA from its TLS handshake",
+      caScript,
+      unless = caCurrent,
+      timeout = 60
+    ).after(caDirectory, tools(1))
 
-      stage("confirm-glance-healthy", node)
-        .waitFor(
-          HealthCheck.Command(
-            onNode = node,
-            command = List("sh", "-c", apiHealthScript),
-            pollIntervalSeconds = 5,
-            timeoutSeconds = 90
-          )
-        )
-        .task("list images through Keystone-authenticated access")(
-          Task.RunCommand(
-            List("sh", "-c", "/usr/local/sbin/orphera-glance-api image-list"),
-            timeoutSeconds = 60
-          )
-        )
-        .task("glance confirmed")(
-          Task.Debug(
-            s"Glance up at http://$fqdn:9292 ($nodeIp): glance-api with the RBD store in Ceph pool $cephPool, database via $vip:3306, identity from $ksUrl. Test: manifests/test_glance.sh"
-          )
-        )
-        .build
+    val apiDirectory = directory(apiDir, mode = "0755")
+    val logDirectory = directory(logDir)
+    val stateDirectory = directory(stateDir)
+
+    val conf = secretFile(
+      s"$apiDir/glance-api.conf",
+      Secret(glanceApiConfText), // it holds the database and service passwords
+      mode = "0640",
+      owner = "root",
+      group = "root"
+    ).after(apiDirectory).notifies(unitService)
+    val kollaCa = command(
+      "copy Keystone's CA to the Kolla config",
+      s"cp $caCert $apiDir/ca.crt",
+      unless = s"cmp -s $caCert $apiDir/ca.crt"
+    ).after(ca, apiDirectory).notifies(unitService)
+    val cephConfFile = file(
+      s"$apiDir/ceph.conf",
+      cephConf,
+      mode = "0644",
+      owner = "root",
+      group = "root"
+    ).after(apiDirectory).notifies(unitService)
+    val keyring = secretFile(
+      s"$apiDir/ceph.client.glance.keyring",
+      Secret(cephKeyring),
+      mode = "0640",
+      owner = "root",
+      group = "root"
+    ).after(apiDirectory).notifies(unitService)
+    val configFile = file(
+      s"$apiDir/config.json",
+      configJson,
+      mode = "0644",
+      owner = "root",
+      group = "root"
+    ).after(apiDirectory).notifies(unitService)
+
+    val dbSync = command(
+      "glance-manage db_sync",
+      dbSyncWithStamp,
+      unless = dbCurrent,
+      timeout = 600
+    ).after(pulled, conf, logDirectory, stateDirectory)
+
+    val unitFile = file(
+      glanceApi.unitPath,
+      glanceApi.render,
+      mode = "0644",
+      owner = "root",
+      group = "root"
+    ).notifies(unitService)
+    val running = unitService.after(
+      dbSync,
+      unitFile,
+      conf,
+      kollaCa,
+      cephConfFile,
+      keyring,
+      configFile
+    )
+
+    val helperFile = secretFile(
+      helperPath,
+      Secret(helper), // it holds the admin and glance passwords
+      mode = "0700",
+      owner = "root",
+      group = "root"
+    )
+    val answering = command(
+      "glance answers on 9292",
+      waitHealthy,
+      unless = healthy,
+      timeout = 120
+    ).after(running)
+    val registered = command(
+      "register Glance in Keystone",
+      s"$helperPath register",
+      unless = s"$helperPath registered >/dev/null 2>&1",
+      timeout = 120
+    ).after(answering, helperFile, ca)
+    val listing = command(
+      "list images through Keystone-authenticated access",
+      s"echo 'the image list failed: see the Keystone registration, glance-api.conf and the logs' >&2; exit 1",
+      unless = s"$helperPath image-list >/dev/null 2>&1",
+      timeout = 60
+    ).after(registered)
+
+    tools ++ List(
+      mirrorDir,
+      mirror,
+      pulled,
+      caDirectory,
+      ca,
+      apiDirectory,
+      logDirectory,
+      stateDirectory,
+      conf,
+      kollaCa,
+      cephConfFile,
+      keyring,
+      configFile,
+      dbSync,
+      unitFile,
+      running,
+      helperFile,
+      answering,
+      registered,
+      listing
     )
