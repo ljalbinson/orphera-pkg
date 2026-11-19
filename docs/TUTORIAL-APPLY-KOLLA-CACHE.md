@@ -4,7 +4,9 @@
 This tutorial reads one of the OpenStack descriptions, `manifests/kolla_cache.scala`, from top to bottom
 and explains each part: what it declares, why it is written the way it is, and what `orphera apply` does
 with it. It is one of the simplest in the OpenStack set: one node, no secrets, eight resources. Most of
-the other OpenStack descriptions use the same parts.
+the other OpenStack descriptions use the same parts. Section 11 then follows a run through the
+orchestrator and the agent: how the file is compiled and started, how the engine reads and compares, and
+which agent call carries out each change.
 
 You should know what a node, the inventory and the agent are ([GETTING_STARTED.md](GETTING_STARTED.md)).
 The design behind `orphera apply` is in [APPLY-DESIGN.md](APPLY-DESIGN.md), and the reference table of
@@ -324,26 +326,28 @@ refused when the description is loaded.
 
 ## 7. What a run looks like
 
-Before any node is contacted, the description is checked: duplicate ids, relative paths, bad modes, bad
+Before a node is contacted, the description is checked: duplicate ids, relative paths, bad modes, bad
 package or unit names, a command with no guard, a link to an id that is not described, a notification of
 something that cannot be notified, and cycles. Every problem is listed, and nothing runs.
 
 Then, for each node:
 
-1. **Observe.** One call reads the state of every resource: each path's type, mode, owner, group and hash,
-   each package and unit, and each command's guard (guards run here, also in `--check`).
+1. **Observe.** The state of every resource is read at once: each path's type, mode, owner, group and
+   hash, each package and unit, and each command's guard (guards run here, also in `--check`).
 2. **Compare and change**, resource by resource in plan order. After the first change, each later
    resource is read again just before its turn, so the unit installed by a package, or created by the unit
    file, is seen.
 
+Section 11 follows the same run through the code and the agent calls.
+
 On tst9, set up already, a second run ends with:
 
 ```
-[tst9] 0 changed, 8 unchanged
+[tst9] apply kolla_cache: 0 changed, 8 unchanged
 ```
 
 and a guarded command that was not needed shows its guard, for example
-`command[the registry answers]  unchanged (unless: true)`.
+`[tst9] apply kolla_cache: command[the registry answers]  unchanged (unless: true)`.
 
 With `--check` on a fresh node, the packages, the pull, the directory, the unit file and the commands are
 reported as `would change` or `would run`, and the service as `the unit does not exist yet`: nothing has
@@ -406,6 +410,240 @@ The last check is the one every description's test has: it proves the guards are
 the wrong thing shows up there as a command that runs every time.
 
 `NO_APPLY=1 manifests/test_kolla_cache.sh` runs the checks only.
+
+## 11. How it is executed underneath
+
+Sections 1 to 10 describe what the description says. This section follows
+`orphera apply manifests/kolla_cache.scala` through the code that runs it, from the command line to the
+agent on tst9. Paths are relative to the repository; `orchestrator/.../` is
+`orchestrator/src/main/scala/orphera/orchestrator/`.
+
+The whole chain, in outline:
+
+```
+orphera apply kolla_cache.scala                      Main (orchestrator JVM)
+  └─ java orphera.scripting.Main kolla_cache.scala   compiles the file
+       └─ java PlaybookLauncher kolla_cache          runs the compiled object
+            └─ OrpheraApply.run → OrpheraApply.runOn → Orphera.run
+                 └─ each node, in parallel:
+                      Apply.plan(describe(node))     check the description, work out the order
+                      NodeRef.applyGrouped           facts, run log, output
+                      TaskExecutor.applyOn           build a NodeTarget for the node
+                      Apply.run                      the engine: read, compare, change
+                        └─ NodeTarget → NodeClient   one gRPC call per read or change
+                             └─ agent on tst9        ObserveNode, ExecuteCommand, ApplyFiles, ApplySoftware
+```
+
+### 11.1 The command line
+
+`Cli.parse` (`orchestrator/.../Cli.scala`) turns `apply <path> [--check] [--nodes a,b] [--stop-on-failure]`
+into `Command.Apply`. `Locations.resolveManifest` then looks for a bare file name such as
+`kolla_cache.scala` in the manifests directory, so `orphera apply kolla_cache.scala` works from anywhere.
+
+Before the command is dispatched, `Main` does three things that apply to every command that calls agents:
+
+- checks the operator (`CurrentOperator`);
+- with `ORPHERA_OPERATOR` set and an `access.yaml` beside the inventory, refuses the command early if the
+  operator's role does not allow it (`AccessPolicy.early`). A Scala description cannot be read in
+  advance, so it is taken to need `run`;
+- records the start and end of the command in the audit log (`AuditLog`).
+
+A `.yaml` description is loaded and applied in the same JVM (`ApplyYaml`, then `OrpheraApply.runOn`). A
+`.scala` description is code, so `runScalaPlaybookScript` in `Main.scala` starts a second JVM for it and
+passes the options as environment variables:
+
+| Option | Variable |
+|---|---|
+| `--check` | `ORPHERA_CHECK=true` |
+| `--stop-on-failure` | `ORPHERA_STOP_ON_FAILURE=true` |
+| `--nodes a,b` | `ORPHERA_APPLY_NODES=a,b` |
+
+The child's exit code becomes the exit code of `orphera apply`.
+
+### 11.2 Compiling and starting the description
+
+`orphera.scripting.Main` (`scripting/src/main/scala/orphera/scripting/Main.scala`) compiles the file with
+the Scala 3 compiler (`dotty.tools.dotc.Main`), with the orchestrator jar on the classpath, into a
+temporary directory. A compile error stops the run here with `compilation of ... failed`, before any node
+is contacted. The temporary directory is removed when the run ends.
+
+It then starts `PlaybookLauncher` with the class name taken from the file name: `kolla_cache.scala` runs
+the object `kolla_cache`. **The object name must match the file name.** `PlaybookLauncher` calls the
+object's `main` by reflection. `OrpheraApply` extends Cats Effect's `IOApp.Simple`, so `main` runs the
+trait's `run`. An error is printed as one line (`Error: ...`); set `ORPHERA_DEBUG=1` for the stack trace.
+
+### 11.3 The run
+
+`OrpheraApply.run` (`orchestrator/.../OrpheraApply.scala`) reads the three variables and takes the nodes
+from `ORPHERA_APPLY_NODES`, or else from the description's `nodes`. `OrpheraApply.runOn` prints
+`Applying 'kolla_cache' to tst9` and calls `Orphera.run` (`orchestrator/.../OrpheraScript.scala`), the same
+context that scripts use. It:
+
+- fails at once if no agent token is configured;
+- starts a run log, `.orphera-logs/script-apply-kolla_cache-<yyyyMMdd-HHmmss>.jsonl` under the state
+  directory, with `run_start` and `run_end` events, and a `task_start` and `task_end` event per node; the
+  `task_end` lists every resource and its outcome;
+- has no checkpoint. A description is not resumed; running it again is the resume.
+
+`orphera.nodes(...).each(...)` runs the nodes with `parTraverse`, all at once. For each node,
+`Apply.plan(name, describe(node))` is evaluated first. This is where your `describe` is called, and where
+`ApplyPlan.apply` (`orchestrator/.../Apply.scala`) checks the list and sorts it into the plan order
+(section 6). A mistake there fails the node before it is contacted.
+
+With more than one node, each node's lines are held back and printed together when it finishes, under a
+lock, so lines from different nodes do not interleave. A last line totals the nodes.
+
+### 11.4 One node
+
+`NodeRef.applyGrouped` (`OrpheraScript.scala`) gathers the node's facts first (the agent's `GatherFacts`
+call, cached for the run). The facts are template variables for `fileFrom` with a `.mustache` source;
+`kolla_cache` has none, but the call is made for every description. It then calls
+`TaskExecutor.applyOn`, which wraps the node in a `NodeTarget` and calls the engine, `Apply.run`.
+
+`Apply.run` knows nothing about gRPC. It talks to the node only through the `ApplyTarget` trait in
+`Apply.scala`:
+
+| Method | What it does |
+|---|---|
+| `observe(resources)` | read the state of a set of resources |
+| `readText(path)` | read a file's text, for a diff |
+| `writeText(...)` | write a file's text, guarded by the hash that was read |
+| `typed(label, changes, fallback, timeout)` | make file changes |
+| `software(...)` | install packages, control units |
+| `access(...)` | users, groups, keys, mounts |
+| `shell(label, script, timeout)` | run a shell script |
+
+`NodeTarget` (in `TaskExecutor.scala`) implements it for a real node. The checks in `ApplyCheck` implement
+it with a fake node, so the engine's rules are tested with no machine. This is the split agreed in
+`docs/TYPED-ACTIONS-PLAN.md`: the rules stay pure Scala in the orchestrator, and the agent only carries out
+a fixed list of actions.
+
+### 11.5 The engine
+
+`Apply.run` does this for one node:
+
+1. **Wanted contents.** Each file's wanted text is worked out once: the text given, a secret's value, or
+   a local source file (rendered if it is `.mustache`).
+2. **One read of everything.** `target.observe` is called once with every resource that can be read. A
+   command without a guard is not read; it can only be `onChangeOnly`.
+3. **Each resource, in plan order:**
+   - If a resource it comes after, or one that notifies it, failed or was skipped, it is skipped. With
+     `--stop-on-failure`, everything after the first failure is skipped.
+   - An `onChangeOnly` command that nothing notified in this run is `not notified`.
+   - If something has already changed on this node in this run (and this is not `--check`), the resource
+     is read again on its own, since the first read may be out of date.
+   - A guard that says the command is not needed gives `unchanged (unless: true)` or
+     `unchanged (onlyIf: false)`.
+   - Otherwise `compare` takes the wanted and the observed state and returns a `Difference`: the changes
+     as words (`created`, `content`, `mode 0600 -> 0644`, `started`), the diff lines for a file, and the
+     **actions** that would make them true.
+   - In `--check` the result is `would change` or `would run`, and the actions are dropped. Otherwise the
+     actions are carried out in order, and the result is `changed`, `ran` or `FAILED`.
+4. **The report.** The summary line is printed, and the `ApplyReport` is returned. If any resource failed,
+   `applyGrouped` raises, and the node is reported as failed.
+
+The actions are data, not code that runs on the spot:
+
+| Action | Carried out by |
+|---|---|
+| `Action.Write(path, text, owner, group, mode, expectedSha, overwrite)` | `target.writeText` |
+| `Action.Typed(fileChanges, fallbackScript)` | `target.typed` |
+| `Action.Software(softwareChanges, fallbackScript)` | `target.software` |
+| `Action.Access(accessChanges, fallbackScript)` | `target.access` |
+| `Action.Shell(script)` | `target.shell` (a `command` resource's `run`) |
+
+Each typed action carries the shell script that makes the same change. That script is used only on an
+agent that does not have the typed call.
+
+For a service, the actions are `systemctl daemon-reload` and then `enable`, `start` or `restart` as needed
+(the `ReloadUnits` and `ControlUnit` changes); this is where the reload in section 6 comes from.
+
+### 11.6 From actions to agent calls
+
+`NodeTarget` turns each read and action into a call to the agent through `NodeClient`
+(`orchestrator/.../NodeClient.scala`). The calls are defined in `common/src/main/protobuf/Protocol.proto`:
+
+| Agent call | Used for | Policy operation |
+|---|---|---|
+| `GatherFacts` | the node's facts (11.4) | `facts` |
+| `ObserveNode` | reading paths, packages, units and the other kinds, with no script | `observe` |
+| `ExecuteCommand` | a command's guard; a command's `run`; reading a file's text for a diff; any fallback script | `run` |
+| `ApplyFiles` | directories, mode/owner/group, removing, links, sysctl, modules, a file's text | `apply-files` |
+| `ApplySoftware` | packages and systemd units | `apply-software` |
+| `ApplyAccess` | users, groups, keys, mounts (not used here) | `apply-access` |
+
+Some details:
+
+- **The guards are one script.** All guards that need reading are put into one shell script by
+  `Apply.observeScript`, with a marker line before each, and sent in one `ExecuteCommand` (`sh -c`,
+  120 s). `Apply.parseObserved` splits the output by marker. A guard's own output is thrown away; only
+  its exit status counts.
+- **A diff is read only when needed.** `readText` is a `head -c 262144` of the file, sent only when a
+  file's hash differs from the wanted text's hash and the file is not secret.
+- **Fallback.** If the agent answers `UNIMPLEMENTED` to `ObserveNode`, `ApplyFiles`, `ApplySoftware` or
+  `ApplyAccess`, the same read or change is done with the script through `ExecuteCommand`. That answer
+  comes before anything is changed, so an older agent gets the same result by the older route.
+- **Timeouts.** A command uses its own `timeout`; a package 900 s; anything else 120 s.
+- **Each call is its own connection.** `NodeClient` opens a gRPC channel over TLS to the node's host and
+  port (50051 by default), trusting the Orphera CA, presents the client certificate if the control host
+  has one (mutual TLS), and sends the agent token in the call's metadata.
+
+### 11.7 On the agent
+
+The Go agent is the default (`agent-go/internal/agent/`). The Scala agent implements the same calls from
+0.1.218 (`agent/src/main/scala/orphera/agent/`: `Observe`, `TypedFiles`, `TypedSoftware`, `Fixed`).
+
+Every call passes the agent's interceptors first (`auth.go`, `policy.go`): the token must match, and on a
+node with a policy file the role in the caller's certificate must allow the call's operation. Each call is
+logged on the node as allowed or `REFUSED`. A refused call returns `PERMISSION_DENIED`, and the resource
+fails with that message.
+
+Then, by call:
+
+- **`ObserveNode`** (`observe.go`): reads directly, with no shell. A path is `lstat`ed and, if it is a
+  regular file, hashed with SHA-256; a package is asked of dpkg or rpm; a unit of
+  `systemctl is-enabled` and `is-active`. A protected path, such as the agent's own directory, is refused.
+- **`ExecuteCommand`** (`command.go`): runs the program and its arguments directly (here always
+  `sh -c <script>`), with a fixed `PATH`, as root. Output comes back line by line as a stream of events.
+  At the timeout the process is killed and the result is exit 124, `Timed out after Ns`.
+- **`ApplyFiles`** (`applyfiles.go`): for a file's text, `ReplaceText` refuses if the file's hash is no
+  longer the one the orchestrator read (`the file has changed since it was read`), or, for a new file, if
+  a file has appeared. It writes a temporary file `.orphera-edit-*` beside the target, syncs it, sets the
+  owner and mode, and renames it over the target, so the file is never half written. `SetAttributes`
+  follows for the wanted mode, owner and group.
+- **`ApplySoftware`** (`applysoftware.go`): checks each package and unit name, then runs `apt-get update`
+  (for `updateCache`) and `apt-get install` with a lock timeout, or `dnf install`, and `systemctl` for
+  units, without a shell. It stops at the first failure and names it.
+
+### 11.8 kolla_cache on a fresh tst9, call by call
+
+Putting it together, a first run on a tst9 with nothing on it makes these calls:
+
+| Step | Agent calls |
+|---|---|
+| start | `GatherFacts` |
+| first read | `ObserveNode` (podman, curl, the directory, the unit file, the unit); `ExecuteCommand` (the guard script for the three commands) |
+| `package[podman]` | `ApplySoftware`: `apt-get update`, install podman |
+| `package[curl]` | `ObserveNode` (read again); `ApplySoftware`: install curl |
+| `command[pull the registry image]` | `ExecuteCommand` (its guard, again); `ExecuteCommand` (the pull script, 600 s) |
+| `directory[/var/lib/orphera/kolla-cache]` | `ObserveNode`; `ApplyFiles`: make the directory |
+| `file[.../orphera-kolla-cache.service]` | `ObserveNode`; `ApplyFiles`: `ReplaceText` (no file expected), then `SetAttributes` 0644 root:root |
+| `service[orphera-kolla-cache.service]` | `ObserveNode`; `ApplySoftware`: daemon-reload, enable, start |
+| `command[the registry answers]` | `ExecuteCommand` (its guard, again); `ExecuteCommand` (the wait script, 90 s) |
+| `command[pre-pull the Kolla images ...]` | `ExecuteCommand` (its guard, again); `ExecuteCommand` (the warm script, 3600 s) |
+
+The second read of each guard matters on this run. At the first read the registry was not running, so
+`command[the registry answers]` was needed. By its turn the service has started, and the guard is run
+again: if the registry already answers, the command is `unchanged`; if not, the wait script runs. Without
+the second read, the engine would act on state from before the packages were installed.
+
+A second run on the same node changes nothing, so nothing is read twice. It makes three calls:
+`GatherFacts`, one `ObserveNode` and one `ExecuteCommand` for the guards. That last call is why applying
+this description needs `run` even when nothing changes: its guards are shell. At the agent, a description
+with no `command` resources needs only `facts`, `observe`, `apply-files` and `apply-software` (and
+`apply-access` for users, groups, keys and mounts). The early refusal in 11.1 still takes any Scala
+description to need `run`, because it cannot read one in advance; a `.yaml` description is read, and is
+checked for the calls its kinds need.
 
 ## Exercises
 
