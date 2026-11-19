@@ -493,7 +493,9 @@ host user with the container nova uid 42436 so libvirtd can resolve the caller),
 nova.conf (the server create returned 500 DiscoveryFailure without it; re-apply Nova), os-vif over the
 OVS loopback manager `ptcp:6640` (the unix socket is root-only), `/dev` mounted into the container
 (console ptys). `utils/trace-dhcp.sh` captures DHCP on the three provider NICs when a lease is missing.
-Teardown: `orphera cluster-playbook manifests/nova_compute_teardown.scala` (not run).
+Teardown: `orphera apply manifests/nova_compute_teardown.scala` (since the move to `orphera apply`; not run). The
+playbook was replaced by `nova_compute.scala` and `nova_compute_discover.scala` as descriptions; the test applies both and
+asserts that a second run changes nothing. Not yet run in that form.
 The lease check was changed on 2026-10-13: after a cold start of the fleet the console-based check
 failed although the guest held its address (DHCP counters and ARP showed it). Not re-run as a whole;
 see K13 for the run that proved the new check.

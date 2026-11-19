@@ -1,63 +1,70 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import orphera.orchestrator.*
-import orphera.orchestrator.ClusterPlaybookDsl.*
 import orphera.orchestrator.kolla.*
 
-// DRAFT. OpenStack compute nodes: nova-compute plus the Neutron Open vSwitch agent
-// on tst17 and tst18, Kolla images under podman. Modelled on nova_single_node.scala
-// and neutron_single_node.scala; read their headers for the conventions.
+// OpenStack compute nodes: nova-compute plus the Neutron Open vSwitch agent on tst17 and tst18, Kolla images
+// under podman, as a declarative description (OrpheraApply, docs/APPLY-DESIGN.md). It replaced the cluster
+// playbook of the same name; a second run changes nothing and restarts nothing, and `--check` shows what
+// would change. Modelled on nova_single_node.scala and neutron_single_node.scala, which explain the
+// conventions.
+//
+// Two descriptions, since one description cannot order its nodes. Apply them in this order:
+//
+//   orphera apply manifests/nova_compute.scala           # the compute nodes (this one: tst17 and tst18)
+//   orphera apply manifests/nova_compute_discover.scala  # map the new hosts into cell1 (tst14)
+//
+// The compute nodes are described in parallel; the host name and the management address that nova.conf and
+// the Neutron agent config carry come from the inventory (`cluster_ip`), per node.
 //
 // Where it runs: tst17 and tst18, both VMs on gs2 (an AMD host with nested KVM on:
-// /sys/module/kvm_amd/parameters/nested = 1). Their config has host_type
-// host-passthrough, so the guests see svm and /dev/kvm exists; the playbook stops
-// with a clear message when it does not, and nova-compute uses virt_type = kvm.
+// /sys/module/kvm_amd/parameters/nested = 1). Their config has host_type host-passthrough, so the guests see
+// svm and /dev/kvm exists; the description stops with a clear message when it does not, and nova-compute uses
+// virt_type = kvm.
 //
-// libvirt and QEMU come from the host (apt: libvirt-daemon-system, qemu-system-x86),
-// not from a nova-libvirt container: fewer moving parts, and the nova-compute
-// container reaches libvirtd through /run/libvirt. /var/lib/nova is mounted at the
-// same path in the container and on the host, because libvirt (on the host) opens
-// the instance disks by the paths nova (in the container) writes into the domain XML.
+// libvirt and QEMU come from the host (apt: libvirt-daemon-system, qemu-system-x86), not from a nova-libvirt
+// container: fewer moving parts, and the nova-compute container reaches libvirtd through /run/libvirt.
+// /var/lib/nova is mounted at the same path in the container and on the host, because libvirt (on the host)
+// opens the instance disks by the paths nova (in the container) writes into the domain XML.
 //
-// Networking: the second NIC (enp2s0, on the hypervisor's br-net106) is the flat
-// provider network, exactly as on tst19: the playbook removes the address it was
-// given at provisioning (10.10.6.29/30, table 2 policy routing) so it is a plain
-// layer-2 port, and puts it on the Open vSwitch bridge `br-provider`. The compute
-// node stays reachable on its first NIC. Instances are plugged into br-int by
-// libvirt/os-vif; the Neutron OVS agent here wires br-int to br-provider with the
-// same bridge mapping (provider:br-provider) as the agent on tst19.
+// Networking: the second NIC (enp2s0, on the hypervisor's br-net106) is the flat provider network, exactly as
+// on tst19: the description removes the address it was given at provisioning (10.10.6.29/30, table 2 policy
+// routing) so it is a plain layer-2 port, and puts it on the Open vSwitch bridge `br-provider`. The compute
+// node stays reachable on its first NIC. Instances are plugged into br-int by libvirt/os-vif; the Neutron OVS
+// agent here wires br-int to br-provider with the same bridge mapping (provider:br-provider) as the agent on
+// tst19.
 //
-// No metadata agent: nova.conf has force_config_drive = true, so every instance gets
-// its configuration from a config drive.
+// No metadata agent: nova.conf has force_config_drive = true, so every instance gets its configuration from a
+// config drive.
 //
 // Prerequisites, not checked here:
 //   - Galera + VIP healthy, Keystone up on tst6, RabbitMQ on tst10
-//   - Nova (nova_single_node.scala, tst14) and Neutron (neutron_single_node.scala,
-//     tst19) running, Glance and Placement up
+//   - Nova (nova_single_node.scala, tst14) and Neutron (neutron_single_node.scala, tst19) running, Glance and
+//     Placement up
 //   - agents on tst17 and tst18; tst9's Kolla cache is optional
 //
-// Stages:
-//   - install-compute (tst17, tst18): wait for apt, check /dev/kvm, packages
-//     (podman, Open vSwitch, libvirt, QEMU with its RBD driver), libvirtd, the libvirt
-//     secret for Cinder's Ceph volumes, provider NIC and bridge, cache
-//     mirror, image pulls, Keystone's CA, nova.conf and the Neutron agent config
-//     (host name and IP filled in per node), Kolla config, units, helper.
-//   - discover-compute-hosts (tst14): `nova-manage cell_v2 discover_hosts`, so the
-//     scheduler can use the new hosts at once (it would also find them within the
-//     60 s of discover_hosts_in_cells_interval).
-//   - confirm-compute-healthy (tst17, tst18): the nova-compute service and the OVS
-//     agent report alive through the APIs, and the node shows up as a hypervisor.
+// How it stays idempotent (as for Heat and the other modules):
+//   - Each step that changes the node is a command with a guard that tests what it makes: libvirtd's socket
+//     mode and settings, the libvirt secret's value, the provider NIC having no address (in netplan and in the
+//     kernel), br-provider with its port and the OVS manager, Keystone's CA compared as a certificate.
+//   - nova.conf and neutron.conf hold secrets, so they are secret files (one per service directory, with the
+//     node's own host name and address filled in); the agent's ini, config.json and the units are plain files.
+//     Each notifies its service, so a change restarts exactly that service.
+//   - The checks that the images have what nova-compute needs (rootwrap, genisoimage or mkisofs, the
+//     Neutron rootwrap) are commands that only run, and fail with the reason, when the image lacks it.
 //
-// Test-only hardcoded credentials, same convention and caveat as the other
-// manifests. Not compiled where this was written; the first run on scala0 is the
-// first compile. The most likely things to need a fix on the first run: the
-// privileges nova-compute needs in its container, genisoimage in the image and the
-// os-vif Open vSwitch connection.
-object nova_compute extends OrpheraClusterPlaybook:
+// Not restored by the teardown: the address enp2s0 had from provisioning.
+//
+// Test-only credentials come from the secret store (nova/rabbit, neutron/rabbit, nova/service,
+// neutron/service, cinder/ceph-key, keystone/admin), as before. The most likely things to need a fix if a run
+// fails: the privileges nova-compute needs in its container, genisoimage in the image and the os-vif Open
+// vSwitch connection.
+object nova_compute extends OrpheraApply:
+  import Resources.*
 
-  private val nodes = List("tst17", "tst18")
-  private val controlNode = "tst14"
-  private val mgmtNic = "enp1s0"
+  private val computeNodes = List("tst17", "tst18")
+
+  override def nodes: List[String] = computeNodes
 
   // Cinder's volumes are Ceph RBD images. QEMU on the node opens them with the cephx key of
   // client.cinder, which libvirt keeps as a secret named by this UUID; Cinder tells Nova the
@@ -84,7 +91,7 @@ object nova_compute extends OrpheraClusterPlaybook:
   private val neutronApi = "http://tst19.ljalbinson.com:9696"
   private val glanceApi = "http://tst13.ljalbinson.com:9292"
 
-  // Keep in step with the other Kolla playbooks.
+  // Keep in step with the other Kolla descriptions.
   private val registry = "quay.io/openstack.kolla"
   private val cacheHostPort = "tst9.ljalbinson.com:5000"
 
@@ -93,13 +100,14 @@ object nova_compute extends OrpheraClusterPlaybook:
   private val neutronPassword = Secrets.secret("neutron/service")
 
   private val confRoot = "/etc/kolla"
-  private val novaSrcDir = "/etc/kolla/nova-compute-src"
-  private val neutronSrcDir = "/etc/kolla/neutron-agent-src"
   private val novaLogDir = "/var/log/kolla/nova"
   private val neutronLogDir = "/var/log/kolla/neutron"
   private val novaStateDir = "/var/lib/nova"
   private val neutronStateDir = "/var/lib/orphera/neutron"
   private val caDir = "/etc/kolla/nova-compute-ca"
+  private val caCert = s"$caDir/ca.crt"
+  private val novaDir = s"$confRoot/nova-compute"
+  private val ovsDir = s"$confRoot/neutron-openvswitch-agent"
 
   // The containers as data (orchestrator/.../kolla/Container.scala, checked by ContainerCheck).
   // Defined after the directory vals they read; a val used before its definition is null in an
@@ -113,7 +121,7 @@ object nova_compute extends OrpheraClusterPlaybook:
     name = ContainerName("nova-compute"),
     image = Image("nova-compute", Release.R2025_1, Base.UbuntuNoble, registry),
     mounts = List(
-      Mount(s"$confRoot/nova-compute", "/var/lib/kolla/config_files"),
+      Mount(novaDir, "/var/lib/kolla/config_files"),
       Mount(novaLogDir, "/var/log/kolla/nova", Access.ReadWrite),
       Mount(novaStateDir, "/var/lib/nova", Access.Unlabelled),
       Mount("/run/libvirt", "/run/libvirt", Access.Unlabelled),
@@ -139,10 +147,7 @@ object nova_compute extends OrpheraClusterPlaybook:
       registry
     ),
     mounts = List(
-      Mount(
-        s"$confRoot/neutron-openvswitch-agent",
-        "/var/lib/kolla/config_files"
-      ),
+      Mount(ovsDir, "/var/lib/kolla/config_files"),
       Mount(neutronLogDir, "/var/log/kolla/neutron", Access.ReadWrite),
       Mount(neutronStateDir, "/var/lib/neutron", Access.ReadWrite),
       Mount("/run/openvswitch", "/run/openvswitch", Access.Unlabelled),
@@ -160,8 +165,6 @@ object nova_compute extends OrpheraClusterPlaybook:
   )
   private val computeImage = novaCompute.image.ref
   private val ovsAgentImage = ovsAgent.image.ref
-  private val novaApiImage =
-    Image("nova-api", Release.R2025_1, Base.UbuntuNoble, registry).ref
 
   private val hostPackages =
     List(
@@ -178,45 +181,30 @@ object nova_compute extends OrpheraClusterPlaybook:
       "qemu-utils"
     )
 
-  // The libvirt secret that holds the client.cinder key (see rbdSecretUuid). Safe to repeat: it
-  // changes nothing when the secret already holds the key.
-  private val cephSecretScript =
-    s"""set -e
-       |V="virsh -c qemu:///system"
-       |if ! $$V secret-get-value $rbdSecretUuid 2>/dev/null | grep -qx '${cephKey.reveal}'; then
-       |  cat > /tmp/orphera-ceph-secret.xml <<'XML'
-       |<secret ephemeral='no' private='no'>
-       |  <uuid>$rbdSecretUuid</uuid>
-       |  <usage type='ceph'><name>client.cinder secret</name></usage>
-       |</secret>
-       |XML
-       |  $$V secret-define --file /tmp/orphera-ceph-secret.xml
-       |  rm -f /tmp/orphera-ceph-secret.xml
-       |  $$V secret-set-value --secret $rbdSecretUuid --base64 '${cephKey.reveal}'
-       |fi
-       |echo "libvirt secret $rbdSecretUuid holds the client.cinder key"""".stripMargin
-
+  // A fresh VM may still be running unattended-upgrades (see
+  // disable_unattended_upgrades.scala); when it finishes needrestart restarts the
+  // agent and kills the running task. Wait for it before touching packages.
+  private val aptIdle =
+    """! pgrep -f '^/usr/bin/python3 /usr/bin/unattended-upgrade$' >/dev/null && ! pgrep -x apt-get >/dev/null && ! pgrep -x apt >/dev/null && ! pgrep -x dpkg >/dev/null"""
   private val waitAptIdleScript =
-    """for i in $(seq 1 180); do
-      |  if pgrep -f '^/usr/bin/python3 /usr/bin/unattended-upgrade$' >/dev/null || pgrep -x apt-get >/dev/null || pgrep -x apt >/dev/null || pgrep -x dpkg >/dev/null; then
-      |    sleep 5
-      |  else
-      |    echo "apt and dpkg are idle"
-      |    exit 0
-      |  fi
-      |done
-      |echo "apt/dpkg still busy after 15 minutes (unattended-upgrades?)" >&2
-      |exit 1""".stripMargin
+    s"""for i in $$(seq 1 180); do
+       |  if $aptIdle; then
+       |    echo "apt and dpkg are idle"
+       |    exit 0
+       |  fi
+       |  sleep 5
+       |done
+       |echo "apt/dpkg still busy after 15 minutes (unattended-upgrades?)" >&2
+       |exit 1""".stripMargin
 
-  // Nested virtualization must be visible in the guest. Fail early with the reason.
-  private val kvmCheckScript =
-    """if [ ! -c /dev/kvm ]; then
-      |  echo "no /dev/kvm on $(hostname): the VM does not see hardware virtualization." >&2
-      |  echo "  cpu flags with svm/vmx: $(grep -cE 'svm|vmx' /proc/cpuinfo)" >&2
-      |  echo "  on the hypervisor: nested must be enabled (/sys/module/kvm_amd/parameters/nested or kvm_intel) and the VM needs host_type host-passthrough" >&2
-      |  exit 1
-      |fi
-      |echo "/dev/kvm present; cpus with svm/vmx: $(grep -cE 'svm|vmx' /proc/cpuinfo)"""".stripMargin
+  // Nested virtualization must be visible in the guest. Fail early with the reason. The command only runs
+  // (and fails) when /dev/kvm is missing.
+  private val kvmPresent = "[ -c /dev/kvm ]"
+  private val kvmMissingScript =
+    """echo "no /dev/kvm on $(hostname): the VM does not see hardware virtualization." >&2
+      |echo "  cpu flags with svm/vmx: $(grep -cE 'svm|vmx' /proc/cpuinfo)" >&2
+      |echo "  on the hypervisor: nested must be enabled (/sys/module/kvm_amd/parameters/nested or kvm_intel) and the VM needs host_type host-passthrough" >&2
+      |exit 1""".stripMargin
 
   // libvirtd from the host package. The default NAT network is not wanted. The
   // nova-compute container runs as the container's own `nova` user (uid 42436),
@@ -259,15 +247,43 @@ object nova_compute extends OrpheraClusterPlaybook:
       |if [ "$MODE" != "777" ]; then echo "libvirt socket mode is $MODE, expected 777" >&2; exit 1; fi
       |virsh -c qemu:///system version | head -3
       |echo "libvirtd running, socket mode $MODE"""".stripMargin
+  // True when everything the script above makes is in place and libvirtd answers.
+  private val libvirtReady =
+    s"""getent group 42436 >/dev/null && getent passwd 42436 >/dev/null &&
+       |grep -qx 'SocketMode=0777' /etc/systemd/system/libvirtd.socket.d/orphera.conf 2>/dev/null &&
+       |grep -q '^unix_sock_rw_perms' /etc/libvirt/libvirtd.conf &&
+       |grep -q '^auth_unix_rw ' /etc/libvirt/libvirtd.conf &&
+       |grep -q '^auth_unix_ro ' /etc/libvirt/libvirtd.conf &&
+       |[ "$$(stat -c %a /run/libvirt/libvirt-sock 2>/dev/null)" = "777" ] &&
+       |systemctl is-active --quiet libvirtd &&
+       |virsh -c qemu:///system list --all >/dev/null 2>&1 &&
+       |! virsh -c qemu:///system net-list --name 2>/dev/null | grep -qx default &&
+       |! virsh -c qemu:///system net-list --all --autostart --name 2>/dev/null | grep -qx default""".stripMargin
+
+  // The libvirt secret that holds the client.cinder key (see rbdSecretUuid).
+  private val cephSecretScript =
+    s"""set -e
+       |V="virsh -c qemu:///system"
+       |cat > /tmp/orphera-ceph-secret.xml <<'XML'
+       |<secret ephemeral='no' private='no'>
+       |  <uuid>$rbdSecretUuid</uuid>
+       |  <usage type='ceph'><name>client.cinder secret</name></usage>
+       |</secret>
+       |XML
+       |$$V secret-define --file /tmp/orphera-ceph-secret.xml
+       |rm -f /tmp/orphera-ceph-secret.xml
+       |$$V secret-set-value --secret $rbdSecretUuid --base64 '${cephKey.reveal}'
+       |echo "libvirt secret $rbdSecretUuid holds the client.cinder key"""".stripMargin
+  private val cephSecretReady =
+    s"""virsh -c qemu:///system secret-get-value $rbdSecretUuid 2>/dev/null | grep -qx '${cephKey.reveal}'"""
 
   // The provisioning script gave enp2s0 an address, a table-2 route and a
   // "from <address>" rule (netplan, generated by cloud-init). Neutron needs the
   // port to be plain layer 2, so: stop cloud-init regenerating the network config,
   // strip the address, routes, routing policy and nameservers of that interface
   // from /etc/netplan/50-cloud-init.yaml (kept: name, MAC match, MTU), apply, and
-  // clear what is left in the kernel. The management NIC is not touched. Safe to
-  // re-run (nothing to strip the second time). Needs PyYAML, which cloud-init
-  // already depends on.
+  // clear what is left in the kernel. The management NIC is not touched. Needs
+  // PyYAML, which cloud-init already depends on.
   private val dropAddressScript =
     s"""set -e
        |mkdir -p /etc/cloud/cloud.cfg.d
@@ -302,10 +318,29 @@ object nova_compute extends OrpheraClusterPlaybook:
        |ip route flush table 2 2>/dev/null || true
        |ip -4 -br addr show $providerNic
        |echo "$providerNic is an address-less layer-2 port"""".stripMargin
+  // True when the kernel has no IPv4 address on the NIC, cloud-init is stopped from regenerating the network
+  // config, and netplan has none of the keys the script strips.
+  private val addressDropped =
+    s"""[ -z "$$(ip -4 -o addr show dev $providerNic 2>/dev/null)" ] &&
+       |[ -f /etc/cloud/cloud.cfg.d/99-orphera-disable-network-config.cfg ] &&
+       |python3 - <<'PY'
+       |import sys, yaml
+       |path = '/etc/netplan/50-cloud-init.yaml'
+       |nic = '$providerNic'
+       |try:
+       |    doc = yaml.safe_load(open(path))
+       |except FileNotFoundError:
+       |    sys.exit(0)
+       |for name, cfg in (doc.get('network', {}).get('ethernets', {}) or {}).items():
+       |    if name == nic or cfg.get('set-name') == nic:
+       |        if any(k in cfg for k in ('addresses', 'routes', 'routing-policy', 'nameservers', 'gateway4', 'gateway6')):
+       |            sys.exit(1)
+       |sys.exit(0)
+       |PY""".stripMargin
 
   // Open vSwitch comes from the host (apt). br-provider's only physical port is the
   // provider NIC; the OVS agent in the container creates br-int and the patch
-  // ports. Idempotent.
+  // ports.
   private val bridgeScript =
     s"""set -e
        |systemctl enable --now openvswitch-switch
@@ -317,11 +352,17 @@ object nova_compute extends OrpheraClusterPlaybook:
        |ip link set $providerBridge up
        |ovs-vsctl show
        |echo "$providerBridge has $providerNic"""".stripMargin
+  private val bridgeReady =
+    s"""systemctl is-active --quiet openvswitch-switch &&
+       |systemctl is-enabled --quiet openvswitch-switch &&
+       |ovs-vsctl br-exists $providerBridge &&
+       |ovs-vsctl list-ports $providerBridge | grep -qx $providerNic &&
+       |ovs-vsctl get-manager | grep -qx 'ptcp:6640:127.0.0.1' &&
+       |ip link show $providerBridge | grep -q '<[^>]*UP'""".stripMargin
 
-  private val useCacheScript =
-    s"""mkdir -p /etc/containers/registries.conf.d
-       |cat > /etc/containers/registries.conf.d/orphera-kolla-cache.conf <<'REG'
-       |[[registry]]
+  // The Kolla cache as a mirror of quay.io (podman registries.conf.d drop-in).
+  private val registryMirror =
+    s"""[[registry]]
        |prefix = "quay.io"
        |location = "quay.io"
        |
@@ -332,58 +373,75 @@ object nova_compute extends OrpheraClusterPlaybook:
        |[[registry.mirror]]
        |location = "$cacheHostPort"
        |insecure = true
-       |REG
-       |echo "podman will try tst21.ljalbinson.com:5000 (built images), then $cacheHostPort, before quay.io"""".stripMargin
+       |""".stripMargin
 
+  private val images = List(computeImage, ovsAgentImage)
   private val pullScript =
     s"""${Pull.shellFunction(
         "the Image(...) values in novaCompute and ovsAgent in nova_compute.scala"
       )}
-       |for img in $computeImage $ovsAgentImage; do
+       |for img in ${images.mkString(" ")}; do
        |  pull_retry $$img || exit 1
        |done
        |echo "images ready"""".stripMargin
+  private val imagesPresent =
+    s"""for img in ${images.mkString(" ")}; do podman image exists $$img || exit 1; done"""
 
-  // Same method as nova_single_node.scala: the last certificate Keystone presents
-  // is its CA; trust on first use.
-  private val fetchCaScript =
+  // Keystone's CA: the last certificate it presents (trust on first use),
+  // which must be self-signed. `chainTo DIR` leaves DIR/c1.pem ... DIR/cN.pem,
+  // each holding the certificate only: the text s_client prints after the
+  // last one (bytes read and written, session ticket) differs on every
+  // handshake, and would make the comparison with the installed copy fail.
+  private val chainTo =
+    s"""chainTo() { openssl s_client -connect $ksFqdn:5000 -servername $ksFqdn -showcerts </dev/null 2>/dev/null | awk -v d="$$1" '/-----BEGIN CERTIFICATE-----/{n++; p=1} p{print > (d "/c" n ".pem")} /-----END CERTIFICATE-----/{p=0}'; }"""
+
+  private val trustTarget =
+    """if command -v update-ca-certificates >/dev/null 2>&1; then t=/usr/local/share/ca-certificates/orphera-test-ca.crt; else t=/etc/pki/ca-trust/source/anchors/orphera-test-ca.crt; fi"""
+
+  // Current when the installed CA is the one Keystone presents now, and is in
+  // the system trust store.
+  private val caCurrent =
+    s"""$chainTo
+       |D=$$(mktemp -d)
+       |chainTo $$D
+       |N=$$(ls $$D/c*.pem 2>/dev/null | wc -l)
+       |R=1
+       |if [ "$$N" -ge 2 ]; then
+       |  $trustTarget
+       |  cmp -s $$D/c$$N.pem $caCert && cmp -s $caCert "$$t" && R=0
+       |fi
+       |rm -rf $$D
+       |exit $$R""".stripMargin
+
+  private val caScript =
     s"""set -e
+       |$chainTo
        |mkdir -p $caDir
-       |rm -f /tmp/ks-chain-*.pem
-       |openssl s_client -connect $ksFqdn:5000 -servername $ksFqdn -showcerts </dev/null 2>/dev/null | awk '/-----BEGIN CERTIFICATE-----/{n++} n>0{print > ("/tmp/ks-chain-" n ".pem")}'
-       |COUNT=$$(ls /tmp/ks-chain-*.pem 2>/dev/null | wc -l)
+       |D=$$(mktemp -d)
+       |trap 'rm -rf $$D' EXIT
+       |chainTo $$D
+       |COUNT=$$(ls $$D/c*.pem 2>/dev/null | wc -l)
        |if [ "$$COUNT" -lt 2 ]; then
-       |  echo "keystone at $ksFqdn:5000 presented $$COUNT certificate(s); expected leaf + CA - re-run keystone_single_node.scala (it must serve server-chain.crt)" >&2
+       |  echo "keystone at $ksFqdn:5000 presented $$COUNT certificate(s); expected leaf + CA - apply keystone_single_node.scala (it must serve server-chain.crt)" >&2
        |  exit 1
        |fi
-       |cp /tmp/ks-chain-$$COUNT.pem $caDir/ca.crt
-       |openssl verify -CAfile $caDir/ca.crt /tmp/ks-chain-1.pem
-       |SUBJ=$$(openssl x509 -in $caDir/ca.crt -noout -subject | sed 's/^subject=//')
-       |ISS=$$(openssl x509 -in $caDir/ca.crt -noout -issuer | sed 's/^issuer=//')
+       |cp $$D/c$$COUNT.pem $caCert
+       |openssl verify -CAfile $caCert $$D/c1.pem
+       |SUBJ=$$(openssl x509 -in $caCert -noout -subject | sed 's/^subject=//')
+       |ISS=$$(openssl x509 -in $caCert -noout -issuer | sed 's/^issuer=//')
        |if [ "$$SUBJ" != "$$ISS" ]; then echo "last certificate is not self-signed: $$SUBJ / $$ISS" >&2; exit 1; fi
-       |rm -f /tmp/ks-chain-*.pem
-       |if command -v update-ca-certificates >/dev/null 2>&1; then
-       |  cp $caDir/ca.crt /usr/local/share/ca-certificates/orphera-test-ca.crt
-       |  update-ca-certificates
-       |else
-       |  cp $caDir/ca.crt /etc/pki/ca-trust/source/anchors/orphera-test-ca.crt
-       |  update-ca-trust
-       |fi
+       |$trustTarget
+       |cp $caCert "$$t"
+       |if command -v update-ca-certificates >/dev/null 2>&1; then update-ca-certificates; else update-ca-trust; fi
        |echo "Keystone CA installed: $$SUBJ"""".stripMargin
 
-  // Both config files carry @@HOST@@ and @@IP@@, replaced per node: the host name is
-  // what Nova and Neutron both use as the binding host, so it is set explicitly and
-  // identically in the two files.
-  private val confScript =
-    s"""set -e
-       |mkdir -p $novaSrcDir $neutronSrcDir $novaLogDir $neutronLogDir $novaStateDir $neutronStateDir
-       |MYIP=$$(ip -4 -o addr show dev $mgmtNic | awk '{print $$4}' | cut -d/ -f1 | head -1)
-       |HOST=$$(hostname -s)
-       |if [ -z "$$MYIP" ]; then echo "no IPv4 address on $mgmtNic" >&2; exit 1; fi
-       |cat > $novaSrcDir/nova.conf <<'CONF'
+  // nova.conf and the Neutron agent config: the host name is what Nova and Neutron both use as the binding
+  // host, so it is set explicitly and identically in the files; the address is the node's management address.
+  private def novaConf(host: String, ip: String): String =
+    s"""# Managed by Orphera (nova_compute.scala)
        |[DEFAULT]
-       |host = @@HOST@@
-       |my_ip = @@IP@@
+       |host = $host
+       |my_ip = $ip
        |log_dir = /var/log/kolla/nova
        |state_path = /var/lib/nova
        |instances_path = /var/lib/nova/instances
@@ -464,14 +522,16 @@ object nova_compute extends OrpheraClusterPlaybook:
        |[vnc]
        |enabled = true
        |server_listen = 0.0.0.0
-       |server_proxyclient_address = @@IP@@
+       |server_proxyclient_address = $ip
        |
        |[os_vif_ovs]
        |ovsdb_connection = tcp:127.0.0.1:6640
-       |CONF
-       |cat > $neutronSrcDir/neutron.conf <<'CONF'
+       |""".stripMargin
+
+  private def neutronConf(host: String): String =
+    s"""# Managed by Orphera (nova_compute.scala)
        |[DEFAULT]
-       |host = @@HOST@@
+       |host = $host
        |log_dir = /var/log/kolla/neutron
        |state_path = /var/lib/neutron
        |use_stderr = true
@@ -485,11 +545,13 @@ object nova_compute extends OrpheraClusterPlaybook:
        |[agent]
        |root_helper = sudo neutron-rootwrap /etc/neutron/rootwrap.conf
        |root_helper_daemon = sudo neutron-rootwrap-daemon /etc/neutron/rootwrap.conf
-       |CONF
-       |cat > $neutronSrcDir/openvswitch_agent.ini <<'CONF'
+       |""".stripMargin
+
+  private def ovsAgentIni(ip: String): String =
+    s"""# Managed by Orphera (nova_compute.scala)
        |[ovs]
        |bridge_mappings = $physnet:$providerBridge
-       |local_ip = @@IP@@
+       |local_ip = $ip
        |
        |[securitygroup]
        |firewall_driver = openvswitch
@@ -498,48 +560,34 @@ object nova_compute extends OrpheraClusterPlaybook:
        |[agent]
        |tunnel_types = vxlan
        |l2_population = true
-       |CONF
-       |sed -i "s/@@HOST@@/$$HOST/; s/@@IP@@/$$MYIP/" $novaSrcDir/nova.conf $neutronSrcDir/neutron.conf $neutronSrcDir/openvswitch_agent.ini
-       |chmod 640 $novaSrcDir/nova.conf $neutronSrcDir/neutron.conf $neutronSrcDir/openvswitch_agent.ini
-       |echo "config files written for $$HOST ($$MYIP)"""".stripMargin
+       |""".stripMargin
 
-  // One Kolla config directory per service. The tools nova-compute needs are
-  // checked in the image first, as in the other playbooks.
-  private val kollaConfigScript =
-    s"""set -e
-       |mkdir -p $confRoot/nova-compute $confRoot/neutron-openvswitch-agent
-       |cp $novaSrcDir/nova.conf $caDir/ca.crt $confRoot/nova-compute/
-       |cp $neutronSrcDir/neutron.conf $neutronSrcDir/openvswitch_agent.ini $caDir/ca.crt $confRoot/neutron-openvswitch-agent/
-       |if ! podman run --rm --entrypoint sh $computeImage -c 'command -v nova-compute >/dev/null && test -f /etc/nova/rootwrap.conf'; then
-       |  echo "nova-compute or /etc/nova/rootwrap.conf not found in $computeImage - see the header of nova_compute.scala" >&2
-       |  exit 1
-       |fi
-       |if ! podman run --rm --entrypoint sh $computeImage -c 'command -v genisoimage >/dev/null || command -v mkisofs >/dev/null'; then
-       |  echo "neither genisoimage nor mkisofs is in $computeImage, which config drives need" >&2
-       |  exit 1
-       |fi
-       |if ! podman run --rm --entrypoint sh $ovsAgentImage -c 'test -f /etc/neutron/rootwrap.conf'; then
-       |  echo "/etc/neutron/rootwrap.conf not found in $ovsAgentImage" >&2
-       |  exit 1
-       |fi
-       |cat > $confRoot/nova-compute/config.json <<JSON
-       |{"command": "nova-compute --config-file /etc/nova/nova.conf", "config_files": [{"source": "/var/lib/kolla/config_files/nova.conf", "dest": "/etc/nova/nova.conf", "owner": "nova", "perm": "0600"}, {"source": "/var/lib/kolla/config_files/ca.crt", "dest": "/etc/nova/ssl/ca.crt", "owner": "nova", "perm": "0644"}], "permissions": [{"path": "/var/log/kolla/nova", "owner": "nova:kolla", "recurse": true}, {"path": "/var/lib/nova", "owner": "nova:nova"}]}
-       |JSON
-       |cat > $confRoot/neutron-openvswitch-agent/config.json <<JSON
-       |{"command": "neutron-openvswitch-agent --config-file /etc/neutron/neutron.conf --config-file /etc/neutron/plugins/ml2/openvswitch_agent.ini", "config_files": [{"source": "/var/lib/kolla/config_files/neutron.conf", "dest": "/etc/neutron/neutron.conf", "owner": "neutron", "perm": "0600"}, {"source": "/var/lib/kolla/config_files/ca.crt", "dest": "/etc/neutron/ssl/ca.crt", "owner": "neutron", "perm": "0644"}, {"source": "/var/lib/kolla/config_files/openvswitch_agent.ini", "dest": "/etc/neutron/plugins/ml2/openvswitch_agent.ini", "owner": "neutron", "perm": "0600"}], "permissions": [{"path": "/var/log/kolla/neutron", "owner": "neutron:kolla", "recurse": true}, {"path": "/var/lib/neutron", "owner": "neutron:neutron", "recurse": true}]}
-       |JSON
-       |echo "kolla config written under $confRoot"""".stripMargin
+  private val novaConfigJson =
+    """{"command": "nova-compute --config-file /etc/nova/nova.conf", "config_files": [{"source": "/var/lib/kolla/config_files/nova.conf", "dest": "/etc/nova/nova.conf", "owner": "nova", "perm": "0600"}, {"source": "/var/lib/kolla/config_files/ca.crt", "dest": "/etc/nova/ssl/ca.crt", "owner": "nova", "perm": "0644"}], "permissions": [{"path": "/var/log/kolla/nova", "owner": "nova:kolla", "recurse": true}, {"path": "/var/lib/nova", "owner": "nova:nova"}]}
+      |""".stripMargin
+  private val ovsConfigJson =
+    """{"command": "neutron-openvswitch-agent --config-file /etc/neutron/neutron.conf --config-file /etc/neutron/plugins/ml2/openvswitch_agent.ini", "config_files": [{"source": "/var/lib/kolla/config_files/neutron.conf", "dest": "/etc/neutron/neutron.conf", "owner": "neutron", "perm": "0600"}, {"source": "/var/lib/kolla/config_files/ca.crt", "dest": "/etc/neutron/ssl/ca.crt", "owner": "neutron", "perm": "0644"}, {"source": "/var/lib/kolla/config_files/openvswitch_agent.ini", "dest": "/etc/neutron/plugins/ml2/openvswitch_agent.ini", "owner": "neutron", "perm": "0600"}], "permissions": [{"path": "/var/log/kolla/neutron", "owner": "neutron:kolla", "recurse": true}, {"path": "/var/lib/neutron", "owner": "neutron:neutron", "recurse": true}]}
+      |""".stripMargin
 
-  // Run on the control node: map the new compute hosts into cell1.
-  private val discoverScript =
-    s"""set -e
-       |podman run --rm --network host --user root --entrypoint nova-manage -v /etc/kolla/nova/nova.conf:/etc/nova/nova.conf:ro,z -v /var/log/kolla/nova:/var/log/kolla/nova:z $novaApiImage cell_v2 discover_hosts --verbose
-       |echo "discover_hosts done"""".stripMargin
+  // What the images must have; each check is a command that runs, and fails with the reason, only when the
+  // image lacks it.
+  private val novaImageOk =
+    s"""podman run --rm --entrypoint sh $computeImage -c 'command -v nova-compute >/dev/null && test -f /etc/nova/rootwrap.conf'"""
+  private val isoToolOk =
+    s"""podman run --rm --entrypoint sh $computeImage -c 'command -v genisoimage >/dev/null || command -v mkisofs >/dev/null'"""
+  private val ovsRootwrapOk =
+    s"""podman run --rm --entrypoint sh $ovsAgentImage -c 'test -f /etc/neutron/rootwrap.conf'"""
+  private def failWith(message: String): String =
+    s"""echo "$message" >&2
+       |exit 1""".stripMargin
 
   // Standard-library Python, plain string filled in with replace(). Subcommands:
   //   compute-up <host> ...   every named host has an enabled nova-compute service that is up
   //   hypervisors             one line per hypervisor (state, vCPUs, memory)
   //   ovs-up <host> ...       every named host has an alive neutron-openvswitch-agent
+  //   known <host>            exit 0 when Nova has a nova-compute service or Neutron an agent for the host
+  //   unregister <host>       delete the host's nova-compute service (and its compute node and resource
+  //                           provider, which Nova removes with it) and its Neutron agents
   //   boot-cleanup           delete what an earlier boot-test --keep left behind
   //   boot-test <qcow2-file> [--keep]  upload an image, create a flavor, use the existing flat
   //                           network (`provider`, left in place) or else create a throwaway
@@ -639,6 +687,34 @@ def ovs_up(hosts):
     if bad:
         die('not alive yet: ' + ', '.join(bad))
     print('neutron-openvswitch-agent is alive on ' + ', '.join(hosts))
+
+
+def known(host):
+    token = admin_token()
+    s, p, _ = call('GET', NOVA + '/os-services?binary=nova-compute&host=' + host, None, token)
+    if s == 200 and p.get('services'):
+        print('nova-compute service of %s exists' % host)
+        return
+    s, p, _ = call('GET', NEUTRON + '/v2.0/agents?host=' + host, None, token)
+    if s == 200 and p.get('agents'):
+        print('neutron agents of %s exist' % host)
+        return
+    die('nothing is registered for ' + host)
+
+
+def unregister(host):
+    token = admin_token()
+    s, p, _ = call('GET', NOVA + '/os-services?binary=nova-compute&host=' + host, None, token)
+    for svc in (p.get('services', []) if s == 200 else []):
+        s2, p2, _ = call('DELETE', NOVA + '/os-services/' + str(svc['id']), None, token)
+        if s2 not in (200, 204):
+            die('deleting the nova-compute service of %s failed: HTTP %s %s' % (host, s2, p2))
+    s, p, _ = call('GET', NEUTRON + '/v2.0/agents?host=' + host, None, token)
+    for a in (p.get('agents', []) if s == 200 else []):
+        s2, p2, _ = call('DELETE', NEUTRON + '/v2.0/agents/' + a['id'], None, token)
+        if s2 not in (200, 204):
+            die('deleting the neutron agent %s of %s failed: HTTP %s %s' % (a.get('binary'), host, s2, p2))
+    print('removed the nova-compute service and the Neutron agents of ' + host)
 
 
 def wait_for(fn, what, tries, delay):
@@ -780,122 +856,262 @@ if __name__ == '__main__':
         hypervisors()
     elif cmd == 'ovs-up' and len(sys.argv) > 2:
         ovs_up(sys.argv[2:])
+    elif cmd == 'known' and len(sys.argv) == 3:
+        known(sys.argv[2])
+    elif cmd == 'unregister' and len(sys.argv) == 3:
+        unregister(sys.argv[2])
     elif cmd == 'boot-cleanup':
         boot_cleanup()
     elif cmd == 'boot-test' and len(sys.argv) > 2:
         boot_test(sys.argv[2], '--keep' in sys.argv[3:])
     else:
-        die('usage: orphera-compute-api compute-up <host>... | hypervisors | ovs-up <host>... | boot-cleanup | boot-test <qcow2-file> [--keep]')
+        die('usage: orphera-compute-api compute-up <host>... | hypervisors | ovs-up <host>... | known <host> | unregister <host> | boot-cleanup | boot-test <qcow2-file> [--keep]')
 """
 
-  private val helperScript =
-    "cat > /usr/local/sbin/orphera-compute-api <<'PYEOF'\n" +
-      apiHelperPython
-        .replace("@@KS@@", ksFqdn)
-        .replace("@@NOVA@@", novaApi)
-        .replace("@@NEUTRON@@", neutronApi)
-        .replace("@@GLANCE@@", glanceApi)
-        .replace("@@ADMINPW@@", adminPassword.reveal)
-        .replace("@@PHYSNET@@", physnet)
-        .replace("@@CA@@", s"$caDir/ca.crt") +
-      "\nPYEOF\nchmod 700 /usr/local/sbin/orphera-compute-api\necho wrote /usr/local/sbin/orphera-compute-api\n"
+  private val helper =
+    apiHelperPython
+      .replace("@@KS@@", ksFqdn)
+      .replace("@@NOVA@@", novaApi)
+      .replace("@@NEUTRON@@", neutronApi)
+      .replace("@@GLANCE@@", glanceApi)
+      .replace("@@ADMINPW@@", adminPassword.reveal)
+      .replace("@@PHYSNET@@", physnet)
+      .replace("@@CA@@", caCert)
+  private val helperPath = "/usr/local/sbin/orphera-compute-api"
 
-  // Each node checks its own entries. nova-compute takes a while to register and
-  // the OVS agent a little less.
-  private val confirmScript =
-    """H=$(hostname -s)
-      |for i in $(seq 1 36); do
-      |  if /usr/local/sbin/orphera-compute-api compute-up $H >/dev/null 2>&1 && /usr/local/sbin/orphera-compute-api ovs-up $H >/dev/null 2>&1; then
-      |    /usr/local/sbin/orphera-compute-api compute-up $H
-      |    /usr/local/sbin/orphera-compute-api ovs-up $H
-      |    /usr/local/sbin/orphera-compute-api hypervisors
-      |    exit 0
-      |  fi
-      |  sleep 5
-      |done
-      |/usr/local/sbin/orphera-compute-api compute-up $H
-      |/usr/local/sbin/orphera-compute-api ovs-up $H
-      |exit 1""".stripMargin
+  // Each node checks its own entries. nova-compute takes a while to register and the OVS agent a little
+  // less.
+  private val reportsIn =
+    s"""H=$$(hostname -s)
+       |$helperPath compute-up $$H >/dev/null 2>&1 && $helperPath ovs-up $$H >/dev/null 2>&1""".stripMargin
+  private val waitReportsIn =
+    s"""H=$$(hostname -s)
+       |for i in $$(seq 1 36); do
+       |  if $helperPath compute-up $$H >/dev/null 2>&1 && $helperPath ovs-up $$H >/dev/null 2>&1; then
+       |    $helperPath compute-up $$H
+       |    $helperPath ovs-up $$H
+       |    exit 0
+       |  fi
+       |  sleep 5
+       |done
+       |$helperPath compute-up $$H
+       |$helperPath ovs-up $$H
+       |exit 1""".stripMargin
 
-  val playbook: ClusterPlaybook =
-    clusterPlaybook("nova-compute")(
-      stage("install-compute", nodes*)
-        .task("wait for apt and dpkg to be idle")(
-          Task.RunCommand(
-            List("sh", "-c", waitAptIdleScript),
-            timeoutSeconds = 960
-          )
-        )
-        .task("check that the VM has hardware virtualization")(
-          Task.RunCommand(List("sh", "-c", kvmCheckScript))
-        )
-        .task("install podman, Open vSwitch, libvirt and QEMU")(
-          Task.Install(packages = hostPackages, updateCache = true)
-        )
-        .task("start libvirtd")(
-          Task.RunCommand(List("sh", "-c", libvirtScript), timeoutSeconds = 120)
-        )
-        .task("define the libvirt secret for the Ceph volumes")(
-          Task.RunCommand(
-            List("sh", "-c", cephSecretScript),
-            timeoutSeconds = 60
-          )
-        )
-        .task(s"make $providerNic an address-less layer-2 port")(
-          Task.RunCommand(
-            List("sh", "-c", dropAddressScript),
-            timeoutSeconds = 120
-          )
-        )
-        .task(s"create $providerBridge with $providerNic as its port")(
-          Task.RunCommand(List("sh", "-c", bridgeScript), timeoutSeconds = 60)
-        )
-        .task("use the Kolla cache as a mirror for quay.io")(
-          Task.RunCommand(List("sh", "-c", useCacheScript))
-        )
-        .task("pull the Nova compute and Neutron OVS agent images")(
-          Task.RunCommand(List("sh", "-c", pullScript), timeoutSeconds = 2400)
-        )
-        .task("fetch Keystone's CA from its TLS handshake")(
-          Task.RunCommand(List("sh", "-c", fetchCaScript), timeoutSeconds = 60)
-        )
-        .task("write nova.conf and the Neutron agent config for this node")(
-          Task.RunCommand(List("sh", "-c", confScript))
-        )
-        .task("write the Kolla config")(
-          Task.RunCommand(
-            List("sh", "-c", kollaConfigScript),
-            timeoutSeconds = 180
-          )
-        )
-        .task("write the compute API helper")(
-          Task.RunCommand(List("sh", "-c", helperScript))
-        )
-        .task(s"write ${ovsAgent.unitName}")(ovsAgent.writeUnit)
-        .task(s"write ${novaCompute.unitName}")(novaCompute.writeUnit)
-        .task(s"start ${ovsAgent.unitName}")(ovsAgent.start)
-        .task(s"start ${novaCompute.unitName}")(novaCompute.start)
-        .build,
+  def describe(target: Node): List[ApplyResource] =
+    val host = target.name
+    val ip = target.vars
+      .getOrElse("cluster_ip", sys.error(s"inventory: node $host has no cluster_ip"))
 
-      stage("discover-compute-hosts", controlNode)
-        .task("nova-manage cell_v2 discover_hosts")(
-          Task.RunCommand(
-            List("sh", "-c", s"sleep 20; $discoverScript"),
-            timeoutSeconds = 180
-          )
-        )
-        .build,
+    val aptWait = command(
+      "wait for apt and dpkg to be idle",
+      waitAptIdleScript,
+      unless = aptIdle,
+      timeout = 960
+    )
+    val kvm = command(
+      "check that the VM has hardware virtualization",
+      kvmMissingScript,
+      unless = kvmPresent
+    )
+    val tools = hostPackages.map(p => pkg(p, updateCache = true).after(aptWait))
+    val podman = tools(0)
 
-      stage("confirm-compute-healthy", nodes*)
-        .task(
-          "nova-compute and the OVS agent report in; the node is a hypervisor"
-        )(
-          Task.RunCommand(List("sh", "-c", confirmScript), timeoutSeconds = 240)
-        )
-        .task("compute confirmed")(
-          Task.Debug(
-            s"nova-compute (KVM, config drive) and the Neutron Open vSwitch agent running on ${nodes.mkString(", ")}; flat provider network `$physnet` on $providerBridge/$providerNic, VXLAN tunnels to the other nodes from the management address. Test: manifests/test_nova_compute.sh"
-          )
-        )
-        .build
+    // libvirtd, the libvirt secret for the Ceph volumes, the provider NIC and its bridge.
+    val libvirt = command(
+      "start libvirtd with the sockets and settings nova-compute needs",
+      libvirtScript,
+      unless = libvirtReady,
+      timeout = 120
+    ).after(tools*)
+    val cephSecret = command(
+      "define the libvirt secret for the Ceph volumes",
+      cephSecretScript,
+      unless = cephSecretReady,
+      timeout = 60
+    ).after(libvirt)
+    val addressless = command(
+      s"make $providerNic an address-less layer-2 port",
+      dropAddressScript,
+      unless = addressDropped,
+      timeout = 120
+    ).after(tools*)
+    val bridge = command(
+      s"create $providerBridge with $providerNic as its port",
+      bridgeScript,
+      unless = bridgeReady,
+      timeout = 60
+    ).after((addressless :: tools)*)
+
+    val mirrorDir = directory("/etc/containers/registries.conf.d").after(podman)
+    val mirror = file(
+      "/etc/containers/registries.conf.d/orphera-kolla-cache.conf",
+      registryMirror,
+      mode = "0644"
+    ).after(mirrorDir)
+    val pulled = command(
+      "pull the Nova compute and Neutron OVS agent images",
+      pullScript,
+      unless = imagesPresent,
+      timeout = 2400
+    ).after(podman, mirror)
+
+    val caDirectory = directory(caDir, mode = "0755").after(podman)
+    val ca = command(
+      "fetch Keystone's CA from its TLS handshake",
+      caScript,
+      unless = caCurrent,
+      timeout = 60
+    ).after(caDirectory, tools(1))
+
+    val novaLogDirectory = directory(novaLogDir)
+    val neutronLogDirectory = directory(neutronLogDir)
+    val novaState = directory(novaStateDir)
+    val neutronState = directory(neutronStateDir)
+
+    val novaImage = command(
+      s"$computeImage has nova-compute and its rootwrap config",
+      failWith(
+        s"nova-compute or /etc/nova/rootwrap.conf not found in $computeImage - see the header of nova_compute.scala"
+      ),
+      unless = novaImageOk
+    ).after(pulled)
+    val isoTool = command(
+      s"$computeImage has genisoimage or mkisofs (config drives)",
+      failWith(
+        s"neither genisoimage nor mkisofs is in $computeImage, which config drives need"
+      ),
+      unless = isoToolOk
+    ).after(pulled)
+    val ovsImage = command(
+      s"$ovsAgentImage has the Neutron rootwrap config",
+      failWith(s"/etc/neutron/rootwrap.conf not found in $ovsAgentImage"),
+      unless = ovsRootwrapOk
+    ).after(pulled)
+
+    // ---- the Open vSwitch agent ----
+    val ovsUnit = service(ovsAgent.unitName)
+    val ovsDirRes = directory(ovsDir, mode = "0755")
+    val ovsNeutronConf = secretFile(
+      s"$ovsDir/neutron.conf",
+      Secret(neutronConf(host)), // it holds the message bus password
+      mode = "0640",
+      owner = "root",
+      group = "root"
+    ).after(ovsDirRes).notifies(ovsUnit)
+    val ovsIni = file(
+      s"$ovsDir/openvswitch_agent.ini",
+      ovsAgentIni(ip),
+      mode = "0640",
+      owner = "root",
+      group = "root"
+    ).after(ovsDirRes).notifies(ovsUnit)
+    val ovsCa = command(
+      "copy Keystone's CA to the neutron-openvswitch-agent config",
+      s"cp $caCert $ovsDir/ca.crt",
+      unless = s"cmp -s $caCert $ovsDir/ca.crt"
+    ).after(ca, ovsDirRes).notifies(ovsUnit)
+    val ovsJson = file(
+      s"$ovsDir/config.json",
+      ovsConfigJson,
+      mode = "0644",
+      owner = "root",
+      group = "root"
+    ).after(ovsDirRes).notifies(ovsUnit)
+    val ovsUnitFile = file(
+      ovsAgent.unitPath,
+      ovsAgent.render,
+      mode = "0644",
+      owner = "root",
+      group = "root"
+    ).notifies(ovsUnit)
+    val ovsResources =
+      List(ovsDirRes, ovsNeutronConf, ovsIni, ovsCa, ovsJson, ovsUnitFile)
+
+    // ---- nova-compute ----
+    val novaUnit = service(novaCompute.unitName)
+    val novaDirRes = directory(novaDir, mode = "0755")
+    val novaConfFile = secretFile(
+      s"$novaDir/nova.conf",
+      Secret(novaConf(host, ip)), // it holds the message bus and service passwords
+      mode = "0640",
+      owner = "root",
+      group = "root"
+    ).after(novaDirRes).notifies(novaUnit)
+    val novaCa = command(
+      "copy Keystone's CA to the nova-compute config",
+      s"cp $caCert $novaDir/ca.crt",
+      unless = s"cmp -s $caCert $novaDir/ca.crt"
+    ).after(ca, novaDirRes).notifies(novaUnit)
+    val novaJson = file(
+      s"$novaDir/config.json",
+      novaConfigJson,
+      mode = "0644",
+      owner = "root",
+      group = "root"
+    ).after(novaDirRes).notifies(novaUnit)
+    val novaUnitFile = file(
+      novaCompute.unitPath,
+      novaCompute.render,
+      mode = "0644",
+      owner = "root",
+      group = "root"
+    ).notifies(novaUnit)
+    val novaResources =
+      List(novaDirRes, novaConfFile, novaCa, novaJson, novaUnitFile)
+
+    val helperFile = secretFile(
+      helperPath,
+      Secret(helper), // it holds the admin password
+      mode = "0700",
+      owner = "root",
+      group = "root"
+    )
+
+    // The agent first, then nova-compute (which wants libvirtd and the OVS manager on 127.0.0.1:6640).
+    val ovsRunning = ovsUnit.after(
+      (pulled :: bridge :: ovsImage :: neutronLogDirectory :: neutronState ::
+        List(ovsNeutronConf, ovsIni, ovsCa, ovsJson, ovsUnitFile))*
+    )
+    val novaRunning = novaUnit.after(
+      (ovsRunning :: kvm :: libvirt :: cephSecret :: bridge :: novaImage :: isoTool ::
+        novaLogDirectory :: novaState :: List(
+          novaConfFile,
+          novaCa,
+          novaJson,
+          novaUnitFile
+        ))*
+    )
+
+    val reporting = command(
+      "nova-compute and the OVS agent report in",
+      waitReportsIn,
+      unless = reportsIn,
+      timeout = 240
+    ).after(helperFile, ovsRunning, novaRunning)
+
+    tools ++ List(
+      aptWait,
+      kvm,
+      libvirt,
+      cephSecret,
+      addressless,
+      bridge,
+      mirrorDir,
+      mirror,
+      pulled,
+      caDirectory,
+      ca,
+      novaLogDirectory,
+      neutronLogDirectory,
+      novaState,
+      neutronState,
+      novaImage,
+      isoTool,
+      ovsImage
+    ) ++ ovsResources ++ novaResources ++ List(
+      helperFile,
+      ovsRunning,
+      novaRunning,
+      reporting
     )

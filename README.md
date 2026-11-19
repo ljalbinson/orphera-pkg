@@ -2612,7 +2612,7 @@ result independently of the playbook's own health checks:
     manifests/test_placement.sh                                 # applies placement_single_node.scala
     manifests/test_nova.sh                                      # applies nova_single_node.scala
     manifests/test_neutron.sh                                   # applies neutron_single_node.scala
-    manifests/test_nova_compute.sh                              # applies nova_compute.scala, boots a CirrOS instance
+    manifests/test_nova_compute.sh                              # applies nova_compute*.scala, boots a CirrOS instance
     manifests/test_horizon.sh                                   # applies dashboard_tls.scala, horizon_single_node.scala
     manifests/test_designate.sh                                 # applies designate_*.scala
     manifests/test_heat.sh                                      # applies heat_*.scala
@@ -2943,7 +2943,7 @@ Worth knowing:
   the playbook removes the address that NIC had) is the external network: routers get their
   gateway address and floating IPs from it, and the L3 agent on tst19 does the NAT. It must be
   marked external. There is no metadata agent: instances use a config drive. After applying it,
-  re-apply `nova_compute.scala` so the compute nodes get the VXLAN settings, and `nova_single_node.scala`
+  re-apply `nova_compute.scala` (a description, as is `nova_compute_discover.scala`) so the compute nodes get the VXLAN settings, and `nova_single_node.scala`
   once so Nova's config gets the `[neutron]` section. The external network: `openstack network create
   --external --share --provider-network-type flat --provider-physical-network provider provider`, then
   a subnet on it (or `openstack network set --external <name>` for one that exists). A tenant
@@ -2955,7 +2955,10 @@ Worth knowing:
   instance on a temporary flat network with DHCP (10.10.6.0/24, pool .200-.220) and removes it.
   The node helper `orphera-compute-api` (`compute-up`, `ovs-up`, `hypervisors`, `boot-test`,
   `boot-cleanup`) is installed on both nodes; `KEEP_BOOT=1` leaves the test instance behind for
-  inspection. Teardown: `nova_compute_teardown.scala`.
+  inspection. Two descriptions, applied in this order: `nova_compute.scala` (tst17 and tst18, in parallel;
+  each node's name and management address come from the inventory) and `nova_compute_discover.scala` (tst14,
+  maps the hosts into cell1). Teardown: `nova_compute_teardown.scala`, which also removes the node's
+  nova-compute service and Neutron agents. The description and its test have not been run on the lab yet.
 - **Utilities** in `utils/`: `list-vms.sh [hv...]` lists every VM on each hypervisor with state,
   vCPUs and memory; `scan-vm-sizes.sh [vm...]` compares each VM's CPU and memory in its config file, in libvirt
   and inside the running guest, and exits 1 on a difference; `start-vm.sh <vm>...` starts VMs, finding each one's hypervisor and domain name in
@@ -3400,7 +3403,7 @@ playbooks marked DRAFT there have been written but not all run on the lab.
 | `ceph_client_upgrade.scala`, `ceph_key_rotation.scala` | Ceph's own client for the OpenStack services and compute hosts, then their keys rotated to `aes256k` and the monitors set to `aes256k` only |
 | `lustre_cluster_script.scala` | the Lustre build as an `OrpheraScript` (replaces `lustre_cluster.scala`) |
 | `apt_cache_teardown.scala`, `rpm_cache_teardown.scala`, `kolla_cache_teardown.scala` | Undo the apt cache (tst11) and its clients, the RPM cache (tst12) and its clients, and the Kolla image cache (tst9) |
-| `keystone_teardown.scala`, `glance_teardown.scala`, `placement_teardown.scala`, `cinder_teardown.scala`, `rabbitmq_teardown.scala`, `heat_teardown.scala`, `nova_teardown.scala`, `neutron_teardown.scala`, `horizon_teardown.scala`, `barbican_teardown.scala`, `designate_teardown.scala` | Undo the matching `*_single_node.scala` playbook (see the OpenStack example below) |
+| `keystone_teardown.scala`, `glance_teardown.scala`, `placement_teardown.scala`, `cinder_teardown.scala`, `rabbitmq_teardown.scala`, `heat_teardown.scala`, `nova_teardown.scala`, `neutron_teardown.scala`, `horizon_teardown.scala`, `barbican_teardown.scala`, `designate_teardown.scala`, `nova_compute_teardown.scala` | Undo the matching `*_single_node.scala` playbook (see the OpenStack example below) |
 
 ## Known gaps / not yet built
 

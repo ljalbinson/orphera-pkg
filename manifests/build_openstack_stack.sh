@@ -22,7 +22,7 @@
 #                        network on tst19's second NIC; its address is removed), then the
 #                        persistent network `provider` (flat, shared, external, 10.10.6.0/24 with
 #                        DHCP) that Magnum, Trove and the boot tests use
-#   compute  tst17,tst18 nova_compute (nova-compute on KVM + Neutron Open vSwitch agent, config drive;
+#   compute  tst17,tst18 nova_compute + nova_compute_discover (nova-compute on KVM + Neutron Open vSwitch agent, config drive;
 #                        the second NIC becomes the provider port, its address is removed)
 #   horizon  tst13       horizon_single_node (the dashboard, https://tst13:8080/)
 #   heat     tst20       heat_single_node (orchestration: API, CloudFormation API, engine; RabbitMQ vhost on tst10)
@@ -350,7 +350,8 @@ step_neutron() {
 }
 
 step_compute() {
-  playbook nova_compute.scala
+  apply_desc nova_compute.scala
+  apply_desc nova_compute_discover.scala
   local out
   out=$(run_on tst17 "sudo /usr/local/sbin/orphera-compute-api compute-up tst17 tst18")
   check "nova-compute is up on tst17 and tst18" contains "nova-compute is up on tst17, tst18" "$out"

@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# DRAFT end-to-end test for nova_compute.scala (nova-compute + Neutron OVS agent on
-# tst17 and tst18).
+# End-to-end test for nova_compute.scala (nova-compute + Neutron OVS agent on
+# tst17 and tst18) and nova_compute_discover.scala (maps the hosts into cell1 on tst14).
 #
-# Applies the playbook, then checks independently of its own health check, on each
+# Applies the two descriptions, then checks independently of their own health checks, on each
 # node:
 #  - orphera-nova-compute and orphera-neutron-openvswitch-agent are active,
 #  - /dev/kvm exists (nested virtualization) and libvirtd answers,
@@ -12,21 +12,21 @@
 #    the management NIC (enp1s0) still has its address,
 # and then, through the APIs:
 #  - both nova-compute services are up and both OVS agents are alive,
-#  - both nodes are listed as hypervisors,
+#  - both nodes are listed as hypervisors and are mapped into cell1,
 #  - Nova (tst14) and Neutron (tst19) are still healthy,
 #  - an instance boots: a CirrOS image is uploaded to Glance, a flat provider network
 #    with DHCP (10.10.6.0/24, pool .200-.220) is created, the instance is started
 #    with a config drive, its console shows the login prompt and a DHCP lease from
 #    that pool, and everything is deleted again (this exercises the scheduler,
 #    Placement, Glance, Neutron port binding, libvirt/KVM and the DHCP agent),
-#  - a second run of the playbook succeeds (idempotence).
+#  - a second run of both descriptions changes nothing (idempotence), and both services are still up.
 #
 # Prerequisites: Galera + VIP, Keystone, RabbitMQ, Glance, Placement, Nova (tst14) and
 # Neutron (tst19) healthy, no flat network left on the physical network `provider`
 # (only one is allowed), agents on tst17 and tst18, internet access from scala0 for
 # the CirrOS image (or CIRROS_IMAGE=/path/to/cirros.qcow2).
 # Run from scala0, in orphera-pkg:   manifests/test_nova_compute.sh
-# NO_APPLY=1 skips the playbook runs; SKIP_BOOT=1 skips the instance boot;
+# NO_APPLY=1 skips the apply runs; SKIP_BOOT=1 skips the instance boot;
 # KEEP_BOOT=1 leaves the test instance, image, flavor and network in place for inspection.
 # Exit code: 0 if every assertion passes, 1 otherwise.
 
@@ -60,9 +60,11 @@ assert_contains() {
 
 if [ -z "${NO_APPLY:-}" ]; then
   log "install"
-  if ! orphera cluster-playbook nova_compute.scala; then
-    log "FAIL: nova_compute.scala did not complete"; exit 1
-  fi
+  for d in nova_compute.scala nova_compute_discover.scala; do
+    if ! orphera apply "$d"; then
+      log "FAIL: $d did not complete"; exit 1
+    fi
+  done
 fi
 
 for i in "${!NODES[@]}"; do
@@ -96,6 +98,10 @@ assert_contains "both Open vSwitch agents are alive" "alive on tst17, tst18" "$O
 OUT=$(run_on tst17 "sudo $HELPER hypervisors")
 assert_contains "tst17 is a hypervisor" "hypervisor tst17" "$OUT"
 assert_contains "tst18 is a hypervisor" "hypervisor tst18" "$OUT"
+
+OUT=$(run_on tst14 "sudo podman run --rm --network host --user root --entrypoint nova-manage -v /etc/kolla/nova-api/nova.conf:/etc/nova/nova.conf:ro,z -v /var/log/kolla/nova:/var/log/kolla/nova:z quay.io/openstack.kolla/nova-api:2025.1-ubuntu-noble cell_v2 list_hosts")
+assert_contains "tst17 is mapped into cell1" "tst17" "$OUT"
+assert_contains "tst18 is mapped into cell1" "tst18" "$OUT"
 
 OUT=$(run_on tst14 "sudo /usr/local/sbin/orphera-nova-api services-up")
 assert_contains "Nova on tst14 still has its scheduler and conductor up" "are up" "$OUT"
@@ -134,11 +140,16 @@ fi
 
 if [ -z "${NO_APPLY:-}" ]; then
   log "re-apply (idempotence)"
-  if orphera cluster-playbook nova_compute.scala; then
-    log "PASS: second run completed"; PASS=$((PASS + 1))
-  else
-    log "FAIL: second run of nova_compute.scala failed"; FAIL=$((FAIL + 1))
-  fi
+  for d in nova_compute.scala nova_compute_discover.scala; do
+    SECOND=$(orphera apply "$d" 2>&1); RC=$?
+    printf '%s\n' "$SECOND"
+    if [ "$RC" -ne 0 ]; then
+      log "FAIL: second run of $d failed"; FAIL=$((FAIL + 1))
+    fi
+    assert_contains "second run of $d changed nothing" "0 changed" "$SECOND"
+  done
+  OUT=$(run_on tst17 "sudo $HELPER compute-up tst17 tst18")
+  assert_contains "both nova-compute services are still up after the second run" "nova-compute is up on tst17, tst18" "$OUT"
 fi
 
 log "passed=$PASS failed=$FAIL"

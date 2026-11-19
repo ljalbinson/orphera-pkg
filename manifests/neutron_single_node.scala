@@ -27,7 +27,7 @@ import orphera.orchestrator.conf.*
 // --external <name>`); the L3 agent does the NAT in router namespaces on this
 // node. There is no metadata agent: Nova's metadata API is not deployed, so
 // instances use a config drive. The compute nodes need the matching VXLAN
-// settings (nova_compute.scala); apply that playbook after this one.
+// settings (nova_compute.scala); apply that description after this one.
 //
 // Where it runs: tst19, whose second NIC (enp2s0, on the hypervisor's br-net106)
 // is the provider network. This description first removes the address that NIC
