@@ -2614,7 +2614,7 @@ result independently of the playbook's own health checks:
     manifests/test_neutron.sh                                   # applies neutron_single_node.scala
     manifests/test_nova_compute.sh                              # applies nova_compute.scala, boots a CirrOS instance
     manifests/test_horizon.sh                                   # applies dashboard_tls.scala, horizon_single_node.scala
-    manifests/test_designate.sh                                 # applies designate_single_node.scala
+    manifests/test_designate.sh                                 # applies designate_*.scala
     manifests/test_heat.sh                                      # applies heat_*.scala
     manifests/test_barbican.sh                                  # applies barbican_*.scala
     utils/openstack-client-setup.sh                             # CLI on the machine you run orphera from
@@ -2636,7 +2636,7 @@ port 53 of the node's address and takes its zones from mdns. One pool, `default`
     dig +short @10.10.5.28 www.example.org A
 
 (the CLI needs `python-designateclient`.) Neutron's DNS integration and the notification sink, which create records for ports and
-instances, are not set up yet. The playbook and its test have not been run.
+instances, are not set up yet. The descriptions and their test have not been run.
 
 **Heat** (`manifests/heat_single_node.scala`, undone by `heat_teardown.scala`, checked by `test_heat.sh`) puts orchestration on tst20: the API
 (8004), the CloudFormation compatible API (8000) and the engine as Kolla containers. It makes the stack user domain `heat` and its admin in
@@ -3400,7 +3400,7 @@ playbooks marked DRAFT there have been written but not all run on the lab.
 | `ceph_client_upgrade.scala`, `ceph_key_rotation.scala` | Ceph's own client for the OpenStack services and compute hosts, then their keys rotated to `aes256k` and the monitors set to `aes256k` only |
 | `lustre_cluster_script.scala` | the Lustre build as an `OrpheraScript` (replaces `lustre_cluster.scala`) |
 | `apt_cache_teardown.scala`, `rpm_cache_teardown.scala`, `kolla_cache_teardown.scala` | Undo the apt cache (tst11) and its clients, the RPM cache (tst12) and its clients, and the Kolla image cache (tst9) |
-| `keystone_teardown.scala`, `glance_teardown.scala`, `placement_teardown.scala`, `cinder_teardown.scala`, `rabbitmq_teardown.scala`, `heat_teardown.scala`, `nova_teardown.scala`, `neutron_teardown.scala`, `horizon_teardown.scala`, `barbican_teardown.scala` | Undo the matching `*_single_node.scala` playbook (see the OpenStack example below) |
+| `keystone_teardown.scala`, `glance_teardown.scala`, `placement_teardown.scala`, `cinder_teardown.scala`, `rabbitmq_teardown.scala`, `heat_teardown.scala`, `nova_teardown.scala`, `neutron_teardown.scala`, `horizon_teardown.scala`, `barbican_teardown.scala`, `designate_teardown.scala` | Undo the matching `*_single_node.scala` playbook (see the OpenStack example below) |
 
 ## Known gaps / not yet built
 

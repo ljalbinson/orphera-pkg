@@ -1,12 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import orphera.orchestrator.*
-import orphera.orchestrator.ClusterPlaybookDsl.*
 import orphera.orchestrator.kolla.*
 
-// DRAFT. OpenStack Designate (DNS as a service) with a BIND9 name server on the same node, Kolla images
-// under podman. Modelled on nova_single_node.scala and placement_single_node.scala; read their headers
-// for the conventions.
+// OpenStack Designate (DNS as a service) with a BIND9 name server on the same node, Kolla images under
+// podman, as a declarative description (OrpheraApply, docs/APPLY-DESIGN.md). It replaced the cluster
+// playbook of the same name; a second run changes nothing and restarts nothing, and `--check` shows what
+// would change. Modelled on heat_single_node.scala and barbican_single_node.scala, which explain the
+// conventions.
+//
+// Three descriptions, since one description cannot order its nodes. Apply them in this order:
+//
+//   orphera apply manifests/designate_database.scala     # the designate database and user (tst3)
+//   orphera apply manifests/designate_rabbitmq.scala     # the `designate` vhost and user on RabbitMQ (tst10)
+//   orphera apply manifests/designate_single_node.scala  # this one (tst16)
 //
 // Where it runs: tst16, which had no role. Designate is five small Python services plus BIND9, so one
 // 4 GB VM holds all of it. To move it, change `node`, `fqdn` and `nodeIp` below (and the teardown's
@@ -30,34 +37,39 @@ import orphera.orchestrator.kolla.*
 //   - agent on the node; tst9's Kolla cache is optional
 //   Ceph is not involved.
 //
-// Stages:
-//   - designate-database (tst3, a Galera node): the `designate` database + user.
-//   - designate-rabbitmq (tst10): vhost and user, idempotent.
-//   - install-designate (the node): packages, cache mirror, image pulls, Keystone's CA from its TLS
-//     handshake, designate.conf, pools.yaml, named.conf and the rndc key, Kolla config for each
-//     container, `designate-manage database sync`, the units, registration in Keystone (user `designate`
-//     in project `service`, service type `dns`, three endpoints), then the pool is loaded and the worker
-//     and mdns are restarted so they read it.
-//   - confirm-designate-healthy (the node): the API answers, BIND9 answers on port 53, and the zone
-//     list is readable with an admin token.
+// How it stays idempotent (as for Heat and Barbican):
+//   - Keystone's CA is compared as a certificate with the installed copy each run; each service's copy is
+//     refreshed (and the service restarted) when it changes.
+//   - designate.conf holds secrets, so it is a secret file, one per service directory. The API's Apache
+//     vhost and config.json, and BIND9's config.json, depend on what the image has (the WSGI script, the
+//     Apache flavour, the path of `named` and the name of its user), so they are generated into a
+//     temporary directory and compared with the installed files.
+//   - `designate-manage database sync` is skipped while its stamp matches and the `pools` table exists (a
+//     query as the designate user, through the VIP).
+//   - The rndc key (shared by BIND9 and the worker) is made once and kept: a new key on a re-run would
+//     stop the worker's rndc calls until both sides were restarted. It lives in the BIND9 config directory;
+//     the worker's copy is refreshed when it differs.
+//   - The default pool is loaded with `designate-manage pool update`, skipped while its stamp (the hash of
+//     pools.yaml) matches and the pool `default` is in the database. It runs once central is up, because
+//     it talks to central over RabbitMQ, and the worker and mdns start after it (they read the pool when
+//     they start). When pools.yaml changes later, the pool is loaded again and the worker and mdns are
+//     restarted.
+//   - Designate is registered in Keystone before the units start, skipped while the helper's `registered`
+//     check passes.
 //
 // Not done here, on purpose (later): Neutron's DNS integration and the notification sink, which
 // need changes to neutron_single_node.scala and nova_single_node.scala.
 //
-// Check mode: `ORPHERA_CHECK=1 orphera cluster-playbook manifests/designate_single_node.scala` changes
-// nothing and reports whether the units on the node match what this playbook writes.
-//
-// Facts about Designate this was written from, to check if the first run fails: `designate-manage
-// pool update` talks to designate-central over RabbitMQ, so it runs after the services start; the worker
-// reads the pool when it starts, so it is restarted afterwards; the keys of pools.yaml are the
-// documented ones (name, ns_records, nameservers, targets with masters and options); the Kolla
-// images are the 2025.1 ubuntu-noble ones, as for the other services. designate.conf is written as
-// plain text: a typed version needs a catalogue of the image's options
-// (manifests/dump_oslo_options.sh designate-central).
+// Facts about Designate this was written from, to check if a run fails: `designate-manage pool update`
+// talks to designate-central over RabbitMQ; the keys of pools.yaml are the documented ones (name,
+// ns_records, nameservers, targets with masters and options); the Kolla images are the 2025.1 ubuntu-noble
+// ones, as for the other services. designate.conf is written as plain text: a typed version needs a
+// catalogue of the image's options (manifests/dump_oslo_options.sh designate-central).
 //
 // Test-only credentials come from the secret store (designate/db, designate/service, designate/rabbit),
-// made on first use. Not compiled where this was written; the first run on scala0 is the first compile.
-object designate_single_node extends OrpheraClusterPlaybook:
+// as before.
+object designate_single_node extends OrpheraApply:
+  import Resources.*
 
   private val node = "tst16"
   private val fqdn = "tst16.ljalbinson.com"
@@ -67,10 +79,11 @@ object designate_single_node extends OrpheraClusterPlaybook:
   private val dnsPort = 53
   private val rndcPort = 953
 
+  override def nodes: List[String] = List(node)
+
   private val ksFqdn = "tst6.ljalbinson.com"
   private val vip = "10.10.5.100"
 
-  private val rabbitNode = "tst10"
   private val rabbitIp = "10.10.5.22"
   private val rabbitUser = "designate"
   private val rabbitPassword = Secrets.secret("designate/rabbit")
@@ -87,17 +100,20 @@ object designate_single_node extends OrpheraClusterPlaybook:
   private val designatePassword = Secrets.secret("designate/service")
 
   private val confRoot = "/etc/kolla"
-  private val srcDir = "/etc/kolla/designate"
   private val logDir = "/var/log/kolla/designate"
   private val stateDir = "/var/lib/orphera/designate"
   private val caDir = "/etc/kolla/designate-ca"
+  private val caCert = s"$caDir/ca.crt"
   private val ksUrl = s"https://$ksFqdn:5000"
+  private val centralDir = s"$confRoot/designate-central"
+  private val bindDir = s"$confRoot/designate-backend-bind9"
+  private val rndcKey = s"$bindDir/rndc.key"
 
   // The name of the nameserver in the pool's NS and SOA records: the node itself, with the final dot
   // DNS names need.
   private val nsHostname = s"$fqdn."
 
-  // The six containers as data: the unit file text and the start task come from Container
+  // The six containers as data: the unit file text comes from Container
   // (orchestrator/.../kolla/Container.scala), checked by ContainerCheck. The five Designate services
   // share their mounts apart from their own config directory. Defined after confRoot, logDir and
   // stateDir, which they read; a val used before its definition is null in an object.
@@ -114,14 +130,15 @@ object designate_single_node extends OrpheraClusterPlaybook:
       // The image's own user cannot open Apache's log files; the API container starts as root.
       user = if service == "designate-api" then Some("root") else None
     )
+  private val designateNames = List(
+    "designate-central",
+    "designate-mdns",
+    "designate-api",
+    "designate-producer",
+    "designate-worker"
+  )
   private val designateServices: List[Container] =
-    List(
-      "designate-central",
-      "designate-mdns",
-      "designate-api",
-      "designate-producer",
-      "designate-worker"
-    ).map(designateContainer)
+    designateNames.map(designateContainer)
 
   // BIND9 keeps the zones Designate adds with rndc (allow-new-zones) in /var/lib/named.
   private val bind9 = Container(
@@ -133,34 +150,18 @@ object designate_single_node extends OrpheraClusterPlaybook:
       registry
     ),
     mounts = List(
-      Mount(
-        s"$confRoot/designate-backend-bind9",
-        "/var/lib/kolla/config_files"
-      ),
+      Mount(bindDir, "/var/lib/kolla/config_files"),
       Mount(s"$stateDir/bind", "/var/lib/named", Access.ReadWrite)
     ),
     env = List("KOLLA_CONFIG_STRATEGY" -> "COPY_ALWAYS")
   )
 
   private val allContainers: List[Container] = bind9 :: designateServices
-  private val apiImage = Image(
-    "designate-api",
-    Release.R2025_1,
-    Base.UbuntuNoble,
-    registry
-  ).ref
-  private val centralImage = Image(
-    "designate-central",
-    Release.R2025_1,
-    Base.UbuntuNoble,
-    registry
-  ).ref
-  private val workerImage = Image(
-    "designate-worker",
-    Release.R2025_1,
-    Base.UbuntuNoble,
-    registry
-  ).ref
+  private def imageRef(service: String): String =
+    Image(service, Release.R2025_1, Base.UbuntuNoble, registry).ref
+  private val apiImage = imageRef("designate-api")
+  private val centralImage = imageRef("designate-central")
+  private val workerImage = imageRef("designate-worker")
   private val bindImage = bind9.image.ref
 
   private val hostPackages =
@@ -173,100 +174,21 @@ object designate_single_node extends OrpheraClusterPlaybook:
       "bind9-dnsutils"
     )
 
+  // A fresh VM may still be running unattended-upgrades (see
+  // disable_unattended_upgrades.scala); when it finishes needrestart restarts the
+  // agent and kills the running task. Wait for it before touching packages.
+  private val aptIdle =
+    """! pgrep -f '^/usr/bin/python3 /usr/bin/unattended-upgrade$' >/dev/null && ! pgrep -x apt-get >/dev/null && ! pgrep -x apt >/dev/null && ! pgrep -x dpkg >/dev/null"""
   private val waitAptIdleScript =
-    """for i in $(seq 1 180); do
-      |  if pgrep -f '^/usr/bin/python3 /usr/bin/unattended-upgrade$' >/dev/null || pgrep -x apt-get >/dev/null || pgrep -x apt >/dev/null || pgrep -x dpkg >/dev/null; then
-      |    sleep 5
-      |  else
-      |    echo "apt and dpkg are idle"
-      |    exit 0
-      |  fi
-      |done
-      |echo "apt/dpkg still busy after 15 minutes (unattended-upgrades?)" >&2
-      |exit 1""".stripMargin
-
-  // ---- tst3 (Galera) ---------------------------------------------------
-
-  private val createDatabaseScript =
-    s"""mariadb -N -e "CREATE DATABASE IF NOT EXISTS $dbName; CREATE USER IF NOT EXISTS '$dbUser'@'%' IDENTIFIED BY '${dbPassword.reveal}'; GRANT ALL PRIVILEGES ON $dbName.* TO '$dbUser'@'%'; FLUSH PRIVILEGES;""""
-
-  // ---- tst10 (RabbitMQ) ------------------------------------------------
-
-  private val rabbitScript =
-    s"""set -e
-       |if ! podman ps -q --filter 'name=^rabbitmq$$' | grep -q .; then
-       |  echo "no running 'rabbitmq' container on this node - apply rabbitmq_single_node.scala first" >&2
-       |  exit 1
-       |fi
-       |if ! podman exec rabbitmq rabbitmqctl list_vhosts -q | grep -qx '$rabbitVhost'; then
-       |  podman exec rabbitmq rabbitmqctl add_vhost '$rabbitVhost'
-       |fi
-       |if podman exec rabbitmq rabbitmqctl list_users -q | awk '{print $$1}' | grep -qx '$rabbitUser'; then
-       |  podman exec rabbitmq rabbitmqctl change_password '$rabbitUser' '${rabbitPassword.reveal}'
-       |else
-       |  podman exec rabbitmq rabbitmqctl add_user '$rabbitUser' '${rabbitPassword.reveal}'
-       |fi
-       |podman exec rabbitmq rabbitmqctl set_permissions -p '$rabbitVhost' '$rabbitUser' '.*' '.*' '.*'
-       |echo "rabbitmq vhost $rabbitVhost and user $rabbitUser ready"""".stripMargin
-
-  // ---- the node --------------------------------------------------------
-
-  private val useCacheScript =
-    s"""mkdir -p /etc/containers/registries.conf.d
-       |cat > /etc/containers/registries.conf.d/orphera-kolla-cache.conf <<'REG'
-       |[[registry]]
-       |prefix = "quay.io"
-       |location = "quay.io"
-       |
-       |[[registry.mirror]]
-       |location = "tst21.ljalbinson.com:5000"
-       |insecure = true
-       |
-       |[[registry.mirror]]
-       |location = "$cacheHostPort"
-       |insecure = true
-       |REG
-       |echo "podman will try tst21.ljalbinson.com:5000 (built images), then $cacheHostPort, before quay.io"""".stripMargin
-
-  private val pullScript =
-    s"""${Pull.shellFunction(
-        "the Image(...) values in designate_single_node.scala"
-      )}
-       |for img in ${allContainers.map(_.image.ref).mkString(" ")}; do
-       |  pull_retry $$img || exit 1
+    s"""for i in $$(seq 1 180); do
+       |  if $aptIdle; then
+       |    echo "apt and dpkg are idle"
+       |    exit 0
+       |  fi
+       |  sleep 5
        |done
-       |echo "images ready"""".stripMargin
-
-  // Same method as placement_single_node.scala: the last certificate Keystone presents is its CA; trust on
-  // first use.
-  private val fetchCaScript =
-    s"""set -e
-       |mkdir -p $caDir
-       |rm -f /tmp/ks-chain-*.pem
-       |openssl s_client -connect $ksFqdn:5000 -servername $ksFqdn -showcerts </dev/null 2>/dev/null | awk '/-----BEGIN CERTIFICATE-----/{n++} n>0{print > ("/tmp/ks-chain-" n ".pem")}'
-       |COUNT=$$(ls /tmp/ks-chain-*.pem 2>/dev/null | wc -l)
-       |if [ "$$COUNT" -lt 2 ]; then
-       |  echo "keystone at $ksFqdn:5000 presented $$COUNT certificate(s); expected leaf + CA - re-run keystone_single_node.scala (it must serve server-chain.crt)" >&2
-       |  exit 1
-       |fi
-       |cp /tmp/ks-chain-$$COUNT.pem $caDir/ca.crt
-       |openssl verify -CAfile $caDir/ca.crt /tmp/ks-chain-1.pem
-       |SUBJ=$$(openssl x509 -in $caDir/ca.crt -noout -subject | sed 's/^subject=//')
-       |ISS=$$(openssl x509 -in $caDir/ca.crt -noout -issuer | sed 's/^issuer=//')
-       |if [ "$$SUBJ" != "$$ISS" ]; then echo "last certificate is not self-signed: $$SUBJ / $$ISS" >&2; exit 1; fi
-       |rm -f /tmp/ks-chain-*.pem
-       |if command -v update-ca-certificates >/dev/null 2>&1; then
-       |  cp $caDir/ca.crt /usr/local/share/ca-certificates/orphera-test-ca.crt
-       |  update-ca-certificates
-       |else
-       |  cp $caDir/ca.crt /etc/pki/ca-trust/source/anchors/orphera-test-ca.crt
-       |  update-ca-trust
-       |fi
-       |echo "Keystone CA installed: $$SUBJ"""".stripMargin
-
-  private val dirsScript =
-    s"""mkdir -p $srcDir $logDir $stateDir $stateDir/bind
-       |echo "directories ready"""".stripMargin
+       |echo "apt/dpkg still busy after 15 minutes (unattended-upgrades?)" >&2
+       |exit 1""".stripMargin
 
   // designate.conf, plain text (see the header). The same file goes to all five services.
   private val designateConf: String =
@@ -355,57 +277,114 @@ object designate_single_node extends OrpheraClusterPlaybook:
        |};
        |""".stripMargin
 
-  // The rndc key is made once and kept: a new key on a re-run would stop the worker's rndc calls until
-  // both sides were restarted.
+  // The rndc key is made once and kept (see the header).
   private val rndcKeyScript =
     s"""set -e
-       |if [ ! -s $srcDir/rndc.key ]; then
-       |  umask 077
-       |  SECRET=$$(openssl rand -base64 32)
-       |  cat > $srcDir/rndc.key <<KEY
+       |umask 077
+       |SECRET=$$(openssl rand -base64 32)
+       |cat > $rndcKey <<KEY
        |key "designate" {
        |    algorithm hmac-sha256;
        |    secret "$$SECRET";
        |};
        |KEY
-       |  echo "rndc key made"
-       |else
-       |  echo "rndc key already there"
-       |fi""".stripMargin
+       |echo "rndc key made"""".stripMargin
 
-  // One config directory per container (Kolla mounts it at /var/lib/kolla/config_files). The API runs
-  // behind Apache + mod_wsgi like Placement and Nova when the image has the WSGI script, else as the
-  // standalone designate-api. The command, the user of BIND9 and the presence of rndc in the worker
-  // image are read from the images.
-  private val kollaConfigScript =
-    s"""set -e
-       |for svc in central mdns api producer worker; do
-       |  mkdir -p $confRoot/designate-$$svc
-       |  cp $srcDir/designate.conf $confRoot/designate-$$svc/designate.conf
-       |  cp $caDir/ca.crt $confRoot/designate-$$svc/ca.crt
+  // The Kolla cache as a mirror of quay.io (podman registries.conf.d drop-in).
+  private val registryMirror =
+    s"""[[registry]]
+       |prefix = "quay.io"
+       |location = "quay.io"
+       |
+       |[[registry.mirror]]
+       |location = "tst21.ljalbinson.com:5000"
+       |insecure = true
+       |
+       |[[registry.mirror]]
+       |location = "$cacheHostPort"
+       |insecure = true
+       |""".stripMargin
+
+  private val images = allContainers.map(_.image.ref)
+  private val pullScript =
+    s"""${Pull.shellFunction(
+        "the Image(...) values in designate_single_node.scala"
+      )}
+       |for img in ${images.mkString(" ")}; do
+       |  pull_retry $$img || exit 1
        |done
-       |cp $srcDir/rndc.key $confRoot/designate-worker/rndc.key
-       |mkdir -p $confRoot/designate-backend-bind9
-       |cp $srcDir/named.conf $confRoot/designate-backend-bind9/named.conf
-       |cp $srcDir/rndc.key $confRoot/designate-backend-bind9/rndc.key
-       |if ! podman run --rm --entrypoint sh $workerImage -c 'command -v rndc' >/dev/null; then
-       |  echo "rndc is not in $workerImage; the worker cannot manage BIND9 without it" >&2
+       |echo "images ready"""".stripMargin
+  private val imagesPresent =
+    s"""for img in ${images.mkString(" ")}; do podman image exists $$img || exit 1; done"""
+
+  // Keystone's CA: the last certificate it presents (trust on first use),
+  // which must be self-signed. `chainTo DIR` leaves DIR/c1.pem ... DIR/cN.pem,
+  // each holding the certificate only: the text s_client prints after the
+  // last one (bytes read and written, session ticket) differs on every
+  // handshake, and would make the comparison with the installed copy fail.
+  private val chainTo =
+    s"""chainTo() { openssl s_client -connect $ksFqdn:5000 -servername $ksFqdn -showcerts </dev/null 2>/dev/null | awk -v d="$$1" '/-----BEGIN CERTIFICATE-----/{n++; p=1} p{print > (d "/c" n ".pem")} /-----END CERTIFICATE-----/{p=0}'; }"""
+
+  private val trustTarget =
+    """if command -v update-ca-certificates >/dev/null 2>&1; then t=/usr/local/share/ca-certificates/orphera-test-ca.crt; else t=/etc/pki/ca-trust/source/anchors/orphera-test-ca.crt; fi"""
+
+  // Current when the installed CA is the one Keystone presents now, and is in
+  // the system trust store.
+  private val caCurrent =
+    s"""$chainTo
+       |D=$$(mktemp -d)
+       |chainTo $$D
+       |N=$$(ls $$D/c*.pem 2>/dev/null | wc -l)
+       |R=1
+       |if [ "$$N" -ge 2 ]; then
+       |  $trustTarget
+       |  cmp -s $$D/c$$N.pem $caCert && cmp -s $caCert "$$t" && R=0
+       |fi
+       |rm -rf $$D
+       |exit $$R""".stripMargin
+
+  private val caScript =
+    s"""set -e
+       |$chainTo
+       |mkdir -p $caDir
+       |D=$$(mktemp -d)
+       |trap 'rm -rf $$D' EXIT
+       |chainTo $$D
+       |COUNT=$$(ls $$D/c*.pem 2>/dev/null | wc -l)
+       |if [ "$$COUNT" -lt 2 ]; then
+       |  echo "keystone at $ksFqdn:5000 presented $$COUNT certificate(s); expected leaf + CA - apply keystone_single_node.scala (it must serve server-chain.crt)" >&2
        |  exit 1
        |fi
-       |NAMED=$$(podman run --rm --entrypoint sh $bindImage -c 'command -v named' || true)
-       |if [ -z "$$NAMED" ]; then echo "named not found in $bindImage" >&2; exit 1; fi
-       |BINDUSER=$$(podman run --rm --entrypoint sh $bindImage -c 'id -u bind >/dev/null 2>&1 && echo bind || echo named')
+       |cp $$D/c$$COUNT.pem $caCert
+       |openssl verify -CAfile $caCert $$D/c1.pem
+       |SUBJ=$$(openssl x509 -in $caCert -noout -subject | sed 's/^subject=//')
+       |ISS=$$(openssl x509 -in $caCert -noout -issuer | sed 's/^issuer=//')
+       |if [ "$$SUBJ" != "$$ISS" ]; then echo "last certificate is not self-signed: $$SUBJ / $$ISS" >&2; exit 1; fi
+       |$trustTarget
+       |cp $caCert "$$t"
+       |if command -v update-ca-certificates >/dev/null 2>&1; then update-ca-certificates; else update-ca-trust; fi
+       |echo "Keystone CA installed: $$SUBJ"""".stripMargin
+
+  // The files every Designate service's config.json copies in, and the ownership it sets.
+  private val commonFiles =
+    """{"source": "/var/lib/kolla/config_files/designate.conf", "dest": "/etc/designate/designate.conf", "owner": "designate", "perm": "0600"}, {"source": "/var/lib/kolla/config_files/ca.crt", "dest": "/etc/designate/ssl/ca.crt", "owner": "designate", "perm": "0644"}"""
+  private val permissions =
+    """"permissions": [{"path": "/var/log/kolla/designate", "owner": "designate:kolla", "recurse": true}, {"path": "/var/lib/designate", "owner": "designate:designate", "recurse": true}]"""
+  // central, mdns and producer: the program of the same name.
+  private def plainConfigJson(name: String): String =
+    s"""{"command": "$name --config-file /etc/designate/designate.conf", "config_files": [$commonFiles], $permissions}
+       |""".stripMargin
+  private val workerConfigJson =
+    s"""{"command": "designate-worker --config-file /etc/designate/designate.conf", "config_files": [$commonFiles, {"source": "/var/lib/kolla/config_files/rndc.key", "dest": "/etc/designate/rndc.key", "owner": "designate", "perm": "0600"}], $permissions}
+       |""".stripMargin
+
+  // The API runs behind Apache + mod_wsgi like Placement and Nova when the image has the WSGI script, else
+  // as the standalone designate-api. Which one is read from the image. The vhost (WSGI case only) and
+  // config.json are generated into `out` (the real directory, or a temporary one for the guard to compare
+  // with).
+  private def kollaApiScript(out: String): String =
+    s"""set -e
        |WSGI=$$(podman run --rm --entrypoint sh $apiImage -c 'command -v designate-api-wsgi' || true)
-       |COMMON='{"source": "/var/lib/kolla/config_files/designate.conf", "dest": "/etc/designate/designate.conf", "owner": "designate", "perm": "0600"}, {"source": "/var/lib/kolla/config_files/ca.crt", "dest": "/etc/designate/ssl/ca.crt", "owner": "designate", "perm": "0644"}'
-       |PERMS='"permissions": [{"path": "/var/log/kolla/designate", "owner": "designate:kolla", "recurse": true}, {"path": "/var/lib/designate", "owner": "designate:designate", "recurse": true}]'
-       |for svc in central mdns producer; do
-       |  cat > $confRoot/designate-$$svc/config.json <<JSON
-       |{"command": "designate-$$svc --config-file /etc/designate/designate.conf", "config_files": [$$COMMON], $$PERMS}
-       |JSON
-       |done
-       |cat > $confRoot/designate-worker/config.json <<JSON
-       |{"command": "designate-worker --config-file /etc/designate/designate.conf", "config_files": [$$COMMON, {"source": "/var/lib/kolla/config_files/rndc.key", "dest": "/etc/designate/rndc.key", "owner": "designate", "perm": "0600"}], $$PERMS}
-       |JSON
        |if [ -n "$$WSGI" ]; then
        |  if podman run --rm --entrypoint sh $apiImage -c 'test -d /etc/apache2/conf-enabled'; then
        |    APACHE_CONF=/etc/apache2/conf-enabled/designate-api.conf
@@ -417,7 +396,7 @@ object designate_single_node extends OrpheraClusterPlaybook:
        |    APACHE_CMD="/usr/sbin/httpd -DFOREGROUND"
        |  fi
        |  echo "api: wsgi script $$WSGI; apache config $$APACHE_CONF"
-       |  cat > $confRoot/designate-api/designate-api.conf <<WSGICONF
+       |cat > $out/designate-api.conf <<WSGICONF
        |Listen 0.0.0.0:$apiPort
        |ServerSignature Off
        |ServerTokens Prod
@@ -437,33 +416,82 @@ object designate_single_node extends OrpheraClusterPlaybook:
        |    </Directory>
        |</VirtualHost>
        |WSGICONF
-       |  cat > $confRoot/designate-api/config.json <<JSON
-       |{"command": "$$APACHE_CMD", "config_files": [$$COMMON, {"source": "/var/lib/kolla/config_files/designate-api.conf", "dest": "$$APACHE_CONF", "owner": "designate", "perm": "0600"}], $$PERMS}
+       |cat > $out/config.json <<JSON
+       |{"command": "$$APACHE_CMD", "config_files": [$commonFiles, {"source": "/var/lib/kolla/config_files/designate-api.conf", "dest": "$$APACHE_CONF", "owner": "designate", "perm": "0600"}], $permissions}
        |JSON
        |else
        |  echo "api: no designate-api-wsgi in $apiImage; running the standalone designate-api"
-       |  cat > $confRoot/designate-api/config.json <<JSON
-       |{"command": "designate-api --config-file /etc/designate/designate.conf", "config_files": [$$COMMON], $$PERMS}
+       |cat > $out/config.json <<JSON
+       |{"command": "designate-api --config-file /etc/designate/designate.conf", "config_files": [$commonFiles], $permissions}
        |JSON
        |fi
-       |cat > $confRoot/designate-backend-bind9/config.json <<JSON
+       |echo "kolla config written under $out"""".stripMargin
+
+  // BIND9's config.json: the path of `named` and the name of its user (`bind` or `named`) are read from the
+  // image.
+  private def kollaBindScript(out: String): String =
+    s"""set -e
+       |NAMED=$$(podman run --rm --entrypoint sh $bindImage -c 'command -v named' || true)
+       |if [ -z "$$NAMED" ]; then echo "named not found in $bindImage" >&2; exit 1; fi
+       |BINDUSER=$$(podman run --rm --entrypoint sh $bindImage -c 'id -u bind >/dev/null 2>&1 && echo bind || echo named')
+       |cat > $out/config.json <<JSON
        |{"command": "$$NAMED -f -u $$BINDUSER -c /etc/bind/named.conf", "config_files": [{"source": "/var/lib/kolla/config_files/named.conf", "dest": "/etc/bind/named.conf", "owner": "$$BINDUSER", "perm": "0640"}, {"source": "/var/lib/kolla/config_files/rndc.key", "dest": "/etc/bind/rndc.key", "owner": "$$BINDUSER", "perm": "0640"}], "permissions": [{"path": "/var/lib/named", "owner": "$$BINDUSER:$$BINDUSER", "recurse": true}]}
        |JSON
-       |echo "kolla config written under $confRoot (bind user $$BINDUSER)"""".stripMargin
+       |echo "kolla config written under $out (bind user $$BINDUSER)"""".stripMargin
 
-  // designate-manage runs in a one-off container with designate.conf bind-mounted (entrypoint overridden,
-  // so kolla_set_configs does not run).
+  // Current when every file the script generates is installed with the same content.
+  private def kollaCurrent(generate: String, dir: String): String =
+    s"""T=$$(mktemp -d)
+       |$generate >/dev/null
+       |R=0
+       |for f in $$T/*; do cmp -s $$f $dir/$$(basename $$f) || R=1; done
+       |rm -rf $$T
+       |exit $$R""".stripMargin
+
+  // The worker cannot manage BIND9 without rndc in its image.
+  private val workerHasRndc =
+    s"""podman run --rm --entrypoint sh $workerImage -c 'command -v rndc' >/dev/null 2>&1"""
+  private val workerRndcMissing =
+    s"""echo "rndc is not in $workerImage; the worker cannot manage BIND9 without it" >&2
+       |exit 1""".stripMargin
+
+  // designate-manage runs in a one-off container with designate.conf and pools.yaml bind-mounted (entrypoint
+  // overridden, so kolla_set_configs does not run). Both live in central's config directory.
   private def manage(args: String): String =
-    s"podman run --rm --network host --user root --entrypoint designate-manage -v $srcDir/designate.conf:/etc/designate/designate.conf:ro,z -v $srcDir/pools.yaml:/etc/designate/pools.yaml:ro,z -v $logDir:/var/log/kolla/designate:z $centralImage $args"
+    s"podman run --rm --network host --user root --entrypoint designate-manage -v $centralDir/designate.conf:/etc/designate/designate.conf:ro,z -v $centralDir/pools.yaml:/etc/designate/pools.yaml:ro,z -v $logDir:/var/log/kolla/designate:z $centralImage $args"
+
+  // Runs a Python snippet in the central image, with its own interpreter (the one named on the first line
+  // of designate-manage), which has pymysql. `body` is indented lines inside a `try`; the connection is `c`.
+  // Exit 0 when the snippet ends normally, 1 on any error.
+  private def dbProbe(body: String): String =
+    s"""podman run --rm -i --network host --entrypoint sh $centralImage -c 'exec $$(head -1 "$$(command -v designate-manage)" | sed "s/^#!//") -' >/dev/null 2>&1 <<'PYEOF'
+       |import sys, pymysql
+       |try:
+       |    c = pymysql.connect(host='$vip', user='$dbUser', password='${dbPassword.reveal}', database='$dbName')
+       |$body
+       |except Exception:
+       |    sys.exit(1)
+       |PYEOF""".stripMargin
 
   private val dbSyncScript =
     s"""set -e
        |${manage("database sync")}
        |echo "designate database synced"""".stripMargin
+  private val dbStamp = Resource.sha256(dbSyncScript + designateConf)
+  // True when the designate database, queried as the designate user through the VIP, has the `pools` table.
+  private val dbInState =
+    dbProbe("    c.cursor().execute('SELECT COUNT(*) FROM pools')")
+  // Current when the stamp matches AND the database is in that state.
+  private val dbCurrent =
+    s"""[ "$$(cat $stateDir/db.stamp 2>/dev/null)" = "$dbStamp" ] &&
+       |$dbInState""".stripMargin
+  private val dbSyncWithStamp =
+    s"""$dbSyncScript
+       |echo $dbStamp > $stateDir/db.stamp""".stripMargin
 
   // `pool update` calls designate-central over RabbitMQ, so central must be up; it can take a few seconds
-  // after the unit starts. The worker reads the pool when it starts, so it and mdns are restarted after.
-  private val poolScript =
+  // after the unit starts.
+  private val poolRun =
     s"""set -e
        |ok=""
        |for i in $$(seq 1 24); do
@@ -472,16 +500,23 @@ object designate_single_node extends OrpheraClusterPlaybook:
        |  sleep 5
        |done
        |if [ -z "$$ok" ]; then echo "designate-manage pool update failed; see the output above and: journalctl -u orphera-designate-central" >&2; exit 1; fi
-       |systemctl restart orphera-designate-worker orphera-designate-mdns
-       |sleep 5
-       |for u in worker mdns; do
-       |  systemctl is-active --quiet orphera-designate-$$u || { echo "orphera-designate-$$u is not running after the pool update" >&2; exit 1; }
-       |done
-       |echo "pool loaded; worker and mdns restarted"""".stripMargin
+       |echo "pool loaded"""".stripMargin
+  private val poolStamp = Resource.sha256(poolRun + poolsYaml)
+  // True when the pool `default` is in the database.
+  private val poolInDatabase =
+    dbProbe(
+      "    cur = c.cursor()\n    cur.execute(\"SELECT 1 FROM pools WHERE name = 'default'\")\n    sys.exit(0 if cur.fetchone() else 1)"
+    )
+  private val poolCurrent =
+    s"""[ "$$(cat $stateDir/pool.stamp 2>/dev/null)" = "$poolStamp" ] &&
+       |$poolInDatabase""".stripMargin
+  private val poolWithStamp =
+    s"""$poolRun
+       |echo $poolStamp > $stateDir/pool.stamp""".stripMargin
 
-  // Standard-library Python, as in the other service playbooks. Plain string filled in with replace().
+  // Standard-library Python, as in the other services. Plain string filled in with replace().
   // Subcommands:
-  //   register | unregister | catalog | zone-list | zone-create <name> <email> | zone-wait <id> |
+  //   register | registered | unregister | catalog | zone-list | zone-create <name> <email> | zone-wait <id> |
   //   record-create <zone-id> <name> <ipv4> | record-wait <zone-id> <id> | zone-delete <id> | zone-cycle
   // zone-cycle is the whole path: a zone and an A record made through the API, BIND9 asked for them on
   // port 53, then the zone deleted.
@@ -576,6 +611,22 @@ def register():
         elif ep['url'] != DNS:
             call('PATCH', KS + '/endpoints/' + ep['id'], {'endpoint': {'url': DNS}}, token)
     print('registered designate in keystone (project service, user designate, service type dns, 3 endpoints)')
+
+
+def registered():
+    # Exit 0 only when everything register() makes is in place: the designate user can get a token in project
+    # service (so it holds a role there), and the dns service has its three endpoints at the right URL.
+    # Makes no change.
+    get_token('designate', DESIGNATE_PW, 'service')
+    token, _ = get_token('admin', ADMIN_PW, 'admin')
+    service = find(token, '/services?type=dns', 'services')
+    if service is None:
+        die('no service of type dns')
+    for iface in ('public', 'internal', 'admin'):
+        ep = find(token, '/endpoints?service_id=%s&interface=%s' % (service['id'], iface), 'endpoints')
+        if ep is None or ep['url'] != DNS:
+            die('endpoint %s of dns missing or wrong' % iface)
+    print('designate is registered in keystone')
 
 
 def unregister():
@@ -701,6 +752,8 @@ if __name__ == '__main__':
     args = sys.argv[2:]
     if cmd == 'register':
         register()
+    elif cmd == 'registered':
+        registered()
     elif cmd == 'unregister':
         unregister()
     elif cmd == 'catalog':
@@ -720,183 +773,277 @@ if __name__ == '__main__':
     elif cmd == 'zone-cycle':
         zone_cycle()
     else:
-        die('usage: orphera-designate-api register | unregister | catalog | zone-list | zone-create <name> <email> | zone-wait <id> | record-create <zone-id> <name> <ipv4> | record-wait <zone-id> <id> | zone-delete <id> | zone-cycle')
+        die('usage: orphera-designate-api register | registered | unregister | catalog | zone-list | zone-create <name> <email> | zone-wait <id> | record-create <zone-id> <name> <ipv4> | record-wait <zone-id> <id> | zone-delete <id> | zone-cycle')
 """
 
-  private val helperScript =
-    "cat > /usr/local/sbin/orphera-designate-api <<'PYEOF'\n" +
-      apiHelperPython
-        .replace("@@KS@@", ksFqdn)
-        .replace("@@DNS@@", s"http://$fqdn:$apiPort")
-        .replace("@@NSIP@@", nodeIp)
-        .replace("@@ADMINPW@@", adminPassword.reveal)
-        .replace("@@DESIGNATEPW@@", designatePassword.reveal)
-        .replace("@@CA@@", s"$caDir/ca.crt") +
-      "\nPYEOF\nchmod 700 /usr/local/sbin/orphera-designate-api\necho wrote /usr/local/sbin/orphera-designate-api\n"
+  private val helper =
+    apiHelperPython
+      .replace("@@KS@@", ksFqdn)
+      .replace("@@DNS@@", s"http://$fqdn:$apiPort")
+      .replace("@@NSIP@@", nodeIp)
+      .replace("@@ADMINPW@@", adminPassword.reveal)
+      .replace("@@DESIGNATEPW@@", designatePassword.reveal)
+      .replace("@@CA@@", caCert)
+  private val helperPath = "/usr/local/sbin/orphera-designate-api"
 
-  // The API answers its version document without a token (200, or 300 for a list of versions).
-  private val apiHealthScript =
-    s"""CODE=$$(curl -s -o /dev/null -w '%{http_code}' http://localhost:$apiPort/)
-       |[ "$$CODE" = "200" ] || [ "$$CODE" = "300" ]""".stripMargin
+  // The API answers its version document without a token (200, or 300 for a list of versions), and BIND9
+  // answers on port 53 of the node's address (any reply, even REFUSED, ends dig with status 0; a timeout
+  // does not).
+  private val healthy =
+    s"""CODE=$$(curl -s -o /dev/null -w '%{http_code}' http://localhost:$apiPort/); { [ "$$CODE" = "200" ] || [ "$$CODE" = "300" ]; } && dig +time=3 +tries=1 @$nodeIp version.bind txt chaos >/dev/null"""
+  private val waitHealthy =
+    s"""for i in $$(seq 1 24); do
+       |  ( $healthy ) && exit 0
+       |  sleep 5
+       |done
+       |echo "designate-api on $apiPort or BIND9 on $nodeIp:$dnsPort does not answer - see 'journalctl -xeu orphera-designate-api' and $logDir" >&2
+       |exit 1""".stripMargin
 
-  // BIND9 answers on port 53 of the node's address (any reply, even REFUSED, ends dig with status 0; a
-  // timeout does not). One health check covers both, because a stage takes only one.
-  private val healthScript =
-    s"""set -e
-       |$apiHealthScript
-       |dig +time=3 +tries=1 @$nodeIp version.bind txt chaos >/dev/null""".stripMargin
+  // The API accepts an admin token from Keystone and reaches its database.
+  private val acceptsToken = s"$helperPath zone-list >/dev/null 2>&1"
+  private val waitAcceptsToken =
+    s"""for i in $$(seq 1 24); do $helperPath zone-list && exit 0; sleep 5; done
+       |$helperPath zone-list
+       |exit 1""".stripMargin
 
-  // ORPHERA_CHECK=1 turns the run into a check: it changes nothing on the node and fails, with a diff, if
-  // a unit differs from what this playbook would write. The check task comes from the same Container
-  // value as the write task (see Resource.scala).
-  private val checkMode = sys.env.get("ORPHERA_CHECK").contains("1")
+  // One Designate service: its resources (written before it starts) and the ones that decide its order.
+  private final case class Svc(
+      name: String,
+      unit: ApplyResource,
+      resources: List[ApplyResource],
+      deps: List[ApplyResource],
+      conf: ApplyResource
+  )
 
-  private val unitResource = summon[Resource[Container]]
-
-  // Adds one "write the unit" task per container, then one "start" task per container (BIND9 first, then
-  // central, mdns, api, producer, worker).
-  private def withServices(b: StageBuilder): StageBuilder =
-    val written = allContainers.foldLeft(b)((acc, c) =>
-      acc.task(s"write ${c.unitName}")(c.writeUnit)
+  def describe(target: Node): List[ApplyResource] =
+    val aptWait = command(
+      "wait for apt and dpkg to be idle",
+      waitAptIdleScript,
+      unless = aptIdle,
+      timeout = 960
     )
-    allContainers.foldLeft(written)((acc, c) =>
-      acc.task(s"start ${c.unitName}")(c.start)
-    )
+    val tools = hostPackages.map(p => pkg(p, updateCache = true).after(aptWait))
+    val podman = tools(0)
 
-  val playbook: ClusterPlaybook =
-    if checkMode then
-      clusterPlaybook("designate-single-node-check")(
-        allContainers
-          .foldLeft(stage("check-designate", node))((acc, c) =>
-            acc.task(s"check ${c.unitName}")(unitResource.check(c))
+    val mirrorDir = directory("/etc/containers/registries.conf.d").after(podman)
+    val mirror = file(
+      "/etc/containers/registries.conf.d/orphera-kolla-cache.conf",
+      registryMirror,
+      mode = "0644"
+    ).after(mirrorDir)
+    val pulled = command(
+      "pull the Designate and BIND9 images",
+      pullScript,
+      unless = imagesPresent,
+      timeout = 2400
+    ).after(podman, mirror)
+
+    val caDirectory = directory(caDir, mode = "0755").after(podman)
+    val ca = command(
+      "fetch Keystone's CA from its TLS handshake",
+      caScript,
+      unless = caCurrent,
+      timeout = 60
+    ).after(caDirectory, tools(1))
+
+    val logDirectory = directory(logDir)
+    val stateDirectory = directory(stateDir)
+    val bindState = directory(s"$stateDir/bind").after(stateDirectory)
+
+    // The units come first so that what they depend on can name them in `notifies`.
+    val bindUnit = service(bind9.unitName)
+    val unitOf: Map[String, ApplyResource] =
+      designateNames.zip(designateServices).map((n, c) => n -> service(c.unitName)).toMap
+
+    // ---- BIND9: its config directory, named.conf, the rndc key (made once) and config.json ----
+    val bindDirRes = directory(bindDir, mode = "0755")
+    val namedFile = file(
+      s"$bindDir/named.conf",
+      namedConf,
+      mode = "0644",
+      owner = "root",
+      group = "root"
+    ).after(bindDirRes).notifies(bindUnit)
+    val rndcMade = command(
+      "make the rndc key, once",
+      rndcKeyScript,
+      unless = s"[ -s $rndcKey ]"
+    ).after(bindDirRes, tools(1)).notifies(bindUnit)
+    val bindJson = command(
+      "write the Kolla config.json for designate-backend-bind9",
+      kollaBindScript(bindDir),
+      unless = kollaCurrent(kollaBindScript("$T"), bindDir),
+      timeout = 180
+    ).after(pulled, bindDirRes).notifies(bindUnit)
+    val bindUnitFile = file(
+      bind9.unitPath,
+      bind9.render,
+      mode = "0644",
+      owner = "root",
+      group = "root"
+    ).notifies(bindUnit)
+    val bindResources =
+      List(bindState, bindDirRes, namedFile, rndcMade, bindJson, bindUnitFile)
+
+    // ---- the five Designate services: a config directory each, mounted by Kolla at
+    // /var/lib/kolla/config_files ----
+    val svcs = designateNames.zip(designateServices).map { (name, c) =>
+      val dir = s"$confRoot/$name"
+      val unitService = unitOf(name)
+      val dirRes = directory(dir, mode = "0755")
+      val conf = secretFile(
+        s"$dir/designate.conf",
+        Secret(designateConf), // it holds the database, message bus and service passwords
+        mode = "0640",
+        owner = "root",
+        group = "root"
+      ).after(dirRes).notifies(unitService)
+      val kollaCa = command(
+        s"copy Keystone's CA to the $name config",
+        s"cp $caCert $dir/ca.crt",
+        unless = s"cmp -s $caCert $dir/ca.crt"
+      ).after(ca, dirRes).notifies(unitService)
+      val kollaJson = name match
+        case "designate-api" =>
+          command(
+            s"write the Apache vhost and the Kolla config.json for $name",
+            kollaApiScript(dir),
+            unless = kollaCurrent(kollaApiScript("$T"), dir),
+            timeout = 180
+          ).after(pulled, dirRes, logDirectory).notifies(unitService)
+        case "designate-worker" =>
+          file(
+            s"$dir/config.json",
+            workerConfigJson,
+            mode = "0644",
+            owner = "root",
+            group = "root"
+          ).after(dirRes).notifies(unitService)
+        case _ =>
+          file(
+            s"$dir/config.json",
+            plainConfigJson(name),
+            mode = "0644",
+            owner = "root",
+            group = "root"
+          ).after(dirRes).notifies(unitService)
+      val unitFile = file(
+        c.unitPath,
+        c.render,
+        mode = "0644",
+        owner = "root",
+        group = "root"
+      ).notifies(unitService)
+      // Central keeps pools.yaml in its directory (the pool update mounts it from there); the worker gets
+      // the rndc key.
+      val extras: List[ApplyResource] = name match
+        case "designate-central" =>
+          List(
+            file(
+              s"$dir/pools.yaml",
+              poolsYaml,
+              mode = "0644",
+              owner = "root",
+              group = "root"
+            ).after(dirRes)
           )
-          .build
+        case "designate-worker" =>
+          val rndcHere = command(
+            "copy the rndc key to the designate-worker config",
+            s"install -m 0600 $rndcKey $dir/rndc.key",
+            unless = s"cmp -s $rndcKey $dir/rndc.key"
+          ).after(rndcMade, dirRes).notifies(unitService)
+          val rndcInImage = command(
+            "the worker image has rndc",
+            workerRndcMissing,
+            unless = workerHasRndc
+          ).after(pulled)
+          List(rndcHere, rndcInImage)
+        case _ => Nil
+      Svc(
+        name,
+        unitService,
+        List(dirRes, conf, kollaCa, kollaJson, unitFile) ++ extras,
+        List(conf, kollaCa, kollaJson, unitFile) ++ extras,
+        conf
       )
-    else applyPlaybook
+    }
+    val byName = svcs.map(s => s.name -> s).toMap
 
-  // The install stage up to and including starting every container; registering in Keystone and loading
-  // the pool come after, because they need the services running.
-  private def installDesignate: StageBuilder =
-    withServices(
-      stage("install-designate", node)
-        .task("wait for apt and dpkg to be idle")(
-          Task.RunCommand(
-            List("sh", "-c", waitAptIdleScript),
-            timeoutSeconds = 960
-          )
-        )
-        .task("install podman and tools")(
-          Task.Install(packages = hostPackages, updateCache = true)
-        )
-        .task("use the Kolla cache as a mirror for quay.io")(
-          Task.RunCommand(List("sh", "-c", useCacheScript))
-        )
-        .task("pull the Designate and BIND9 images")(
-          Task.RunCommand(List("sh", "-c", pullScript), timeoutSeconds = 2400)
-        )
-        .task("fetch Keystone's CA from its TLS handshake")(
-          Task.RunCommand(
-            List("sh", "-c", fetchCaScript),
-            timeoutSeconds = 60
-          )
-        )
-        .task("create the Designate directories")(
-          Task.RunCommand(List("sh", "-c", dirsScript))
-        )
-        .task("write designate.conf")(
-          Task.WriteFile(
-            content = designateConf,
-            dest = s"$srcDir/designate.conf",
-            owner = "root",
-            group = "root",
-            mode = 384 // 0600
-          )
-        )
-        .task("write pools.yaml")(
-          Task.WriteFile(
-            content = poolsYaml,
-            dest = s"$srcDir/pools.yaml",
-            owner = "root",
-            group = "root",
-            mode = 420 // 0644
-          )
-        )
-        .task("write named.conf")(
-          Task.WriteFile(
-            content = namedConf,
-            dest = s"$srcDir/named.conf",
-            owner = "root",
-            group = "root",
-            mode = 420 // 0644
-          )
-        )
-        .task("make the rndc key, once")(
-          Task.RunCommand(List("sh", "-c", rndcKeyScript))
-        )
-        .task("write the Kolla config for each container")(
-          Task.RunCommand(
-            List("sh", "-c", kollaConfigScript),
-            timeoutSeconds = 300
-          )
-        )
-        .task("designate-manage database sync")(
-          Task.RunCommand(
-            List("sh", "-c", dbSyncScript),
-            timeoutSeconds = 600
-          )
-        )
-        .task("write the Designate API helper")(
-          Task.RunCommand(List("sh", "-c", helperScript))
-        )
+    // The one-off container mounts central's designate.conf and pools.yaml, so both must exist first.
+    val dbSync = command(
+      "designate-manage database sync",
+      dbSyncWithStamp,
+      unless = dbCurrent,
+      timeout = 600
+    ).after(
+      (pulled :: logDirectory :: stateDirectory :: byName("designate-central").deps)*
     )
 
-  private def applyPlaybook: ClusterPlaybook =
-    clusterPlaybook("designate-single-node")(
-      stage("designate-database", "tst3")
-        .task(s"create $dbName database and $dbUser on the Galera cluster")(
-          Task.RunCommand(List("sh", "-c", createDatabaseScript))
-        )
-        .build,
-
-      stage("designate-rabbitmq", rabbitNode)
-        .task(
-          s"create the $rabbitVhost vhost and the $rabbitUser user on RabbitMQ"
-        )(
-          Task.RunCommand(List("sh", "-c", rabbitScript), timeoutSeconds = 120)
-        )
-        .build,
-
-      installDesignate
-        .task("register Designate in Keystone")(
-          Task.RunCommand(
-            List("sh", "-c", "/usr/local/sbin/orphera-designate-api register"),
-            timeoutSeconds = 120
-          )
-        )
-        .task("load the default pool, then restart the worker and mdns")(
-          Task.RunCommand(List("sh", "-c", poolScript), timeoutSeconds = 300)
-        )
-        .build,
-
-      stage("confirm-designate-healthy", node)
-        .waitFor(
-          HealthCheck.Command(
-            onNode = node,
-            command = List("sh", "-c", healthScript),
-            pollIntervalSeconds = 5,
-            timeoutSeconds = 120
-          )
-        )
-        .task("list zones with an admin token")(
-          Task.RunCommand(
-            List("sh", "-c", "/usr/local/sbin/orphera-designate-api zone-list"),
-            timeoutSeconds = 60
-          )
-        )
-        .task("designate confirmed")(
-          Task.Debug(
-            s"Designate up at http://$fqdn:$apiPort ($nodeIp): api, central, worker, producer, mdns (:$mdnsPort) and BIND9 (:$dnsPort), RabbitMQ vhost $rabbitVhost on $rabbitIp:5672, database $dbName via $vip:3306, identity from $ksUrl. Test: manifests/test_designate.sh"
-          )
-        )
-        .build
+    val helperFile = secretFile(
+      helperPath,
+      Secret(helper), // it holds the admin and designate passwords
+      mode = "0700",
+      owner = "root",
+      group = "root"
     )
+    // Registration comes before the services start.
+    val registered = command(
+      "register Designate in Keystone",
+      s"$helperPath register",
+      unless = s"$helperPath registered >/dev/null 2>&1",
+      timeout = 120
+    ).after(helperFile, ca)
+
+    def start(name: String, more: ApplyResource*): ApplyResource =
+      val s = byName(name)
+      s.unit.after((dbSync :: registered :: (s.deps ++ more))*)
+
+    val bindRunning = bindUnit.after(
+      (pulled :: bindResources)*
+    )
+    val centralRunning = start("designate-central")
+    // The pool is loaded once central answers; the worker and mdns read it when they start, and are
+    // restarted when a later change of pools.yaml loads it again.
+    val pool = command(
+      "load the default pool (designate-manage pool update)",
+      poolWithStamp,
+      unless = poolCurrent,
+      timeout = 300
+    ).after(
+      (centralRunning :: stateDirectory :: byName("designate-central").deps)*
+    ).notifies(unitOf("designate-worker"), unitOf("designate-mdns"))
+    val running = List(
+      bindRunning,
+      centralRunning,
+      start("designate-mdns", pool),
+      start("designate-api"),
+      start("designate-producer"),
+      start("designate-worker", pool, bindRunning)
+    )
+
+    val answering = command(
+      "designate-api and BIND9 answer on their ports",
+      waitHealthy,
+      unless = healthy,
+      timeout = 180
+    ).after(running*)
+    val authenticating = command(
+      "the API accepts an admin token and reaches its database",
+      waitAcceptsToken,
+      unless = acceptsToken,
+      timeout = 180
+    ).after((answering :: running)*)
+
+    tools ++ List(
+      aptWait,
+      mirrorDir,
+      mirror,
+      pulled,
+      caDirectory,
+      ca,
+      logDirectory,
+      stateDirectory
+    ) ++ bindResources ++ svcs.flatMap(_.resources) ++
+      List(dbSync, helperFile, registered, pool) ++ running ++
+      List(answering, authenticating)

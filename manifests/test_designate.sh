@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# DRAFT end-to-end test for designate_single_node.scala.
+# End-to-end test for designate_single_node.scala (with designate_database.scala and
+# designate_rabbitmq.scala, which it applies first).
 #
-# Applies the playbook, then checks independently of its own health check:
+# Tears Designate down (designate_teardown.scala: it drops the designate database, so every zone is gone),
+# applies the three descriptions, then checks independently of their own health checks:
 #  - the five Designate units and BIND9 run as systemd units,
 #  - the API answers its version document on 9001 without a token,
 #  - an unauthenticated request to a protected path is refused (401),
@@ -14,11 +16,11 @@
 #    (the whole path: API, RabbitMQ, central, the database, worker, rndc, mdns, AXFR), then the
 #    zone is deleted and is gone,
 #  - Designate is in the Keystone catalog (service type `dns`),
-#  - a second run of the playbook succeeds (idempotence).
+#  - a second run of the description changes nothing (idempotence), and a zone still goes through afterwards.
 #
 # Prerequisites: Galera + VIP, Keystone and RabbitMQ (tst10) healthy; the node (tst16) has an agent.
 # Run from scala0, in orphera-pkg:   manifests/test_designate.sh
-# NO_APPLY=1 skips the playbook runs and only checks.
+# NO_APPLY=1 skips the teardown and the apply runs and only checks.
 # Exit code: 0 if every assertion passes, 1 otherwise.
 
 set -uo pipefail
@@ -46,10 +48,15 @@ assert_contains() {
 }
 
 if [ -z "${NO_APPLY:-}" ]; then
+  log "teardown (failures here are tolerated: nothing may be installed yet)"
+  orphera apply designate_teardown.scala || true
+
   log "install"
-  if ! orphera cluster-playbook designate_single_node.scala; then
-    log "FAIL: designate_single_node.scala did not complete"; exit 1
-  fi
+  for d in designate_database.scala designate_rabbitmq.scala designate_single_node.scala; do
+    if ! orphera apply "$d"; then
+      log "FAIL: $d did not complete"; exit 1
+    fi
+  done
 fi
 
 for u in designate-backend-bind9 designate-central designate-mdns designate-api designate-producer designate-worker; do
@@ -94,11 +101,12 @@ assert_contains "the catalog lists service type dns" "dns" "$OUT"
 
 if [ -z "${NO_APPLY:-}" ]; then
   log "re-apply (idempotence)"
-  if orphera cluster-playbook designate_single_node.scala; then
-    log "PASS: second run completed"; PASS=$((PASS + 1))
-  else
+  SECOND=$(orphera apply designate_single_node.scala 2>&1); RC=$?
+  printf '%s\n' "$SECOND"
+  if [ "$RC" -ne 0 ]; then
     log "FAIL: second run of designate_single_node.scala failed"; FAIL=$((FAIL + 1))
   fi
+  assert_contains "second run changed nothing" "0 changed" "$SECOND"
   OUT=$(run_on "sudo $HELPER zone-cycle")
   assert_contains "a zone still goes through after the second run" "zone cycle ok" "$OUT"
 fi

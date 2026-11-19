@@ -367,7 +367,9 @@ step_horizon() {
 }
 
 step_designate() {
-  playbook designate_single_node.scala
+  apply_desc designate_database.scala
+  apply_desc designate_rabbitmq.scala
+  apply_desc designate_single_node.scala
   local out
   out=$(run_on tst16 "curl -s -o /dev/null -w 'http=%{http_code}' http://localhost:9001/")
   check "the Designate API answers its version document" contains "http=" "$out"
