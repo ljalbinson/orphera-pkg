@@ -185,9 +185,12 @@ object glance_single_node extends OrpheraApply:
        |echo "image ready: $apiImage"""".stripMargin
 
   // Keystone's CA: the last certificate it presents (trust on first use),
-  // which must be self-signed. `chainTo DIR` leaves DIR/c1.pem ... DIR/cN.pem.
+  // which must be self-signed. `chainTo DIR` leaves DIR/c1.pem ... DIR/cN.pem,
+  // each holding the certificate only: the text s_client prints after the
+  // last one (bytes read and written, session ticket) differs on every
+  // handshake, and would make the comparison with the installed copy fail.
   private val chainTo =
-    s"""chainTo() { openssl s_client -connect $ksFqdn:5000 -servername $ksFqdn -showcerts </dev/null 2>/dev/null | awk -v d="$$1" '/-----BEGIN CERTIFICATE-----/{n++} n>0{print > (d "/c" n ".pem")}'; }"""
+    s"""chainTo() { openssl s_client -connect $ksFqdn:5000 -servername $ksFqdn -showcerts </dev/null 2>/dev/null | awk -v d="$$1" '/-----BEGIN CERTIFICATE-----/{n++; p=1} p{print > (d "/c" n ".pem")} /-----END CERTIFICATE-----/{p=0}'; }"""
 
   private val trustTarget =
     """if command -v update-ca-certificates >/dev/null 2>&1; then t=/usr/local/share/ca-certificates/orphera-test-ca.crt; else t=/etc/pki/ca-trust/source/anchors/orphera-test-ca.crt; fi"""
