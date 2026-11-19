@@ -304,7 +304,9 @@ step_cinder() {
 }
 
 step_glance() {
-  playbook glance_single_node.scala
+  apply_desc glance_database.scala
+  apply_desc glance_ceph.scala
+  apply_desc glance_single_node.scala
   local out
   out=$(run_on tst13 "sudo /usr/local/sbin/orphera-glance-api image-list")
   check "Glance lists images through Keystone" contains "images:" "$out"

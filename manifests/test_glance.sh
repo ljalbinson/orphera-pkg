@@ -1,21 +1,23 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# DRAFT end-to-end test for glance_single_node.scala.
+# End-to-end test for glance_single_node.scala (with glance_database.scala and
+# glance_ceph.scala, which it applies first).
 #
-# Applies the playbook, then checks independently of its own health check:
+# Tears Glance down (glance_teardown.scala: it DELETES the `images` pool and
+# every image in it), applies the three descriptions, then checks independently of its own health check:
 #  - the glance-api container runs as a systemd unit,
 #  - the API answers on 9292 and lists images through Keystone,
 #  - an image can be created and uploaded through the API, reaches `active`,
 #    and really exists as an RBD image in Ceph (checked on tst0 with `rbd ls`),
 #    then deletes cleanly and the RBD image is gone,
 #  - Glance is in the Keystone catalog (service type `image`),
-#  - a second run of the playbook succeeds (idempotence).
+#  - a second run of the description changes nothing (idempotence).
 #
 # Prerequisites: Galera + VIP, Ceph with OSDs, Keystone (keystone_single_node)
 # all healthy; tst13 has an agent. Run from scala0, in orphera-pkg:
 #   manifests/test_glance.sh
-# NO_APPLY=1 skips the playbook runs and only checks.
+# NO_APPLY=1 skips the teardown and the apply runs and only checks.
 # Exit code: 0 if every assertion passes, 1 otherwise.
 
 set -uo pipefail
@@ -54,10 +56,15 @@ assert_not_contains() {
 }
 
 if [ -z "${NO_APPLY:-}" ]; then
+  log "teardown (failures here are tolerated: nothing may be installed yet)"
+  orphera apply glance_teardown.scala || true
+
   log "install"
-  if ! orphera cluster-playbook glance_single_node.scala; then
-    log "FAIL: glance_single_node.scala did not complete"; exit 1
-  fi
+  for d in glance_database.scala glance_ceph.scala glance_single_node.scala; do
+    if ! orphera apply "$d"; then
+      log "FAIL: $d did not complete"; exit 1
+    fi
+  done
 fi
 
 OUT=$(run_on "systemctl is-active orphera-glance-api")
@@ -99,11 +106,12 @@ assert_contains "the catalog lists service type image" "image" "$OUT"
 
 if [ -z "${NO_APPLY:-}" ]; then
   log "re-apply (idempotence)"
-  if orphera cluster-playbook glance_single_node.scala; then
-    log "PASS: second run completed"; PASS=$((PASS + 1))
-  else
+  SECOND=$(orphera apply glance_single_node.scala 2>&1); RC=$?
+  printf '%s\n' "$SECOND"
+  if [ "$RC" -ne 0 ]; then
     log "FAIL: second run of glance_single_node.scala failed"; FAIL=$((FAIL + 1))
   fi
+  assert_contains "second run changed nothing" "0 changed" "$SECOND"
 fi
 
 log "passed=$PASS failed=$FAIL"

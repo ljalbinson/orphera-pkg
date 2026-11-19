@@ -30,8 +30,11 @@ object keystone_teardown extends OrpheraApply:
 
   private val dropDatabaseScript =
     s"""mariadb -N -e "DROP DATABASE IF EXISTS $dbName; DROP USER IF EXISTS '$dbUser'@'%'; FLUSH PRIVILEGES;""""
+  // True when the database or user exists. When MariaDB cannot be queried this is
+  // also true, so that the drop runs and fails with MariaDB's own message: a
+  // database that is down is not "nothing to remove".
   private val databaseExists =
-    s"""[ -n "$$(mariadb -N -e "SELECT 1 FROM information_schema.SCHEMATA WHERE SCHEMA_NAME='$dbName' UNION SELECT 1 FROM mysql.user WHERE User='$dbUser'")" ]"""
+    s"""OUT=$$(mariadb -N -e "SELECT 1 FROM information_schema.SCHEMATA WHERE SCHEMA_NAME='$dbName' UNION SELECT 1 FROM mysql.user WHERE User='$dbUser'" 2>/dev/null) || exit 0; [ -n "$$OUT" ]"""
 
   private val unitExists =
     s"[ -f /etc/systemd/system/$unit.service ] || systemctl is-active --quiet $unit || systemctl is-enabled --quiet $unit"

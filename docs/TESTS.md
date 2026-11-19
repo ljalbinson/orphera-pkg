@@ -418,7 +418,7 @@ image uploads, becomes `active`, appears as an RBD image in pool `images`, delet
 disappears from the pool; the catalog lists `image`; second run completes. Prerequisites:
 Galera + VIP, Ceph with OSDs, Keystone, agent on tst13. An earlier attempt failed at Keystone
 registration with HTTP 500 because Galera had been wiped (keystone and cinder databases gone);
-fixed by rerunning test_keystone.sh, test_cinder.sh and openstack-client-setup.sh. Teardown: `orphera cluster-playbook manifests/glance_teardown.scala`.
+fixed by rerunning test_keystone.sh, test_cinder.sh and openstack-client-setup.sh. Teardown: `orphera apply manifests/glance_teardown.scala` (since the move to `orphera apply`).
 
 ### K7. Cinder volume from a Glance image - PASSED (2026-10-11), after the privsep capability fix
     openstack image create my-image --file ubuntu.img --disk-format qcow2 --container-format bare --public
