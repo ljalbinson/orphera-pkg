@@ -745,7 +745,10 @@ if __name__ == '__main__':
 
     // The units come first so that what they depend on can name them in `notifies`.
     val unitOf: Map[String, ApplyResource] =
-      nodeContainers.map(c => c.name.value -> service(c.unitName)).toMap
+      ("ceilometer-central" :: aodhNames)
+        .zip(nodeContainers)
+        .map((n, c) => n -> service(c.unitName))
+        .toMap
 
     val caDirectory = directory(caDir, mode = "0755").after(podman)
     val ca = command(
