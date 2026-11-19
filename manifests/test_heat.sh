@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# DRAFT end-to-end test for heat_single_node.scala.
+# End-to-end test for heat_single_node.scala (with heat_database.scala and
+# heat_rabbitmq.scala, which it applies first).
 #
-# Applies the playbook, then checks independently of its own health check:
+# Tears Heat down (heat_teardown.scala: it drops the heat database and removes the stack user domain), applies
+# the three descriptions, then checks independently of their own health checks:
 #  - the three Heat units run as systemd units,
 #  - both APIs answer their version documents without a token (8004 and 8000),
 #  - an unauthenticated request to a protected path is refused (401),
@@ -13,11 +15,11 @@
 #    trust and calls Nova, so this needs Nova to be up),
 #  - no test stack is left behind,
 #  - Heat is in the Keystone catalog (service types orchestration and cloudformation),
-#  - a second run of the playbook succeeds (idempotence), and a stack still works afterwards.
+#  - a second run of the description changes nothing (idempotence), and a stack still works afterwards.
 #
 # Prerequisites: Galera + VIP, Keystone, RabbitMQ (tst10) and Nova healthy; the node (tst20) has an agent.
 # Run from scala0, in orphera-pkg:   manifests/test_heat.sh
-# NO_APPLY=1 skips the playbook runs and only checks.
+# NO_APPLY=1 skips the teardown and the apply runs and only checks.
 # Exit code: 0 if every assertion passes, 1 otherwise.
 
 set -uo pipefail
@@ -45,10 +47,15 @@ assert_contains() {
 }
 
 if [ -z "${NO_APPLY:-}" ]; then
+  log "teardown (failures here are tolerated: nothing may be installed yet)"
+  orphera apply heat_teardown.scala || true
+
   log "install"
-  if ! orphera cluster-playbook heat_single_node.scala; then
-    log "FAIL: heat_single_node.scala did not complete"; exit 1
-  fi
+  for d in heat_database.scala heat_rabbitmq.scala heat_single_node.scala; do
+    if ! orphera apply "$d"; then
+      log "FAIL: $d did not complete"; exit 1
+    fi
+  done
 fi
 
 for u in heat-engine heat-api heat-api-cfn; do
@@ -93,11 +100,12 @@ assert_contains "the catalog lists service type cloudformation" "cloudformation"
 
 if [ -z "${NO_APPLY:-}" ]; then
   log "re-apply (idempotence)"
-  if orphera cluster-playbook heat_single_node.scala; then
-    log "PASS: second run completed"; PASS=$((PASS + 1))
-  else
+  SECOND=$(orphera apply heat_single_node.scala 2>&1); RC=$?
+  printf '%s\n' "$SECOND"
+  if [ "$RC" -ne 0 ]; then
     log "FAIL: second run of heat_single_node.scala failed"; FAIL=$((FAIL + 1))
   fi
+  assert_contains "second run changed nothing" "0 changed" "$SECOND"
   OUT=$(run_on "sudo $HELPER stack-cycle")
   assert_contains "a stack still works after the second run" "stack cycle ok" "$OUT"
 fi

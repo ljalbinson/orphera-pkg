@@ -375,7 +375,9 @@ step_designate() {
 }
 
 step_heat() {
-  playbook heat_single_node.scala
+  apply_desc heat_database.scala
+  apply_desc heat_rabbitmq.scala
+  apply_desc heat_single_node.scala
   local out
   out=$(run_on tst20 "curl -s -o /dev/null -w 'http=%{http_code}' http://localhost:8004/")
   check "the Heat API answers its version document" contains "http=" "$out"

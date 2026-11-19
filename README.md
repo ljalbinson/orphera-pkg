@@ -2615,7 +2615,7 @@ result independently of the playbook's own health checks:
     manifests/test_nova_compute.sh                              # applies nova_compute.scala, boots a CirrOS instance
     manifests/test_horizon.sh                                   # applies horizon_single_node.scala
     manifests/test_designate.sh                                 # applies designate_single_node.scala
-    manifests/test_heat.sh                                      # applies heat_single_node.scala
+    manifests/test_heat.sh                                      # applies heat_*.scala
     manifests/test_barbican.sh                                  # applies barbican_single_node.scala
     utils/openstack-client-setup.sh                             # CLI on the machine you run orphera from
 
@@ -3400,7 +3400,7 @@ playbooks marked DRAFT there have been written but not all run on the lab.
 | `ceph_client_upgrade.scala`, `ceph_key_rotation.scala` | Ceph's own client for the OpenStack services and compute hosts, then their keys rotated to `aes256k` and the monitors set to `aes256k` only |
 | `lustre_cluster_script.scala` | the Lustre build as an `OrpheraScript` (replaces `lustre_cluster.scala`) |
 | `apt_cache_teardown.scala`, `rpm_cache_teardown.scala`, `kolla_cache_teardown.scala` | Undo the apt cache (tst11) and its clients, the RPM cache (tst12) and its clients, and the Kolla image cache (tst9) |
-| `keystone_teardown.scala`, `glance_teardown.scala`, `placement_teardown.scala`, `cinder_teardown.scala`, `rabbitmq_teardown.scala`, `nova_teardown.scala`, `neutron_teardown.scala`, `horizon_teardown.scala` | Undo the matching `*_single_node.scala` playbook (see the OpenStack example below) |
+| `keystone_teardown.scala`, `glance_teardown.scala`, `placement_teardown.scala`, `cinder_teardown.scala`, `rabbitmq_teardown.scala`, `heat_teardown.scala`, `nova_teardown.scala`, `neutron_teardown.scala`, `horizon_teardown.scala` | Undo the matching `*_single_node.scala` playbook (see the OpenStack example below) |
 
 ## Known gaps / not yet built
 
