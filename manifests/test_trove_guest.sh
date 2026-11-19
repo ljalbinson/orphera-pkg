@@ -1,21 +1,22 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# DRAFT end-to-end test for trove_guest_image.scala (part 2 of Trove: the guest image and the MySQL datastore).
+# End-to-end test for trove_guest_image.scala (part 2 of Trove: the guest image and the MySQL datastore).
 #
-# Applies the playbook (the first run builds the image on tst21, which takes a while), then checks
+# Applies trove_guest_image.scala (tst21) and trove_datastore.scala (tst25); the first run builds the image on
+# tst21, which takes a while. Then it checks
 # independently of its own checks:
 #  - the Trove guest image is active in Glance with the tags trove and mysql, and the flavor orphera-trove exists,
 #  - the Trove API lists the datastore mysql with the version as its default,
 #  - a real database instance can be made: ACTIVE and HEALTHY, mysqld in its Docker container (reached by ssh
 #    with the trove-mgmt key) reports the expected version, and the instance is deleted again. Whether port 3306
 #    is reachable from tst25 is printed, not asserted,
-#  - a second run of the playbook succeeds without building again (idempotence), and the datastore is still there.
+#  - a second run of both descriptions changes nothing (no new build, no new upload), and the datastore is still there.
 #
 # Prerequisites: trove_single_node.scala has run (test_trove.sh passes); tst21 reaches GitHub, opendev.org and
 # download.docker.com; the guests reach Docker Hub and RabbitMQ; Nova has capacity for a 2048 MB guest.
 # Run from scala0, in orphera-pkg:   manifests/test_trove_guest.sh
-# NO_APPLY=1 skips the playbook runs; NO_INSTANCE=1 skips making a database instance.
+# NO_APPLY=1 skips the apply runs; NO_INSTANCE=1 skips making a database instance.
 # TROVE_MYSQL_VERSION must be the same as for the playbook (default 8.0.29).
 # Exit code: 0 if every assertion passes, 1 otherwise.
 
@@ -46,9 +47,11 @@ assert_contains() {
 
 if [ -z "${NO_APPLY:-}" ]; then
   log "install (the first run builds the image: 10 to 30 minutes)"
-  if ! orphera cluster-playbook trove_guest_image.scala; then
-    log "FAIL: trove_guest_image.scala did not complete"; exit 1
-  fi
+  for d in trove_guest_image.scala trove_datastore.scala; do
+    if ! orphera apply "$d"; then
+      log "FAIL: $d did not complete"; exit 1
+    fi
+  done
 fi
 
 OUT=$(RUN_TIMEOUT=120 run_on "$IMAGE_HELPER present" "$BUILD_NODE")
@@ -68,20 +71,13 @@ if [ -z "${NO_INSTANCE:-}" ]; then
 fi
 
 if [ -z "${NO_APPLY:-}" ]; then
-  IMAGE_FILE="/var/lib/orphera/trove-image/trove-guest-ubuntu-noble.qcow2"
-  BEFORE=$(run_on "stat -c %Y $IMAGE_FILE" "$BUILD_NODE" | tail -1)
-  log "second run (must not build again)"
-  if orphera cluster-playbook trove_guest_image.scala >/dev/null 2>&1; then
-    log "PASS: second run of the playbook succeeds"; PASS=$((PASS + 1))
-  else
-    log "FAIL: second run of the playbook failed"; FAIL=$((FAIL + 1))
-  fi
-  AFTER=$(run_on "stat -c %Y $IMAGE_FILE" "$BUILD_NODE" | tail -1)
-  if [ -n "$BEFORE" ] && [ "$BEFORE" = "$AFTER" ]; then
-    log "PASS: the second run did not build the image again"; PASS=$((PASS + 1))
-  else
-    log "FAIL: the image file changed or could not be read (before: $BEFORE, after: $AFTER)"; FAIL=$((FAIL + 1))
-  fi
+  log "second run (must change nothing and not build again)"
+  for d in trove_guest_image.scala trove_datastore.scala; do
+    SECOND=$(orphera apply "$d" 2>&1); RC=$?
+    printf '%s\n' "$SECOND"
+    if [ "$RC" -ne 0 ]; then log "FAIL: second run of $d failed"; FAIL=$((FAIL + 1)); fi
+    assert_contains "second run of $d changed nothing" "0 changed" "$SECOND"
+  done
   OUT=$(run_on "$DB_HELPER datastores")
   assert_contains "the datastore is still there after the second run" "default $VERSION" "$OUT"
 fi
