@@ -323,7 +323,9 @@ step_placement() {
 }
 
 step_nova() {
-  playbook nova_single_node.scala
+  apply_desc nova_database.scala
+  apply_desc nova_rabbitmq.scala
+  apply_desc nova_single_node.scala
   local out
   out=$(run_on tst14 "curl -s -o /dev/null -w 'http=%{http_code}' http://localhost:8774/")
   check "the Nova API answers its version document" contains "http=" "$out"

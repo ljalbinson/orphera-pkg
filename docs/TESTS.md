@@ -460,7 +460,7 @@ tst13 answer from tst14; second run completes. The first run stopped on a `{{.Na
 command, which Orphera rendered as an empty template; fixed, then passed. Not yet checked: that
 Horizon's Project dashboard stops returning a 403 now that the catalog has `compute`.
 Prerequisites: Galera + VIP, Keystone, RabbitMQ on tst10 (Cinder), Placement, agent on tst14.
-Teardown: `orphera cluster-playbook manifests/nova_teardown.scala` (not yet run).
+Teardown: `orphera apply manifests/nova_teardown.scala` (since the move to `orphera apply`).
 
 ### K11. Neutron on tst19 - PASSED (2026-10-12), 18/18, first run (branch `neutron`)
     manifests/test_neutron.sh 2>&1 | tee /tmp/neutron.log
