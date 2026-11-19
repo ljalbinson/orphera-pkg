@@ -2720,7 +2720,7 @@ central agent (tst24) and the compute agents (tst17, tst18, reading libvirt) pol
 notification agent, no pipeline.yaml). Prometheus scrapes the three exporters as `job="ceilometer"`, with a target per node, through `/etc/prometheus/scrape.d/openstack-telemetry.yml`, which `scrape_config_files` in `prometheus.yml` names (needs Prometheus 2.43 or later;
 `observability_stack.scala` and `observability_extended.scala` now write that line, so re-running them keeps the job). The series names are Ceilometer's own; the playbook prints the names it finds. Aodh runs
 PromQL alarms against that Prometheus, whose address the Aodh containers get in `PROMETHEUS_HOST` and `PROMETHEUS_PORT` (the library the
-evaluator uses reads it from nowhere else; the playbook also registers it in the Keystone catalog as service type `prometheus`). Run on the lab: `test_telemetry.sh` 18 of 18 (against the playbook the descriptions replaced; the descriptions have not been run on the lab yet; the teardown has not been run); only the image and volume
+evaluator uses reads it from nowhere else; the playbook also registers it in the Keystone catalog as service type `prometheus`). Run on the lab: `test_telemetry.sh` 22 of 22 (the descriptions); the teardown has not been run; only the image and volume
 metrics (`ceilometer_image_size`, `ceilometer_volume_size`) have been seen so far, the instance metrics appear once a VM runs on tst17 or tst18:
 
     source ~/.config/openstack/admin-openrc.sh
