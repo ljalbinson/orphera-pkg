@@ -2747,7 +2747,7 @@ chooses another MySQL 8.0 version; the name is also the tag of the Docker image 
 `TROVE_REBUILD_IMAGE=1` builds it again. A database is then `openstack database instance create NAME orphera-trove --size 1 --datastore mysql
 --datastore-version 8.0.29`. Backups to Swift, replication and the dashboard are not set up. The Trove images need `orphera-kolla-build sources refresh` and a build of
 `trove-api trove-conductor trove-taskmanager` on tst21 (an existing `/etc/kolla-build/images.txt` is not rewritten; add them by hand), or they come
-from quay.io. `python-troveclient` is in `utils/openstack-client-setup.sh`. Run on the lab: `test_trove_guest.sh` 9 of 9 (against the playbook this description replaced); the descriptions have not been run on the lab yet.
+from quay.io. `python-troveclient` is in `utils/openstack-client-setup.sh`. Run on the lab: `test_trove.sh` 12 of 12 (the descriptions); `test_trove_guest.sh` 9 of 9 (run before the migration, not repeated since); the teardown has not been run.
 
 **Keycloak** (`manifests/keycloak_single_node.scala`, undone by `keycloak_teardown.scala`, checked by `test_keycloak.sh`) is an OpenID Connect
 identity provider on a new VM, tst26 (`config/tst26.yaml`, 10.10.5.38), with Keystone federated to it: a user in Keycloak's realm `openstack` gets
