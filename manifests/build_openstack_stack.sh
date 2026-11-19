@@ -359,7 +359,8 @@ step_compute() {
 }
 
 step_horizon() {
-  playbook horizon_single_node.scala
+  playbook dashboard_tls.scala
+  apply_desc horizon_single_node.scala
   local out
   out=$(run_on tst13 "sudo /usr/local/sbin/orphera-horizon-check login")
   check "admin can sign in to the dashboard" contains "login ok as admin" "$out"

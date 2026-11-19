@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# DRAFT end-to-end test for horizon_single_node.scala.
+# End-to-end test for horizon_single_node.scala (with dashboard_tls.scala, which it runs first).
 #
-# Applies the playbook, then checks independently of its own health check:
+# Tears Horizon down (horizon_teardown.scala), makes sure the certificate is there (dashboard_tls.scala, a
+# cluster playbook: it changes nothing while the certificate is good), applies the description, then checks
+# independently of its own health checks:
 #  - the horizon container runs as a systemd unit,
 #  - the root leads to the login page and the login page answers 200,
 #  - a static file referenced by the login page is served (the Apache Alias and
@@ -14,11 +16,11 @@
 #  - the dashboard is reachable from this machine (scala0) over HTTPS, its certificate verified with the test CA,
 #  - plain HTTP on the same port gets no dashboard,
 #  - Glance and Placement on the same node still answer,
-#  - a second run of the playbook succeeds (idempotence).
+#  - a second run of the description changes nothing (idempotence).
 #
 # Prerequisites: Keystone healthy; the node (tst13) has an agent. Run from
 # scala0, in orphera-pkg:   manifests/test_horizon.sh
-# NO_APPLY=1 skips the playbook runs and only checks.
+# NO_APPLY=1 skips the teardown and the apply runs and only checks.
 # Exit code: 0 if every assertion passes, 1 otherwise.
 
 set -uo pipefail
@@ -46,8 +48,14 @@ assert_contains() {
 }
 
 if [ -z "${NO_APPLY:-}" ]; then
+  log "teardown (failures here are tolerated: nothing may be installed yet)"
+  orphera apply horizon_teardown.scala || true
+
   log "install"
-  if ! orphera cluster-playbook horizon_single_node.scala; then
+  if ! orphera cluster-playbook dashboard_tls.scala; then
+    log "FAIL: dashboard_tls.scala did not complete"; exit 1
+  fi
+  if ! orphera apply horizon_single_node.scala; then
     log "FAIL: horizon_single_node.scala did not complete"; exit 1
   fi
 fi
@@ -90,11 +98,12 @@ fi
 
 if [ -z "${NO_APPLY:-}" ]; then
   log "re-apply (idempotence)"
-  if orphera cluster-playbook horizon_single_node.scala; then
-    log "PASS: second run completed"; PASS=$((PASS + 1))
-  else
+  SECOND=$(orphera apply horizon_single_node.scala 2>&1); RC=$?
+  printf '%s\n' "$SECOND"
+  if [ "$RC" -ne 0 ]; then
     log "FAIL: second run of horizon_single_node.scala failed"; FAIL=$((FAIL + 1))
   fi
+  assert_contains "second run changed nothing" "0 changed" "$SECOND"
 fi
 
 log "passed=$PASS failed=$FAIL"

@@ -1,32 +1,57 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import orphera.orchestrator.*
-import orphera.orchestrator.ClusterPlaybookDsl.*
 
-// DRAFT. Undoes horizon_single_node.scala: stops and removes the container and
-// its unit, config, logs, CA copy and the check helper on the node. Horizon
-// keeps no database and registers nothing in Keystone, so that is all there is.
-// Glance and Placement on the same node are untouched; podman stays installed.
-// Keep `node` in step with horizon_single_node. Safe to re-run when nothing is
-// installed.
-object horizon_teardown extends OrpheraClusterPlaybook:
+// Undoes horizon_single_node.scala, as a declarative description (OrpheraApply, docs/APPLY-DESIGN.md): on
+// tst13 stops and removes the container and its unit, config, logs, Keystone CA copy and the check helper.
+// Horizon keeps no database and registers nothing in Keystone, so that is all there is. The certificate in
+// /etc/orphera/tls stays (Skyline uses it too; dashboard_tls.scala makes it), and so do Glance and Placement
+// on the same node and podman. Keep `node` in step with horizon_single_node.
+//
+//   orphera apply manifests/horizon_teardown.scala --check
+//   orphera apply manifests/horizon_teardown.scala
+//
+// Each step is a command that runs only while there is something to remove (`onlyIf`), so a second run
+// changes nothing.
+object horizon_teardown extends OrpheraApply:
+  import Resources.*
 
   private val node = "tst13"
+  private val unit = "orphera-horizon"
+  private val helper = "/usr/local/sbin/orphera-horizon-check"
 
-  private val nodeScript =
-    """systemctl disable --now orphera-horizon 2>/dev/null || true
-      |rm -f /etc/systemd/system/orphera-horizon.service
-      |if command -v podman >/dev/null 2>&1; then podman rm -f horizon 2>/dev/null || true; fi
-      |systemctl daemon-reload
-      |rm -rf /etc/kolla/horizon /etc/kolla/horizon-web /etc/kolla/horizon-ca /var/log/kolla/horizon
-      |rm -f /usr/local/sbin/orphera-horizon-check
-      |echo "horizon container, unit, config and logs removed"""".stripMargin
+  override def nodes: List[String] = List(node)
 
-  val playbook: ClusterPlaybook =
-    clusterPlaybook("horizon-teardown")(
-      stage("teardown-horizon", node)
-        .task("remove the horizon container, unit and config")(
-          Task.RunCommand(List("sh", "-c", nodeScript), timeoutSeconds = 120)
-        )
-        .build
+  // True when the unit file exists, or the unit is active or enabled.
+  private val unitExists =
+    s"""[ -f /etc/systemd/system/$unit.service ] || systemctl is-active --quiet $unit || systemctl is-enabled --quiet $unit"""
+  private val stopScript =
+    s"""systemctl disable --now $unit 2>/dev/null || true
+       |rm -f /etc/systemd/system/$unit.service
+       |if command -v podman >/dev/null 2>&1; then podman rm -f horizon 2>/dev/null || true; fi
+       |systemctl daemon-reload
+       |echo "horizon container and unit removed"""".stripMargin
+
+  private val paths =
+    "/etc/kolla/horizon /etc/kolla/horizon-web /etc/kolla/horizon-ca /var/log/kolla/horizon " + helper
+  // True when ANY of them exists.
+  private val filesExist =
+    s"for p in $paths; do [ -e \"$$p\" ] && exit 0; done; exit 1"
+  private val cleanupScript =
+    s"""rm -rf $paths
+       |echo "horizon config, logs and helper removed"""".stripMargin
+
+  def describe(target: Node): List[ApplyResource] =
+    val stopped = command(
+      "stop and remove the horizon container and unit",
+      stopScript,
+      onlyIf = unitExists,
+      timeout = 240
     )
+    val cleaned = command(
+      "remove horizon files, logs and the helper",
+      cleanupScript,
+      onlyIf = filesExist,
+      timeout = 120
+    ).after(stopped)
+    List(stopped, cleaned)

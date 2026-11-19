@@ -142,7 +142,7 @@ object skyline_single_node extends OrpheraClusterPlaybook:
       |exit 1""".stripMargin
 
   // ---- TLS for the dashboards on tst13 ------------------------------------
-  // One certificate for the node, shared by horizon_single_node.scala and skyline_single_node.scala (both make it
+  // One certificate for the node, shared by horizon_single_node.scala (which needs dashboard_tls.scala, the same steps, applied first) and skyline_single_node.scala (which makes it
   // when missing; the same steps as keycloak_single_node.scala): the key is made once on the node and stays there,
   // the request goes to tst6 and is signed by Keystone's test CA, and the certificate comes back. Browsers that
   // trust that CA trust the dashboards, and the WebSSO login stays on HTTPS from start to end.

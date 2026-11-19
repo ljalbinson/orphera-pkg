@@ -1,43 +1,58 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import orphera.orchestrator.*
-import orphera.orchestrator.ClusterPlaybookDsl.*
 import orphera.orchestrator.kolla.*
 
-// DRAFT. OpenStack Horizon (the web dashboard), Kolla image under podman,
-// Apache + mod_wsgi, HTTPS (a certificate from Keystone's test CA). Modelled on the other *_single_node.scala
-// playbooks; read cinder_single_node.scala's header for the conventions.
+// OpenStack Horizon (the web dashboard), Kolla image under podman, Apache + mod_wsgi, HTTPS (a certificate from
+// Keystone's test CA), as a declarative description (OrpheraApply, docs/APPLY-DESIGN.md). It replaced the
+// cluster playbook of the same name; a second run changes nothing and restarts nothing, and `--check` shows
+// what would change. Modelled on cinder_single_node.scala and heat_single_node.scala, which explain the
+// conventions.
+//
+// Two steps, since the certificate has to move between nodes, which a description cannot do:
+//
+//   orphera cluster-playbook manifests/dashboard_tls.scala   # key and certificate on tst13, signed on tst6
+//   orphera apply manifests/horizon_single_node.scala        # this one (tst13)
+//
+// The description starts with a check that the certificate files are there, and fails with that message when
+// they are not.
 //
 // Where it runs: tst13, next to Glance and Placement, on port 8080 over HTTPS
-// (https://tst13.ljalbinson.com:8080/; certificate from Keystone's test CA, shared with Skyline). Horizon is a stateless web front end:
-// it keeps no database (sessions live in signed cookies) and talks to the other
-// services through the Keystone catalog. To move it, change `node`, `fqdn`,
-// `nodeIp` and `port` below (and the teardown's `node`).
+// (https://tst13.ljalbinson.com:8080/; certificate from Keystone's test CA, shared with Skyline). Horizon is a
+// stateless web front end: it keeps no database (sessions are files in the container's /tmp) and talks to the
+// other services through the Keystone catalog. To move it, change `node`, `fqdn`, `nodeIp` and `port` below
+// (and the teardown's `node`, and dashboard_tls.scala).
 //
 // Prerequisites, not checked here:
 //   - Keystone up on tst6 (keystone_single_node.scala), serving the CA chain.
-//     Cinder, Glance and Placement are optional: their panels appear when they
-//     are in the catalog.
+//     Cinder, Glance and Placement are optional: their panels appear when they are in the catalog.
+//   - the certificate (dashboard_tls.scala), checked first
 //   - agent on the node; tst9's Kolla cache is optional
 //   Galera and Ceph are not involved.
 //
-// Stages:
-//   - install-horizon (the node): packages, cache mirror, image pull, Keystone's
-//     CA from its TLS handshake, local_settings, the Apache vhost and Kolla
-//     config, the unit.
-//   - confirm-horizon-healthy (the node): the login page answers, then a real
-//     login as admin succeeds (helper `orphera-horizon-check`).
+// How it stays idempotent (as for Cinder and Heat):
+//   - Keystone's CA is compared as a certificate with the installed copy each run, and the copy in the Kolla
+//     directory is refreshed (and the container restarted) when it changes.
+//   - local_settings.py holds the session key, so it is a secret file. The certificate chain and the key are
+//     copied into the Kolla directory and compared with the ones in /etc/orphera/tls, so a renewed certificate
+//     reaches the container. The Apache vhost and config.json depend on what the image has (the site-packages
+//     directory, the Apache flavour, the module paths), so they are generated into a temporary directory and
+//     compared with the installed files.
+//   - There is no database and nothing to register in Keystone.
+//   - The last step signs in as admin like a browser would (the helper's `login`); it is skipped while the
+//     sign-in works.
 //
-// Sign in with user `admin`, password as in keystone_single_node.scala, domain
-// Default. Test-only hardcoded credentials, same convention and caveat as the
-// other manifests. Not compiled where this was written; the first run on
-// scala0 is the first compile.
-object horizon_single_node extends OrpheraClusterPlaybook:
+// Sign in with user `admin`, password as in keystone_single_node.scala, domain Default. Test-only credentials
+// from the secret store (`orphera secrets`), as before.
+object horizon_single_node extends OrpheraApply:
+  import Resources.*
 
   private val node = "tst13"
   private val fqdn = "tst13.ljalbinson.com"
   private val nodeIp = "10.10.5.25"
   private val port = 8080
+
+  override def nodes: List[String] = List(node)
 
   private val ksFqdn = "tst6.ljalbinson.com"
 
@@ -46,23 +61,24 @@ object horizon_single_node extends OrpheraClusterPlaybook:
   private val cacheHostPort = "tst9.ljalbinson.com:5000"
 
   private val adminPassword = Secrets.secret("keystone/admin")
-  // Signs the session cookies; a fixed test value like the other secrets.
+  // Signs the session ids; a fixed test value like the other secrets.
   private val secretKey = Secrets.secret("horizon/secret-key")
 
-  private val confRoot = "/etc/kolla"
-  private val srcDir = "/etc/kolla/horizon"
+  private val webDir = "/etc/kolla/horizon-web"
   private val logDir = "/var/log/kolla/horizon"
   private val caDir = "/etc/kolla/horizon-ca"
+  private val caCert = s"$caDir/ca.crt"
+  private val tlsDir = "/etc/orphera/tls"
   private val ksUrl = s"https://$ksFqdn:5000"
 
-  // The container as data: the unit file text and the start task come from it
-  // (orchestrator/.../kolla/Container.scala), checked by ContainerCheck. Defined after
-  // confRoot and logDir, which it reads; a val used before its definition is null in an object.
+  // The container as data: the unit file text comes from it (orchestrator/.../kolla/Container.scala,
+  // checked by ContainerCheck). Defined after webDir and logDir, which it reads; a val used before its
+  // definition is null in an object.
   private val horizonWeb = Container(
     name = ContainerName("horizon"),
     image = Image("horizon", Release.R2025_1, Base.UbuntuNoble, registry),
     mounts = List(
-      Mount(s"$confRoot/horizon-web", "/var/lib/kolla/config_files"),
+      Mount(webDir, "/var/lib/kolla/config_files"),
       Mount(logDir, "/var/log/kolla/horizon", Access.ReadWrite)
     ),
     env = List("KOLLA_CONFIG_STRATEGY" -> "COPY_ALWAYS"),
@@ -73,30 +89,25 @@ object horizon_single_node extends OrpheraClusterPlaybook:
   private val hostPackages =
     List("podman", "openssl", "curl", "ca-certificates", "python3")
 
-  // A freshly provisioned VM runs unattended-upgrades for a while after boot,
-  // and apt cannot take the dpkg lock meanwhile. Wait here, with an explicit
-  // task timeout, instead of relying on how long the agent's own apt call waits.
-  // Matches the upgrade workers by exact command line: the always-running
-  // unattended-upgrade-shutdown daemon has the same 15-character process name.
-  // Note the upgrade can itself restart orphera-agent (needrestart), which
-  // kills any task in flight, this one included; if that happens, rerun once
-  // the upgrade has finished.
+  // A fresh VM may still be running unattended-upgrades (see
+  // disable_unattended_upgrades.scala); when it finishes needrestart restarts the
+  // agent and kills the running task. Wait for it before touching packages.
+  private val aptIdle =
+    """! pgrep -f '^/usr/bin/python3 /usr/bin/unattended-upgrade$' >/dev/null && ! pgrep -x apt-get >/dev/null && ! pgrep -x apt >/dev/null && ! pgrep -x dpkg >/dev/null"""
   private val waitAptIdleScript =
-    """for i in $(seq 1 180); do
-      |  if pgrep -f '^/usr/bin/python3 /usr/bin/unattended-upgrade$' >/dev/null || pgrep -x apt-get >/dev/null || pgrep -x apt >/dev/null || pgrep -x dpkg >/dev/null; then
-      |    sleep 5
-      |  else
-      |    echo "apt and dpkg are idle"
-      |    exit 0
-      |  fi
-      |done
-      |echo "apt/dpkg still busy after 15 minutes (unattended-upgrades?)" >&2
-      |exit 1""".stripMargin
+    s"""for i in $$(seq 1 180); do
+       |  if $aptIdle; then
+       |    echo "apt and dpkg are idle"
+       |    exit 0
+       |  fi
+       |  sleep 5
+       |done
+       |echo "apt/dpkg still busy after 15 minutes (unattended-upgrades?)" >&2
+       |exit 1""".stripMargin
 
-  private val useCacheScript =
-    s"""mkdir -p /etc/containers/registries.conf.d
-       |cat > /etc/containers/registries.conf.d/orphera-kolla-cache.conf <<'REG'
-       |[[registry]]
+  // The Kolla cache as a mirror of quay.io (podman registries.conf.d drop-in).
+  private val registryMirror =
+    s"""[[registry]]
        |prefix = "quay.io"
        |location = "quay.io"
        |
@@ -107,8 +118,7 @@ object horizon_single_node extends OrpheraClusterPlaybook:
        |[[registry.mirror]]
        |location = "$cacheHostPort"
        |insecure = true
-       |REG
-       |echo "podman will try tst21.ljalbinson.com:5000 (built images), then $cacheHostPort, before quay.io"""".stripMargin
+       |""".stripMargin
 
   private val pullScript =
     s"""${Pull.shellFunction(
@@ -116,165 +126,70 @@ object horizon_single_node extends OrpheraClusterPlaybook:
       )}
        |pull_retry $webImage || exit 1
        |echo "image ready"""".stripMargin
+  private val imagePresent = s"podman image exists $webImage"
 
-  // Same method as the other service playbooks: the last certificate Keystone
-  // presents is its CA; trust on first use.
-  private val fetchCaScript =
+  // The certificate files dashboard_tls.scala leaves on the node.
+  private val tlsPresent =
+    s"[ -f $tlsDir/server-chain.crt ] && [ -f $tlsDir/server.key ] && [ -f $tlsDir/ca.crt ]"
+  private val tlsMissing =
+    s"""echo "no certificate in $tlsDir - run: orphera cluster-playbook manifests/dashboard_tls.scala" >&2
+       |exit 1""".stripMargin
+
+  // Keystone's CA: the last certificate it presents (trust on first use),
+  // which must be self-signed. `chainTo DIR` leaves DIR/c1.pem ... DIR/cN.pem,
+  // each holding the certificate only: the text s_client prints after the
+  // last one (bytes read and written, session ticket) differs on every
+  // handshake, and would make the comparison with the installed copy fail.
+  private val chainTo =
+    s"""chainTo() { openssl s_client -connect $ksFqdn:5000 -servername $ksFqdn -showcerts </dev/null 2>/dev/null | awk -v d="$$1" '/-----BEGIN CERTIFICATE-----/{n++; p=1} p{print > (d "/c" n ".pem")} /-----END CERTIFICATE-----/{p=0}'; }"""
+
+  private val trustTarget =
+    """if command -v update-ca-certificates >/dev/null 2>&1; then t=/usr/local/share/ca-certificates/orphera-test-ca.crt; else t=/etc/pki/ca-trust/source/anchors/orphera-test-ca.crt; fi"""
+
+  // Current when the installed CA is the one Keystone presents now, and is in
+  // the system trust store.
+  private val caCurrent =
+    s"""$chainTo
+       |D=$$(mktemp -d)
+       |chainTo $$D
+       |N=$$(ls $$D/c*.pem 2>/dev/null | wc -l)
+       |R=1
+       |if [ "$$N" -ge 2 ]; then
+       |  $trustTarget
+       |  cmp -s $$D/c$$N.pem $caCert && cmp -s $caCert "$$t" && R=0
+       |fi
+       |rm -rf $$D
+       |exit $$R""".stripMargin
+
+  private val caScript =
     s"""set -e
+       |$chainTo
        |mkdir -p $caDir
-       |rm -f /tmp/ks-chain-*.pem
-       |openssl s_client -connect $ksFqdn:5000 -servername $ksFqdn -showcerts </dev/null 2>/dev/null | awk '/-----BEGIN CERTIFICATE-----/{n++} n>0{print > ("/tmp/ks-chain-" n ".pem")}'
-       |COUNT=$$(ls /tmp/ks-chain-*.pem 2>/dev/null | wc -l)
+       |D=$$(mktemp -d)
+       |trap 'rm -rf $$D' EXIT
+       |chainTo $$D
+       |COUNT=$$(ls $$D/c*.pem 2>/dev/null | wc -l)
        |if [ "$$COUNT" -lt 2 ]; then
-       |  echo "keystone at $ksFqdn:5000 presented $$COUNT certificate(s); expected leaf + CA - re-run keystone_single_node.scala (it must serve server-chain.crt)" >&2
+       |  echo "keystone at $ksFqdn:5000 presented $$COUNT certificate(s); expected leaf + CA - apply keystone_single_node.scala (it must serve server-chain.crt)" >&2
        |  exit 1
        |fi
-       |cp /tmp/ks-chain-$$COUNT.pem $caDir/ca.crt
-       |openssl verify -CAfile $caDir/ca.crt /tmp/ks-chain-1.pem
-       |SUBJ=$$(openssl x509 -in $caDir/ca.crt -noout -subject | sed 's/^subject=//')
-       |ISS=$$(openssl x509 -in $caDir/ca.crt -noout -issuer | sed 's/^issuer=//')
+       |cp $$D/c$$COUNT.pem $caCert
+       |openssl verify -CAfile $caCert $$D/c1.pem
+       |SUBJ=$$(openssl x509 -in $caCert -noout -subject | sed 's/^subject=//')
+       |ISS=$$(openssl x509 -in $caCert -noout -issuer | sed 's/^issuer=//')
        |if [ "$$SUBJ" != "$$ISS" ]; then echo "last certificate is not self-signed: $$SUBJ / $$ISS" >&2; exit 1; fi
-       |rm -f /tmp/ks-chain-*.pem
-       |if command -v update-ca-certificates >/dev/null 2>&1; then
-       |  cp $caDir/ca.crt /usr/local/share/ca-certificates/orphera-test-ca.crt
-       |  update-ca-certificates
-       |else
-       |  cp $caDir/ca.crt /etc/pki/ca-trust/source/anchors/orphera-test-ca.crt
-       |  update-ca-trust
-       |fi
+       |$trustTarget
+       |cp $caCert "$$t"
+       |if command -v update-ca-certificates >/dev/null 2>&1; then update-ca-certificates; else update-ca-trust; fi
        |echo "Keystone CA installed: $$SUBJ"""".stripMargin
-
-  // ---- TLS for the dashboards on tst13 ------------------------------------
-  // One certificate for the node, shared by horizon_single_node.scala and skyline_single_node.scala (both make it
-  // when missing; the same steps as keycloak_single_node.scala): the key is made once on the node and stays there,
-  // the request goes to tst6 and is signed by Keystone's test CA, and the certificate comes back. Browsers that
-  // trust that CA trust the dashboards, and the WebSSO login stays on HTTPS from start to end.
-  private val ksNode = "tst6"
-  private val ksCaDir = "/etc/kolla/keystone-ca"
-  private val tlsDir = "/etc/orphera/tls"
-  private val signDir = s"$ksCaDir/issued/$node"
-
-  private val tlsRequestScript =
-    s"""set -e
-       |mkdir -p $tlsDir
-       |chmod 750 $tlsDir
-       |cd $tlsDir
-       |if [ ! -f server.key ] || [ ! -f server.csr ]; then
-       |  openssl req -newkey rsa:2048 -nodes -keyout server.key -out server.csr -subj "/CN=$fqdn"
-       |fi
-       |chown root:root server.key server.csr
-       |chmod 600 server.key
-       |chmod 644 server.csr
-       |echo "key and certificate request ready in $tlsDir"""".stripMargin
-
-  private val signDirScript =
-    s"""set -e
-       |[ -f $ksCaDir/ca.key ] || { echo "no CA key in $ksCaDir: keystone_single_node.scala makes it" >&2; exit 1; }
-       |mkdir -p $signDir
-       |chmod 700 $signDir
-       |echo "$signDir ready"""".stripMargin
-
-  // Signs only when needed: no certificate yet, one for another key, one that does not verify against the CA,
-  // lacks the name, or expires within 30 days.
-  private val signScript =
-    s"""set -e
-       |cd $signDir
-       |openssl req -in server.csr -noout -verify
-       |NEED=1
-       |if [ -f server.crt ] \\
-       |   && [ "$$(openssl x509 -in server.crt -noout -pubkey)" = "$$(openssl req -in server.csr -noout -pubkey)" ] \\
-       |   && openssl verify -CAfile $ksCaDir/ca.crt server.crt >/dev/null 2>&1 \\
-       |   && openssl x509 -in server.crt -noout -checkend 2592000 >/dev/null \\
-       |   && openssl x509 -in server.crt -noout -ext subjectAltName | grep -q "DNS:$fqdn"; then
-       |  NEED=0
-       |fi
-       |if [ "$$NEED" = "1" ]; then
-       |  cat > server.ext <<EXT
-       |subjectAltName=DNS:$fqdn,DNS:$node,IP:$nodeIp
-       |basicConstraints=CA:FALSE
-       |keyUsage=digitalSignature,keyEncipherment
-       |extendedKeyUsage=serverAuth
-       |EXT
-       |  openssl x509 -req -in server.csr -CA $ksCaDir/ca.crt -CAkey $ksCaDir/ca.key -CAcreateserial -out server.crt -days 825 -sha256 -extfile server.ext
-       |  echo "signed a new certificate for $fqdn"
-       |else
-       |  echo "the certificate for $fqdn is still good"
-       |fi
-       |cp $ksCaDir/ca.crt ca.crt
-       |openssl x509 -in server.crt -noout -subject -enddate""".stripMargin
-
-  private val tlsInstallScript =
-    s"""set -e
-       |cd $tlsDir
-       |if [ "$$(openssl x509 -in server.crt -noout -pubkey)" != "$$(openssl pkey -in server.key -pubout)" ]; then
-       |  echo "the certificate from $ksNode is not for the key in $tlsDir" >&2; exit 1
-       |fi
-       |openssl verify -CAfile ca.crt server.crt
-       |cat server.crt ca.crt > server-chain.crt
-       |chown root:root server.crt server-chain.crt ca.crt
-       |chmod 644 server.crt ca.crt server-chain.crt
-       |echo "TLS ready: $$(openssl x509 -in server.crt -noout -subject -enddate | tr '\\n' ' ')"""".stripMargin
-
-  private def tlsStages: List[Stage] = List(
-    stage("horizon-tls-request", node)
-      .task("make the TLS key and certificate request")(
-        Task.RunCommand(List("sh", "-c", tlsRequestScript), timeoutSeconds = 60)
-      )
-      .build,
-    stage("horizon-tls-sign", ksNode)
-      .task(s"prepare $signDir")(
-        Task.RunCommand(List("sh", "-c", signDirScript))
-      )
-      .task(s"fetch the certificate request from $node")(
-        Task.DistributeFile(
-          node,
-          s"$tlsDir/server.csr",
-          s"$signDir/server.csr",
-          "root",
-          "root",
-          420
-        )
-      )
-      .task(s"sign the certificate for $fqdn with the test CA")(
-        Task.RunCommand(List("sh", "-c", signScript), timeoutSeconds = 60)
-      )
-      .build,
-    stage("horizon-tls-install", node)
-      .task(s"fetch the certificate from $ksNode")(
-        Task.DistributeFile(
-          ksNode,
-          s"$signDir/server.crt",
-          s"$tlsDir/server.crt",
-          "root",
-          "root",
-          420
-        )
-      )
-      .task(s"fetch the CA certificate from $ksNode")(
-        Task.DistributeFile(
-          ksNode,
-          s"$signDir/ca.crt",
-          s"$tlsDir/ca.crt",
-          "root",
-          "root",
-          420
-        )
-      )
-      .task("check the certificate and write the chain")(
-        Task.RunCommand(List("sh", "-c", tlsInstallScript), timeoutSeconds = 60)
-      )
-      .build
-  )
 
   // Sessions are files in the container's /tmp, which both WSGI processes share; the browser holds only the
   // session id. They used to be signed cookies, but a session made by a single sign-on login (the federated
   // token and its project list) is over 4096 bytes, and browsers silently drop such a cookie, so the user came
   // straight back to the login page. Sessions do not outlive a restart of the container. The cache is per
   // process. COMPRESS_OFFLINE matches how the Kolla image prepared its static files at build time.
-  private val settingsScript =
-    s"""mkdir -p $srcDir $logDir
-       |cat > $srcDir/local_settings.py <<'SETTINGS'
-       |import os
+  private val localSettings: String =
+    s"""|import os
        |from django.utils.translation import gettext_lazy as _
        |from openstack_dashboard.settings import HORIZON_CONFIG
        |
@@ -321,18 +236,13 @@ object horizon_single_node extends OrpheraClusterPlaybook:
        |    'keycloak_openid': ('keycloak', 'openid'),
        |}
        |WEBSSO_INITIAL_CHOICE = 'credentials'
-       |SETTINGS
-       |chmod 640 $srcDir/local_settings.py
-       |echo "local_settings.py written"""".stripMargin
+       |""".stripMargin
 
-  // The site-packages directory (where openstack_dashboard and the collected
-  // static files live) is read from the image, as the WSGI script paths are in
-  // the Cinder and Placement playbooks.
-  private val kollaConfigScript =
+  // The vhost and config.json are generated into `out` (the real directory, or a temporary one for the
+  // guard to compare with). The site-packages directory (where openstack_dashboard and the collected static
+  // files live), the Apache flavour and the module paths are read from the image.
+  private def kollaScript(out: String): String =
     s"""set -e
-       |mkdir -p $confRoot/horizon-web
-       |cp $srcDir/local_settings.py $confRoot/horizon-web/local_settings.py
-       |cp $caDir/ca.crt $confRoot/horizon-web/ca.crt
        |SITE=$$(podman run --rm --entrypoint sh $webImage -c '/var/lib/kolla/venv/bin/python -c "import os, openstack_dashboard; print(os.path.dirname(os.path.dirname(openstack_dashboard.__file__)))"')
        |if [ -z "$$SITE" ]; then echo "openstack_dashboard not found in $webImage" >&2; exit 1; fi
        |if podman run --rm --entrypoint sh $webImage -c 'test -d /etc/apache2/conf-enabled'; then
@@ -346,11 +256,8 @@ object horizon_single_node extends OrpheraClusterPlaybook:
        |HDRMOD=$$(podman run --rm --entrypoint sh $webImage -c 'ls /usr/lib/apache2/modules/mod_headers.so /etc/httpd/modules/mod_headers.so /usr/lib64/httpd/modules/mod_headers.so 2>/dev/null | head -n 1')
        |if [ -z "$$HDRMOD" ]; then echo "mod_headers.so not found in $webImage" >&2; exit 1; fi
        |if [ -z "$$SSLMOD" ]; then echo "mod_ssl.so not found in $webImage" >&2; exit 1; fi
-       |cp $tlsDir/server-chain.crt $confRoot/horizon-web/server-chain.crt
-       |cp $tlsDir/server.key $confRoot/horizon-web/server.key
-       |chmod 600 $confRoot/horizon-web/server.key
        |echo "site-packages: $$SITE; apache config: $$APACHE_CONF; mod_ssl: $$SSLMOD"
-       |cat > $confRoot/horizon-web/horizon.conf <<WSGICONF
+       |cat > $out/horizon.conf <<WSGICONF
        |<IfModule !headers_module>
        |LoadModule headers_module $$HDRMOD
        |</IfModule>
@@ -397,10 +304,19 @@ object horizon_single_node extends OrpheraClusterPlaybook:
        |    </Directory>
        |</VirtualHost>
        |WSGICONF
-       |cat > $confRoot/horizon-web/config.json <<JSON
+       |cat > $out/config.json <<JSON
        |{"command": "$$APACHE_CMD", "config_files": [{"source": "/var/lib/kolla/config_files/local_settings.py", "dest": "/etc/openstack-dashboard/local_settings.py", "owner": "horizon", "perm": "0600"}, {"source": "/var/lib/kolla/config_files/ca.crt", "dest": "/etc/openstack-dashboard/ca.crt", "owner": "horizon", "perm": "0644"}, {"source": "/var/lib/kolla/config_files/horizon.conf", "dest": "$$APACHE_CONF", "owner": "horizon", "perm": "0600"}, {"source": "/var/lib/kolla/config_files/server-chain.crt", "dest": "/etc/openstack-dashboard/horizon-server-chain.crt", "owner": "horizon", "perm": "0644"}, {"source": "/var/lib/kolla/config_files/server.key", "dest": "/etc/openstack-dashboard/horizon-server.key", "owner": "horizon", "perm": "0600"}], "permissions": [{"path": "/var/log/kolla/horizon", "owner": "horizon:kolla", "recurse": true}]}
        |JSON
-       |echo "kolla config written under $confRoot/horizon-web"""".stripMargin
+       |echo "kolla config written under $out"""".stripMargin
+
+  private val kollaTemp = kollaScript("$T")
+  private val kollaCurrent =
+    s"""T=$$(mktemp -d)
+       |$kollaTemp >/dev/null
+       |R=0
+       |for f in $$T/*; do cmp -s $$f $webDir/$$(basename $$f) || R=1; done
+       |rm -rf $$T
+       |exit $$R""".stripMargin
 
   // Standard-library Python. Plain string filled in with replace(). Subcommands:
   //   login-page | login | static
@@ -516,79 +432,141 @@ if __name__ == '__main__':
         die('usage: orphera-horizon-check login-page | login | static')
 """
 
-  private val helperScript =
-    "cat > /usr/local/sbin/orphera-horizon-check <<'PYEOF'\n" +
-      checkHelperPython
-        .replace("@@BASE@@", s"https://$fqdn:$port")
-        .replace("@@CA@@", s"$tlsDir/ca.crt")
-        .replace("@@LOGDIR@@", logDir)
-        .replace("@@ADMINPW@@", adminPassword.reveal) +
-      "\nPYEOF\nchmod 700 /usr/local/sbin/orphera-horizon-check\necho wrote /usr/local/sbin/orphera-horizon-check\n"
+  private val helper =
+    checkHelperPython
+      .replace("@@BASE@@", s"https://$fqdn:$port")
+      .replace("@@CA@@", s"$tlsDir/ca.crt")
+      .replace("@@LOGDIR@@", logDir)
+      .replace("@@ADMINPW@@", adminPassword.reveal)
+  private val helperPath = "/usr/local/sbin/orphera-horizon-check"
 
-  // The root redirects to the login page; the login page itself answers 200.
-  private val webHealthScript =
-    s"""CODE=$$(curl -s --cacert $tlsDir/ca.crt --resolve $fqdn:$port:127.0.0.1 -o /dev/null -w '%{http_code}' https://$fqdn:$port/auth/login/)
-       |[ "$$CODE" = "200" ]""".stripMargin
+  // The login page answers 200 (the root redirects to it).
+  private val healthy =
+    s"""CODE=$$(curl -s --cacert $tlsDir/ca.crt --resolve $fqdn:$port:127.0.0.1 -o /dev/null -w '%{http_code}' https://$fqdn:$port/auth/login/); [ "$$CODE" = "200" ]"""
+  private val waitHealthy =
+    s"""for i in $$(seq 1 24); do
+       |  $healthy && exit 0
+       |  sleep 5
+       |done
+       |echo "horizon does not answer on https://$fqdn:$port/auth/login/ - see 'journalctl -xeu orphera-horizon' and $logDir" >&2
+       |exit 1""".stripMargin
 
-  val playbook: ClusterPlaybook =
-    clusterPlaybook("horizon-single-node")(
-      (tlsStages ++ List[Stage](
-        stage("install-horizon", node)
-          .task("wait until apt and dpkg are idle")(
-            Task.RunCommand(
-              List("sh", "-c", waitAptIdleScript),
-              timeoutSeconds = 960
-            )
-          )
-          .task("install podman and tools")(
-            Task.Install(packages = hostPackages, updateCache = true)
-          )
-          .task("use the Kolla cache as a mirror for quay.io")(
-            Task.RunCommand(List("sh", "-c", useCacheScript))
-          )
-          .task("pull the Horizon image")(
-            Task.RunCommand(List("sh", "-c", pullScript), timeoutSeconds = 1800)
-          )
-          .task("fetch Keystone's CA from its TLS handshake")(
-            Task
-              .RunCommand(List("sh", "-c", fetchCaScript), timeoutSeconds = 60)
-          )
-          .task("write local_settings.py")(
-            Task.RunCommand(List("sh", "-c", settingsScript))
-          )
-          .task("write the Kolla config and the Apache vhost")(
-            Task.RunCommand(
-              List("sh", "-c", kollaConfigScript),
-              timeoutSeconds = 120
-            )
-          )
-          .task("write the Horizon check helper")(
-            Task.RunCommand(List("sh", "-c", helperScript))
-          )
-          .task(s"write ${horizonWeb.unitName}")(horizonWeb.writeUnit)
-          .task(s"start ${horizonWeb.unitName}")(horizonWeb.start)
-          .build,
+  private val signedIn = s"$helperPath login >/dev/null 2>&1"
 
-        stage("confirm-horizon-healthy", node)
-          .waitFor(
-            HealthCheck.Command(
-              onNode = node,
-              command = List("sh", "-c", webHealthScript),
-              pollIntervalSeconds = 5,
-              timeoutSeconds = 120
-            )
-          )
-          .task("sign in as admin like a browser would")(
-            Task.RunCommand(
-              List("sh", "-c", "/usr/local/sbin/orphera-horizon-check login"),
-              timeoutSeconds = 120
-            )
-          )
-          .task("horizon confirmed")(
-            Task.Debug(
-              s"Horizon up at https://$fqdn:$port/ ($nodeIp, certificate from the test CA): sign in as admin (domain Default) with the Keystone admin password from keystone_single_node.scala. Identity from $ksUrl. Test: manifests/test_horizon.sh"
-            )
-          )
-          .build
-      ))*
+  def describe(target: Node): List[ApplyResource] =
+    val tls = command(
+      s"the certificate files from dashboard_tls.scala are in $tlsDir",
+      tlsMissing,
+      unless = tlsPresent
+    )
+    val aptWait = command(
+      "wait for apt and dpkg to be idle",
+      waitAptIdleScript,
+      unless = aptIdle,
+      timeout = 960
+    )
+    val tools = hostPackages.map(p => pkg(p, updateCache = true).after(aptWait))
+    val podman = tools(0)
+
+    val mirrorDir = directory("/etc/containers/registries.conf.d").after(podman)
+    val mirror = file(
+      "/etc/containers/registries.conf.d/orphera-kolla-cache.conf",
+      registryMirror,
+      mode = "0644"
+    ).after(mirrorDir)
+    val pulled = command(
+      "pull the Horizon image",
+      pullScript,
+      unless = imagePresent,
+      timeout = 1800
+    ).after(podman, mirror)
+
+    val caDirectory = directory(caDir, mode = "0755").after(podman)
+    val ca = command(
+      "fetch Keystone's CA from its TLS handshake",
+      caScript,
+      unless = caCurrent,
+      timeout = 60
+    ).after(caDirectory, tools(1))
+
+    val logDirectory = directory(logDir)
+    val web = directory(webDir, mode = "0755")
+    val unitService = service(horizonWeb.unitName)
+
+    val settings = secretFile(
+      s"$webDir/local_settings.py",
+      Secret(localSettings), // it holds the session key
+      mode = "0640",
+      owner = "root",
+      group = "root"
+    ).after(web).notifies(unitService)
+    val kollaCa = command(
+      "copy Keystone's CA to the Kolla config",
+      s"cp $caCert $webDir/ca.crt",
+      unless = s"cmp -s $caCert $webDir/ca.crt"
+    ).after(ca, web).notifies(unitService)
+    val certCopy = command(
+      "copy the certificate chain and key to the Kolla config",
+      s"""cp $tlsDir/server-chain.crt $webDir/server-chain.crt
+         |cp $tlsDir/server.key $webDir/server.key
+         |chmod 600 $webDir/server.key
+         |echo "certificate and key copied"""".stripMargin,
+      unless =
+        s"cmp -s $tlsDir/server-chain.crt $webDir/server-chain.crt && cmp -s $tlsDir/server.key $webDir/server.key"
+    ).after(tls, web).notifies(unitService)
+    val vhost = command(
+      "write the Apache vhost and the Kolla config.json",
+      kollaScript(webDir),
+      unless = kollaCurrent,
+      timeout = 180
+    ).after(pulled, web, logDirectory).notifies(unitService)
+    val unitFile = file(
+      horizonWeb.unitPath,
+      horizonWeb.render,
+      mode = "0644",
+      owner = "root",
+      group = "root"
+    ).notifies(unitService)
+
+    val helperFile = secretFile(
+      helperPath,
+      Secret(helper), // it holds the admin password
+      mode = "0700",
+      owner = "root",
+      group = "root"
+    )
+
+    val running = unitService.after(settings, kollaCa, certCopy, vhost, unitFile)
+    val answering = command(
+      "horizon answers on its port",
+      waitHealthy,
+      unless = healthy,
+      timeout = 180
+    ).after(running)
+    val login = command(
+      "sign in as admin like a browser would",
+      s"$helperPath login",
+      unless = signedIn,
+      timeout = 120
+    ).after(answering, helperFile)
+
+    tools ++ List(
+      tls,
+      aptWait,
+      mirrorDir,
+      mirror,
+      pulled,
+      caDirectory,
+      ca,
+      logDirectory,
+      web,
+      settings,
+      kollaCa,
+      certCopy,
+      vhost,
+      unitFile,
+      helperFile,
+      running,
+      answering,
+      login
     )

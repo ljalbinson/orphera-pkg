@@ -448,7 +448,7 @@ service in the catalog the default landing page /project/ is a 403; with Nova re
 until Neutron existed; with Neutron registered the override is gone and the default page works.
 Prerequisite:
 Keystone, agent on tst13. Teardown:
-`orphera cluster-playbook manifests/horizon_teardown.scala`.
+`orphera apply manifests/horizon_teardown.scala`.
 
 ### K10. Nova control plane on tst14 - PASSED (2026-10-12), 19/19 (branch `nova`)
     manifests/test_nova.sh 2>&1 | tee /tmp/nova.log

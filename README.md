@@ -2613,7 +2613,7 @@ result independently of the playbook's own health checks:
     manifests/test_nova.sh                                      # applies nova_single_node.scala
     manifests/test_neutron.sh                                   # applies neutron_single_node.scala
     manifests/test_nova_compute.sh                              # applies nova_compute.scala, boots a CirrOS instance
-    manifests/test_horizon.sh                                   # applies horizon_single_node.scala
+    manifests/test_horizon.sh                                   # applies dashboard_tls.scala, horizon_single_node.scala
     manifests/test_designate.sh                                 # applies designate_single_node.scala
     manifests/test_heat.sh                                      # applies heat_*.scala
     manifests/test_barbican.sh                                  # applies barbican_single_node.scala
