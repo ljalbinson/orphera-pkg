@@ -78,7 +78,11 @@ object rabbitmq_single_node extends OrpheraApply:
 
   // No {{...}} in any command: Orphera renders those as a template before
   // running the command. Use filters, not --format.
-  private val ping = "podman exec rabbitmq rabbitmq-diagnostics -q ping >/dev/null 2>&1"
+  // `ping` passes as soon as the Erlang node is up, before the `rabbit` application
+  // has started; `check_running` passes only when it is running, which the
+  // `rabbitmqctl` commands below need.
+  private val ping =
+    "podman exec rabbitmq rabbitmq-diagnostics -q check_running >/dev/null 2>&1"
   private val waitScript =
     s"""for i in $$(seq 1 30); do
        |  if $ping; then
