@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# DRAFT end-to-end test for kolla_build.scala. Applies the playbook, then checks on tst21:
+# End-to-end test for kolla_build.scala. Applies the description, then checks on tst21:
 #  - the registry, devpi and nginx answer,
 #  - the base image and the source tarballs are cached (MANIFEST lists them),
 #  - kolla-build is installed,
-#  - a second run is idempotent.
+#  - a second run changes nothing.
 # BUILD=1 also builds one small image (keystone) from the cached sources and checks that it reaches the
 # registry and that a node can pull it. That takes a long time the first time.
-# NO_APPLY=1 skips the playbook runs. Run from scala0, in orphera-pkg:   manifests/test_kolla_build.sh
+# NO_APPLY=1 skips the apply runs. Run from scala0, in orphera-pkg:   manifests/test_kolla_build.sh
 set -uo pipefail
 
 NODE="tst21"
@@ -24,7 +24,7 @@ assert_contains() {
 
 if [ -z "${NO_APPLY:-}" ]; then
   log "install"
-  orphera cluster-playbook kolla_build.scala || { log "FAIL: kolla_build.scala did not complete"; exit 1; }
+  orphera apply kolla_build.scala || { log "FAIL: kolla_build.scala did not complete"; exit 1; }
 fi
 
 assert_contains "the registry answers" "http=200" "$(run_on "curl -s -o /dev/null -w 'http=%{http_code}' http://localhost:5000/v2/")"
@@ -46,8 +46,10 @@ fi
 
 if [ -z "${NO_APPLY:-}" ]; then
   log "re-apply (idempotence)"
-  if orphera cluster-playbook kolla_build.scala; then log "PASS: second run completed"; PASS=$((PASS + 1))
-  else log "FAIL: second run failed"; FAIL=$((FAIL + 1)); fi
+  SECOND=$(orphera apply kolla_build.scala 2>&1); RC=$?
+  printf '%s\n' "$SECOND"
+  if [ "$RC" -ne 0 ]; then log "FAIL: second run of kolla_build.scala failed"; FAIL=$((FAIL + 1)); fi
+  assert_contains "second run changed nothing" "0 changed" "$SECOND"
 fi
 
 log "passed=$PASS failed=$FAIL"

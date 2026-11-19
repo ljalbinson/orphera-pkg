@@ -247,7 +247,7 @@ step_caches() {
 }
 
 step_build() {
-  playbook kolla_build.scala
+  apply_desc kolla_build.scala
   local out
   out=$(run_on tst21 "curl -s -o /dev/null -w 'http=%{http_code}' http://localhost:5000/v2/")
   check "the image registry answers on tst21" contains "http=200" "$out"

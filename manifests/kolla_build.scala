@@ -1,11 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import orphera.orchestrator.*
-import orphera.orchestrator.ClusterPlaybookDsl.*
 import orphera.orchestrator.kolla.*
 
-// DRAFT. Builds the Kolla images from source on tst21 (10.10.5.33), with caches so that a rebuild downloads
-// next to nothing, and serves them from a writable registry that the other nodes pull from.
+// Sets up the Kolla image builder on tst21 (10.10.5.33) as a declarative description (OrpheraApply,
+// docs/APPLY-DESIGN.md; it replaced the cluster playbook of the same name): kolla-build, with caches so that a
+// rebuild downloads next to nothing, and a writable registry that the other nodes pull from. A second run
+// changes nothing and `--check` shows what would change.
+//
+//   orphera apply manifests/kolla_build.scala --check
+//   orphera apply manifests/kolla_build.scala
+//
+// Each step that changes the node is a command with a guard that tests what it makes (a file it creates, the
+// tarballs and the base image being cached, the three services answering), so a second run does nothing.
+// /etc/kolla-build/images.txt is written once and never again: it is the user's list afterwards.
 //
 // What runs on tst21:
 //   - kolla-registry  registry:2 on port 5000 (writable; kolla_cache.scala on tst9 is a read-only proxy of
@@ -44,8 +52,10 @@ import orphera.orchestrator.kolla.*
 // kolla-build.conf option names (base_image, tag, namespace, registry, push, build_args); the section
 // names for source locations ([<project>-base], [horizon], [openstack-base] for the requirements); the
 // opendev branch tarball URLs; that build_args is a list of key:value pairs. Not compiled where this
-// was written; the first run on scala0 is the first compile.
-object kolla_build extends OrpheraClusterPlaybook:
+// was written. Not yet run on the lab in either form: the first build is likely to need the kolla-build
+// options checked.
+object kolla_build extends OrpheraApply:
+  import Resources.*
 
   private val node = "tst21"
   private val fqdn = "tst21.ljalbinson.com"
@@ -55,6 +65,10 @@ object kolla_build extends OrpheraClusterPlaybook:
   private val aptProxy = "http://tst11.ljalbinson.com:3142"
 
   private val dataDir = "/var/lib/orphera/kolla-registry"
+  // Keep in step with BRANCH in the helper below.
+  private val branch = "stable-2025.1"
+
+  override def nodes: List[String] = List(node)
 
   private val registryContainer = Container(
     name = ContainerName("kolla-registry"),
@@ -67,6 +81,7 @@ object kolla_build extends OrpheraClusterPlaybook:
       Some("Writable Kolla image registry (built images) managed by Orphera"),
     settleSeconds = 5
   )
+  private val registryImage = registryContainer.image.ref
 
   // Images built by default; written to /etc/kolla-build/images.txt once, then left to the user.
   private val images = List(
@@ -152,19 +167,25 @@ object kolla_build extends OrpheraClusterPlaybook:
     "ca-certificates"
   )
 
+  // A fresh VM may still be running unattended-upgrades; wait for it before touching packages.
+  private val aptIdle =
+    """! pgrep -f '^/usr/bin/python3 /usr/bin/unattended-upgrade$' >/dev/null && ! pgrep -x apt-get >/dev/null && ! pgrep -x apt >/dev/null && ! pgrep -x dpkg >/dev/null"""
   private val waitAptIdleScript =
-    """end=$(( $(date +%s) + 900 ))
-      |while fuser /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/lib/apt/lists/lock >/dev/null 2>&1; do
-      |  [ "$(date +%s)" -lt "$end" ] || { echo "apt/dpkg still busy after 15 minutes" >&2; exit 1; }
-      |  sleep 5
-      |done
-      |echo "apt and dpkg idle"""".stripMargin
+    s"""for i in $$(seq 1 180); do
+       |  if $aptIdle; then
+       |    echo "apt and dpkg are idle"
+       |    exit 0
+       |  fi
+       |  sleep 5
+       |done
+       |echo "apt/dpkg still busy after 15 minutes (unattended-upgrades?)" >&2
+       |exit 1""".stripMargin
 
   private val pullRegistryScript =
     s"""${Pull.shellFunction(
         "the registry image name in kolla_build.scala; the pull is from Docker Hub"
       )}
-       |pull_retry ${registryContainer.image.ref} || exit 1
+       |pull_retry $registryImage || exit 1
        |echo "registry image ready"""".stripMargin
 
   // podman may talk to the local registry over plain HTTP (the registry is on this LAN, as tst9's is).
@@ -203,44 +224,32 @@ object kolla_build extends OrpheraClusterPlaybook:
        |WantedBy=multi-user.target
        |""".stripMargin
 
-  private val setupScript =
-    s"""set -e
-       |mkdir -p /srv/kolla-sources /etc/kolla-build /var/lib/orphera/kolla-build /var/lib/orphera/devpi $dataDir
-       |if [ ! -x /opt/devpi/bin/devpi-server ]; then
-       |  python3 -m venv /opt/devpi
-       |  /opt/devpi/bin/pip install --quiet devpi-server
-       |fi
-       |if [ ! -f /var/lib/orphera/devpi/.serverversion ]; then
-       |  /opt/devpi/bin/devpi-init --serverdir /var/lib/orphera/devpi
-       |fi
-       |if [ ! -f /etc/kolla-build/images.txt ]; then
-       |  printf '%s\\n' ${images.mkString(" ")} > /etc/kolla-build/images.txt
-       |fi
-       |rm -f /etc/nginx/sites-enabled/default
-       |echo "directories and devpi ready"""".stripMargin
+  private val installDevpiScript =
+    """set -e
+      |python3 -m venv /opt/devpi
+      |/opt/devpi/bin/pip install --quiet devpi-server
+      |echo "devpi installed"""".stripMargin
+  private val initDevpiScript =
+    """set -e
+      |/opt/devpi/bin/devpi-init --serverdir /var/lib/orphera/devpi
+      |echo "devpi initialised"""".stripMargin
+  // The image list is written once; after that it is the user's to edit.
+  private val imageListScript =
+    s"""printf '%s\\n' ${images.mkString(" ")} > /etc/kolla-build/images.txt
+       |echo "wrote /etc/kolla-build/images.txt"""".stripMargin
+  private val removeDefaultSiteScript =
+    """rm -f /etc/nginx/sites-enabled/default
+      |echo "default nginx site removed"""".stripMargin
 
-  private val startServicesScript =
-    s"""set -e
-       |systemctl daemon-reload
-       |systemctl enable --now orphera-devpi
-       |systemctl enable --now podman.socket
-       |nginx -t
-       |systemctl enable nginx
-       |systemctl restart nginx
-       |echo "devpi, podman.socket and nginx running"""".stripMargin
-
-  // devpi is started before the kolla-build install above would need it, so that part is its own task
-  // after the services are up.
+  // kolla-build is installed through devpi, so wait for it first.
   private val installKollaScript =
     s"""set -e
-       |if [ ! -x /opt/kolla-build/bin/kolla-build ]; then
-       |  for i in 1 2 3 4 5 6 7 8 9 10; do
-       |    curl -sf -o /dev/null http://localhost:$devpiPort/ && break
-       |    sleep 3
-       |  done
-       |  python3 -m venv /opt/kolla-build
-       |  /opt/kolla-build/bin/pip install --quiet --index-url http://localhost:$devpiPort/root/pypi/+simple/ --trusted-host localhost 'kolla>=20,<21' podman
-       |fi
+       |for i in $$(seq 1 20); do
+       |  curl -sf -o /dev/null http://localhost:$devpiPort/ && break
+       |  sleep 3
+       |done
+       |python3 -m venv /opt/kolla-build
+       |/opt/kolla-build/bin/pip install --quiet --index-url http://localhost:$devpiPort/root/pypi/+simple/ --trusted-host localhost 'kolla>=20,<21' podman
        |/opt/kolla-build/bin/kolla-build --version
        |echo "kolla-build installed"""".stripMargin
 
@@ -360,118 +369,183 @@ case "${1:-}" in
 esac
 """
 
-  private val helperScript =
-    "cat > /usr/local/sbin/orphera-kolla-build <<'HELPEREOF'\n" +
-      helper
-        .replace("@@FQDN@@", fqdn)
-        .replace("@@REGPORT@@", registryPort.toString)
-        .replace("@@SRCPORT@@", sourcesPort.toString)
-        .replace("@@DEVPIPORT@@", devpiPort.toString)
-        .replace("@@APTPROXY@@", aptProxy)
-        .replace("@@PROJECTS@@", projects.mkString(" ")) +
-      "HELPEREOF\nchmod 755 /usr/local/sbin/orphera-kolla-build\necho wrote /usr/local/sbin/orphera-kolla-build\n"
+  private val helperText: String =
+    helper
+      .replace("@@FQDN@@", fqdn)
+      .replace("@@REGPORT@@", registryPort.toString)
+      .replace("@@SRCPORT@@", sourcesPort.toString)
+      .replace("@@DEVPIPORT@@", devpiPort.toString)
+      .replace("@@APTPROXY@@", aptProxy)
+      .replace("@@PROJECTS@@", projects.mkString(" "))
+  private val helperPath = "/usr/local/sbin/orphera-kolla-build"
 
-  private val healthScript =
+  private val servicesAnswer =
     s"""curl -sf http://localhost:$registryPort/v2/ >/dev/null &&
        |curl -sf http://localhost:$sourcesPort/ >/dev/null &&
        |curl -sf http://localhost:$devpiPort/ >/dev/null""".stripMargin
+  private val waitServicesScript =
+    s"""for i in $$(seq 1 40); do
+       |  if $servicesAnswer; then echo "registry, sources and devpi answer"; exit 0; fi
+       |  sleep 3
+       |done
+       |curl -s -o /dev/null -w 'registry http=%{http_code}\\n' http://localhost:$registryPort/v2/ || true
+       |curl -s -o /dev/null -w 'sources http=%{http_code}\\n' http://localhost:$sourcesPort/ || true
+       |curl -s -o /dev/null -w 'devpi http=%{http_code}\\n' http://localhost:$devpiPort/ || true
+       |exit 1""".stripMargin
 
+  // True when every project's tarball and the checksum list are there and the base image is in the registry.
+  private val warm =
+    s"""for p in ${projects.mkString(" ")}; do [ -s /srv/kolla-sources/$$p-$branch.tar.gz ] || exit 1; done
+       |[ -s /srv/kolla-sources/MANIFEST ] && curl -sf http://localhost:$registryPort/v2/library/ubuntu/tags/list | grep -q '"24.04"'""".stripMargin
   // Fetches the source tarballs and copies the base image, so the first build starts with warm caches.
   private val warmScript =
-    """set -e
-      |/usr/local/sbin/orphera-kolla-build sources
-      |mkdir -p /var/lib/orphera/kolla-build
-      |if ! curl -sf http://localhost:5000/v2/library/ubuntu/tags/list | grep -q '"24.04"'; then
-      |  skopeo copy --dest-tls-verify=false docker://docker.io/library/ubuntu:24.04 docker://localhost:5000/library/ubuntu:24.04
-      |fi
-      |/usr/local/sbin/orphera-kolla-build status""".stripMargin
+    s"""set -e
+       |$helperPath sources
+       |if ! curl -sf http://localhost:$registryPort/v2/library/ubuntu/tags/list | grep -q '"24.04"'; then
+       |  skopeo copy --dest-tls-verify=false docker://docker.io/library/ubuntu:24.04 docker://localhost:$registryPort/library/ubuntu:24.04
+       |fi
+       |$helperPath status""".stripMargin
 
-  val playbook: ClusterPlaybook =
-    clusterPlaybook("kolla-build")(
-      stage("install-kolla-build", node)
-        .task("wait for apt and dpkg to be idle")(
-          Task.RunCommand(
-            List("sh", "-c", waitAptIdleScript),
-            timeoutSeconds = 960
-          )
-        )
-        .task("install podman, nginx and tools")(
-          Task.Install(packages = hostPackages, updateCache = true)
-        )
-        .task("pull the registry image")(
-          Task.RunCommand(
-            List("sh", "-c", pullRegistryScript),
-            timeoutSeconds = 600
-          )
-        )
-        .task("let podman use the local registry over HTTP")(
-          Task.WriteFile(
-            content = registriesConf,
-            dest =
-              "/etc/containers/registries.conf.d/orphera-kolla-registry.conf",
-            owner = "root",
-            group = "root",
-            mode = 420
-          )
-        )
-        .task("nginx site for the source tarballs")(
-          Task.WriteFile(
-            content = nginxConf,
-            dest = "/etc/nginx/conf.d/orphera-kolla-sources.conf",
-            owner = "root",
-            group = "root",
-            mode = 420
-          )
-        )
-        .task("devpi unit")(
-          Task.WriteFile(
-            content = devpiUnit,
-            dest = "/etc/systemd/system/orphera-devpi.service",
-            owner = "root",
-            group = "root",
-            mode = 420
-          )
-        )
-        .task("create directories, install devpi, write the image list")(
-          Task.RunCommand(List("sh", "-c", setupScript), timeoutSeconds = 900)
-        )
-        .task(s"write ${registryContainer.unitName}")(
-          registryContainer.writeUnit
-        )
-        .task(s"start ${registryContainer.unitName}")(registryContainer.start)
-        .task("start devpi, podman.socket and nginx")(
-          Task.RunCommand(
-            List("sh", "-c", startServicesScript),
-            timeoutSeconds = 120
-          )
-        )
-        .task("install kolla-build through the devpi cache")(
-          Task.RunCommand(
-            List("sh", "-c", installKollaScript),
-            timeoutSeconds = 900
-          )
-        )
-        .task("write the kolla-build helper")(
-          Task.RunCommand(List("sh", "-c", helperScript))
-        )
-        .build,
+  def describe(target: Node): List[ApplyResource] =
+    val aptWait = command(
+      "wait for apt and dpkg to be idle",
+      waitAptIdleScript,
+      unless = aptIdle,
+      timeout = 960
+    )
+    val tools = hostPackages.map(p => pkg(p, updateCache = true).after(aptWait))
+    val byName = hostPackages.zip(tools).toMap
+    val podman = byName("podman")
+    val nginxPkg = byName("nginx")
+    val venvTools = List(byName("python3"), byName("python3-venv"), byName("python3-pip"))
 
-      stage("confirm-kolla-build-healthy", node)
-        .waitFor(
-          HealthCheck.Command(
-            onNode = node,
-            command = List("sh", "-c", healthScript),
-            pollIntervalSeconds = 3,
-            timeoutSeconds = 120
-          )
-        )
-        .task("fetch the source tarballs and the base image")(
-          Task.RunCommand(List("sh", "-c", warmScript), timeoutSeconds = 1800)
-        )
-        .task("kolla builder confirmed")(
-          Task.Debug(
-            s"Kolla builder up on $fqdn: registry :$registryPort, sources :$sourcesPort, pip cache :$devpiPort. Build with: orphera run sudo orphera-kolla-build build --nodes $node"
-          )
-        )
-        .build
+    val pulled = command(
+      "pull the registry image",
+      pullRegistryScript,
+      unless = s"podman image exists $registryImage",
+      timeout = 600
+    ).after(podman)
+    val registriesDir = directory("/etc/containers/registries.conf.d").after(podman)
+    val registries = file(
+      "/etc/containers/registries.conf.d/orphera-kolla-registry.conf",
+      registriesConf,
+      mode = "0644"
+    ).after(registriesDir)
+
+    val sourcesDir = directory("/srv/kolla-sources")
+    val kollaBuildDir = directory("/etc/kolla-build")
+    val stateDir = directory("/var/lib/orphera/kolla-build")
+    val devpiDir = directory("/var/lib/orphera/devpi")
+    val registryData = directory(dataDir)
+
+    val imageList = command(
+      "write the list of images to build (once)",
+      imageListScript,
+      creates = "/etc/kolla-build/images.txt"
+    ).after(kollaBuildDir)
+
+    // nginx serves the source tarballs.
+    val nginxUnit = service("nginx")
+    val nginxConfFile = file(
+      "/etc/nginx/conf.d/orphera-kolla-sources.conf",
+      nginxConf,
+      mode = "0644",
+      owner = "root",
+      group = "root"
+    ).after(nginxPkg).notifies(nginxUnit)
+    val defaultSite = command(
+      "remove nginx's default site",
+      removeDefaultSiteScript,
+      onlyIf = "[ -e /etc/nginx/sites-enabled/default ] || [ -L /etc/nginx/sites-enabled/default ]"
+    ).after(nginxPkg).notifies(nginxUnit)
+    val nginxRunning = nginxUnit.after(nginxPkg, nginxConfFile, defaultSite, sourcesDir)
+
+    // devpi, the PyPI cache.
+    val devpiUnit0 = service("orphera-devpi.service")
+    val devpiInstalled = command(
+      "install devpi",
+      installDevpiScript,
+      creates = "/opt/devpi/bin/devpi-server",
+      timeout = 900
+    ).after((devpiDir :: venvTools)*)
+    val devpiInit = command(
+      "initialise the devpi store",
+      initDevpiScript,
+      creates = "/var/lib/orphera/devpi/.serverversion"
+    ).after(devpiInstalled, devpiDir)
+    val devpiUnitFile = file(
+      "/etc/systemd/system/orphera-devpi.service",
+      devpiUnit,
+      mode = "0644",
+      owner = "root",
+      group = "root"
+    ).notifies(devpiUnit0)
+    val devpiRunning = devpiUnit0.after(devpiInit, devpiUnitFile)
+
+    // The registry container.
+    val registryUnit = service(registryContainer.unitName)
+    val registryUnitFile = file(
+      registryContainer.unitPath,
+      registryContainer.render,
+      mode = "0644",
+      owner = "root",
+      group = "root"
+    ).notifies(registryUnit)
+    val registryRunning = registryUnit.after(pulled, registryData, registryUnitFile, registries)
+
+    val socket = service("podman.socket").after(podman)
+
+    val kollaInstalled = command(
+      "install kolla-build through the devpi cache",
+      installKollaScript,
+      creates = "/opt/kolla-build/bin/kolla-build",
+      timeout = 900
+    ).after((devpiRunning :: podman :: venvTools)*)
+
+    val helperFile = file(
+      helperPath,
+      helperText,
+      mode = "0755",
+      owner = "root",
+      group = "root"
+    ).after(sourcesDir, kollaBuildDir, stateDir)
+
+    val warmed = command(
+      "fetch the source tarballs and copy the base image into the registry",
+      warmScript,
+      unless = warm,
+      timeout = 1800
+    ).after(helperFile, registryRunning, nginxRunning, sourcesDir, byName("skopeo"), byName("curl"))
+    val answering = command(
+      "the registry, the source server and devpi answer",
+      waitServicesScript,
+      unless = servicesAnswer,
+      timeout = 150
+    ).after(registryRunning, nginxRunning, devpiRunning)
+
+    tools ++ List(
+      aptWait,
+      pulled,
+      registriesDir,
+      registries,
+      sourcesDir,
+      kollaBuildDir,
+      stateDir,
+      devpiDir,
+      registryData,
+      imageList,
+      nginxConfFile,
+      defaultSite,
+      nginxRunning,
+      devpiInstalled,
+      devpiInit,
+      devpiUnitFile,
+      devpiRunning,
+      registryUnitFile,
+      registryRunning,
+      socket,
+      kollaInstalled,
+      helperFile,
+      warmed,
+      answering
     )
