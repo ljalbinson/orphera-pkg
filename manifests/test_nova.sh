@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# DRAFT end-to-end test for nova_single_node.scala.
+# End-to-end test for nova_single_node.scala (with nova_database.scala and
+# nova_rabbitmq.scala, which it applies first).
 #
-# Applies the playbook, then checks independently of its own health check:
+# Tears Nova down (nova_teardown.scala), applies the three descriptions, then checks independently of its own health check:
 #  - the four Nova units (API, scheduler, conductor, noVNC proxy) are active,
 #  - the API answers its version document on 8774 without a token,
 #  - an unauthenticated request to a protected path is refused (401),
@@ -15,12 +16,12 @@
 #  - Nova is in the Keystone catalog (service type `compute`),
 #  - the noVNC proxy serves its web page on 6080,
 #  - Placement and Glance on tst13 still answer from tst14,
-#  - a second run of the playbook succeeds (idempotence).
+#  - a second run of the description changes nothing (idempotence).
 #
 # Prerequisites: Galera + VIP, Keystone, RabbitMQ on tst10 (Cinder) and
 # Placement healthy; tst14 has an agent. Run from scala0, in orphera-pkg:
 #   manifests/test_nova.sh
-# NO_APPLY=1 skips the playbook runs and only checks.
+# NO_APPLY=1 skips the teardown and the apply runs and only checks.
 # Exit code: 0 if every assertion passes, 1 otherwise.
 
 set -uo pipefail
@@ -48,10 +49,15 @@ assert_contains() {
 }
 
 if [ -z "${NO_APPLY:-}" ]; then
+  log "teardown (failures here are tolerated: nothing may be installed yet)"
+  orphera apply nova_teardown.scala || true
+
   log "install"
-  if ! orphera cluster-playbook nova_single_node.scala; then
-    log "FAIL: nova_single_node.scala did not complete"; exit 1
-  fi
+  for d in nova_database.scala nova_rabbitmq.scala nova_single_node.scala; do
+    if ! orphera apply "$d"; then
+      log "FAIL: $d did not complete"; exit 1
+    fi
+  done
 fi
 
 for u in nova-api nova-scheduler nova-conductor nova-novncproxy; do
@@ -108,11 +114,12 @@ fi
 
 if [ -z "${NO_APPLY:-}" ]; then
   log "re-apply (idempotence)"
-  if orphera cluster-playbook nova_single_node.scala; then
-    log "PASS: second run completed"; PASS=$((PASS + 1))
-  else
+  SECOND=$(orphera apply nova_single_node.scala 2>&1); RC=$?
+  printf '%s\n' "$SECOND"
+  if [ "$RC" -ne 0 ]; then
     log "FAIL: second run of nova_single_node.scala failed"; FAIL=$((FAIL + 1))
   fi
+  assert_contains "second run changed nothing" "0 changed" "$SECOND"
 fi
 
 log "passed=$PASS failed=$FAIL"
