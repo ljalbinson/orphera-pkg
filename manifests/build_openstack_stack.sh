@@ -460,7 +460,11 @@ step_observability() {
 }
 
 step_telemetry() {
-  playbook telemetry_single_node.scala
+  apply_desc telemetry_database.scala
+  apply_desc telemetry_rabbitmq.scala
+  apply_desc telemetry_prometheus.scala
+  apply_desc telemetry_compute.scala
+  apply_desc telemetry_single_node.scala
   local out
   out=$(run_on tst24 "curl -s -o /dev/null -w 'http=%{http_code}' http://localhost:8042/")
   check "the Aodh API answers its version document" contains "http=" "$out"
