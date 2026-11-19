@@ -16,8 +16,8 @@ import orphera.orchestrator.kolla.*
 //   orphera apply manifests/heat_single_node.scala  # this one (tst20)
 //
 // Where it runs: tst20, which had no role. Heat is three small Python services (the API, the CloudFormation
-// compatible API and the engine), so one 4 GB VM holds all of it. To move it, change `node`, `fqdn` and
-// `nodeIp` below (and the teardown's `node`); nothing else depends on the location.
+// compatible API and the engine), so one 4 GB VM holds all of it. To move it, change `node` and `fqdn`
+// below (and the teardown's `node`); nothing else depends on the location.
 //
 // What it builds:
 //   - heat-api       the REST API (Apache + mod_wsgi when the image has heat-wsgi-api, else the standalone
@@ -67,7 +67,6 @@ object heat_single_node extends OrpheraApply:
 
   private val node = "tst20"
   private val fqdn = "tst20.ljalbinson.com"
-  private val nodeIp = "10.10.5.32"
   private val apiPort = 8004
   private val cfnPort = 8000
 
