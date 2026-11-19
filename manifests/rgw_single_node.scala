@@ -439,10 +439,10 @@ if __name__ == '__main__':
       .replace("@@CA@@", caCert)
   private val helperPath = "/usr/local/sbin/orphera-rgw-api"
 
-  // The RGW options as lines `option value`. Their hash decides whether the daemon is restarted.
+  // The RGW options as lines `option value`. Their hash decides whether the daemon is restarted. No
+  // rgw_keystone_api_version: Ceph 20 has dropped it (v3 only), and `config set` refuses it.
   private val rgwOptions: List[(String, String)] = List(
     "rgw_keystone_url" -> ksUrl,
-    "rgw_keystone_api_version" -> "3",
     "rgw_keystone_admin_user" -> "rgw",
     "rgw_keystone_admin_password" -> rgwPassword.reveal,
     "rgw_keystone_admin_domain" -> "Default",
@@ -506,6 +506,9 @@ if __name__ == '__main__':
        |  exit 1
        |fi
        |$hashFns
+       |# Ceph 20 (Tentacle) has no rgw_keystone_api_version (Keystone v3 is the only one it speaks) and refuses to
+       |# set it; a node set up with an older Ceph may still hold it, so it is cleared.
+       |cephadm shell -- ceph config rm client.rgw.$serviceId rgw_keystone_api_version 2>/dev/null || true
        |$sets
        |spec > /tmp/rgw-spec.yaml
        |cephadm shell --mount /tmp/rgw-spec.yaml -- ceph orch apply -i /mnt/rgw-spec.yaml
