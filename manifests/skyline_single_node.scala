@@ -1,25 +1,33 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import orphera.orchestrator.*
-import orphera.orchestrator.ClusterPlaybookDsl.*
 import orphera.orchestrator.kolla.*
 
-// DRAFT. OpenStack Skyline, the dashboard that replaces Horizon's look and adds a console, on tst13 next to
-// Horizon (which stays on 8080). One container under podman from the image the Skyline project documents for
-// installation, 99cloud/skyline (the apiserver, gunicorn on a Unix socket, and nginx in front of it serving the
-// console on port 9999). It is not a Kolla image, so tst21 does not build it. Modelled on
-// horizon_single_node.scala and magnum_single_node.scala; read their headers for the conventions.
+// OpenStack Skyline, the dashboard that replaces Horizon's look and adds a console, on tst13 next to Horizon
+// (which stays on 8080), as a declarative description (OrpheraApply, docs/APPLY-DESIGN.md). It replaced the
+// cluster playbook of the same name; a second run changes nothing and restarts nothing, and `--check` shows
+// what would change. One container under podman from the image the Skyline project documents for installation,
+// 99cloud/skyline (the apiserver, gunicorn on a Unix socket, and nginx in front of it serving the console on
+// port 9999). It is not a Kolla image, so tst21 does not build it. Modelled on horizon_single_node.scala, which
+// explains the conventions.
 //
-// Where it runs: tst13 (Glance, Placement, Horizon). To move it, change `node`, `fqdn` and `nodeIp` below (and
-// the teardown's `node`); nothing else depends on the location.
+// Apply in this order (one description cannot order its nodes):
+//
+//   orphera cluster-playbook manifests/dashboard_tls.scala   # key and certificate on tst13, signed on tst6
+//   orphera apply manifests/skyline_database.scala           # the database on Galera (tst3)
+//   orphera apply manifests/skyline_single_node.scala        # this one (tst13)
+//
+// dashboard_tls.scala is the same one Horizon uses; Skyline used to make the certificate itself when it was
+// missing, and now starts with a check that the files are there, as Horizon does.
+//
+// Where it runs: tst13 (Glance, Placement, Horizon). To move it, change `node` and `fqdn` below (and
+// the teardown's `node`, and dashboard_tls.scala); nothing else depends on the location.
 //
 // Why this image: the nginx configuration of Skyline has one location block per service endpoint in the
 // Keystone catalog (/api/openstack/<region>/<service>/ ...). The image writes it from the catalog every time
 // it starts. A Kolla-style split into apiserver and console containers needs that file made by hand.
 //
 // What it does:
-//   - database `skyline` on Galera (stage skyline-database) with the settings the Skyline documents give
-//     (utf8, utf8_general_ci);
 //   - the Keystone user `skyline` (project `service`, role admin), made by the helper's `register`; Skyline
 //     itself has no service entry in the catalog;
 //   - skyline.yaml (database, Keystone URL, the service password, a secret key from the secret store, the
@@ -31,28 +39,29 @@ import orphera.orchestrator.kolla.*
 //     /var/lib/orphera/skyline/pylib and put on PYTHONPATH (as for the Magnum driver);
 //   - `skyline_bootstrap` (the image's KOLLA_BOOTSTRAP mode: the Alembic migrations), then the unit
 //     `orphera-skyline.service`.
-// The container trusts the test CA: the host's CA bundle (which the playbook updates with Keystone's CA) is
+// The container trusts the test CA: the host's CA bundle (which the description updates with Keystone's CA) is
 // mounted over the image's and REQUESTS_CA_BUNDLE points at it.
 //
-// Because the nginx file comes from the catalog at start, the playbook restarts the container whenever the
+// Because the nginx file comes from the catalog at start, the description restarts the container whenever the
 // catalog's public endpoints have changed since the last run (a hash kept in /var/lib/orphera/skyline). Run it
 // again after adding a service and the new service appears in the console.
 //
 // Prerequisites, not checked here:
 //   - Galera + VIP healthy, Keystone up on tst6 (keystone_single_node.scala), serving the CA chain
+//   - the certificate (dashboard_tls.scala), checked first
 //   - the services you want in the console registered (the console shows what the catalog lists)
 //   - the agent on tst13; Docker Hub reachable from tst13 (the image is docker.io/99cloud/skyline; set
 //     SKYLINE_IMAGE to another reference or a tag, or point podman at a mirror)
 //
-// Stages:
-//   - skyline-database (tst3): the `skyline` database + user.
-//   - install-skyline (tst13): packages, image pull, Keystone's CA, the helper and the registration, the
-//     PyMySQL driver, skyline.yaml, `skyline_bootstrap`, the unit, a restart if the catalog changed.
-//   - confirm-skyline-healthy (tst13): the console answers on 9999, the API docs answer, and the admin user
-//     logs in through the login API.
-//
-// Check mode: `ORPHERA_CHECK=1 orphera cluster-playbook manifests/skyline_single_node.scala` changes nothing
-// and reports whether the unit on the node matches what this playbook writes.
+// How it stays idempotent (as for Horizon):
+//   - Each step that changes the node is a command with a guard that tests what it makes: the image, the
+//     certificate copy (compared with the files in /etc/orphera/tls, and owned by the image's user), the
+//     PyMySQL driver, the Keystone user (a token as `skyline`), and the migrations (a stamp of the step and
+//     the image, and tables in the database, read with the image's own Python).
+//   - skyline.yaml holds the passwords, so it is a secret file; it and the unit notify the service, so a change
+//     restarts it. Keystone's CA is compared as a certificate each run (a changed one also updates the bundle
+//     the container mounts, so the container is restarted).
+//   - The last steps check that the console and the API docs answer and that the admin user logs in.
 //
 // Facts this was written from, to check if the first run fails: the documented bootstrap is
 // `-e KOLLA_BOOTSTRAP=""` with skyline.yaml mounted and the host network; the API docs are at
@@ -62,13 +71,15 @@ import orphera.orchestrator.kolla.*
 // default.prometheus_endpoint, openstack.keystone_url, openstack.system_user_password and so on).
 //
 // Test-only credentials come from the secret store (skyline/db, skyline/service, skyline/secret-key), made on
-// first use. Not compiled where this was written; the first run on scala0 is the first compile.
-object skyline_single_node extends OrpheraClusterPlaybook:
+// first use.
+object skyline_single_node extends OrpheraApply:
+  import Resources.*
 
   private val node = "tst13"
   private val fqdn = "tst13.ljalbinson.com"
-  private val nodeIp = "10.10.5.25"
   private val port = 9999
+
+  override def nodes: List[String] = List(node)
 
   private val ksFqdn = "tst6.ljalbinson.com"
   private val vip = "10.10.5.100"
@@ -78,6 +89,7 @@ object skyline_single_node extends OrpheraClusterPlaybook:
   private val skylineImage = ExternalImage(
     sys.env.getOrElse("SKYLINE_IMAGE", "docker.io/99cloud/skyline:latest")
   )
+  private val imageRef = skylineImage.ref
 
   private val adminPassword = Secrets.secret("keystone/admin")
   private val dbName = "skyline"
@@ -88,12 +100,15 @@ object skyline_single_node extends OrpheraClusterPlaybook:
 
   private val confDir = "/etc/skyline"
   private val caDir = "/etc/skyline/ca"
+  private val caCert = s"$caDir/ca.crt"
   private val logDir = "/var/log/skyline"
   private val stateDir = "/var/lib/orphera/skyline"
   private val pylibDir = "/var/lib/orphera/skyline/pylib"
   private val socketDir = "/var/lib/orphera/skyline/run"
   // A copy of the node's certificate chain and key, owned by the image's user (the shared files are root's).
   private val skylineTlsDir = "/var/lib/orphera/skyline/tls"
+  // The certificate files dashboard_tls.scala leaves on the node.
+  private val tlsDir = "/etc/orphera/tls"
   private val ksUrl = s"https://$ksFqdn:5000"
 
   // Defined after the directories above, which they read; a val used before its definition is null in an
@@ -129,174 +144,76 @@ object skyline_single_node extends OrpheraClusterPlaybook:
   private val hostPackages =
     List("podman", "openssl", "curl", "ca-certificates", "python3")
 
+  // A fresh VM may still be running unattended-upgrades (see disable_unattended_upgrades.scala); wait for it
+  // before touching packages.
+  private val aptIdle =
+    """! pgrep -f '^/usr/bin/python3 /usr/bin/unattended-upgrade$' >/dev/null && ! pgrep -x apt-get >/dev/null && ! pgrep -x apt >/dev/null && ! pgrep -x dpkg >/dev/null"""
   private val waitAptIdleScript =
-    """for i in $(seq 1 180); do
-      |  if pgrep -f '^/usr/bin/python3 /usr/bin/unattended-upgrade$' >/dev/null || pgrep -x apt-get >/dev/null || pgrep -x apt >/dev/null || pgrep -x dpkg >/dev/null; then
-      |    sleep 5
-      |  else
-      |    echo "apt and dpkg are idle"
-      |    exit 0
-      |  fi
-      |done
-      |echo "apt/dpkg still busy after 15 minutes (unattended-upgrades?)" >&2
-      |exit 1""".stripMargin
+    s"""for i in $$(seq 1 180); do
+       |  if $aptIdle; then
+       |    echo "apt and dpkg are idle"
+       |    exit 0
+       |  fi
+       |  sleep 5
+       |done
+       |echo "apt/dpkg still busy after 15 minutes (unattended-upgrades?)" >&2
+       |exit 1""".stripMargin
 
-  // ---- TLS for the dashboards on tst13 ------------------------------------
-  // One certificate for the node, shared by horizon_single_node.scala (which needs dashboard_tls.scala, the same steps, applied first) and skyline_single_node.scala (which makes it
-  // when missing; the same steps as keycloak_single_node.scala): the key is made once on the node and stays there,
-  // the request goes to tst6 and is signed by Keystone's test CA, and the certificate comes back. Browsers that
-  // trust that CA trust the dashboards, and the WebSSO login stays on HTTPS from start to end.
-  private val ksNode = "tst6"
-  private val ksCaDir = "/etc/kolla/keystone-ca"
-  private val tlsDir = "/etc/orphera/tls"
-  private val signDir = s"$ksCaDir/issued/$node"
-
-  private val tlsRequestScript =
-    s"""set -e
-       |mkdir -p $tlsDir
-       |chmod 750 $tlsDir
-       |cd $tlsDir
-       |if [ ! -f server.key ] || [ ! -f server.csr ]; then
-       |  openssl req -newkey rsa:2048 -nodes -keyout server.key -out server.csr -subj "/CN=$fqdn"
-       |fi
-       |chown root:root server.key server.csr
-       |chmod 600 server.key
-       |chmod 644 server.csr
-       |echo "key and certificate request ready in $tlsDir"""".stripMargin
-
-  private val signDirScript =
-    s"""set -e
-       |[ -f $ksCaDir/ca.key ] || { echo "no CA key in $ksCaDir: keystone_single_node.scala makes it" >&2; exit 1; }
-       |mkdir -p $signDir
-       |chmod 700 $signDir
-       |echo "$signDir ready"""".stripMargin
-
-  // Signs only when needed: no certificate yet, one for another key, one that does not verify against the CA,
-  // lacks the name, or expires within 30 days.
-  private val signScript =
-    s"""set -e
-       |cd $signDir
-       |openssl req -in server.csr -noout -verify
-       |NEED=1
-       |if [ -f server.crt ] \\
-       |   && [ "$$(openssl x509 -in server.crt -noout -pubkey)" = "$$(openssl req -in server.csr -noout -pubkey)" ] \\
-       |   && openssl verify -CAfile $ksCaDir/ca.crt server.crt >/dev/null 2>&1 \\
-       |   && openssl x509 -in server.crt -noout -checkend 2592000 >/dev/null \\
-       |   && openssl x509 -in server.crt -noout -ext subjectAltName | grep -q "DNS:$fqdn"; then
-       |  NEED=0
-       |fi
-       |if [ "$$NEED" = "1" ]; then
-       |  cat > server.ext <<EXT
-       |subjectAltName=DNS:$fqdn,DNS:$node,IP:$nodeIp
-       |basicConstraints=CA:FALSE
-       |keyUsage=digitalSignature,keyEncipherment
-       |extendedKeyUsage=serverAuth
-       |EXT
-       |  openssl x509 -req -in server.csr -CA $ksCaDir/ca.crt -CAkey $ksCaDir/ca.key -CAcreateserial -out server.crt -days 825 -sha256 -extfile server.ext
-       |  echo "signed a new certificate for $fqdn"
-       |else
-       |  echo "the certificate for $fqdn is still good"
-       |fi
-       |cp $ksCaDir/ca.crt ca.crt
-       |openssl x509 -in server.crt -noout -subject -enddate""".stripMargin
-
-  private val tlsInstallScript =
-    s"""set -e
-       |cd $tlsDir
-       |if [ "$$(openssl x509 -in server.crt -noout -pubkey)" != "$$(openssl pkey -in server.key -pubout)" ]; then
-       |  echo "the certificate from $ksNode is not for the key in $tlsDir" >&2; exit 1
-       |fi
-       |openssl verify -CAfile ca.crt server.crt
-       |cat server.crt ca.crt > server-chain.crt
-       |chown root:root server.crt server-chain.crt ca.crt
-       |chmod 644 server.crt ca.crt server-chain.crt
-       |echo "TLS ready: $$(openssl x509 -in server.crt -noout -subject -enddate | tr '\\n' ' ')"""".stripMargin
-
-  private def tlsStages: List[Stage] = List(
-    stage("skyline-tls-request", node)
-      .task("make the TLS key and certificate request")(
-        Task.RunCommand(List("sh", "-c", tlsRequestScript), timeoutSeconds = 60)
-      )
-      .build,
-    stage("skyline-tls-sign", ksNode)
-      .task(s"prepare $signDir")(
-        Task.RunCommand(List("sh", "-c", signDirScript))
-      )
-      .task(s"fetch the certificate request from $node")(
-        Task.DistributeFile(
-          node,
-          s"$tlsDir/server.csr",
-          s"$signDir/server.csr",
-          "root",
-          "root",
-          420
-        )
-      )
-      .task(s"sign the certificate for $fqdn with the test CA")(
-        Task.RunCommand(List("sh", "-c", signScript), timeoutSeconds = 60)
-      )
-      .build,
-    stage("skyline-tls-install", node)
-      .task(s"fetch the certificate from $ksNode")(
-        Task.DistributeFile(
-          ksNode,
-          s"$signDir/server.crt",
-          s"$tlsDir/server.crt",
-          "root",
-          "root",
-          420
-        )
-      )
-      .task(s"fetch the CA certificate from $ksNode")(
-        Task.DistributeFile(
-          ksNode,
-          s"$signDir/ca.crt",
-          s"$tlsDir/ca.crt",
-          "root",
-          "root",
-          420
-        )
-      )
-      .task("check the certificate and write the chain")(
-        Task.RunCommand(List("sh", "-c", tlsInstallScript), timeoutSeconds = 60)
-      )
-      .build
-  )
-
-  // ---- tst3 (Galera) ---------------------------------------------------
-
-  private val createDatabaseScript =
-    s"""mariadb -N -e "CREATE DATABASE IF NOT EXISTS $dbName DEFAULT CHARACTER SET utf8 DEFAULT COLLATE utf8_general_ci; CREATE USER IF NOT EXISTS '$dbUser'@'%' IDENTIFIED BY '${dbPassword.reveal}'; ALTER USER '$dbUser'@'%' IDENTIFIED BY '${dbPassword.reveal}'; GRANT ALL PRIVILEGES ON $dbName.* TO '$dbUser'@'%'; FLUSH PRIVILEGES;""""
-
-  // ---- the node --------------------------------------------------------
+  private val tlsPresent =
+    s"[ -f $tlsDir/server-chain.crt ] && [ -f $tlsDir/server.key ] && [ -f $tlsDir/ca.crt ]"
+  private val tlsMissing =
+    s"""echo "no certificate in $tlsDir - run: orphera cluster-playbook manifests/dashboard_tls.scala" >&2
+       |exit 1""".stripMargin
 
   private val pullScript =
     s"""${Pull.shellFunction(
         "SKYLINE_IMAGE or the Image in skyline_single_node.scala"
       )}
-       |pull_retry ${skylineImage.ref} || exit 1
-       |echo "image ready: $$(podman images -q ${skylineImage.ref} | head -1)"""".stripMargin
+       |pull_retry $imageRef || exit 1
+       |echo "image ready: $$(podman images -q $imageRef | head -1)"""".stripMargin
+  private val imagePresent = s"podman image exists $imageRef"
 
-  // Same method as manila_single_node.scala: the last certificate Keystone presents is its CA; trust on first
-  // use. update-ca-certificates also puts it in /etc/ssl/certs/ca-certificates.crt, which the container mounts.
-  private val fetchCaScript =
+  // Keystone's CA: the last certificate it presents (trust on first use), which must be self-signed.
+  // `chainTo DIR` leaves DIR/c1.pem ... DIR/cN.pem, each holding the certificate only: the text s_client
+  // prints after the last one differs on every handshake, and would make the comparison fail.
+  private val chainTo =
+    s"""chainTo() { openssl s_client -connect $ksFqdn:5000 -servername $ksFqdn -showcerts </dev/null 2>/dev/null | awk -v d="$$1" '/-----BEGIN CERTIFICATE-----/{n++; p=1} p{print > (d "/c" n ".pem")} /-----END CERTIFICATE-----/{p=0}'; }"""
+  private val trustTarget =
+    """if command -v update-ca-certificates >/dev/null 2>&1; then t=/usr/local/share/ca-certificates/orphera-test-ca.crt; else t=/etc/pki/ca-trust/source/anchors/orphera-test-ca.crt; fi"""
+  // Current when the installed CA is the one Keystone presents now, and is in the system trust store.
+  private val caCurrent =
+    s"""$chainTo
+       |D=$$(mktemp -d)
+       |chainTo $$D
+       |N=$$(ls $$D/c*.pem 2>/dev/null | wc -l)
+       |R=1
+       |if [ "$$N" -ge 2 ]; then
+       |  $trustTarget
+       |  cmp -s $$D/c$$N.pem $caCert && cmp -s $caCert "$$t" && R=0
+       |fi
+       |rm -rf $$D
+       |exit $$R""".stripMargin
+  // update-ca-certificates also puts it in /etc/ssl/certs/ca-certificates.crt, which the container mounts.
+  private val caScript =
     s"""set -e
+       |$chainTo
        |mkdir -p $caDir
-       |rm -f /tmp/ks-chain-*.pem
-       |openssl s_client -connect $ksFqdn:5000 -servername $ksFqdn -showcerts </dev/null 2>/dev/null | awk '/-----BEGIN CERTIFICATE-----/{n++} n>0{print > ("/tmp/ks-chain-" n ".pem")}'
-       |COUNT=$$(ls /tmp/ks-chain-*.pem 2>/dev/null | wc -l)
+       |D=$$(mktemp -d)
+       |trap 'rm -rf $$D' EXIT
+       |chainTo $$D
+       |COUNT=$$(ls $$D/c*.pem 2>/dev/null | wc -l)
        |if [ "$$COUNT" -lt 2 ]; then
-       |  echo "keystone at $ksFqdn:5000 presented $$COUNT certificate(s); expected leaf + CA - re-run keystone_single_node.scala (it must serve server-chain.crt)" >&2
+       |  echo "keystone at $ksFqdn:5000 presented $$COUNT certificate(s); expected leaf + CA - apply keystone_single_node.scala (it must serve server-chain.crt)" >&2
        |  exit 1
        |fi
-       |cp /tmp/ks-chain-$$COUNT.pem $caDir/ca.crt
-       |openssl verify -CAfile $caDir/ca.crt /tmp/ks-chain-1.pem
-       |SUBJ=$$(openssl x509 -in $caDir/ca.crt -noout -subject | sed 's/^subject=//')
-       |ISS=$$(openssl x509 -in $caDir/ca.crt -noout -issuer | sed 's/^issuer=//')
+       |cp $$D/c$$COUNT.pem $caCert
+       |openssl verify -CAfile $caCert $$D/c1.pem
+       |SUBJ=$$(openssl x509 -in $caCert -noout -subject | sed 's/^subject=//')
+       |ISS=$$(openssl x509 -in $caCert -noout -issuer | sed 's/^issuer=//')
        |if [ "$$SUBJ" != "$$ISS" ]; then echo "last certificate is not self-signed: $$SUBJ / $$ISS" >&2; exit 1; fi
-       |rm -f /tmp/ks-chain-*.pem
-       |cp $caDir/ca.crt /usr/local/share/ca-certificates/orphera-test-ca.crt
-       |update-ca-certificates
+       |$trustTarget
+       |cp $caCert "$$t"
+       |if command -v update-ca-certificates >/dev/null 2>&1; then update-ca-certificates; else update-ca-trust; fi
        |echo "Keystone CA installed: $$SUBJ"""".stripMargin
 
   // The key goes to a directory of Skyline's own, owned by the user the image runs as, whoever that is.
@@ -305,16 +222,17 @@ object skyline_single_node extends OrpheraClusterPlaybook:
        |mkdir -p $skylineTlsDir
        |chmod 750 $skylineTlsDir
        |cp $tlsDir/server-chain.crt $tlsDir/server.key $skylineTlsDir/
-       |U=$$(podman run --rm --entrypoint id ${skylineImage.ref} -u)
-       |G=$$(podman run --rm --entrypoint id ${skylineImage.ref} -g)
+       |U=$$(podman run --rm --entrypoint id $imageRef -u)
+       |G=$$(podman run --rm --entrypoint id $imageRef -g)
        |chown -R $$U:$$G $skylineTlsDir
        |chmod 600 $skylineTlsDir/server.key
        |chmod 644 $skylineTlsDir/server-chain.crt
        |echo "certificate and key for Skyline in $skylineTlsDir (uid $$U)"""".stripMargin
-
-  private val dirsScript =
-    s"""mkdir -p $confDir $caDir $logDir $stateDir $pylibDir $socketDir
-       |echo "directories ready"""".stripMargin
+  private val skylineTlsCurrent =
+    s"""podman image exists $imageRef &&
+       |cmp -s $tlsDir/server-chain.crt $skylineTlsDir/server-chain.crt &&
+       |cmp -s $tlsDir/server.key $skylineTlsDir/server.key &&
+       |[ "$$(stat -c %u:%g $skylineTlsDir/server.key)" = "$$(podman run --rm --entrypoint id $imageRef -u):$$(podman run --rm --entrypoint id $imageRef -g)" ]""".stripMargin
 
   // PyMySQL goes into pylibDir with the image's own Python, so it matches the Python in the container. Only
   // `podman run` is used. A bare entrypoint avoids the image's start script.
@@ -325,6 +243,7 @@ object skyline_single_node extends OrpheraClusterPlaybook:
        |"$$PY" -m pip install --no-deps --upgrade --target /out PyMySQL || { echo "pip is not usable in the image" >&2; exit 1; }
        |chmod -R a+rX /out
        |PYTHONPATH=/out "$$PY" -c "import pymysql; print(\\"pymysql\\", pymysql.__version__)"'""".stripMargin
+
 
   // skyline.yaml. The same names the Skyline settings reference gives.
   private val skylineYaml: String =
@@ -356,21 +275,41 @@ object skyline_single_node extends OrpheraClusterPlaybook:
        |  sso_region: $region
        |""".stripMargin
 
+
   // The documented bootstrap: the image's start script runs the migrations when KOLLA_BOOTSTRAP is set (even
   // empty) and exits.
-  private val bootstrapScript =
+  private val bootstrapRun =
     s"""podman rm -f skyline_bootstrap >/dev/null 2>&1 || true
        |RC=0
-       |podman run --rm --name skyline_bootstrap --network host --user root -e KOLLA_BOOTSTRAP= -e PYTHONPATH=$pylibDir -e REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt -v $confDir/skyline.yaml:/etc/skyline/skyline.yaml:ro,z -v $logDir:/var/log/skyline:z -v $pylibDir:$pylibDir:ro,z -v /etc/ssl/certs/ca-certificates.crt:/etc/ssl/certs/ca-certificates.crt:ro ${skylineImage.ref} >/tmp/skyline-bootstrap.log 2>&1 || RC=$$?
+       |podman run --rm --name skyline_bootstrap --network host --user root -e KOLLA_BOOTSTRAP= -e PYTHONPATH=$pylibDir -e REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt -v $confDir/skyline.yaml:/etc/skyline/skyline.yaml:ro,z -v $logDir:/var/log/skyline:z -v $pylibDir:$pylibDir:ro,z -v /etc/ssl/certs/ca-certificates.crt:/etc/ssl/certs/ca-certificates.crt:ro $imageRef >/tmp/skyline-bootstrap.log 2>&1 || RC=$$?
        |tail -n 25 /tmp/skyline-bootstrap.log
        |if [ "$$RC" != "0" ]; then echo "skyline_bootstrap failed (exit $$RC) - the output above names the reason" >&2; exit 1; fi
        |echo "skyline database migrated"""".stripMargin
+  // The migrations are current when this stamp (the step and the image) is the one the last run left, and the
+  // database has tables, read as the skyline user with the image's own Python.
+  private val stampValue =
+    s"""echo "${Resource.sha256(bootstrapRun)}-$$(podman images -q $imageRef | head -1)""""
+  private val bootstrapScript =
+    s"""$bootstrapRun
+       |$stampValue > $stateDir/bootstrap.stamp
+       |echo "stamped"""".stripMargin
+  private val migrated =
+    s"""[ "$$(cat $stateDir/bootstrap.stamp 2>/dev/null)" = "$$($stampValue)" ] &&
+       |podman image exists $imageRef &&
+       |podman run --rm -i --network host --user root -e PYTHONPATH=$pylibDir -v $pylibDir:$pylibDir:ro,z --entrypoint sh $imageRef -c 'PY=/var/lib/kolla/venv/bin/python; [ -x "$$PY" ] || PY=$$(command -v python3); exec "$$PY" -' <<'PYEOF'
+       |import sys, pymysql
+       |c = pymysql.connect(host='$vip', user='$dbUser', password='${dbPassword.reveal}', database='$dbName')
+       |cur = c.cursor()
+       |cur.execute("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=%s", ('$dbName',))
+       |sys.exit(0 if cur.fetchone()[0] > 0 else 1)
+       |PYEOF""".stripMargin
 
   // After the container is up: if the catalog's public endpoints differ from those the last start saw,
   // restart it so nginx.conf is written again.
+  private val helperPath = "/usr/local/sbin/orphera-skyline-api"
   private val catalogRestartScript =
     s"""set -e
-       |NEW=$$(/usr/local/sbin/orphera-skyline-api catalog-hash)
+       |NEW=$$($helperPath catalog-hash)
        |OLD=$$(cat $stateDir/catalog.sha 2>/dev/null || true)
        |if [ "$$NEW" != "$$OLD" ]; then
        |  if [ -n "$$OLD" ]; then
@@ -380,11 +319,13 @@ object skyline_single_node extends OrpheraClusterPlaybook:
        |  echo "$$NEW" > $stateDir/catalog.sha
        |fi
        |echo "catalog hash $$NEW"""".stripMargin
+  private val catalogCurrent =
+    s"""[ "$$($helperPath catalog-hash 2>/dev/null)" = "$$(cat $stateDir/catalog.sha 2>/dev/null)" ]"""
 
   // ---- the helper ------------------------------------------------------
 
   // Standard-library Python, as in the other service playbooks. Plain string filled in with replace().
-  // Subcommands: register | unregister | catalog-hash | login-check
+  // Subcommands: register | registered | unregister | catalog-hash | login-check
   private val apiHelperPython =
     """#!/usr/bin/python3
 import hashlib, json, ssl, sys, urllib.error, urllib.request
@@ -462,6 +403,12 @@ def register():
     print('registered skyline in keystone (user skyline, role admin in project service)')
 
 
+def registered():
+    # The Skyline user exists, has its password from the secret store and a role in project service.
+    get_token('skyline', SKYLINE_PW, 'service')
+    print('skyline is registered in keystone')
+
+
 def unregister():
     token, _ = get_token('admin', ADMIN_PW, 'admin')
     user = find(token, '/users?name=skyline', 'users')
@@ -498,6 +445,8 @@ if __name__ == '__main__':
     cmd = sys.argv[1] if len(sys.argv) > 1 else ''
     if cmd == 'register':
         register()
+    elif cmd == 'registered':
+        registered()
     elif cmd == 'unregister':
         unregister()
     elif cmd == 'catalog-hash':
@@ -505,146 +454,171 @@ if __name__ == '__main__':
     elif cmd == 'login-check':
         login_check()
     else:
-        die('usage: orphera-skyline-api register | unregister | catalog-hash | login-check')
+        die('usage: orphera-skyline-api register | registered | unregister | catalog-hash | login-check')
 """
 
-  private val helperScript =
-    "cat > /usr/local/sbin/orphera-skyline-api <<'PYEOF'\n" +
-      apiHelperPython
-        .replace("@@KS@@", ksFqdn)
-        .replace("@@PORT@@", port.toString)
-        .replace("@@FQDN@@", fqdn)
-        .replace("@@REGION@@", region)
-        .replace("@@ADMINPW@@", adminPassword.reveal)
-        .replace("@@SKYLINEPW@@", skylinePassword.reveal)
-        .replace("@@CA@@", s"$caDir/ca.crt") +
-      "\nPYEOF\nchmod 700 /usr/local/sbin/orphera-skyline-api\necho wrote /usr/local/sbin/orphera-skyline-api\n"
 
-  private val healthScript =
-    s"""CODE=$$(curl -s --cacert $tlsDir/ca.crt --resolve $fqdn:$port:127.0.0.1 -o /dev/null -w '%{http_code}' https://$fqdn:$port/)
-       |[ "$$CODE" = "200" ]""".stripMargin
+  private val helper =
+    apiHelperPython
+      .replace("@@KS@@", ksFqdn)
+      .replace("@@PORT@@", port.toString)
+      .replace("@@FQDN@@", fqdn)
+      .replace("@@REGION@@", region)
+      .replace("@@ADMINPW@@", adminPassword.reveal)
+      .replace("@@SKYLINEPW@@", skylinePassword.reveal)
+      .replace("@@CA@@", caCert)
 
-  // ORPHERA_CHECK=1 turns the run into a check: it changes nothing on the node and fails, with a diff, if the
-  // unit differs from what this playbook would write.
-  private val checkMode = sys.env.get("ORPHERA_CHECK").contains("1")
+  private val healthy =
+    s"""CODE=$$(curl -s --cacert $tlsDir/ca.crt --resolve $fqdn:$port:127.0.0.1 -o /dev/null -w '%{http_code}' https://$fqdn:$port/); [ "$$CODE" = "200" ]"""
+  private val waitHealthy =
+    s"""for i in $$(seq 1 36); do
+       |  $healthy && exit 0
+       |  sleep 5
+       |done
+       |echo "skyline does not answer on https://$fqdn:$port/ - see 'journalctl -xeu orphera-skyline' and $logDir" >&2
+       |exit 1""".stripMargin
+  private val loggedIn = s"$helperPath login-check >/dev/null 2>&1"
 
-  private val unitResource = summon[Resource[Container]]
+  def describe(target: Node): List[ApplyResource] =
+    val tls = command(
+      s"the certificate files from dashboard_tls.scala are in $tlsDir",
+      tlsMissing,
+      unless = tlsPresent
+    )
+    val aptWait = command(
+      "wait for apt and dpkg to be idle",
+      waitAptIdleScript,
+      unless = aptIdle,
+      timeout = 960
+    )
+    val tools = hostPackages.map(p => pkg(p, updateCache = true).after(aptWait))
+    val podman = tools(0)
 
-  val playbook: ClusterPlaybook =
-    if checkMode then
-      clusterPlaybook("skyline-single-node-check")(
-        stage("check-skyline", node)
-          .task(s"check ${skylineContainer.unitName}")(
-            unitResource.check(skylineContainer)
-          )
-          .build
-      )
-    else applyPlaybook
+    val pulled = command(
+      "pull the Skyline image",
+      pullScript,
+      unless = imagePresent,
+      timeout = 1800
+    ).after(podman)
 
-  private def applyPlaybook: ClusterPlaybook =
-    clusterPlaybook("skyline-single-node")(
-      (tlsStages ++ List[Stage](
-        stage("skyline-database", "tst3")
-          .task(s"create $dbName database and $dbUser on the Galera cluster")(
-            Task.RunCommand(List("sh", "-c", createDatabaseScript))
-          )
-          .build,
+    val confDirectory = directory(confDir)
+    val caDirectory = directory(caDir, mode = "0755").after(confDirectory, podman)
+    val logDirectory = directory(logDir)
+    val state = directory(stateDir)
+    val pylib = directory(pylibDir).after(state)
+    val socket = directory(socketDir).after(state)
 
-        stage("install-skyline", node)
-          .task("wait for apt and dpkg to be idle")(
-            Task.RunCommand(
-              List("sh", "-c", waitAptIdleScript),
-              timeoutSeconds = 960
-            )
-          )
-          .task("install podman and tools")(
-            Task.Install(packages = hostPackages, updateCache = true)
-          )
-          .task("pull the Skyline image")(
-            Task.RunCommand(List("sh", "-c", pullScript), timeoutSeconds = 1800)
-          )
-          .task("create the Skyline directories")(
-            Task.RunCommand(List("sh", "-c", dirsScript))
-          )
-          .task("give Skyline its copy of the certificate and key")(
-            Task.RunCommand(
-              List("sh", "-c", skylineTlsScript),
-              timeoutSeconds = 120
-            )
-          )
-          .task("fetch Keystone's CA from its TLS handshake")(
-            Task.RunCommand(
-              List("sh", "-c", fetchCaScript),
-              timeoutSeconds = 60
-            )
-          )
-          .task("write the Skyline API helper")(
-            Task.RunCommand(List("sh", "-c", helperScript))
-          )
-          .task("register the Skyline user in Keystone")(
-            Task.RunCommand(
-              List("sh", "-c", "/usr/local/sbin/orphera-skyline-api register"),
-              timeoutSeconds = 120
-            )
-          )
-          .task("install the PyMySQL driver with the image's Python")(
-            Task.RunCommand(
-              List("sh", "-c", installDriverScript),
-              timeoutSeconds = 300
-            )
-          )
-          .task("write skyline.yaml")(
-            Task.WriteFile(
-              content = skylineYaml,
-              dest = s"$confDir/skyline.yaml",
-              owner = "root",
-              group = "root",
-              mode = 384 // 0600
-            )
-          )
-          .task("skyline_bootstrap (database migrations)")(
-            Task
-              .RunCommand(
-                List("sh", "-c", bootstrapScript),
-                timeoutSeconds = 600
-              )
-          )
-          .task(s"write ${skylineContainer.unitName}")(
-            skylineContainer.writeUnit
-          )
-          .task(s"start ${skylineContainer.unitName}")(skylineContainer.start)
-          .task("restart skyline if the Keystone catalog changed")(
-            Task.RunCommand(
-              List("sh", "-c", catalogRestartScript),
-              timeoutSeconds = 180
-            )
-          )
-          .build,
+    val unitService = service(skylineContainer.unitName)
 
-        stage("confirm-skyline-healthy", node)
-          .waitFor(
-            HealthCheck.Command(
-              onNode = node,
-              command = List("sh", "-c", healthScript),
-              pollIntervalSeconds = 5,
-              timeoutSeconds = 180
-            )
-          )
-          .task("the console, the API docs and an admin login answer")(
-            Task.RunCommand(
-              List(
-                "sh",
-                "-c",
-                "/usr/local/sbin/orphera-skyline-api login-check"
-              ),
-              timeoutSeconds = 120
-            )
-          )
-          .task("skyline confirmed")(
-            Task.Debug(
-              s"Skyline up at https://$fqdn:$port/ ($nodeIp): one container (apiserver + nginx) from ${skylineImage.ref}, database $dbName via $vip:3306, identity from $ksUrl, monitoring pages read $promUrl. Log in as admin (domain Default); the monitoring pages are not in the menu in this build, open /monitor-center/physical-node-admin. Test: manifests/test_skyline.sh"
-            )
-          )
-          .build
-      ))*
+    val ca = command(
+      "fetch Keystone's CA from its TLS handshake",
+      caScript,
+      unless = caCurrent,
+      timeout = 60
+    ).after(caDirectory, tools(1)).notifies(unitService)
+    val tlsCopy = command(
+      "give Skyline its copy of the certificate and key",
+      skylineTlsScript,
+      unless = skylineTlsCurrent,
+      timeout = 120
+    ).after(tls, pulled, state).notifies(unitService)
+
+    val helperFile = secretFile(
+      helperPath,
+      Secret(helper), // it holds the admin and skyline passwords
+      mode = "0700",
+      owner = "root",
+      group = "root"
+    ).after(ca)
+    val registered = command(
+      "register the Skyline user in Keystone",
+      s"$helperPath register",
+      unless = s"$helperPath registered >/dev/null 2>&1",
+      timeout = 120
+    ).after(helperFile)
+
+    val driver = command(
+      "install the PyMySQL driver with the image's Python",
+      installDriverScript,
+      creates = s"$pylibDir/pymysql/__init__.py",
+      timeout = 300
+    ).after(pulled, pylib)
+
+    val config = secretFile(
+      s"$confDir/skyline.yaml",
+      Secret(skylineYaml), // it holds the database and service passwords and the session key
+      mode = "0600",
+      owner = "root",
+      group = "root"
+    ).after(confDirectory).notifies(unitService)
+
+    val bootstrap = command(
+      "skyline_bootstrap (database migrations)",
+      bootstrapScript,
+      unless = migrated,
+      timeout = 600
+    ).after(pulled, config, driver, ca, logDirectory, state)
+
+    val unitFile = file(
+      skylineContainer.unitPath,
+      skylineContainer.render,
+      mode = "0644",
+      owner = "root",
+      group = "root"
+    ).notifies(unitService)
+
+    val running = unitService.after(
+      pulled,
+      config,
+      ca,
+      tlsCopy,
+      driver,
+      bootstrap,
+      registered,
+      unitFile,
+      logDirectory,
+      socket,
+      pylib
+    )
+    val catalogRestart = command(
+      "restart skyline if the Keystone catalog changed",
+      catalogRestartScript,
+      unless = catalogCurrent,
+      timeout = 180
+    ).after(running, helperFile)
+    val answering = command(
+      "skyline answers on its port",
+      waitHealthy,
+      unless = healthy,
+      timeout = 200
+    ).after(catalogRestart)
+    val login = command(
+      "the console, the API docs and an admin login answer",
+      s"$helperPath login-check",
+      unless = loggedIn,
+      timeout = 120
+    ).after(answering, helperFile)
+
+    tools ++ List(
+      tls,
+      aptWait,
+      pulled,
+      confDirectory,
+      caDirectory,
+      logDirectory,
+      state,
+      pylib,
+      socket,
+      ca,
+      tlsCopy,
+      helperFile,
+      registered,
+      driver,
+      config,
+      bootstrap,
+      unitFile,
+      running,
+      catalogRestart,
+      answering,
+      login
     )

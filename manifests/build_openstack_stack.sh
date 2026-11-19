@@ -485,7 +485,8 @@ step_trove() {
 }
 
 step_skyline() {
-  playbook skyline_single_node.scala
+  apply_desc skyline_database.scala
+  apply_desc skyline_single_node.scala
   local out
   out=$(run_on tst13 "curl -s --cacert /etc/orphera/tls/ca.crt --resolve tst13.ljalbinson.com:9999:127.0.0.1 -o /dev/null -w 'http=%{http_code}' https://tst13.ljalbinson.com:9999/")
   check "the Skyline console answers on 9999" contains "http=200" "$out"

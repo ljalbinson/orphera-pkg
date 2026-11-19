@@ -2810,11 +2810,11 @@ browser's script, which has no place to send the browser on). Not set up: Skylin
 openrc > ~/keycloak-openrc.sh`, mode 600). Keycloak 26.8 refuses a wrong password with HTTP 400 and `invalid_grant`, not 401. A federated
 user's id in Keystone is a 64-character hash of the identity provider and the user name, not a UUID.
 
-**Skyline** (`manifests/skyline_single_node.scala`, undone by `skyline_teardown.scala`, checked by `test_skyline.sh`) is the Skyline dashboard on tst13,
+**Skyline** (`manifests/skyline_database.scala` then `manifests/skyline_single_node.scala`, descriptions applied with `orphera apply` after `dashboard_tls.scala`, undone by `skyline_teardown.scala`, checked by `test_skyline.sh`) is the Skyline dashboard on tst13,
 beside Horizon: `https://tst13.ljalbinson.com:9999/`, log in as `admin` with domain `Default`. It is one container from the image the Skyline project
 documents (`docker.io/99cloud/skyline:latest`; `SKYLINE_IMAGE` sets another reference), not a Kolla image, so tst21 does not build it and tst13 needs
 Docker Hub. The image runs the API server and the nginx in front of it, and writes nginx's configuration from the Keystone catalog each time it starts,
-so run the playbook again after registering a new service (it restarts the container when the catalog's public endpoints changed). The database
+so apply the description again after registering a new service (it restarts the container when the catalog's public endpoints changed). The database
 `skyline` is on Galera, the Keystone user `skyline` (role admin, project `service`) is made for you, and the monitoring pages read the Prometheus on
 tst7. The image has no MySQL driver, so PyMySQL is installed into `/var/lib/orphera/skyline/pylib` with the image's own Python. The console is served
 over HTTPS by the image's own nginx (`SSL_CERTFILE`, `SSL_KEYFILE`) with the node's certificate, which Horizon shares, so `ssl_enabled` is
@@ -3404,7 +3404,7 @@ playbooks marked DRAFT there have been written but not all run on the lab.
 | `ceph_client_upgrade.scala`, `ceph_key_rotation.scala` | Ceph's own client for the OpenStack services and compute hosts, then their keys rotated to `aes256k` and the monitors set to `aes256k` only |
 | `lustre_cluster_script.scala` | the Lustre build as an `OrpheraScript` (replaces `lustre_cluster.scala`) |
 | `apt_cache_teardown.scala`, `rpm_cache_teardown.scala`, `kolla_cache_teardown.scala` (a description) | Undo the apt cache (tst11) and its clients, the RPM cache (tst12) and its clients, and the Kolla image cache (tst9) |
-| `keystone_teardown.scala`, `glance_teardown.scala`, `placement_teardown.scala`, `cinder_teardown.scala`, `rabbitmq_teardown.scala`, `heat_teardown.scala`, `nova_teardown.scala`, `neutron_teardown.scala`, `horizon_teardown.scala`, `barbican_teardown.scala`, `designate_teardown.scala`, `nova_compute_teardown.scala` | Undo the matching `*_single_node.scala` playbook (see the OpenStack example below) |
+| `keystone_teardown.scala`, `glance_teardown.scala`, `placement_teardown.scala`, `cinder_teardown.scala`, `rabbitmq_teardown.scala`, `heat_teardown.scala`, `nova_teardown.scala`, `neutron_teardown.scala`, `horizon_teardown.scala`, `barbican_teardown.scala`, `designate_teardown.scala`, `nova_compute_teardown.scala`, `skyline_teardown.scala` | Undo the matching `*_single_node.scala` playbook (see the OpenStack example below) |
 
 ## Known gaps / not yet built
 
