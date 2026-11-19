@@ -1,50 +1,54 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import orphera.orchestrator.*
-import orphera.orchestrator.ClusterPlaybookDsl.*
 import orphera.orchestrator.kolla.*
 import orphera.orchestrator.conf.*
 
-// DRAFT. OpenStack Placement (resource inventory and allocation service, which
-// Nova needs), one container, Kolla image under podman. Modelled on
-// cinder_single_node.scala and glance_single_node.scala; read their headers for
-// the conventions.
+// OpenStack Placement (resource inventory and allocation service, which Nova
+// needs), one container, Kolla image under podman, as a declarative description
+// (OrpheraApply, docs/APPLY-DESIGN.md). It replaced the cluster playbook of the
+// same name; a second run changes nothing and restarts nothing, and `--check`
+// shows what would change. Modelled on keystone_single_node.scala and
+// glance_single_node.scala, which explain the conventions.
+//
+//   orphera apply manifests/placement_database.scala     # first: the database and user (tst3)
+//   orphera apply manifests/placement_single_node.scala --check
+//   orphera apply manifests/placement_single_node.scala
 //
 // Where it runs: tst13, next to Glance. Placement is a small stateless API
 // (Apache + mod_wsgi on 8780, plain HTTP), so it shares the node rather than
-// taking a VM of its own. To move it, change `node`, `fqdn` and `nodeIp`
-// below (and the teardown's `node`); nothing else depends on the location.
+// taking a VM of its own. To move it, change `node`, `fqdn` and `nodeIp` below
+// (and in placement_teardown.scala); nothing else depends on the location.
 //
-// Prerequisites, not checked here:
-//   - Galera + VIP healthy (mariadb_galera_cluster.scala,
-//     mariadb_haproxy_keepalived.scala)
-//   - Keystone up on tst6 (keystone_single_node.scala), serving the CA chain
-//   - agent on the node; tst9's Kolla cache is optional
-//   Ceph is not involved.
+// Prerequisites, not checked here: Galera + VIP healthy, Keystone up on tst6
+// serving the CA chain (keystone_single_node.scala), the agent on the node.
+// tst9's Kolla cache is optional. Ceph is not involved.
 //
-// Stages:
-//   - placement-database (tst3, a Galera node): the `placement` database + user.
-//   - install-placement (the node): packages, cache mirror, image pull,
-//     Keystone's CA from its TLS handshake, placement.conf, Kolla config with
-//     the Apache vhost, `placement-manage db sync`, the unit, then registration
-//     in Keystone (user `placement` in project `service`, service `placement`,
-//     three endpoints).
-//   - confirm-placement-healthy (the node): the API answers, and the resource
-//     provider list is readable with an admin token (empty until Nova exists).
+// How it stays idempotent (as for Glance):
+//   - Keystone's CA is fetched from its TLS handshake (trust on first use, the
+//     certificate only) and compared with the installed copy each run.
+//   - placement.conf holds secrets, so it is a secret file. The Apache vhost
+//     and config.json depend on paths read from the image, so they are
+//     generated into a temporary directory and compared with the installed
+//     files; the service restarts only when they differ.
+//   - `placement-manage db sync` is skipped while its stamp matches and the
+//     database has the `resource_providers` table (a query as the placement
+//     user, through the VIP), so a database dropped since the last run is
+//     synced again.
+//   - The Keystone registration is skipped while the helper's `registered`
+//     check (a token for the placement user, the service and three endpoint
+//     URLs) passes.
 //
-// Check mode: `ORPHERA_CHECK=1 orphera cluster-playbook manifests/placement_single_node.scala`
-// changes nothing and reports whether the placement-api unit on the node matches
-// what this playbook writes (non-zero exit with a diff if not).
-//
-// Test-only hardcoded credentials, same convention and caveat as the other
-// manifests. Not compiled where this was written; the first run on scala0 is
-// the first compile.
-object placement_single_node extends OrpheraClusterPlaybook:
+// Test-only credentials from the secret store (`orphera secrets`), as before.
+object placement_single_node extends OrpheraApply:
+  import Resources.*
 
   private val node = "tst13"
   private val fqdn = "tst13.ljalbinson.com"
   private val nodeIp = "10.10.5.25"
   private val port = 8780
+
+  override def nodes: List[String] = List(node)
 
   private val ksFqdn = "tst6.ljalbinson.com"
   private val vip = "10.10.5.100"
@@ -53,128 +57,47 @@ object placement_single_node extends OrpheraClusterPlaybook:
   private val registry = "quay.io/openstack.kolla"
   private val cacheHostPort = "tst9.ljalbinson.com:5000"
 
-  // From the encrypted secret store (`orphera secrets ...`), made on first use and
-  // hidden from the output. No password is in this file.
   private val adminPassword = Secrets.secret("keystone/admin")
   private val dbName = "placement"
   private val dbUser = "placement"
   private val dbPassword = Secrets.secret("placement/db")
   private val placementPassword = Secrets.secret("placement/service")
 
-  private val confRoot = "/etc/kolla"
-  private val srcDir = "/etc/kolla/placement"
+  private val apiDir = "/etc/kolla/placement-api"
   private val logDir = "/var/log/kolla/placement"
   private val stateDir = "/var/lib/orphera/placement"
+  private val caDir = "/etc/kolla/placement-ca"
+  private val caCert = s"$caDir/ca.crt"
+  private val ksUrl = s"https://$ksFqdn:5000"
 
-  // The container as data: the unit file text and the start task come from it
-  // (orchestrator/.../kolla/Container.scala), and are checked by ContainerCheck.
-  // Defined after confRoot and logDir, which it reads; a val used before its
-  // definition is null in an object.
+  // The container as data: the unit file text comes from it
+  // (orchestrator/.../kolla/Container.scala), checked by ContainerCheck. Defined
+  // after the directories it reads; a val used before its definition is null in
+  // an object.
   private val placementApi = Container(
     name = ContainerName("placement-api"),
     image = Image("placement-api", Release.R2025_1, Base.UbuntuNoble, registry),
     mounts = List(
-      Mount(s"$confRoot/placement-api", "/var/lib/kolla/config_files"),
+      Mount(apiDir, "/var/lib/kolla/config_files"),
       Mount(logDir, "/var/log/kolla/placement", Access.ReadWrite)
     ),
     env = List("KOLLA_CONFIG_STRATEGY" -> "COPY_ALWAYS")
   )
   private val apiImage = placementApi.image.ref
-  private val caDir = "/etc/kolla/placement-ca"
-  private val ksUrl = s"https://$ksFqdn:5000"
 
   private val hostPackages =
     List("podman", "openssl", "curl", "ca-certificates", "python3")
 
-  // ---- tst3 (Galera) ---------------------------------------------------
-
-  private val createDatabaseScript =
-    s"""mariadb -N -e "CREATE DATABASE IF NOT EXISTS $dbName; CREATE USER IF NOT EXISTS '$dbUser'@'%' IDENTIFIED BY '${dbPassword.reveal}'; GRANT ALL PRIVILEGES ON $dbName.* TO '$dbUser'@'%'; FLUSH PRIVILEGES;""""
-
-  // ---- the node --------------------------------------------------------
-
-  private val useCacheScript =
-    s"""mkdir -p /etc/containers/registries.conf.d
-       |cat > /etc/containers/registries.conf.d/orphera-kolla-cache.conf <<'REG'
-       |[[registry]]
-       |prefix = "quay.io"
-       |location = "quay.io"
-       |
-       |[[registry.mirror]]
-       |location = "tst21.ljalbinson.com:5000"
-       |insecure = true
-       |
-       |[[registry.mirror]]
-       |location = "$cacheHostPort"
-       |insecure = true
-       |REG
-       |echo "podman will try tst21.ljalbinson.com:5000 (built images), then $cacheHostPort, before quay.io"""".stripMargin
-
-  private val pullScript =
-    s"""${Pull.shellFunction(
-        "the Image(...) in placementApi in placement_single_node.scala"
-      )}
-       |pull_retry $apiImage || exit 1
-       |echo "image ready"""".stripMargin
-
-  // Same method as cinder_single_node.scala / glance_single_node.scala: the last
-  // certificate Keystone presents is its CA; trust on first use.
-  private val fetchCaScript =
-    s"""set -e
-       |mkdir -p $caDir
-       |rm -f /tmp/ks-chain-*.pem
-       |openssl s_client -connect $ksFqdn:5000 -servername $ksFqdn -showcerts </dev/null 2>/dev/null | awk '/-----BEGIN CERTIFICATE-----/{n++} n>0{print > ("/tmp/ks-chain-" n ".pem")}'
-       |COUNT=$$(ls /tmp/ks-chain-*.pem 2>/dev/null | wc -l)
-       |if [ "$$COUNT" -lt 2 ]; then
-       |  echo "keystone at $ksFqdn:5000 presented $$COUNT certificate(s); expected leaf + CA - re-run keystone_single_node.scala (it must serve server-chain.crt)" >&2
-       |  exit 1
-       |fi
-       |cp /tmp/ks-chain-$$COUNT.pem $caDir/ca.crt
-       |openssl verify -CAfile $caDir/ca.crt /tmp/ks-chain-1.pem
-       |SUBJ=$$(openssl x509 -in $caDir/ca.crt -noout -subject | sed 's/^subject=//')
-       |ISS=$$(openssl x509 -in $caDir/ca.crt -noout -issuer | sed 's/^issuer=//')
-       |if [ "$$SUBJ" != "$$ISS" ]; then echo "last certificate is not self-signed: $$SUBJ / $$ISS" >&2; exit 1; fi
-       |rm -f /tmp/ks-chain-*.pem
-       |if command -v update-ca-certificates >/dev/null 2>&1; then
-       |  cp $caDir/ca.crt /usr/local/share/ca-certificates/orphera-test-ca.crt
-       |  update-ca-certificates
-       |else
-       |  cp $caDir/ca.crt /etc/pki/ca-trust/source/anchors/orphera-test-ca.crt
-       |  update-ca-trust
-       |fi
-       |echo "Keystone CA installed: $$SUBJ"""".stripMargin
-
-  private val dirsScript =
-    s"""mkdir -p $srcDir $logDir $stateDir
-       |echo "directories ready"""".stripMargin
-
-  // placement.conf as a typed value: every section and key is checked against the
-  // options the image declares (catalogues/placement-api-<tag>.json, made by
-  // manifests/dump_oslo_options.sh), when this manifest is built. A mistyped key
-  // or a wrong type stops the run before anything is written to a node.
-  private val catalogueDir =
-    sys.env.getOrElse("ORPHERA_CATALOGUES", "catalogues")
+  // placement.conf as a typed value: every section and key is checked against
+  // the options the image declares (catalogues/placement-api-<tag>.json) when
+  // this manifest is built. [keystone_authtoken] is open (the options of the
+  // auth plugin are loaded at run time).
   private val placementCatalogue: Catalogue =
-    val file = java.nio.file.Paths
-      .get(catalogueDir, "placement-api-2025.1-ubuntu-noble.json")
-    if !java.nio.file.Files.exists(file) then
-      throw new RuntimeException(
-        s"$file not found: run manifests/dump_oslo_options.sh placement-api on a node and copy the JSON there (or set ORPHERA_CATALOGUES)"
-      )
-    OsloJson
-      // [keystone_authtoken] also takes the options of the auth plugin chosen by
-      // auth_type (auth_url, username, password ...), loaded at run time and so
-      // not in the image's option list.
-      .load(
-        "placement",
-        java.nio.file.Files.readString(file),
-        openSections = Set("keystone_authtoken")
-      )
-      .fold(e => throw new RuntimeException(s"$file: $e"), identity)
+    Catalogues.load("placement-api", Set("keystone_authtoken"))
 
   private val placementConf: ConfFile =
     ConfFile
-      .of(s"$srcDir/placement.conf", placementCatalogue)(
+      .of(s"$apiDir/placement.conf", placementCatalogue)(
         ("DEFAULT", "log_dir", Value.Str("/var/log/kolla/placement")),
         ("DEFAULT", "use_stderr", Value.Bool(true)),
         ("api", "auth_strategy", Value.Str("keystone")),
@@ -202,14 +125,83 @@ object placement_single_node extends OrpheraClusterPlaybook:
           ),
         identity
       )
+  private val placementConfText: String = placementConf.render
 
-  // The WSGI script path and the Apache flavour are read from the image, as in
-  // cinder_single_node.scala.
-  private val kollaConfigScript =
+  // The Kolla cache as a mirror of quay.io (podman registries.conf.d drop-in).
+  private val registryMirror =
+    s"""[[registry]]
+       |prefix = "quay.io"
+       |location = "quay.io"
+       |
+       |[[registry.mirror]]
+       |location = "tst21.ljalbinson.com:5000"
+       |insecure = true
+       |
+       |[[registry.mirror]]
+       |location = "$cacheHostPort"
+       |insecure = true
+       |""".stripMargin
+
+  private val pullScript =
+    s"""${Pull.shellFunction(
+        "the Image(...) in placementApi in placement_single_node.scala"
+      )}
+       |pull_retry $apiImage || exit 1
+       |echo "image ready: $apiImage"""".stripMargin
+
+  // Keystone's CA: the last certificate it presents (trust on first use),
+  // which must be self-signed. `chainTo DIR` leaves DIR/c1.pem ... DIR/cN.pem,
+  // each holding the certificate only: the text s_client prints after the
+  // last one (bytes read and written, session ticket) differs on every
+  // handshake, and would make the comparison with the installed copy fail.
+  private val chainTo =
+    s"""chainTo() { openssl s_client -connect $ksFqdn:5000 -servername $ksFqdn -showcerts </dev/null 2>/dev/null | awk -v d="$$1" '/-----BEGIN CERTIFICATE-----/{n++; p=1} p{print > (d "/c" n ".pem")} /-----END CERTIFICATE-----/{p=0}'; }"""
+
+  private val trustTarget =
+    """if command -v update-ca-certificates >/dev/null 2>&1; then t=/usr/local/share/ca-certificates/orphera-test-ca.crt; else t=/etc/pki/ca-trust/source/anchors/orphera-test-ca.crt; fi"""
+
+  // Current when the installed CA is the one Keystone presents now, and is in
+  // the system trust store.
+  private val caCurrent =
+    s"""$chainTo
+       |D=$$(mktemp -d)
+       |chainTo $$D
+       |N=$$(ls $$D/c*.pem 2>/dev/null | wc -l)
+       |R=1
+       |if [ "$$N" -ge 2 ]; then
+       |  $trustTarget
+       |  cmp -s $$D/c$$N.pem $caCert && cmp -s $caCert "$$t" && R=0
+       |fi
+       |rm -rf $$D
+       |exit $$R""".stripMargin
+
+  private val caScript =
     s"""set -e
-       |mkdir -p $confRoot/placement-api
-       |cp $srcDir/placement.conf $confRoot/placement-api/placement.conf
-       |cp $caDir/ca.crt $confRoot/placement-api/ca.crt
+       |$chainTo
+       |mkdir -p $caDir
+       |D=$$(mktemp -d)
+       |trap 'rm -rf $$D' EXIT
+       |chainTo $$D
+       |COUNT=$$(ls $$D/c*.pem 2>/dev/null | wc -l)
+       |if [ "$$COUNT" -lt 2 ]; then
+       |  echo "keystone at $ksFqdn:5000 presented $$COUNT certificate(s); expected leaf + CA - apply keystone_single_node.scala (it must serve server-chain.crt)" >&2
+       |  exit 1
+       |fi
+       |cp $$D/c$$COUNT.pem $caCert
+       |openssl verify -CAfile $caCert $$D/c1.pem
+       |SUBJ=$$(openssl x509 -in $caCert -noout -subject | sed 's/^subject=//')
+       |ISS=$$(openssl x509 -in $caCert -noout -issuer | sed 's/^issuer=//')
+       |if [ "$$SUBJ" != "$$ISS" ]; then echo "last certificate is not self-signed: $$SUBJ / $$ISS" >&2; exit 1; fi
+       |$trustTarget
+       |cp $caCert "$$t"
+       |if command -v update-ca-certificates >/dev/null 2>&1; then update-ca-certificates; else update-ca-trust; fi
+       |echo "Keystone CA installed: $$SUBJ"""".stripMargin
+
+  // The WSGI script path and the Apache flavour are read from the image. The
+  // vhost and config.json are generated into `out` (the real directory, or a
+  // temporary one for the guard to compare with).
+  private def kollaConfigScript(out: String): String =
+    s"""set -e
        |WSGI=$$(podman run --rm --entrypoint sh $apiImage -c 'command -v placement-api')
        |if [ -z "$$WSGI" ]; then echo "placement-api not found in $apiImage" >&2; exit 1; fi
        |if podman run --rm --entrypoint sh $apiImage -c 'test -d /etc/apache2/conf-enabled'; then
@@ -220,7 +212,7 @@ object placement_single_node extends OrpheraClusterPlaybook:
        |  APACHE_CMD="/usr/sbin/httpd -DFOREGROUND"
        |fi
        |echo "wsgi script: $$WSGI; apache config: $$APACHE_CONF"
-       |cat > $confRoot/placement-api/placement-api.conf <<WSGICONF
+       |cat > $out/placement-api.conf <<WSGICONF
        |Listen 0.0.0.0:$port
        |ServerSignature Off
        |ServerTokens Prod
@@ -240,19 +232,49 @@ object placement_single_node extends OrpheraClusterPlaybook:
        |    </Directory>
        |</VirtualHost>
        |WSGICONF
-       |cat > $confRoot/placement-api/config.json <<JSON
+       |cat > $out/config.json <<JSON
        |{"command": "$$APACHE_CMD", "config_files": [{"source": "/var/lib/kolla/config_files/placement.conf", "dest": "/etc/placement/placement.conf", "owner": "placement", "perm": "0600"}, {"source": "/var/lib/kolla/config_files/ca.crt", "dest": "/etc/placement/ssl/ca.crt", "owner": "placement", "perm": "0644"}, {"source": "/var/lib/kolla/config_files/placement-api.conf", "dest": "$$APACHE_CONF", "owner": "placement", "perm": "0600"}], "permissions": [{"path": "/var/log/kolla/placement", "owner": "placement:kolla", "recurse": true}]}
        |JSON
-       |echo "kolla config written under $confRoot/placement-api"""".stripMargin
+       |echo "kolla config written under $out"""".stripMargin
+
+  private val kollaFilesCurrent =
+    s"""T=$$(mktemp -d)
+       |${kollaConfigScript("$T")} >/dev/null
+       |R=0
+       |cmp -s $$T/placement-api.conf $apiDir/placement-api.conf && cmp -s $$T/config.json $apiDir/config.json || R=1
+       |rm -rf $$T
+       |exit $$R""".stripMargin
 
   private val dbSyncScript =
     s"""set -e
-       |podman run --rm --network host --user root --entrypoint placement-manage -v $srcDir/placement.conf:/etc/placement/placement.conf:ro,z -v $logDir:/var/log/kolla/placement:z $apiImage db sync
+       |podman run --rm --network host --user root --entrypoint placement-manage -v $apiDir/placement.conf:/etc/placement/placement.conf:ro,z -v $logDir:/var/log/kolla/placement:z $apiImage db sync
        |echo "placement database synced"""".stripMargin
+  private val dbStamp = Resource.sha256(dbSyncScript + placementConfText)
 
-  // Standard-library Python, as in the other service playbooks. Plain string
-  // filled in with replace(). Subcommands:
-  //   register | unregister | catalog | rp-list | rp-create | rp-delete <uuid>
+  // True when the database, queried as the placement user through the VIP, has
+  // the resource_providers table. The query runs with the image's own Python
+  // (the interpreter named on the first line of placement-manage), which has
+  // pymysql.
+  private val dbHasTables =
+    s"""podman run --rm -i --network host --entrypoint sh $apiImage -c 'exec $$(head -1 "$$(command -v placement-manage)" | sed "s/^#!//") -' >/dev/null 2>&1 <<'PYEOF'
+       |import sys, pymysql
+       |try:
+       |    c = pymysql.connect(host='$vip', user='$dbUser', password='${dbPassword.reveal}', database='$dbName')
+       |    c.cursor().execute('SELECT COUNT(*) FROM resource_providers')
+       |except Exception:
+       |    sys.exit(1)
+       |PYEOF""".stripMargin
+  // Current when the stamp matches AND the tables are there.
+  private val dbCurrent =
+    s"""[ "$$(cat $stateDir/db.stamp 2>/dev/null)" = "$dbStamp" ] &&
+       |$dbHasTables""".stripMargin
+  private val dbSyncWithStamp =
+    s"""$dbSyncScript
+       |echo $dbStamp > $stateDir/db.stamp""".stripMargin
+
+  // Standard-library Python, as in the other services. Plain string filled in
+  // with replace(). Subcommands:
+  //   register | registered | unregister | catalog | rp-list | rp-create | rp-delete <uuid>
   // (rp = resource provider, the object Placement manages; the test makes and
   // deletes one.)
   private val apiHelperPython =
@@ -346,6 +368,22 @@ def register():
     print('registered placement in keystone (project service, user placement, service placement, 3 endpoints)')
 
 
+def registered():
+    # Exit 0 only when everything register() makes is in place: the placement
+    # user can get a token in project service, and service `placement` has the
+    # three endpoints at PLACEMENT. Makes no change.
+    get_token('placement', PLACEMENT_PW, 'service')
+    token, _ = get_token('admin', ADMIN_PW, 'admin')
+    service = find(token, '/services?type=placement', 'services')
+    if service is None:
+        die('no service of type placement')
+    for iface in ('public', 'internal', 'admin'):
+        ep = find(token, '/endpoints?service_id=%s&interface=%s' % (service['id'], iface), 'endpoints')
+        if ep is None or ep['url'] != PLACEMENT:
+            die('endpoint %s missing or wrong' % iface)
+    print('placement is registered in keystone')
+
+
 def unregister():
     token, _ = get_token('admin', ADMIN_PW, 'admin')
     service = find(token, '/services?type=placement', 'services')
@@ -401,6 +439,8 @@ if __name__ == '__main__':
     cmd = sys.argv[1] if len(sys.argv) > 1 else ''
     if cmd == 'register':
         register()
+    elif cmd == 'registered':
+        registered()
     elif cmd == 'unregister':
         unregister()
     elif cmd == 'catalog':
@@ -412,111 +452,138 @@ if __name__ == '__main__':
     elif cmd == 'rp-delete' and len(sys.argv) > 2:
         rp_delete(sys.argv[2])
     else:
-        die('usage: orphera-placement-api register | unregister | catalog | rp-list | rp-create | rp-delete <uuid>')
+        die('usage: orphera-placement-api register | registered | unregister | catalog | rp-list | rp-create | rp-delete <uuid>')
 """
 
-  private val helperScript =
-    "cat > /usr/local/sbin/orphera-placement-api <<'PYEOF'\n" +
-      apiHelperPython
-        .replace("@@KS@@", ksFqdn)
-        .replace("@@PLACEMENT@@", s"http://$fqdn:$port")
-        .replace("@@ADMINPW@@", adminPassword.reveal)
-        .replace("@@PLACEMENTPW@@", placementPassword.reveal)
-        .replace("@@CA@@", s"$caDir/ca.crt") +
-      "\nPYEOF\nchmod 700 /usr/local/sbin/orphera-placement-api\necho wrote /usr/local/sbin/orphera-placement-api\n"
+  private val helper =
+    apiHelperPython
+      .replace("@@KS@@", ksFqdn)
+      .replace("@@PLACEMENT@@", s"http://$fqdn:$port")
+      .replace("@@ADMINPW@@", adminPassword.reveal)
+      .replace("@@PLACEMENTPW@@", placementPassword.reveal)
+      .replace("@@CA@@", caCert)
+  private val helperPath = "/usr/local/sbin/orphera-placement-api"
 
   // Placement answers its version document (HTTP 200) without a token.
-  private val apiHealthScript =
-    s"""CODE=$$(curl -s -o /dev/null -w '%{http_code}' http://localhost:$port/)
-       |[ "$$CODE" = "200" ]""".stripMargin
+  private val healthy =
+    s"""CODE=$$(curl -s -o /dev/null -w '%{http_code}' http://localhost:$port/); [ "$$CODE" = "200" ]"""
+  private val waitHealthy =
+    s"""for i in $$(seq 1 18); do
+       |  $healthy && exit 0
+       |  sleep 5
+       |done
+       |echo "placement does not answer on http://localhost:$port - see 'journalctl -xeu ${placementApi.unitName}' and $logDir" >&2
+       |exit 1""".stripMargin
 
-  // ORPHERA_CHECK=1 turns the run into a check: it changes nothing on the node
-  // and fails, with a diff, if the placement-api unit differs from what this
-  // playbook would write. The check task comes from the same Container value
-  // as the write task (see Resource.scala).
-  private val checkMode = sys.env.get("ORPHERA_CHECK").contains("1")
+  def describe(target: Node): List[ApplyResource] =
+    val tools = hostPackages.map(p => pkg(p, updateCache = true))
+    val podman = tools(0)
+    val unit = placementApi.unitName
+    val unitService = service(unit)
 
-  private val unitResource = summon[Resource[Container]]
-  private val confResource = summon[Resource[ConfFile]]
+    val mirrorDir = directory("/etc/containers/registries.conf.d").after(podman)
+    val mirror = file(
+      "/etc/containers/registries.conf.d/orphera-kolla-cache.conf",
+      registryMirror,
+      mode = "0644"
+    ).after(mirrorDir)
+    val pulled = command(
+      "pull the Kolla placement-api image",
+      pullScript,
+      unless = s"podman image exists $apiImage",
+      timeout = 1800
+    ).after(podman, mirror)
 
-  val playbook: ClusterPlaybook =
-    if checkMode then
-      clusterPlaybook("placement-single-node-check")(
-        stage("check-placement", node)
-          .task(s"check ${placementApi.unitName}")(
-            unitResource.check(placementApi)
-          )
-          .task("check placement.conf")(confResource.check(placementConf))
-          .build
-      )
-    else applyPlaybook
+    val caDirectory = directory(caDir, mode = "0755").after(podman)
+    val ca = command(
+      "fetch Keystone's CA from its TLS handshake",
+      caScript,
+      unless = caCurrent,
+      timeout = 60
+    ).after(caDirectory, tools(1))
 
-  private def applyPlaybook: ClusterPlaybook =
-    clusterPlaybook("placement-single-node")(
-      stage("placement-database", "tst3")
-        .task(s"create $dbName database and $dbUser on the Galera cluster")(
-          Task.RunCommand(List("sh", "-c", createDatabaseScript))
-        )
-        .build,
+    val apiDirectory = directory(apiDir, mode = "0755")
+    val logDirectory = directory(logDir)
+    val stateDirectory = directory(stateDir)
 
-      stage("install-placement", node)
-        .task("install podman and tools")(
-          Task.Install(packages = hostPackages, updateCache = true)
-        )
-        .task("use the Kolla cache as a mirror for quay.io")(
-          Task.RunCommand(List("sh", "-c", useCacheScript))
-        )
-        .task("pull the Placement image")(
-          Task.RunCommand(List("sh", "-c", pullScript), timeoutSeconds = 1800)
-        )
-        .task("fetch Keystone's CA from its TLS handshake")(
-          Task.RunCommand(List("sh", "-c", fetchCaScript), timeoutSeconds = 60)
-        )
-        .task("create the Placement directories")(
-          Task.RunCommand(List("sh", "-c", dirsScript))
-        )
-        .task("write placement.conf")(confResource.write(placementConf))
-        .task("write the Kolla config and the Apache vhost")(
-          Task.RunCommand(
-            List("sh", "-c", kollaConfigScript),
-            timeoutSeconds = 120
-          )
-        )
-        .task("placement-manage db sync")(
-          Task.RunCommand(List("sh", "-c", dbSyncScript), timeoutSeconds = 600)
-        )
-        .task("write the Placement API helper")(
-          Task.RunCommand(List("sh", "-c", helperScript))
-        )
-        .task(s"write ${placementApi.unitName}")(placementApi.writeUnit)
-        .task(s"start ${placementApi.unitName}")(placementApi.start)
-        .task("register Placement in Keystone")(
-          Task.RunCommand(
-            List("sh", "-c", "/usr/local/sbin/orphera-placement-api register"),
-            timeoutSeconds = 120
-          )
-        )
-        .build,
+    val conf = secretFile(
+      s"$apiDir/placement.conf",
+      Secret(placementConfText), // it holds the database and service passwords
+      mode = "0640",
+      owner = "root",
+      group = "root"
+    ).after(apiDirectory).notifies(unitService)
+    val kollaCa = command(
+      "copy Keystone's CA to the Kolla config",
+      s"cp $caCert $apiDir/ca.crt",
+      unless = s"cmp -s $caCert $apiDir/ca.crt"
+    ).after(ca, apiDirectory).notifies(unitService)
+    val kollaFiles = command(
+      "write the Apache vhost and Kolla config.json",
+      kollaConfigScript(apiDir),
+      unless = kollaFilesCurrent,
+      timeout = 120
+    ).after(pulled, apiDirectory, logDirectory).notifies(unitService)
 
-      stage("confirm-placement-healthy", node)
-        .waitFor(
-          HealthCheck.Command(
-            onNode = node,
-            command = List("sh", "-c", apiHealthScript),
-            pollIntervalSeconds = 5,
-            timeoutSeconds = 90
-          )
-        )
-        .task("list resource providers with an admin token")(
-          Task.RunCommand(
-            List("sh", "-c", "/usr/local/sbin/orphera-placement-api rp-list"),
-            timeoutSeconds = 60
-          )
-        )
-        .task("placement confirmed")(
-          Task.Debug(
-            s"Placement up at http://$fqdn:$port ($nodeIp): placement-api, database via $vip:3306, identity from $ksUrl. Test: manifests/test_placement.sh"
-          )
-        )
-        .build
+    val dbSync = command(
+      "placement-manage db sync",
+      dbSyncWithStamp,
+      unless = dbCurrent,
+      timeout = 600
+    ).after(pulled, conf, logDirectory, stateDirectory)
+
+    val unitFile = file(
+      placementApi.unitPath,
+      placementApi.render,
+      mode = "0644",
+      owner = "root",
+      group = "root"
+    ).notifies(unitService)
+    val running = unitService.after(dbSync, unitFile, conf, kollaCa, kollaFiles)
+
+    val helperFile = secretFile(
+      helperPath,
+      Secret(helper), // it holds the admin and placement passwords
+      mode = "0700",
+      owner = "root",
+      group = "root"
+    )
+    val answering = command(
+      "placement answers on its port",
+      waitHealthy,
+      unless = healthy,
+      timeout = 120
+    ).after(running)
+    val registered = command(
+      "register Placement in Keystone",
+      s"$helperPath register",
+      unless = s"$helperPath registered >/dev/null 2>&1",
+      timeout = 120
+    ).after(answering, helperFile, ca)
+    val listing = command(
+      "list resource providers with an admin token",
+      "echo 'the resource provider list failed: see the Keystone registration, placement.conf and the logs' >&2; exit 1",
+      unless = s"$helperPath rp-list >/dev/null 2>&1",
+      timeout = 60
+    ).after(registered)
+
+    tools ++ List(
+      mirrorDir,
+      mirror,
+      pulled,
+      caDirectory,
+      ca,
+      apiDirectory,
+      logDirectory,
+      stateDirectory,
+      conf,
+      kollaCa,
+      kollaFiles,
+      dbSync,
+      unitFile,
+      running,
+      helperFile,
+      answering,
+      registered,
+      listing
     )

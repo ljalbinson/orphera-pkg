@@ -1,48 +1,89 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import orphera.orchestrator.*
-import orphera.orchestrator.ClusterPlaybookDsl.*
 
-// DRAFT. Undoes placement_single_node.scala: removes Placement from Keystone
-// (service `placement`, its endpoints, user `placement`) through the helper
-// installed by the main playbook if it is still there, removes the container,
-// unit, config, state and helper on the node, and drops the placement database
-// and user. Glance on the same node is untouched; podman stays installed and
-// project `service` stays. Keep `node` in step with placement_single_node.
-// Safe to re-run when nothing is installed.
-object placement_teardown extends OrpheraClusterPlaybook:
+// Undoes placement_database.scala and placement_single_node.scala, as a
+// declarative description (OrpheraApply, docs/APPLY-DESIGN.md): on tst13
+// removes Placement from Keystone (service `placement`, its endpoints, user
+// `placement`) through the helper if it is still there, then the container,
+// unit, config, state, helper and Keystone CA copy; on tst3 drops the placement
+// database and user. Glance on the same node is untouched; podman and the image
+// stay, and project `service` stays. Keep `node` in step with
+// placement_single_node.
+//
+//   orphera apply manifests/placement_teardown.scala --check
+//   orphera apply manifests/placement_teardown.scala
+//
+// Each step is a command that runs only while there is something to remove
+// (`onlyIf`), so a second run changes nothing. A database that cannot be queried
+// fails the step instead of being skipped.
+object placement_teardown extends OrpheraApply:
+  import Resources.*
 
   private val node = "tst13"
+  private val dbNode = "tst3"
   private val dbName = "placement"
   private val dbUser = "placement"
+  private val unit = "orphera-placement-api"
+  private val helper = "/usr/local/sbin/orphera-placement-api"
 
-  private val nodeScript =
-    """if [ -x /usr/local/sbin/orphera-placement-api ]; then
-      |  /usr/local/sbin/orphera-placement-api unregister || echo "keystone cleanup failed (continuing)"
-      |fi
-      |systemctl disable --now orphera-placement-api 2>/dev/null || true
-      |rm -f /etc/systemd/system/orphera-placement-api.service
-      |if command -v podman >/dev/null 2>&1; then podman rm -f placement-api 2>/dev/null || true; fi
-      |systemctl daemon-reload
-      |rm -rf /etc/kolla/placement /etc/kolla/placement-api /etc/kolla/placement-ca
-      |rm -rf /var/lib/orphera/placement /var/log/kolla/placement
-      |rm -f /usr/local/sbin/orphera-placement-api
-      |echo "placement-api container, unit, config and state removed"""".stripMargin
+  override def nodes: List[String] = List(dbNode, node)
+
+  private val registeredInKeystone = s"[ -x $helper ] && $helper registered >/dev/null 2>&1"
+  private val unregisterScript =
+    s"""$helper unregister || echo "keystone cleanup failed (continuing)""""
+
+  private val unitExists =
+    s"[ -f /etc/systemd/system/$unit.service ] || systemctl is-active --quiet $unit || systemctl is-enabled --quiet $unit"
+  private val stopScript =
+    s"""systemctl disable --now $unit 2>/dev/null || true
+       |rm -f /etc/systemd/system/$unit.service
+       |systemctl daemon-reload
+       |if command -v podman >/dev/null 2>&1; then podman rm -f placement-api 2>/dev/null || true; fi
+       |echo "placement-api container and unit removed"""".stripMargin
+
+  // True when ANY of them exists.
+  private val filesExist =
+    s"for p in /etc/kolla/placement /etc/kolla/placement-api /etc/kolla/placement-ca /var/lib/orphera/placement /var/log/kolla/placement $helper; do [ -e \"$$p\" ] && exit 0; done; exit 1"
+  private val cleanupScript =
+    s"""rm -rf /etc/kolla/placement /etc/kolla/placement-api /etc/kolla/placement-ca
+       |rm -rf /var/lib/orphera/placement /var/log/kolla/placement
+       |rm -f $helper
+       |echo "placement config, state and helper removed"""".stripMargin
 
   private val dropDatabaseScript =
     s"""mariadb -N -e "DROP DATABASE IF EXISTS $dbName; DROP USER IF EXISTS '$dbUser'@'%'; FLUSH PRIVILEGES;""""
+  // True when the database or user exists. When MariaDB cannot be queried this is
+  // also true, so that the drop runs and fails with MariaDB's own message: a
+  // database that is down is not "nothing to remove".
+  private val databaseExists =
+    s"""OUT=$$(mariadb -N -e "SELECT 1 FROM information_schema.SCHEMATA WHERE SCHEMA_NAME='$dbName' UNION SELECT 1 FROM mysql.user WHERE User='$dbUser'" 2>/dev/null) || exit 0; [ -n "$$OUT" ]"""
 
-  val playbook: ClusterPlaybook =
-    clusterPlaybook("placement-teardown")(
-      stage("teardown-placement-node", node)
-        .task("unregister from Keystone, remove the container, unit and state")(
-          Task.RunCommand(List("sh", "-c", nodeScript), timeoutSeconds = 180)
+  def describe(target: Node): List[ApplyResource] =
+    if target.name == dbNode then
+      List(
+        command(
+          s"drop the $dbName database and the $dbUser user on the Galera cluster",
+          dropDatabaseScript,
+          onlyIf = databaseExists
         )
-        .build,
-
-      stage("drop-placement-database", "tst3")
-        .task(s"drop $dbName database and $dbUser on the Galera cluster")(
-          Task.RunCommand(List("sh", "-c", dropDatabaseScript))
-        )
-        .build
-    )
+      )
+    else
+      val unregistered = command(
+        "remove Placement from Keystone",
+        unregisterScript,
+        onlyIf = registeredInKeystone,
+        timeout = 120
+      )
+      val stopped = command(
+        "stop and remove the placement-api container and unit",
+        stopScript,
+        onlyIf = unitExists
+      ).after(unregistered)
+      val cleaned = command(
+        "remove placement files, state and the helper",
+        cleanupScript,
+        onlyIf = filesExist,
+        timeout = 120
+      ).after(stopped)
+      List(unregistered, stopped, cleaned)

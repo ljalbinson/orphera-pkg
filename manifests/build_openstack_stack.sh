@@ -313,7 +313,8 @@ step_glance() {
 }
 
 step_placement() {
-  playbook placement_single_node.scala
+  apply_desc placement_database.scala
+  apply_desc placement_single_node.scala
   local out
   out=$(run_on tst13 "curl -s -o /dev/null -w 'http=%{http_code}' http://localhost:8780/")
   check "Placement answers its version document" contains "http=200" "$out"
