@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# DRAFT end-to-end test for manila_single_node.scala.
+# End-to-end test for manila_single_node.scala.
 #
-# Applies the playbook, then checks independently of its own health check:
+# Applies the four descriptions (manila_database, manila_rabbitmq, manila_ceph, manila_single_node), then checks
+# independently of their own health checks:
 #  - the three Manila units run as systemd units on tst22,
 #  - the API answers its version document without a token (8786),
 #  - an unauthenticated request to a protected path is refused (401),
@@ -13,12 +14,14 @@
 #    written and read back, and the share is deleted and gone,
 #  - no test share is left behind, and no test mount is left on the node,
 #  - Manila is in the Keystone catalog (service type sharev2),
-#  - a second run of the playbook succeeds (idempotence), and a share still round-trips afterwards.
+#  - the vhost manila exists on RabbitMQ (tst10), and CephFS, the NFS cluster manila and client.manila exist
+#    on Ceph (tst0),
+#  - a second run of each description changes nothing, and a share still round-trips afterwards.
 #
 # Prerequisites: Galera + VIP, Keystone, RabbitMQ (tst10) and Ceph healthy; tst22 exists and has an agent;
 # the Manila images are available (built on tst21 or on quay.io).
 # Run from scala0, in orphera-pkg:   manifests/test_manila.sh
-# NO_APPLY=1 skips the playbook runs and only checks.
+# NO_APPLY=1 skips the apply runs and only checks.
 # Exit code: 0 if every assertion passes, 1 otherwise.
 
 set -uo pipefail
@@ -31,7 +34,7 @@ PASS=0
 FAIL=0
 
 log() { printf '[%s] %s\n' "$(date +%H:%M:%S)" "$1"; }
-run_on() { orphera run sh -c "$1" --nodes "$NODE" --timeout "${RUN_TIMEOUT:-60}" 2>&1; }
+run_on() { orphera run sh -c "$1" --nodes "${2:-$NODE}" --timeout "${RUN_TIMEOUT:-60}" 2>&1; }
 
 assert_contains() {
   local desc="$1" needle="$2" haystack="$3"
@@ -44,11 +47,15 @@ assert_contains() {
   fi
 }
 
+DESCRIPTIONS="manila_database.scala manila_rabbitmq.scala manila_ceph.scala manila_single_node.scala"
+
 if [ -z "${NO_APPLY:-}" ]; then
   log "install"
-  if ! orphera cluster-playbook manila_single_node.scala; then
-    log "FAIL: manila_single_node.scala did not complete"; exit 1
-  fi
+  for d in $DESCRIPTIONS; do
+    if ! orphera apply "$d"; then
+      log "FAIL: $d did not complete"; exit 1
+    fi
+  done
 fi
 
 for u in manila-scheduler manila-share manila-api; do
@@ -86,13 +93,22 @@ assert_contains "no test mount is left on the node" "mounts=0" "$OUT"
 OUT=$(run_on "sudo $HELPER catalog")
 assert_contains "the catalog lists service type sharev2" "sharev2" "$OUT"
 
+OUT=$(run_on "sudo podman exec rabbitmq rabbitmqctl list_vhosts -q" tst10)
+assert_contains "the vhost manila exists on RabbitMQ" "manila" "$OUT"
+
+OUT=$(orphera run sh -c "cephadm shell -- ceph fs ls 2>/dev/null; cephadm shell -- ceph nfs cluster ls 2>/dev/null; cephadm shell -- ceph auth get client.manila 2>/dev/null" --nodes tst0 --timeout 120 2>&1)
+assert_contains "CephFS cephfs exists" "name: cephfs," "$OUT"
+assert_contains "the NFS cluster manila exists" "manila" "$OUT"
+assert_contains "client.manila has the mgr capability" 'caps mgr = "allow rw"' "$OUT"
+
 if [ -z "${NO_APPLY:-}" ]; then
   log "re-apply (idempotence)"
-  if orphera cluster-playbook manila_single_node.scala; then
-    log "PASS: second run completed"; PASS=$((PASS + 1))
-  else
-    log "FAIL: second run of manila_single_node.scala failed"; FAIL=$((FAIL + 1))
-  fi
+  for d in $DESCRIPTIONS; do
+    SECOND=$(orphera apply "$d" 2>&1); RC=$?
+    printf '%s\n' "$SECOND"
+    if [ "$RC" -ne 0 ]; then log "FAIL: second run of $d failed"; FAIL=$((FAIL + 1)); fi
+    assert_contains "second run of $d changed nothing" "0 changed" "$SECOND"
+  done
   OUT=$(RUN_TIMEOUT=900 run_on "sudo $HELPER share-cycle")
   assert_contains "a share still round-trips after the second run" "share cycle ok" "$OUT"
 fi

@@ -46,7 +46,7 @@ NAMES=(
   heat/db heat/service heat/rabbit heat/domain-admin
   barbican/db barbican/service barbican/rabbit barbican/kek  # NB: rotating kek makes stored Barbican secrets unreadable
   rgw/service  # also stored in the Ceph configuration database: re-run rgw_single_node.scala after rotating
-  manila/db manila/service manila/rabbit manila/ceph-key  # NB: rotating ceph-key needs manila_single_node.scala re-run (it re-imports client.manila)
+  manila/db manila/service manila/rabbit manila/ceph-key  # NB: rotating ceph-key needs manila_ceph.scala and manila_single_node.scala re-applied (they re-import client.manila and rewrite its keyring)
   octavia/db octavia/service octavia/rabbit octavia/ca-passphrase octavia/heartbeat-key  # NB: rotating ca-passphrase makes octavia_single_node.scala make new CAs; existing amphorae stop working
   magnum/db magnum/service magnum/rabbit magnum/domain-admin
   aodh/db aodh/service aodh/rabbit ceilometer/service ceilometer/rabbit

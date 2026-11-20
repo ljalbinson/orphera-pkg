@@ -29,9 +29,8 @@ import orphera.orchestrator.*
 //      then stores the new key in the secret store (cinder/ceph-key,
 //      glance/ceph-key, manila/ceph-key). The key is fetched masked with a
 //      one-time pad, so it is not in the output or the run log.
-//   4. Re-runs cinder_ceph, cinder_single_node, glance_ceph, glance_single_node and nova_compute
-//      (orphera apply) and manila_single_node (orphera cluster-playbook, in full: never resumed from an
-//      old checkpoint, even under --resume), which write the new keys into
+//   4. Re-runs cinder_ceph, cinder_single_node, glance_ceph, glance_single_node, manila_ceph,
+//      manila_single_node and nova_compute (orphera apply), which write the new keys into
 //      the services' keyrings and the compute hosts' libvirt secret, and leave
 //      the cipher setting alone now that the keys are aes256k.
 //   5. Checks each service connects with its new key, and the libvirt secret.
@@ -67,16 +66,18 @@ object ceph_key_rotation extends OrpheraScript:
   private val computeHosts = List("tst17", "tst18")
   private val rbdSecretUuid =
     "8c256f90-1c37-4fb6-b8be-cedcf0fffd3c" // nova_compute.scala, cinder_single_node.scala
-  // Descriptions run with `orphera apply` (cinder_ceph and glance_ceph find the key in Ceph already
-  // the stored one, and change nothing; cinder_single_node and glance_single_node write it into the
-  // keyring and restart the service; nova_compute rewrites the libvirt secret). The other is a cluster
-  // playbook.
+  // Descriptions run with `orphera apply` (cinder_ceph, glance_ceph and manila_ceph find the key in Ceph
+  // already the stored one, and change nothing; cinder_single_node, glance_single_node and
+  // manila_single_node write it into the keyring and restart the service; nova_compute rewrites the libvirt
+  // secret). Anything else in the list is a cluster playbook.
   private val applied =
     Set(
       "cinder_ceph",
       "cinder_single_node",
       "glance_ceph",
       "glance_single_node",
+      "manila_ceph",
+      "manila_single_node",
       "nova_compute"
     )
   private val manifests = List(
@@ -84,6 +85,7 @@ object ceph_key_rotation extends OrpheraScript:
     "cinder_single_node",
     "glance_ceph",
     "glance_single_node",
+    "manila_ceph",
     "manila_single_node",
     "nova_compute"
   )

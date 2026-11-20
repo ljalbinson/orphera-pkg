@@ -405,7 +405,10 @@ step_barbican() {
 }
 
 step_manila() {
-  playbook manila_single_node.scala
+  apply_desc manila_database.scala
+  apply_desc manila_rabbitmq.scala
+  apply_desc manila_ceph.scala
+  apply_desc manila_single_node.scala
   local out
   out=$(run_on tst22 "curl -s -o /dev/null -w 'http=%{http_code}' http://localhost:8786/")
   check "the Manila API answers its version document" contains "http=" "$out"

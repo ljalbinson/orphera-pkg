@@ -2664,11 +2664,11 @@ every stored secret is unreadable.** After it is up, with the CLI (`python-barbi
 Nothing else uses Barbican yet (Cinder volume encryption and Octavia certificates are the usual first users). The Keystone listener that
 removes a deleted project's secrets is not run. The descriptions and their test have not been run.
 
-**Manila** (`manifests/manila_single_node.scala`, undone by `manila_teardown.scala`, checked by `test_manila.sh`) provides shared file systems
+**Manila** (descriptions applied with `orphera apply` in this order: `manifests/manila_database.scala` on tst3, `manila_rabbitmq.scala` on tst10, `manila_ceph.scala` on tst0, `manila_single_node.scala` on tst22; undone by `manila_teardown.scala`, checked by `test_manila.sh`) provides shared file systems
 (NFS shares) on a new VM, tst22 (`config/tst22.yaml`, 10.10.5.34): the API (8786), the scheduler and the share service as Kolla containers.
 The backend is CephFS on the existing Ceph cluster, exported over NFS by NFS-Ganesha, so clients need only an NFS client and a route to the
-Ganesha host (tst0, 10.10.5.12, port 2049), no Ceph software and no key. The playbook also creates, on tst0, the filesystem `cephfs`, the NFS
-cluster `manila` and the cephx user `client.manila` (its key is derived from the secret `manila/ceph-key`). The share type `default_share_type`
+Ganesha host (tst0, 10.10.5.12, port 2049), no Ceph software and no key. `manila_ceph.scala` creates, on tst0, the filesystem `cephfs`, the NFS
+cluster `manila` and the cephx user `client.manila` (its key is the secret `manila/ceph-key`, or derived from it while that is not a whole key). The share type `default_share_type`
 is made for you. Access is by client IP. After it is up, with the CLI (`python-manilaclient`):
 
     source ~/.config/openstack/admin-openrc.sh
@@ -2681,7 +2681,7 @@ is made for you. Access is by client IP. After it is up, with the CLI (`python-m
 `manila_teardown.scala` keeps CephFS and the NFS cluster (shares live there); `MANILA_PURGE_CEPH=yes` removes them and all data in them. The
 Manila images need `orphera-kolla-build sources refresh` and a build of `manila-api manila-scheduler manila-share` on tst21 (an existing
 `/etc/kolla-build/images.txt` is not rewritten; add the three names), or they come from quay.io. Share migration and backups (the data
-service) and shares with their own network (driver-handled share servers) are not set up. The playbook and its test have not been run.
+service) and shares with their own network (driver-handled share servers) are not set up. The descriptions replaced the cluster playbook, which was run on the lab (2026-11-13) before the key rotation; the four descriptions were run on the lab on 2026-11-20 (`test_manila.sh`: a share made, mounted over NFS, written, read back and deleted; a second run of each changes nothing). The teardown has not been run.
 
 **Load balancing** (`manifests/octavia_single_node.scala`, undone by `octavia_teardown.scala`, checked by `test_octavia.sh`) is Octavia with the
 Amphora provider on tst19: the API (9876), the worker, the health manager and housekeeping as Kolla containers. Each load balancer is a small VM
@@ -2908,11 +2908,11 @@ Worth knowing:
   Ubuntu's Ceph 19.2.3 client, which only knows the older `aes`. The
   `cephadm_install.scala` playbook therefore runs
   `ceph mon set auth_allowed_ciphers aes,aes256k`, and `cinder_single_node.scala`,
-  `glance_single_node.scala` and `manila_single_node.scala` do so while their
+  `glance_single_node.scala` and `manila_ceph.scala` do so while their
   own key is an `aes` one (`CephKeys.allowCiphersFor`). To end the compromise:
   `ceph_client_upgrade.scala` gives the services and the compute hosts Ceph's
   20.2.5 client, then `ceph_key_rotation.scala` rotates `client.cinder`,
-  `client.glance` and `client.manila` to `aes256k`, re-runs their playbooks and
+  `client.glance` and `client.manila` to `aes256k`, re-applies their descriptions and
   `nova_compute.scala`, and sets the monitors to `aes256k` only, unless another
   client (such as `client.k8s`, whose kernel RBD client needs `aes` before
   Linux 7.0) still has an `aes` key.
@@ -3405,7 +3405,7 @@ playbooks marked DRAFT there have been written but not all run on the lab.
 | `ceph_client_upgrade.scala`, `ceph_key_rotation.scala` | Ceph's own client for the OpenStack services and compute hosts, then their keys rotated to `aes256k` and the monitors set to `aes256k` only |
 | `lustre_cluster_script.scala` | the Lustre build as an `OrpheraScript` (replaces `lustre_cluster.scala`) |
 | `apt_cache_teardown.scala`, `rpm_cache_teardown.scala`, `kolla_cache_teardown.scala` (a description) | Undo the apt cache (tst11) and its clients, the RPM cache (tst12) and its clients, and the Kolla image cache (tst9) |
-| `keystone_teardown.scala`, `glance_teardown.scala`, `placement_teardown.scala`, `cinder_teardown.scala`, `rabbitmq_teardown.scala`, `heat_teardown.scala`, `nova_teardown.scala`, `neutron_teardown.scala`, `horizon_teardown.scala`, `barbican_teardown.scala`, `designate_teardown.scala`, `nova_compute_teardown.scala`, `skyline_teardown.scala`, `rgw_teardown.scala`, `trove_teardown.scala`, `trove_guest_image_teardown.scala`, `telemetry_teardown.scala` | Undo the matching `*_single_node.scala` playbook (see the OpenStack example below) |
+| `keystone_teardown.scala`, `glance_teardown.scala`, `placement_teardown.scala`, `cinder_teardown.scala`, `rabbitmq_teardown.scala`, `heat_teardown.scala`, `nova_teardown.scala`, `neutron_teardown.scala`, `horizon_teardown.scala`, `barbican_teardown.scala`, `designate_teardown.scala`, `nova_compute_teardown.scala`, `skyline_teardown.scala`, `rgw_teardown.scala`, `trove_teardown.scala`, `trove_guest_image_teardown.scala`, `telemetry_teardown.scala`, `manila_teardown.scala` | Undo the matching `*_single_node.scala` playbook (see the OpenStack example below) |
 
 ## Known gaps / not yet built
 
