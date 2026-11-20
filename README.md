@@ -2750,7 +2750,7 @@ chooses another MySQL 8.0 version; the name is also the tag of the Docker image 
 `trove-api trove-conductor trove-taskmanager` on tst21 (an existing `/etc/kolla-build/images.txt` is not rewritten; add them by hand), or they come
 from quay.io. `python-troveclient` is in `utils/openstack-client-setup.sh`. Run on the lab: `test_trove.sh` 12 of 12 (the descriptions); `test_trove_guest.sh` 9 of 9 (run before this part was migrated; the descriptions have not been run on the lab yet); the teardown has not been run.
 
-**Keycloak** (`manifests/keycloak_single_node.scala`, undone by `keycloak_teardown.scala`, checked by `test_keycloak.sh`) is an OpenID Connect
+**Keycloak** (three parts, in this order: `manifests/keycloak_tls.scala`, a cluster playbook that signs the certificate on tst6; then `orphera apply` of `keycloak_database.scala` on tst3 and `keycloak_single_node.scala` on tst26; undone by `keycloak_teardown.scala`, checked by `test_keycloak.sh`) is an OpenID Connect
 identity provider on a new VM, tst26 (`config/tst26.yaml`, 10.10.5.38), with Keystone federated to it: a user in Keycloak's realm `openstack` gets
 an OpenStack token. One container from `quay.io/keycloak/keycloak:26.8.1` (`KEYCLOAK_IMAGE` sets another reference; it is pulled through the
 Kolla cache), HTTPS on 8443 with a certificate signed by Keystone's test CA (the request goes to tst6 and the certificate comes back; the key stays
@@ -2761,7 +2761,7 @@ temporary admin; it is made only on an empty database, so rotating the secret la
 
 The Keystone half is in `keystone_single_node.scala`: its vhost loads mod_auth_openidc from the Kolla image and checks bearer tokens on
 `/v3/OS-FEDERATION/identity_providers/keycloak/protocols/openid/auth` against the realm's keys, and `[auth] methods` includes `openid`. Run it
-again before the first Keycloak build (the Keycloak playbook's first stage stops, saying so, if tst6 does not have it yet). The helper
+again before the first Keycloak build (`keycloak_tls.scala`'s first stage stops, saying so, if tst6 does not have it yet). The helper
 `orphera-keycloak-api` on tst26 makes the rest: in Keycloak the confidential client `keystone` (direct access grants on, a `groups` claim),
 the three groups and the test users below; in Keystone the domain `keycloak`, the project `keycloak-demo`, the groups the mapping uses,
 the identity provider `keycloak` (remote id = the realm's issuer), the mapping `keycloak-mapping` (`preferred_username` becomes the user
@@ -2781,7 +2781,7 @@ name), and make the browser trust the test CA (`~/.config/openstack/keystone-ca.
 HTTPS. Keystone writes its own `sso_callback_template.html`. Skyline 8.x uses the protocol-wide websso path, for which Keystone finds the
 identity provider from `[federation] remote_id_attribute`. `sudo orphera-keycloak-api sso-check [horizon|skyline|all]` on tst26 does
 the whole browser flow (a fresh cookie jar, the redirects, Keycloak's login form, the token post) and asks the dashboard who is signed in.
-Order: keystone_single_node, horizon_single_node, skyline_single_node, keycloak_single_node (for the helper), then test_keycloak.sh.
+Order: keystone_single_node, horizon_single_node, skyline_single_node, then keycloak_tls, keycloak_database and keycloak_single_node (for the helper), then test_keycloak.sh. The description keeps `keycloak.conf` and the unit as declared files and runs the realm, the Keystone objects and the login check only while their read-only checks (`realm-ok`, `federated-ok`, `check`) fail, so a second run changes nothing. It was a cluster playbook; the descriptions have not been run on the lab yet (the playbook passed 13 of 13 on 2026-10-30).
 Run on the lab: both dashboards sign `kcdemo` in through Keycloak (`sso-check all`, and from Chrome and Safari on a Mac that
 trusts the test CA). Horizon keeps its sessions in files on the server: a single sign-on session is too big for a cookie. mod_auth_openidc sends only browser-like
 requests (`Accept: text/html`) on to Keycloak and answers others with 401, so a script that follows the flow must send those headers.

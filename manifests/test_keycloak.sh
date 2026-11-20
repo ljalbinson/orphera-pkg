@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# DRAFT end-to-end test for keycloak_single_node.scala.
+# End-to-end test for keycloak_single_node.scala.
 #
-# Applies the playbook, then checks independently of its own health check:
+# Runs keycloak_tls.scala (a cluster playbook: the certificate is signed on tst6), then applies keycloak_database.scala
+# and keycloak_single_node.scala, then checks independently of their own health checks:
 #  - the unit orphera-keycloak is active on tst26,
 #  - the management interface reports ready on 9000,
 #  - from tst6, over HTTPS with the host's trust store only, the realm's discovery document names its issuer,
@@ -17,12 +18,13 @@
 #    kcreader reader on keycloak-demo, only kcadmin may list users, kcnogroup (in no group) is refused,
 #  - single sign-on: Horizon and Skyline each sign kcdemo in through Keycloak's login page, and Horizon's logout ends the
 #    Keycloak session too, so the next single sign-on asks for the password (SKIP_SSO=1 skips),
-#  - a second run of the playbook succeeds (idempotence), and the federated login still works afterwards.
+#  - a second run of keycloak_tls.scala succeeds and a second run of each description changes nothing (idempotence),
+#    and the federated login still works afterwards.
 #
-# Prerequisites: Galera + VIP and Keystone up (keystone_single_node.scala run with federation, after this change);
+# Prerequisites: Galera + VIP and Keystone up (keystone_single_node.scala run with federation);
 # tst26 has an agent and quay.io (or the cache) is reachable from it.
 # Run from scala0, in orphera-pkg:   manifests/test_keycloak.sh
-# NO_APPLY=1 skips the playbook runs and only checks.
+# NO_APPLY=1 skips the apply runs and only checks.
 # Exit code: 0 if every assertion passes, 1 otherwise.
 
 set -uo pipefail
@@ -54,9 +56,14 @@ assert_contains() {
 
 if [ -z "${NO_APPLY:-}" ]; then
   log "install"
-  if ! orphera cluster-playbook keycloak_single_node.scala; then
-    log "FAIL: keycloak_single_node.scala did not complete"; exit 1
+  if ! orphera cluster-playbook keycloak_tls.scala; then
+    log "FAIL: keycloak_tls.scala did not complete"; exit 1
   fi
+  for d in keycloak_database.scala keycloak_single_node.scala; do
+    if ! orphera apply "$d"; then
+      log "FAIL: $d did not complete"; exit 1
+    fi
+  done
 fi
 
 OUT=$(run_on "echo state=\$(systemctl is-active orphera-keycloak)")
@@ -111,11 +118,17 @@ fi
 
 if [ -z "${NO_APPLY:-}" ]; then
   log "re-apply (idempotence)"
-  if orphera cluster-playbook keycloak_single_node.scala; then
-    log "PASS: second run completed"; PASS=$((PASS + 1))
+  if orphera cluster-playbook keycloak_tls.scala; then
+    log "PASS: second run of keycloak_tls.scala completed"; PASS=$((PASS + 1))
   else
-    log "FAIL: second run of keycloak_single_node.scala failed"; FAIL=$((FAIL + 1))
+    log "FAIL: second run of keycloak_tls.scala failed"; FAIL=$((FAIL + 1))
   fi
+  for d in keycloak_database.scala keycloak_single_node.scala; do
+    SECOND=$(orphera apply "$d" 2>&1); RC=$?
+    printf '%s\n' "$SECOND"
+    if [ "$RC" -ne 0 ]; then log "FAIL: second run of $d failed"; FAIL=$((FAIL + 1)); fi
+    assert_contains "second run of $d changed nothing" "0 changed" "$SECOND"
+  done
   OUT=$(RUN_TIMEOUT=120 run_on "sudo $HELPER check")
   assert_contains "the federated login still works after the second run" "federation ok" "$OUT"
 fi
