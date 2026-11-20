@@ -35,6 +35,20 @@ object AgeAgent:
     */
   def clock(t: java.time.LocalTime): String = clockFormat.format(t)
 
+  /** When a cached answer expires: HH:mm:ss if that is today, otherwise
+    * "yyyy-MM-dd HH:mm:ss". `--cache` may be longer than a day, and a bare time
+    * of day would then read as an expiry earlier today.
+    */
+  def expiry(
+      until: java.time.Instant,
+      now: java.time.Instant,
+      zone: java.time.ZoneId
+  ): String =
+    val t = java.time.LocalDateTime.ofInstant(until, zone)
+    val today = java.time.LocalDateTime.ofInstant(now, zone).toLocalDate
+    if t.toLocalDate == today then clock(t.toLocalTime)
+    else s"${t.toLocalDate} ${clock(t.toLocalTime)}"
+
   /** Where the agent listens, and where orphera looks for it:
     * $ORPHERA_AGE_AGENT, or ~/.config/orphera/agent.sock.
     */
@@ -211,7 +225,7 @@ object AgeAgent:
                     cache.get(k) match
                       case Some((text, until)) =>
                         say(
-                          s"request $n: from the cache (until ${AgeAgent.clock(java.time.LocalTime.ofInstant(until, java.time.ZoneId.systemDefault))})"
+                          s"request $n: from the cache (until ${AgeAgent.expiry(until, now, java.time.ZoneId.systemDefault)})"
                         )
                         answer(out, Right(text))
                       case None =>
