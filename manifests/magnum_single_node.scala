@@ -1099,7 +1099,8 @@ if __name__ == '__main__':
     s"""[ "$$(cat $cycleStampFile 2>/dev/null)" = "$cycleStamp" ]"""
   private val cycleScript =
     s"""set -e
-       |$helperPath cluster-cycle
+       |$heartbeat
+       |heartbeat $helperPath cluster-cycle
        |echo $cycleStamp > $cycleStampFile""".stripMargin
 
   // One service: its resources (written before it starts), the ones that decide when it restarts.
