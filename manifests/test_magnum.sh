@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# DRAFT end-to-end test for magnum_single_node.scala.
+# End-to-end test for magnum_single_node.scala.
 #
-# Applies the playbook (which itself makes a real Kubernetes cluster and deletes it), then checks
-# independently:
+# Applies the three descriptions (magnum_database, magnum_rabbitmq, magnum_single_node; the last one itself makes a
+# real Kubernetes cluster and deletes it), then checks independently:
 #  - orphera-magnum-api and orphera-magnum-conductor are active on tst23,
 #  - the API answers its version document without a token (9511), a protected path refuses without a token (401),
 #  - Magnum is in the Keystone catalog (service type container-infra),
@@ -13,13 +13,14 @@
 #  - the management cluster is reachable from the container's kubeconfig,
 #  - Glance has the Kubernetes image, Nova the flavor orphera-k8s, and the template orphera-k8s exists,
 #  - a second cluster cycle works (cluster created, API answers /version, cluster deleted),
-#  - a second run of the playbook succeeds (idempotence) and the template is still there.
+#  - a second run of each description changes nothing (the test cluster is made again only when its stamp changes),
+#    and the template is still there.
 #
-# Prerequisites: capi_management_cluster.scala applied; Keystone, Glance, Nova (with compute capacity for a
+# Prerequisites: capi_management_cluster.scala applied (a cluster playbook); Keystone, Glance, Nova (with compute capacity for a
 # control-plane node, a worker and an amphora), Neutron, Octavia, RabbitMQ and Galera healthy; tst17/tst18 and
 # tst23 sized for it (see the sizing answer). A cluster cycle takes 15 to 40 minutes.
 # Run from scala0, in orphera-pkg:   manifests/test_magnum.sh
-# NO_APPLY=1 skips the playbook runs and only checks. SKIP_CYCLE=1 skips the additional cluster cycle.
+# NO_APPLY=1 skips the apply runs and only checks. SKIP_CYCLE=1 skips the additional cluster cycle.
 # Exit code: 0 if every assertion passes, 1 otherwise.
 
 set -uo pipefail
@@ -27,6 +28,7 @@ set -uo pipefail
 NODE="tst23"
 PORT=9511
 HELPER="/usr/local/sbin/orphera-magnum-api"
+DESCRIPTIONS="magnum_database.scala magnum_rabbitmq.scala magnum_single_node.scala"
 
 PASS=0
 FAIL=0
@@ -47,9 +49,11 @@ assert_contains() {
 
 if [ -z "${NO_APPLY:-}" ]; then
   log "install"
-  if ! orphera cluster-playbook magnum_single_node.scala; then
-    log "FAIL: magnum_single_node.scala did not complete"; exit 1
-  fi
+  for d in $DESCRIPTIONS; do
+    if ! orphera apply "$d"; then
+      log "FAIL: $d did not complete"; exit 1
+    fi
+  done
 fi
 
 for u in magnum-conductor magnum-api; do
@@ -96,11 +100,12 @@ fi
 
 if [ -z "${NO_APPLY:-}" ]; then
   log "re-apply (idempotence)"
-  if OUT=$(orphera cluster-playbook magnum_single_node.scala 2>&1); then
-    log "PASS: second run completed"; PASS=$((PASS + 1))
-  else
-    log "FAIL: second run of magnum_single_node.scala failed"; printf '%s\n' "$OUT" | tail -20 | sed 's/^/    /'; FAIL=$((FAIL + 1))
-  fi
+  for d in $DESCRIPTIONS; do
+    SECOND=$(orphera apply "$d" 2>&1); RC=$?
+    printf '%s\n' "$SECOND"
+    if [ "$RC" -ne 0 ]; then log "FAIL: second run of $d failed"; FAIL=$((FAIL + 1)); fi
+    assert_contains "second run of $d changed nothing" "0 changed" "$SECOND"
+  done
   OUT=$(run_on "sudo $HELPER template")
   assert_contains "the template is still there after the second run" "cluster template orphera-k8s ready" "$OUT"
 fi

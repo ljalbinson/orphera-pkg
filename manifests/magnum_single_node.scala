@@ -1,93 +1,113 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import orphera.orchestrator.*
-import orphera.orchestrator.ClusterPlaybookDsl.*
 import orphera.orchestrator.kolla.*
 
-// DRAFT. OpenStack Magnum (Kubernetes clusters as a service) with the Cluster API Helm driver
-// (magnum-capi-helm), Kolla images under podman. Modelled on octavia_single_node.scala and
-// manila_single_node.scala; read their headers for the conventions.
+// OpenStack Magnum (Kubernetes clusters as a service) with the Cluster API Helm driver (magnum-capi-helm), Kolla
+// images under podman, as a declarative description (OrpheraApply, docs/APPLY-DESIGN.md). It replaced the cluster
+// playbook of the same name; a second run changes nothing and restarts nothing, and `--check` shows what would
+// change. Modelled on manila_single_node.scala and trove_single_node.scala, which explain the conventions.
 //
-// Where it runs: tst23 (10.10.5.35), the same VM as the Cluster API management cluster that
-// capi_management_cluster.scala builds (apply that first). Magnum does not build clusters itself: for every
-// Kubernetes cluster the driver makes an application credential for the user, stores it as a Secret in the
-// management cluster and installs the Helm chart `openstack-cluster` there; Cluster API and the OpenStack
-// provider (CAPO) then create the VMs, networks and load balancer in OpenStack, and the Azimuth addon
-// provider installs the cluster's add-ons (Calico, the OpenStack cloud controller, the Cinder CSI driver).
+// Three descriptions, since one description cannot order its nodes. Apply them in this order, after
+// capi_management_cluster.scala (a cluster playbook) has been applied on tst23:
+//
+//   orphera apply manifests/magnum_database.scala      # the magnum database and user (tst3)
+//   orphera apply manifests/magnum_rabbitmq.scala      # the `magnum` vhost and user on RabbitMQ (tst10)
+//   orphera apply manifests/magnum_single_node.scala   # this one (tst23)
+//
+// Where it runs: tst23 (10.10.5.35), the same VM as the Cluster API management cluster. To move it, change `node`
+// and `fqdn` below (and the teardown's `node`).
+//
+// Magnum does not build clusters itself: for every Kubernetes cluster the driver makes an application credential
+// for the user, stores it as a Secret in the management cluster and installs the Helm chart `openstack-cluster`
+// there; Cluster API and the OpenStack provider (CAPO) then create the VMs, networks and load balancer in
+// OpenStack, and the Azimuth addon provider installs the cluster's add-ons (Calico, the OpenStack cloud
+// controller, the Cinder CSI driver).
 //
 // What it builds (two Kolla containers on the host network):
 //   - magnum-api         the REST API, port 9511, plain HTTP like the other APIs here
 //   - magnum-conductor   does the work; loads the driver
-// The Kolla images do not contain the Cluster API driver or helm. podman build and podman commit both failed
-// on these images (a manifest error, then a podman crash), so the images stay as they are: the playbook installs
-// the pip package `magnum-capi-helm` (without its dependencies) into a host directory,
-// /var/lib/orphera/magnum/pylib, using the image's own Python, and the containers mount that directory and the
-// helm binary that capi_management_cluster.scala installed, with PYTHONPATH pointing at it.
-// MAGNUM_CAPI_HELM_SPEC sets the pip requirement (default `magnum-capi-helm`).
+// The Kolla images do not contain the Cluster API driver or helm. podman build and podman commit both failed on
+// these images, so the images stay as they are: the pip package `magnum-capi-helm` (without its dependencies) is
+// installed into a host directory, /var/lib/orphera/magnum/pylib, using the image's own Python, and the
+// containers mount that directory and the helm binary that capi_management_cluster.scala installed, with
+// PYTHONPATH pointing at it. MAGNUM_CAPI_HELM_SPEC sets the pip requirement (default `magnum-capi-helm`).
 //
-// What it makes besides the containers (the helper's subcommands, repeatable):
+// What it makes besides the containers (the helper's subcommands, each with a read-only check that decides
+// whether it runs):
 //   - Keystone: user `magnum` (project service, admin), service `magnum` of type `container-infra` with the
 //     endpoint http://<fqdn>:9511/v1, and the trustee domain `magnum` with its admin user `magnum_domain_admin`
 //     (Magnum creates its per-cluster trustee users there)
 //   - the Nova flavor `orphera.k8s` (id orphera-k8s; 2 vCPU, 3072 MB, 30 GB), the driver's minimum being 2 vCPU
-//     and 2048 MB
-//   - a Kubernetes node image in Glance (public, with os_distro, os_version and kube_version properties,
-//     which the driver reads). The image is downloaded on the node from the Azimuth image releases manifest;
-//     K8S_VERSION (for example v1.31.4) or K8S_MINOR (1.31) chooses the version, K8S_IMAGE_URL names an image
-//     directly (then K8S_VERSION and K8S_OS_VERSION are needed too). Without any of them the newest in the
-//     manifest is taken, which may be newer than the chart supports; pin it if clusters do not build.
-//   - the public cluster template `orphera-k8s` (Calico, the provider network as the external network, DNS
-//     server MAGNUM_DNS, default 192.168.1.70, the lab resolver, which must resolve the Keystone name for the cluster's cloud controller)
+//     and 2048 MB, and the key pair `orphera-magnum`
+//   - a Kubernetes node image in Glance (public, with os_distro, os_version and kube_version properties, which
+//     the driver reads). The image is downloaded on the node from the Azimuth image releases manifest; K8S_VERSION
+//     (for example v1.31.4) or K8S_MINOR (1.31) chooses the version, K8S_IMAGE_URL names an image directly (then
+//     K8S_VERSION and K8S_OS_VERSION are needed too). Without any of them the newest in the manifest is taken,
+//     which may be newer than the chart supports; pin it if clusters do not build.
+//   - the public cluster template `orphera-k8s` (Calico, the provider network as the external network, DNS server
+//     MAGNUM_DNS, default 192.168.1.70, the lab resolver, which must resolve the Keystone name for the cluster's
+//     cloud controller)
 //
 // The Kolla image also contains the Cluster API driver of another project (magnum_cluster_api, entry points
 // k8s_cluster_api_*). Magnum instantiates every installed driver to validate a template, and that one fails
 // without a kubeconfig, so [drivers] disabled_drivers switches those five off; magnum-capi-helm is
 // k8s_capi_helm_v1.
 //
-// Magnum's certificates are kept in its database (x509keypair), not in Barbican. The Keystone CA is passed to
-// the driver ([drivers] openstack_ca_file), which puts it into the cloud credentials that CAPO and the
-// cluster's OpenStack integrations use.
+// Magnum's certificates are kept in its database (x509keypair), not in Barbican. The Keystone CA is passed to the
+// driver ([drivers] openstack_ca_file), which puts it into the cloud credentials that CAPO and the cluster's
+// OpenStack integrations use.
 //
 // Versions: the Helm chart is MAGNUM_CHART_VERSION (default 0.26.0, the driver's own default). The management
 // cluster has Cluster API v1.14, which still serves the v1beta1 API versions the driver uses.
 //
-// Prerequisites, not checked here: capi_management_cluster.scala applied on tst23; Heat is NOT needed. Galera,
-// Keystone, RabbitMQ (tst10), Glance, Nova with compute nodes, Neutron with the L3 agent and the provider
-// network, and Octavia (the API load balancer of every cluster is an Octavia amphora) healthy; tst23 can reach
-// the floating IP network (10.10.6.0/24) and the clusters' nodes can reach the internet through their router;
-// the compute nodes have room: one test cluster is a control-plane node and a worker (2 vCPU, 3 GB each) and an
-// amphora (1 GB). The Magnum images (magnum-api, magnum-conductor) on tst21's registry or quay.io.
+// Prerequisites, not checked here: capi_management_cluster.scala applied on tst23 (helm, and the kubeconfig at
+// /var/lib/orphera/capi/kubeconfig); Heat is NOT needed. Galera, Keystone, RabbitMQ (tst10), Glance, Nova with
+// compute nodes, Neutron with the L3 agent and the provider network, and Octavia (the API load balancer of every
+// cluster is an Octavia amphora) healthy; tst23 can reach the floating IP network (10.10.6.0/24) and the
+// clusters' nodes can reach the internet through their router; the compute nodes have room: one test cluster is
+// a control-plane node and a worker (2 vCPU, 3 GB each) and an amphora (1 GB). The Magnum images (magnum-api,
+// magnum-conductor) on tst21's registry or quay.io.
 //
-// Stages:
-//   - magnum-database (tst3), magnum-rabbitmq (tst10)
-//   - install-magnum (tst23): packages, cache mirror, image pulls, the driver images, Keystone's CA, helper,
-//     registration and trustee domain, kubeconfig and magnum.conf, Kolla config, `magnum-db-manage upgrade`,
-//     the units
-//   - magnum-resources (tst23): flavor, node image, cluster template
-//   - confirm-magnum-healthy (tst23): the API answers, the conductor is up, and a real cluster (one control-plane
-//     node, one worker) is made, its API address answers /version, and it is deleted. This takes tens of minutes.
+// How it stays idempotent (as for Manila, Trove and Cinder):
+//   - Keystone's CA is compared as a certificate with the installed copy each run; the copies in the two Kolla
+//     directories are compared with it, and a service restarts when its copy changes.
+//   - Each service has its own `magnum.conf` (a secret file; it holds the database, message bus and service
+//     passwords), CA copy, copy of the management cluster's kubeconfig and `config.json` in its Kolla directory.
+//   - The driver is installed again when its stamp changes (the install script, MAGNUM_CAPI_HELM_SPEC and the two
+//     images) or its import fails, and both services restart. The pip package itself is not pinned: delete
+//     /var/lib/orphera/magnum/driver.stamp to take a newer release.
+//   - `magnum-db-manage upgrade` is skipped while its stamp matches and the `cluster_template` table exists (a
+//     query as the magnum user, through the VIP).
+//   - Magnum is registered in Keystone before the units start, skipped while the helper's `registered` passes.
+//   - The flavor and key pair, the node image and the cluster template each run only while their read-only
+//     checks (`resources-ok`, `image-present`, `template-ok`) fail.
+//   - The test cluster (a control-plane node and a worker are made, the API answers /version, the cluster is
+//     deleted: 15 to 40 minutes) is made again only when its stamp changes (a hash of magnum.conf, the driver
+//     stamp, the DNS server and the Kubernetes image choice), so a repeated run does not build a cluster.
+//     manifests/test_magnum.sh makes one more by hand. Delete /var/lib/orphera/magnum/cycle.stamp to have the
+//     next run make one.
 //
-// Check mode: `ORPHERA_CHECK=1 orphera cluster-playbook manifests/magnum_single_node.scala`.
-//
-// Facts about Magnum this was written from, to check if the first run fails: console scripts magnum-api,
+// Facts about Magnum this was written from, to check if a run fails: console scripts magnum-api,
 // magnum-conductor and magnum-db-manage are in the images; the config sections [keystone_auth], [trust],
 // [certificates], [drivers] (openstack_ca_file, verify_ca) and [capi_helm]; the driver reads the image
 // properties os_distro and kube_version; the Azimuth manifest.json is a JSON object whose values have `name`,
-// `url` and `checksum`. Not compiled where this was written; the first run on scala0 is the first compile.
+// `url` and `checksum`.
 //
 // Test-only credentials come from the secret store (magnum/db, magnum/service, magnum/rabbit,
 // magnum/domain-admin), made on first use.
-object magnum_single_node extends OrpheraClusterPlaybook:
+object magnum_single_node extends OrpheraApply:
+  import Resources.*
 
   private val node = "tst23"
   private val fqdn = "tst23.ljalbinson.com"
-  private val nodeIp = "10.10.5.35"
   private val apiPort = 9511
+
+  override def nodes: List[String] = List(node)
 
   private val ksFqdn = "tst6.ljalbinson.com"
   private val vip = "10.10.5.100"
 
-  private val rabbitNode = "tst10"
   private val rabbitIp = "10.10.5.22"
   private val rabbitUser = "magnum"
   private val rabbitPassword = Secrets.secret("magnum/rabbit")
@@ -121,12 +141,13 @@ object magnum_single_node extends OrpheraClusterPlaybook:
   private val k8sFlavorId = "orphera-k8s"
 
   private val confRoot = "/etc/kolla"
-  private val srcDir = "/etc/kolla/magnum"
   private val logDir = "/var/log/kolla/magnum"
   private val stateDir = "/var/lib/orphera/magnum"
   private val dataDir = "/var/lib/orphera/magnum/data"
   private val buildDir = "/var/lib/orphera/magnum/build"
+  private val pylibDir = "/var/lib/orphera/magnum/pylib"
   private val caDir = "/etc/kolla/magnum-ca"
+  private val caCert = s"$caDir/ca.crt"
   private val ksUrl = s"https://$ksFqdn:5000"
   private val mgmtKubeconfig = "/var/lib/orphera/capi/kubeconfig"
   private val helperPath = "/usr/local/sbin/orphera-magnum-api"
@@ -135,14 +156,16 @@ object magnum_single_node extends OrpheraClusterPlaybook:
     Image("magnum-api", Release.R2025_1, Base.UbuntuNoble, registry).ref
   private val conductorBase =
     Image("magnum-conductor", Release.R2025_1, Base.UbuntuNoble, registry).ref
-  private val pylibDir = "/var/lib/orphera/magnum/pylib"
 
-  // The two containers as data. They run the stock Kolla images. Defined after the directory vals, which
-  // they read; a val used before its definition is null in an object.
-  private def magnumContainer(service: String, image: String): Container =
+  // The conductor first, the API last.
+  private val serviceNames = List("magnum-conductor", "magnum-api")
+
+  // The two containers as data. They run the stock Kolla images. Defined after the directory vals, which they
+  // read; a val used before its definition is null in an object.
+  private def magnumContainer(service: String): Container =
     Container(
       name = ContainerName(service),
-      image = ExternalImage(image),
+      image = ExternalImage(if service == "magnum-api" then apiBase else conductorBase),
       mounts = List(
         Mount(s"$confRoot/$service", "/var/lib/kolla/config_files"),
         Mount(logDir, "/var/log/kolla/magnum", Access.ReadWrite),
@@ -157,67 +180,29 @@ object magnum_single_node extends OrpheraClusterPlaybook:
       user = Some("root"),
       settleSeconds = 12
     )
-  private val magnumServices: List[Container] =
-    List(
-      magnumContainer("magnum-conductor", conductorBase),
-      magnumContainer("magnum-api", apiBase)
-    )
+  private val containers: List[Container] = serviceNames.map(magnumContainer)
 
   private val hostPackages =
     List("podman", "openssl", "curl", "ca-certificates", "python3")
 
-  private def fill(s: String): String =
-    s.replace("@@CONF@@", confRoot)
-      .replace("@@SRC@@", srcDir)
-      .replace("@@LOG@@", logDir)
-      .replace("@@STATE@@", stateDir)
-      .replace("@@DATA@@", dataDir)
-      .replace("@@BUILD@@", buildDir)
-      .replace("@@PYLIB@@", pylibDir)
-      .replace("@@CA@@", caDir)
-      .replace("@@HELPER@@", helperPath)
-      .replace("@@KUBECONFIG@@", mgmtKubeconfig)
-
+  // A fresh VM may still be running unattended-upgrades; when it finishes needrestart restarts the agent and
+  // kills the running task. Wait for it before touching packages.
+  private val aptIdle =
+    """! pgrep -f '^/usr/bin/python3 /usr/bin/unattended-upgrade$' >/dev/null && ! pgrep -x apt-get >/dev/null && ! pgrep -x apt >/dev/null && ! pgrep -x dpkg >/dev/null"""
   private val waitAptIdleScript =
-    """for i in $(seq 1 180); do
-      |  if pgrep -f '^/usr/bin/python3 /usr/bin/unattended-upgrade$' >/dev/null || pgrep -x apt-get >/dev/null || pgrep -x apt >/dev/null || pgrep -x dpkg >/dev/null; then
-      |    sleep 5
-      |  else
-      |    echo "apt and dpkg are idle"
-      |    exit 0
-      |  fi
-      |done
-      |echo "apt/dpkg still busy after 15 minutes" >&2
-      |exit 1""".stripMargin
+    s"""for i in $$(seq 1 180); do
+       |  if $aptIdle; then
+       |    echo "apt and dpkg are idle"
+       |    exit 0
+       |  fi
+       |  sleep 5
+       |done
+       |echo "apt/dpkg still busy after 15 minutes (unattended-upgrades?)" >&2
+       |exit 1""".stripMargin
 
-  // ---- tst3 / tst10 ----------------------------------------------------
-
-  private val createDatabaseScript =
-    s"""mariadb -N -e "CREATE DATABASE IF NOT EXISTS $dbName; CREATE USER IF NOT EXISTS '$dbUser'@'%' IDENTIFIED BY '${dbPassword.reveal}'; GRANT ALL PRIVILEGES ON $dbName.* TO '$dbUser'@'%'; FLUSH PRIVILEGES;""""
-
-  private val rabbitScript =
-    s"""set -e
-       |if ! podman ps -q --filter 'name=^rabbitmq$$' | grep -q .; then
-       |  echo "no running 'rabbitmq' container on this node - apply rabbitmq_single_node.scala first" >&2
-       |  exit 1
-       |fi
-       |if ! podman exec rabbitmq rabbitmqctl list_vhosts -q | grep -qx '$rabbitVhost'; then
-       |  podman exec rabbitmq rabbitmqctl add_vhost '$rabbitVhost'
-       |fi
-       |if podman exec rabbitmq rabbitmqctl list_users -q | awk '{print $$1}' | grep -qx '$rabbitUser'; then
-       |  podman exec rabbitmq rabbitmqctl change_password '$rabbitUser' '${rabbitPassword.reveal}'
-       |else
-       |  podman exec rabbitmq rabbitmqctl add_user '$rabbitUser' '${rabbitPassword.reveal}'
-       |fi
-       |podman exec rabbitmq rabbitmqctl set_permissions -p '$rabbitVhost' '$rabbitUser' '.*' '.*' '.*'
-       |echo "rabbitmq vhost $rabbitVhost and user $rabbitUser ready"""".stripMargin
-
-  // ---- the node --------------------------------------------------------
-
-  private val useCacheScript =
-    s"""mkdir -p /etc/containers/registries.conf.d
-       |cat > /etc/containers/registries.conf.d/orphera-kolla-cache.conf <<'REG'
-       |[[registry]]
+  // The Kolla cache as a mirror of quay.io (podman registries.conf.d drop-in).
+  private val registryMirror =
+    s"""[[registry]]
        |prefix = "quay.io"
        |location = "quay.io"
        |
@@ -228,19 +213,22 @@ object magnum_single_node extends OrpheraClusterPlaybook:
        |[[registry.mirror]]
        |location = "$cacheHostPort"
        |insecure = true
-       |REG
-       |echo "podman will try tst21.ljalbinson.com:5000 (built images), then $cacheHostPort, before quay.io"""".stripMargin
+       |""".stripMargin
 
+  private val images = List(apiBase, conductorBase)
   private val pullScript =
     s"""${Pull.shellFunction(
         "the Image(...) values in magnum_single_node.scala"
       )}
-       |for img in $apiBase $conductorBase; do
+       |for img in ${images.mkString(" ")}; do
        |  pull_retry $$img || exit 1
        |done
        |echo "images ready"""".stripMargin
+  private val imagesPresent =
+    s"""for img in ${images.mkString(" ")}; do podman image exists $$img || exit 1; done"""
 
-  private val baseCheckScript =
+  // The commands the service needs are in its image, and the image can switch off the other Cluster API driver.
+  private val imageCommandsScript =
     s"""for spec in "$apiBase magnum-api" "$conductorBase magnum-conductor" "$apiBase magnum-db-manage"; do
        |  set -- $$spec
        |  if ! podman run --rm --entrypoint sh $$1 -c "command -v $$2 >/dev/null"; then
@@ -253,35 +241,56 @@ object magnum_single_node extends OrpheraClusterPlaybook:
        |  exit 1
        |fi
        |echo "the Magnum commands are in the images"""".stripMargin
+  private val imageCommandsOk = s"( $imageCommandsScript ) >/dev/null 2>&1"
 
-  private val fetchCaScript =
-    fill(
-      s"""set -e
-         |mkdir -p @@CA@@
-         |rm -f /tmp/ks-chain-*.pem
-         |openssl s_client -connect $ksFqdn:5000 -servername $ksFqdn -showcerts </dev/null 2>/dev/null | awk '/-----BEGIN CERTIFICATE-----/{n++} n>0{print > ("/tmp/ks-chain-" n ".pem")}'
-         |COUNT=$$(ls /tmp/ks-chain-*.pem 2>/dev/null | wc -l)
-         |if [ "$$COUNT" -lt 2 ]; then
-         |  echo "keystone at $ksFqdn:5000 presented $$COUNT certificate(s); expected leaf + CA - re-run keystone_single_node.scala (it must serve server-chain.crt)" >&2
-         |  exit 1
-         |fi
-         |cp /tmp/ks-chain-$$COUNT.pem @@CA@@/ca.crt
-         |openssl verify -CAfile @@CA@@/ca.crt /tmp/ks-chain-1.pem
-         |SUBJ=$$(openssl x509 -in @@CA@@/ca.crt -noout -subject | sed 's/^subject=//')
-         |ISS=$$(openssl x509 -in @@CA@@/ca.crt -noout -issuer | sed 's/^issuer=//')
-         |if [ "$$SUBJ" != "$$ISS" ]; then echo "last certificate is not self-signed: $$SUBJ / $$ISS" >&2; exit 1; fi
-         |rm -f /tmp/ks-chain-*.pem
-         |cp @@CA@@/ca.crt /usr/local/share/ca-certificates/orphera-test-ca.crt
-         |update-ca-certificates
-         |echo "Keystone CA installed: $$SUBJ"""".stripMargin
-    )
+  // Keystone's CA: the last certificate it presents (trust on first use), which must be self-signed.
+  // `chainTo DIR` leaves DIR/c1.pem ... DIR/cN.pem, each holding the certificate only: the text s_client
+  // prints after the last one differs on every handshake, and would make the comparison fail.
+  private val chainTo =
+    s"""chainTo() { openssl s_client -connect $ksFqdn:5000 -servername $ksFqdn -showcerts </dev/null 2>/dev/null | awk -v d="$$1" '/-----BEGIN CERTIFICATE-----/{n++; p=1} p{print > (d "/c" n ".pem")} /-----END CERTIFICATE-----/{p=0}'; }"""
 
-  private val dirsScript =
-    fill(
-      "mkdir -p @@SRC@@ @@LOG@@ @@STATE@@ @@DATA@@ @@DATA@@/tmp @@BUILD@@\necho directories ready"
-    )
+  private val trustTarget =
+    """if command -v update-ca-certificates >/dev/null 2>&1; then t=/usr/local/share/ca-certificates/orphera-test-ca.crt; else t=/etc/pki/ca-trust/source/anchors/orphera-test-ca.crt; fi"""
 
-  // The driver goes into @@PYLIB@@ with the image's own Python, so the wheel matches the Python in the
+  // Current when the installed CA is the one Keystone presents now, and is in the system trust store.
+  private val caCurrent =
+    s"""$chainTo
+       |D=$$(mktemp -d)
+       |chainTo $$D
+       |N=$$(ls $$D/c*.pem 2>/dev/null | wc -l)
+       |R=1
+       |if [ "$$N" -ge 2 ]; then
+       |  $trustTarget
+       |  cmp -s $$D/c$$N.pem $caCert && cmp -s $caCert "$$t" && R=0
+       |fi
+       |rm -rf $$D
+       |exit $$R""".stripMargin
+
+  private val caScript =
+    s"""set -e
+       |$chainTo
+       |mkdir -p $caDir
+       |D=$$(mktemp -d)
+       |trap 'rm -rf $$D' EXIT
+       |chainTo $$D
+       |COUNT=$$(ls $$D/c*.pem 2>/dev/null | wc -l)
+       |if [ "$$COUNT" -lt 2 ]; then
+       |  echo "keystone at $ksFqdn:5000 presented $$COUNT certificate(s); expected leaf + CA - apply keystone_single_node.scala (it must serve server-chain.crt)" >&2
+       |  exit 1
+       |fi
+       |cp $$D/c$$COUNT.pem $caCert
+       |openssl verify -CAfile $caCert $$D/c1.pem
+       |SUBJ=$$(openssl x509 -in $caCert -noout -subject | sed 's/^subject=//')
+       |ISS=$$(openssl x509 -in $caCert -noout -issuer | sed 's/^issuer=//')
+       |if [ "$$SUBJ" != "$$ISS" ]; then echo "last certificate is not self-signed: $$SUBJ / $$ISS" >&2; exit 1; fi
+       |$trustTarget
+       |cp $caCert "$$t"
+       |if command -v update-ca-certificates >/dev/null 2>&1; then update-ca-certificates; else update-ca-trust; fi
+       |echo "Keystone CA installed: $$SUBJ"""".stripMargin
+
+  // ---- the Cluster API driver --------------------------------------------
+
+  // The driver goes into pylibDir with the image's own Python, so the wheel matches the Python in the
   // containers. No dependencies are installed (pip cannot replace the Magnum and oslo libraries); a missing
   // dependency shows up in the import check, which names it. Only `podman run` is used.
   private val installInImage =
@@ -291,25 +300,31 @@ object magnum_single_node extends OrpheraClusterPlaybook:
        |chmod -R a+rX /out
        |PYTHONPATH=/out "$$PY" -c 'import magnum_capi_helm.driver; print("driver import ok")'""".stripMargin
 
-  private val buildScript =
-    fill(s"""set -e
-         |if [ ! -x /usr/local/bin/helm ]; then
-         |  echo "helm is not installed - apply capi_management_cluster.scala first" >&2
-         |  exit 1
-         |fi
-         |mkdir -p @@PYLIB@@ @@BUILD@@
-         |cat > @@BUILD@@/install-in-image.sh <<'INSTALL'
-         |$installInImage
-         |INSTALL
-         |podman run --rm --user root --entrypoint sh -v @@PYLIB@@:/out:z -v @@BUILD@@/install-in-image.sh:/install-in-image.sh:ro,z $conductorBase /install-in-image.sh
-         |podman run --rm --user root --entrypoint sh -e PYTHONPATH=@@PYLIB@@ -v @@PYLIB@@:@@PYLIB@@:ro,z $apiBase -c "/var/lib/kolla/venv/bin/python -c 'import magnum_capi_helm.driver' && echo api-image-import-ok"
-         |helm version --short
-         |echo "driver installed in @@PYLIB@@"
-         |""".stripMargin)
+  private val driverStamp = Resource.sha256(installInImage + apiBase + conductorBase)
+  private val driverStampFile = s"$stateDir/driver.stamp"
+  // True when the driver imports in the conductor image with the directory mounted, helm is there, and the stamp
+  // is the one the last install made.
+  private val driverCurrent =
+    s"""[ "$$(cat $driverStampFile 2>/dev/null)" = "$driverStamp" ] && [ -x /usr/local/bin/helm ] && podman run --rm --user root --entrypoint sh -e PYTHONPATH=$pylibDir -v $pylibDir:$pylibDir:ro,z $conductorBase -c "/var/lib/kolla/venv/bin/python -c 'import magnum_capi_helm.driver'" >/dev/null 2>&1"""
 
-  // Standard-library Python, as in the other service playbooks. Subcommands:
-  //   register | unregister | catalog | mservices | resources | image-present | image-upload FILE KUBE_VERSION
-  //   OS_VERSION | template | cluster-cycle | teardown
+  private val driverScript =
+    s"""set -e
+       |if [ ! -x /usr/local/bin/helm ]; then
+       |  echo "helm is not installed - apply capi_management_cluster.scala first" >&2
+       |  exit 1
+       |fi
+       |mkdir -p $pylibDir $buildDir
+       |cat > $buildDir/install-in-image.sh <<'INSTALL'
+       |$installInImage
+       |INSTALL
+       |podman run --rm --user root --entrypoint sh -v $pylibDir:/out:z -v $buildDir/install-in-image.sh:/install-in-image.sh:ro,z $conductorBase /install-in-image.sh
+       |podman run --rm --user root --entrypoint sh -e PYTHONPATH=$pylibDir -v $pylibDir:$pylibDir:ro,z $apiBase -c "/var/lib/kolla/venv/bin/python -c 'import magnum_capi_helm.driver' && echo api-image-import-ok"
+       |helm version --short
+       |echo $driverStamp > $driverStampFile
+       |echo "driver installed in $pylibDir"""".stripMargin
+
+  // ---- the helper ----------------------------------------------------------
+
   private val apiHelperPython =
     """#!/usr/bin/python3
 import json, os, ssl, subprocess, sys, time, urllib.request, urllib.error
@@ -693,10 +708,82 @@ def teardown():
     print('removed the Magnum clusters, template, flavor, key pair, image and Keystone entries')
 
 
+def registered():
+    # Exit 0 only when everything register() makes is in place: the user magnum (able to log in with the stored
+    # password) with the admin role on project service, the service of type container-infra with its three
+    # endpoints, the trustee domain magnum and its admin user (able to log in, with the admin role on the
+    # domain). Makes no change.
+    token, _ = get_token('admin', ADMIN_PW, 'admin')
+    project = find(token, '/projects?name=service', 'projects')
+    user = find(token, '/users?name=magnum', 'users')
+    admin_role = find(token, '/roles?name=admin', 'roles')
+    if project is None or user is None or admin_role is None:
+        die('project service, user magnum or role admin is missing')
+    body = {'auth': {'identity': {'methods': ['password'], 'password': {'user': {'name': 'magnum', 'domain': {'name': 'Default'}, 'password': MAGNUM_PW}}}}}
+    s, _, _ = call('POST', KS + '/auth/tokens', body)
+    if s != 201:
+        die('user magnum cannot log in with the stored password')
+    s, _, _ = call('GET', KS + '/projects/%s/users/%s/roles/%s' % (project['id'], user['id'], admin_role['id']), None, token)
+    if s != 204:
+        die('user magnum has no admin role on project service (HTTP %s)' % s)
+    service = find(token, '/services?type=container-infra', 'services')
+    if service is None:
+        die('service of type container-infra is missing')
+    for iface in ('public', 'internal', 'admin'):
+        ep = find(token, '/endpoints?service_id=%s&interface=%s' % (service['id'], iface), 'endpoints')
+        if ep is None or ep['url'] != MAGNUM + '/v1':
+            die('the %s endpoint is missing or differs' % iface)
+    domain = find(token, '/domains?name=magnum', 'domains')
+    if domain is None:
+        die('domain magnum is missing')
+    dadmin = find(token, '/users?name=magnum_domain_admin&domain_id=' + domain['id'], 'users')
+    if dadmin is None:
+        die('user magnum_domain_admin is missing')
+    body = {'auth': {'identity': {'methods': ['password'], 'password': {'user': {'name': 'magnum_domain_admin', 'domain': {'name': 'magnum'}, 'password': DOMAIN_PW}}}}}
+    s, _, _ = call('POST', KS + '/auth/tokens', body)
+    if s != 201:
+        die('user magnum_domain_admin cannot log in with the stored password')
+    s, _, _ = call('GET', KS + '/domains/%s/users/%s/roles/%s' % (domain['id'], dadmin['id'], admin_role['id']), None, token)
+    if s != 204:
+        die('user magnum_domain_admin has no admin role on domain magnum (HTTP %s)' % s)
+    print('magnum is registered in keystone')
+
+
+def resources_ok():
+    # Exit 0 when the flavor and the key pair that resources() makes exist. Makes no change.
+    cl = Clients()
+    s, _, _ = cl.c('GET', '/flavors/' + FLAVOR_ID)
+    if s != 200:
+        die('flavor %s is missing (HTTP %s)' % (FLAVOR_ID, s))
+    s, _, _ = cl.c('GET', '/os-keypairs/' + KEYPAIR)
+    if s != 200:
+        die('key pair %s is missing (HTTP %s)' % (KEYPAIR, s))
+    print('flavor %s and key pair %s exist' % (FLAVOR_ID, KEYPAIR))
+
+
+def template_ok():
+    # Exit 0 when the template exists with the Kubernetes image Glance has now and the DNS server chosen, which
+    # is what ensure_template() leaves. Makes no change.
+    cl = Clients()
+    imgs = k8s_images(cl)
+    if not imgs:
+        die('no Kubernetes image in Glance')
+    s, p, _ = cl.m('GET', '/clustertemplates')
+    if s != 200:
+        die('template list failed: HTTP %s %s' % (s, p))
+    for t in p.get('clustertemplates', []):
+        if t.get('name') == TEMPLATE and t.get('image_id') == imgs[0]['id'] and t.get('dns_nameserver') == DNS:
+            print('cluster template %s is in place (%s)' % (TEMPLATE, t['uuid']))
+            return
+    die('cluster template %s is missing or differs' % TEMPLATE)
+
+
 if __name__ == '__main__':
     cmd = sys.argv[1] if len(sys.argv) > 1 else ''
     if cmd == 'register':
         register()
+    elif cmd == 'registered':
+        registered()
     elif cmd == 'unregister':
         unregister()
     elif cmd == 'catalog':
@@ -705,12 +792,16 @@ if __name__ == '__main__':
         mservices()
     elif cmd == 'resources':
         resources()
+    elif cmd == 'resources-ok':
+        resources_ok()
     elif cmd == 'image-present':
         image_present()
     elif cmd == 'image-upload' and len(sys.argv) > 4:
         image_upload(sys.argv[2], sys.argv[3], sys.argv[4])
     elif cmd == 'template':
         template()
+    elif cmd == 'template-ok':
+        template_ok()
     elif cmd == 'cluster-cycle':
         cluster_cycle()
     elif cmd == 'delete-clusters':
@@ -718,23 +809,22 @@ if __name__ == '__main__':
     elif cmd == 'teardown':
         teardown()
     else:
-        die('usage: orphera-magnum-api register | unregister | catalog | mservices | resources | image-present | image-upload FILE KUBE_VERSION OS_VERSION | template | cluster-cycle | delete-clusters | teardown')
+        die('usage: orphera-magnum-api register | registered | unregister | catalog | mservices | resources | resources-ok | image-present | image-upload FILE KUBE_VERSION OS_VERSION | template | template-ok | cluster-cycle | delete-clusters | teardown')
 """
 
-  private val helperScript =
-    "cat > " + helperPath + " <<'PYEOF'\n" +
-      fill(apiHelperPython)
-        .replace("@@KS@@", ksFqdn)
-        .replace("@@MAGNUM@@", s"http://$fqdn:$apiPort")
-        .replace("@@ADMINPW@@", adminPassword.reveal)
-        .replace("@@MAGNUMPW@@", magnumPassword.reveal)
-        .replace("@@DOMAINPW@@", domainAdminPassword.reveal)
-        .replace("@@CAFILE@@", s"$caDir/ca.crt")
-        .replace("@@FLAVORID@@", k8sFlavorId)
-        .replace("@@DNS@@", dnsServer) +
-      "\nPYEOF\nchmod 700 " + helperPath + "\necho wrote " + helperPath + "\n"
 
-  // ---- magnum.conf -----------------------------------------------------
+  private val helper =
+    apiHelperPython
+      .replace("@@KS@@", ksFqdn)
+      .replace("@@MAGNUM@@", s"http://$fqdn:$apiPort")
+      .replace("@@ADMINPW@@", adminPassword.reveal)
+      .replace("@@MAGNUMPW@@", magnumPassword.reveal)
+      .replace("@@DOMAINPW@@", domainAdminPassword.reveal)
+      .replace("@@CAFILE@@", caCert)
+      .replace("@@FLAVORID@@", k8sFlavorId)
+      .replace("@@DNS@@", dnsServer)
+
+  // ---- magnum.conf ---------------------------------------------------------
 
   private val magnumConf: String =
     s"""# Managed by Orphera (magnum_single_node.scala)
@@ -819,63 +909,76 @@ if __name__ == '__main__':
        |lock_path = /var/lib/magnum/tmp
        |""".stripMargin
 
-  private val kollaConfigScript =
-    fill(
-      """set -e
-        |for svc in api conductor; do
-        |  d=@@CONF@@/magnum-$svc
-        |  mkdir -p $d
-        |  cp @@SRC@@/magnum.conf @@CA@@/ca.crt @@SRC@@/kubeconfig $d/
-        |  chmod 600 $d/kubeconfig
-        |  cat > $d/config.json <<JSON
-        |{"command": "magnum-$svc", "config_files": [
-        |  {"source": "/var/lib/kolla/config_files/magnum.conf", "dest": "/etc/magnum/magnum.conf", "owner": "magnum", "perm": "0600"},
-        |  {"source": "/var/lib/kolla/config_files/ca.crt", "dest": "/etc/magnum/ssl/ca.crt", "owner": "magnum", "perm": "0644"},
-        |  {"source": "/var/lib/kolla/config_files/kubeconfig", "dest": "/etc/magnum/kubeconfig", "owner": "magnum", "perm": "0600"}
-        |], "permissions": [
-        |  {"path": "/var/log/kolla/magnum", "owner": "magnum:kolla", "recurse": true},
-        |  {"path": "/var/lib/magnum", "owner": "magnum:magnum", "recurse": true}
-        |]}
-        |JSON
-        |  python3 -c "import json; json.load(open('$d/config.json'))"
-        |done
-        |echo "kolla config written under @@CONF@@"
-        |""".stripMargin
-    )
 
-  private val kubeconfigScript =
-    fill(
-      """set -e
-        |if [ ! -s @@KUBECONFIG@@ ]; then
-        |  echo "no kubeconfig at @@KUBECONFIG@@ - apply capi_management_cluster.scala first" >&2
-        |  exit 1
-        |fi
-        |install -m 0600 @@KUBECONFIG@@ @@SRC@@/kubeconfig
-        |echo "management cluster kubeconfig copied"
-        |""".stripMargin
-    )
+  // The files every service's config.json copies in, and the ownership it sets.
+  private def configJson(service: String): String =
+    s"""{"command": "$service", "config_files": [
+       |  {"source": "/var/lib/kolla/config_files/magnum.conf", "dest": "/etc/magnum/magnum.conf", "owner": "magnum", "perm": "0600"},
+       |  {"source": "/var/lib/kolla/config_files/ca.crt", "dest": "/etc/magnum/ssl/ca.crt", "owner": "magnum", "perm": "0644"},
+       |  {"source": "/var/lib/kolla/config_files/kubeconfig", "dest": "/etc/magnum/kubeconfig", "owner": "magnum", "perm": "0600"}
+       |], "permissions": [
+       |  {"path": "/var/log/kolla/magnum", "owner": "magnum:kolla", "recurse": true},
+       |  {"path": "/var/lib/magnum", "owner": "magnum:magnum", "recurse": true}
+       |]}
+       |""".stripMargin
 
+  // magnum-db-manage runs in a one-off container with magnum.conf bind-mounted (entrypoint overridden, so
+  // kolla_set_configs does not run) and the driver directory on the path. `:z` relabels for SELinux hosts and is
+  // ignored elsewhere.
   private val dbSyncScript =
+    s"""set -e
+       |podman run --rm --network host --user root --entrypoint magnum-db-manage -v $confRoot/magnum-api/magnum.conf:/etc/magnum/magnum.conf:ro,z -v $logDir:/var/log/kolla/magnum:z -e PYTHONPATH=$pylibDir -v $pylibDir:$pylibDir:ro,z $apiBase --config-file /etc/magnum/magnum.conf upgrade
+       |echo "magnum database synced"""".stripMargin
+
+  // Runs a Python snippet in the magnum-api image, with its own interpreter (the one named on the first line of
+  // magnum-db-manage), which has pymysql. `body` is indented lines inside a `try`; the connection is `c`. Exit 0
+  // when the snippet ends normally, 1 on any error.
+  private def dbProbe(body: String): String =
+    s"""podman run --rm -i --network host --entrypoint sh $apiBase -c 'exec $$(head -1 "$$(command -v magnum-db-manage)" | sed "s/^#!//") -' >/dev/null 2>&1 <<'PYEOF'
+       |import sys, pymysql
+       |try:
+       |    c = pymysql.connect(host='$vip', user='$dbUser', password='${dbPassword.reveal}', database='$dbName')
+       |$body
+       |except Exception:
+       |    sys.exit(1)
+       |PYEOF""".stripMargin
+
+  private val dbStamp = Resource.sha256(dbSyncScript + magnumConf)
+  // True when the magnum database, queried as the magnum user through the VIP, has the `cluster_template` table.
+  private val dbInState =
+    dbProbe("    c.cursor().execute('SELECT COUNT(*) FROM cluster_template')")
+  // Current when the stamp matches AND the database is in that state.
+  private val dbCurrent =
+    s"""[ "$$(cat $stateDir/db.stamp 2>/dev/null)" = "$dbStamp" ] &&
+       |$dbInState""".stripMargin
+  private val dbSyncWithStamp =
+    s"""$dbSyncScript
+       |echo $dbStamp > $stateDir/db.stamp""".stripMargin
+
+  // ---- the Kubernetes node image -------------------------------------------
+
+  private def fill(s: String): String =
+    s.replace("@@STATE@@", stateDir).replace("@@HELPER@@", helperPath)
+
+  // A step that runs for minutes with no output can lose its connection to the agent, so the download and the
+  // upload each print a line every 20 seconds while they work.
+  private val heartbeat =
+    """heartbeat() { "$@" & P=$!; while kill -0 $P 2>/dev/null; do sleep 20; echo "still working ($(date +%H:%M:%S))"; done; wait $P; }"""
+
+  // What was asked for, to tell a downloaded image from one for another choice.
+  private val imageChoice =
+    Resource.sha256(k8sVersion + "|" + k8sMinor + "|" + k8sImageUrl + "|" + k8sOsVersion + "|" + manifestUrl)
+
+  // Step one: choose the image, download it and check it, and note what was chosen in image.current.
+  private val fetchImageScript =
     fill(
       s"""set -e
-         |podman run --rm --network host --user root --entrypoint magnum-db-manage -v @@SRC@@/magnum.conf:/etc/magnum/magnum.conf:ro,z -v @@LOG@@:/var/log/kolla/magnum:z -e PYTHONPATH=@@PYLIB@@ -v @@PYLIB@@:@@PYLIB@@:ro,z $apiBase --config-file /etc/magnum/magnum.conf upgrade
-         |echo "magnum database synced"""".stripMargin
-    )
-
-  // ---- the Kubernetes node image ---------------------------------------
-
-  private val imageScript =
-    fill(
-      s"""set -e
-         |if @@HELPER@@ image-present; then
-         |  exit 0
-         |fi
+         |$heartbeat
          |K8S_VERSION='$k8sVersion'
          |K8S_MINOR='$k8sMinor'
          |IMAGE_URL='$k8sImageUrl'
          |OS_VERSION='$k8sOsVersion'
          |MANIFEST_URL='$manifestUrl'
-         |IMG=@@STATE@@/k8s-image.qcow2
          |SUM=
          |if [ -z "$$IMAGE_URL" ]; then
          |  curl -fsSL --retry 3 --connect-timeout 30 -o @@STATE@@/manifest.json "$$MANIFEST_URL" || { echo "cannot download $$MANIFEST_URL - set K8S_IMAGE_URL, K8S_VERSION and K8S_OS_VERSION" >&2; exit 1; }
@@ -926,12 +1029,18 @@ if __name__ == '__main__':
          |  exit 1
          |fi
          |echo "image: $$IMAGE_URL ($$K8S_VERSION, Ubuntu $$OS_VERSION)"
+         |IMG=@@STATE@@/k8s-image-$$K8S_VERSION.qcow2
+         |rm -f @@STATE@@/k8s-image.qcow2
+         |if [ -s $$IMG ] && [ -n "$$SUM" ] && ! echo "$$SUM  $$IMG" | sha256sum -c - >/dev/null 2>&1; then
+         |  echo "the kept image file does not match its checksum; downloading it again"
+         |  rm -f $$IMG
+         |fi
          |if [ ! -s $$IMG ]; then
-         |  curl -fL --retry 3 --connect-timeout 30 -o $$IMG.part "$$IMAGE_URL" || { rm -f $$IMG.part; echo "cannot download the image - put it at $$IMG and run again" >&2; exit 1; }
+         |  heartbeat curl -fsSL --retry 3 --connect-timeout 30 -o $$IMG.part "$$IMAGE_URL" || { rm -f $$IMG.part; echo "cannot download the image - put it at $$IMG and run again" >&2; exit 1; }
          |  mv $$IMG.part $$IMG
          |fi
          |if [ -n "$$SUM" ]; then
-         |  echo "$$SUM  $$IMG" | sha256sum -c - || { echo "checksum mismatch - delete $$IMG and run again" >&2; exit 1; }
+         |  echo "$$SUM  $$IMG" | sha256sum -c - || { echo "checksum mismatch after the download - the image at $$IMAGE_URL differs from its manifest entry" >&2; exit 1; }
          |fi
          |MAGIC=$$(head -c 3 $$IMG)
          |if [ "$$MAGIC" != "QFI" ]; then
@@ -939,134 +1048,260 @@ if __name__ == '__main__':
          |  exit 1
          |fi
          |ls -l $$IMG
-         |@@HELPER@@ image-upload $$IMG $$K8S_VERSION $$OS_VERSION""".stripMargin
+         |printf "IMG='%s'\\nK8S_VERSION='%s'\\nOS_VERSION='%s'\\nCHOICE='%s'\\n" "$$IMG" "$$K8S_VERSION" "$$OS_VERSION" "$imageChoice" > @@STATE@@/image.current
+         |echo "image ready: $$IMG"""".stripMargin
     )
 
-  // The API answers its version document without a token.
-  private val apiHealthScript =
-    s"""CODE=$$(curl -s -o /dev/null -w '%{http_code}' http://localhost:$apiPort/)
-       |[ "$$CODE" = "200" ] || [ "$$CODE" = "300" ]""".stripMargin
+  // Step two: upload what step one noted.
+  private val uploadImageScript =
+    fill(
+      s"""set -e
+         |$heartbeat
+         |. @@STATE@@/image.current
+         |heartbeat @@HELPER@@ image-upload "$$IMG" "$$K8S_VERSION" "$$OS_VERSION"""".stripMargin
+    )
 
-  private val routeCheckScript =
+  private val imagePresent = s"$helperPath image-present >/dev/null 2>&1"
+  // Nothing to fetch when Glance has an image, or the file for this choice is there.
+  private val imageFetched =
+    s"""$imagePresent || ( [ -s $stateDir/image.current ] && . $stateDir/image.current && [ "$$CHOICE" = "$imageChoice" ] && [ -s "$$IMG" ] )"""
+
+
+  // The API answers its version document without a token (200, or 300 for a list of versions).
+  private val healthy =
+    s"""CODE=$$(curl -s -o /dev/null -w '%{http_code}' http://localhost:$apiPort/); [ "$$CODE" = "200" ] || [ "$$CODE" = "300" ]"""
+  private val waitHealthy =
+    s"""for i in $$(seq 1 36); do
+       |  ( $healthy ) && exit 0
+       |  sleep 5
+       |done
+       |echo "magnum-api does not answer on $apiPort - see 'journalctl -xeu orphera-magnum-api' and $logDir" >&2
+       |exit 1""".stripMargin
+
+  // The conductor reports in every few seconds; give it three minutes to appear as `up` through the API.
+  private val conductorUp = s"$helperPath mservices >/dev/null 2>&1"
+  private val waitConductorUp =
+    s"""for i in $$(seq 1 36); do $helperPath mservices && exit 0; sleep 5; done
+       |echo "magnum-conductor never reported up - see 'journalctl -xeu orphera-magnum-conductor'" >&2
+       |exit 1""".stripMargin
+
+  private val routeOk = "ip route get 10.10.6.200 >/dev/null 2>&1"
+  private val routeScript =
     """ip route get 10.10.6.200
       |echo "route to the floating IP network ok"""".stripMargin
 
-  private val checkMode = sys.env.get("ORPHERA_CHECK").contains("1")
-  private val unitResource = summon[Resource[Container]]
+  // The test cluster is made again when this changes: the configuration, the driver and the image choice.
+  private val cycleStamp = Resource.sha256(
+    magnumConf + driverStamp + dnsServer + k8sVersion + k8sMinor + k8sImageUrl + k8sOsVersion + manifestUrl
+  )
+  private val cycleStampFile = s"$stateDir/cycle.stamp"
+  private val cycleCurrent =
+    s"""[ "$$(cat $cycleStampFile 2>/dev/null)" = "$cycleStamp" ]"""
+  private val cycleScript =
+    s"""set -e
+       |$heartbeat
+       |heartbeat $helperPath cluster-cycle
+       |echo $cycleStamp > $cycleStampFile""".stripMargin
 
-  private def withServices(b: StageBuilder): StageBuilder =
-    val written = magnumServices.foldLeft(b)((acc, c) =>
-      acc.task(s"write ${c.unitName}")(c.writeUnit)
-    )
-    magnumServices.foldLeft(written)((acc, c) =>
-      acc.task(s"start ${c.unitName}")(c.start)
-    )
+  // One service: its resources (written before it starts), the ones that decide when it restarts.
+  private final case class Svc(
+      unit: ApplyResource,
+      resources: List[ApplyResource],
+      deps: List[ApplyResource],
+      conf: ApplyResource
+  )
 
-  val playbook: ClusterPlaybook =
-    if checkMode then
-      clusterPlaybook("magnum-single-node-check")(
-        magnumServices
-          .foldLeft(stage("check-magnum", node))((acc, c) =>
-            acc.task(s"check ${c.unitName}")(unitResource.check(c))
-          )
-          .build
+  def describe(target: Node): List[ApplyResource] =
+    val aptWait = command(
+      "wait for apt and dpkg to be idle",
+      waitAptIdleScript,
+      unless = aptIdle,
+      timeout = 960
+    )
+    val tools = hostPackages.map(p => pkg(p, updateCache = true).after(aptWait))
+    val podman = tools(0)
+
+    val mirrorDir = directory("/etc/containers/registries.conf.d").after(podman)
+    val mirror = file(
+      "/etc/containers/registries.conf.d/orphera-kolla-cache.conf",
+      registryMirror,
+      mode = "0644"
+    ).after(mirrorDir)
+    val pulled = command(
+      "pull the Magnum images",
+      pullScript,
+      unless = imagesPresent,
+      timeout = 2400
+    ).after(podman, mirror)
+    val commandsOk = command(
+      "check that the commands are in the images",
+      imageCommandsScript,
+      unless = imageCommandsOk,
+      timeout = 300
+    ).after(pulled)
+
+    val caDirectory = directory(caDir, mode = "0755").after(podman)
+    val ca = command(
+      "fetch Keystone's CA from its TLS handshake",
+      caScript,
+      unless = caCurrent,
+      timeout = 60
+    ).after(caDirectory, tools(1))
+
+    val logDirectory = directory(logDir)
+    val stateDirectory = directory(stateDir)
+    val dataDirectory = directory(dataDir).after(stateDirectory)
+    val tmpDirectory = directory(s"$dataDir/tmp").after(dataDirectory)
+    val buildDirectory = directory(buildDir).after(stateDirectory)
+    val pylibDirectory = directory(pylibDir).after(stateDirectory)
+
+    val unitServices = containers.map(c => service(c.unitName))
+    val driver = command(
+      "install the Cluster API driver for Magnum",
+      driverScript,
+      unless = driverCurrent,
+      timeout = 1800
+    ).after(
+      (commandsOk :: pulled :: podman :: tools(1) :: stateDirectory :: pylibDirectory :: buildDirectory :: Nil)*
+    ).notifies(unitServices*)
+
+    // One config directory per service, mounted by Kolla at /var/lib/kolla/config_files.
+    val svcs = serviceNames.zip(containers).zip(unitServices).map { case ((name, c), unitService) =>
+      val dir = s"$confRoot/$name"
+      val dirRes = directory(dir, mode = "0755")
+      val conf = secretFile(
+        s"$dir/magnum.conf",
+        Secret(magnumConf), // it holds the database, message bus and service passwords
+        mode = "0600",
+        owner = "root",
+        group = "root"
+      ).after(dirRes).notifies(unitService)
+      val kollaCa = command(
+        s"copy Keystone's CA to the $name config",
+        s"cp $caCert $dir/ca.crt",
+        unless = s"cmp -s $caCert $dir/ca.crt"
+      ).after(ca, dirRes).notifies(unitService)
+      // The management cluster's kubeconfig (capi_management_cluster.scala) is a file on this node.
+      val kubeconfig = command(
+        s"copy the management cluster kubeconfig to the $name config",
+        s"""if [ ! -s $mgmtKubeconfig ]; then echo "no kubeconfig at $mgmtKubeconfig - apply capi_management_cluster.scala first" >&2; exit 1; fi
+           |install -m 0600 $mgmtKubeconfig $dir/kubeconfig
+           |echo "management cluster kubeconfig copied"""".stripMargin,
+        unless = s"[ -s $mgmtKubeconfig ] && cmp -s $mgmtKubeconfig $dir/kubeconfig"
+      ).after(dirRes).notifies(unitService)
+      val kollaJson = file(
+        s"$dir/config.json",
+        configJson(name),
+        mode = "0644",
+        owner = "root",
+        group = "root"
+      ).after(dirRes).notifies(unitService)
+      val unitFile = file(
+        c.unitPath,
+        c.render,
+        mode = "0644",
+        owner = "root",
+        group = "root"
+      ).notifies(unitService)
+      Svc(
+        unitService,
+        List(dirRes, conf, kollaCa, kubeconfig, kollaJson, unitFile),
+        List(conf, kollaCa, kubeconfig, kollaJson, unitFile),
+        conf
       )
-    else applyPlaybook
+    }
+    val apiConf = svcs.last.conf
 
-  private def runScript(script: String, seconds: Int = 60): Task =
-    Task.RunCommand(List("sh", "-c", script), timeoutSeconds = seconds)
+    val dbSync = command(
+      "magnum-db-manage upgrade",
+      dbSyncWithStamp,
+      unless = dbCurrent,
+      timeout = 600
+    ).after(commandsOk, driver, apiConf, logDirectory, stateDirectory)
 
-  private def installMagnum: StageBuilder =
-    withServices(
-      stage("install-magnum", node)
-        .task("wait for apt and dpkg to be idle")(
-          runScript(waitAptIdleScript, 960)
-        )
-        .task("install podman, openssl and tools")(
-          Task.Install(packages = hostPackages, updateCache = true)
-        )
-        .task("use the Kolla cache as a mirror for quay.io")(
-          runScript(useCacheScript)
-        )
-        .task("pull the Magnum images")(runScript(pullScript, 1800))
-        .task("check that the commands are in the images")(
-          runScript(baseCheckScript, 300)
-        )
-        .task("fetch Keystone's CA from its TLS handshake")(
-          runScript(fetchCaScript)
-        )
-        .task("create the Magnum directories")(runScript(dirsScript))
-        .task("install the Cluster API driver for Magnum")(
-          runScript(buildScript, 1800)
-        )
-        .task("write the Magnum API helper")(runScript(helperScript))
-        .task("register Magnum and its trustee domain in Keystone")(
-          runScript(s"$helperPath register", 120)
-        )
-        .task("copy the management cluster kubeconfig")(
-          runScript(kubeconfigScript)
-        )
-        .task("write magnum.conf")(
-          Task.WriteFile(
-            content = magnumConf,
-            dest = s"$srcDir/magnum.conf",
-            owner = "root",
-            group = "root",
-            mode = 384 // 0600
-          )
-        )
-        .task("write the Kolla config")(runScript(kollaConfigScript, 240))
-        .task("magnum-db-manage upgrade")(runScript(dbSyncScript, 600))
+    val helperFile = secretFile(
+      helperPath,
+      Secret(helper), // it holds the admin, magnum and trustee domain admin passwords
+      mode = "0700",
+      owner = "root",
+      group = "root"
     )
+    // Registration comes before the services start.
+    val registered = command(
+      "register Magnum and its trustee domain in Keystone",
+      s"$helperPath register",
+      unless = s"$helperPath registered >/dev/null 2>&1",
+      timeout = 120
+    ).after(helperFile, ca)
 
-  private def applyPlaybook: ClusterPlaybook =
-    clusterPlaybook("magnum-single-node")(
-      stage("magnum-database", "tst3")
-        .task(s"create $dbName database and $dbUser on the Galera cluster")(
-          runScript(createDatabaseScript)
-        )
-        .build,
+    val running = svcs.map { s =>
+      s.unit.after(
+        (dbSync :: registered :: pulled :: driver :: logDirectory :: dataDirectory :: tmpDirectory :: s.deps)*
+      )
+    }
 
-      stage("magnum-rabbitmq", rabbitNode)
-        .task(
-          s"create the $rabbitVhost vhost and the $rabbitUser user on RabbitMQ"
-        )(runScript(rabbitScript, 120))
-        .build,
+    val answering = command(
+      "magnum-api answers on its port",
+      waitHealthy,
+      unless = healthy,
+      timeout = 240
+    ).after(running*)
+    val reporting = command(
+      "the conductor reports up through the API",
+      waitConductorUp,
+      unless = conductorUp,
+      timeout = 240
+    ).after((answering :: running)*)
+    val flavor = command(
+      "make the Kubernetes node flavor and key pair",
+      s"$helperPath resources",
+      unless = s"$helperPath resources-ok >/dev/null 2>&1",
+      timeout = 120
+    ).after(reporting)
+    val fetchedImage = command(
+      "download the Kubernetes node image",
+      fetchImageScript,
+      unless = imageFetched,
+      timeout = 3600
+    ).after(flavor, stateDirectory)
+    val nodeImage = command(
+      "upload the Kubernetes node image to Glance",
+      uploadImageScript,
+      unless = imagePresent,
+      timeout = 3600
+    ).after(fetchedImage)
+    val clusterTemplate = command(
+      "make the cluster template",
+      s"$helperPath template",
+      unless = s"$helperPath template-ok >/dev/null 2>&1",
+      timeout = 120
+    ).after(nodeImage)
+    val route = command(
+      "this node reaches the floating IP network",
+      routeScript,
+      unless = routeOk
+    ).after(clusterTemplate)
+    val cycle = command(
+      "make a Kubernetes cluster, ask its API for the version, delete it",
+      cycleScript,
+      unless = cycleCurrent,
+      timeout = 5400
+    ).after(route, stateDirectory)
 
-      installMagnum.build,
-
-      stage("magnum-resources", node)
-        .task("make the Kubernetes node flavor and key pair")(
-          runScript(s"$helperPath resources", 120)
-        )
-        .task("download and upload the Kubernetes node image")(
-          runScript(imageScript, 3600)
-        )
-        .build,
-
-      stage("confirm-magnum-healthy", node)
-        .waitFor(
-          HealthCheck.Command(
-            onNode = node,
-            command = List("sh", "-c", apiHealthScript),
-            pollIntervalSeconds = 5,
-            timeoutSeconds = 180
-          )
-        )
-        .task("the conductor is up")(runScript(s"$helperPath mservices", 180))
-        .task("make the cluster template")(
-          runScript(s"$helperPath template", 120)
-        )
-        .task("this node reaches the floating IP network")(
-          runScript(routeCheckScript)
-        )
-        .task(
-          "make a Kubernetes cluster, ask its API for the version, delete it"
-        )(runScript(s"$helperPath cluster-cycle", 5400))
-        .task("magnum confirmed")(
-          Task.Debug(
-            s"Magnum up at http://$fqdn:$apiPort ($nodeIp): magnum-api and magnum-conductor with the Cluster API Helm driver (chart $chartVersion) against the management cluster on this node; template orphera-k8s; RabbitMQ vhost $rabbitVhost on $rabbitIp:5672, database $dbName via $vip:3306, identity from $ksUrl. Test: manifests/test_magnum.sh"
-          )
-        )
-        .build
-    )
+    tools ++ List(
+      aptWait,
+      mirrorDir,
+      mirror,
+      pulled,
+      commandsOk,
+      caDirectory,
+      ca,
+      logDirectory,
+      stateDirectory,
+      dataDirectory,
+      tmpDirectory,
+      buildDirectory,
+      pylibDirectory,
+      driver
+    ) ++ svcs.flatMap(_.resources) ++ List(dbSync, helperFile, registered) ++
+      running ++ List(answering, reporting, flavor, fetchedImage, nodeImage, clusterTemplate, route, cycle)

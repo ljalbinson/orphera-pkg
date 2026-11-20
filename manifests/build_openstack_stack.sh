@@ -444,7 +444,9 @@ step_octavia() {
 
 step_magnum() {
   playbook capi_management_cluster.scala
-  playbook magnum_single_node.scala
+  apply_desc magnum_database.scala
+  apply_desc magnum_rabbitmq.scala
+  apply_desc magnum_single_node.scala
   local out
   out=$(run_on tst23 "curl -s -o /dev/null -w 'http=%{http_code}' http://localhost:9511/")
   check "the Magnum API answers its version document" contains "http=" "$out"
