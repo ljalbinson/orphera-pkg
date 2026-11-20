@@ -971,7 +971,6 @@ if __name__ == '__main__':
          |IMAGE_URL='$k8sImageUrl'
          |OS_VERSION='$k8sOsVersion'
          |MANIFEST_URL='$manifestUrl'
-         |IMG=@@STATE@@/k8s-image.qcow2
          |SUM=
          |if [ -z "$$IMAGE_URL" ]; then
          |  curl -fsSL --retry 3 --connect-timeout 30 -o @@STATE@@/manifest.json "$$MANIFEST_URL" || { echo "cannot download $$MANIFEST_URL - set K8S_IMAGE_URL, K8S_VERSION and K8S_OS_VERSION" >&2; exit 1; }
@@ -1022,12 +1021,18 @@ if __name__ == '__main__':
          |  exit 1
          |fi
          |echo "image: $$IMAGE_URL ($$K8S_VERSION, Ubuntu $$OS_VERSION)"
+         |IMG=@@STATE@@/k8s-image-$$K8S_VERSION.qcow2
+         |rm -f @@STATE@@/k8s-image.qcow2
+         |if [ -s $$IMG ] && [ -n "$$SUM" ] && ! echo "$$SUM  $$IMG" | sha256sum -c - >/dev/null 2>&1; then
+         |  echo "the kept image file does not match its checksum; downloading it again"
+         |  rm -f $$IMG
+         |fi
          |if [ ! -s $$IMG ]; then
          |  curl -fL --retry 3 --connect-timeout 30 -o $$IMG.part "$$IMAGE_URL" || { rm -f $$IMG.part; echo "cannot download the image - put it at $$IMG and run again" >&2; exit 1; }
          |  mv $$IMG.part $$IMG
          |fi
          |if [ -n "$$SUM" ]; then
-         |  echo "$$SUM  $$IMG" | sha256sum -c - || { echo "checksum mismatch - delete $$IMG and run again" >&2; exit 1; }
+         |  echo "$$SUM  $$IMG" | sha256sum -c - || { echo "checksum mismatch after the download - the image at $$IMAGE_URL differs from its manifest entry" >&2; exit 1; }
          |fi
          |MAGIC=$$(head -c 3 $$IMG)
          |if [ "$$MAGIC" != "QFI" ]; then
