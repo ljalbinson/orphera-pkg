@@ -2977,6 +2977,7 @@ Worth knowing:
   `--node-groups g1,g2` and `--exclude-nodes a,b` as `vmctl.sh` does (`stop-vm.sh --node-groups k8s --exclude-nodes
   tst39`), and `--parallel N` to work on up to N VMs at a time, printing the results in command-line order; options
   may come anywhere among the VM names;
+  `zfs-backup-sets.py [--pool P] [--keep N] [-v] [--delete [--yes]]` lists the KVM backup sets `<pool>/kvm/<date>/<host>` and marks all but the newest N as OLDER; `--delete` shows what destroying those would do, `--yes` does it (the newest set of each host is always kept);
   `fping-nodes.sh --node-groups k8s [--exclude-nodes a,b] [--count N] [--alive | --unreachable] [--cluster-ip]` pings the nodes of
   those groups at once with fping (apt install fping) and prints one line per node in selection order;
   `manifests/kvm_vm_stop.scala` and `manifests/kvm_vm_reboot.scala` do the same as playbooks, for one VM per run
