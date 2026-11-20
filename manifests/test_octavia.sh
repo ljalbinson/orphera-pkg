@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# DRAFT end-to-end test for octavia_single_node.scala.
+# End-to-end test for octavia_single_node.scala.
 #
-# Applies the playbook, then checks independently of its own health check:
+# Applies the three descriptions (octavia_database, octavia_rabbitmq, octavia_single_node; the last one itself
+# boots an amphora and checks a load balancer), then checks independently of their own health checks:
 #  - the four Octavia units and the o-hm0 unit are active on tst19,
 #  - o-hm0 has an address on br-int and the health manager listens on UDP 5555 at that address,
 #  - the API answers its version document without a token (9876),
@@ -15,15 +16,15 @@
 #    DHCP namespace); an HTTP request to its address is answered by that member through the amphora; the load
 #    balancer and the network are deleted,
 #  - no test load balancer is left behind,
-#  - a second run of the playbook succeeds (idempotence), leaves the certificates alone, and a load balancer
-#    still works afterwards.
+#  - a second run of each description changes nothing (the load balancer test is made again only when its stamp
+#    changes), leaves the certificates alone, and a load balancer still works afterwards.
 #
 # Prerequisites: Galera + VIP, Keystone, RabbitMQ (tst10), Glance, Nova with compute nodes, and Neutron (with
 # the L3 and DHCP agents on tst19) healthy; tst19 has an agent; the Octavia images are available (built on
 # tst21 or on quay.io); tst19 can download the amphora image from tarballs.opendev.org (or it is already at
 # /var/lib/orphera/octavia/amphora.qcow2). A load balancer needs a booted VM: allow several minutes per cycle.
 # Run from scala0, in orphera-pkg:   manifests/test_octavia.sh
-# NO_APPLY=1 skips the playbook runs and only checks.
+# NO_APPLY=1 skips the apply runs and only checks.
 # Exit code: 0 if every assertion passes, 1 otherwise.
 
 set -uo pipefail
@@ -31,6 +32,7 @@ set -uo pipefail
 NODE="tst19"
 PORT=9876
 HELPER="/usr/local/sbin/orphera-octavia-api"
+DESCRIPTIONS="octavia_database.scala octavia_rabbitmq.scala octavia_single_node.scala"
 
 PASS=0
 FAIL=0
@@ -51,9 +53,11 @@ assert_contains() {
 
 if [ -z "${NO_APPLY:-}" ]; then
   log "install"
-  if ! orphera cluster-playbook octavia_single_node.scala; then
-    log "FAIL: octavia_single_node.scala did not complete"; exit 1
-  fi
+  for d in $DESCRIPTIONS; do
+    if ! orphera apply "$d"; then
+      log "FAIL: $d did not complete"; exit 1
+    fi
+  done
 fi
 
 for u in octavia-housekeeping octavia-worker octavia-health-manager octavia-api octavia-hm-port; do
@@ -93,11 +97,12 @@ assert_contains "a load balancer answers an HTTP request through its amphora and
 if [ -z "${NO_APPLY:-}" ]; then
   log "re-apply (idempotence)"
   BEFORE=$(run_on "sha256sum /etc/kolla/octavia/certs/server_ca.cert.pem /etc/kolla/octavia/certs/client.cert-and-key.pem | awk '{print \$1}' | tr -d '\n'")
-  if OUT=$(orphera cluster-playbook octavia_single_node.scala 2>&1); then
-    log "PASS: second run completed"; PASS=$((PASS + 1))
-  else
-    log "FAIL: second run of octavia_single_node.scala failed"; printf '%s\n' "$OUT" | tail -20 | sed 's/^/    /'; FAIL=$((FAIL + 1))
-  fi
+  for d in $DESCRIPTIONS; do
+    SECOND=$(orphera apply "$d" 2>&1); RC=$?
+    printf '%s\n' "$SECOND"
+    if [ "$RC" -ne 0 ]; then log "FAIL: second run of $d failed"; FAIL=$((FAIL + 1)); fi
+    assert_contains "second run of $d changed nothing" "0 changed" "$SECOND"
+  done
   AFTER=$(run_on "sha256sum /etc/kolla/octavia/certs/server_ca.cert.pem /etc/kolla/octavia/certs/client.cert-and-key.pem | awk '{print \$1}' | tr -d '\n'")
   if [ -n "$BEFORE" ] && [ "$BEFORE" = "$AFTER" ]; then
     log "PASS: the second run kept the certificates"; PASS=$((PASS + 1))
