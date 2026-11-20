@@ -442,6 +442,21 @@ object SecretsCheck:
       ) && agentDecrypts == 2,
       s"$agentDecrypts"
     )
+    val utc = java.time.ZoneId.of("UTC")
+    val noon = java.time.Instant.parse("2026-11-20T12:00:00Z")
+    check(
+      "agent cache: an expiry today shows the time only",
+      AgeAgent.expiry(noon.plusSeconds(600), noon, utc) == "12:10:00",
+      AgeAgent.expiry(noon.plusSeconds(600), noon, utc)
+    )
+    check(
+      "agent cache: an expiry on another day shows the date",
+      AgeAgent.expiry(noon.plusSeconds(25 * 3600L), noon, utc) ==
+        "2026-11-21 13:00:00" &&
+        AgeAgent.expiry(noon.plusSeconds(3000 * 60L), noon, utc) ==
+          "2026-11-22 14:00:00",
+      AgeAgent.expiry(noon.plusSeconds(25 * 3600L), noon, utc)
+    )
     val big = "y" * 300000
     check(
       "agent: a large store comes back whole",
