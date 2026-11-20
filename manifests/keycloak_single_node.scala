@@ -586,7 +586,8 @@ def federated_ok():
         die('mapping %s is missing or its rules differ' % MAPPING)
     s, p, _ = ks('GET', '/OS-FEDERATION/identity_providers/%s/protocols/%s' % (IDP, PROTOCOL), t)
     proto = p.get('protocol', {}) if s == 200 else {}
-    if proto.get('mapping_id') != MAPPING or proto.get('remote_id_attribute') != 'HTTP_OIDC_ISS':
+    # Keystone's GET may leave remote_id_attribute out; it is compared only when it is reported.
+    if proto.get('mapping_id') != MAPPING or proto.get('remote_id_attribute', 'HTTP_OIDC_ISS') != 'HTTP_OIDC_ISS':
         die('protocol %s is missing or differs' % PROTOCOL)
     print('keycloak federation is in place in keystone')
 
