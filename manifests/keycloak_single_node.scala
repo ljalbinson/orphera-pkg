@@ -59,7 +59,8 @@ import orphera.orchestrator.kolla.*
 //   - The certificate files from keycloak_tls.scala are checked for (a step fails with a message when they are
 //     missing); they are not managed here.
 //   - keycloak.conf (a secret file: it holds the database password and the first admin's) and the unit are
-//     declared files; a change restarts Keycloak, and nothing else does.
+//     declared files, and a stamp of the certificate chain and key is kept; a change in any of them restarts
+//     Keycloak, and nothing else does (it reads its certificate only at start).
 //   - The realm step, the Keystone step and the login check each run only while their read-only check
 //     (`realm-ok`, `federated-ok`, `check`) fails. `realm-ok` also logs each test user in by password, so a
 //     changed password or a held profile is repaired by running this again.
@@ -183,6 +184,14 @@ object keycloak_single_node extends OrpheraApply:
   private val tlsCheckScript =
     s"""echo "no usable certificate in $tlsDir - run: orphera cluster-playbook manifests/keycloak_tls.scala" >&2
        |exit 1""".stripMargin
+
+  // Hashes of the chain and the key (no secret in them), kept beside keycloak.conf.
+  private val tlsStampFile = s"$confDir/tls.stamp"
+  private val tlsHashes = s"sha256sum $tlsDir/server-chain.crt $tlsDir/server.key"
+  private val tlsStampCurrent = s"$tlsHashes 2>/dev/null | cmp -s - $tlsStampFile"
+  private val tlsStampScript =
+    s"""$tlsHashes > $tlsStampFile
+       |echo "certificate and key noted"""".stripMargin
 
   // Option names as in Keycloak's configuration reference; the file is read at every start.
   private val keycloakConf: String =
@@ -939,6 +948,15 @@ if __name__ == '__main__':
 
     val unitService = service(keycloakContainer.unitName)
     val confDirectory = directory(confDir, mode = "0750")
+    // Keycloak reads its certificate and key at start, so a renewed certificate (keycloak_tls.scala) needs a
+    // restart: a stamp of their hashes is kept, and a change restarts the service. The first run makes the stamp
+    // and restarts once.
+    val tlsStamp = command(
+      "note the certificate and key Keycloak runs with (a change restarts it)",
+      tlsStampScript,
+      unless = tlsStampCurrent,
+      timeout = 60
+    ).after(tlsChecked, confDirectory).notifies(unitService)
     val conf = secretFile(
       s"$confDir/keycloak.conf",
       Secret(keycloakConf), // it holds the database password and the first admin's
@@ -953,7 +971,7 @@ if __name__ == '__main__':
       owner = "root",
       group = "root"
     ).notifies(unitService)
-    val running = unitService.after(pulled, tlsChecked, conf, unitFile)
+    val running = unitService.after(pulled, tlsChecked, tlsStamp, conf, unitFile)
 
     val helperFile = secretFile(
       helper,
@@ -994,6 +1012,7 @@ if __name__ == '__main__':
       pulled,
       tlsChecked,
       confDirectory,
+      tlsStamp,
       conf,
       unitFile,
       running,
