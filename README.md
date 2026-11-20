@@ -2689,7 +2689,7 @@ running HAProxy, booted by Nova from an image tagged `amphora`. The controller r
 (192.168.200.0/24, project `service`) through a port, `o-hm0`, that the playbook plugs into `br-int` on tst19; the amphorae send their
 heartbeats to the health manager at that port's address. The playbook downloads the Octavia project's **test** amphora image on tst19 (if
 tst19 cannot reach tarballs.opendev.org, put the file at `/var/lib/orphera/octavia/amphora.qcow2`), makes the certificate authorities with
-openssl (kept in `/etc/kolla/octavia/certs`; the passphrase is the secret `octavia/ca-passphrase`) and checks itself with a real load balancer, made again only when its stamp changes. The descriptions replaced the cluster playbook and have not been run on the lab yet.
+openssl (kept in `/etc/kolla/octavia/certs`; the passphrase is the secret `octavia/ca-passphrase`) and checks itself with a real load balancer, made again only when its stamp changes. The descriptions replaced the cluster playbook and have been run on the lab (`test_octavia.sh` 18 of 18; the teardown has not).
 After it is up, with the CLI (`python-octaviaclient`), on a tenant network with a subnet:
 
     source ~/.config/openstack/admin-openrc.sh
