@@ -2705,10 +2705,12 @@ octavia-worker octavia-health-manager octavia-housekeeping` on tst21 (an existin
 four names), or they come from quay.io. Not set up: the Horizon dashboard for Octavia, TLS-terminated listeners (Barbican), active-standby
 topology, availability zones. The playbook and its test have not been run.
 
-**Kubernetes as a service** (`manifests/capi_management_cluster.scala` then `manifests/magnum_single_node.scala` on tst23, undone by `magnum_teardown.scala`
-and `capi_management_cluster_teardown.scala`, checked by `test_magnum.sh`) is Magnum with the Cluster API Helm driver. The first playbook makes a
-single-node k3s management cluster with Cluster API and the OpenStack provider; the second runs magnum-api and magnum-conductor, registers them in
-Keystone, uploads a Kubernetes node image, and makes the flavor `orphera.k8s` and the template `orphera-k8s`. It needs Octavia (every cluster's API
+**Kubernetes as a service** (`manifests/capi_management_cluster.scala`, a cluster playbook, then `orphera apply` of `magnum_database.scala` on tst3,
+`magnum_rabbitmq.scala` on tst10 and `magnum_single_node.scala` on tst23; undone by `magnum_teardown.scala` and `capi_management_cluster_teardown.scala`,
+checked by `test_magnum.sh`) is Magnum with the Cluster API Helm driver. The first playbook makes a
+single-node k3s management cluster with Cluster API and the OpenStack provider; the Magnum description runs magnum-api and magnum-conductor, registers them in
+Keystone, uploads a Kubernetes node image, and makes the flavor `orphera.k8s` and the template `orphera-k8s`. It makes a test cluster only when its stamp
+changes (the configuration, the driver or the image choice), so a repeated run does not build one; the descriptions have not been run on the lab yet. It needs Octavia (every cluster's API
 load balancer is an amphora) and compute capacity for a control-plane node, a worker and an amphora. With the CLI (`python-magnumclient`):
 `openstack coe cluster create demo --cluster-template orphera-k8s --master-count 1 --node-count 1 --keypair orphera-magnum`; when it is
 `CREATE_COMPLETE`, `openstack coe cluster config demo` writes a kubeconfig. Two settings matter in this lab: the template's DNS server
