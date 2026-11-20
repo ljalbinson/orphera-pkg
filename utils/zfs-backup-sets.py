@@ -15,7 +15,7 @@ Usage:
 
 --delete acts on exactly the sets the listing marks OLDER (everything except
 the newest --keep sets). It is a dry run (`zfs destroy -r -n -v`) unless --yes
-is given. The newest set of each pool/host is never deleted, whatever --keep says.
+is given. The newest set of each host (in any pool) is never deleted, whatever --keep says.
 """
 import argparse
 import re
@@ -82,13 +82,13 @@ def zfs_destroy(name, recursive, execute):
 def delete_old_sets(ordered, n_old, ds, execute):
     """Destroy the OLDER sets. Returns the process exit status."""
     candidates = [k for k, _ in ordered[:n_old]]
-    # the newest set of each pool/host is always kept
+    # the newest set of each host, in any pool, is always kept
     newest = {}
     for (pool, date, host), _ in ordered:
-        newest[(pool, host)] = date
+        newest[host] = (date, pool)
     to_delete, kept = [], []
     for pool, date, host in candidates:
-        (kept if newest[(pool, host)] == date else to_delete).append((pool, date, host))
+        (kept if newest[host] == (date, pool) else to_delete).append((pool, date, host))
 
     print()
     for pool, date, host in kept:
