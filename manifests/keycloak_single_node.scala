@@ -1,27 +1,33 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import orphera.orchestrator.*
-import orphera.orchestrator.ClusterPlaybookDsl.*
 import orphera.orchestrator.kolla.*
 
-// DRAFT. Keycloak (an OpenID Connect identity provider) on a new VM, tst26, and Keystone on tst6 federated to it,
-// so that a Keycloak user gets an OpenStack token. Modelled on skyline_single_node.scala (one container from the
-// project's own image, a helper that does the API work) and keystone_single_node.scala (TLS from the test CA).
+// Keycloak (an OpenID Connect identity provider) on tst26 and Keystone on tst6 federated to it, so that a Keycloak
+// user gets an OpenStack token, as a declarative description (OrpheraApply, docs/APPLY-DESIGN.md). It replaced
+// the cluster playbook of the same name; a second run changes nothing and restarts nothing, and `--check` shows
+// what would change. Modelled on trove_single_node.scala and skyline_single_node.scala (one container, a helper
+// that does the API work).
 //
-// Where it runs: tst26 (config/tst26.yaml, 10.10.5.38). To move it, change `node`, `fqdn` and `nodeIp` below, the
-// teardown's `node`, and keycloakIssuer in keystone_single_node.scala.
+// Three parts, since a description works on one node and cannot move a file between nodes. Apply them in this
+// order:
 //
-// What it builds:
-//   - database `keycloak` on Galera (utf8mb4), reached through the VIP like the OpenStack services;
-//   - a server certificate for tst26 signed by Keystone's test CA on tst6 (the key never leaves tst26: the request
-//     goes to tst6 and the certificate comes back), so every node that already trusts Keystone trusts Keycloak;
+//   orphera cluster-playbook manifests/keycloak_tls.scala   # the certificate, signed on tst6 (a cluster playbook)
+//   orphera apply manifests/keycloak_database.scala         # the keycloak database and user (tst3)
+//   orphera apply manifests/keycloak_single_node.scala      # this one (tst26)
+//
+// Where it runs: tst26 (config/tst26.yaml, 10.10.5.38). To move it, change `node` and `fqdn` here and `node`,
+// `fqdn` and `nodeIp` in keycloak_tls.scala, the teardown's `node`, and keycloakIssuer in keystone_single_node.scala.
+//
+// What it builds on tst26:
 //   - one container from quay.io/keycloak/keycloak (KEYCLOAK_IMAGE overrides; it goes through the Kolla cache on
 //     tst9 like the Kolla images), host network: HTTPS on 8443, the management interface (health) on 9000, plain
 //     HTTP off. `start` (not --optimized): Keycloak builds itself for MariaDB at each start, which adds about half a
 //     minute and needs no image build (podman build failed on this fleet before; see magnum_single_node.scala);
 //   - /etc/keycloak/keycloak.conf (root:root 0640: the image's user is uid 1000 in group 0, so the container reads it
-//     and the host's uid 1000, localadmin, does not), with the database, the hostname, the certificate, the local
-//     cache (one node, no cluster discovery) and the first admin;
+//     and the host's uid 1000, localadmin, does not), with the database (through the VIP, like the OpenStack
+//     services), the hostname, the certificate, the local cache (one node, no cluster discovery) and the first
+//     admin;
 //   - the admin user `admin` of the master realm, made by Keycloak at its first start from bootstrap-admin-* (it
 //     then says the account is temporary; that is expected here). Changing keycloak/admin later does not change it;
 //   - through the helper `orphera-keycloak-api` (realm, federate, check, sso-check, unfederate, openrc):
@@ -39,8 +45,8 @@ import orphera.orchestrator.kolla.*
 //
 // The Keystone half: keystone_single_node.scala loads mod_auth_openidc and checks bearer tokens on
 // /v3/OS-FEDERATION/identity_providers/keycloak/protocols/openid/auth against the realm's published keys, and has
-// `openid` in [auth] methods. The first stage here fails, saying so, if the Keystone on tst6 was set up before
-// that (run keystone_single_node.scala again first).
+// `openid` in [auth] methods. keycloak_tls.scala fails, saying so, if the Keystone on tst6 was set up before that
+// (run keystone_single_node.scala again first).
 //
 // How a login works (what `check` does, and what the CLI's v3oidcpassword plugin does): password grant at Keycloak
 // for client `keystone` -> access token -> POST it as a bearer token to the federation path above -> an unscoped
@@ -49,49 +55,45 @@ import orphera.orchestrator.kolla.*
 // that kcnogroup is refused. `sudo orphera-keycloak-api openrc [kcdemo|kcadmin|kcreader]` on tst26 prints the
 // environment for the CLI.
 //
+// How it stays idempotent:
+//   - The certificate files from keycloak_tls.scala are checked for (a step fails with a message when they are
+//     missing); they are not managed here.
+//   - keycloak.conf (a secret file: it holds the database password and the first admin's) and the unit are
+//     declared files, and a stamp of the certificate chain and key is kept; a change in any of them restarts
+//     Keycloak, and nothing else does (it reads its certificate only at start).
+//   - The realm step, the Keystone step and the login check each run only while their read-only check
+//     (`realm-ok`, `federated-ok`, `check`) fails. `realm-ok` also logs each test user in by password, so a
+//     changed password or a held profile is repaired by running this again.
+//
 // Prerequisites, not checked here: Galera + VIP healthy; Keystone up on tst6 with its CA at
 // /etc/kolla/keystone-ca; tst26 provisioned with an agent, its name in DNS; quay.io (or the cache) reachable.
 //
-// Stages:
-//   - keystone-federation-ready (tst6): the vhost has the OIDC settings for this realm and keystone.conf has openid.
-//   - keycloak-database (tst3): database and user.
-//   - keycloak-tls-request (tst26): packages, directories, key and certificate request.
-//   - keycloak-tls-sign (tst6): signs the request with the test CA (only when the certificate is missing, is for
-//     another key, or expires within 30 days).
-//   - install-keycloak (tst26): certificate back, trust store, the cache mirror, image, keycloak.conf, unit, start.
-//   - confirm-keycloak-healthy (tst26): /health/ready on 9000, then the helper: realm, client, user, the Keystone
-//     objects, and a federated login end to end.
-//
-// Check mode: `ORPHERA_CHECK=1 orphera cluster-playbook manifests/keycloak_single_node.scala` changes nothing and
-// reports whether the unit on tst26 matches what this playbook writes.
-//
-// Facts this was written from, to check if the first run fails: Keycloak 26 option names (db, db-url-host,
-// db-url-port, db-url-database, db-username, db-password, db-pool-max-lifetime, hostname as a full URL, http-enabled,
+// Facts this was written from, to check if a run fails: Keycloak 26 option names (db, db-url-host, db-url-port,
+// db-url-database, db-username, db-password, db-pool-max-lifetime, hostname as a full URL, http-enabled,
 // https-port, https-certificate-file, https-certificate-key-file, health-enabled, cache, bootstrap-admin-username,
 // bootstrap-admin-password); health on the management port 9000 over the same TLS; the image's entrypoint kc.sh
-// with no default command; the admin REST paths /admin/realms/...; mod_auth_openidc's AuthType oauth20,
-// OIDCOAuthVerifyJwksUri, OIDCCABundlePath and OIDCClaimPrefix, with claims reaching Keystone as environment
-// variables OIDC-<claim> (OIDC-preferred_username has an underscore, so only the environment variable carries it,
-// not the header) and the issuer as the header HTTP_OIDC_ISS. db-pool-max-lifetime is 20 s because haproxy on the
-// Galera VIP closes connections idle for 30 s (see the Aodh note in telemetry_single_node.scala).
+// with no default command, so the container gets the argument `start`; the admin REST paths /admin/realms/...;
+// mod_auth_openidc's AuthType oauth20, OIDCOAuthVerifyJwksUri, OIDCCABundlePath and OIDCClaimPrefix, with claims
+// reaching Keystone as environment variables OIDC-<claim> (OIDC-preferred_username has an underscore, so only the
+// environment variable carries it, not the header) and the issuer as the header HTTP_OIDC_ISS. db-pool-max-lifetime
+// is 20 s because haproxy on the Galera VIP closes connections idle for 30 s (see the Aodh note in
+// telemetry_single_node.scala).
 //
 // Test-only credentials come from the secret store (keycloak/db, keycloak/admin, keycloak/keystone-client,
-// keycloak/demo-user), made on first use. Not compiled where this was written; the first run on scala0 is the
-// first compile.
-object keycloak_single_node extends OrpheraClusterPlaybook:
+// keycloak/demo-user, keycloak/kcadmin, keycloak/kcreader, keycloak/kcnogroup), made on first use.
+object keycloak_single_node extends OrpheraApply:
+  import Resources.*
 
   private val node = "tst26"
   private val fqdn = "tst26.ljalbinson.com"
-  private val nodeIp = "10.10.5.38"
   private val httpsPort = 8443
   private val mgmtPort = 9000
   private val realm = "openstack"
-  private val issuer = s"https://$fqdn:$httpsPort/realms/$realm"
+
+  override def nodes: List[String] = List(node)
 
   private val ksNode = "tst6"
   private val ksFqdn = "tst6.ljalbinson.com"
-  private val ksCaDir = "/etc/kolla/keystone-ca"
-  private val ksConfDir = "/etc/kolla/keystone"
   private val vip = "10.10.5.100"
   // The dashboards that sign in through Keycloak (WebSSO); keystone_single_node.scala trusts exactly these names.
   private val horizonUrl = "https://tst13.ljalbinson.com:8080"
@@ -115,11 +117,10 @@ object keycloak_single_node extends OrpheraClusterPlaybook:
 
   private val confDir = "/etc/keycloak"
   private val tlsDir = "/etc/keycloak/tls"
-  // On tst6: where the request and the signed certificate for this node live, beside the CA.
-  private val signDir = s"$ksCaDir/issued/$node"
   private val helper = "/usr/local/sbin/orphera-keycloak-api"
 
   // Defined after the directories above, which it reads; a val used before its definition is null in an object.
+  // The image's entrypoint (kc.sh) needs the command `start` after the image.
   private val keycloakContainer = Container(
     name = ContainerName("keycloak"),
     image = keycloakImage,
@@ -127,137 +128,35 @@ object keycloak_single_node extends OrpheraClusterPlaybook:
       Mount(s"$confDir/keycloak.conf", "/opt/keycloak/conf/keycloak.conf"),
       Mount(tlsDir, "/opt/keycloak/conf/tls")
     ),
+    args = List("start"),
     description = Some("Keycloak (OpenID Connect provider) managed by Orphera"),
     stopGraceSeconds = 30,
     startTimeoutSeconds = 300,
     settleSeconds = 20
   )
 
-  // The image's entrypoint (kc.sh) needs the command `start` after the image. Container has an `args` field for
-  // this from d8ce67d on, but a manifest is compiled against the installed orchestrator jar, which may be older;
-  // so the word is added to the ExecStart line here. Once every jar in use has `args`, use
-  // `args = List("start")` above and keycloakContainer.writeUnit / unitResource.check instead.
-  private val unitPath = keycloakContainer.unitPath
-  private val unitText: String =
-    keycloakContainer.render
-      .split("\n", -1)
-      .map(l => if l.startsWith("ExecStart=") then l + " start" else l)
-      .mkString("\n")
-
   private val hostPackages =
     List("podman", "openssl", "curl", "ca-certificates", "python3")
 
+  // A fresh VM may still be running unattended-upgrades; when it finishes needrestart restarts the agent and
+  // kills the running task. Wait for it before touching packages.
+  private val aptIdle =
+    """! pgrep -f '^/usr/bin/python3 /usr/bin/unattended-upgrade$' >/dev/null && ! pgrep -x apt-get >/dev/null && ! pgrep -x apt >/dev/null && ! pgrep -x dpkg >/dev/null"""
   private val waitAptIdleScript =
-    """for i in $(seq 1 180); do
-      |  if pgrep -f '^/usr/bin/python3 /usr/bin/unattended-upgrade$' >/dev/null || pgrep -x apt-get >/dev/null || pgrep -x apt >/dev/null || pgrep -x dpkg >/dev/null; then
-      |    sleep 5
-      |  else
-      |    echo "apt and dpkg are idle"
-      |    exit 0
-      |  fi
-      |done
-      |echo "apt/dpkg still busy after 15 minutes (unattended-upgrades?)" >&2
-      |exit 1""".stripMargin
-
-  // ---- tst6: is Keystone ready for federation? ---------------------------
-
-  private val federationReadyScript =
-    s"""V=$ksConfDir/wsgi-keystone.conf
-       |C=$ksConfDir/keystone.conf
-       |[ -f "$$V" ] || { echo "$$V not found: Keystone is not set up on $ksNode (keystone_single_node.scala)" >&2; exit 1; }
-       |if ! grep -q 'OIDCOAuthVerifyJwksUri "$issuer/protocol/openid-connect/certs"' "$$V"; then
-       |  if grep -q 'OIDCOAuthVerifyJwksUri' "$$V"; then
-       |    echo "Keystone's vhost points at another Keycloak realm than $issuer: make keycloakIssuer in keystone_single_node.scala agree, then run it again" >&2
-       |  else
-       |    echo "Keystone's vhost has no OIDC settings: run keystone_single_node.scala again first (it adds them), or its image lacks mod_auth_openidc (it warns when it does)" >&2
+    s"""for i in $$(seq 1 180); do
+       |  if $aptIdle; then
+       |    echo "apt and dpkg are idle"
+       |    exit 0
        |  fi
-       |  exit 1
-       |fi
-       |grep -Eq '^methods *= *.*openid' "$$C" || { echo "openid is not in [auth] methods in $$C: run keystone_single_node.scala again first" >&2; exit 1; }
-       |[ -f $ksCaDir/ca.key ] && [ -f $ksCaDir/ca.crt ] || { echo "the test CA is not in $ksCaDir" >&2; exit 1; }
-       |echo "Keystone on $ksNode accepts Keycloak tokens from $issuer"""".stripMargin
+       |  sleep 5
+       |done
+       |echo "apt/dpkg still busy after 15 minutes (unattended-upgrades?)" >&2
+       |exit 1""".stripMargin
 
-  // ---- tst3 (Galera) -----------------------------------------------------
-
-  private val createDatabaseScript =
-    s"""mariadb -N -e "CREATE DATABASE IF NOT EXISTS $dbName DEFAULT CHARACTER SET utf8mb4 DEFAULT COLLATE utf8mb4_unicode_ci; CREATE USER IF NOT EXISTS '$dbUser'@'%' IDENTIFIED BY '${dbPassword.reveal}'; ALTER USER '$dbUser'@'%' IDENTIFIED BY '${dbPassword.reveal}'; GRANT ALL PRIVILEGES ON $dbName.* TO '$dbUser'@'%'; FLUSH PRIVILEGES;""""
-
-  // ---- TLS: key and request on tst26, signature on tst6 --------------------
-
-  // The key is made once and kept, so the certificate only changes when it has to.
-  private val tlsRequestScript =
-    s"""set -e
-       |mkdir -p $confDir $tlsDir
-       |chmod 750 $confDir $tlsDir
-       |cd $tlsDir
-       |if [ ! -f server.key ] || [ ! -f server.csr ]; then
-       |  openssl req -newkey rsa:2048 -nodes -keyout server.key -out server.csr -subj "/CN=$fqdn"
-       |fi
-       |chown root:root server.key server.csr
-       |chmod 640 server.key
-       |chmod 644 server.csr
-       |echo "key and certificate request ready in $tlsDir"""".stripMargin
-
-  private val signDirScript =
-    s"""set -e
-       |[ -f $ksCaDir/ca.key ] || { echo "no CA key in $ksCaDir: keystone_single_node.scala makes it" >&2; exit 1; }
-       |mkdir -p $signDir
-       |chmod 700 $signDir
-       |echo "$signDir ready"""".stripMargin
-
-  // Signs only when needed: no certificate yet, a certificate for another key (the key on tst26 was remade), one
-  // that does not verify against the CA, lacks the name, or expires within 30 days.
-  private val signScript =
-    s"""set -e
-       |cd $signDir
-       |openssl req -in server.csr -noout -verify
-       |NEED=1
-       |if [ -f server.crt ] \\
-       |   && [ "$$(openssl x509 -in server.crt -noout -pubkey)" = "$$(openssl req -in server.csr -noout -pubkey)" ] \\
-       |   && openssl verify -CAfile $ksCaDir/ca.crt server.crt >/dev/null 2>&1 \\
-       |   && openssl x509 -in server.crt -noout -checkend 2592000 >/dev/null \\
-       |   && openssl x509 -in server.crt -noout -ext subjectAltName | grep -q "DNS:$fqdn"; then
-       |  NEED=0
-       |fi
-       |if [ "$$NEED" = "1" ]; then
-       |  cat > server.ext <<EXT
-       |subjectAltName=DNS:$fqdn,DNS:$node,IP:$nodeIp
-       |basicConstraints=CA:FALSE
-       |keyUsage=digitalSignature,keyEncipherment
-       |extendedKeyUsage=serverAuth
-       |EXT
-       |  openssl x509 -req -in server.csr -CA $ksCaDir/ca.crt -CAkey $ksCaDir/ca.key -CAcreateserial -out server.crt -days 825 -sha256 -extfile server.ext
-       |  echo "signed a new certificate for $fqdn"
-       |else
-       |  echo "the certificate for $fqdn is still good"
-       |fi
-       |cp $ksCaDir/ca.crt ca.crt
-       |openssl x509 -in server.crt -noout -subject -enddate""".stripMargin
-
-  // After the certificate and the CA came back: they must fit the key, the chain is what Keycloak serves (so a
-  // client can take the CA from the handshake, as for Keystone), and the CA joins the host's trust store.
-  private val tlsInstallScript =
-    s"""set -e
-       |cd $tlsDir
-       |if [ "$$(openssl x509 -in server.crt -noout -pubkey)" != "$$(openssl pkey -in server.key -pubout)" ]; then
-       |  echo "the certificate from $ksNode is not for the key in $tlsDir" >&2; exit 1
-       |fi
-       |openssl verify -CAfile ca.crt server.crt
-       |cat server.crt ca.crt > server-chain.crt
-       |chown root:root server.crt server-chain.crt ca.crt
-       |chmod 644 server.crt ca.crt
-       |chmod 640 server-chain.crt
-       |cp ca.crt /usr/local/share/ca-certificates/orphera-test-ca.crt
-       |update-ca-certificates
-       |echo "TLS ready: $$(openssl x509 -in server.crt -noout -subject -enddate | tr '\\n' ' ')"""".stripMargin
-
-  // ---- tst26 -------------------------------------------------------------
-
-  // Same mirror order as keystone_single_node.scala: tst21's registry, then the cache on tst9, then quay.io.
-  private val useCacheScript =
-    """mkdir -p /etc/containers/registries.conf.d
-      |cat > /etc/containers/registries.conf.d/orphera-kolla-cache.conf <<'REG'
-      |[[registry]]
+  // The Kolla cache as a mirror of quay.io, same order as keystone_single_node.scala: tst21's registry, then the
+  // cache on tst9, then quay.io.
+  private val registryMirror =
+    """[[registry]]
       |prefix = "quay.io"
       |location = "quay.io"
       |
@@ -268,15 +167,31 @@ object keycloak_single_node extends OrpheraClusterPlaybook:
       |[[registry.mirror]]
       |location = "tst9.ljalbinson.com:5000"
       |insecure = true
-      |REG
-      |echo "podman will try tst21, then tst9, before quay.io"""".stripMargin
+      |""".stripMargin
 
+  private val imageRef = keycloakImage.ref
   private val pullScript =
     s"""${Pull.shellFunction(
         "KEYCLOAK_IMAGE or the ExternalImage in keycloak_single_node.scala"
       )}
-       |pull_retry ${keycloakImage.ref} || exit 1
-       |echo "image ready: $$(podman images -q ${keycloakImage.ref} | head -1)"""".stripMargin
+       |pull_retry $imageRef || exit 1
+       |echo "image ready: $$(podman images -q $imageRef | head -1)"""".stripMargin
+  private val imagePresent = s"podman image exists $imageRef"
+
+  // The files keycloak_tls.scala leaves: they must be there, and the certificate must be for the key.
+  private val tlsPresent =
+    s"""[ -f $tlsDir/server-chain.crt ] && [ -f $tlsDir/server.crt ] && [ -f $tlsDir/server.key ] && [ -f $tlsDir/ca.crt ] && [ "$$(openssl x509 -in $tlsDir/server.crt -noout -pubkey)" = "$$(openssl pkey -in $tlsDir/server.key -pubout)" ]"""
+  private val tlsCheckScript =
+    s"""echo "no usable certificate in $tlsDir - run: orphera cluster-playbook manifests/keycloak_tls.scala" >&2
+       |exit 1""".stripMargin
+
+  // Hashes of the chain and the key (no secret in them), kept beside keycloak.conf.
+  private val tlsStampFile = s"$confDir/tls.stamp"
+  private val tlsHashes = s"sha256sum $tlsDir/server-chain.crt $tlsDir/server.key"
+  private val tlsStampCurrent = s"$tlsHashes 2>/dev/null | cmp -s - $tlsStampFile"
+  private val tlsStampScript =
+    s"""$tlsHashes > $tlsStampFile
+       |echo "certificate and key noted"""".stripMargin
 
   // Option names as in Keycloak's configuration reference; the file is read at every start.
   private val keycloakConf: String =
@@ -301,8 +216,7 @@ object keycloak_single_node extends OrpheraClusterPlaybook:
 
   // ---- the helper ----------------------------------------------------------
 
-  // Standard-library Python, as in the other service playbooks. Plain string filled in with replace().
-  // Subcommands: realm | federate | check | sso-check [horizon|skyline|all] | unfederate | openrc
+  // Standard-library Python, as in the other service descriptions. Plain string filled in with replace().
   private val apiHelperPython =
     """#!/usr/bin/python3
 import html, http.cookiejar, json, re, ssl, sys, urllib.error, urllib.parse, urllib.request
@@ -504,6 +418,51 @@ def realm():
         REALM, CLIENT_ID, ', '.join(gids), ', '.join('%s (%s)' % (n, g or 'no group') for n, _, g, _ in USERS)))
 
 
+def realm_ok():
+    # Exit 0 only when everything realm() makes is in place and works: the realm, the client (with its secret, its
+    # redirect and logout addresses), the groups claim mapper, the groups, and each test user (in exactly its
+    # group, able to log in by password: that checks the password, the profile and the client secret). Makes no
+    # change.
+    kc = KcAdmin()
+    s, p, _ = kc('GET', '/' + REALM)
+    if s != 200:
+        die('realm %s: HTTP %s' % (REALM, s))
+    s, found, _ = kc('GET', '/%s/clients?clientId=%s' % (REALM, CLIENT_ID))
+    if s != 200 or not found:
+        die('client %s is missing' % CLIENT_ID)
+    c = found[0]
+    if c.get('publicClient') or not c.get('directAccessGrantsEnabled') or not c.get('enabled'):
+        die('client %s is not confidential with direct access grants' % CLIENT_ID)
+    if c.get('redirectUris') != ['https://@@KS@@:5000/*']:
+        die('client %s: redirect addresses differ' % CLIENT_ID)
+    if (c.get('attributes') or {}).get('post.logout.redirect.uris') != '@@HORIZON@@/*##@@SKYLINE@@/*':
+        die('client %s: logout redirect addresses differ' % CLIENT_ID)
+    s, mappers, _ = kc('GET', '/%s/clients/%s/protocol-mappers/models' % (REALM, c['id']))
+    if s != 200:
+        die('listing the client\'s mappers: HTTP %s' % s)
+    m = [x for x in mappers if x.get('name') == 'groups']
+    want = {'claim.name': 'groups', 'full.path': 'false', 'id.token.claim': 'true', 'access.token.claim': 'true', 'userinfo.token.claim': 'true'}
+    if not m or any((m[0].get('config') or {}).get(k) != v for k, v in want.items()):
+        die('the groups claim mapper is missing or differs')
+    managed = set(g[0] for g in GROUP_MAP)
+    for kc_group in managed:
+        s, found, _ = kc('GET', '/%s/groups?search=%s&exact=true' % (REALM, kc_group))
+        if s != 200 or not [g for g in found if g.get('name') == kc_group]:
+            die('group %s is missing' % kc_group)
+    for name, password, group, _ in USERS:
+        s, found, _ = kc('GET', '/%s/users?username=%s&exact=true' % (REALM, name))
+        if s != 200 or not found:
+            die('user %s is missing' % name)
+        s, current, _ = kc('GET', '/%s/users/%s/groups' % (REALM, found[0]['id']))
+        if s != 200:
+            die('groups of %s: HTTP %s' % (name, s))
+        have = set(g['name'] for g in current) & managed
+        if have != (set([group]) if group else set()):
+            die('user %s is in groups %s, not %s' % (name, sorted(have), group))
+        kc_token(REALM, CLIENT_ID, name, password, CLIENT_SECRET)
+    print('realm %s is in place' % REALM)
+
+
 # ---- Keystone ----
 
 def ks_token():
@@ -551,6 +510,13 @@ def put_or_patch(t, path, key, create, update):
     return p[key]
 
 
+def rule_for(kc_group, ks_group):
+    return {
+        'local': [{'user': {'name': '{0}'}}, {'group': {'name': ks_group, 'domain': {'name': FED_DOMAIN}}}],
+        'remote': [{'type': 'OIDC-preferred_username'}, {'type': 'OIDC-groups', 'any_one_of': [kc_group]}],
+    }
+
+
 def federate():
     t = ks_token()
     dom = ensure(t, '/domains', '?name=' + FED_DOMAIN, 'domain', {'name': FED_DOMAIN, 'enabled': True, 'description': 'Users federated from Keycloak realm ' + REALM})
@@ -568,10 +534,7 @@ def federate():
         s, p, _ = ks('PUT', '/projects/%s/groups/%s/roles/%s' % (proj['id'], grp['id'], role['id']), t)
         if s not in (200, 204):
             die('granting %s on %s to group %s: HTTP %s %s' % (role_name, project, ks_group, s, p))
-        rules.append({
-            'local': [{'user': {'name': '{0}'}}, {'group': {'name': ks_group, 'domain': {'name': FED_DOMAIN}}}],
-            'remote': [{'type': 'OIDC-preferred_username'}, {'type': 'OIDC-groups', 'any_one_of': [kc_group]}],
-        })
+        rules.append(rule_for(kc_group, ks_group))
     for old in OLD_GROUPS:
         grp = find(t, '/groups?name=%s&domain_id=%s' % (old, dom['id']), 'groups')
         if grp is not None:
@@ -587,6 +550,46 @@ def federate():
     put_or_patch(t, '/OS-FEDERATION/identity_providers/%s/protocols/%s' % (IDP, PROTOCOL), 'protocol', proto, proto)
     print('keystone: identity provider %s (%s), protocol %s, mapping %s: %s' % (IDP, ISSUER, PROTOCOL, MAPPING, '; '.join(
         '%s -> %s (%s on %s/%s)' % (k, g, r, pd, pr) for k, g, r, pr, pd in GROUP_MAP)))
+
+
+def federated_ok():
+    # Exit 0 only when everything federate() makes is in place: the domain and project, each Keystone group with its
+    # role, the identity provider (remote id, domain), the mapping (the rules) and the protocol; the old groups are
+    # gone. Makes no change.
+    t = ks_token()
+    dom = find(t, '/domains?name=' + FED_DOMAIN, 'domains')
+    if dom is None:
+        die('domain %s is missing' % FED_DOMAIN)
+    if find(t, '/projects?name=%s&domain_id=%s' % (FED_PROJECT, dom['id']), 'projects') is None:
+        die('project %s is missing' % FED_PROJECT)
+    rules = []
+    for kc_group, ks_group, role_name, project, project_domain in GROUP_MAP:
+        grp = find(t, '/groups?name=%s&domain_id=%s' % (ks_group, dom['id']), 'groups')
+        pdom = find(t, '/domains?name=' + project_domain, 'domains')
+        proj = find(t, '/projects?name=%s&domain_id=%s' % (project, pdom['id']), 'projects') if pdom else None
+        role = find(t, '/roles?name=' + role_name, 'roles')
+        if grp is None or proj is None or role is None:
+            die('group %s, project %s or role %s is missing' % (ks_group, project, role_name))
+        s, _, _ = ks('GET', '/projects/%s/groups/%s/roles/%s' % (proj['id'], grp['id'], role['id']), t)
+        if s != 204:
+            die('group %s has no role %s on %s (HTTP %s)' % (ks_group, role_name, project, s))
+        rules.append(rule_for(kc_group, ks_group))
+    for old in OLD_GROUPS:
+        if find(t, '/groups?name=%s&domain_id=%s' % (old, dom['id']), 'groups') is not None:
+            die('the old group %s still exists' % old)
+    s, p, _ = ks('GET', '/OS-FEDERATION/identity_providers/' + IDP, t)
+    idp = p.get('identity_provider', {}) if s == 200 else {}
+    if not idp or not idp.get('enabled') or idp.get('remote_ids') != [ISSUER] or idp.get('domain_id') != dom['id']:
+        die('identity provider %s is missing or differs' % IDP)
+    s, p, _ = ks('GET', '/OS-FEDERATION/mappings/' + MAPPING, t)
+    if s != 200 or p.get('mapping', {}).get('rules') != rules:
+        die('mapping %s is missing or its rules differ' % MAPPING)
+    s, p, _ = ks('GET', '/OS-FEDERATION/identity_providers/%s/protocols/%s' % (IDP, PROTOCOL), t)
+    proto = p.get('protocol', {}) if s == 200 else {}
+    # Keystone's GET may leave remote_id_attribute out; it is compared only when it is reported.
+    if proto.get('mapping_id') != MAPPING or proto.get('remote_id_attribute', 'HTTP_OIDC_ISS') != 'HTTP_OIDC_ISS':
+        die('protocol %s is missing or differs' % PROTOCOL)
+    print('keycloak federation is in place in keystone')
 
 
 def unfederate():
@@ -872,7 +875,7 @@ if [ -d "$HOME/.venvs/openstack/bin" ]; then case ":$PATH:" in *":$HOME/.venvs/o
 
 if __name__ == '__main__':
     cmd = sys.argv[1] if len(sys.argv) > 1 else ''
-    actions = {'realm': realm, 'federate': federate, 'check': check, 'unfederate': unfederate, 'openrc': openrc}
+    actions = {'realm': realm, 'realm-ok': realm_ok, 'federate': federate, 'federated-ok': federated_ok, 'check': check, 'unfederate': unfederate, 'openrc': openrc}
     if cmd == 'sso-check':
         sso_check(sys.argv[2] if len(sys.argv) > 2 else 'all')
     elif cmd == 'openrc' and len(sys.argv) > 2:
@@ -880,188 +883,143 @@ if __name__ == '__main__':
     elif cmd in actions:
         actions[cmd]()
     else:
-        die('usage: orphera-keycloak-api realm | federate | check | sso-check [horizon|skyline|all] | unfederate | openrc [kcdemo|kcadmin|kcreader]')
+        die('usage: orphera-keycloak-api realm | realm-ok | federate | federated-ok | check | sso-check [horizon|skyline|all] | unfederate | openrc [kcdemo|kcadmin|kcreader]')
 """
 
-  private val helperScript =
-    s"cat > $helper <<'PYEOF'\n" +
-      apiHelperPython
-        .replace("@@FQDN@@", fqdn)
-        .replace("@@PORT@@", httpsPort.toString)
-        .replace("@@REALM@@", realm)
-        .replace("@@KS@@", ksFqdn)
-        .replace("@@KCADMINPW@@", kcAdminPassword.reveal)
-        .replace("@@KSADMINPW@@", ksAdminPassword.reveal)
-        .replace("@@CLIENTSECRET@@", clientSecret.reveal)
-        .replace("@@DEMOUSER@@", demoUser)
-        .replace("@@DEMOPW@@", demoPassword.reveal)
-        .replace("@@KCADMINUSERPW@@", kcAdminUserPassword.reveal)
-        .replace("@@KCREADERPW@@", kcReaderPassword.reveal)
-        .replace("@@KCNOGROUPPW@@", kcNogroupPassword.reveal)
-        .replace("@@CA@@", s"$tlsDir/ca.crt")
-        .replace("@@KSNODE@@", ksNode)
-        .replace("@@HORIZON@@", horizonUrl)
-        .replace("@@SKYLINE@@", skylineUrl) +
-      s"\nPYEOF\nchmod 700 $helper\necho wrote $helper\n"
+  private val helperText =
+    apiHelperPython
+      .replace("@@FQDN@@", fqdn)
+      .replace("@@PORT@@", httpsPort.toString)
+      .replace("@@REALM@@", realm)
+      .replace("@@KS@@", ksFqdn)
+      .replace("@@KCADMINPW@@", kcAdminPassword.reveal)
+      .replace("@@KSADMINPW@@", ksAdminPassword.reveal)
+      .replace("@@CLIENTSECRET@@", clientSecret.reveal)
+      .replace("@@DEMOUSER@@", demoUser)
+      .replace("@@DEMOPW@@", demoPassword.reveal)
+      .replace("@@KCADMINUSERPW@@", kcAdminUserPassword.reveal)
+      .replace("@@KCREADERPW@@", kcReaderPassword.reveal)
+      .replace("@@KCNOGROUPPW@@", kcNogroupPassword.reveal)
+      .replace("@@CA@@", s"$tlsDir/ca.crt")
+      .replace("@@KSNODE@@", ksNode)
+      .replace("@@HORIZON@@", horizonUrl)
+      .replace("@@SKYLINE@@", skylineUrl) + "\n"
 
   // --resolve: the name on the certificate, the address of this host, whatever DNS says.
-  private val healthScript =
-    s"""CODE=$$(curl -s --cacert $tlsDir/ca.crt --resolve $fqdn:$mgmtPort:127.0.0.1 -o /tmp/kc-ready.json -w '%{http_code}' https://$fqdn:$mgmtPort/health/ready)
-       |[ "$$CODE" = "200" ] && grep -q '"UP"' /tmp/kc-ready.json""".stripMargin
+  private val healthy =
+    s"""CODE=$$(curl -s --cacert $tlsDir/ca.crt --resolve $fqdn:$mgmtPort:127.0.0.1 -o /tmp/kc-ready.json -w '%{http_code}' https://$fqdn:$mgmtPort/health/ready); [ "$$CODE" = "200" ] && grep -q '"UP"' /tmp/kc-ready.json"""
+  // Keycloak builds itself for MariaDB at each start and runs its database migrations at the first, so it takes
+  // minutes to answer: wait up to seven.
+  private val waitHealthy =
+    s"""for i in $$(seq 1 84); do
+       |  ( $healthy ) && exit 0
+       |  sleep 5
+       |done
+       |echo "Keycloak does not report ready on $mgmtPort - see 'journalctl -xeu orphera-keycloak' and 'podman logs keycloak'" >&2
+       |exit 1""".stripMargin
 
-  private val checkMode = sys.env.get("ORPHERA_CHECK").contains("1")
+  def describe(target: Node): List[ApplyResource] =
+    val aptWait = command(
+      "wait for apt and dpkg to be idle",
+      waitAptIdleScript,
+      unless = aptIdle,
+      timeout = 960
+    )
+    val tools = hostPackages.map(p => pkg(p, updateCache = true).after(aptWait))
+    val podman = tools(0)
 
-  val playbook: ClusterPlaybook =
-    if checkMode then
-      clusterPlaybook("keycloak-single-node-check")(
-        stage("check-keycloak", node)
-          .task(s"check ${keycloakContainer.unitName}")(
-            Resource
-              .checkTask(keycloakContainer.unitName, unitPath, unitText, Nil)
-          )
-          .build
-      )
-    else applyPlaybook
+    val mirrorDir = directory("/etc/containers/registries.conf.d").after(podman)
+    val mirror = file(
+      "/etc/containers/registries.conf.d/orphera-kolla-cache.conf",
+      registryMirror,
+      mode = "0644"
+    ).after(mirrorDir)
+    val pulled = command(
+      "pull the Keycloak image",
+      pullScript,
+      unless = imagePresent,
+      timeout = 1800
+    ).after(podman, mirror)
 
-  private def applyPlaybook: ClusterPlaybook =
-    clusterPlaybook("keycloak-single-node")(
-      stage("keystone-federation-ready", ksNode)
-        .task("Keystone checks Keycloak tokens (vhost and keystone.conf)")(
-          Task.RunCommand(List("sh", "-c", federationReadyScript))
-        )
-        .build,
+    val tlsChecked = command(
+      s"the certificate files from keycloak_tls.scala are in $tlsDir",
+      tlsCheckScript,
+      unless = tlsPresent
+    ).after(tools(1))
 
-      stage("keycloak-database", "tst3")
-        .task(s"create $dbName database and $dbUser on the Galera cluster")(
-          Task.RunCommand(List("sh", "-c", createDatabaseScript))
-        )
-        .build,
+    val unitService = service(keycloakContainer.unitName)
+    val confDirectory = directory(confDir, mode = "0750")
+    // Keycloak reads its certificate and key at start, so a renewed certificate (keycloak_tls.scala) needs a
+    // restart: a stamp of their hashes is kept, and a change restarts the service. The first run makes the stamp
+    // and restarts once.
+    val tlsStamp = command(
+      "note the certificate and key Keycloak runs with (a change restarts it)",
+      tlsStampScript,
+      unless = tlsStampCurrent,
+      timeout = 60
+    ).after(tlsChecked, confDirectory).notifies(unitService)
+    val conf = secretFile(
+      s"$confDir/keycloak.conf",
+      Secret(keycloakConf), // it holds the database password and the first admin's
+      mode = "0640",
+      owner = "root",
+      group = "root"
+    ).after(confDirectory).notifies(unitService)
+    val unitFile = file(
+      keycloakContainer.unitPath,
+      keycloakContainer.render,
+      mode = "0644",
+      owner = "root",
+      group = "root"
+    ).notifies(unitService)
+    val running = unitService.after(pulled, tlsChecked, tlsStamp, conf, unitFile)
 
-      stage("keycloak-tls-request", node)
-        .task("wait for apt and dpkg to be idle")(
-          Task.RunCommand(
-            List("sh", "-c", waitAptIdleScript),
-            timeoutSeconds = 960
-          )
-        )
-        .task("install podman and tools")(
-          Task.Install(packages = hostPackages, updateCache = true)
-        )
-        .task("make the TLS key and certificate request")(
-          Task
-            .RunCommand(List("sh", "-c", tlsRequestScript), timeoutSeconds = 60)
-        )
-        .build,
+    val helperFile = secretFile(
+      helper,
+      Secret(helperText), // it holds the admin and test user passwords
+      mode = "0700",
+      owner = "root",
+      group = "root"
+    )
+    val ready = command(
+      "Keycloak reports ready on its management port",
+      waitHealthy,
+      unless = healthy,
+      timeout = 480
+    ).after(running)
+    val realmMade = command(
+      s"realm $realm, client keystone, groups and the test users",
+      s"$helper realm",
+      unless = s"$helper realm-ok >/dev/null 2>&1",
+      timeout = 180
+    ).after(ready, helperFile)
+    val federated = command(
+      "identity provider, mapping and protocol in Keystone",
+      s"$helper federate",
+      unless = s"$helper federated-ok >/dev/null 2>&1",
+      timeout = 180
+    ).after(realmMade)
+    val loggedIn = command(
+      "a federated login for each test user: Keycloak to a scoped Keystone token",
+      s"$helper check",
+      unless = s"$helper check >/dev/null 2>&1",
+      timeout = 240
+    ).after(federated)
 
-      stage("keycloak-tls-sign", ksNode)
-        .task(s"prepare $signDir")(
-          Task.RunCommand(List("sh", "-c", signDirScript))
-        )
-        .task(s"fetch the certificate request from $node")(
-          Task.DistributeFile(
-            node,
-            s"$tlsDir/server.csr",
-            s"$signDir/server.csr",
-            "root",
-            "root",
-            420 // 0644
-          )
-        )
-        .task(s"sign the certificate for $fqdn with the test CA")(
-          Task.RunCommand(List("sh", "-c", signScript), timeoutSeconds = 60)
-        )
-        .build,
-
-      stage("install-keycloak", node)
-        .task(s"fetch the certificate from $ksNode")(
-          Task.DistributeFile(
-            ksNode,
-            s"$signDir/server.crt",
-            s"$tlsDir/server.crt",
-            "root",
-            "root",
-            420
-          )
-        )
-        .task(s"fetch the CA certificate from $ksNode")(
-          Task.DistributeFile(
-            ksNode,
-            s"$signDir/ca.crt",
-            s"$tlsDir/ca.crt",
-            "root",
-            "root",
-            420
-          )
-        )
-        .task("install the certificate chain and trust the CA")(
-          Task.RunCommand(
-            List("sh", "-c", tlsInstallScript),
-            timeoutSeconds = 60
-          )
-        )
-        .task("use the Kolla cache as a mirror for quay.io")(
-          Task.RunCommand(List("sh", "-c", useCacheScript))
-        )
-        .task("pull the Keycloak image")(
-          Task.RunCommand(List("sh", "-c", pullScript), timeoutSeconds = 1800)
-        )
-        .task("write keycloak.conf")(
-          Task.WriteFile(
-            content = keycloakConf,
-            dest = s"$confDir/keycloak.conf",
-            owner = "root",
-            group = "root",
-            mode = 416 // 0640: the container's user is in group 0
-          )
-        )
-        .task(s"write ${keycloakContainer.unitName}")(
-          Task.WriteFile(
-            content = unitText,
-            dest = unitPath,
-            owner = "root",
-            group = "root",
-            mode = 420 // 0644
-          )
-        )
-        .task(s"start ${keycloakContainer.unitName}")(keycloakContainer.start)
-        .task("write the Keycloak API helper")(
-          Task.RunCommand(List("sh", "-c", helperScript))
-        )
-        .build,
-
-      stage("confirm-keycloak-healthy", node)
-        .waitFor(
-          HealthCheck.Command(
-            onNode = node,
-            command = List("sh", "-c", healthScript),
-            pollIntervalSeconds = 5,
-            timeoutSeconds = 420
-          )
-        )
-        .task(s"realm $realm, client keystone and user $demoUser")(
-          Task.RunCommand(
-            List("sh", "-c", s"$helper realm"),
-            timeoutSeconds = 120
-          )
-        )
-        .task("identity provider, mapping and protocol in Keystone")(
-          Task.RunCommand(
-            List("sh", "-c", s"$helper federate"),
-            timeoutSeconds = 120
-          )
-        )
-        .task(
-          s"a federated login: $demoUser through Keycloak to a Keystone token"
-        )(
-          Task.RunCommand(
-            List("sh", "-c", s"$helper check"),
-            timeoutSeconds = 120
-          )
-        )
-        .task("keycloak confirmed")(
-          Task.Debug(
-            s"Keycloak up at https://$fqdn:$httpsPort/ ($nodeIp) from ${keycloakImage.ref}, database $dbName via $vip:3306. Admin console: https://$fqdn:$httpsPort/admin/ (user admin, secret keycloak/admin). Keystone federates realm $realm as identity provider keycloak: Keycloak groups openstack-admins, openstack-members and openstack-readers map to admin on Default/admin, member and reader on keycloak/keycloak-demo; test users kcadmin, $demoUser and kcreader (secrets keycloak/kcadmin, keycloak/demo-user, keycloak/kcreader). CLI environment: sudo $helper openrc [user] on $node. Test: manifests/test_keycloak.sh"
-          )
-        )
-        .build
+    tools ++ List(
+      aptWait,
+      mirrorDir,
+      mirror,
+      pulled,
+      tlsChecked,
+      confDirectory,
+      tlsStamp,
+      conf,
+      unitFile,
+      running,
+      helperFile,
+      ready,
+      realmMade,
+      federated,
+      loggedIn
     )

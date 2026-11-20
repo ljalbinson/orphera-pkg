@@ -505,7 +505,9 @@ step_skyline() {
 }
 
 step_keycloak() {
-  playbook keycloak_single_node.scala
+  playbook keycloak_tls.scala
+  apply_desc keycloak_database.scala
+  apply_desc keycloak_single_node.scala
   local out
   out=$(run_on tst6 "curl -s https://tst26.ljalbinson.com:8443/realms/openstack/.well-known/openid-configuration")
   check "the Keycloak realm answers over TLS from tst6" contains '"issuer":"https://tst26.ljalbinson.com:8443/realms/openstack"' "$out"
