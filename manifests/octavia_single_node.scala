@@ -342,10 +342,16 @@ object octavia_single_node extends OrpheraApply:
       |  sleep 2
       |done
       |ovs-vsctl br-exists br-int
+      |# An o-hm0 left from an earlier install carries another port's iface-id, and the Open vSwitch agent does not
+      |# notice an iface-id that changes on a live interface. Make it again so the agent sees a new port.
+      |if ovs-vsctl list-ports br-int | grep -qx o-hm0 && [ "$(ovs-vsctl get Interface o-hm0 external_ids:iface-id 2>/dev/null | tr -d '"')" != "$HM_PORT_ID" ]; then
+      |  ovs-vsctl --if-exists del-port br-int o-hm0
+      |fi
       |ovs-vsctl --may-exist add-port br-int o-hm0 -- set Interface o-hm0 type=internal -- set Interface o-hm0 external-ids:iface-status=active -- set Interface o-hm0 external-ids:attached-mac=$HM_MAC -- set Interface o-hm0 external-ids:iface-id=$HM_PORT_ID -- set Interface o-hm0 external-ids:skip_cleanup=true
       |ip link set dev o-hm0 address $HM_MAC
       |ip link set dev o-hm0 mtu $HM_MTU
-      |ip addr replace $HM_IP/$HM_PREFIX dev o-hm0
+      |ip addr flush dev o-hm0
+      |ip addr add $HM_IP/$HM_PREFIX dev o-hm0
       |ip link set dev o-hm0 up
       |sysctl -qw net.ipv4.conf.o-hm0.rp_filter=0 || true
       |echo "o-hm0 is $HM_IP/$HM_PREFIX ($HM_MAC) on br-int"
