@@ -2681,7 +2681,7 @@ is made for you. Access is by client IP. After it is up, with the CLI (`python-m
 `manila_teardown.scala` keeps CephFS and the NFS cluster (shares live there); `MANILA_PURGE_CEPH=yes` removes them and all data in them. The
 Manila images need `orphera-kolla-build sources refresh` and a build of `manila-api manila-scheduler manila-share` on tst21 (an existing
 `/etc/kolla-build/images.txt` is not rewritten; add the three names), or they come from quay.io. Share migration and backups (the data
-service) and shares with their own network (driver-handled share servers) are not set up. The descriptions replaced the cluster playbook, which was run on the lab (2026-11-13) before the key rotation; the descriptions and the teardown have not been run on the lab yet.
+service) and shares with their own network (driver-handled share servers) are not set up. The descriptions replaced the cluster playbook, which was run on the lab (2026-11-13) before the key rotation; the four descriptions were run on the lab on 2026-11-20 (`test_manila.sh`: a share made, mounted over NFS, written, read back and deleted; a second run of each changes nothing). The teardown has not been run.
 
 **Load balancing** (`manifests/octavia_single_node.scala`, undone by `octavia_teardown.scala`, checked by `test_octavia.sh`) is Octavia with the
 Amphora provider on tst19: the API (9876), the worker, the health manager and housekeeping as Kolla containers. Each load balancer is a small VM
