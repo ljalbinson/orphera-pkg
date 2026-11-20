@@ -38,7 +38,13 @@ object skyline_teardown extends OrpheraApply:
       |rm -f /etc/systemd/system/orphera-skyline.service
       |systemctl daemon-reload
       |if command -v podman >/dev/null 2>&1; then
-      |  podman rm -f skyline skyline_bootstrap 2>/dev/null || true
+      |  # One container at a time: with a name that does not exist in the same call, podman can leave the others.
+      |  for c in skyline skyline_bootstrap; do
+      |    if podman container exists $c; then podman rm -f $c; fi
+      |  done
+      |  for c in skyline skyline_bootstrap; do
+      |    if podman container exists $c; then echo "container $c is still there" >&2; exit 1; fi
+      |  done
       |fi
       |echo "skyline container and unit removed"""".stripMargin
 

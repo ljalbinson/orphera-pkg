@@ -233,6 +233,11 @@ object mariadb_haproxy_keepalived extends OrpheraClusterPlaybook:
        |listen galera_write
        |    bind $vip:3306
        |    mode tcp
+       |    # A schema change on a Galera cluster can run for more than the 30 s of the defaults: HAProxy cut the
+       |    # connection of Keycloak's first migration (ALTER TABLE keycloak.REALM) at 30 s, the statement still
+       |    # finished in the cluster, and every later start failed with "Duplicate column name".
+       |    timeout client 30m
+       |    timeout server 30m
        |    option httpchk GET /
        |    http-check expect status 200
        |    default-server port 9200 inter 2s downinter 5s rise 3 fall 2 on-marked-down shutdown-sessions

@@ -3471,3 +3471,5 @@ playbooks marked DRAFT there have been written but not all run on the lab.
   in both `Task.Reboot` and `Cli.Command.Reboot` while building the
   reboot feature — both use `waitForReturn` instead. Worth remembering
   before naming any future field `wait` anywhere in this project.
+
+**Teardown tests.** `manifests/test_teardowns.sh MODULE...` (modules: `--list`) applies each module's teardown, checks that nothing of it is left, applies it again (it must change nothing), builds the module again and runs its test script. Take modules in dependency order (keycloak, skyline, trove, telemetry, magnum, octavia, manila, rgw, nova_compute, kolla_cache, kolla_build). The teardowns delete data: databases, instance disks on the compute nodes, and so on; see each teardown's header for what is kept.
