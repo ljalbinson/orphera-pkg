@@ -111,7 +111,7 @@ object manila_teardown extends OrpheraApply:
       |echo "cephx user client.manila removed"""".stripMargin
 
   private val nfsExists =
-    s"""OUT=$$(cephadm shell -- ceph nfs cluster ls 2>/dev/null) || exit 0; echo "$$OUT" | tr -d '\r' | grep -qw '$nfsCluster'"""
+    s"""OUT=$$(cephadm shell -- ceph nfs cluster ls 2>/dev/null) || exit 0; echo "$$OUT" | tr -d '\\r' | grep -qw '$nfsCluster'"""
   private val nfsScript =
     s"""cephadm shell -- ceph nfs cluster rm $nfsCluster
        |echo "NFS cluster $nfsCluster removed"""".stripMargin

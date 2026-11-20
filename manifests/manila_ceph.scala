@@ -86,7 +86,7 @@ object manila_ceph extends OrpheraApply:
 
   private val nfsListed =
     // cephadm shell may return carriage returns or a JSON list, so the name is matched as a word.
-    s"""cephadm shell -- ceph nfs cluster ls 2>/dev/null | tr -d '\r' | grep -qw '$nfsCluster'"""
+    s"""cephadm shell -- ceph nfs cluster ls 2>/dev/null | tr -d '\\r' | grep -qw '$nfsCluster'"""
   private val nfsScript =
     s"""set -e
        |HOST=$$(cephadm shell -- ceph orch host ls --format json 2>/dev/null | python3 -c "import sys, json
