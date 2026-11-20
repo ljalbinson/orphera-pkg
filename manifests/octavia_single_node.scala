@@ -1407,24 +1407,24 @@ if __name__ == '__main__':
         s"copy octavia.conf to the $name config",
         s"install -m 0600 $srcDir/octavia.conf $dir/octavia.conf",
         unless = s"cmp -s $srcDir/octavia.conf $dir/octavia.conf"
-      ).after(rendered, dirRes).notifies(unitService)
+      ).after(rendered, dirRes)
       val kollaCa = command(
         s"copy Keystone's CA to the $name config",
         s"cp $caCert $dir/ca.crt",
         unless = s"cmp -s $caCert $dir/ca.crt"
-      ).after(ca, dirRes).notifies(unitService)
+      ).after(ca, dirRes)
       val certCopies = command(
         s"copy the certificates to the $name config",
         certsCopyScript(dir),
         unless = certsCopyCurrent(dir)
-      ).after(certs, dirRes).notifies(unitService)
+      ).after(certs, dirRes)
       val kollaJson = file(
         s"$dir/config.json",
         configJson(name),
         mode = "0644",
         owner = "root",
         group = "root"
-      ).after(dirRes).notifies(unitService)
+      ).after(dirRes)
       val unitFile = file(
         c.unitPath,
         c.render,
@@ -1452,18 +1452,36 @@ if __name__ == '__main__':
       )
     }
 
+    // A container reads its configuration and CA at start. So each unit is restarted when the hash of its config
+    // directory and unit file differs from the one noted at its last restart here. The stamp is written after the
+    // restart, so a change that came while the unit was skipped (an earlier step failed) is still picked up by the
+    // next run. The first run restarts each unit once.
+    val restarts = octaviaServices.zip(running).map { case (c, r) =>
+      val dir = s"$confRoot/${c.name.value}"
+      val stampFile = s"$stateDir/${c.name.value}.restart.stamp"
+      val hash = s"cat $dir/* ${c.unitPath} 2>/dev/null | sha256sum | cut -c1-32"
+      command(
+        s"restart ${c.unitName} when its configuration or CA changed",
+        s"""set -e
+           |systemctl restart ${c.unitName}
+           |$hash > $stampFile""".stripMargin,
+        unless = s"""[ "$$($hash)" = "$$(cat $stampFile 2>/dev/null)" ]""",
+        timeout = 180
+      ).after(r)
+    }
+
     val answering = command(
       "octavia-api answers on its port",
       waitHealthy,
       unless = healthy,
       timeout = 240
-    ).after(running*)
+    ).after((running ++ restarts)*)
     val providerListed = command(
       "the amphora provider is listed",
       waitProviders,
       unless = providersListed,
       timeout = 240
-    ).after((answering :: running)*)
+    ).after((answering :: (running ++ restarts))*)
     val cycle = command(
       "make a load balancer, send an HTTP request through its amphora, delete it",
       cycleScript,
@@ -1496,5 +1514,5 @@ if __name__ == '__main__':
       certs,
       confTemplate,
       rendered
-    ) ++ svcs.flatMap(_.resources) ++ List(dbSync) ++ running ++
+    ) ++ svcs.flatMap(_.resources) ++ List(dbSync) ++ running ++ restarts ++
       List(answering, providerListed, cycle)
