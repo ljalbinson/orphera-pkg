@@ -960,12 +960,20 @@ if __name__ == '__main__':
   private def fill(s: String): String =
     s.replace("@@STATE@@", stateDir).replace("@@HELPER@@", helperPath)
 
-  private val imageScript =
+  // A step that runs for minutes with no output can lose its connection to the agent, so the download and the
+  // upload each print a line every 20 seconds while they work.
+  private val heartbeat =
+    """heartbeat() { "$@" & P=$!; while kill -0 $P 2>/dev/null; do sleep 20; echo "still working ($(date +%H:%M:%S))"; done; wait $P; }"""
+
+  // What was asked for, to tell a downloaded image from one for another choice.
+  private val imageChoice =
+    Resource.sha256(k8sVersion + "|" + k8sMinor + "|" + k8sImageUrl + "|" + k8sOsVersion + "|" + manifestUrl)
+
+  // Step one: choose the image, download it and check it, and note what was chosen in image.current.
+  private val fetchImageScript =
     fill(
       s"""set -e
-         |if @@HELPER@@ image-present; then
-         |  exit 0
-         |fi
+         |$heartbeat
          |K8S_VERSION='$k8sVersion'
          |K8S_MINOR='$k8sMinor'
          |IMAGE_URL='$k8sImageUrl'
@@ -1028,7 +1036,7 @@ if __name__ == '__main__':
          |  rm -f $$IMG
          |fi
          |if [ ! -s $$IMG ]; then
-         |  curl -fL --retry 3 --connect-timeout 30 -o $$IMG.part "$$IMAGE_URL" || { rm -f $$IMG.part; echo "cannot download the image - put it at $$IMG and run again" >&2; exit 1; }
+         |  heartbeat curl -fsSL --retry 3 --connect-timeout 30 -o $$IMG.part "$$IMAGE_URL" || { rm -f $$IMG.part; echo "cannot download the image - put it at $$IMG and run again" >&2; exit 1; }
          |  mv $$IMG.part $$IMG
          |fi
          |if [ -n "$$SUM" ]; then
@@ -1040,8 +1048,23 @@ if __name__ == '__main__':
          |  exit 1
          |fi
          |ls -l $$IMG
-         |@@HELPER@@ image-upload $$IMG $$K8S_VERSION $$OS_VERSION""".stripMargin
+         |printf "IMG='%s'\\nK8S_VERSION='%s'\\nOS_VERSION='%s'\\nCHOICE='%s'\\n" "$$IMG" "$$K8S_VERSION" "$$OS_VERSION" "$imageChoice" > @@STATE@@/image.current
+         |echo "image ready: $$IMG"""".stripMargin
     )
+
+  // Step two: upload what step one noted.
+  private val uploadImageScript =
+    fill(
+      s"""set -e
+         |$heartbeat
+         |. @@STATE@@/image.current
+         |heartbeat @@HELPER@@ image-upload "$$IMG" "$$K8S_VERSION" "$$OS_VERSION"""".stripMargin
+    )
+
+  private val imagePresent = s"$helperPath image-present >/dev/null 2>&1"
+  // Nothing to fetch when Glance has an image, or the file for this choice is there.
+  private val imageFetched =
+    s"""$imagePresent || ( [ -s $stateDir/image.current ] && . $stateDir/image.current && [ "$$CHOICE" = "$imageChoice" ] && [ -s "$$IMG" ] )"""
 
 
   // The API answers its version document without a token (200, or 300 for a list of versions).
@@ -1234,12 +1257,18 @@ if __name__ == '__main__':
       unless = s"$helperPath resources-ok >/dev/null 2>&1",
       timeout = 120
     ).after(reporting)
-    val nodeImage = command(
-      "download and upload the Kubernetes node image",
-      imageScript,
-      unless = s"$helperPath image-present >/dev/null 2>&1",
+    val fetchedImage = command(
+      "download the Kubernetes node image",
+      fetchImageScript,
+      unless = imageFetched,
       timeout = 3600
     ).after(flavor, stateDirectory)
+    val nodeImage = command(
+      "upload the Kubernetes node image to Glance",
+      uploadImageScript,
+      unless = imagePresent,
+      timeout = 3600
+    ).after(fetchedImage)
     val clusterTemplate = command(
       "make the cluster template",
       s"$helperPath template",
@@ -1274,4 +1303,4 @@ if __name__ == '__main__':
       pylibDirectory,
       driver
     ) ++ svcs.flatMap(_.resources) ++ List(dbSync, helperFile, registered) ++
-      running ++ List(answering, reporting, flavor, nodeImage, clusterTemplate, route, cycle)
+      running ++ List(answering, reporting, flavor, fetchedImage, nodeImage, clusterTemplate, route, cycle)
