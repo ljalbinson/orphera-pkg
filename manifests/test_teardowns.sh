@@ -98,9 +98,14 @@ apply_td() {
 
 catalog_types() {
   command -v openstack >/dev/null 2>&1 || return 1
+  # The credentials file may use variables that are not set, so `set -u` is off while it is read.
   # shellcheck disable=SC1090
-  [ -f "$HOME/.config/openstack/admin-openrc.sh" ] && . "$HOME/.config/openstack/admin-openrc.sh"
-  openstack service list -f value -c Type 2>/dev/null
+  if [ -f "$HOME/.config/openstack/admin-openrc.sh" ]; then
+    set +u
+    . "$HOME/.config/openstack/admin-openrc.sh"
+    set -u
+  fi
+  openstack service list -f value -c Type
 }
 
 test_module() {
@@ -134,7 +139,7 @@ test_module() {
         else pass "service type $t is gone from the Keystone catalog"; fi
       done
     else
-      log "SKIP: the OpenStack CLI does not work here (utils/openstack-client-setup.sh): catalog not checked"
+      log "SKIP: 'openstack service list' gave nothing here (utils/openstack-client-setup.sh): catalog not checked"
     fi
   fi
 
