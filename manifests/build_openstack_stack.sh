@@ -430,7 +430,9 @@ step_rgw() {
 }
 
 step_octavia() {
-  playbook octavia_single_node.scala
+  apply_desc octavia_database.scala
+  apply_desc octavia_rabbitmq.scala
+  apply_desc octavia_single_node.scala
   local out
   out=$(run_on tst19 "curl -s -o /dev/null -w 'http=%{http_code}' http://localhost:9876/")
   check "the Octavia API answers its version document" contains "http=200" "$out"
