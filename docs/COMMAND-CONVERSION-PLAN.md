@@ -21,7 +21,8 @@ Every command step in `manifests/` at `08f5d24`:
 
 Each step was sorted by its label and the script it runs, by pattern, with a few corrections by hand. The counts are
 good to a few steps either way, not exact. The list of every step, with its file, line, group and the proposed
-replacement, is `docs/command-conversion-steps.csv`.
+replacement, is `docs/command-conversion-steps.csv`. The same, with a summary and counts by area, is the
+workbook `docs/command-conversion.xlsx`.
 
 ## Summary
 
