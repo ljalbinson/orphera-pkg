@@ -46,14 +46,13 @@ object glance_teardown extends OrpheraApply:
        |if command -v podman >/dev/null 2>&1; then podman rm -f glance-api 2>/dev/null || true; fi
        |echo "glance-api container and unit removed"""".stripMargin
 
-  // True when ANY of them exists.
-  private val filesExist =
-    s"for p in /etc/kolla/glance /etc/kolla/glance-api /etc/kolla/glance-ca /var/lib/orphera/glance /var/log/kolla/glance $helper; do [ -e \"$$p\" ] && exit 0; done; exit 1"
-  private val cleanupScript =
-    s"""rm -rf /etc/kolla/glance /etc/kolla/glance-api /etc/kolla/glance-ca
-       |rm -rf /var/lib/orphera/glance /var/log/kolla/glance
-       |rm -f $helper
-       |echo "glance config, state and helper removed"""".stripMargin
+  private val dirs = List(
+    "/etc/kolla/glance",
+    "/etc/kolla/glance-api",
+    "/etc/kolla/glance-ca",
+    "/var/lib/orphera/glance",
+    "/var/log/kolla/glance"
+  )
 
   private val imageExists = s"command -v podman >/dev/null 2>&1 && podman image exists $image"
 
@@ -106,16 +105,13 @@ object glance_teardown extends OrpheraApply:
         stopScript,
         onlyIf = unitExists
       ).after(unregistered)
-      val cleaned = command(
-        "remove glance files, state and the helper",
-        cleanupScript,
-        onlyIf = filesExist,
-        timeout = 120
-      ).after(stopped)
+      // Typed removal, no script: each directory with its contents, then the helper.
+      val cleaned = (dirs.map(absentDirectory(_, recursive = true)) :+
+        absentFile(helper)).map(_.after(stopped))
       val removedImage = command(
         "remove the glance-api image",
         s"podman rmi -f $image",
         onlyIf = imageExists,
         timeout = 120
       ).after(stopped)
-      List(unregistered, stopped, cleaned, removedImage)
+      List(unregistered, stopped) ++ cleaned ++ List(removedImage)

@@ -56,14 +56,14 @@ object magnum_teardown extends OrpheraApply:
 
   // /etc/kolla/magnum is where the cluster playbook kept magnum.conf and the kubeconfig; it is listed so that a
   // node set up by the playbook is cleaned too.
-  private val paths =
-    "/etc/kolla/magnum /etc/kolla/magnum-api /etc/kolla/magnum-conductor /etc/kolla/magnum-ca /var/lib/orphera/magnum /var/log/kolla/magnum " + helper
-  // True when ANY of them exists.
-  private val filesExist =
-    s"for p in $paths; do [ -e \"$$p\" ] && exit 0; done; exit 1"
-  private val cleanupScript =
-    s"""rm -rf $paths
-       |echo "magnum config, state and helper removed"""".stripMargin
+  private val dirs = List(
+    "/etc/kolla/magnum",
+    "/etc/kolla/magnum-api",
+    "/etc/kolla/magnum-conductor",
+    "/etc/kolla/magnum-ca",
+    "/var/lib/orphera/magnum",
+    "/var/log/kolla/magnum"
+  )
 
   // ---- tst10 ----
   private val rabbitUp =
@@ -115,10 +115,7 @@ object magnum_teardown extends OrpheraApply:
         onlyIf = anyUnit,
         timeout = 240
       ).after(openstack)
-      val cleaned = command(
-        "remove magnum files, state and the helper",
-        cleanupScript,
-        onlyIf = filesExist,
-        timeout = 120
-      ).after(stopped)
-      List(openstack, stopped, cleaned)
+      // Typed removal, no script: each directory with its contents, then the helper.
+      val cleaned = (dirs.map(absentDirectory(_, recursive = true)) :+
+        absentFile(helper)).map(_.after(stopped))
+      List(openstack, stopped) ++ cleaned

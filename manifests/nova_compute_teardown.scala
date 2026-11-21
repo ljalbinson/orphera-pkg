@@ -61,13 +61,17 @@ object nova_compute_teardown extends OrpheraApply:
 
   // /etc/kolla/nova-compute-src and neutron-agent-src are where the cluster playbook kept its sources; they
   // are listed so that a node set up by the playbook is cleaned too.
-  private val paths =
-    s"/etc/kolla/nova-compute /etc/kolla/nova-compute-src /etc/kolla/nova-compute-ca /etc/kolla/neutron-openvswitch-agent /etc/kolla/neutron-agent-src /var/lib/nova /var/lib/orphera/neutron /var/log/kolla/nova /var/log/kolla/neutron $helper"
-  private val filesExist =
-    s"for p in $paths; do [ -e \"$$p\" ] && exit 0; done; exit 1"
-  private val cleanupScript =
-    s"""rm -rf $paths
-       |echo "nova-compute and Neutron agent config, state and helper removed"""".stripMargin
+  private val dirs = List(
+    "/etc/kolla/nova-compute",
+    "/etc/kolla/nova-compute-src",
+    "/etc/kolla/nova-compute-ca",
+    "/etc/kolla/neutron-openvswitch-agent",
+    "/etc/kolla/neutron-agent-src",
+    "/var/lib/nova",
+    "/var/lib/orphera/neutron",
+    "/var/log/kolla/nova",
+    "/var/log/kolla/neutron"
+  )
 
   def describe(target: Node): List[ApplyResource] =
     val stopped = command(
@@ -82,10 +86,7 @@ object nova_compute_teardown extends OrpheraApply:
       onlyIf = registered,
       timeout = 120
     ).after(stopped)
-    val cleaned = command(
-      "remove nova-compute files, state and the helper",
-      cleanupScript,
-      onlyIf = filesExist,
-      timeout = 120
-    ).after(unregistered)
-    List(stopped, unregistered, cleaned)
+    // Typed removal, no script: each directory with its contents, then the helper.
+    val cleaned = (dirs.map(absentDirectory(_, recursive = true)) :+
+      absentFile(helper)).map(_.after(unregistered))
+    List(stopped, unregistered) ++ cleaned

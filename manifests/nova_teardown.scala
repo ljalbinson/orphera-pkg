@@ -50,14 +50,16 @@ object nova_teardown extends OrpheraApply:
        |systemctl daemon-reload
        |echo "nova containers and units removed"""".stripMargin
 
-  private val paths =
-    "/etc/kolla/nova /etc/kolla/nova-api /etc/kolla/nova-scheduler /etc/kolla/nova-conductor /etc/kolla/nova-novncproxy /etc/kolla/nova-ca /var/lib/orphera/nova /var/log/kolla/nova " + helper
-  // True when ANY of them exists.
-  private val filesExist =
-    s"for p in $paths; do [ -e \"$$p\" ] && exit 0; done; exit 1"
-  private val cleanupScript =
-    s"""rm -rf $paths
-       |echo "nova config, state and helper removed"""".stripMargin
+  private val dirs = List(
+    "/etc/kolla/nova",
+    "/etc/kolla/nova-api",
+    "/etc/kolla/nova-scheduler",
+    "/etc/kolla/nova-conductor",
+    "/etc/kolla/nova-novncproxy",
+    "/etc/kolla/nova-ca",
+    "/var/lib/orphera/nova",
+    "/var/log/kolla/nova"
+  )
 
   // ---- tst10 ----
   private val rabbitUp =
@@ -111,10 +113,7 @@ object nova_teardown extends OrpheraApply:
         onlyIf = anyUnit,
         timeout = 240
       ).after(unregistered)
-      val cleaned = command(
-        "remove nova files, state and the helper",
-        cleanupScript,
-        onlyIf = filesExist,
-        timeout = 120
-      ).after(stopped)
-      List(unregistered, stopped, cleaned)
+      // Typed removal, no script: each directory with its contents, then the helper.
+      val cleaned = (dirs.map(absentDirectory(_, recursive = true)) :+
+        absentFile(helper)).map(_.after(stopped))
+      List(unregistered, stopped) ++ cleaned

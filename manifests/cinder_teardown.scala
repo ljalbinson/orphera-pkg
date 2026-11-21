@@ -56,14 +56,15 @@ object cinder_teardown extends OrpheraApply:
        |systemctl daemon-reload
        |echo "cinder containers and units removed"""".stripMargin
 
-  private val paths =
-    "/etc/kolla/cinder /etc/kolla/cinder-api /etc/kolla/cinder-scheduler /etc/kolla/cinder-volume /etc/kolla/cinder-ca /var/lib/orphera/cinder /var/log/kolla/cinder " + helper
-  // True when ANY of them exists.
-  private val filesExist =
-    s"for p in $paths; do [ -e \"$$p\" ] && exit 0; done; exit 1"
-  private val cleanupScript =
-    s"""rm -rf $paths
-       |echo "cinder config, state and helper removed"""".stripMargin
+  private val dirs = List(
+    "/etc/kolla/cinder",
+    "/etc/kolla/cinder-api",
+    "/etc/kolla/cinder-scheduler",
+    "/etc/kolla/cinder-volume",
+    "/etc/kolla/cinder-ca",
+    "/var/lib/orphera/cinder",
+    "/var/log/kolla/cinder"
+  )
 
   // ---- tst0 ----
   // True when the pool or the user exists. When Ceph cannot be queried this is
@@ -122,10 +123,7 @@ object cinder_teardown extends OrpheraApply:
         onlyIf = anyUnit,
         timeout = 240
       ).after(unregistered)
-      val cleaned = command(
-        "remove cinder files, state and the helper",
-        cleanupScript,
-        onlyIf = filesExist,
-        timeout = 120
-      ).after(stopped)
-      List(unregistered, stopped, cleaned)
+      // Typed removal, no script: each directory with its contents, then the helper.
+      val cleaned = (dirs.map(absentDirectory(_, recursive = true)) :+
+        absentFile(helper)).map(_.after(stopped))
+      List(unregistered, stopped) ++ cleaned

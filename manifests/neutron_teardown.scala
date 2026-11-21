@@ -66,14 +66,16 @@ object neutron_teardown extends OrpheraApply:
       |ovs-vsctl --if-exists del-br br-int || true
       |echo "br-provider and br-int removed"""".stripMargin
 
-  private val paths =
-    "/etc/kolla/neutron /etc/kolla/neutron-server /etc/kolla/neutron-openvswitch-agent /etc/kolla/neutron-dhcp-agent /etc/kolla/neutron-l3-agent /etc/kolla/neutron-ca /var/lib/orphera/neutron /var/log/kolla/neutron " + helper
-  // True when ANY of them exists.
-  private val filesExist =
-    s"for p in $paths; do [ -e \"$$p\" ] && exit 0; done; exit 1"
-  private val cleanupScript =
-    s"""rm -rf $paths
-       |echo "neutron config, state and helper removed"""".stripMargin
+  private val dirs = List(
+    "/etc/kolla/neutron",
+    "/etc/kolla/neutron-server",
+    "/etc/kolla/neutron-openvswitch-agent",
+    "/etc/kolla/neutron-dhcp-agent",
+    "/etc/kolla/neutron-l3-agent",
+    "/etc/kolla/neutron-ca",
+    "/var/lib/orphera/neutron",
+    "/var/log/kolla/neutron"
+  )
 
   // ---- tst10 ----
   private val rabbitUp =
@@ -133,10 +135,7 @@ object neutron_teardown extends OrpheraApply:
         onlyIf = bridgesExist,
         timeout = 60
       ).after(stopped)
-      val cleaned = command(
-        "remove neutron files, state and the helper",
-        cleanupScript,
-        onlyIf = filesExist,
-        timeout = 120
-      ).after(stopped)
-      List(unregistered, stopped, bridges, cleaned)
+      // Typed removal, no script: each directory with its contents, then the helper.
+      val cleaned = (dirs.map(absentDirectory(_, recursive = true)) :+
+        absentFile(helper)).map(_.after(stopped))
+      List(unregistered, stopped, bridges) ++ cleaned
