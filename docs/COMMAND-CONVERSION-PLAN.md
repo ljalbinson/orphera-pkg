@@ -127,7 +127,7 @@ otherwise need only typed actions, so that those descriptions can run without `r
 
 ## Order
 
-1. Group 1, mostly playbooks: replace the write-and-restart scripts with `Task.Apply`. No agent change.
+1. Group 1, mostly playbooks: replace the write-and-restart scripts with `Task.Apply`. No agent change. Started on branch `group1-playbooks` with three steps; the 30 write-and-restart steps are held up by `{{...}}` in the file text (`Task.Apply` does not render content) and by values worked out on the node (the default interface in keepalived), so they need a templated content kind and an interface fact first.
 2. Group 2: recursive `absentDirectory`, a file copied from a path on the node, and the dpkg lock wait in `pkg`.
 3. Group 3, in order of steps saved: `containerImage` and `container`, `sqlDatabase`/`sqlUser`, `waitFor`,
    `rabbitmqVhost`/`rabbitmqUser`, certificates, `aptRepository` and archive.

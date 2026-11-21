@@ -47,6 +47,17 @@ object wordpress_teardown extends OrpheraClusterPlaybook:
       |rm -f /etc/nginx/sites-available/wordpress /etc/nginx/sites-enabled/wordpress
       |echo 'WordPress site files and nginx site config removed'""".stripMargin
 
+  // Stopped through the apply engine: nothing to do for a unit that is not there or is already stopped.
+  private val stopWebPlan: ApplyPlan =
+    import Resources.*
+    ApplyPlan.orFail(
+      "wordpress-stop-web",
+      List(
+        service("nginx", enabled = None, running = Some(false)),
+        service("php8.3-fpm", enabled = None, running = Some(false))
+      )
+    )
+
   val playbook: ClusterPlaybook =
     clusterPlaybook("wordpress-teardown")(
       stage("drop-wordpress-database", "tst3")
@@ -56,15 +67,7 @@ object wordpress_teardown extends OrpheraClusterPlaybook:
         .build,
 
       stage("teardown-tst7", "tst7")
-        .task("stop nginx and php8.3-fpm")(
-          Task.RunCommand(
-            List(
-              "sh",
-              "-c",
-              "systemctl stop nginx php8.3-fpm 2>/dev/null || true"
-            )
-          )
-        )
+        .task("stop nginx and php8.3-fpm")(Task.Apply(stopWebPlan))
         .task("purge nginx, php8.3-fpm and PHP extensions")(
           Task.Remove(
             packages = List(

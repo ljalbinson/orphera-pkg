@@ -62,16 +62,20 @@ object mariadb_galera_teardown extends OrpheraClusterPlaybook:
       |ip addr del 10.10.5.100/24 dev "$IFACE" 2>/dev/null || true
       |echo 'haproxy/keepalived VIP frontend state removed (clustercheck endpoint, sysctl override, any lingering VIP)'""".stripMargin
 
+  // Stopped through the apply engine: a unit that is not there, or is already stopped, is left alone.
+  private val stopServicesPlan: ApplyPlan =
+    import Resources.*
+    ApplyPlan.orFail(
+      "galera-stop-services",
+      List("mariadb", "haproxy", "keepalived", "clustercheck.socket").map(u =>
+        service(u, enabled = None, running = Some(false))
+      )
+    )
+
   private def teardownStage(host: String) =
     stage(s"teardown-$host", host)
       .task(s"stop mariadb, haproxy, keepalived on $host")(
-        Task.RunCommand(
-          List(
-            "sh",
-            "-c",
-            "systemctl stop mariadb haproxy keepalived clustercheck.socket 2>/dev/null || true"
-          )
-        )
+        Task.Apply(stopServicesPlan)
       )
       .task(
         s"purge mariadb-server, mariadb-client, mariadb-backup, galera-4 on $host"
