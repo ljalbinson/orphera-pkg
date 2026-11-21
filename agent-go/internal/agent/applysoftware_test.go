@@ -12,6 +12,9 @@ import (
 	"github.com/ljalbinson/orphera-pkg/agent-go/internal/pb"
 )
 
+// No test waits for the real apt: pgrep would look at the machine running the tests.
+func init() { aptBusy = func() bool { return false } }
+
 func installA(name, version string, update bool) *pb.SoftwareAction {
 	return &pb.SoftwareAction{Action: &pb.SoftwareAction_PackageInstall{
 		PackageInstall: &pb.PackageInstall{Name: name, Version: version, UpdateCache: update}}}
@@ -116,5 +119,56 @@ func TestApplySoftwarePackages(t *testing.T) {
 func TestApplySoftwareOperation(t *testing.T) {
 	if got := operationOf("ApplySoftware"); got != "apply-software" {
 		t.Errorf("operation %q", got)
+	}
+}
+
+func TestWaitAptIdle(t *testing.T) {
+	oldBusy, oldPoll := aptBusy, aptPoll
+	defer func() { aptBusy, aptPoll = oldBusy, oldPoll }()
+	aptPoll = time.Millisecond
+
+	n := 0
+	aptBusy = func() bool { n++; return n <= 3 }
+	if err := waitAptIdle(time.Second); err != nil || n != 4 {
+		t.Errorf("busy three times, then idle: err=%v looks=%d", err, n)
+	}
+	aptBusy = func() bool { return true }
+	if err := waitAptIdle(20 * time.Millisecond); err == nil {
+		t.Error("always busy should time out")
+	}
+	aptBusy = func() bool { return false }
+	if err := waitAptIdle(time.Second); err != nil {
+		t.Errorf("idle: %v", err)
+	}
+}
+
+func TestInstallWaitsForAptFirst(t *testing.T) {
+	oldBusy, oldPoll, oldRun := aptBusy, aptPoll, runSoftwareCommand
+	defer func() { aptBusy, aptPoll, runSoftwareCommand = oldBusy, oldPoll, oldRun }()
+	aptPoll = time.Millisecond
+	busy := true
+	looks := 0
+	aptBusy = func() bool {
+		looks++
+		if looks >= 3 {
+			busy = false
+		}
+		return busy
+	}
+	ranWhileBusy := false
+	runSoftwareCommand = func(_ time.Duration, name string, args ...string) error {
+		if busy {
+			ranWhileBusy = true
+		}
+		return nil
+	}
+	if detectPackageManager() != pmApt {
+		t.Skip("not an apt node")
+	}
+	if err := installPackage(&pb.PackageInstall{Name: "curl"}); err != nil {
+		t.Fatal(err)
+	}
+	if ranWhileBusy || looks < 3 {
+		t.Errorf("apt-get ran while busy=%v, looks=%d", ranWhileBusy, looks)
 	}
 }

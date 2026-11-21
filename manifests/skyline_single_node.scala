@@ -144,21 +144,6 @@ object skyline_single_node extends OrpheraApply:
   private val hostPackages =
     List("podman", "openssl", "curl", "ca-certificates", "python3")
 
-  // A fresh VM may still be running unattended-upgrades (see disable_unattended_upgrades.scala); wait for it
-  // before touching packages.
-  private val aptIdle =
-    """! pgrep -f '^/usr/bin/python3 /usr/bin/unattended-upgrade$' >/dev/null && ! pgrep -x apt-get >/dev/null && ! pgrep -x apt >/dev/null && ! pgrep -x dpkg >/dev/null"""
-  private val waitAptIdleScript =
-    s"""for i in $$(seq 1 180); do
-       |  if $aptIdle; then
-       |    echo "apt and dpkg are idle"
-       |    exit 0
-       |  fi
-       |  sleep 5
-       |done
-       |echo "apt/dpkg still busy after 15 minutes (unattended-upgrades?)" >&2
-       |exit 1""".stripMargin
-
   private val tlsPresent =
     s"[ -f $tlsDir/server-chain.crt ] && [ -f $tlsDir/server.key ] && [ -f $tlsDir/ca.crt ]"
   private val tlsMissing =
@@ -485,13 +470,7 @@ if __name__ == '__main__':
       tlsMissing,
       unless = tlsPresent
     )
-    val aptWait = command(
-      "wait for apt and dpkg to be idle",
-      waitAptIdleScript,
-      unless = aptIdle,
-      timeout = 960
-    )
-    val tools = hostPackages.map(p => pkg(p, updateCache = true).after(aptWait))
+    val tools = hostPackages.map(p => pkg(p, updateCache = true))
     val podman = tools(0)
 
     val pulled = command(
@@ -601,7 +580,6 @@ if __name__ == '__main__':
 
     tools ++ List(
       tls,
-      aptWait,
       pulled,
       confDirectory,
       caDirectory,

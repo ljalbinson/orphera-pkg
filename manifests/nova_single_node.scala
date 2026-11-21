@@ -111,22 +111,6 @@ object nova_single_node extends OrpheraApply:
   private val hostPackages =
     List("podman", "openssl", "curl", "ca-certificates", "python3")
 
-  // A fresh VM may still be running unattended-upgrades (see
-  // disable_unattended_upgrades.scala); when it finishes needrestart restarts the
-  // agent and kills the running task. Wait for it before touching packages.
-  private val aptIdle =
-    """! pgrep -f '^/usr/bin/python3 /usr/bin/unattended-upgrade$' >/dev/null && ! pgrep -x apt-get >/dev/null && ! pgrep -x apt >/dev/null && ! pgrep -x dpkg >/dev/null"""
-  private val waitAptIdleScript =
-    s"""for i in $$(seq 1 180); do
-       |  if $aptIdle; then
-       |    echo "apt and dpkg are idle"
-       |    exit 0
-       |  fi
-       |  sleep 5
-       |done
-       |echo "apt/dpkg still busy after 15 minutes (unattended-upgrades?)" >&2
-       |exit 1""".stripMargin
-
   // The option lists of the image (nova), from catalogues/. Every section and key of the
   // files below is checked against them when this manifest is built.
   private val novaCatalogue: Catalogue =
@@ -624,13 +608,7 @@ if __name__ == '__main__':
        |exit 1""".stripMargin
 
   def describe(target: Node): List[ApplyResource] =
-    val aptWait = command(
-      "wait for apt and dpkg to be idle",
-      waitAptIdleScript,
-      unless = aptIdle,
-      timeout = 960
-    )
-    val tools = hostPackages.map(p => pkg(p, updateCache = true).after(aptWait))
+    val tools = hostPackages.map(p => pkg(p, updateCache = true))
     val podman = tools(0)
 
     val mirrorDir = directory("/etc/containers/registries.conf.d").after(podman)
@@ -742,7 +720,6 @@ if __name__ == '__main__':
     ).after((answering :: running)*)
 
     tools ++ List(
-      aptWait,
       mirrorDir,
       mirror,
       pulled,

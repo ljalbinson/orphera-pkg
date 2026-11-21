@@ -181,22 +181,6 @@ object nova_compute extends OrpheraApply:
       "qemu-utils"
     )
 
-  // A fresh VM may still be running unattended-upgrades (see
-  // disable_unattended_upgrades.scala); when it finishes needrestart restarts the
-  // agent and kills the running task. Wait for it before touching packages.
-  private val aptIdle =
-    """! pgrep -f '^/usr/bin/python3 /usr/bin/unattended-upgrade$' >/dev/null && ! pgrep -x apt-get >/dev/null && ! pgrep -x apt >/dev/null && ! pgrep -x dpkg >/dev/null"""
-  private val waitAptIdleScript =
-    s"""for i in $$(seq 1 180); do
-       |  if $aptIdle; then
-       |    echo "apt and dpkg are idle"
-       |    exit 0
-       |  fi
-       |  sleep 5
-       |done
-       |echo "apt/dpkg still busy after 15 minutes (unattended-upgrades?)" >&2
-       |exit 1""".stripMargin
-
   // Nested virtualization must be visible in the guest. Fail early with the reason. The command only runs
   // (and fails) when /dev/kvm is missing.
   private val kvmPresent = "[ -c /dev/kvm ]"
@@ -903,18 +887,12 @@ if __name__ == '__main__':
     val ip = target.vars
       .getOrElse("cluster_ip", sys.error(s"inventory: node $host has no cluster_ip"))
 
-    val aptWait = command(
-      "wait for apt and dpkg to be idle",
-      waitAptIdleScript,
-      unless = aptIdle,
-      timeout = 960
-    )
     val kvm = command(
       "check that the VM has hardware virtualization",
       kvmMissingScript,
       unless = kvmPresent
     )
-    val tools = hostPackages.map(p => pkg(p, updateCache = true).after(aptWait))
+    val tools = hostPackages.map(p => pkg(p, updateCache = true))
     val podman = tools(0)
 
     // libvirtd, the libvirt secret for the Ceph volumes, the provider NIC and its bridge.
@@ -1091,7 +1069,6 @@ if __name__ == '__main__':
     ).after(helperFile, ovsRunning, novaRunning)
 
     tools ++ List(
-      aptWait,
       kvm,
       libvirt,
       cephSecret,

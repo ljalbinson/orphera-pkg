@@ -80,19 +80,6 @@ object trove_guest_image extends OrpheraApply:
   )
 
 
-  private val aptIdle =
-    """! pgrep -f '^/usr/bin/python3 /usr/bin/unattended-upgrade$' >/dev/null && ! pgrep -x apt-get >/dev/null && ! pgrep -x apt >/dev/null && ! pgrep -x dpkg >/dev/null"""
-  private val waitAptIdleScript =
-    s"""for i in $$(seq 1 180); do
-       |  if $aptIdle; then
-       |    echo "apt and dpkg are idle"
-       |    exit 0
-       |  fi
-       |  sleep 5
-       |done
-       |echo "apt/dpkg still busy after 15 minutes (unattended-upgrades?)" >&2
-       |exit 1""".stripMargin
-
   // ---- tst21: the image ------------------------------------------------
 
   private val prepareScript =
@@ -389,13 +376,7 @@ if __name__ == '__main__':
       .replace("@@CA@@", caFile)
 
   def describe(target: Node): List[ApplyResource] =
-    val aptWait = command(
-      "wait for apt and dpkg to be idle",
-      waitAptIdleScript,
-      unless = aptIdle,
-      timeout = 960
-    )
-    val tools = buildPackages.map(p => pkg(p, updateCache = true).after(aptWait))
+    val tools = buildPackages.map(p => pkg(p, updateCache = true))
 
     val imageDirectory = directory(imageDir)
     val cacheDirectory = directory(cacheDir)
@@ -440,7 +421,6 @@ if __name__ == '__main__':
     ).after(helperFile, ca)
 
     tools ++ List(
-      aptWait,
       imageDirectory,
       cacheDirectory,
       prepare,

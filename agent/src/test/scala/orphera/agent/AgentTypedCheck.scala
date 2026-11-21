@@ -162,6 +162,19 @@ object AgentTypedCheck:
       check(s"recursive remove refuses $bad", r.error.contains(why) || r.error.nonEmpty, r.toString)
     val notDir = files(FileAction.Action.RemovePath(RemovePath(s"$d/keep", recursive = true)))
     check("recursive needs the directory flag", notDir.error.contains("only for a directory"), notDir.toString)
+    val (oldBusy, oldPoll) = (TypedSoftware.aptBusy, TypedSoftware.aptPoll)
+    TypedSoftware.aptPoll = scala.concurrent.duration.FiniteDuration(1, "ms")
+    var looks = 0
+    TypedSoftware.aptBusy = () => { looks += 1; looks <= 3 }
+    TypedSoftware.waitAptIdle(scala.concurrent.duration.FiniteDuration(1, "s"))
+    check("waitAptIdle waits while busy, then goes on", looks == 4, looks.toString)
+    TypedSoftware.aptBusy = () => true
+    val timedOut = scala.util.Try(
+      TypedSoftware.waitAptIdle(scala.concurrent.duration.FiniteDuration(20, "ms"))
+    ).isFailure
+    check("waitAptIdle gives up when apt stays busy", timedOut)
+    TypedSoftware.aptBusy = oldBusy
+    TypedSoftware.aptPoll = oldPoll
     val stop = files(
       FileAction.Action.MakeDirectory(MakeDirectory(s"$d/s1")),
       FileAction.Action.RemovePath(RemovePath("relative")),

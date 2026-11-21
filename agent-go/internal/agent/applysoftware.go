@@ -92,6 +92,9 @@ func installPackage(p *pb.PackageInstall) error {
 	const long = 15 * time.Minute
 	switch detectPackageManager() {
 	case pmApt:
+		if err := waitAptIdle(long); err != nil {
+			return err
+		}
 		spec := p.Name
 		if p.Version != "" {
 			spec = p.Name + "=" + p.Version
@@ -123,6 +126,9 @@ func removePackage(name string) error {
 	const long = 15 * time.Minute
 	switch detectPackageManager() {
 	case pmApt:
+		if err := waitAptIdle(long); err != nil {
+			return err
+		}
 		return runSoftware(long, "apt-get", "remove", "-y", "-q", "-o", "DPkg::Lock::Timeout=300", name)
 	case pmDnf:
 		return runSoftware(long, "dnf", "-y", "-q", "remove", name)
@@ -154,4 +160,35 @@ var runSoftwareCommand = func(timeout time.Duration, name string, args ...string
 
 func runSoftware(timeout time.Duration, name string, args ...string) error {
 	return runSoftwareCommand(timeout, name, args...)
+}
+
+// aptPoll is how often waitAptIdle looks again; tests shorten it.
+var aptPoll = 5 * time.Second
+
+// aptBusy tells whether apt-get, apt, dpkg or unattended-upgrades is running.
+// The dpkg lock alone is not enough: unattended-upgrades on a fresh VM can be
+// between two locks, and when it ends needrestart restarts the agent in the
+// middle of a task. A node without pgrep is taken to be idle.
+var aptBusy = func() bool {
+	for _, a := range [][]string{
+		{"-x", "apt-get"}, {"-x", "apt"}, {"-x", "dpkg"},
+		{"-f", "^/usr/bin/python3 /usr/bin/unattended-upgrade$"},
+	} {
+		if exec.Command("pgrep", a...).Run() == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// waitAptIdle waits until nothing is using apt, for at most max.
+func waitAptIdle(max time.Duration) error {
+	deadline := time.Now().Add(max)
+	for aptBusy() {
+		if time.Now().After(deadline) {
+			return fmt.Errorf("apt or dpkg still busy after %s (unattended-upgrades?)", max)
+		}
+		time.Sleep(aptPoll)
+	}
+	return nil
 }

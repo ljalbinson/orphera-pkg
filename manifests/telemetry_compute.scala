@@ -59,19 +59,6 @@ object telemetry_compute extends OrpheraApply:
   private val hostPackages =
     List("podman", "openssl", "curl", "ca-certificates", "python3")
 
-  private val aptIdle =
-    """! pgrep -f '^/usr/bin/python3 /usr/bin/unattended-upgrade$' >/dev/null && ! pgrep -x apt-get >/dev/null && ! pgrep -x apt >/dev/null && ! pgrep -x dpkg >/dev/null"""
-  private val waitAptIdleScript =
-    s"""for i in $$(seq 1 180); do
-       |  if $aptIdle; then
-       |    echo "apt and dpkg are idle"
-       |    exit 0
-       |  fi
-       |  sleep 5
-       |done
-       |echo "apt/dpkg still busy after 15 minutes (unattended-upgrades?)" >&2
-       |exit 1""".stripMargin
-
   private val registryMirror =
     s"""[[registry]]
        |prefix = "quay.io"
@@ -211,13 +198,7 @@ object telemetry_compute extends OrpheraApply:
        |exit 1""".stripMargin
 
   def describe(target: Node): List[ApplyResource] =
-    val aptWait = command(
-      "wait for apt and dpkg to be idle",
-      waitAptIdleScript,
-      unless = aptIdle,
-      timeout = 960
-    )
-    val tools = hostPackages.map(p => pkg(p, updateCache = true).after(aptWait))
+    val tools = hostPackages.map(p => pkg(p, updateCache = true))
     val podman = tools(0)
     val mirrorDir = directory("/etc/containers/registries.conf.d").after(podman)
     val mirror = file(
@@ -299,7 +280,6 @@ object telemetry_compute extends OrpheraApply:
     ).after(running)
 
     tools ++ List(
-      aptWait,
       mirrorDir,
       mirror,
       pulled,

@@ -969,6 +969,15 @@ object Apply:
 
   private val NoDifference = Difference(Nil, Nil, Nil)
 
+  /** The script a node without the typed call runs first: waits (up to 15
+    * minutes) until no apt, dpkg or unattended-upgrades is running, as the
+    * agent does itself. The dpkg lock alone is not enough: unattended-upgrades
+    * can be between two locks, and when it ends needrestart restarts the agent
+    * in the middle of the task.
+    */
+  private val AptIdleWait: String =
+    "i=0; while { pgrep -x apt-get || pgrep -x apt || pgrep -x dpkg || pgrep -f '^/usr/bin/python3 /usr/bin/unattended-upgrade$'; } >/dev/null 2>&1; do i=$((i+1)); [ $i -ge 180 ] && { echo 'apt/dpkg still busy after 15 minutes' >&2; exit 1; }; sleep 5; done; "
+
   // What differs in a path's mode, owner and group, and the commands that fix it.
   private final case class Attrs(
       changes: List[String],
@@ -1253,7 +1262,7 @@ object Apply:
         val install =
           if apt then
             val update = if p.updateCache then "apt-get update -q && " else ""
-            s"${update}DEBIAN_FRONTEND=noninteractive apt-get install -y -q -o DPkg::Lock::Timeout=300 --allow-downgrades $spec"
+            s"$AptIdleWait${update}DEBIAN_FRONTEND=noninteractive apt-get install -y -q -o DPkg::Lock::Timeout=300 --allow-downgrades $spec"
           else s"dnf -y -q install $spec || dnf -y -q downgrade $spec"
         if !p.present then
           if !installed then Right(NoDifference)
@@ -1262,7 +1271,7 @@ object Apply:
               List("removed"),
               List(
                 List(SoftwareChange.RemovePackage(p.name)) ->
-                  s"DEBIAN_FRONTEND=noninteractive apt-get remove -y -q -o DPkg::Lock::Timeout=300 $n"
+                  s"${AptIdleWait}DEBIAN_FRONTEND=noninteractive apt-get remove -y -q -o DPkg::Lock::Timeout=300 $n"
               )
             )
           else

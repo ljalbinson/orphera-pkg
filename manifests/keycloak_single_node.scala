@@ -138,21 +138,6 @@ object keycloak_single_node extends OrpheraApply:
   private val hostPackages =
     List("podman", "openssl", "curl", "ca-certificates", "python3")
 
-  // A fresh VM may still be running unattended-upgrades; when it finishes needrestart restarts the agent and
-  // kills the running task. Wait for it before touching packages.
-  private val aptIdle =
-    """! pgrep -f '^/usr/bin/python3 /usr/bin/unattended-upgrade$' >/dev/null && ! pgrep -x apt-get >/dev/null && ! pgrep -x apt >/dev/null && ! pgrep -x dpkg >/dev/null"""
-  private val waitAptIdleScript =
-    s"""for i in $$(seq 1 180); do
-       |  if $aptIdle; then
-       |    echo "apt and dpkg are idle"
-       |    exit 0
-       |  fi
-       |  sleep 5
-       |done
-       |echo "apt/dpkg still busy after 15 minutes (unattended-upgrades?)" >&2
-       |exit 1""".stripMargin
-
   // The Kolla cache as a mirror of quay.io, same order as keystone_single_node.scala: tst21's registry, then the
   // cache on tst9, then quay.io.
   private val registryMirror =
@@ -919,13 +904,7 @@ if __name__ == '__main__':
        |exit 1""".stripMargin
 
   def describe(target: Node): List[ApplyResource] =
-    val aptWait = command(
-      "wait for apt and dpkg to be idle",
-      waitAptIdleScript,
-      unless = aptIdle,
-      timeout = 960
-    )
-    val tools = hostPackages.map(p => pkg(p, updateCache = true).after(aptWait))
+    val tools = hostPackages.map(p => pkg(p, updateCache = true))
     val podman = tools(0)
 
     val mirrorDir = directory("/etc/containers/registries.conf.d").after(podman)
@@ -1007,7 +986,6 @@ if __name__ == '__main__':
     ).after(federated)
 
     tools ++ List(
-      aptWait,
       mirrorDir,
       mirror,
       pulled,
