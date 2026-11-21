@@ -35,6 +35,35 @@ object AgeAgent:
     */
   def clock(t: java.time.LocalTime): String = clockFormat.format(t)
 
+  /** The value of `--cache`: minutes, or a number followed by m, h or d (`90`,
+    * `90m`, `48h`, `2d`); 0 keeps nothing. None for anything else (a sign, a
+    * fraction, a space, another unit, or more than an Int of minutes).
+    */
+  def parseCacheMinutes(value: String): Option[Int] =
+    val t = value.toLowerCase
+    val (digits, minutesEach) =
+      if t.endsWith("d") then (t.dropRight(1), 1440L)
+      else if t.endsWith("h") then (t.dropRight(1), 60L)
+      else if t.endsWith("m") then (t.dropRight(1), 1L)
+      else (t, 1L)
+    Option(digits)
+      .filter(d => d.nonEmpty && d.length <= 9 && d.forall(c => c >= '0' && c <= '9'))
+      .map(_.toLong * minutesEach)
+      .filter(_ <= Int.MaxValue.toLong)
+      .map(_.toInt)
+
+  /** Minutes as days, hours and minutes without the zero parts, for the
+    * agent's start-up line: 3000 is "2d 2h", 10 is "10m", 1440 is "1d".
+    */
+  def minutesText(minutes: Int): String =
+    val d = minutes / 1440
+    val h = minutes % 1440 / 60
+    val m = minutes % 60
+    List((d, "d"), (h, "h"), (m, "m"))
+      .filter(_._1 > 0)
+      .map(x => s"${x._1}${x._2}")
+      .mkString(" ")
+
   /** When a cached answer expires: HH:mm:ss if that is today, otherwise
     * "yyyy-MM-dd HH:mm:ss". `--cache` may be longer than a day, and a bare time
     * of day would then read as an expiry earlier today.

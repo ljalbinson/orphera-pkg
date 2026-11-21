@@ -2150,7 +2150,8 @@ stays on the control host.
   esac
   ```
 - What the agent decrypted is kept in its memory for 10 minutes
-  (`--cache <minutes>`; `--cache 0` keeps nothing), so a series of runs asks
+  (`--cache <time>`: minutes, or a number with `m`, `h` or `d`, so `--cache 90`,
+  `--cache 48h` and `--cache 2d` all work; `--cache 0` keeps nothing), so a series of runs asks
   for the PIN and touch once rather than at each command; a changed store is
   decrypted afresh.
 - While the session is open, anything on the control host that can open the

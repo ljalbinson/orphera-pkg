@@ -442,6 +442,33 @@ object SecretsCheck:
       ) && agentDecrypts == 2,
       s"$agentDecrypts"
     )
+    check(
+      "--cache: minutes, or a number with m, h or d",
+      AgeAgent.parseCacheMinutes("90") == Some(90) &&
+        AgeAgent.parseCacheMinutes("90m") == Some(90) &&
+        AgeAgent.parseCacheMinutes("48h") == Some(2880) &&
+        AgeAgent.parseCacheMinutes("2d") == Some(2880) &&
+        AgeAgent.parseCacheMinutes("2D") == Some(2880) &&
+        AgeAgent.parseCacheMinutes("0") == Some(0) &&
+        AgeAgent.parseCacheMinutes("0d") == Some(0),
+      s"${AgeAgent.parseCacheMinutes("48h")}"
+    )
+    check(
+      "--cache: a bad value is refused",
+      List("", "d", "-1", "1.5", "5x", "1 d", "h2", "+5", "2dd", "99999999d", "1000000000")
+        .forall(v => AgeAgent.parseCacheMinutes(v).isEmpty),
+      List("", "d", "-1", "1.5", "5x", "1 d", "h2", "+5", "2dd", "99999999d", "1000000000")
+        .filter(v => AgeAgent.parseCacheMinutes(v).nonEmpty)
+        .mkString(",")
+    )
+    check(
+      "--cache: minutes are shown as days, hours and minutes",
+      AgeAgent.minutesText(3000) == "2d 2h" &&
+        AgeAgent.minutesText(10) == "10m" &&
+        AgeAgent.minutesText(1440) == "1d" &&
+        AgeAgent.minutesText(1501) == "1d 1h 1m",
+      AgeAgent.minutesText(3000)
+    )
     val utc = java.time.ZoneId.of("UTC")
     val noon = java.time.Instant.parse("2026-11-20T12:00:00Z")
     check(
