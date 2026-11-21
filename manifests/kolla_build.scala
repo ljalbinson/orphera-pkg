@@ -223,10 +223,6 @@ object kolla_build extends OrpheraApply:
   private val imageListScript =
     s"""printf '%s\\n' ${images.mkString(" ")} > /etc/kolla-build/images.txt
        |echo "wrote /etc/kolla-build/images.txt"""".stripMargin
-  private val removeDefaultSiteScript =
-    """rm -f /etc/nginx/sites-enabled/default
-      |echo "default nginx site removed"""".stripMargin
-
   // kolla-build is installed through devpi, so wait for it first.
   private val installKollaScript =
     s"""set -e
@@ -433,11 +429,10 @@ esac
       owner = "root",
       group = "root"
     ).after(nginxPkg).notifies(nginxUnit)
-    val defaultSite = command(
-      "remove nginx's default site",
-      removeDefaultSiteScript,
-      onlyIf = "[ -e /etc/nginx/sites-enabled/default ] || [ -L /etc/nginx/sites-enabled/default ]"
-    ).after(nginxPkg).notifies(nginxUnit)
+    // The stock site is a link; absentFile removes a file or a link.
+    val defaultSite = absentFile("/etc/nginx/sites-enabled/default")
+      .after(nginxPkg)
+      .notifies(nginxUnit)
     val nginxRunning = nginxUnit.after(nginxPkg, nginxConfFile, defaultSite, sourcesDir)
 
     // devpi, the PyPI cache.
