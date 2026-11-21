@@ -135,8 +135,9 @@ object TypedFiles:
             java.nio.file.FileVisitResult.TERMINATE
           else java.nio.file.FileVisitResult.CONTINUE
     )
-    if mounted.nonEmpty then
-      fail(s"${mounted.head} is on another filesystem (a mount): nothing removed")
+    mounted.headOption.foreach(m =>
+      fail(s"$m is on another filesystem (a mount): nothing removed")
+    )
     Files.walkFileTree(
       dir,
       new java.nio.file.SimpleFileVisitor[Path]:
