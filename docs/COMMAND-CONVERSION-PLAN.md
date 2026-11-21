@@ -62,7 +62,7 @@ Gap: a playbook step that restarts a service once, at a given point in a rolling
 | Addition | Steps | Where |
 |---|---|---|
 | `absentDirectory(path, recursive = true)` (done on branch `absent-directory-recursive`, 36 steps still to convert; skyline's teardown is the first): today it removes only an empty directory | 36 | the `remove X files, state and the helper` steps in every teardown, leftover config and data |
-| A file whose content is copied from a path on the same node | 23 | `copy Keystone's CA to the X config`, the rndc key, the certificate chain, the management kubeconfig |
+| A file whose content is copied from a path on the same node (done on branch `file-copy-local` as `fileCopy`: 19 steps converted; the horizon chain and key and the octavia certificates, which copy several files in one step, are left) | 23 | `copy Keystone's CA to the X config`, the rndc key, the certificate chain, the management kubeconfig |
 | `pkg` waits for apt and dpkg to be idle itself (done on branch `pkg-lock-wait`; 20 apply manifests converted, the 4 playbooks keep theirs) | 23 | `wait for apt and dpkg to be idle`, before package steps |
 
 Each is a small change to an existing kind in the Go and Scala agents and the shared case table. The recursive delete

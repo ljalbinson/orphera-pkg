@@ -1155,19 +1155,16 @@ if __name__ == '__main__':
         owner = "root",
         group = "root"
       ).after(dirRes).notifies(unitService)
-      val kollaCa = command(
-        s"copy Keystone's CA to the $name config",
-        s"cp $caCert $dir/ca.crt",
-        unless = s"cmp -s $caCert $dir/ca.crt"
+      val kollaCa = fileCopy(
+        s"$dir/ca.crt",
+        caCert,
+        mode = "0644"
       ).after(ca, dirRes).notifies(unitService)
       // The management cluster's kubeconfig (capi_management_cluster.scala) is a file on this node.
-      val kubeconfig = command(
-        s"copy the management cluster kubeconfig to the $name config",
-        s"""if [ ! -s $mgmtKubeconfig ]; then echo "no kubeconfig at $mgmtKubeconfig - apply capi_management_cluster.scala first" >&2; exit 1; fi
-           |install -m 0600 $mgmtKubeconfig $dir/kubeconfig
-           |echo "management cluster kubeconfig copied"""".stripMargin,
-        unless = s"[ -s $mgmtKubeconfig ] && cmp -s $mgmtKubeconfig $dir/kubeconfig"
-      ).after(dirRes).notifies(unitService)
+      // (a missing kubeconfig fails with "the source ... is not on the node": apply capi_management_cluster.scala first)
+      val kubeconfig = fileCopy(s"$dir/kubeconfig", mgmtKubeconfig, mode = "0600")
+        .after(dirRes)
+        .notifies(unitService)
       val kollaJson = file(
         s"$dir/config.json",
         configJson(name),

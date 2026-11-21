@@ -284,3 +284,70 @@ func TestApplyRemoveTree(t *testing.T) {
 		t.Error("recursive without directory should be refused")
 	}
 }
+
+func copyA(path, source, sha, mode string) *pb.FileAction {
+	return &pb.FileAction{Action: &pb.FileAction_ReplaceText{ReplaceText: &pb.ReplaceText{
+		Path: path, Source: source, ExpectedSha256: sha, CreateMode: mode}}}
+}
+
+func TestApplyReplaceFromSource(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "ca.crt")
+	body := []byte("-----BEGIN CERTIFICATE-----\n\xff\x00binary\n")
+	if err := os.WriteFile(src, body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	dst := filepath.Join(dir, "out", "ca.crt")
+	os.MkdirAll(filepath.Dir(dst), 0o755)
+
+	reply := applyFiles(t, copyA(dst, src, "", "0644"))
+	if reply.Error != "" || reply.Completed != 1 {
+		t.Fatalf("copy: %+v", reply)
+	}
+	got, _ := os.ReadFile(dst)
+	if string(got) != string(body) {
+		t.Errorf("the copy differs: %q", got)
+	}
+	if fi, _ := os.Stat(dst); fi.Mode().Perm() != 0o644 {
+		t.Errorf("created mode: %v", fi.Mode())
+	}
+	// The source changes; the copy is guarded by the hash of what it replaces.
+	os.WriteFile(src, []byte("new"), 0o600)
+	sum, _ := sha256File(dst)
+	if r := applyFiles(t, copyA(dst, src, "0000", "")); r.Error == "" {
+		t.Error("a wrong expected hash should refuse")
+	}
+	if r := applyFiles(t, copyA(dst, src, sum, "")); r.Error != "" {
+		t.Fatalf("replace with the right hash: %v", r.Error)
+	}
+	if got, _ := os.ReadFile(dst); string(got) != "new" {
+		t.Errorf("replaced: %q", got)
+	}
+	// Refusals.
+	both := &pb.FileAction{Action: &pb.FileAction_ReplaceText{ReplaceText: &pb.ReplaceText{
+		Path: dst, Source: src, Content: "x", Overwrite: true}}}
+	if r := applyFiles(t, both); r.Error == "" {
+		t.Error("text and a source together should be refused")
+	}
+	link := filepath.Join(dir, "link")
+	os.Symlink(src, link)
+	if r := applyFiles(t, copyA(filepath.Join(dir, "out", "l"), link, "", "")); r.Error == "" {
+		t.Error("a link as the source should be refused")
+	}
+	if r := applyFiles(t, copyA(filepath.Join(dir, "out", "d"), dir, "", "")); r.Error == "" {
+		t.Error("a directory as the source should be refused")
+	}
+	if r := applyFiles(t, copyA(filepath.Join(dir, "out", "m"), filepath.Join(dir, "missing"), "", "")); r.Error == "" {
+		t.Error("a missing source should be refused")
+	}
+	if r := applyFiles(t, copyA(filepath.Join(dir, "out", "r"), "relative", "", "")); r.Error == "" {
+		t.Error("a relative source should be refused")
+	}
+}
+
+func TestSourceIsPartOfTheRolesPaths(t *testing.T) {
+	got := filePaths(copyA("/etc/kolla/x/ca.crt", "/etc/orphera/tls/ca.crt", "", ""))
+	if len(got) != 2 || got[0] != "/etc/kolla/x/ca.crt" || got[1] != "/etc/orphera/tls/ca.crt" {
+		t.Errorf("paths: %v", got)
+	}
+}

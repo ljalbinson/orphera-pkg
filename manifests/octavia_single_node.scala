@@ -1382,15 +1382,12 @@ if __name__ == '__main__':
       val dir = s"$confRoot/$name"
       val unitService = service(c.unitName)
       val dirRes = directory(dir, mode = "0755")
-      val conf = command(
-        s"copy octavia.conf to the $name config",
-        s"install -m 0600 $srcDir/octavia.conf $dir/octavia.conf",
-        unless = s"cmp -s $srcDir/octavia.conf $dir/octavia.conf"
-      ).after(rendered, dirRes)
-      val kollaCa = command(
-        s"copy Keystone's CA to the $name config",
-        s"cp $caCert $dir/ca.crt",
-        unless = s"cmp -s $caCert $dir/ca.crt"
+      val conf = fileCopy(s"$dir/octavia.conf", s"$srcDir/octavia.conf", mode = "0600")
+        .after(rendered, dirRes)
+      val kollaCa = fileCopy(
+        s"$dir/ca.crt",
+        caCert,
+        mode = "0644"
       ).after(ca, dirRes)
       val certCopies = command(
         s"copy the certificates to the $name config",

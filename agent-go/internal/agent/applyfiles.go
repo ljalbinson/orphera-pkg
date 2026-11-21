@@ -55,6 +55,9 @@ func filePaths(a *pb.FileAction) []string {
 	case *pb.FileAction_MakeSymlink:
 		return []string{x.MakeSymlink.Path}
 	case *pb.FileAction_ReplaceText:
+		if x.ReplaceText.Source != "" {
+			return []string{x.ReplaceText.Path, x.ReplaceText.Source}
+		}
 		return []string{x.ReplaceText.Path}
 	}
 	return nil
@@ -280,14 +283,43 @@ func runFixed(name string, args ...string) error {
 
 const maxReplaceText = 4 * 1024 * 1024
 
+// replacementBytes is the new content: the text sent, or (source) the bytes of
+// a regular file on this node, which never leave it.
+func replacementBytes(r *pb.ReplaceText) ([]byte, error) {
+	if r.Source == "" {
+		if len(r.Content) > maxReplaceText {
+			return nil, fmt.Errorf("text is larger than %d bytes", maxReplaceText)
+		}
+		return []byte(r.Content), nil
+	}
+	if r.Content != "" {
+		return nil, fmt.Errorf("%s: a source and text were both given", r.Path)
+	}
+	if err := needChangeablePath(r.Source); err != nil { // not the agent's own keys either
+		return nil, err
+	}
+	fi, err := os.Lstat(r.Source)
+	if err != nil {
+		return nil, fmt.Errorf("source %s: %v", r.Source, err)
+	}
+	if !fi.Mode().IsRegular() {
+		return nil, fmt.Errorf("source %s is not a regular file", r.Source)
+	}
+	if fi.Size() > maxReplaceText {
+		return nil, fmt.Errorf("source %s is larger than %d bytes", r.Source, maxReplaceText)
+	}
+	return os.ReadFile(r.Source)
+}
+
 // replaceText writes a file's new text through a temporary file beside it,
 // with the old mode and owner, and renames it into place.
 func replaceText(r *pb.ReplaceText) error {
 	if err := needChangeablePath(r.Path); err != nil {
 		return err
 	}
-	if len(r.Content) > maxReplaceText {
-		return fmt.Errorf("text is larger than %d bytes", maxReplaceText)
+	data, err := replacementBytes(r)
+	if err != nil {
+		return err
 	}
 	mode := os.FileMode(0o644)
 	uid, gid := -1, -1
@@ -333,7 +365,7 @@ func replaceText(r *pb.ReplaceText) error {
 	}
 	name := tmp.Name()
 	cleanup := func() { _ = os.Remove(name) }
-	if _, err := tmp.WriteString(r.Content); err != nil {
+	if _, err := tmp.Write(data); err != nil {
 		tmp.Close()
 		cleanup()
 		return err
