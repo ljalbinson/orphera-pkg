@@ -876,10 +876,10 @@ if __name__ == '__main__':
         owner = "root",
         group = "root"
       ).after(dirRes).notifies(unitService)
-      val kollaCa = command(
-        s"copy Keystone's CA to the $name config",
-        s"cp $caCert $dir/ca.crt",
-        unless = s"cmp -s $caCert $dir/ca.crt"
+      val kollaCa = fileCopy(
+        s"$dir/ca.crt",
+        caCert,
+        mode = "0644"
       ).after(ca, dirRes).notifies(unitService)
       val kollaJson = name match
         case "designate-api" =>
@@ -926,11 +926,8 @@ if __name__ == '__main__':
             ).after(dirRes)
           )
         case "designate-worker" =>
-          val rndcHere = command(
-            "copy the rndc key to the designate-worker config",
-            s"install -m 0600 $rndcKey $dir/rndc.key",
-            unless = s"cmp -s $rndcKey $dir/rndc.key"
-          ).after(rndcMade, dirRes).notifies(unitService)
+          val rndcHere = fileCopy(s"$dir/rndc.key", rndcKey, mode = "0600")
+            .after(rndcMade, dirRes).notifies(unitService)
           val rndcInImage = command(
             "the worker image has rndc",
             workerRndcMissing,

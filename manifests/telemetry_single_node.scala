@@ -781,10 +781,10 @@ if __name__ == '__main__':
         owner = "root",
         group = "root"
       ).after(centralDirRes).notifies(centralUnit),
-      command(
-        "copy Keystone's CA to the ceilometer-central config",
-        s"cp $caCert $centralDir/ca.crt",
-        unless = s"cmp -s $caCert $centralDir/ca.crt"
+      fileCopy(
+        s"$centralDir/ca.crt",
+        caCert,
+        mode = "0644"
       ).after(ca, centralDirRes).notifies(centralUnit),
       file(
         s"$centralDir/config.json",
@@ -814,10 +814,10 @@ if __name__ == '__main__':
         owner = "root",
         group = "root"
       ).after(dirRes).notifies(unitService)
-      val kollaCa = command(
-        s"copy Keystone's CA to the $name config",
-        s"cp $caCert $dir/ca.crt",
-        unless = s"cmp -s $caCert $dir/ca.crt"
+      val kollaCa = fileCopy(
+        s"$dir/ca.crt",
+        caCert,
+        mode = "0644"
       ).after(ca, dirRes).notifies(unitService)
       val kollaJson =
         if name == "aodh-api" then

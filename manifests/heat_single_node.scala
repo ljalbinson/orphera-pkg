@@ -711,10 +711,10 @@ if __name__ == '__main__':
         owner = "root",
         group = "root"
       ).after(dirRes).notifies(unitService)
-      val kollaCa = command(
-        s"copy Keystone's CA to the $name config",
-        s"cp $caCert $dir/ca.crt",
-        unless = s"cmp -s $caCert $dir/ca.crt"
+      val kollaCa = fileCopy(
+        s"$dir/ca.crt",
+        caCert,
+        mode = "0644"
       ).after(ca, dirRes).notifies(unitService)
       val kollaJson = name match
         case "heat-engine" =>

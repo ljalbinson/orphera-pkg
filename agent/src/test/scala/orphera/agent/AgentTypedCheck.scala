@@ -175,6 +175,33 @@ object AgentTypedCheck:
     check("waitAptIdle gives up when apt stays busy", timedOut)
     TypedSoftware.aptBusy = oldBusy
     TypedSoftware.aptPoll = oldPoll
+    Files.write(dir.resolve("src.crt"), Array[Byte](1, 2, -1, 0, 3))
+    val copied = files(
+      FileAction.Action.ReplaceText(
+        ReplaceText(s"$d/copy.crt", "", "", "0644", false, source = s"$d/src.crt")
+      )
+    )
+    check(
+      "a file replaced from a source on the node: the bytes, not text",
+      copied.error.isEmpty &&
+        Files.readAllBytes(dir.resolve("copy.crt")).toList == List[Byte](1, 2, -1, 0, 3),
+      copied.toString
+    )
+    for (name, act) <- List(
+        ("text and a source", ReplaceText(s"$d/c2", "x", "", "", true, source = s"$d/src.crt")),
+        ("a missing source", ReplaceText(s"$d/c3", "", "", "", false, source = s"$d/none")),
+        ("a directory as the source", ReplaceText(s"$d/c4", "", "", "", false, source = d)),
+        ("a relative source", ReplaceText(s"$d/c5", "", "", "", false, source = "rel"))
+      )
+    do
+      val r = files(FileAction.Action.ReplaceText(act))
+      check(s"a source refused: $name", r.error.nonEmpty, r.toString)
+    check(
+      "the role's paths include the source",
+      TypedFiles.paths(
+        FileAction(FileAction.Action.ReplaceText(ReplaceText("/a/b", "", "", "", false, source = "/c/d")))
+      ) == List("/a/b", "/c/d")
+    )
     val stop = files(
       FileAction.Action.MakeDirectory(MakeDirectory(s"$d/s1")),
       FileAction.Action.RemovePath(RemovePath("relative")),

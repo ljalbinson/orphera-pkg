@@ -58,6 +58,11 @@ object ApplyResource:
     case Hidden(secret: Secret)
     case Source(path: String, vars: Map[String, String])
 
+    /** The bytes of a file on the node itself. They are copied there by the
+      * agent and never come here, so it suits a key or a kubeconfig.
+      */
+    case OnNode(path: String)
+
   final case class File(
       path: String,
       content: Option[Content],
@@ -322,6 +327,21 @@ object Resources:
       group,
       present = true
     )
+
+  /** A file whose content is another file on the same node: a certificate
+    * copied into a service's config, a key, a kubeconfig. The agent copies the
+    * bytes (nothing is sent here, so a secret stays on the node); it is
+    * unchanged when the two have the same hash, and fails if `from` is not
+    * there, so make the step that creates `from` come first (`after`).
+    */
+  def fileCopy(
+      path: String,
+      from: String,
+      mode: String = "",
+      owner: String = "",
+      group: String = ""
+  ): ApplyResource =
+    File(path, Some(Content.OnNode(from)), mode, owner, group, present = true)
 
   def absentFile(path: String): ApplyResource =
     File(path, None, "", "", "", present = false)
@@ -763,7 +783,8 @@ enum FileChange:
       content: String,
       expectedSha256: String,
       createMode: String,
-      overwrite: Boolean = false
+      overwrite: Boolean = false,
+      source: String = "" // a file on the node to take the bytes from
   )
 
 /** A change the agent's `ApplyAccess` makes itself: accounts, authorized keys
@@ -909,10 +930,11 @@ object Apply:
       group: String,
       mode: Int,
       expectedSha: String,
-      overwrite: Boolean
+      overwrite: Boolean,
+      source: String = ""
   ): List[FileChange] =
     val create = if mode > 0 then "0" + Integer.toOctalString(mode) else "0644"
-    FileChange.ReplaceText(path, text, expectedSha, create, overwrite) ::
+    FileChange.ReplaceText(path, text, expectedSha, create, overwrite, source) ::
       (if mode > 0 || owner.nonEmpty || group.nonEmpty then
          List(
            FileChange.SetAttributes(
@@ -1023,6 +1045,60 @@ object Apply:
       )
     )
 
+  private def onNodeSource(f: ApplyResource.File): Option[String] =
+    f.content match
+      case Some(ApplyResource.Content.OnNode(p)) => Some(p)
+      case _                                     => None
+
+  /** A file that is to hold the bytes of another file on the node. The source
+    * is looked at now, not at the start of the run, since an earlier step may
+    * have made it.
+    */
+  private def compareCopy(
+      f: ApplyResource.File,
+      src: String,
+      seen: Observed,
+      target: ApplyTarget
+  ): IO[Either[String, Difference]] =
+    def copy(expected: String): Action =
+      val fallback = (s"cp -- ${quote(src)} ${quote(f.path)}" ::
+        attrs(f.path, f.mode, f.owner, f.group, -1, "", "").commands)
+        .mkString(" && ")
+      Action.Typed(
+        writeChanges(f.path, "", f.owner, f.group, octal(f.mode), expected, false, src),
+        fallback
+      )
+    target
+      .observe(List(0 -> ApplyResource.File(src, None, "", "", "", present = true)))
+      .map(_.get(0))
+      .map {
+        case Some(Observed.RegularFile(_, _, _, srcSum)) =>
+          seen match
+            case Observed.Absent =>
+              Right(Difference(List(s"created (copied from $src)"), List(copy("")), Nil))
+            case Observed.RegularFile(m, o, g, sum) =>
+              val fix = attrs(f.path, f.mode, f.owner, f.group, m, o, g)
+              if sum != srcSum then
+                Right(
+                  Difference(
+                    s"content (copied from $src)" :: fix.changes,
+                    List(copy(sum)),
+                    Nil
+                  )
+                )
+              else Right(Difference(fix.changes, fix.actions, Nil))
+            case Observed.Dir(_, _, _) =>
+              Left(s"${f.path} is a directory: not replaced by a file")
+            case Observed.Link(t) =>
+              Left(s"${f.path} is a symlink (to $t): not replaced by a file")
+            case _ => Left(s"${f.path} is not a regular file: not replaced")
+        case Some(Observed.Absent) | None =>
+          Left(s"the source $src is not on the node")
+        case Some(Observed.Unreadable(text)) =>
+          Left(s"could not read the source $src: $text")
+        case Some(_) => Left(s"the source $src is not a regular file")
+      }
+
   // The difference for one resource, or why it cannot be brought there.
   private def compare(
       r: ApplyResource,
@@ -1065,6 +1141,8 @@ object Apply:
               case Observed.Dir(_, _, _) =>
                 Left(s"$path is a directory: not removed")
               case _ => Left(s"$path is not a file: not removed"))
+          case f: File if f.present && onNodeSource(f).isDefined =>
+            compareCopy(f, onNodeSource(f).getOrElse(""), seen, target)
           case f: File =>
             val wanted = content.getOrElse(("", false))
             val text = wanted._1
@@ -1912,6 +1990,8 @@ object Apply:
                 IO.pure((s.reveal, true))
               case Some(ApplyResource.Content.Source(p, vars)) =>
                 target.source(p, vars).map((_, false))
+              case Some(ApplyResource.Content.OnNode(_)) =>
+                IO.pure(("", false)) // read on the node, never here
               case None => IO.pure(("", false))
             ).attempt.map(e =>
               i -> e

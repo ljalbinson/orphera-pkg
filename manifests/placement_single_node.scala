@@ -513,10 +513,10 @@ if __name__ == '__main__':
       owner = "root",
       group = "root"
     ).after(apiDirectory).notifies(unitService)
-    val kollaCa = command(
-      "copy Keystone's CA to the Kolla config",
-      s"cp $caCert $apiDir/ca.crt",
-      unless = s"cmp -s $caCert $apiDir/ca.crt"
+    val kollaCa = fileCopy(
+      s"$apiDir/ca.crt",
+      caCert,
+      mode = "0644"
     ).after(ca, apiDirectory).notifies(unitService)
     val kollaFiles = command(
       "write the Apache vhost and Kolla config.json",

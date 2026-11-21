@@ -40,8 +40,9 @@ object TypedFiles:
     case FileAction.Action.SetAttributes(x) => List(x.path)
     case FileAction.Action.RemovePath(x)    => List(x.path)
     case FileAction.Action.MakeSymlink(x)   => List(x.path)
-    case FileAction.Action.ReplaceText(x)   => List(x.path)
-    case _                                  => Nil
+    case FileAction.Action.ReplaceText(x)   =>
+      if x.source.nonEmpty then List(x.path, x.source) else List(x.path)
+    case _ => Nil
 
   def describe(a: FileAction): String = a.action match
     case FileAction.Action.MakeDirectory(x) => s"make directory ${x.path}"
@@ -68,7 +69,14 @@ object TypedFiles:
       if !validArg(x.name) then fail(s"not a valid module name: '${x.name}'")
       run("modprobe", List(x.name))
     case FileAction.Action.ReplaceText(x) =>
-      replaceText(x.path, x.content, x.expectedSha256, x.createMode, x.overwrite)
+      replaceText(
+        x.path,
+        x.content,
+        x.expectedSha256,
+        x.createMode,
+        x.overwrite,
+        x.source
+      )
     case _ => fail("an action this agent does not know")
 
   private def makeDirectory(m: MakeDirectory): Unit =
@@ -189,12 +197,11 @@ object TypedFiles:
       content: String,
       expectedSha256: String,
       createMode: String,
-      overwrite: Boolean
+      overwrite: Boolean,
+      source: String = ""
   ): Unit =
     needChangeablePath(path)
-    val bytes = content.getBytes(StandardCharsets.UTF_8)
-    if bytes.length > MaxReplaceText then
-      fail(s"text is larger than $MaxReplaceText bytes")
+    val bytes = replacementBytes(path, content, source)
     val p = Paths.get(path)
     // The mode, and the owner and group to give the new file (none: root).
     val (mode, keep): (Int, Option[PosixFileAttributes]) = lstat(p) match
@@ -233,6 +240,32 @@ object TypedFiles:
       case e: Exception =>
         Try(Files.deleteIfExists(tmp))
         throw e
+
+  /** The new content: the text sent, or (source) the bytes of a regular file
+    * on this node, which never leave it. A link or a directory is refused, and
+    * so is the agent's own directory (its keys).
+    */
+  private def replacementBytes(
+      path: String,
+      content: String,
+      source: String
+  ): Array[Byte] =
+    if source.isEmpty then
+      val bytes = content.getBytes(StandardCharsets.UTF_8)
+      if bytes.length > MaxReplaceText then
+        fail(s"text is larger than $MaxReplaceText bytes")
+      bytes
+    else
+      if content.nonEmpty then fail(s"$path: a source and text were both given")
+      needChangeablePath(source)
+      val p = Paths.get(source)
+      lstat(p) match
+        case None => fail(s"source $source: no such file")
+        case Some(a) =>
+          if !a.isRegularFile then fail(s"source $source is not a regular file")
+          if a.size > MaxReplaceText then
+            fail(s"source $source is larger than $MaxReplaceText bytes")
+      Files.readAllBytes(p)
 
   def writeSynced(p: Path, bytes: Array[Byte]): Unit =
     val ch = FileChannel.open(p, StandardOpenOption.WRITE)

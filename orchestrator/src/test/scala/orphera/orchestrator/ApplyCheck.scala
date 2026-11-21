@@ -1754,6 +1754,50 @@ object ApplyCheck:
         directory("/opt/d", mode = "0750")
       )._1 == Vector(FileChange.MakeDirectory("/opt/d", "0750", "", ""))
     )
+    def fileKv(sum: String, mode: String = "644") =
+      Map("type" -> "file", "mode" -> mode, "owner" -> "root", "group" -> "root", "sha256" -> sum)
+    check(
+      "fileCopy: the destination is not there, so the agent copies the file on the node",
+      seenFor(
+        Map("/src/ca" -> fileKv("aa"), "/dst/ca" -> Map("type" -> "absent")),
+        fileCopy("/dst/ca", "/src/ca", mode = "0644")
+      )._1 == Vector(
+        FileChange.ReplaceText("/dst/ca", "", "", "0644", false, "/src/ca"),
+        FileChange.SetAttributes("/dst/ca", "0644", "", "")
+      )
+    )
+    check(
+      "fileCopy: a different hash is replaced, guarded by the hash it replaces",
+      seenFor(
+        Map("/src/ca" -> fileKv("aa"), "/dst/ca" -> fileKv("bb")),
+        fileCopy("/dst/ca", "/src/ca")
+      )._1 == Vector(
+        FileChange.ReplaceText("/dst/ca", "", "bb", "0644", false, "/src/ca")
+      )
+    )
+    check(
+      "fileCopy: the same hash changes nothing",
+      seenFor(
+        Map("/src/ca" -> fileKv("aa"), "/dst/ca" -> fileKv("aa")),
+        fileCopy("/dst/ca", "/src/ca", mode = "0644")
+      )._1.isEmpty
+    )
+    check(
+      "fileCopy: the same hash but the wrong mode sets only the mode",
+      seenFor(
+        Map("/src/ca" -> fileKv("aa"), "/dst/ca" -> fileKv("aa", "600")),
+        fileCopy("/dst/ca", "/src/ca", mode = "0644")
+      )._1 == Vector(FileChange.SetAttributes("/dst/ca", "0644", "", ""))
+    )
+    check(
+      "fileCopy: a source that is not on the node fails and nothing is written", {
+        val t = new TypedTarget(
+          Map("/src/ca" -> Map("type" -> "absent"), "/dst/ca" -> Map("type" -> "absent"))
+        )
+        val ran = applyTo(t, List(fileCopy("/dst/ca", "/src/ca")))
+        ran.report.failed && t.seen.isEmpty && ran.lines.exists(_.contains("is not on the node"))
+      }
+    )
     check(
       "a directory with the wrong mode: only the mode is set",
       seenFor(

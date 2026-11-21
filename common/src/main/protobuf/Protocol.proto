@@ -281,6 +281,11 @@ message ReplaceText {
   // With no expected_sha256: replace a regular file that exists, whatever it
   // holds (a file the orchestrator owns, such as one it persists a setting in).
   bool overwrite = 5;
+  // When not empty, the new content is the bytes of this regular file on the
+  // node (an absolute path, not a link) and content must be empty: a copy that
+  // never leaves the node, for a certificate, a key or a kubeconfig. The role's
+  // path limits apply to it as to path.
+  string source = 6;
 }
 
 message FileAction {

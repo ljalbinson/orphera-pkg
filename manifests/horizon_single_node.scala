@@ -478,10 +478,10 @@ if __name__ == '__main__':
       owner = "root",
       group = "root"
     ).after(web).notifies(unitService)
-    val kollaCa = command(
-      "copy Keystone's CA to the Kolla config",
-      s"cp $caCert $webDir/ca.crt",
-      unless = s"cmp -s $caCert $webDir/ca.crt"
+    val kollaCa = fileCopy(
+      s"$webDir/ca.crt",
+      caCert,
+      mode = "0644"
     ).after(ca, web).notifies(unitService)
     val certCopy = command(
       "copy the certificate chain and key to the Kolla config",

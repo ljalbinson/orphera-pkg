@@ -729,10 +729,10 @@ if __name__ == '__main__':
       val dir = s"$confRoot/$name"
       val unitService = unitOf(name)
       val dirRes = directory(dir, mode = "0755")
-      val kollaCa = command(
-        s"copy Keystone's CA to the $name config",
-        s"cp $caCert $dir/ca.crt",
-        unless = s"cmp -s $caCert $dir/ca.crt"
+      val kollaCa = fileCopy(
+        s"$dir/ca.crt",
+        caCert,
+        mode = "0644"
       ).after(ca, dirRes).notifies(unitService)
       val json = file(
         s"$dir/config.json",
