@@ -200,7 +200,7 @@ person presses the button.
 
 ## Keeping it safe
 
-- Anyone who can push to a protected branch of this project can make the runner do what the `deployer`
+- Anyone who can push to a protected branch of this project can make the runner do what the `pipeline`
   role allows. Restrict who may push to `main`, and who may edit `.gitlab-ci.yml` there.
 - Protected runner, protected variables, protected branches: all three, or a feature branch can read the
   token.
