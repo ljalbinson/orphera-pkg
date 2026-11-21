@@ -17,9 +17,10 @@ object SecretsTool:
       |orphera secrets rm <name>         remove a secret
       |orphera secrets recipients        who the store is encrypted to
       |orphera secrets rekey             re-encrypt the store to the recipients file (after editing it)
-      |orphera secrets agent [--socket <path>] [--cache <minutes>]
+      |orphera secrets agent [--socket <path>] [--cache <time>]
       |                                  on the machine the YubiKey is plugged into: decrypt for an orphera
-      |                                  host that the SSH session forwards the socket to (see the README)
+      |                                  host that the SSH session forwards the socket to (see the README);
+      |                                  --cache is minutes, or a number with m, h or d (90, 48h, 2d; default 10, 0: none)
       |
       |Files: $ORPHERA_SECRETS        (default ~/.config/orphera/secrets.age, encrypted)
       |       $ORPHERA_AGE_KEY        (default ~/.config/orphera/age.key, the identity: back it up;
@@ -89,7 +90,7 @@ object SecretsTool:
               )
           )
       case "agent" :: rest =>
-        // --socket <path>, --cache <minutes> (default 10; 0 keeps nothing).
+        // --socket <path>, --cache <time>: minutes, or a number with m, h or d (default 10; 0 keeps nothing).
         def opts(
             args: List[String],
             sock: java.nio.file.Path,
@@ -99,9 +100,9 @@ object SecretsTool:
             case Nil                        => Some((sock, cache))
             case "--socket" :: path :: more =>
               opts(more, java.nio.file.Paths.get(path), cache)
-            case "--cache" :: minutes :: more =>
-              minutes.toIntOption
-                .filter(_ >= 0)
+            case "--cache" :: value :: more =>
+              AgeAgent
+                .parseCacheMinutes(value)
                 .flatMap(m => opts(more, sock, m))
             case _ => None
         opts(rest, AgeAgent.socketPath, 10) match
@@ -125,7 +126,7 @@ object SecretsTool:
               println(s"Orphera age agent: decrypting with $id on $sock")
               println(
                 if cacheMinutes > 0 then
-                  s"What it decrypts is kept for $cacheMinutes minutes, so the store asks the YubiKey once in that time (--cache 0: every time)."
+                  s"What it decrypts is kept for ${AgeAgent.minutesText(cacheMinutes)}, so the store asks the YubiKey once in that time (--cache 0: every time)."
                 else "Nothing is kept: every request asks the YubiKey."
               )
               println(
