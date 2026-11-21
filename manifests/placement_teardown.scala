@@ -42,14 +42,13 @@ object placement_teardown extends OrpheraApply:
        |if command -v podman >/dev/null 2>&1; then podman rm -f placement-api 2>/dev/null || true; fi
        |echo "placement-api container and unit removed"""".stripMargin
 
-  // True when ANY of them exists.
-  private val filesExist =
-    s"for p in /etc/kolla/placement /etc/kolla/placement-api /etc/kolla/placement-ca /var/lib/orphera/placement /var/log/kolla/placement $helper; do [ -e \"$$p\" ] && exit 0; done; exit 1"
-  private val cleanupScript =
-    s"""rm -rf /etc/kolla/placement /etc/kolla/placement-api /etc/kolla/placement-ca
-       |rm -rf /var/lib/orphera/placement /var/log/kolla/placement
-       |rm -f $helper
-       |echo "placement config, state and helper removed"""".stripMargin
+  private val dirs = List(
+    "/etc/kolla/placement",
+    "/etc/kolla/placement-api",
+    "/etc/kolla/placement-ca",
+    "/var/lib/orphera/placement",
+    "/var/log/kolla/placement"
+  )
 
   private val dropDatabaseScript =
     s"""mariadb -N -e "DROP DATABASE IF EXISTS $dbName; DROP USER IF EXISTS '$dbUser'@'%'; FLUSH PRIVILEGES;""""
@@ -80,10 +79,7 @@ object placement_teardown extends OrpheraApply:
         stopScript,
         onlyIf = unitExists
       ).after(unregistered)
-      val cleaned = command(
-        "remove placement files, state and the helper",
-        cleanupScript,
-        onlyIf = filesExist,
-        timeout = 120
-      ).after(stopped)
-      List(unregistered, stopped, cleaned)
+      // Typed removal, no script: each directory with its contents, then the helper.
+      val cleaned = (dirs.map(absentDirectory(_, recursive = true)) :+
+        absentFile(helper)).map(_.after(stopped))
+      List(unregistered, stopped) ++ cleaned

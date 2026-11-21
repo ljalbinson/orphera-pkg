@@ -46,20 +46,15 @@ object telemetry_teardown extends OrpheraApply:
 
   // /etc/kolla/telemetry is where the cluster playbook kept its staging copies; it is listed so that a node set
   // up by the playbook is cleaned too.
-  private def paths(units: List[String], extra: String): String =
-    (units.map(u => s"/etc/kolla/$u") ++
+  private def dirs(units: List[String]): List[String] =
+    units.map(u => s"/etc/kolla/$u") ++
       List(
         "/etc/kolla/telemetry",
         "/etc/kolla/telemetry-ca",
         "/var/lib/orphera/telemetry",
         "/var/log/kolla/aodh",
         "/var/log/kolla/ceilometer"
-      )).mkString(" ") + extra
-  private def filesExist(p: String): String =
-    s"for p in $p; do [ -e \"$$p\" ] && exit 0; done; exit 1"
-  private def cleanupScript(p: String): String =
-    s"""rm -rf $p
-       |echo "telemetry config, state and helper removed"""".stripMargin
+      )
 
   private val nodeUnits =
     List("aodh-api", "aodh-evaluator", "aodh-notifier", "ceilometer-central")
@@ -135,14 +130,10 @@ object telemetry_teardown extends OrpheraApply:
         onlyIf = anyUnit(computeUnits),
         timeout = 240
       )
-      val p = paths(computeUnits, "")
-      val cleaned = command(
-        "remove ceilometer config and state",
-        cleanupScript(p),
-        onlyIf = filesExist(p),
-        timeout = 120
-      ).after(stopped)
-      List(stopped, cleaned)
+      // Typed removal, no script.
+      val cleaned =
+        dirs(computeUnits).map(absentDirectory(_, recursive = true).after(stopped))
+      List(stopped) ++ cleaned
     else
       val unregistered = command(
         "remove Aodh, Ceilometer and the Prometheus entry from Keystone",
@@ -156,11 +147,7 @@ object telemetry_teardown extends OrpheraApply:
         onlyIf = anyUnit(nodeUnits),
         timeout = 240
       ).after(unregistered)
-      val p = paths(nodeUnits, s" $helper")
-      val cleaned = command(
-        "remove telemetry files, state and the helper",
-        cleanupScript(p),
-        onlyIf = filesExist(p),
-        timeout = 120
-      ).after(stopped)
-      List(unregistered, stopped, cleaned)
+      // Typed removal, no script: each directory with its contents, then the helper.
+      val cleaned = (dirs(nodeUnits).map(absentDirectory(_, recursive = true)) :+
+        absentFile(helper)).map(_.after(stopped))
+      List(unregistered, stopped) ++ cleaned

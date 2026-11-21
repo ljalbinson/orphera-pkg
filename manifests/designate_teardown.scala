@@ -61,14 +61,18 @@ object designate_teardown extends OrpheraApply:
 
   // /etc/kolla/designate is where the cluster playbook kept designate.conf, pools.yaml, named.conf and the
   // rndc key; it is listed so that a node set up by the playbook is cleaned too.
-  private val paths =
-    "/etc/kolla/designate /etc/kolla/designate-central /etc/kolla/designate-mdns /etc/kolla/designate-api /etc/kolla/designate-producer /etc/kolla/designate-worker /etc/kolla/designate-backend-bind9 /etc/kolla/designate-ca /var/lib/orphera/designate /var/log/kolla/designate " + helper
-  // True when ANY of them exists.
-  private val filesExist =
-    s"for p in $paths; do [ -e \"$$p\" ] && exit 0; done; exit 1"
-  private val cleanupScript =
-    s"""rm -rf $paths
-       |echo "designate config, state and helper removed"""".stripMargin
+  private val dirs = List(
+    "/etc/kolla/designate",
+    "/etc/kolla/designate-central",
+    "/etc/kolla/designate-mdns",
+    "/etc/kolla/designate-api",
+    "/etc/kolla/designate-producer",
+    "/etc/kolla/designate-worker",
+    "/etc/kolla/designate-backend-bind9",
+    "/etc/kolla/designate-ca",
+    "/var/lib/orphera/designate",
+    "/var/log/kolla/designate"
+  )
 
   // ---- tst10 ----
   private val rabbitUp =
@@ -122,10 +126,7 @@ object designate_teardown extends OrpheraApply:
         onlyIf = anyUnit,
         timeout = 240
       ).after(unregistered)
-      val cleaned = command(
-        "remove designate files, state and the helper",
-        cleanupScript,
-        onlyIf = filesExist,
-        timeout = 120
-      ).after(stopped)
-      List(unregistered, stopped, cleaned)
+      // Typed removal, no script: each directory with its contents, then the helper.
+      val cleaned = (dirs.map(absentDirectory(_, recursive = true)) :+
+        absentFile(helper)).map(_.after(stopped))
+      List(unregistered, stopped) ++ cleaned

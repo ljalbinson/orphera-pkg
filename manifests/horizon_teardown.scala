@@ -32,14 +32,12 @@ object horizon_teardown extends OrpheraApply:
        |systemctl daemon-reload
        |echo "horizon container and unit removed"""".stripMargin
 
-  private val paths =
-    "/etc/kolla/horizon /etc/kolla/horizon-web /etc/kolla/horizon-ca /var/log/kolla/horizon " + helper
-  // True when ANY of them exists.
-  private val filesExist =
-    s"for p in $paths; do [ -e \"$$p\" ] && exit 0; done; exit 1"
-  private val cleanupScript =
-    s"""rm -rf $paths
-       |echo "horizon config, logs and helper removed"""".stripMargin
+  private val dirs = List(
+    "/etc/kolla/horizon",
+    "/etc/kolla/horizon-web",
+    "/etc/kolla/horizon-ca",
+    "/var/log/kolla/horizon"
+  )
 
   def describe(target: Node): List[ApplyResource] =
     val stopped = command(
@@ -48,10 +46,7 @@ object horizon_teardown extends OrpheraApply:
       onlyIf = unitExists,
       timeout = 240
     )
-    val cleaned = command(
-      "remove horizon files, logs and the helper",
-      cleanupScript,
-      onlyIf = filesExist,
-      timeout = 120
-    ).after(stopped)
-    List(stopped, cleaned)
+    // Typed removal, no script: each directory with its contents, then the helper.
+    val cleaned = (dirs.map(absentDirectory(_, recursive = true)) :+
+      absentFile(helper)).map(_.after(stopped))
+    List(stopped) ++ cleaned

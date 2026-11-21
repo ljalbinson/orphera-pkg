@@ -54,14 +54,15 @@ object heat_teardown extends OrpheraApply:
        |systemctl daemon-reload
        |echo "heat containers and units removed"""".stripMargin
 
-  private val paths =
-    "/etc/kolla/heat /etc/kolla/heat-engine /etc/kolla/heat-api /etc/kolla/heat-api-cfn /etc/kolla/heat-ca /var/lib/orphera/heat /var/log/kolla/heat " + helper
-  // True when ANY of them exists.
-  private val filesExist =
-    s"for p in $paths; do [ -e \"$$p\" ] && exit 0; done; exit 1"
-  private val cleanupScript =
-    s"""rm -rf $paths
-       |echo "heat config, state and helper removed"""".stripMargin
+  private val dirs = List(
+    "/etc/kolla/heat",
+    "/etc/kolla/heat-engine",
+    "/etc/kolla/heat-api",
+    "/etc/kolla/heat-api-cfn",
+    "/etc/kolla/heat-ca",
+    "/var/lib/orphera/heat",
+    "/var/log/kolla/heat"
+  )
 
   // ---- tst10 ----
   private val rabbitUp =
@@ -115,10 +116,7 @@ object heat_teardown extends OrpheraApply:
         onlyIf = anyUnit,
         timeout = 240
       ).after(unregistered)
-      val cleaned = command(
-        "remove heat files, state and the helper",
-        cleanupScript,
-        onlyIf = filesExist,
-        timeout = 120
-      ).after(stopped)
-      List(unregistered, stopped, cleaned)
+      // Typed removal, no script: each directory with its contents, then the helper.
+      val cleaned = (dirs.map(absentDirectory(_, recursive = true)) :+
+        absentFile(helper)).map(_.after(stopped))
+      List(unregistered, stopped) ++ cleaned

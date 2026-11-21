@@ -72,14 +72,15 @@ object manila_teardown extends OrpheraApply:
 
   // /etc/kolla/manila is where the cluster playbook kept manila.conf and the Ceph client files; it is listed
   // so that a node set up by the playbook is cleaned too.
-  private val paths =
-    "/etc/kolla/manila /etc/kolla/manila-api /etc/kolla/manila-scheduler /etc/kolla/manila-share /etc/kolla/manila-ca /var/lib/orphera/manila /var/log/kolla/manila " + helper
-  // True when ANY of them exists.
-  private val filesExist =
-    s"for p in $paths; do [ -e \"$$p\" ] && exit 0; done; exit 1"
-  private val cleanupScript =
-    s"""rm -rf $paths
-       |echo "manila config, state and helper removed"""".stripMargin
+  private val dirs = List(
+    "/etc/kolla/manila",
+    "/etc/kolla/manila-api",
+    "/etc/kolla/manila-scheduler",
+    "/etc/kolla/manila-share",
+    "/etc/kolla/manila-ca",
+    "/var/lib/orphera/manila",
+    "/var/log/kolla/manila"
+  )
 
   // ---- tst10 ----
   private val rabbitUp =
@@ -185,10 +186,7 @@ object manila_teardown extends OrpheraApply:
         onlyIf = anyUnit,
         timeout = 240
       ).after(unregistered, unmounted)
-      val cleaned = command(
-        "remove manila files, state and the helper",
-        cleanupScript,
-        onlyIf = filesExist,
-        timeout = 120
-      ).after(stopped)
-      List(unregistered, unmounted, stopped, cleaned)
+      // Typed removal, no script: each directory with its contents, then the helper.
+      val cleaned = (dirs.map(absentDirectory(_, recursive = true)) :+
+        absentFile(helper)).map(_.after(stopped))
+      List(unregistered, unmounted, stopped) ++ cleaned
