@@ -28,6 +28,34 @@ to the project do anything to the fleet. The runner gets an identity of its own 
 - You can reach GitLab as a user who may create a runner (project owner or group owner).
 - scala0, for the steps that need the CA key.
 
+## Building it with Orphera: runner0
+
+`manifests/gitlab_runner.scala` does steps 1 to 3 below (and the registration in step 2) on a VM called
+`runner0`, so that the host can be rebuilt from nothing. `runner0` has a config file (`config/runner0.yaml`: 2 CPUs,
+4 GB, 40 GB, `10.10.5.65` on `br-net105`, hypervisor st0, Ubuntu 24.04) and an inventory entry, and is in the `all` group.
+Change the config before you build it if st0 or the address is not what you want. From `~/orphera-pkg` on scala0:
+
+```sh
+git checkout main && git pull origin main
+make cli-package                                    # orphera_<version>_all.deb, which the runner installs
+manifests/mk-new-and-empty.sh runner0               # the VM, agent, DNS, dist-upgrade, base packages
+orphera issue-client-cert --operator ci --role pipeline --days 30
+orphera secrets set gitlab/runner-token             # paste the glrt- token from GitLab, then end the input
+GITLAB_URL=https://<your-gitlab> orphera cluster-playbook gitlab_runner.scala --config runner0
+```
+
+`GITLAB_CA=/path/to/ca.crt` as well if your GitLab's certificate is from a private CA. Before it sends anything, the
+playbook checks that `ca.crt`, the `ci` certificate and key, the package, `gitlab/runner-token` and `orphera/agent-token`
+exist, and says what to make for any that do not. It then installs Java, git and age, GitLab's apt repository and the
+`gitlab-runner` package, the `orphera` package, puts the certificates in the `gitlab-runner` user's
+`~/.config/orphera/certs`, registers the runner (once: it leaves an existing registration for that URL alone) and checks
+that `orphera version --nodes tst0` works as the runner with the `ci` certificate. Re-running it is safe, and picks up a
+new certificate or package.
+
+It does not make the runner in GitLab, set its tags or "Protected", or set the CI variables: those are GitLab's, and are
+in steps 2 and 3. To register against a different runner token, `sudo gitlab-runner unregister --all-runners` on
+`runner0` first.
+
 ## 1. The host
 
 On the runner VM, as `localadmin`:
@@ -58,7 +86,8 @@ Install GitLab Runner from GitLab's apt repository (see
 [the GitLab Runner install page](https://docs.gitlab.com/runner/install/linux-repository.html) for the
 repository line for your release), then make a runner in GitLab: in the project (or group), **Settings,
 CI/CD, Runners, New project runner**. Give it the tag `orphera`, tick **Run untagged jobs** off, and
-copy the authentication token it shows (it starts `glrt-`).
+copy the authentication token it shows (it starts `glrt-`). With a token like this, the tags, the lock and the
+description are the runner's settings in GitLab; `register` does not take them on its command line.
 
 Register it on the runner VM:
 
@@ -66,8 +95,7 @@ Register it on the runner VM:
 sudo gitlab-runner register --non-interactive \
   --url https://<your-gitlab> \
   --token <glrt-token> \
-  --executor shell \
-  --description orphera-exec
+  --executor shell
 ```
 
 If your lab GitLab uses a certificate from a private CA, add `--tls-ca-file /path/to/that-ca.crt`, or the
