@@ -80,36 +80,34 @@ object observability_stack extends OrpheraClusterPlaybook:
   // config and systemd unit; this overwrites the scrape config with the
   // real fleet target list and nothing else (alerting/rules are left at
   // package defaults — out of scope for this first pass).
-  private val prometheusConfigScript =
-    s"""mkdir -p /etc/prometheus/scrape.d
-       |cat > /etc/prometheus/prometheus.yml <<EOF
-       |global:
-       |  scrape_interval: 15s
-       |
-       |scrape_config_files:
-       |  - /etc/prometheus/scrape.d/*.yml
-       |
-       |scrape_configs:
-       |  - job_name: 'node_exporter'
-       |    static_configs:
-       |      - targets: [$nodeExporterTargets]
-       |
-       |  - job_name: 'prometheus'
-       |    static_configs:
-       |      - targets: ['localhost:9090']
-       |EOF
-       |systemctl enable --now prometheus
-       |systemctl restart prometheus
-       |if ! systemctl is-active --quiet prometheus; then
-       |  echo "prometheus failed to start — see 'journalctl -xeu prometheus' for the real reason" >&2
-       |  exit 1
-       |fi
-       |sleep 2
-       |if ! curl -sf http://localhost:9090/-/healthy > /dev/null; then
-       |  echo "prometheus is running but /-/healthy didn't return success" >&2
-       |  exit 1
-       |fi
-       |echo "prometheus running on :9090, configured to scrape ${allNodes.length} node_exporter targets"""".stripMargin
+  // prometheus.yml with the scrape targets (`{{nodes.<n>.cluster_ip}}` rendered
+  // on the node), as an apply description: the file, then prometheus restarted
+  // if it changed. The `/-/healthy` check the script ran after the restart is
+  // covered by the health stage below.
+  private val prometheusPlan: ApplyPlan =
+    import Resources.*
+    val dir = directory("/etc/prometheus/scrape.d", mode = "0755")
+    val cfg = fileTemplate(
+      "/etc/prometheus/prometheus.yml",
+      s"""global:
+         |  scrape_interval: 15s
+         |
+         |scrape_config_files:
+         |  - /etc/prometheus/scrape.d/*.yml
+         |
+         |scrape_configs:
+         |  - job_name: 'node_exporter'
+         |    static_configs:
+         |      - targets: [$nodeExporterTargets]
+         |
+         |  - job_name: 'prometheus'
+         |    static_configs:
+         |      - targets: ['localhost:9090']
+         |""".stripMargin,
+      mode = "0644"
+    )
+    val unit = service("prometheus")
+    ApplyPlan.orFail("prometheus-config", List(dir, cfg.after(dir).notifies(unit), unit))
 
   // tst7 only. The one genuinely new technique in this file — see the
   // header comment. `signed-by` (not the deprecated `apt-key add`) is
@@ -304,10 +302,7 @@ object observability_stack extends OrpheraClusterPlaybook:
           Task.Install(packages = List("prometheus"), updateCache = true)
         )
         .task("write prometheus.yml and (re)start prometheus")(
-          Task.RunCommand(
-            List("sh", "-c", prometheusConfigScript),
-            timeoutSeconds = 60
-          )
+          Task.Apply(prometheusPlan)
         )
         .build,
 

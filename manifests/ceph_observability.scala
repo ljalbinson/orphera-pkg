@@ -98,43 +98,42 @@ object ceph_observability extends OrpheraClusterPlaybook:
   private val cephExporterTarget =
     s"'{{nodes.$mgrNode.cluster_ip}}:$cephMetricsPort'"
 
-  private val prometheusConfigScript =
-    s"""cat > /etc/prometheus/prometheus.yml <<EOF
-       |global:
-       |  scrape_interval: 15s
-       |
-       |scrape_configs:
-       |  - job_name: 'node_exporter'
-       |    static_configs:
-       |      - targets: [$nodeExporterTargets]
-       |
-       |  - job_name: 'haproxy'
-       |    static_configs:
-       |      - targets: [$haproxyExporterTargets]
-       |
-       |  - job_name: 'mysqld'
-       |    static_configs:
-       |      - targets: [$mysqldExporterTargets]
-       |
-       |  - job_name: 'ceph'
-       |    static_configs:
-       |      - targets: [$cephExporterTarget]
-       |
-       |  - job_name: 'prometheus'
-       |    static_configs:
-       |      - targets: ['localhost:9090']
-       |EOF
-       |systemctl restart prometheus
-       |if ! systemctl is-active --quiet prometheus; then
-       |  echo "prometheus failed to restart after the scrape-config update — see 'journalctl -xeu prometheus' for the real reason" >&2
-       |  exit 1
-       |fi
-       |sleep 2
-       |if ! curl -sf http://localhost:9090/-/healthy > /dev/null; then
-       |  echo "prometheus is running but /-/healthy didn't return success" >&2
-       |  exit 1
-       |fi
-       |echo "prometheus reconfigured: now also scraping the ceph mgr target"""".stripMargin
+  // prometheus.yml with the scrape targets (`{{nodes.<n>.cluster_ip}}` rendered
+  // on the node), as an apply description: the file, then prometheus restarted
+  // if it changed. The `/-/healthy` check the script ran after the restart is
+  // covered by the health stage below.
+  private val prometheusPlan: ApplyPlan =
+    import Resources.*
+    val cfg = fileTemplate(
+      "/etc/prometheus/prometheus.yml",
+      s"""global:
+         |  scrape_interval: 15s
+         |
+         |scrape_configs:
+         |  - job_name: 'node_exporter'
+         |    static_configs:
+         |      - targets: [$nodeExporterTargets]
+         |
+         |  - job_name: 'haproxy'
+         |    static_configs:
+         |      - targets: [$haproxyExporterTargets]
+         |
+         |  - job_name: 'mysqld'
+         |    static_configs:
+         |      - targets: [$mysqldExporterTargets]
+         |
+         |  - job_name: 'ceph'
+         |    static_configs:
+         |      - targets: [$cephExporterTarget]
+         |
+         |  - job_name: 'prometheus'
+         |    static_configs:
+         |      - targets: ['localhost:9090']
+         |""".stripMargin,
+      mode = "0644"
+    )
+    val unit = service("prometheus")
+    ApplyPlan.orFail("prometheus-config-ceph", List(cfg.notifies(unit), unit))
 
   // node_exporter(6) + haproxy(3) + mysqld(3) + ceph(1) + prometheus-self(1) = 14.
   private val expectedTargets =
@@ -169,10 +168,7 @@ object ceph_observability extends OrpheraClusterPlaybook:
 
       stage("update-prometheus-scrape-config-for-ceph", monitoringNode)
         .task("rewrite prometheus.yml with the ceph job and restart")(
-          Task.RunCommand(
-            List("sh", "-c", prometheusConfigScript),
-            timeoutSeconds = 60
-          )
+          Task.Apply(prometheusPlan)
         )
         .build,
 
