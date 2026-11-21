@@ -1222,6 +1222,7 @@ Resources (`import Resources.*`), each named by kind and path or label (`file[/e
 | `secretFile(path, secret, ...)` | the same, never shown in a plan or diff |
 | `fileFrom(path, source, vars, ...)` | the content of a local file; a `.mustache` one rendered with `vars` and the node's facts and vars |
 | `fileCopy(path, from, mode, owner, group)` | the content of another file on the same node (a certificate, a key, a kubeconfig): the agent copies the bytes and nothing is sent to the orchestrator; unchanged when the hashes match; fails if `from` is not there, so order the step that makes it first (`after`). Needs agent 0.1.222; one that predates it gets a `cp` script |
+| `fileTemplate(path, template, vars, mode, owner, group)` | text with `{{...}}` in it, rendered on the node with its facts and vars (`{{cluster_ip}}`, `{{nodes.tst4.cluster_ip}}`, and `{{default_interface}}`, the interface of its default route) when the plan reaches the file; unchanged when the rendered text matches. Pair it with `service(...)` and `.notifies(unit)` to restart on change |
 | `directory(path, mode, owner, group)` | a directory |
 | `symlink(path, target)` | a symbolic link |
 | `absentFile`, `absentDirectory`, `absentSymlink` | removed; `absentDirectory(path)` only if empty, `absentDirectory(path, recursive = true)` with everything in it (never across a symbolic link or a mount, and the path must be absolute, clean and at least two levels deep: `/srv/x` yes, `/srv` no) |

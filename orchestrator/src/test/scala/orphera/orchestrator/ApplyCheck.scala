@@ -106,6 +106,9 @@ object ApplyCheck:
     def source(path: String, vars: Map[String, String]): IO[String] =
       IO(Templating.render(s"source $path for {{name}}", vars))
 
+    def render(text: String, vars: Map[String, String]): IO[String] =
+      IO(Templating.render(text, Map("node" -> node, "default_interface" -> "eth9") ++ vars))
+
     def write(
         path: String,
         content: String,
@@ -600,6 +603,32 @@ object ApplyCheck:
         case _                   => false
       },
       tn.fs.toString
+    )
+
+    // Inline template text is rendered with the node's vars, then compared as
+    // content, so a second run changes nothing.
+    val tt = new FakeNode(Map.empty)
+    val tplPlan = List(
+      fileTemplate(
+        "/etc/k.conf",
+        "iface {{default_interface}} on {{node}} peer {{peer}}",
+        Map("peer" -> "10.0.0.4"),
+        mode = "0644"
+      )
+    )
+    val first = applyTo(tt, tplPlan)
+    check(
+      "fileTemplate: rendered with the node's vars",
+      tt.fs.get("/etc/k.conf").exists {
+        case Entry.F(t, _, _, _) => t == "iface eth9 on fake peer 10.0.0.4"
+        case _                   => false
+      },
+      tt.fs.toString
+    )
+    check("fileTemplate: first run changed", first.report.changed)
+    check(
+      "fileTemplate: second run changed nothing",
+      !applyTo(tt, tplPlan).report.changed
     )
 
   private def kindChecks(): Unit =
@@ -1659,6 +1688,8 @@ object ApplyCheck:
     def readText(path: String): IO[Option[String]] = IO.pure(None)
     def source(path: String, vars: Map[String, String]): IO[String] =
       IO.pure("")
+    def render(text: String, vars: Map[String, String]): IO[String] =
+      IO.pure(text)
     def write(
         path: String,
         content: String,
