@@ -97,14 +97,15 @@ apply_td() {
 }
 
 catalog_types() {
-  command -v openstack >/dev/null 2>&1 || return 1
-  # The credentials file may use variables that are not set, so `set -u` is off while it is read.
+  # The credentials file puts the OpenStack virtualenv on PATH, so it is read before looking for the CLI;
+  # it may use variables that are not set, so `set -u` is off while it is read.
   # shellcheck disable=SC1090
   if [ -f "$HOME/.config/openstack/admin-openrc.sh" ]; then
     set +u
     . "$HOME/.config/openstack/admin-openrc.sh"
     set -u
   fi
+  command -v openstack >/dev/null 2>&1 || return 1
   openstack service list -f value -c Type
 }
 
