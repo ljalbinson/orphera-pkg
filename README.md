@@ -51,6 +51,7 @@ New to Orphera? [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md) takes you fro
 - [Decommissioning a host](#decommissioning-a-host)
 - [Installing the command line](#installing-the-command-line)
 - [Building a second control host](#building-a-second-control-host)
+- [A GitLab runner that can run Orphera](docs/GITLAB-RUNNER.md)
 - [Makefile targets](#makefile-targets)
 - [Testing](#testing)
 - [Development notes](#development-notes)
@@ -2410,6 +2411,8 @@ Afterwards both hosts hold the same CA key, secret store and SSH key, and either
 - **GitHub.** The new host has no push credentials; add them before committing from it.
 - **OpenStack clients** when the handover ran with `CONTROL_HOST_SKIP_OPENSTACK=1`: run `utils/openstack-client-setup.sh` there once
   Keystone is up.
+
+A GitLab runner that runs `orphera` from pipelines is not a second control host: it gets an operator certificate and the token, not the CA key or your SSH key. See [docs/GITLAB-RUNNER.md](docs/GITLAB-RUNNER.md).
 
 ## Makefile targets
 
