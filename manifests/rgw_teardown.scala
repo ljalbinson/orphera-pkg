@@ -18,6 +18,10 @@ import orphera.orchestrator.*
 //   orphera apply manifests/rgw_teardown.scala --check
 //   orphera apply manifests/rgw_teardown.scala
 //
+// The options are found by the name that starts with rgw_ in the row of `ceph config dump`: with no mask the
+// second column is the level (advanced, basic), not the option, so taking column 2 removed nothing and every
+// run found the options still there.
+//
 // Each step is a command that runs only while there is something to remove (`onlyIf`), so a second run
 // changes nothing.
 object rgw_teardown extends OrpheraApply:
@@ -53,7 +57,7 @@ object rgw_teardown extends OrpheraApply:
        |if $serviceListed; then
        |  cephadm shell -- ceph orch rm rgw.$serviceId
        |fi
-       |for o in $$(cephadm shell -- ceph config dump 2>/dev/null | awk '$$1 == "client.rgw.$serviceId" {print $$2}'); do
+       |for o in $$(cephadm shell -- ceph config dump 2>/dev/null | awk '$$1 == "client.rgw.$serviceId" {for (i = 2; i <= NF; i++) if ($$i ~ /^rgw_/) { print $$i; break }}'); do
        |  cephadm shell -- ceph config rm client.rgw.$serviceId $$o
        |done
        |rm -rf $paths
