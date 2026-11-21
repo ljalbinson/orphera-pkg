@@ -1242,7 +1242,8 @@ reach the node untouched. `fileTemplate(path, template, vars, mode, owner, group
 the node, with that node's facts and vars and the extra `vars`; `fileFrom(path, "x.mustache", vars)` does the
 same for a local template file. The text is compared after rendering, so a second run is `unchanged`. A template
 is Mustache (`{{name}}`, `{{nodes.tst4.cluster_ip}}`); a name that is not known renders as empty text, so check
-the file once.
+the file once. `{{x}}` escapes HTML characters in the value (`&`, `<`, `>`, `"`, `'`, `=`); use `{{{x}}}` for
+a value that has them, a password or a URL with `&` for one.
 
 | Placeholder | Value |
 |---|---|
