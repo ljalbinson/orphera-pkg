@@ -1032,6 +1032,39 @@ object TaskExecutor:
         else text
       )
 
+    // `{{default_interface}}` is the interface of the node's default route,
+    // read from the node only when a template asks for it.
+    private def defaultInterface: IO[Map[String, String]] =
+      quietly(
+        "default interface",
+        Task.RunCommand(
+          List(
+            "sh",
+            "-c",
+            "ip -4 route show default | awk '{print $5; exit}'"
+          ),
+          30
+        )
+      ).flatMap { done =>
+        done.output.map(_.trim).filter(_.nonEmpty).lastOption match
+          case Some(name) if done.error.isEmpty =>
+            IO.pure(Map("default_interface" -> name))
+          case _ =>
+            IO.raiseError(
+              new RuntimeException(
+                s"${n.name} has no default route to name an interface from"
+              )
+            )
+      }
+
+    def render(text: String, more: Map[String, String]): IO[String] =
+      (if text.contains("default_interface") then defaultInterface
+       else IO.pure(Map.empty[String, String])).map { extra =>
+        if text.contains("{{") then
+          Templating.render(text, vars ++ extra ++ more)
+        else text
+      }
+
     def write(
         path: String,
         content: String,

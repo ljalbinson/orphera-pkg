@@ -82,76 +82,81 @@ object k8s_api_vip extends OrpheraClusterPlaybook:
       )
     )
 
-  private val haproxyScript =
-    s"""cat > /etc/haproxy/haproxy.cfg <<'EOF'
-       |global
-       |    daemon
-       |    maxconn 2048
-       |
-       |defaults
-       |    mode tcp
-       |    timeout connect 5s
-       |    timeout client 1h
-       |    timeout server 1h
-       |    timeout tunnel 1h
-       |
-       |# kube-apiserver health: a TLS handshake plus GET /livez would need the
-       |# client CA; a plain TCP check is enough to take a dead node out.
-       |listen kube_apiserver
-       |    bind $vip:8443
-       |    balance roundrobin
-       |    default-server inter 3s fall 3 rise 2 on-marked-down shutdown-sessions
-       |    server tst30 {{nodes.tst30.cluster_ip}}:6443 check
-       |    server tst31 {{nodes.tst31.cluster_ip}}:6443 check
-       |    server tst32 {{nodes.tst32.cluster_ip}}:6443 check
-       |EOF
-       |haproxy -c -f /etc/haproxy/haproxy.cfg
-       |systemctl enable haproxy
-       |systemctl restart haproxy
-       |sleep 1
-       |systemctl is-active --quiet haproxy || { echo "haproxy failed to start; see journalctl -xeu haproxy" >&2; exit 1; }
-       |echo "haproxy forwards $vip:8443 to port 6443 of the three API servers"""".stripMargin
+  // The haproxy configuration, rendered on each node (`{{nodes.<n>.cluster_ip}}`)
+  // as an apply description: the file, then haproxy restarted if it changed.
+  // `haproxy -c` is no longer run first; a bad file makes the service step fail.
+  private val haproxyPlan: ApplyPlan =
+    import Resources.*
+    val cfg = fileTemplate(
+      "/etc/haproxy/haproxy.cfg",
+      s"""global
+         |    daemon
+         |    maxconn 2048
+         |
+         |defaults
+         |    mode tcp
+         |    timeout connect 5s
+         |    timeout client 1h
+         |    timeout server 1h
+         |    timeout tunnel 1h
+         |
+         |# kube-apiserver health: a TLS handshake plus GET /livez would need the
+         |# client CA; a plain TCP check is enough to take a dead node out.
+         |listen kube_apiserver
+         |    bind $vip:8443
+         |    balance roundrobin
+         |    default-server inter 3s fall 3 rise 2 on-marked-down shutdown-sessions
+         |    server tst30 {{nodes.tst30.cluster_ip}}:6443 check
+         |    server tst31 {{nodes.tst31.cluster_ip}}:6443 check
+         |    server tst32 {{nodes.tst32.cluster_ip}}:6443 check
+         |""".stripMargin,
+      mode = "0644"
+    )
+    val unit = service("haproxy")
+    ApplyPlan.orFail("k8s-haproxy", List(cfg.notifies(unit), unit))
 
-  private def keepalivedScript(host: String): String =
+  // keepalived's configuration for one node: its priority and state, its own
+  // address and its peers' (rendered on the node), and the interface of its
+  // default route (`{{default_interface}}`, read from the node).
+  private def keepalivedPlan(host: String): ApplyPlan =
+    import Resources.*
     val (priority, state) = priorityAndState(host)
     val peerLines =
       peers(host).map(p => s"        {{nodes.$p.cluster_ip}}").mkString("\n")
-    s"""IFACE=$$(ip -4 route show default | awk '{print $$5; exit}')
-       |cat > /etc/keepalived/keepalived.conf <<EOF
-       |vrrp_script chk_haproxy {
-       |    script "/usr/bin/pgrep -x haproxy"
-       |    interval 2
-       |    weight 4
-       |}
-       |
-       |vrrp_instance K8S_API_VIP {
-       |    state $state
-       |    interface $$IFACE
-       |    virtual_router_id 53
-       |    priority $priority
-       |    advert_int 1
-       |    unicast_src_ip {{cluster_ip}}
-       |    unicast_peer {
-       |$peerLines
-       |    }
-       |    authentication {
-       |        auth_type PASS
-       |        auth_pass $vrrpAuthPass
-       |    }
-       |    virtual_ipaddress {
-       |        $vip/24
-       |    }
-       |    track_script {
-       |        chk_haproxy
-       |    }
-       |}
-       |EOF
-       |systemctl daemon-reload
-       |systemctl enable keepalived
-       |systemctl restart keepalived
-       |sleep 2
-       |systemctl is-active --quiet keepalived || { echo "keepalived failed to start; see journalctl -xeu keepalived" >&2; exit 1; }
-       |echo "keepalived on $host: priority=$priority state=$state"""".stripMargin
+    val cfg = fileTemplate(
+      "/etc/keepalived/keepalived.conf",
+      s"""vrrp_script chk_haproxy {
+         |    script "/usr/bin/pgrep -x haproxy"
+         |    interval 2
+         |    weight 4
+         |}
+         |
+         |vrrp_instance K8S_API_VIP {
+         |    state $state
+         |    interface {{default_interface}}
+         |    virtual_router_id 53
+         |    priority $priority
+         |    advert_int 1
+         |    unicast_src_ip {{cluster_ip}}
+         |    unicast_peer {
+         |$peerLines
+         |    }
+         |    authentication {
+         |        auth_type PASS
+         |        auth_pass $vrrpAuthPass
+         |    }
+         |    virtual_ipaddress {
+         |        $vip/24
+         |    }
+         |    track_script {
+         |        chk_haproxy
+         |    }
+         |}
+         |""".stripMargin,
+      mode = "0644"
+    )
+    val unit = service("keepalived")
+    ApplyPlan.orFail(s"k8s-keepalived-$host", List(cfg.notifies(unit), unit))
 
   private val vipHeldScript = s"ip -4 addr show | grep -q '$vip/'"
 
@@ -183,31 +188,22 @@ object k8s_api_vip extends OrpheraClusterPlaybook:
           Task.Apply(nonlocalBindPlan)
         )
         .task("write /etc/haproxy/haproxy.cfg and (re)start haproxy")(
-          Task.RunCommand(List("sh", "-c", haproxyScript), timeoutSeconds = 60)
+          Task.Apply(haproxyPlan)
         )
         .build,
       stage("write-keepalived-tst30", "tst30")
         .task("write keepalived.conf and (re)start keepalived")(
-          Task.RunCommand(
-            List("sh", "-c", keepalivedScript("tst30")),
-            timeoutSeconds = 60
-          )
+          Task.Apply(keepalivedPlan("tst30"))
         )
         .build,
       stage("write-keepalived-tst31", "tst31")
         .task("write keepalived.conf and (re)start keepalived")(
-          Task.RunCommand(
-            List("sh", "-c", keepalivedScript("tst31")),
-            timeoutSeconds = 60
-          )
+          Task.Apply(keepalivedPlan("tst31"))
         )
         .build,
       stage("write-keepalived-tst32", "tst32")
         .task("write keepalived.conf and (re)start keepalived")(
-          Task.RunCommand(
-            List("sh", "-c", keepalivedScript("tst32")),
-            timeoutSeconds = 60
-          )
+          Task.Apply(keepalivedPlan("tst32"))
         )
         .build,
       stage("confirm-api-vip", "tst31")

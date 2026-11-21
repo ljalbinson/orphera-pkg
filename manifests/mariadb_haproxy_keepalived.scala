@@ -54,7 +54,7 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 // after narrowing mysqld's own bind-address to {{cluster_ip}} in
 // mariadb_galera_cluster.scala (still worth doing, but not what actually
 // fixes this), HAProxy's wildcard bind still collided with it. Properly
-// fixed in `haproxyConfigScript` below: HAProxy now binds the VIP address
+// fixed in `haproxyPlan` below: HAProxy now binds the VIP address
 // specifically, never a wildcard, with `net.ipv4.ip_nonlocal_bind=1` set
 // first so it can hold that bind on the backup nodes too, before
 // keepalived has attached the VIP to their interface — see that val's own
@@ -218,52 +218,53 @@ object mariadb_haproxy_keepalived extends OrpheraClusterPlaybook:
       )
     )
 
-  private val haproxyConfigScript =
-    s"""cat > /etc/haproxy/haproxy.cfg <<'EOF'
-       |global
-       |    daemon
-       |    maxconn 256
-       |
-       |defaults
-       |    mode tcp
-       |    timeout connect 5s
-       |    timeout client 30s
-       |    timeout server 30s
-       |
-       |listen galera_write
-       |    bind $vip:3306
-       |    mode tcp
-       |    # A schema change on a Galera cluster can run for more than the 30 s of the defaults: HAProxy cut the
-       |    # connection of Keycloak's first migration (ALTER TABLE keycloak.REALM) at 30 s, the statement still
-       |    # finished in the cluster, and every later start failed with "Duplicate column name".
-       |    timeout client 30m
-       |    timeout server 30m
-       |    option httpchk GET /
-       |    http-check expect status 200
-       |    default-server port 9200 inter 2s downinter 5s rise 3 fall 2 on-marked-down shutdown-sessions
-       |    server tst3 {{nodes.tst3.cluster_ip}}:3306 check
-       |    server tst4 {{nodes.tst4.cluster_ip}}:3306 check backup
-       |    server tst5 {{nodes.tst5.cluster_ip}}:3306 check backup
-       |
-       |listen galera_read
-       |    bind $vip:3307
-       |    mode tcp
-       |    balance roundrobin
-       |    option httpchk GET /
-       |    http-check expect status 200
-       |    default-server port 9200 inter 2s downinter 5s rise 3 fall 2
-       |    server tst3 {{nodes.tst3.cluster_ip}}:3306 check
-       |    server tst4 {{nodes.tst4.cluster_ip}}:3306 check
-       |    server tst5 {{nodes.tst5.cluster_ip}}:3306 check
-       |EOF
-       |systemctl enable --now haproxy
-       |systemctl restart haproxy
-       |sleep 1
-       |if ! systemctl is-active --quiet haproxy; then
-       |  echo "haproxy failed to start on this node — see 'systemctl status haproxy' / 'journalctl -xeu haproxy' for the real reason" >&2
-       |  exit 1
-       |fi
-       |echo 'haproxy configured: write listener on :3306 (tst3 primary), read listener on :3307 (round-robin), bound to the VIP only'""".stripMargin
+  // The haproxy configuration, rendered on each node, as an apply description:
+  // the file, then haproxy restarted if it changed (the enable and the start
+  // are the service's own). It is no longer restarted when nothing changed.
+  private val haproxyPlan: ApplyPlan =
+    import Resources.*
+    val cfg = fileTemplate(
+      "/etc/haproxy/haproxy.cfg",
+      s"""global
+         |    daemon
+         |    maxconn 256
+         |
+         |defaults
+         |    mode tcp
+         |    timeout connect 5s
+         |    timeout client 30s
+         |    timeout server 30s
+         |
+         |listen galera_write
+         |    bind $vip:3306
+         |    mode tcp
+         |    # A schema change on a Galera cluster can run for more than the 30 s of the defaults: HAProxy cut the
+         |    # connection of Keycloak's first migration (ALTER TABLE keycloak.REALM) at 30 s, the statement still
+         |    # finished in the cluster, and every later start failed with "Duplicate column name".
+         |    timeout client 30m
+         |    timeout server 30m
+         |    option httpchk GET /
+         |    http-check expect status 200
+         |    default-server port 9200 inter 2s downinter 5s rise 3 fall 2 on-marked-down shutdown-sessions
+         |    server tst3 {{nodes.tst3.cluster_ip}}:3306 check
+         |    server tst4 {{nodes.tst4.cluster_ip}}:3306 check backup
+         |    server tst5 {{nodes.tst5.cluster_ip}}:3306 check backup
+         |
+         |listen galera_read
+         |    bind $vip:3307
+         |    mode tcp
+         |    balance roundrobin
+         |    option httpchk GET /
+         |    http-check expect status 200
+         |    default-server port 9200 inter 2s downinter 5s rise 3 fall 2
+         |    server tst3 {{nodes.tst3.cluster_ip}}:3306 check
+         |    server tst4 {{nodes.tst4.cluster_ip}}:3306 check
+         |    server tst5 {{nodes.tst5.cluster_ip}}:3306 check
+""".stripMargin,
+      mode = "0644"
+    )
+    val unit = service("haproxy")
+    ApplyPlan.orFail("galera-haproxy", List(cfg.notifies(unit), unit))
 
   // NOT symmetric, unlike the two scripts above — priority/state differ
   // per node, so this is three separate per-host stages below rather than
@@ -294,47 +295,48 @@ object mariadb_haproxy_keepalived extends OrpheraClusterPlaybook:
       case "tst4" => List("tst3", "tst5")
       case "tst5" => List("tst3", "tst4")
 
-  private def keepalivedConfigScript(host: String): String =
+  private def keepalivedPlan(host: String): ApplyPlan =
+    import Resources.*
     val (priority, state) = keepalivedPriorityAndState(host)
     val peerLines = keepalivedPeers(host)
       .map(p => s"        {{nodes.$p.cluster_ip}}")
       .mkString("\n")
-    s"""IFACE=$$(ip -4 route show default | awk '{print $$5; exit}')
-       |cat > /etc/keepalived/keepalived.conf <<EOF
-       |vrrp_script chk_haproxy {
-       |    script "/usr/bin/pgrep -x haproxy"
-       |    interval 2
-       |    weight 4
-       |}
-       |
-       |vrrp_instance GALERA_VIP {
-       |    state $state
-       |    interface $$IFACE
-       |    virtual_router_id 51
-       |    priority $priority
-       |    advert_int 1
-       |    unicast_src_ip {{cluster_ip}}
-       |    unicast_peer {
-       |$peerLines
-       |    }
-       |    authentication {
-       |        auth_type PASS
-       |        auth_pass $vrrpAuthPass
-       |    }
-       |    virtual_ipaddress {
-       |        $vip/24
-       |    }
-       |    track_script {
-       |        chk_haproxy
-       |    }
-       |}
-       |EOF
-       |systemctl daemon-reload
-       |systemctl enable --now keepalived
-       |systemctl restart keepalived
-       |echo "keepalived configured on $host: priority=$priority state=$state, peers=${keepalivedPeers(
-        host
-      ).mkString(",")}"""".stripMargin
+    // `{{default_interface}}` is the interface of the node's default route, read
+    // from the node; the file is rendered there with the addresses in it.
+    val cfg = fileTemplate(
+      "/etc/keepalived/keepalived.conf",
+      s"""vrrp_script chk_haproxy {
+         |    script "/usr/bin/pgrep -x haproxy"
+         |    interval 2
+         |    weight 4
+         |}
+         |
+         |vrrp_instance GALERA_VIP {
+         |    state $state
+         |    interface {{default_interface}}
+         |    virtual_router_id 51
+         |    priority $priority
+         |    advert_int 1
+         |    unicast_src_ip {{cluster_ip}}
+         |    unicast_peer {
+         |$peerLines
+         |    }
+         |    authentication {
+         |        auth_type PASS
+         |        auth_pass $vrrpAuthPass
+         |    }
+         |    virtual_ipaddress {
+         |        $vip/24
+         |    }
+         |    track_script {
+         |        chk_haproxy
+         |    }
+         |}
+""".stripMargin,
+      mode = "0644"
+    )
+    val unit = service("keepalived")
+    ApplyPlan.orFail(s"galera-keepalived-$host", List(cfg.notifies(unit), unit))
 
   // Checked independently on EACH node (`requiredCount = 1` against three
   // candidates) — this isn't really a quorum in the usual sense (it's
@@ -425,28 +427,28 @@ object mariadb_haproxy_keepalived extends OrpheraClusterPlaybook:
           Task.Apply(nonlocalBindPlan)
         )
         .task("write /etc/haproxy/haproxy.cfg and (re)start haproxy")(
-          Task.RunCommand(List("sh", "-c", haproxyConfigScript))
+          Task.Apply(haproxyPlan)
         )
         .build,
 
-      // Three separate single-node stages — see keepalivedConfigScript's
+      // Three separate single-node stages — see keepalivedPlan's
       // own comment for why this can't be one shared stage like the two
       // above.
       stage("write-keepalived-tst3", "tst3")
         .task("write /etc/keepalived/keepalived.conf and (re)start keepalived")(
-          Task.RunCommand(List("sh", "-c", keepalivedConfigScript("tst3")))
+          Task.Apply(keepalivedPlan("tst3"))
         )
         .build,
 
       stage("write-keepalived-tst4", "tst4")
         .task("write /etc/keepalived/keepalived.conf and (re)start keepalived")(
-          Task.RunCommand(List("sh", "-c", keepalivedConfigScript("tst4")))
+          Task.Apply(keepalivedPlan("tst4"))
         )
         .build,
 
       stage("write-keepalived-tst5", "tst5")
         .task("write /etc/keepalived/keepalived.conf and (re)start keepalived")(
-          Task.RunCommand(List("sh", "-c", keepalivedConfigScript("tst5")))
+          Task.Apply(keepalivedPlan("tst5"))
         )
         .build,
 

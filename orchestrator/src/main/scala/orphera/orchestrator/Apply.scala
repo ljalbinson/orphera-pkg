@@ -58,6 +58,13 @@ object ApplyResource:
     case Hidden(secret: Secret)
     case Source(path: String, vars: Map[String, String])
 
+    /** Text with `{{...}}` in it, rendered on this node with its facts and vars
+      * (and `vars`) when the file is compared: `{{cluster_ip}}`,
+      * `{{nodes.tst4.cluster_ip}}`, `{{default_interface}}` (the interface of
+      * the node's default route).
+      */
+    case Template(text: String, vars: Map[String, String])
+
     /** The bytes of a file on the node itself. They are copied there by the
       * agent and never come here, so it suits a key or a kubeconfig.
       */
@@ -304,6 +311,26 @@ object Resources:
     File(
       path,
       Some(Content.Hidden(content)),
+      mode,
+      owner,
+      group,
+      present = true
+    )
+
+  /** A file whose content is this text, rendered with the node's facts and
+    * vars first (see `Content.Template`).
+    */
+  def fileTemplate(
+      path: String,
+      template: String,
+      vars: Map[String, String] = Map.empty,
+      mode: String = "",
+      owner: String = "",
+      group: String = ""
+  ): ApplyResource =
+    File(
+      path,
+      Some(Content.Template(template, vars)),
       mode,
       owner,
       group,
@@ -849,6 +876,9 @@ trait ApplyTarget:
 
   /** A `fileFrom` source as text, rendered if it is a `.mustache` file. */
   def source(path: String, vars: Map[String, String]): IO[String]
+
+  /** Text with `{{...}}` rendered with the node's facts and vars and `vars`. */
+  def render(text: String, vars: Map[String, String]): IO[String]
   def write(
       path: String,
       content: String,
@@ -1990,6 +2020,8 @@ object Apply:
                 IO.pure((s.reveal, true))
               case Some(ApplyResource.Content.Source(p, vars)) =>
                 target.source(p, vars).map((_, false))
+              case Some(ApplyResource.Content.Template(t, vars)) =>
+                target.render(t, vars).map((_, false))
               case Some(ApplyResource.Content.OnNode(_)) =>
                 IO.pure(("", false)) // read on the node, never here
               case None => IO.pure(("", false))
