@@ -61,7 +61,7 @@ Gap: a playbook step that restarts a service once, at a given point in a rolling
 
 | Addition | Steps | Where |
 |---|---|---|
-| `absentDirectory(path, recursive = true)`: today it removes only an empty directory | 36 | the `remove X files, state and the helper` steps in every teardown, leftover config and data |
+| `absentDirectory(path, recursive = true)` (done on branch `absent-directory-recursive`, 36 steps still to convert; skyline's teardown is the first): today it removes only an empty directory | 36 | the `remove X files, state and the helper` steps in every teardown, leftover config and data |
 | A file whose content is copied from a path on the same node | 23 | `copy Keystone's CA to the X config`, the rndc key, the certificate chain, the management kubeconfig |
 | `pkg` waits for the dpkg lock itself | 23 | `wait for apt and dpkg to be idle`, before package steps |
 

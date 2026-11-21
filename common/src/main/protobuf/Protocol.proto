@@ -245,10 +245,13 @@ message SetAttributes {
   string group = 4;
 }
 
-// Removes a file or link, or (directory) an empty directory. Never a tree.
+// Removes a file or link, or (directory) an empty directory, or (directory and
+// recursive) a directory with everything in it. The tree is never followed
+// across a symbolic link or into another filesystem.
 message RemovePath {
   string path = 1;
   bool directory = 2;
+  bool recursive = 3;
 }
 
 // path becomes a symbolic link to target, replacing a file or another link.

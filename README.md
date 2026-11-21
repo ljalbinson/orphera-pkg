@@ -1223,7 +1223,7 @@ Resources (`import Resources.*`), each named by kind and path or label (`file[/e
 | `fileFrom(path, source, vars, ...)` | the content of a local file; a `.mustache` one rendered with `vars` and the node's facts and vars |
 | `directory(path, mode, owner, group)` | a directory |
 | `symlink(path, target)` | a symbolic link |
-| `absentFile`, `absentDirectory` (only if empty), `absentSymlink` | removed |
+| `absentFile`, `absentDirectory`, `absentSymlink` | removed; `absentDirectory(path)` only if empty, `absentDirectory(path, recursive = true)` with everything in it (never across a symbolic link or a mount, and the path must be absolute, clean and at least two levels deep: `/srv/x` yes, `/srv` no) |
 | `pkg(name, version, updateCache)`, `absentPkg(name)` | a package installed (apt or dnf, whichever the node has), at `version` if given (`"2.0"` matches `2.0-1.el9`); `updateCache` runs `apt-get update` before installing |
 | `service(unit, enabled, running)` | a systemd unit enabled and running (each `Some(true)`, `Some(false)`, or `None` to leave it); a resource that notifies it restarts it once, unless this run starts it anyway |
 | `user(name, uid, group, groups, home, shell, system)`, `absentUser(name)` | a local user; `groups` are added to, never taken from; removing one leaves its home |

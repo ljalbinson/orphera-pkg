@@ -48,14 +48,6 @@ object skyline_teardown extends OrpheraApply:
       |fi
       |echo "skyline container and unit removed"""".stripMargin
 
-  private val paths =
-    s"/etc/skyline /var/lib/orphera/skyline /var/log/skyline /tmp/skyline-bootstrap.log $helper"
-  private val filesExist =
-    s"for p in $paths; do [ -e \"$$p\" ] && exit 0; done; exit 1"
-  private val cleanupScript =
-    s"""rm -rf $paths
-       |echo "skyline config, state and helper removed"""".stripMargin
-
   private val dropDatabaseScript =
     s"""mariadb -N -e "DROP DATABASE IF EXISTS $dbName; DROP USER IF EXISTS '$dbUser'@'%'; FLUSH PRIVILEGES;""""
   // True when the database or the user exists. When MariaDB cannot be queried this is also true, so that the
@@ -85,10 +77,12 @@ object skyline_teardown extends OrpheraApply:
         onlyIf = anyUnit,
         timeout = 240
       ).after(unregistered)
-      val cleaned = command(
-        "remove skyline files, state and the helper",
-        cleanupScript,
-        onlyIf = filesExist,
-        timeout = 120
-      ).after(stopped)
-      List(unregistered, stopped, cleaned)
+      // Typed removal, no script: the three directories with their contents, the bootstrap log, the helper.
+      val cleaned = List(
+        absentDirectory("/etc/skyline", recursive = true),
+        absentDirectory("/var/lib/orphera/skyline", recursive = true),
+        absentDirectory("/var/log/skyline", recursive = true),
+        absentFile("/tmp/skyline-bootstrap.log"),
+        absentFile(helper)
+      ).map(_.after(stopped))
+      List(unregistered, stopped) ++ cleaned

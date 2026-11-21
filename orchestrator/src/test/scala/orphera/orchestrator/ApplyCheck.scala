@@ -1788,6 +1788,22 @@ object ApplyCheck:
         )._1 == Vector(FileChange.RemovePath("/f", false))
     )
     check(
+      "a directory removed with its contents: one typed recursive removal",
+      seenFor(
+        Map("/srv/t" -> Map("type" -> "directory", "mode" -> "755", "owner" -> "root", "group" -> "root")),
+        absentDirectory("/srv/t", recursive = true)
+      )._1 == Vector(FileChange.RemovePath("/srv/t", true, true))
+    )
+    check(
+      "absentDirectory(recursive) refuses a path near the root or not clean", {
+        def refused(p: String) =
+          scala.util.Try(absentDirectory(p, recursive = true)).isFailure
+        refused("/") && refused("/srv") && refused("/srv/") &&
+        refused("/srv/../etc") && refused("srv/x") &&
+        scala.util.Try(absentDirectory("/srv/x", recursive = true)).isSuccess
+      }
+    )
+    check(
       "a sysctl that differs is set through the agent, and persisted as a file write", {
         val t = new TypedTarget(
           Map(

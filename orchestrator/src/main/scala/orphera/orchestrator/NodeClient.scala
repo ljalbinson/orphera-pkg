@@ -686,8 +686,8 @@ object NodeClient:
         FileAction.Action.SetAttributes(
           orphera.common.SetAttributes(p, m, o, g)
         )
-      case RemovePath(p, d) =>
-        FileAction.Action.RemovePath(orphera.common.RemovePath(p, d))
+      case RemovePath(p, d, r) =>
+        FileAction.Action.RemovePath(orphera.common.RemovePath(p, d, r))
       case MakeSymlink(p, t) =>
         FileAction.Action.MakeSymlink(orphera.common.MakeSymlink(p, t))
       case SetSysctl(k, v) =>

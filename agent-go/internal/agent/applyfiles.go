@@ -190,11 +190,20 @@ func makeDirectory(m *pb.MakeDirectory) error {
 	return setAttributes(m.Path, m.Mode, m.Owner, m.Group)
 }
 
-// removePath removes a file or link, or an empty directory. Something already
-// gone is not an error.
+// removePath removes a file or link, an empty directory, or (directory and
+// recursive) a directory with everything in it. Something already gone is not
+// an error.
 func removePath(r *pb.RemovePath) error {
 	if err := needChangeablePath(r.Path); err != nil {
 		return err
+	}
+	if r.Recursive {
+		if !r.Directory {
+			return fmt.Errorf("%s: recursive removal is only for a directory", r.Path)
+		}
+		if err := needSafeTree(r.Path); err != nil {
+			return err
+		}
 	}
 	fi, err := os.Lstat(r.Path)
 	if os.IsNotExist(err) {
@@ -209,6 +218,9 @@ func removePath(r *pb.RemovePath) error {
 		}
 	} else if fi.IsDir() {
 		return fmt.Errorf("%s is a directory: not removed", r.Path)
+	}
+	if r.Recursive {
+		return removeTree(r.Path)
 	}
 	return os.Remove(r.Path)
 }

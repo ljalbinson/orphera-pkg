@@ -79,7 +79,8 @@ object ApplyResource:
       group: String,
       present: Boolean,
       needs: List[String] = Nil,
-      triggers: List[String] = Nil
+      triggers: List[String] = Nil,
+      recursive: Boolean = false
   ) extends ApplyResource:
     def id: String = s"directory[$path]"
     protected def relinked(n: List[String], t: List[String]): ApplyResource =
@@ -334,8 +335,19 @@ object Resources:
     Directory(path, mode, owner, group, present = true)
 
   /** Removed if empty; a directory with something in it fails. */
-  def absentDirectory(path: String): ApplyResource =
-    Directory(path, "", "", "", present = false)
+  /** With `recursive`, the directory goes with everything in it (never across a
+    * link or a mount; the agent checks). The path must be absolute and clean and
+    * at least two components deep, so `/srv` or `/` cannot be written by mistake.
+    */
+  def absentDirectory(path: String, recursive: Boolean = false): ApplyResource =
+    if recursive then
+      require(
+        path.startsWith("/") && path.split('/').count(_.nonEmpty) >= 2 &&
+          !path.endsWith("/") && !path.contains("//") &&
+          !path.split('/').exists(c => c == "." || c == ".."),
+        s"absentDirectory(recursive = true) needs an absolute, clean path at least two levels deep, not '$path'"
+      )
+    Directory(path, "", "", "", present = false, recursive = recursive)
 
   def symlink(path: String, target: String): ApplyResource =
     Symlink(path, target, present = true)
@@ -740,7 +752,7 @@ final case class ApplyReport(
 enum FileChange:
   case MakeDirectory(path: String, mode: String, owner: String, group: String)
   case SetAttributes(path: String, mode: String, owner: String, group: String)
-  case RemovePath(path: String, directory: Boolean)
+  case RemovePath(path: String, directory: Boolean, recursive: Boolean = false)
   case MakeSymlink(path: String, target: String)
   case SetSysctl(key: String, value: String)
   case LoadModule(name: String)
@@ -1105,11 +1117,14 @@ object Apply:
                 case Observed.Dir(_, _, _) =>
                   Right(
                     Difference(
-                      List("removed"),
+                      List(
+                        if d.recursive then "removed (with its contents)"
+                        else "removed"
+                      ),
                       List(
                         Action.Typed(
-                          List(FileChange.RemovePath(path, true)),
-                          s"rmdir -- $q"
+                          List(FileChange.RemovePath(path, true, d.recursive)),
+                          if d.recursive then s"rm -rf -- $q" else s"rmdir -- $q"
                         )
                       ),
                       Nil
