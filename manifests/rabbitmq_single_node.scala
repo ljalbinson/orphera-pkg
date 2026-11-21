@@ -52,22 +52,6 @@ object rabbitmq_single_node extends OrpheraApply:
   )
   private val rabbitImage = rabbitContainer.image.ref
 
-  // A fresh VM may still be running unattended-upgrades (see
-  // disable_unattended_upgrades.scala); when it finishes needrestart restarts the
-  // agent and kills the running task. Wait for it before touching packages.
-  private val aptIdle =
-    """! pgrep -f '^/usr/bin/python3 /usr/bin/unattended-upgrade$' >/dev/null && ! pgrep -x apt-get >/dev/null && ! pgrep -x apt >/dev/null && ! pgrep -x dpkg >/dev/null"""
-  private val waitAptIdleScript =
-    s"""for i in $$(seq 1 180); do
-       |  if $aptIdle; then
-       |    echo "apt and dpkg are idle"
-       |    exit 0
-       |  fi
-       |  sleep 5
-       |done
-       |echo "apt/dpkg still busy after 15 minutes (unattended-upgrades?)" >&2
-       |exit 1""".stripMargin
-
   private val pullScript =
     s"""${Pull.shellFunction(
         "the ExternalImage in rabbitContainer in rabbitmq_single_node.scala"
@@ -110,13 +94,7 @@ object rabbitmq_single_node extends OrpheraApply:
        |echo "rabbitmq user $rabbitUser ready"""".stripMargin
 
   def describe(target: Node): List[ApplyResource] =
-    val aptWait = command(
-      "wait for apt and dpkg to be idle",
-      waitAptIdleScript,
-      unless = aptIdle,
-      timeout = 960
-    )
-    val podman = pkg("podman", updateCache = true).after(aptWait)
+    val podman = pkg("podman", updateCache = true)
     val pulled = command(
       "pull the RabbitMQ image",
       pullScript,
@@ -145,4 +123,4 @@ object rabbitmq_single_node extends OrpheraApply:
       unless = userInPlace,
       timeout = 120
     ).after(answering)
-    List(aptWait, podman, pulled, data, unitFile, running, answering, user)
+    List(podman, pulled, data, unitFile, running, answering, user)

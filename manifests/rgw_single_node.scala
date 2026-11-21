@@ -83,21 +83,6 @@ object rgw_single_node extends OrpheraApply:
   private val hostPackages =
     List("openssl", "curl", "ca-certificates", "python3")
 
-  // A fresh node may still be running unattended-upgrades (see disable_unattended_upgrades.scala); wait for it
-  // before touching packages.
-  private val aptIdle =
-    """! pgrep -f '^/usr/bin/python3 /usr/bin/unattended-upgrade$' >/dev/null && ! pgrep -x apt-get >/dev/null && ! pgrep -x apt >/dev/null && ! pgrep -x dpkg >/dev/null"""
-  private val waitAptIdleScript =
-    s"""for i in $$(seq 1 180); do
-       |  if $aptIdle; then
-       |    echo "apt and dpkg are idle"
-       |    exit 0
-       |  fi
-       |  sleep 5
-       |done
-       |echo "apt/dpkg still busy after 15 minutes (unattended-upgrades?)" >&2
-       |exit 1""".stripMargin
-
   // Keystone's CA: the last certificate it presents (trust on first use), which must be self-signed.
   // `chainTo DIR` leaves DIR/c1.pem ... DIR/cN.pem, each holding the certificate only: the text s_client
   // prints after the last one differs on every handshake, and would make the comparison fail. Installed into
@@ -551,13 +536,7 @@ if __name__ == '__main__':
        |cephadm shell -- ceph orch ps --daemon-type rgw 2>/dev/null | grep -q 'rgw.$serviceId.*running'""".stripMargin
 
   def describe(target: Node): List[ApplyResource] =
-    val aptWait = command(
-      "wait for apt and dpkg to be idle",
-      waitAptIdleScript,
-      unless = aptIdle,
-      timeout = 960
-    )
-    val tools = hostPackages.map(p => pkg(p, updateCache = true).after(aptWait))
+    val tools = hostPackages.map(p => pkg(p, updateCache = true))
 
     val caDirectory = directory(caDir, mode = "0755").after(tools*)
     val ca = command(
@@ -601,4 +580,4 @@ if __name__ == '__main__':
       timeout = 180
     ).after(rgw)
 
-    tools ++ List(aptWait, caDirectory, ca, helperFile, registered, rgw, swift, s3)
+    tools ++ List(caDirectory, ca, helperFile, registered, rgw, swift, s3)

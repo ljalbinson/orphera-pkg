@@ -2,7 +2,9 @@
 
 package orphera.agent
 
+import scala.annotation.tailrec
 import scala.concurrent.duration.*
+import scala.util.Try
 
 import orphera.common.*
 
@@ -72,6 +74,7 @@ object TypedSoftware:
     if p.version.nonEmpty && !valid(PackageWord, p.version) then
       fail(s"not a valid package version: '${p.version}'")
     if have("apt-get") then
+      waitAptIdle(Slow)
       val spec = if p.version.isEmpty then p.name else s"${p.name}=${p.version}"
       if p.updateCache then runSoftware(Slow, "apt-get", "update", "-q")
       runSoftware(
@@ -97,6 +100,7 @@ object TypedSoftware:
 
   private def removePackage(name: String): Unit =
     if have("apt-get") then
+      waitAptIdle(Slow)
       runSoftware(
         Slow,
         "apt-get",
@@ -109,3 +113,38 @@ object TypedSoftware:
       )
     else if have("dnf") then runSoftware(Slow, "dnf", "-y", "-q", "remove", name)
     else fail("neither apt nor dnf on this node")
+
+  /** How often `waitAptIdle` looks again; the checks shorten it. */
+  @volatile private[agent] var aptPoll: FiniteDuration = 5.seconds
+
+  /** Whether apt-get, apt, dpkg or unattended-upgrades is running. The dpkg
+    * lock alone is not enough: unattended-upgrades on a fresh VM can be between
+    * two locks, and when it ends needrestart restarts the agent in the middle
+    * of a task. A node without pgrep is taken to be idle. The checks replace it.
+    */
+  @volatile private[agent] var aptBusy: () => Boolean = () =>
+    List(
+      List("-x", "apt-get"),
+      List("-x", "apt"),
+      List("-x", "dpkg"),
+      List("-f", "^/usr/bin/python3 /usr/bin/unattended-upgrade$")
+    ).exists(args =>
+      Try(
+        new ProcessBuilder(("pgrep" :: args)*)
+          .redirectErrorStream(true)
+          .redirectOutput(ProcessBuilder.Redirect.DISCARD)
+          .start()
+          .waitFor() == 0
+      ).getOrElse(false)
+    )
+
+  /** Waits until nothing is using apt, for at most `max`. */
+  private[agent] def waitAptIdle(max: FiniteDuration): Unit =
+    val deadline = System.nanoTime() + max.toNanos
+    @tailrec def go(): Unit =
+      if aptBusy() then
+        if System.nanoTime() > deadline then
+          fail(s"apt or dpkg still busy after $max (unattended-upgrades?)")
+        Thread.sleep(aptPoll.toMillis)
+        go()
+    go()
