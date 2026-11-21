@@ -137,6 +137,31 @@ object AgentTypedCheck:
       rm.error.isEmpty && rm.completed == 4 && !Files.exists(dir.resolve("a/b")),
       rm.toString
     )
+    Files.createDirectories(dir.resolve("t/d1/d2"))
+    Files.writeString(dir.resolve("t/d1/d2/g"), "x")
+    Files.writeString(dir.resolve("keep"), "x")
+    Files.createSymbolicLink(dir.resolve("t/link"), dir.resolve("keep"))
+    val tree = files(
+      FileAction.Action.RemovePath(RemovePath(s"$d/t", directory = true, recursive = true)),
+      FileAction.Action.RemovePath(RemovePath(s"$d/t", directory = true, recursive = true))
+    )
+    check(
+      "recursive remove takes the tree, not what a link points to; gone is fine",
+      tree.error.isEmpty && tree.completed == 2 && !Files.exists(dir.resolve("t")) &&
+        Files.exists(dir.resolve("keep")),
+      tree.toString
+    )
+    for (bad, why) <- List(
+        ("/srv", "too near the root"),
+        (s"$d/x/", "not a clean path"),
+        (s"$d/x/../y", "not a clean path"),
+        ("rel/x", "not an absolute path")
+      )
+    do
+      val r = files(FileAction.Action.RemovePath(RemovePath(bad, directory = true, recursive = true)))
+      check(s"recursive remove refuses $bad", r.error.contains(why) || r.error.nonEmpty, r.toString)
+    val notDir = files(FileAction.Action.RemovePath(RemovePath(s"$d/keep", recursive = true)))
+    check("recursive needs the directory flag", notDir.error.contains("only for a directory"), notDir.toString)
     val stop = files(
       FileAction.Action.MakeDirectory(MakeDirectory(s"$d/s1")),
       FileAction.Action.RemovePath(RemovePath("relative")),

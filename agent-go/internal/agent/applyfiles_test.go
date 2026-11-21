@@ -25,6 +25,10 @@ func rmA(path string, dir bool) *pb.FileAction {
 	return &pb.FileAction{Action: &pb.FileAction_RemovePath{RemovePath: &pb.RemovePath{Path: path, Directory: dir}}}
 }
 
+func rmTreeA(path string) *pb.FileAction {
+	return &pb.FileAction{Action: &pb.FileAction_RemovePath{RemovePath: &pb.RemovePath{Path: path, Directory: true, Recursive: true}}}
+}
+
 func linkA(path, target string) *pb.FileAction {
 	return &pb.FileAction{Action: &pb.FileAction_MakeSymlink{MakeSymlink: &pb.MakeSymlink{Path: path, Target: target}}}
 }
@@ -248,5 +252,35 @@ func TestFilePaths(t *testing.T) {
 	sys := &pb.FileAction{Action: &pb.FileAction_SetSysctl{SetSysctl: &pb.SetSysctl{Key: "k", Value: "1"}}}
 	if p := filePaths(sys); len(p) != 0 {
 		t.Errorf("a sysctl has no path: %v", p)
+	}
+}
+
+func TestApplyRemoveTree(t *testing.T) {
+	dir := t.TempDir()
+	keep := filepath.Join(dir, "keep")
+	os.WriteFile(keep, []byte("x"), 0o644)
+	tree := filepath.Join(dir, "t")
+	os.MkdirAll(filepath.Join(tree, "d1", "d2"), 0o755)
+	os.WriteFile(filepath.Join(tree, "d1", "d2", "g"), []byte("x"), 0o644)
+	os.Symlink(keep, filepath.Join(tree, "link"))
+
+	reply := applyFiles(t, rmTreeA(tree), rmTreeA(tree))
+	if reply.Error != "" || reply.Completed != 2 {
+		t.Fatalf("remove tree twice: %+v", reply)
+	}
+	if _, err := os.Stat(tree); !os.IsNotExist(err) {
+		t.Errorf("tree should be gone: %v", err)
+	}
+	if _, err := os.Stat(keep); err != nil {
+		t.Errorf("what the link pointed to must stay: %v", err)
+	}
+	for _, bad := range []string{"/srv", dir + "/x/", dir + "/x/../y", "rel/x"} {
+		if r := applyFiles(t, rmTreeA(bad)); r.Error == "" {
+			t.Errorf("%q should be refused", bad)
+		}
+	}
+	notDir := &pb.FileAction{Action: &pb.FileAction_RemovePath{RemovePath: &pb.RemovePath{Path: keep, Recursive: true}}}
+	if r := applyFiles(t, notDir); r.Error == "" {
+		t.Error("recursive without directory should be refused")
 	}
 }
