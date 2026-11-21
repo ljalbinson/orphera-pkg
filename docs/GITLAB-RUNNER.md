@@ -85,10 +85,10 @@ In the runner's settings in GitLab, tick **Protected** so that only protected br
 On scala0, make an operator certificate for the runner. This does not touch the shared client certificate:
 
 ```sh
-orphera issue-client-cert --operator ci --role deployer --days 30
+orphera issue-client-cert --operator ci --role pipeline --days 30
 ```
 
-That writes `certs/operators/ci.crt` and `ci.key` (subject `CN=ci, OU=deployer`). Names and roles are
+That writes `certs/operators/ci.crt` and `ci.key` (subject `CN=ci, OU=pipeline`). Names and roles are
 lower-case letters, digits, `.`, `_` and `-`.
 
 Copy `ci.crt`, `ci.key` and `ca.crt` to the runner VM, into the `gitlab-runner` user's directory (on the
@@ -133,20 +133,26 @@ nodes:
 2. The node holds a **policy** that names the role: add it to `access.yaml` and place it with
    `orphera issue-policy --nodes ...` (`--dry-run` shows it first).
 
-An example role in `access.yaml`; check the exact layout against the file you have, and the operations
-against the README's list:
+`access.yaml` already has a `deployer` role (copy and packages on the ceph group) and an `applier` role (apply
+descriptions without `run`, on tst39), so give the runner a role of its own, `pipeline`, and name only the
+nodes its pipelines touch:
 
 ```yaml
 roles:
-  deployer:
-    operations: [facts, version, uptime, observe, apply-files, apply-access, apply-software, packages, copy, run]
+  pipeline:
+    allow: [facts, version, uptime, observe, apply-files, apply-access, apply-software, packages, copy, run]
+    nodes: [tst3, tst4, tst5, tst7]
 ```
 
-Be clear about what that grants. A role with `run` is root on the node. Most playbooks in `manifests/`
-use `Task.RunCommand`, so today a pipeline that runs them needs `run`, and the role limits **where** the
-runner can act (which nodes hold the policy) and **who** acted (the audit log), not **what** it may do. As
-`docs/COMMAND-CONVERSION-PLAN.md` replaces commands with typed actions, a `deployer` role can lose `run`
-playbook by playbook.
+If a pipeline only applies `.yaml` descriptions or Scala playbooks made of `Task.Apply`, leave `run` out, as
+the `applier` role does. Then place it: `orphera issue-policy --nodes tst3,tst4,tst5,tst7` (add `--dry-run`
+first to see it).
+
+Be clear about what `run` grants: a role with it is root on the node. Most playbooks in `manifests/` use
+`Task.RunCommand`, so today a pipeline that runs them needs `run`, and the role limits **where** the runner
+can act (which nodes name it) and **who** acted (the audit log), not **what** it may do. As
+`docs/COMMAND-CONVERSION-PLAN.md` replaces commands with typed actions, `pipeline` can lose `run` playbook
+by playbook.
 
 `ORPHERA_OPERATOR=ci` also makes the orchestrator refuse early, before contacting a node, anything the role
 may not do (see *Early refusal* in the README).
@@ -178,7 +184,7 @@ deploy-wordpress:
 The job checks the repository out and runs from there, so the inventory and manifests are those of the
 commit. *Check* how `-I` and the checkout directory combine on the first run (the launcher changes into
 `$ORPHERA_HOME` if it is set), and use `ORPHERA_INVENTORY` and `ORPHERA_MANIFESTS` if the paths are not
-found. `orphera audit-log` on the runner VM should then show `operator=ci role=deployer` for each step.
+found. `orphera audit-log` on the runner VM should then show `operator=ci role=pipeline` for each step.
 
 The first run to make is the `orphera version` job alone. A TLS error there points at the certificate, an
 authentication error at the token, and a refusal naming the role at `access.yaml`.
