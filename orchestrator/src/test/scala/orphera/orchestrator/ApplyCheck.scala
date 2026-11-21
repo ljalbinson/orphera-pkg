@@ -616,7 +616,7 @@ object ApplyCheck:
         mode = "0644"
       )
     )
-    val first = applyTo(tt, tplPlan)
+    val tplFirst = applyTo(tt, tplPlan)
     check(
       "fileTemplate: rendered with the node's vars",
       tt.fs.get("/etc/k.conf").exists {
@@ -625,7 +625,7 @@ object ApplyCheck:
       },
       tt.fs.toString
     )
-    check("fileTemplate: first run changed", first.report.changed)
+    check("fileTemplate: first run changed", tplFirst.report.changed)
     check(
       "fileTemplate: second run changed nothing",
       !applyTo(tt, tplPlan).report.changed
