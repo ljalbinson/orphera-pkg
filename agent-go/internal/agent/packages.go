@@ -231,16 +231,26 @@ func concat(parts ...[]string) []string {
 }
 
 // aptUpdateScript runs `apt-get update` under a time limit (180 s, or
-// APT_UPDATE_TIMEOUT) and tries up to three times when the limit is hit. A
+// APT_UPDATE_TIMEOUT) and tries up to three times when the limit is hit or an index could not be fetched (an `Err:` or `Failed to fetch` line; apt exits 0 then). A
 // caching proxy that stalls leaves apt waiting for ever otherwise, and with
 // seven nodes asking for the same file at once that does happen (apt-cacher-ng
-// fails the clients that collide). Any other failure is returned at once. The
+// fails the clients that collide). Any other failure is returned at once; after three tries the last exit status stands. The
 // Scala agent has the same script (AptInstaller.updateScript).
 const aptUpdateScript = `for try in 1 2 3; do
-  timeout -k 10 "${APT_UPDATE_TIMEOUT:-180}" apt-get "$@" update
+  log=$(mktemp)
+  timeout -k 10 "${APT_UPDATE_TIMEOUT:-180}" apt-get "$@" update > "$log" 2>&1
   rc=$?
-  if [ "$rc" -ne 124 ] && [ "$rc" -ne 137 ]; then exit "$rc"; fi
-  echo "apt-get update did not finish in ${APT_UPDATE_TIMEOUT:-180} s (try $try of 3)" >&2
+  cat "$log"
+  bad=0
+  if grep -qE '^(Err:|W: Failed to fetch)' "$log"; then bad=1; fi
+  rm -f "$log"
+  if [ "$rc" -ne 124 ] && [ "$rc" -ne 137 ] && [ "$bad" -eq 0 ]; then exit "$rc"; fi
+  if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
+    echo "apt-get update did not finish in ${APT_UPDATE_TIMEOUT:-180} s (try $try of 3)" >&2
+  else
+    echo "apt-get update could not fetch every index (try $try of 3)" >&2
+  fi
+  if [ "$try" -lt 3 ]; then sleep "${APT_UPDATE_PAUSE:-5}"; fi
 done
 exit "$rc"`
 

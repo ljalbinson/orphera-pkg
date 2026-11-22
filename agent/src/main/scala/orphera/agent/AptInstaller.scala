@@ -23,10 +23,20 @@ object AptInstaller:
     */
   val updateScript: String =
     """for try in 1 2 3; do
-  timeout -k 10 "${APT_UPDATE_TIMEOUT:-180}" apt-get "$@" update
+  log=$(mktemp)
+  timeout -k 10 "${APT_UPDATE_TIMEOUT:-180}" apt-get "$@" update > "$log" 2>&1
   rc=$?
-  if [ "$rc" -ne 124 ] && [ "$rc" -ne 137 ]; then exit "$rc"; fi
-  echo "apt-get update did not finish in ${APT_UPDATE_TIMEOUT:-180} s (try $try of 3)" >&2
+  cat "$log"
+  bad=0
+  if grep -qE '^(Err:|W: Failed to fetch)' "$log"; then bad=1; fi
+  rm -f "$log"
+  if [ "$rc" -ne 124 ] && [ "$rc" -ne 137 ] && [ "$bad" -eq 0 ]; then exit "$rc"; fi
+  if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
+    echo "apt-get update did not finish in ${APT_UPDATE_TIMEOUT:-180} s (try $try of 3)" >&2
+  else
+    echo "apt-get update could not fetch every index (try $try of 3)" >&2
+  fi
+  if [ "$try" -lt 3 ]; then sleep "${APT_UPDATE_PAUSE:-5}"; fi
 done
 exit "$rc""""
 

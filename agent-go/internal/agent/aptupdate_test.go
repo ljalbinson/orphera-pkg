@@ -22,6 +22,7 @@ func fakeApt(t *testing.T, body string) string {
 	}
 	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
 	t.Setenv("APT_UPDATE_TIMEOUT", "1")
+	t.Setenv("APT_UPDATE_PAUSE", "0")
 	return counter
 }
 
@@ -88,5 +89,25 @@ func TestAptUpdateDoesNotRepeatARealFailure(t *testing.T) {
 	}
 	if calls(t, counter) != 1 {
 		t.Fatalf("a real failure must not be repeated; %d calls", calls(t, counter))
+	}
+}
+
+func TestAptUpdateTriesAgainWhenAnIndexFailsToFetch(t *testing.T) {
+	// apt exits 0 with a warning when the cache answers 500; the second call is clean.
+	counter := fakeApt(t, `if [ "$n" -eq 1 ]; then echo "Err:4 http://x/ubuntu noble-updates InRelease"; echo "W: Failed to fetch http://x/InRelease  500"; else echo "Hit:1 ok"; fi`)
+	out, code := runUpdate()
+	if code != 0 || !strings.Contains(out, "Hit:1 ok") || !strings.Contains(out, "could not fetch every index (try 1 of 3)") {
+		t.Fatalf("exit %d, output %q", code, out)
+	}
+	if calls(t, counter) != 2 {
+		t.Fatalf("want 2 calls, got %d", calls(t, counter))
+	}
+}
+
+func TestAptUpdateKeepsExitStatusWhenFetchKeepsFailing(t *testing.T) {
+	counter := fakeApt(t, `echo "W: Failed to fetch http://x/InRelease  500"`)
+	_, code := runUpdate()
+	if code != 0 || calls(t, counter) != 3 {
+		t.Fatalf("want exit 0 after 3 calls, got exit %d after %d", code, calls(t, counter))
 	}
 }
