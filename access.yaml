@@ -33,6 +33,12 @@ roles:
   rebooter:
     allow: [facts, version, uptime, check-file, reboot, shutdown]
     nodes: [group:ceph]
+  # The GitLab runner (runner0, docs/GITLAB-RUNNER.md; certificate ci.crt, OU=pipeline).
+  # Read-only on tst0 for now: it is what the playbook's own check uses. Widen
+  # `allow` and `nodes` as pipelines are added; `run` is root on the node.
+  pipeline:
+    allow: [facts, version, uptime, observe]
+    nodes: [tst0]
   admin:
     allow: all
   pathtest:
