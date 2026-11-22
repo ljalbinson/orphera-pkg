@@ -35,7 +35,8 @@ compile_and_test:
 # which waits for a Docker runner. Needs the protected CI variables ORPHERA_TOKEN,
 # ORPHERA_OPERATOR and ORPHERA_CERTS_DIR, so it runs on protected branches only.
 # The `pipeline` role in access.yaml allows version, facts, uptime and observe on
-# tst0 and nothing else: widen it before adding jobs that touch other nodes.
+# tst0 and nothing else (the inventory is the checkout's: -I goes before the
+# command): widen it before adding jobs that touch other nodes.
 orphera-reachable:
   stage: orphera
   tags: [orphera]
@@ -45,4 +46,4 @@ orphera-reachable:
   cache: []
   before_script: []
   script:
-    - orphera version --nodes tst0
+    - orphera -I "$CI_PROJECT_DIR/inventory.yaml" version --nodes tst0

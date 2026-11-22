@@ -198,7 +198,7 @@ orphera-reachable:
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
   script:
-    - orphera version --nodes tst3,tst7
+    - orphera -I "$CI_PROJECT_DIR/inventory.yaml" version --nodes tst3,tst7
 
 deploy-wordpress:
   stage: deploy
@@ -206,13 +206,13 @@ deploy-wordpress:
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
   script:
-    - orphera cluster-playbook manifests/wordpress_site.scala -I inventory.yaml
+    - orphera -I "$CI_PROJECT_DIR/inventory.yaml" cluster-playbook manifests/wordpress_site.scala
 ```
 
 The job checks the repository out and runs from there, so the inventory and manifests are those of the
-commit. *Check* how `-I` and the checkout directory combine on the first run (the launcher changes into
-`$ORPHERA_HOME` if it is set), and use `ORPHERA_INVENTORY` and `ORPHERA_MANIFESTS` if the paths are not
-found. `orphera audit-log` on the runner VM should then show `operator=ci role=pipeline` for each step.
+commit. `-I` is a global option and goes **before** the command (after it, it is read as the command's own). Without it
+the runner looks for `~/.config/orphera/inventory.yaml` and finds none, which the first run showed. Use
+`ORPHERA_INVENTORY` and `ORPHERA_MANIFESTS` if the manifests are not found either. `orphera audit-log` on the runner VM should then show `operator=ci role=pipeline` for each step.
 
 The first run to make is the `orphera version` job alone. A TLS error there points at the certificate, an
 authentication error at the token, and a refusal naming the role at `access.yaml`.
