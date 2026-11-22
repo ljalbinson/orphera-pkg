@@ -176,7 +176,7 @@ object k8s_upgrade extends OrpheraClusterPlaybook:
        |  curl -fsSL --retry 3 "$$REPO/Release.key" | gpg --dearmor --yes -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
        |  echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] $$REPO/ /" > /etc/apt/sources.list.d/kubernetes.list
        |fi
-       |apt-get update -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/kubernetes.list -o Dir::Etc::sourceparts=- -o APT::Get::List-Cleanup=0
+       |for try in 1 2 3; do timeout -k 10 180 apt-get update -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/kubernetes.list -o Dir::Etc::sourceparts=- -o APT::Get::List-Cleanup=0 && break; done
        |apt-mark unhold kubeadm kubelet kubectl
        |apt-get install -y --allow-change-held-packages "kubeadm=$$PKGVER"
        |[ "$$(kubeadm version -o short)" = "v$$SEMVER" ] || { echo "kubeadm is not v$$SEMVER after the install" >&2; exit 1; }
