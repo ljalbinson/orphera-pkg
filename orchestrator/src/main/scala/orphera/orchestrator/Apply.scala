@@ -317,8 +317,8 @@ object Resources:
       present = true
     )
 
-  /** A file whose content is this text, rendered with the node's facts and
-    * vars first (see `Content.Template`).
+  /** A file whose content is this text, rendered with the node's facts and vars
+    * first (see `Content.Template`).
     */
   def fileTemplate(
       path: String,
@@ -383,8 +383,9 @@ object Resources:
 
   /** Removed if empty; a directory with something in it fails. */
   /** With `recursive`, the directory goes with everything in it (never across a
-    * link or a mount; the agent checks). The path must be absolute and clean and
-    * at least two components deep, so `/srv` or `/` cannot be written by mistake.
+    * link or a mount; the agent checks). The path must be absolute and clean
+    * and at least two components deep, so `/srv` or `/` cannot be written by
+    * mistake.
     */
   def absentDirectory(path: String, recursive: Boolean = false): ApplyResource =
     if recursive then
@@ -844,7 +845,8 @@ enum AccessChange:
   case AddAuthorizedKey(user: String, key: String)
   case RemoveAuthorizedKey(user: String, keyId: String)
 
-  /** `expectedSha256`: the hash of the /etc/fstab the new text was made from. */
+  /** `expectedSha256`: the hash of the /etc/fstab the new text was made from.
+    */
   case ReplaceFstab(content: String, expectedSha256: String)
   case MountPath(path: String, makeDirectory: Boolean)
   case Remount(path: String)
@@ -964,7 +966,14 @@ object Apply:
       source: String = ""
   ): List[FileChange] =
     val create = if mode > 0 then "0" + Integer.toOctalString(mode) else "0644"
-    FileChange.ReplaceText(path, text, expectedSha, create, overwrite, source) ::
+    FileChange.ReplaceText(
+      path,
+      text,
+      expectedSha,
+      create,
+      overwrite,
+      source
+    ) ::
       (if mode > 0 || owner.nonEmpty || group.nonEmpty then
          List(
            FileChange.SetAttributes(
@@ -1095,17 +1104,34 @@ object Apply:
         attrs(f.path, f.mode, f.owner, f.group, -1, "", "").commands)
         .mkString(" && ")
       Action.Typed(
-        writeChanges(f.path, "", f.owner, f.group, octal(f.mode), expected, false, src),
+        writeChanges(
+          f.path,
+          "",
+          f.owner,
+          f.group,
+          octal(f.mode),
+          expected,
+          false,
+          src
+        ),
         fallback
       )
     target
-      .observe(List(0 -> ApplyResource.File(src, None, "", "", "", present = true)))
+      .observe(
+        List(0 -> ApplyResource.File(src, None, "", "", "", present = true))
+      )
       .map(_.get(0))
       .map {
         case Some(Observed.RegularFile(_, _, _, srcSum)) =>
           seen match
             case Observed.Absent =>
-              Right(Difference(List(s"created (copied from $src)"), List(copy("")), Nil))
+              Right(
+                Difference(
+                  List(s"created (copied from $src)"),
+                  List(copy("")),
+                  Nil
+                )
+              )
             case Observed.RegularFile(m, o, g, sum) =>
               val fix = attrs(f.path, f.mode, f.owner, f.group, m, o, g)
               if sum != srcSum then
@@ -1241,7 +1267,8 @@ object Apply:
                       List(
                         Action.Typed(
                           List(FileChange.RemovePath(path, true, d.recursive)),
-                          if d.recursive then s"rm -rf -- $q" else s"rmdir -- $q"
+                          if d.recursive then s"rm -rf -- $q"
+                          else s"rmdir -- $q"
                         )
                       ),
                       Nil
@@ -1386,7 +1413,9 @@ object Apply:
             softwareOf(
               List("removed"),
               List(
-                List(SoftwareChange.RemovePackage(p.name)) -> s"dnf -y -q remove $n"
+                List(
+                  SoftwareChange.RemovePackage(p.name)
+                ) -> s"dnf -y -q remove $n"
               )
             )
         else if !installed then
@@ -1847,23 +1876,29 @@ object Apply:
           else
             accessOf(
               List("key added"),
-              List(List(AccessChange.AddAuthorizedKey(k.user, k.key.trim)) ->
-              (s"""$home; [ -n "$$h" ] || { echo "user ${k.user} does not exist" >&2; exit 1; }; """ +
-                s"""mkdir -p "$$h/.ssh" && chmod 700 "$$h/.ssh" && touch $file && chmod 600 $file && """ +
-                s"""{ [ -z "$$(tail -c1 $file)" ] || echo >> $file; } && printf '%s\\n' ${quote(
-                    k.key.trim
-                  )} >> $file && """ +
-                s"""chown $u:"$$g" "$$h/.ssh" $file"""))
+              List(
+                List(AccessChange.AddAuthorizedKey(k.user, k.key.trim)) ->
+                  (s"""$home; [ -n "$$h" ] || { echo "user ${k.user} does not exist" >&2; exit 1; }; """ +
+                    s"""mkdir -p "$$h/.ssh" && chmod 700 "$$h/.ssh" && touch $file && chmod 600 $file && """ +
+                    s"""{ [ -z "$$(tail -c1 $file)" ] || echo >> $file; } && printf '%s\\n' ${quote(
+                        k.key.trim
+                      )} >> $file && """ +
+                    s"""chown $u:"$$g" "$$h/.ssh" $file""")
+              )
             )
         else if count == 0 || !kv.get("exists").contains("yes") then
           Right(NoDifference)
         else
           accessOf(
             List("key removed"),
-            List(List(AccessChange.RemoveAuthorizedKey(k.user, k.keyId)) ->
-            s"""$home; f=$file; t=$$(mktemp) && K=${quote(k.keyId)} awk ${quote(
-                "$1\" \"$2==ENVIRON[\"K\"]{next}{print}"
-              )} "$$f" > "$$t" && cat "$$t" > "$$f"; rc=$$?; rm -f "$$t"; [ $$rc -eq 0 ]""")
+            List(
+              List(AccessChange.RemoveAuthorizedKey(k.user, k.keyId)) ->
+                s"""$home; f=$file; t=$$(mktemp) && K=${quote(
+                    k.keyId
+                  )} awk ${quote(
+                    "$1\" \"$2==ENVIRON[\"K\"]{next}{print}"
+                  )} "$$f" > "$$t" && cat "$$t" > "$$f"; rc=$$?; rm -f "$$t"; [ $$rc -eq 0 ]"""
+            )
           )
       case other => Left(s"unexpected state: $other")
 
@@ -1873,7 +1908,9 @@ object Apply:
 
   private def fstabMatches(line: String, path: String): Boolean =
     val f = line.trim.split("\\s+").toList
-    f.size >= 2 && !f.lift(0).exists(_.startsWith("#")) && f.lift(1).contains(path)
+    f.size >= 2 && !f.lift(0).exists(_.startsWith("#")) && f
+      .lift(1)
+      .contains(path)
 
   /** The fstab with `path`'s entry set to `entry` (the first match replaced,
     * any others dropped, or appended when there is none), or, with `entry`
@@ -1886,7 +1923,7 @@ object Apply:
   ): String =
     val lines = fstabLines(text)
     val kept = entry match
-      case None => lines.filterNot(fstabMatches(_, path))
+      case None    => lines.filterNot(fstabMatches(_, path))
       case Some(e) =>
         val (before, rest) = lines.span(!fstabMatches(_, path))
         if rest.isEmpty then before :+ e

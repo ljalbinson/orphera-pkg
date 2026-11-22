@@ -5,6 +5,11 @@ package orphera.agent
 import java.nio.ByteBuffer
 import java.nio.channels.FileChannel
 import java.nio.charset.StandardCharsets
+import java.nio.file.attribute.{
+  PosixFileAttributeView,
+  PosixFileAttributes,
+  PosixFilePermissions
+}
 import java.nio.file.{
   Files,
   LinkOption,
@@ -12,11 +17,6 @@ import java.nio.file.{
   Paths,
   StandardCopyOption,
   StandardOpenOption
-}
-import java.nio.file.attribute.{
-  PosixFileAttributeView,
-  PosixFileAttributes,
-  PosixFilePermissions
 }
 
 import scala.util.Try
@@ -174,7 +174,9 @@ object TypedFiles:
     val p = Paths.get(l.path)
     if lstat(p).exists(_.isDirectory) then
       fail(s"${l.path} is a directory: not replaced by a link")
-    val tmp = p.resolveSibling(s".${p.getFileName}.orphera-${ProcessHandle.current().pid()}")
+    val tmp = p.resolveSibling(
+      s".${p.getFileName}.orphera-${ProcessHandle.current().pid()}"
+    )
     Files.deleteIfExists(tmp)
     Files.createSymbolicLink(tmp, Paths.get(l.target))
     try Files.move(tmp, p, StandardCopyOption.ATOMIC_MOVE)
@@ -241,9 +243,9 @@ object TypedFiles:
         Try(Files.deleteIfExists(tmp))
         throw e
 
-  /** The new content: the text sent, or (source) the bytes of a regular file
-    * on this node, which never leave it. A link or a directory is refused, and
-    * so is the agent's own directory (its keys).
+  /** The new content: the text sent, or (source) the bytes of a regular file on
+    * this node, which never leave it. A link or a directory is refused, and so
+    * is the agent's own directory (its keys).
     */
   private def replacementBytes(
       path: String,
@@ -260,7 +262,7 @@ object TypedFiles:
       needChangeablePath(source)
       val p = Paths.get(source)
       lstat(p) match
-        case None => fail(s"source $source: no such file")
+        case None    => fail(s"source $source: no such file")
         case Some(a) =>
           if !a.isRegularFile then fail(s"source $source is not a regular file")
           if a.size > MaxReplaceText then

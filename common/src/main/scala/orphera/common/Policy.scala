@@ -20,12 +20,13 @@ import scala.jdk.CollectionConverters.*
   * paths deployer /etc/ceph/,/srv/   # limits the files that role's calls may name
   * role admin all
   * }}}
-  * `paths` limits a role's copy, check-file, fetch, observe and apply-* calls to
-  * the files under those prefixes (Go agent 0.1.212 or later, Scala agent 0.1.218 or
-  * later; an older Scala agent does not parse the line and so refuses every call). A node with no policy
-  * file allows every call, as before. With one, a call is allowed only to a
-  * role that lists an operation containing it; a role not listed, or a
-  * certificate that names no valid role, is refused.
+  * `paths` limits a role's copy, check-file, fetch, observe and apply-* calls
+  * to the files under those prefixes (Go agent 0.1.212 or later, Scala agent
+  * 0.1.218 or later; an older Scala agent does not parse the line and so
+  * refuses every call). A node with no policy file allows every call, as
+  * before. With one, a call is allowed only to a role that lists an operation
+  * containing it; a role not listed, or a certificate that names no valid role,
+  * is refused.
   */
 final case class Policy(
     defaultRole: String,
@@ -144,7 +145,8 @@ object Policy:
                 prefixes.find(!_.startsWith("/")) match
                   case Some(bad) =>
                     Left(s"role $name: the path $bad is not absolute")
-                  case None => Right(p.copy(paths = p.paths + (name -> prefixes)))
+                  case None =>
+                    Right(p.copy(paths = p.paths + (name -> prefixes)))
             case _ => Left(s"cannot read the policy line: $line")
         }
       }

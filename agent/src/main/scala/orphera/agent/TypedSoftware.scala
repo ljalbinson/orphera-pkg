@@ -61,8 +61,10 @@ object TypedSoftware:
         fail(s"not a valid package name: '${x.name}'")
       removePackage(x.name)
     case SoftwareAction.Action.UnitControl(u) =>
-      if !valid(UnitWord, u.unit) then fail(s"not a valid unit name: '${u.unit}'")
-      if !UnitVerbs.contains(u.verb) then fail(s"not a unit action: '${u.verb}'")
+      if !valid(UnitWord, u.unit) then
+        fail(s"not a valid unit name: '${u.unit}'")
+      if !UnitVerbs.contains(u.verb) then
+        fail(s"not a unit action: '${u.verb}'")
       runSoftware(Short, "systemctl", u.verb, u.unit)
     case SoftwareAction.Action.ReloadUnits(_) =>
       runSoftware(Short, "systemctl", "daemon-reload")
@@ -76,7 +78,15 @@ object TypedSoftware:
     if have("apt-get") then
       waitAptIdle(Slow)
       val spec = if p.version.isEmpty then p.name else s"${p.name}=${p.version}"
-      if p.updateCache then runSoftware(Slow, "sh", "-c", AptInstaller.updateScript, "apt-update", "-q")
+      if p.updateCache then
+        runSoftware(
+          Slow,
+          "sh",
+          "-c",
+          AptInstaller.updateScript,
+          "apt-update",
+          "-q"
+        )
       runSoftware(
         Slow,
         "apt-get",
@@ -111,7 +121,8 @@ object TypedSoftware:
         "DPkg::Lock::Timeout=300",
         name
       )
-    else if have("dnf") then runSoftware(Slow, "dnf", "-y", "-q", "remove", name)
+    else if have("dnf") then
+      runSoftware(Slow, "dnf", "-y", "-q", "remove", name)
     else fail("neither apt nor dnf on this node")
 
   /** How often `waitAptIdle` looks again; the checks shorten it. */
@@ -120,7 +131,8 @@ object TypedSoftware:
   /** Whether apt-get, apt, dpkg or unattended-upgrades is running. The dpkg
     * lock alone is not enough: unattended-upgrades on a fresh VM can be between
     * two locks, and when it ends needrestart restarts the agent in the middle
-    * of a task. A node without pgrep is taken to be idle. The checks replace it.
+    * of a task. A node without pgrep is taken to be idle. The checks replace
+    * it.
     */
   @volatile private[agent] var aptBusy: () => Boolean = () =>
     List(

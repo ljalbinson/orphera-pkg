@@ -46,8 +46,8 @@ object AccessPolicy:
     */
   val MinAgentForPaths = "0.1.212"
 
-  /** The same for the Scala agent, which gained the typed calls and path
-    * limits to match the Go agent in 0.1.218.
+  /** The same for the Scala agent, which gained the typed calls and path limits
+    * to match the Go agent in 0.1.218.
     */
   val MinScalaAgentForPaths = "0.1.218"
 
@@ -348,7 +348,7 @@ object AccessPolicy:
   ): List[String] =
     val reads = List("GatherFacts", "ObserveNode")
     ApplyYaml.load(path).toOption match
-      case None => if check then reads else reads :+ "ExecuteCommand"
+      case None    => if check then reads else reads :+ "ExecuteCommand"
       case Some(d) =>
         import ApplyResource.*
         val rs = d.resources

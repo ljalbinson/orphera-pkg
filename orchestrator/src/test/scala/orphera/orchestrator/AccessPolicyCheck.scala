@@ -167,8 +167,7 @@ object AccessPolicyCheck:
           .isLeft
     )
     check(
-      "pathRefusal: inside, outside, `..`, no paths, and /",
-      {
+      "pathRefusal: inside, outside, `..`, no paths, and /", {
         val p = orphera.common.Policy(
           "a",
           Map("a" -> Set("copy"), "b" -> Set("copy"), "c" -> Set("copy")),

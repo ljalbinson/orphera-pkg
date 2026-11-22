@@ -723,7 +723,9 @@ object NodeClient:
     import orphera.common as pb
     AccessAction(c match
       case CreateUser(n, u, g, gs, h, sh, sys, ch) =>
-        AccessAction.Action.CreateUser(pb.CreateUser(n, u, g, gs, h, sh, sys, ch))
+        AccessAction.Action.CreateUser(
+          pb.CreateUser(n, u, g, gs, h, sh, sys, ch)
+        )
       case ModifyUser(n, u, g, gs, h, sh) =>
         AccessAction.Action.ModifyUser(pb.ModifyUser(n, u, g, gs, h, sh))
       case DeleteUser(n) => AccessAction.Action.DeleteUser(pb.DeleteUser(n))
@@ -755,9 +757,9 @@ object NodeClient:
       case ReloadUnits =>
         SoftwareAction.Action.ReloadUnits(pb.ReloadUnits()))
 
-  /** The agent's `ApplySoftware`: makes the changes in order and raises,
-    * naming the one that failed, if one does. Raises UNIMPLEMENTED on an agent
-    * that does not have it.
+  /** The agent's `ApplySoftware`: makes the changes in order and raises, naming
+    * the one that failed, if one does. Raises UNIMPLEMENTED on an agent that
+    * does not have it.
     */
   def applySoftware(node: Node, changes: List[SoftwareChange]): IO[Unit] =
     channelBuilder(node)
