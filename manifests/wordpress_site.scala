@@ -164,31 +164,44 @@ object wordpress_site extends OrpheraClusterPlaybook:
   // is what stops the shell trying (and failing) to expand them itself —
   // a much simpler fix than escaping every nginx `$` individually the way
   // wp-config.php's single `$table_prefix` needed above.
-  private val nginxSiteScript =
-    """rm -f /etc/nginx/sites-enabled/default
-      |cat > /etc/nginx/sites-available/wordpress <<'NGINX'
-      |server {
-      |    listen 80;
-      |    server_name _;
-      |    root /var/www/wordpress;
-      |    index index.php index.html;
-      |
-      |    location / {
-      |        try_files $uri $uri/ /index.php?$args;
-      |    }
-      |
-      |    location ~ \.php$ {
-      |        include snippets/fastcgi-php.conf;
-      |        fastcgi_pass unix:/run/php/php8.3-fpm.sock;
-      |    }
-      |
-      |    location ~ /\.ht {
-      |        deny all;
-      |    }
-      |}
-      |NGINX
-      |ln -sf /etc/nginx/sites-available/wordpress /etc/nginx/sites-enabled/wordpress
-      |echo "nginx site config written"""".stripMargin
+  // The nginx site as an apply description: the site file, its link in
+  // sites-enabled, and nginx's stock default site removed. The file is plain
+  // text (`$uri` and the other nginx variables are not rendered), and nginx is
+  // restarted by the start-services task that follows, after `nginx -t`.
+  private val nginxSitePlan: ApplyPlan =
+    import Resources.*
+    val site = file(
+      "/etc/nginx/sites-available/wordpress",
+      """server {
+         |    listen 80;
+         |    server_name _;
+         |    root /var/www/wordpress;
+         |    index index.php index.html;
+         |
+         |    location / {
+         |        try_files $uri $uri/ /index.php?$args;
+         |    }
+         |
+         |    location ~ \.php$ {
+         |        include snippets/fastcgi-php.conf;
+         |        fastcgi_pass unix:/run/php/php8.3-fpm.sock;
+         |    }
+         |
+         |    location ~ /\.ht {
+         |        deny all;
+         |    }
+         |}
+""".stripMargin,
+      mode = "0644"
+    )
+    ApplyPlan.orFail(
+      "wordpress-nginx-site",
+      List(
+        site,
+        symlink("/etc/nginx/sites-enabled/wordpress", "/etc/nginx/sites-available/wordpress").after(site),
+        absentFile("/etc/nginx/sites-enabled/default")
+      )
+    )
 
   // Applies this session's own lesson from mariadb_haproxy_keepalived.scala's
   // masked-restart bug proactively, rather than waiting to hit the same
@@ -278,7 +291,7 @@ object wordpress_site extends OrpheraClusterPlaybook:
           Task.RunCommand(List("sh", "-c", writeWpConfigScript))
         )
         .task("write nginx site config")(
-          Task.RunCommand(List("sh", "-c", nginxSiteScript))
+          Task.Apply(nginxSitePlan)
         )
         .task("start nginx and php8.3-fpm")(
           Task.RunCommand(List("sh", "-c", startServicesScript))

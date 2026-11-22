@@ -1238,6 +1238,61 @@ Resources (`import Resources.*`), each named by kind and path or label (`file[/e
 | `mount(path, device, fstype, options = "defaults", mounted = Some(true))`, `absentMount(path)` | an `/etc/fstab` entry and whether it is mounted (`None`: leave that alone); the absent form unmounts and removes the entry, and leaves the directory |
 | `command(label, run, onlyIf / unless / creates, onChangeOnly)` | a shell command, run when its guard says it is needed or, with `onChangeOnly`, when a resource that notifies it changed; one with neither is refused, since it would run every time |
 
+**Templates in file content.** `file(path, content)` writes its text as it is, so `{{...}}` and `$` in it
+reach the node untouched. `fileTemplate(path, template, vars, mode, owner, group)` renders the text first, on
+the node, with that node's facts and vars and the extra `vars`; `fileFrom(path, "x.mustache", vars)` does the
+same for a local template file. The text is compared after rendering, so a second run is `unchanged`. A template
+is Mustache (`{{name}}`, `{{nodes.tst4.cluster_ip}}`); a name that is not known renders as empty text, so check
+the file once. `{{x}}` escapes HTML characters in the value (`&`, `<`, `>`, `"`, `'`, `=`); use `{{{x}}}` for
+a value that has them, a password or a URL with `&` for one.
+
+| Placeholder | Value |
+|---|---|
+| `{{cluster_ip}}`, any other inventory or group var | this node's own |
+| `{{nodes.<name>.cluster_ip}}` (also `hostname`, `os_id`, and the node's other vars) | another node's |
+| `{{facts.hostname}}`, `{{facts.os_id}}`, `{{facts.os_version}}`, `{{facts.architecture}}` | this node's gathered facts |
+| `{{default_interface}}` | the interface of this node's default route (`ip -4 route show default`), read from the node only when the text mentions it; a node with no default route fails the step |
+| a key of `vars` | its value, over the others |
+
+Scala's own `$name` interpolation is a second, earlier step: it fills in what is the same on every node or
+known when the manifest is read (a priority, a VIP, a list of peers built in a loop), and `{{...}}` is left
+for the node. This keepalived configuration, one plan per node, uses both:
+
+```scala
+private def keepalivedPlan(host: String): ApplyPlan =
+  import Resources.*
+  val (priority, state) = priorityAndState(host)               // differs per host: Scala
+  val peerLines =
+    peers(host).map(p => s"        {{nodes.$p.cluster_ip}}").mkString("\n")
+  val cfg = fileTemplate(
+    "/etc/keepalived/keepalived.conf",
+    s"""vrrp_instance K8S_API_VIP {
+       |    state $state
+       |    interface {{default_interface}}                      // read from the node
+       |    priority $priority
+       |    unicast_src_ip {{cluster_ip}}                        // this node's own address
+       |    unicast_peer {
+       |$peerLines                                              // the other nodes' addresses
+       |    }
+       |    virtual_ipaddress {
+       |        $vip/24
+       |    }
+       |}
+       |""".stripMargin,
+    mode = "0644"
+  )
+  val unit = service("keepalived")
+  ApplyPlan.orFail(s"k8s-keepalived-$host", List(cfg.notifies(unit), unit))
+```
+
+On tst30 that renders `interface <its default-route interface>`, `unicast_src_ip 10.10.3.30` and the
+addresses of tst31 and tst32 under `unicast_peer`. The last line of the plan is what makes it a description
+and not a script: the service restarts only when the file changed, so a repeat run restarts nothing. Used in
+`manifests/k8s_api_vip.scala`, `mariadb_haproxy_keepalived.scala` and the `prometheus.yml` steps of
+`observability_stack.scala`. In a YAML description, use `source: x.mustache` with `vars:`; inline `content:`
+is not rendered. A secret in a template (a password) is in the rendered text, so register it with
+`Secrets.register` so that output masks it, or use `secretFile` where the file has no placeholders.
+
 - **Order:** as listed, except that `r.after(other)` puts `r` after `other` wherever it stands, a command or
   service comes after everything that notifies it (`r.notifies(command)`), a user after the groups it names,
   and a file or directory after the user and group that own it, when those are described.

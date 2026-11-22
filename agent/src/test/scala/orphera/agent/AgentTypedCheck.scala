@@ -175,6 +175,39 @@ object AgentTypedCheck:
     check("waitAptIdle gives up when apt stays busy", timedOut)
     TypedSoftware.aptBusy = oldBusy
     TypedSoftware.aptPoll = oldPoll
+    // apt-get update under a time limit: a stall is retried, a real failure is not
+    def aptUpdateWith(body: String): (Int, Int, String) =
+      val bin = Files.createTempDirectory(dir, "fake-apt")
+      val counter = bin.resolve("calls")
+      Files.writeString(
+        bin.resolve("apt-get"),
+        s"#!/bin/sh\necho x >> $counter\nn=$$(wc -l < $counter)\n$body\n"
+      )
+      bin.resolve("apt-get").toFile.setExecutable(true)
+      val pb = new ProcessBuilder(AptInstaller.updateCommand(List("-q"))*)
+      pb.environment().put("PATH", s"$bin:${sys.env.getOrElse("PATH", "")}")
+      pb.environment().put("APT_UPDATE_TIMEOUT", "1")
+      pb.environment().put("APT_UPDATE_PAUSE", "0")
+      pb.redirectErrorStream(true)
+      val proc = pb.start()
+      val out = new String(proc.getInputStream.readAllBytes(), StandardCharsets.UTF_8)
+      val code = proc.waitFor()
+      val n = if Files.exists(counter) then Files.readAllLines(counter).size else 0
+      (code, n, out)
+    val (c1, n1, o1) = aptUpdateWith("""echo "args: $*"""")
+    check("apt update: the options reach apt-get, once", c1 == 0 && n1 == 1 && o1.contains("args: -q update"), s"$c1 $n1 $o1")
+    val (c2, n2, o2) = aptUpdateWith("""if [ "$n" -eq 1 ]; then sleep 30; fi; echo done""")
+    check("apt update: a stall is tried again", c2 == 0 && n2 == 2 && o2.contains("try 1 of 3"), s"$c2 $n2 $o2")
+    val (c3, n3, _) = aptUpdateWith("sleep 30")
+    check("apt update: gives up after three stalls", (c3 == 124 || c3 == 137) && n3 == 3, s"$c3 $n3")
+    val (c4, n4, o4) = aptUpdateWith("""echo "E: broken" >&2; exit 100""")
+    check("apt update: a real failure is not repeated", c4 == 100 && n4 == 1 && o4.contains("E: broken"), s"$c4 $n4 $o4")
+    val (c5, n5, o5) = aptUpdateWith(
+      """if [ "$n" -eq 1 ]; then echo "Err:4 http://x InRelease"; echo "W: Failed to fetch http://x/InRelease  500"; else echo "Hit:1 ok"; fi"""
+    )
+    check("apt update: an index that fails to fetch is tried again", c5 == 0 && n5 == 2 && o5.contains("Hit:1 ok") && o5.contains("could not fetch every index (try 1 of 3)"), s"$c5 $n5 $o5")
+    val (c6, n6, _) = aptUpdateWith("""echo "W: Failed to fetch http://x/InRelease  500"""")
+    check("apt update: keeps apt's exit status after three failed fetches", c6 == 0 && n6 == 3, s"$c6 $n6")
     Files.write(dir.resolve("src.crt"), Array[Byte](1, 2, -1, 0, 3))
     val copied = files(
       FileAction.Action.ReplaceText(

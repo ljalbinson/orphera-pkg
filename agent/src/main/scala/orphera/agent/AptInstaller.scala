@@ -14,11 +14,41 @@ object AptInstaller:
   // the dpkg lock before giving up with exit 100. Was 60 s, which was too short.
   private val lockTimeout = "DPkg::Lock::Timeout=600"
 
+  /** `apt-get update` under a time limit (180 s, or APT_UPDATE_TIMEOUT), tried
+    * up to three times when the limit is hit. A caching proxy that stalls leaves
+    * apt waiting for ever otherwise, and with seven nodes asking for the same
+    * file at once that does happen (apt-cacher-ng fails the clients that
+    * collide). Any other failure is returned at once. The Go agent has the same
+    * script (aptUpdateScript).
+    */
+  val updateScript: String =
+    """for try in 1 2 3; do
+  log=$(mktemp)
+  timeout -k 10 "${APT_UPDATE_TIMEOUT:-180}" apt-get "$@" update > "$log" 2>&1
+  rc=$?
+  cat "$log"
+  bad=0
+  if grep -qE '^(Err:|W: Failed to fetch)' "$log"; then bad=1; fi
+  rm -f "$log"
+  if [ "$rc" -ne 124 ] && [ "$rc" -ne 137 ] && [ "$bad" -eq 0 ]; then exit "$rc"; fi
+  if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
+    echo "apt-get update did not finish in ${APT_UPDATE_TIMEOUT:-180} s (try $try of 3)" >&2
+  else
+    echo "apt-get update could not fetch every index (try $try of 3)" >&2
+  fi
+  if [ "$try" -lt 3 ]; then sleep "${APT_UPDATE_PAUSE:-5}"; fi
+done
+exit "$rc""""
+
+  /** The command for `apt-get <opts> update` with that limit. */
+  def updateCommand(opts: List[String]): List[String] =
+    List("sh", "-c", updateScript, "apt-update") ++ opts
+
   def install(cmd: InstallPackages, queue: Queue[IO, Event]): IO[Unit] =
     val update =
       if cmd.updateCache then
         runNoResult(
-          List("apt-get", "-o", lockTimeout, "update"),
+          updateCommand(List("-o", lockTimeout)),
           "Updating package cache",
           queue
         )
@@ -131,7 +161,7 @@ object AptInstaller:
     val update =
       if cmd.updateCache then
         runNoResult(
-          List("apt-get") ++ aptOptions ++ List("update"),
+          updateCommand(aptOptions),
           "Updating package cache",
           queue
         )

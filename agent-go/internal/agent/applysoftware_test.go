@@ -108,7 +108,7 @@ func TestApplySoftwarePackages(t *testing.T) {
 	}
 	joined := strings.Join(ran, "\n")
 	if detectPackageManager() == pmApt {
-		for _, w := range []string{"apt-get update -q", "apt-get install -y -q -o DPkg::Lock::Timeout=300 --allow-downgrades curl=7.1-2", "apt-get remove -y -q"} {
+		for _, w := range []string{`apt-get "$@" update`, "apt-update -q", "apt-get install -y -q -o DPkg::Lock::Timeout=300 --allow-downgrades curl=7.1-2", "apt-get remove -y -q"} {
 			if !strings.Contains(joined, w) {
 				t.Errorf("missing %q in %q", w, joined)
 			}

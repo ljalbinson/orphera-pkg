@@ -76,7 +76,7 @@ object TypedSoftware:
     if have("apt-get") then
       waitAptIdle(Slow)
       val spec = if p.version.isEmpty then p.name else s"${p.name}=${p.version}"
-      if p.updateCache then runSoftware(Slow, "apt-get", "update", "-q")
+      if p.updateCache then runSoftware(Slow, "sh", "-c", AptInstaller.updateScript, "apt-update", "-q")
       runSoftware(
         Slow,
         "apt-get",
