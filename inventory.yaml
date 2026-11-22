@@ -62,6 +62,7 @@ nodes:
   #   tst17, tst18  second NIC on br-net106 (provider network): nova-compute (nova_compute.scala)
   #   tst15       control and build host, a second scala0 (control_host.scala, control_host_handover.scala)
   #   runner0     GitLab runner (gitlab_runner.scala, docs/GITLAB-RUNNER.md)
+  #   runner1     GitLab runner with the Docker executor, for the build job (gitlab_runner_docker.scala)
   #   tst16       Designate (DNS as a service) with BIND9: designate_single_node.scala
   #   tst11       apt cache (apt-cacher-ng)
   #   tst12       rpm cache (nginx caching mirror of Rocky/EPEL)
@@ -329,6 +330,11 @@ nodes:
     vars:
       cluster_ip: "10.10.8.20"
 
+  - name: runner1
+    host: runner1.ljalbinson.com
+    vars:
+      cluster_ip: "10.10.8.21"
+
   - name: gs1
     host: gs1.ljalbinson.com
     never-reboot: true
@@ -422,4 +428,4 @@ groups:
       tst20, tst21, tst22, tst23, tst24, tst25, tst26,
       tst30, tst31, tst32, tst33, tst34, tst35, tst36, tst37, tst38, tst39,
       tst40, tst41, tst42, tst43, tst44, tst45, tst46, tst47, tst48, tst49,
-      tst50, fs0, runner0]
+      tst50, fs0, runner0, runner1]

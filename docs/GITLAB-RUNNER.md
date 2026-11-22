@@ -56,6 +56,27 @@ It does not make the runner in GitLab, set its tags or "Protected", or set the C
 in steps 2 and 3. To register against a different runner token, `sudo gitlab-runner unregister --all-runners` on
 `runner0` first.
 
+## A second runner for the build job: runner1
+
+The project's own build job (`compile_and_test` in `.gitlab-ci.yml`) has no tag and runs in a Docker image, so it
+needs a runner with the Docker executor. `runner0` is the wrong place for it: it holds the `ci` certificate and
+runs only jobs tagged `orphera`. `manifests/gitlab_runner_docker.scala` builds `runner1` for it (4 CPUs, 8 GB,
+60 GB, `10.10.8.21`, hypervisor st0), with Docker and the runner and nothing of Orphera's: no certificate, no
+agent token.
+
+In GitLab make an instance runner with no tags, **Run untagged jobs** on and **Protected** off, and copy its
+`glrt-` token. Then, from `~/orphera-pkg` on scala0:
+
+```sh
+manifests/mk-new-and-empty.sh runner1
+orphera secrets set gitlab/runner1-token            # paste the glrt- token, then end the input
+GITLAB_URL=https://<your-gitlab> orphera cluster-playbook gitlab_runner_docker.scala --config runner1
+```
+
+`GITLAB_CA=/path/to/ca.crt` as well for a private CA. The playbook registers the runner with the `docker`
+executor and the default image `eclipse-temurin:21-jdk`, pulls the image, and checks that the `gitlab-runner`
+user can run a container.
+
 ## 1. The host
 
 On the runner VM, as `localadmin`:
