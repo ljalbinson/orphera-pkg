@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # Who may do what on the nodes. `orphera issue-policy` puts it on each node;
 # the agent then allows each call only to a role that may make it. The role is
 # in the operator's client certificate (orphera issue-client-cert --operator X

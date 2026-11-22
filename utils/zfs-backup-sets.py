@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
 """List KVM backup sets held on ZFS backup pools.
 
 A backup set is <pool>/kvm/<YYYY-MM-DD>/<host>, holding one dataset per VM.
