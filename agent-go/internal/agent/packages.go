@@ -230,10 +230,29 @@ func concat(parts ...[]string) []string {
 	return out
 }
 
+// aptUpdateScript runs `apt-get update` under a time limit (180 s, or
+// APT_UPDATE_TIMEOUT) and tries up to three times when the limit is hit. A
+// caching proxy that stalls leaves apt waiting for ever otherwise, and with
+// seven nodes asking for the same file at once that does happen (apt-cacher-ng
+// fails the clients that collide). Any other failure is returned at once. The
+// Scala agent has the same script (AptInstaller.updateScript).
+const aptUpdateScript = `for try in 1 2 3; do
+  timeout -k 10 "${APT_UPDATE_TIMEOUT:-180}" apt-get "$@" update
+  rc=$?
+  if [ "$rc" -ne 124 ] && [ "$rc" -ne 137 ]; then exit "$rc"; fi
+  echo "apt-get update did not finish in ${APT_UPDATE_TIMEOUT:-180} s (try $try of 3)" >&2
+done
+exit "$rc"`
+
+// aptUpdateCommand is the command for `apt-get <opts> update` with that limit.
+func aptUpdateCommand(opts ...string) []string {
+	return append([]string{"sh", "-c", aptUpdateScript, "apt-update"}, opts...)
+}
+
 func aptInstall(cmd *pb.InstallPackages, q *queue) error {
 	if cmd.UpdateCache {
 		// A failed update must end the stream with a FAILED RESULT.
-		if err := runNoResult([]string{"apt-get", "-o", aptLockTimeout, "update"}, "Updating package cache", q); err != nil {
+		if err := runNoResult(aptUpdateCommand("-o", aptLockTimeout), "Updating package cache", q); err != nil {
 			q.failed(err)
 			return nil
 		}
@@ -266,7 +285,7 @@ func aptAutoRemove(cmd *pb.AutoRemove, q *queue) error {
 // files instead of stalling on a conffile prompt, since there is no tty.
 func aptDistUpgrade(cmd *pb.DistUpgrade, q *queue) error {
 	if cmd.UpdateCache {
-		if err := runNoResult(concat([]string{"apt-get"}, aptOptions, []string{"update"}), "Updating package cache", q); err != nil {
+		if err := runNoResult(aptUpdateCommand(aptOptions...), "Updating package cache", q); err != nil {
 			q.failed(err)
 			return nil
 		}

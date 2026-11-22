@@ -14,11 +14,31 @@ object AptInstaller:
   // the dpkg lock before giving up with exit 100. Was 60 s, which was too short.
   private val lockTimeout = "DPkg::Lock::Timeout=600"
 
+  /** `apt-get update` under a time limit (180 s, or APT_UPDATE_TIMEOUT), tried
+    * up to three times when the limit is hit. A caching proxy that stalls leaves
+    * apt waiting for ever otherwise, and with seven nodes asking for the same
+    * file at once that does happen (apt-cacher-ng fails the clients that
+    * collide). Any other failure is returned at once. The Go agent has the same
+    * script (aptUpdateScript).
+    */
+  val updateScript: String =
+    """for try in 1 2 3; do
+  timeout -k 10 "${APT_UPDATE_TIMEOUT:-180}" apt-get "$@" update
+  rc=$?
+  if [ "$rc" -ne 124 ] && [ "$rc" -ne 137 ]; then exit "$rc"; fi
+  echo "apt-get update did not finish in ${APT_UPDATE_TIMEOUT:-180} s (try $try of 3)" >&2
+done
+exit "$rc""""
+
+  /** The command for `apt-get <opts> update` with that limit. */
+  def updateCommand(opts: List[String]): List[String] =
+    List("sh", "-c", updateScript, "apt-update") ++ opts
+
   def install(cmd: InstallPackages, queue: Queue[IO, Event]): IO[Unit] =
     val update =
       if cmd.updateCache then
         runNoResult(
-          List("apt-get", "-o", lockTimeout, "update"),
+          updateCommand(List("-o", lockTimeout)),
           "Updating package cache",
           queue
         )
@@ -131,7 +151,7 @@ object AptInstaller:
     val update =
       if cmd.updateCache then
         runNoResult(
-          List("apt-get") ++ aptOptions ++ List("update"),
+          updateCommand(aptOptions),
           "Updating package cache",
           queue
         )
