@@ -32,7 +32,7 @@ to the project do anything to the fleet. The runner gets an identity of its own 
 
 `manifests/gitlab_runner.scala` does steps 1 to 3 below (and the registration in step 2) on a VM called
 `runner0`, so that the host can be rebuilt from nothing. `runner0` has a config file (`config/runner0.yaml`: 2 CPUs,
-4 GB, 40 GB, `10.10.5.65` on `br-net105`, hypervisor st0, Ubuntu 24.04) and an inventory entry, and is in the `all` group.
+4 GB, 40 GB, `10.10.8.20` on `br-net108`, hypervisor st0, Ubuntu 24.04) and an inventory entry, and is in the `all` group.
 Change the config before you build it if st0 or the address is not what you want. From `~/orphera-pkg` on scala0:
 
 ```sh

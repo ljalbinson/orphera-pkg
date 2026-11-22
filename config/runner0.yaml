@@ -12,13 +12,13 @@ params:
   - fping
   nic0:
     nic: enp1s0
-    ipaddress: '10.10.5.65'
-    gateway: '10.10.5.1'
-    bridge: br-net105
+    ipaddress: '10.10.8.20'
+    gateway: '10.10.8.1'
+    bridge: br-net108
     netmask: '255.255.255.0'
     table: 1
     priority: 101
-    cidr: '10.10.5.0/24'
+    cidr: '10.10.8.0/24'
     mtu: 1500
   hypervisor: st0
   hostname: runner0
