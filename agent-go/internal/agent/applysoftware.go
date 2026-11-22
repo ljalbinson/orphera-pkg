@@ -100,7 +100,7 @@ func installPackage(p *pb.PackageInstall) error {
 			spec = p.Name + "=" + p.Version
 		}
 		if p.UpdateCache {
-			if err := runSoftware(long, "apt-get", "update", "-q"); err != nil {
+			if err := runSoftware(long, "sh", "-c", aptUpdateScript, "apt-update", "-q"); err != nil {
 				return err
 			}
 		}
