@@ -196,7 +196,7 @@ object k8s_node_prep extends OrpheraClusterPlaybook:
         .build,
       stage("install-kubernetes-packages", nodes*)
         .task("add the pkgs.k8s.io repository")(
-          Task.RunCommand(List("sh", "-c", repoScript), timeoutSeconds = 180)
+          Task.RunCommand(List("sh", "-c", repoScript), timeoutSeconds = 720)
         )
         .task("install kubeadm, kubelet, kubectl, crictl")(
           Task.RunCommand(

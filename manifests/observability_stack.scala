@@ -315,7 +315,7 @@ object observability_stack extends OrpheraClusterPlaybook:
         .task("add Grafana's apt repo and install grafana")(
           Task.RunCommand(
             List("sh", "-c", installGrafanaScript),
-            timeoutSeconds = 120
+            timeoutSeconds = 720
           )
         )
         .task("provision Prometheus datasource and (re)start grafana-server")(
