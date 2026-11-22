@@ -229,7 +229,6 @@ object skyline_single_node extends OrpheraApply:
        |chmod -R a+rX /out
        |PYTHONPATH=/out "$$PY" -c "import pymysql; print(\\"pymysql\\", pymysql.__version__)"'""".stripMargin
 
-
   // skyline.yaml. The same names the Skyline settings reference gives.
   private val skylineYaml: String =
     s"""# Managed by Orphera (skyline_single_node.scala)
@@ -260,7 +259,6 @@ object skyline_single_node extends OrpheraApply:
        |  sso_region: $region
        |""".stripMargin
 
-
   // The documented bootstrap: the image's start script runs the migrations when KOLLA_BOOTSTRAP is set (even
   // empty) and exits.
   private val bootstrapRun =
@@ -273,7 +271,9 @@ object skyline_single_node extends OrpheraApply:
   // The migrations are current when this stamp (the step and the image) is the one the last run left, and the
   // database has tables, read as the skyline user with the image's own Python.
   private val stampValue =
-    s"""echo "${Resource.sha256(bootstrapRun)}-$$(podman images -q $imageRef | head -1)""""
+    s"""echo "${Resource.sha256(
+        bootstrapRun
+      )}-$$(podman images -q $imageRef | head -1)""""
   private val bootstrapScript =
     s"""$bootstrapRun
        |$stampValue > $stateDir/bootstrap.stamp
@@ -442,7 +442,6 @@ if __name__ == '__main__':
         die('usage: orphera-skyline-api register | registered | unregister | catalog-hash | login-check')
 """
 
-
   private val helper =
     apiHelperPython
       .replace("@@KS@@", ksFqdn)
@@ -481,7 +480,8 @@ if __name__ == '__main__':
     ).after(podman)
 
     val confDirectory = directory(confDir)
-    val caDirectory = directory(caDir, mode = "0755").after(confDirectory, podman)
+    val caDirectory =
+      directory(caDir, mode = "0755").after(confDirectory, podman)
     val logDirectory = directory(logDir)
     val state = directory(stateDir)
     val pylib = directory(pylibDir).after(state)
@@ -525,7 +525,9 @@ if __name__ == '__main__':
 
     val config = secretFile(
       s"$confDir/skyline.yaml",
-      Secret(skylineYaml), // it holds the database and service passwords and the session key
+      Secret(
+        skylineYaml
+      ), // it holds the database and service passwords and the session key
       mode = "0600",
       owner = "root",
       group = "root"

@@ -429,7 +429,9 @@ object Orchestrator:
                           )
                         )
                         _ <- IO.raiseUnless(
-                          AccessPolicy.unknownOperations(policy, version).isEmpty
+                          AccessPolicy
+                            .unknownOperations(policy, version)
+                            .isEmpty
                         )(
                           new RuntimeException(
                             s"its agent is $version, which does not know the operation " +

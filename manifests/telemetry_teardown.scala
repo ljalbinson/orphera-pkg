@@ -34,7 +34,9 @@ object telemetry_teardown extends OrpheraApply:
 
   // ---- the containers (tst24, and the compute nodes) ----
   private def anyUnit(units: List[String]): String =
-    s"""for u in ${units.mkString(" ")}; do if [ -f /etc/systemd/system/orphera-$$u.service ] || systemctl is-active --quiet orphera-$$u || systemctl is-enabled --quiet orphera-$$u; then exit 0; fi; done; exit 1"""
+    s"""for u in ${units.mkString(
+        " "
+      )}; do if [ -f /etc/systemd/system/orphera-$$u.service ] || systemctl is-active --quiet orphera-$$u || systemctl is-enabled --quiet orphera-$$u; then exit 0; fi; done; exit 1"""
   private def stopScript(units: List[String]): String =
     s"""for u in ${units.mkString(" ")}; do
        |  systemctl disable --now orphera-$$u 2>/dev/null || true
@@ -132,7 +134,9 @@ object telemetry_teardown extends OrpheraApply:
       )
       // Typed removal, no script.
       val cleaned =
-        dirs(computeUnits).map(absentDirectory(_, recursive = true).after(stopped))
+        dirs(computeUnits).map(
+          absentDirectory(_, recursive = true).after(stopped)
+        )
       List(stopped) ++ cleaned
     else
       val unregistered = command(
@@ -148,6 +152,7 @@ object telemetry_teardown extends OrpheraApply:
         timeout = 240
       ).after(unregistered)
       // Typed removal, no script: each directory with its contents, then the helper.
-      val cleaned = (dirs(nodeUnits).map(absentDirectory(_, recursive = true)) :+
-        absentFile(helper)).map(_.after(stopped))
+      val cleaned =
+        (dirs(nodeUnits).map(absentDirectory(_, recursive = true)) :+
+          absentFile(helper)).map(_.after(stopped))
       List(unregistered, stopped) ++ cleaned

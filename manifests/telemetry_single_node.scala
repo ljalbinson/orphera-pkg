@@ -191,7 +191,9 @@ object telemetry_single_node extends OrpheraApply:
        |done
        |echo "images ready"""".stripMargin
   private val imagesPresent =
-    s"""for img in ${images.mkString(" ")}; do podman image exists $$img || exit 1; done"""
+    s"""for img in ${images.mkString(
+        " "
+      )}; do podman image exists $$img || exit 1; done"""
 
   // Keystone's CA: the last certificate it presents (trust on first use), which must be self-signed. `chainTo
   // DIR` leaves DIR/c1.pem ... DIR/cN.pem, each holding the certificate only: the text s_client prints after
@@ -742,7 +744,8 @@ if __name__ == '__main__':
     val stateDirectory = directory(stateDir)
     val aodhState = directory(s"$stateDir/aodh").after(stateDirectory)
     val aodhTmp = directory(s"$stateDir/aodh/tmp").after(aodhState)
-    val ceilometerState = directory(s"$stateDir/ceilometer").after(stateDirectory)
+    val ceilometerState =
+      directory(s"$stateDir/ceilometer").after(stateDirectory)
     val ceilometerTmp =
       directory(s"$stateDir/ceilometer/tmp").after(ceilometerState)
 
@@ -769,7 +772,9 @@ if __name__ == '__main__':
       centralDirRes,
       secretFile(
         s"$centralDir/ceilometer.conf",
-        Secret(ceilometerConf), // it holds the message bus and service passwords
+        Secret(
+          ceilometerConf
+        ), // it holds the message bus and service passwords
         mode = "0640",
         owner = "root",
         group = "root"
@@ -809,7 +814,9 @@ if __name__ == '__main__':
       val dirRes = directory(dir, mode = "0755")
       val conf = secretFile(
         s"$dir/aodh.conf",
-        Secret(aodhConf), // it holds the database, message bus and service passwords
+        Secret(
+          aodhConf
+        ), // it holds the database, message bus and service passwords
         mode = "0640",
         owner = "root",
         group = "root"
@@ -842,7 +849,11 @@ if __name__ == '__main__':
         owner = "root",
         group = "root"
       ).notifies(unitService)
-      (name, List[ApplyResource](dirRes, conf, kollaCa, kollaJson, unitFile), conf)
+      (
+        name,
+        List[ApplyResource](dirRes, conf, kollaCa, kollaJson, unitFile),
+        conf
+      )
     }
     val aodhResources = aodhServices.flatMap(_._2)
     val apiConf = aodhServices.find(_._1 == "aodh-api").get._3

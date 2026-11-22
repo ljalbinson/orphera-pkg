@@ -28,7 +28,8 @@ object nova_compute_teardown extends OrpheraApply:
 
   override def nodes: List[String] = computeNodes
 
-  private val registered = s"""[ -x $helper ] && $helper known "$$(hostname -s)" >/dev/null 2>&1"""
+  private val registered =
+    s"""[ -x $helper ] && $helper known "$$(hostname -s)" >/dev/null 2>&1"""
   private val unregisterScript =
     s"""$helper unregister "$$(hostname -s)" || echo "nova/neutron cleanup failed (continuing)""""
 

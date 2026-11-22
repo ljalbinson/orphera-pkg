@@ -43,7 +43,8 @@ object telemetry_compute extends OrpheraApply:
 
   private val computeContainer = Container(
     name = ContainerName("ceilometer-compute"),
-    image = Image("ceilometer-compute", Release.R2025_1, Base.UbuntuNoble, registry),
+    image =
+      Image("ceilometer-compute", Release.R2025_1, Base.UbuntuNoble, registry),
     mounts = List(
       Mount(dir, "/var/lib/kolla/config_files"),
       Mount(ceilometerLogDir, "/var/log/kolla/ceilometer", Access.ReadWrite),
@@ -188,7 +189,8 @@ object telemetry_compute extends OrpheraApply:
       |""".stripMargin
 
   // The polling agent's exporter answers once the first poll cycle has started.
-  private val healthy = s"curl -sf http://localhost:$exporterPort/metrics >/dev/null"
+  private val healthy =
+    s"curl -sf http://localhost:$exporterPort/metrics >/dev/null"
   private val waitHealthy =
     s"""for i in $$(seq 1 36); do
        |  $healthy && exit 0
@@ -224,12 +226,16 @@ object telemetry_compute extends OrpheraApply:
     val unit = service(computeContainer.unitName)
     val logDirectory = directory(ceilometerLogDir)
     val stateDirectory = directory(stateDir)
-    val ceilometerState = directory(s"$stateDir/ceilometer").after(stateDirectory)
-    val ceilometerTmp = directory(s"$stateDir/ceilometer/tmp").after(ceilometerState)
+    val ceilometerState =
+      directory(s"$stateDir/ceilometer").after(stateDirectory)
+    val ceilometerTmp =
+      directory(s"$stateDir/ceilometer/tmp").after(ceilometerState)
     val dirRes = directory(dir, mode = "0755")
     val conf = secretFile(
       s"$dir/ceilometer.conf",
-      Secret(ceilometerConf(target.name)), // it holds the message bus and service passwords
+      Secret(
+        ceilometerConf(target.name)
+      ), // it holds the message bus and service passwords
       mode = "0640",
       owner = "root",
       group = "root"

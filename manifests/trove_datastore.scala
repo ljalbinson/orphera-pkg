@@ -329,7 +329,6 @@ if __name__ == '__main__':
         die('usage: orphera-trove-db datastores | instance-test [--keep] | instance-cleanup')
 """
 
-
   private val dbHelperPath = "/usr/local/sbin/orphera-trove-db"
 
   private val helper =

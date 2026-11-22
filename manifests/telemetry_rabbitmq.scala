@@ -49,7 +49,9 @@ object telemetry_rabbitmq extends OrpheraApply:
        |  echo "no running 'rabbitmq' container on this node - apply rabbitmq_single_node.scala first" >&2
        |  exit 1
        |fi
-       |${accounts.map((n, p) => createPart(n, p.reveal)).mkString("\n")}""".stripMargin
+       |${accounts
+        .map((n, p) => createPart(n, p.reveal))
+        .mkString("\n")}""".stripMargin
 
   private def inPlace(name: String, password: String): String =
     val vhostExists =

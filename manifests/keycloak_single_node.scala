@@ -172,8 +172,10 @@ object keycloak_single_node extends OrpheraApply:
 
   // Hashes of the chain and the key (no secret in them), kept beside keycloak.conf.
   private val tlsStampFile = s"$confDir/tls.stamp"
-  private val tlsHashes = s"sha256sum $tlsDir/server-chain.crt $tlsDir/server.key"
-  private val tlsStampCurrent = s"$tlsHashes 2>/dev/null | cmp -s - $tlsStampFile"
+  private val tlsHashes =
+    s"sha256sum $tlsDir/server-chain.crt $tlsDir/server.key"
+  private val tlsStampCurrent =
+    s"$tlsHashes 2>/dev/null | cmp -s - $tlsStampFile"
   private val tlsStampScript =
     s"""$tlsHashes > $tlsStampFile
        |echo "certificate and key noted"""".stripMargin
@@ -939,7 +941,9 @@ if __name__ == '__main__':
     ).after(tlsChecked, confDirectory).notifies(unitService)
     val conf = secretFile(
       s"$confDir/keycloak.conf",
-      Secret(keycloakConf), // it holds the database password and the first admin's
+      Secret(
+        keycloakConf
+      ), // it holds the database password and the first admin's
       mode = "0640",
       owner = "root",
       group = "root"
@@ -951,7 +955,8 @@ if __name__ == '__main__':
       owner = "root",
       group = "root"
     ).notifies(unitService)
-    val running = unitService.after(pulled, tlsChecked, tlsStamp, conf, unitFile)
+    val running =
+      unitService.after(pulled, tlsChecked, tlsStamp, conf, unitFile)
 
     val helperFile = secretFile(
       helper,

@@ -88,16 +88,27 @@ object gitlab_runner extends OrpheraClusterPlaybook:
       .toAbsolutePath
 
   private val gitlabCa: Option[Path] =
-    sys.env.get("GITLAB_CA").filter(_.nonEmpty).map(p => Paths.get(p).toAbsolutePath)
+    sys.env
+      .get("GITLAB_CA")
+      .filter(_.nonEmpty)
+      .map(p => Paths.get(p).toAbsolutePath)
 
   private val missing: List[String] =
     List(
       (caCert, "orphera init-ca (or the CA certificate of this host)"),
-      (opCert, s"orphera issue-client-cert --operator $operator --role pipeline --days 30"),
-      (opKey, s"orphera issue-client-cert --operator $operator --role pipeline --days 30"),
+      (
+        opCert,
+        s"orphera issue-client-cert --operator $operator --role pipeline --days 30"
+      ),
+      (
+        opKey,
+        s"orphera issue-client-cert --operator $operator --role pipeline --days 30"
+      ),
       (cliDeb, "make cli-package (or set ORPHERA_CLI_DEB)")
     ).filterNot((p, _) => Files.exists(p)).map((p, how) => s"$p: $how") ++
-      gitlabCa.filterNot(Files.exists(_)).map(p => s"$p: GITLAB_CA does not exist")
+      gitlabCa
+        .filterNot(Files.exists(_))
+        .map(p => s"$p: GITLAB_CA does not exist")
   if missing.nonEmpty then
     throw new RuntimeException(
       "not found, nothing sent:\n  " + missing.mkString("\n  ")
@@ -210,7 +221,10 @@ object gitlab_runner extends OrpheraClusterPlaybook:
           copy(cliDeb, debDest, "root", mode644)
         )
         .task("install it")(
-          Task.RunCommand(List("sh", "-c", cliInstallScript), timeoutSeconds = 600)
+          Task.RunCommand(
+            List("sh", "-c", cliInstallScript),
+            timeoutSeconds = 600
+          )
         )
         .build,
       stage("operator-certificate", host)
@@ -218,13 +232,28 @@ object gitlab_runner extends OrpheraClusterPlaybook:
           Task.RunCommand(List("sh", "-c", dirsScript), timeoutSeconds = 30)
         )
         .task("CA certificate")(
-          copy(caCert, s"$runnerHome/.config/orphera/certs/ca.crt", runnerUser, mode644)
+          copy(
+            caCert,
+            s"$runnerHome/.config/orphera/certs/ca.crt",
+            runnerUser,
+            mode644
+          )
         )
         .task(s"operator certificate $operator.crt")(
-          copy(opCert, s"$runnerHome/.config/orphera/certs/operators/$operator.crt", runnerUser, mode600)
+          copy(
+            opCert,
+            s"$runnerHome/.config/orphera/certs/operators/$operator.crt",
+            runnerUser,
+            mode600
+          )
         )
         .task(s"operator key $operator.key")(
-          copy(opKey, s"$runnerHome/.config/orphera/certs/operators/$operator.key", runnerUser, mode600)
+          copy(
+            opKey,
+            s"$runnerHome/.config/orphera/certs/operators/$operator.key",
+            runnerUser,
+            mode600
+          )
         )
         .build,
       stage("register-the-runner", host)
@@ -234,7 +263,8 @@ object gitlab_runner extends OrpheraClusterPlaybook:
             case None    => Task.RunCommand(List("true"), timeoutSeconds = 10)
         )
         .task(s"register with $gitlabUrl and start the service")(
-          Task.RunCommand(List("sh", "-c", registerScript), timeoutSeconds = 120)
+          Task
+            .RunCommand(List("sh", "-c", registerScript), timeoutSeconds = 120)
         )
         .build,
       stage("check", host)

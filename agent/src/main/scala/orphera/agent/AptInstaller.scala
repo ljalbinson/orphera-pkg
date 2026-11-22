@@ -15,9 +15,9 @@ object AptInstaller:
   private val lockTimeout = "DPkg::Lock::Timeout=600"
 
   /** `apt-get update` under a time limit (180 s, or APT_UPDATE_TIMEOUT), tried
-    * up to three times when the limit is hit. A caching proxy that stalls leaves
-    * apt waiting for ever otherwise, and with seven nodes asking for the same
-    * file at once that does happen (apt-cacher-ng fails the clients that
+    * up to three times when the limit is hit. A caching proxy that stalls
+    * leaves apt waiting for ever otherwise, and with seven nodes asking for the
+    * same file at once that does happen (apt-cacher-ng fails the clients that
     * collide). Any other failure is returned at once. The Go agent has the same
     * script (aptUpdateScript).
     */

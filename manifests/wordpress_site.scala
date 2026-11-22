@@ -198,7 +198,10 @@ object wordpress_site extends OrpheraClusterPlaybook:
       "wordpress-nginx-site",
       List(
         site,
-        symlink("/etc/nginx/sites-enabled/wordpress", "/etc/nginx/sites-available/wordpress").after(site),
+        symlink(
+          "/etc/nginx/sites-enabled/wordpress",
+          "/etc/nginx/sites-available/wordpress"
+        ).after(site),
         absentFile("/etc/nginx/sites-enabled/default")
       )
     )

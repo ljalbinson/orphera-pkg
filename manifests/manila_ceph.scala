@@ -58,7 +58,8 @@ object manila_ceph extends OrpheraApply:
         .putInt(0)
         .putShort(16.toShort)
         .array()
-      val derived = java.util.Base64.getEncoder.encodeToString(header ++ keyBytes)
+      val derived =
+        java.util.Base64.getEncoder.encodeToString(header ++ keyBytes)
       // Not a stored secret itself, so it is registered to be masked in output.
       Secrets.register(derived)
       derived

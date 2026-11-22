@@ -3,8 +3,8 @@
 package orphera.agent
 
 import java.nio.charset.StandardCharsets
-import java.nio.file.{Files, LinkOption, NoSuchFileException, Path, Paths}
 import java.nio.file.attribute.{BasicFileAttributes, PosixFileAttributeView}
+import java.nio.file.{Files, LinkOption, NoSuchFileException, Path, Paths}
 import java.security.MessageDigest
 import java.util.concurrent.{CompletableFuture, TimeUnit}
 
@@ -88,12 +88,14 @@ object Fixed:
   def parseMode(s: String): Option[Int] =
     if s.isEmpty then None
     else
-      Try(Integer.parseInt(s, 8)).toOption.filter(n => n >= 0 && n <= 4095) match
+      Try(Integer.parseInt(s, 8)).toOption.filter(n =>
+        n >= 0 && n <= 4095
+      ) match
         case None    => fail(s"not an octal mode: '$s'")
         case Some(n) => Some(n)
 
-  /** chown and chmod: an empty owner, group or mode is left alone. The owner and
-    * group first, since chown clears setuid and setgid.
+  /** chown and chmod: an empty owner, group or mode is left alone. The owner
+    * and group first, since chown clears setuid and setgid.
     */
   def setAttributes(
       path: String,
@@ -180,7 +182,9 @@ object Fixed:
     if code != 0 then
       val said = out.trim
       val tail = if said.length > 2000 then said.takeRight(2000) else said
-      fail(if tail.isEmpty then s"$name: exit status $code" else s"$name: $tail")
+      fail(
+        if tail.isEmpty then s"$name: exit status $code" else s"$name: $tail"
+      )
 
   def have(name: String): Boolean =
     Option(System.getenv("PATH"))
@@ -210,6 +214,7 @@ object Fixed:
           case Failure(e) =>
             ApplyReply(
               completed = done,
-              error = s"${describe(a)}: ${Option(e.getMessage).getOrElse(e.toString)}"
+              error =
+                s"${describe(a)}: ${Option(e.getMessage).getOrElse(e.toString)}"
             )
     go(0, actions)

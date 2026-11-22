@@ -369,7 +369,9 @@ object nova_compute extends OrpheraApply:
        |done
        |echo "images ready"""".stripMargin
   private val imagesPresent =
-    s"""for img in ${images.mkString(" ")}; do podman image exists $$img || exit 1; done"""
+    s"""for img in ${images.mkString(
+        " "
+      )}; do podman image exists $$img || exit 1; done"""
 
   // Keystone's CA: the last certificate it presents (trust on first use),
   // which must be self-signed. `chainTo DIR` leaves DIR/c1.pem ... DIR/cN.pem,
@@ -885,7 +887,10 @@ if __name__ == '__main__':
   def describe(target: Node): List[ApplyResource] =
     val host = target.name
     val ip = target.vars
-      .getOrElse("cluster_ip", sys.error(s"inventory: node $host has no cluster_ip"))
+      .getOrElse(
+        "cluster_ip",
+        sys.error(s"inventory: node $host has no cluster_ip")
+      )
 
     val kvm = command(
       "check that the VM has hardware virtualization",
@@ -1011,7 +1016,9 @@ if __name__ == '__main__':
     val novaDirRes = directory(novaDir, mode = "0755")
     val novaConfFile = secretFile(
       s"$novaDir/nova.conf",
-      Secret(novaConf(host, ip)), // it holds the message bus and service passwords
+      Secret(
+        novaConf(host, ip)
+      ), // it holds the message bus and service passwords
       mode = "0640",
       owner = "root",
       group = "root"

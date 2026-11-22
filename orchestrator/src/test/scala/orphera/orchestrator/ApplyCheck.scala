@@ -107,7 +107,12 @@ object ApplyCheck:
       IO(Templating.render(s"source $path for {{name}}", vars))
 
     def render(text: String, vars: Map[String, String]): IO[String] =
-      IO(Templating.render(text, Map("node" -> node, "default_interface" -> "eth9") ++ vars))
+      IO(
+        Templating.render(
+          text,
+          Map("node" -> node, "default_interface" -> "eth9") ++ vars
+        )
+      )
 
     def write(
         path: String,
@@ -1786,7 +1791,13 @@ object ApplyCheck:
       )._1 == Vector(FileChange.MakeDirectory("/opt/d", "0750", "", ""))
     )
     def fileKv(sum: String, mode: String = "644") =
-      Map("type" -> "file", "mode" -> mode, "owner" -> "root", "group" -> "root", "sha256" -> sum)
+      Map(
+        "type" -> "file",
+        "mode" -> mode,
+        "owner" -> "root",
+        "group" -> "root",
+        "sha256" -> sum
+      )
     check(
       "fileCopy: the destination is not there, so the agent copies the file on the node",
       seenFor(
@@ -1823,10 +1834,15 @@ object ApplyCheck:
     check(
       "fileCopy: a source that is not on the node fails and nothing is written", {
         val t = new TypedTarget(
-          Map("/src/ca" -> Map("type" -> "absent"), "/dst/ca" -> Map("type" -> "absent"))
+          Map(
+            "/src/ca" -> Map("type" -> "absent"),
+            "/dst/ca" -> Map("type" -> "absent")
+          )
         )
         val ran = applyTo(t, List(fileCopy("/dst/ca", "/src/ca")))
-        ran.report.failed && t.seen.isEmpty && ran.lines.exists(_.contains("is not on the node"))
+        ran.report.failed && t.seen.isEmpty && ran.lines.exists(
+          _.contains("is not on the node")
+        )
       }
     )
     check(
@@ -1865,7 +1881,14 @@ object ApplyCheck:
     check(
       "a directory removed with its contents: one typed recursive removal",
       seenFor(
-        Map("/srv/t" -> Map("type" -> "directory", "mode" -> "755", "owner" -> "root", "group" -> "root")),
+        Map(
+          "/srv/t" -> Map(
+            "type" -> "directory",
+            "mode" -> "755",
+            "owner" -> "root",
+            "group" -> "root"
+          )
+        ),
         absentDirectory("/srv/t", recursive = true)
       )._1 == Vector(FileChange.RemovePath("/srv/t", true, true))
     )
@@ -1988,7 +2011,9 @@ object ApplyCheck:
     )
     check("typed software: the right version is left", same.isEmpty, s"$same")
     val (unit, _) = softFor(
-      Map("ssh.service" -> Map("enabled" -> "disabled", "active" -> "inactive")),
+      Map(
+        "ssh.service" -> Map("enabled" -> "disabled", "active" -> "inactive")
+      ),
       ApplyResource.Service("ssh.service", Some(true), Some(true))
     )
     check(
@@ -2004,7 +2029,11 @@ object ApplyCheck:
       Map("ssh.service" -> Map("enabled" -> "enabled", "active" -> "active")),
       ApplyResource.Service("ssh.service", Some(true), Some(true))
     )
-    check("typed software: a unit as wanted is left", steady.isEmpty, s"$steady")
+    check(
+      "typed software: a unit as wanted is left",
+      steady.isEmpty,
+      s"$steady"
+    )
     check(
       "typed write: the replacement, then mode, owner and group",
       Apply.writeChanges("/etc/a", "x", "root", "", 416, "abc", false) ==
@@ -2086,7 +2115,9 @@ object ApplyCheck:
     )
     check(
       "typed access: a key is added",
-      key == Vector(AccessChange.AddAuthorizedKey("alice", "ssh-ed25519 AAAA c")),
+      key == Vector(
+        AccessChange.AddAuthorizedKey("alice", "ssh-ed25519 AAAA c")
+      ),
       s"$key"
     )
     val (unkey, _) = accessFor(
@@ -2102,7 +2133,14 @@ object ApplyCheck:
     )
     val tab = "# c\n/dev/sda1 / ext4 defaults 0 1\n"
     val mnt =
-      ApplyResource.Mount("/mnt/x", "tmpfs", "tmpfs", "size=8m", Some(true), true)
+      ApplyResource.Mount(
+        "/mnt/x",
+        "tmpfs",
+        "tmpfs",
+        "size=8m",
+        Some(true),
+        true
+      )
     val (mounted, _) = accessFor(
       Map(
         "/mnt/x" -> Map(
@@ -2150,7 +2188,11 @@ object ApplyCheck:
     )
     check(
       "fstab edits: first match replaced, duplicates and comments handled",
-      Apply.fstabEdited("a /m x 0 0\n#b /m y\nc /m z\nd /o e\n", "/m", Some("N /m t o 0 0")) ==
+      Apply.fstabEdited(
+        "a /m x 0 0\n#b /m y\nc /m z\nd /o e\n",
+        "/m",
+        Some("N /m t o 0 0")
+      ) ==
         "N /m t o 0 0\n#b /m y\nd /o e\n" &&
         Apply.fstabEdited("a /m x\nb /m y\n", "/m", None) == "" &&
         Apply.fstabEdited("a /o x", "/m", Some("N")) == "a /o x\nN\n"
@@ -2164,10 +2206,11 @@ object ApplyCheck:
     val r = applyTo(sh, List(mnt))
     check(
       "no fstab text: the fstab edit is the script",
-      sh.scripts.exists(_.contains("/etc/fstab")) && sh.access.isEmpty && !r.report.failed,
+      sh.scripts.exists(
+        _.contains("/etc/fstab")
+      ) && sh.access.isEmpty && !r.report.failed,
       s"${sh.scripts} ${r.lines}"
     )
-
 
   def main(args: Array[String]): Unit =
     typedChecks()

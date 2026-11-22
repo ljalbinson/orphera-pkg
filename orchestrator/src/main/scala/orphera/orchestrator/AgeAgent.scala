@@ -28,10 +28,11 @@ import scala.util.Try
   */
 object AgeAgent:
 
-  private val clockFormat = java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss")
+  private val clockFormat =
+    java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss")
 
-  /** A time of day as HH:mm:ss. LocalTime's own text leaves the seconds out when
-    * they are zero ("15:16"), which breaks the column of a log.
+  /** A time of day as HH:mm:ss. LocalTime's own text leaves the seconds out
+    * when they are zero ("15:16"), which breaks the column of a log.
     */
   def clock(t: java.time.LocalTime): String = clockFormat.format(t)
 
@@ -47,13 +48,15 @@ object AgeAgent:
       else if t.endsWith("m") then (t.dropRight(1), 1L)
       else (t, 1L)
     Option(digits)
-      .filter(d => d.nonEmpty && d.length <= 9 && d.forall(c => c >= '0' && c <= '9'))
+      .filter(d =>
+        d.nonEmpty && d.length <= 9 && d.forall(c => c >= '0' && c <= '9')
+      )
       .map(_.toLong * minutesEach)
       .filter(_ <= Int.MaxValue.toLong)
       .map(_.toInt)
 
-  /** Minutes as days, hours and minutes without the zero parts, for the
-    * agent's start-up line: 3000 is "2d 2h", 10 is "10m", 1440 is "1d".
+  /** Minutes as days, hours and minutes without the zero parts, for the agent's
+    * start-up line: 3000 is "2d 2h", 10 is "10m", 1440 is "1d".
     */
   def minutesText(minutes: Int): String =
     val d = minutes / 1440

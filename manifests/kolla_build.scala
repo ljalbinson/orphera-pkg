@@ -377,7 +377,9 @@ esac
 
   // True when every project's tarball and the checksum list are there and the base image is in the registry.
   private val warm =
-    s"""for p in ${projects.mkString(" ")}; do [ -s /srv/kolla-sources/$$p-$branch.tar.gz ] || exit 1; done
+    s"""for p in ${projects.mkString(
+        " "
+      )}; do [ -s /srv/kolla-sources/$$p-$branch.tar.gz ] || exit 1; done
        |[ -s /srv/kolla-sources/MANIFEST ] && curl -sf http://localhost:$registryPort/v2/library/ubuntu/tags/list | grep -q '"24.04"'""".stripMargin
   // Fetches the source tarballs and copies the base image, so the first build starts with warm caches.
   private val warmScript =
@@ -393,7 +395,8 @@ esac
     val byName = hostPackages.zip(tools).toMap
     val podman = byName("podman")
     val nginxPkg = byName("nginx")
-    val venvTools = List(byName("python3"), byName("python3-venv"), byName("python3-pip"))
+    val venvTools =
+      List(byName("python3"), byName("python3-venv"), byName("python3-pip"))
 
     val pulled = command(
       "pull the registry image",
@@ -401,7 +404,8 @@ esac
       unless = s"podman image exists $registryImage",
       timeout = 600
     ).after(podman)
-    val registriesDir = directory("/etc/containers/registries.conf.d").after(podman)
+    val registriesDir =
+      directory("/etc/containers/registries.conf.d").after(podman)
     val registries = file(
       "/etc/containers/registries.conf.d/orphera-kolla-registry.conf",
       registriesConf,
@@ -433,7 +437,8 @@ esac
     val defaultSite = absentFile("/etc/nginx/sites-enabled/default")
       .after(nginxPkg)
       .notifies(nginxUnit)
-    val nginxRunning = nginxUnit.after(nginxPkg, nginxConfFile, defaultSite, sourcesDir)
+    val nginxRunning =
+      nginxUnit.after(nginxPkg, nginxConfFile, defaultSite, sourcesDir)
 
     // devpi, the PyPI cache.
     val devpiUnit0 = service("orphera-devpi.service")
@@ -466,7 +471,8 @@ esac
       owner = "root",
       group = "root"
     ).notifies(registryUnit)
-    val registryRunning = registryUnit.after(pulled, registryData, registryUnitFile, registries)
+    val registryRunning =
+      registryUnit.after(pulled, registryData, registryUnitFile, registries)
 
     val socket = service("podman.socket").after(podman)
 
@@ -490,7 +496,14 @@ esac
       warmScript,
       unless = warm,
       timeout = 1800
-    ).after(helperFile, registryRunning, nginxRunning, sourcesDir, byName("skopeo"), byName("curl"))
+    ).after(
+      helperFile,
+      registryRunning,
+      nginxRunning,
+      sourcesDir,
+      byName("skopeo"),
+      byName("curl")
+    )
     val answering = command(
       "the registry, the source server and devpi answer",
       waitServicesScript,

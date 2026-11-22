@@ -215,7 +215,9 @@ object nova_single_node extends OrpheraApply:
        |done
        |echo "images ready"""".stripMargin
   private val imagesPresent =
-    s"""for img in ${images.mkString(" ")}; do podman image exists $$img || exit 1; done"""
+    s"""for img in ${images.mkString(
+        " "
+      )}; do podman image exists $$img || exit 1; done"""
 
   // Keystone's CA: the last certificate it presents (trust on first use),
   // which must be self-signed. `chainTo DIR` leaves DIR/c1.pem ... DIR/cN.pem,
@@ -642,7 +644,9 @@ if __name__ == '__main__':
       val dirRes = directory(dir, mode = "0755")
       val conf = secretFile(
         s"$dir/nova.conf",
-        Secret(novaConfText), // it holds the database, message bus and service passwords
+        Secret(
+          novaConfText
+        ), // it holds the database, message bus and service passwords
         mode = "0640",
         owner = "root",
         group = "root"
@@ -675,7 +679,15 @@ if __name__ == '__main__':
         owner = "root",
         group = "root"
       ).notifies(unitService)
-      (name, unitService, List(dirRes, conf, kollaCa, kollaJson, unitFile), conf, kollaCa, kollaJson, unitFile)
+      (
+        name,
+        unitService,
+        List(dirRes, conf, kollaCa, kollaJson, unitFile),
+        conf,
+        kollaCa,
+        kollaJson,
+        unitFile
+      )
     }
     val apiConf = units.head._4
 
@@ -702,8 +714,16 @@ if __name__ == '__main__':
       timeout = 120
     ).after(helperFile, ca)
 
-    val running = units.map { (_, unitService, _, conf, kollaCa, kollaJson, unitFile) =>
-      unitService.after(dbSync, registered, unitFile, conf, kollaCa, kollaJson)
+    val running = units.map {
+      (_, unitService, _, conf, kollaCa, kollaJson, unitFile) =>
+        unitService.after(
+          dbSync,
+          registered,
+          unitFile,
+          conf,
+          kollaCa,
+          kollaJson
+        )
     }
 
     val answering = command(

@@ -56,7 +56,8 @@ object nova_rabbitmq extends OrpheraApply:
     s"""podman exec rabbitmq rabbitmqctl authenticate_user '$rabbitUser' '${rabbitPassword.reveal}' >/dev/null 2>&1"""
   private val hasFullPermissions =
     s"""podman exec rabbitmq rabbitmqctl list_permissions -p '$rabbitVhost' -q | awk -F'\t' '$$1=="$rabbitUser" && $$2==".*" && $$3==".*" && $$4==".*" {found=1} END {exit !found}'"""
-  private val inPlace = s"$vhostExists && $canAuthenticate && $hasFullPermissions"
+  private val inPlace =
+    s"$vhostExists && $canAuthenticate && $hasFullPermissions"
 
   def describe(node: Node): List[ApplyResource] =
     List(

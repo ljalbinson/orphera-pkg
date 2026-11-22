@@ -455,9 +455,33 @@ object SecretsCheck:
     )
     check(
       "--cache: a bad value is refused",
-      List("", "d", "-1", "1.5", "5x", "1 d", "h2", "+5", "2dd", "99999999d", "1000000000")
+      List(
+        "",
+        "d",
+        "-1",
+        "1.5",
+        "5x",
+        "1 d",
+        "h2",
+        "+5",
+        "2dd",
+        "99999999d",
+        "1000000000"
+      )
         .forall(v => AgeAgent.parseCacheMinutes(v).isEmpty),
-      List("", "d", "-1", "1.5", "5x", "1 d", "h2", "+5", "2dd", "99999999d", "1000000000")
+      List(
+        "",
+        "d",
+        "-1",
+        "1.5",
+        "5x",
+        "1 d",
+        "h2",
+        "+5",
+        "2dd",
+        "99999999d",
+        "1000000000"
+      )
         .filter(v => AgeAgent.parseCacheMinutes(v).nonEmpty)
         .mkString(",")
     )
@@ -481,7 +505,7 @@ object SecretsCheck:
       AgeAgent.expiry(noon.plusSeconds(25 * 3600L), noon, utc) ==
         "2026-11-21 13:00:00" &&
         AgeAgent.expiry(noon.plusSeconds(3000 * 60L), noon, utc) ==
-          "2026-11-22 14:00:00",
+        "2026-11-22 14:00:00",
       AgeAgent.expiry(noon.plusSeconds(25 * 3600L), noon, utc)
     )
     val big = "y" * 300000

@@ -3,8 +3,14 @@
 package orphera.agent
 
 import java.nio.charset.StandardCharsets
-import java.nio.file.{Files, NoSuchFileException, Path, Paths, StandardCopyOption}
 import java.nio.file.attribute.{PosixFileAttributeView, PosixFilePermissions}
+import java.nio.file.{
+  Files,
+  NoSuchFileException,
+  Path,
+  Paths,
+  StandardCopyOption
+}
 
 import scala.util.Try
 
@@ -25,7 +31,8 @@ object TypedAccess:
   /** Where a user's keys are, None if the user is not found. */
   private def authorizedKeysPath(user: String): Option[String] =
     if !validArg(user) then None
-    else passwd(user).map(f => Paths.get(f(5), ".ssh", "authorized_keys").toString)
+    else
+      passwd(user).map(f => Paths.get(f(5), ".ssh", "authorized_keys").toString)
 
   /** The files an action touches, for the role's path limits. */
   def paths(a: AccessAction): List[String] = a.action match
@@ -40,12 +47,12 @@ object TypedAccess:
     case _                                   => Nil
 
   def describe(a: AccessAction): String = a.action match
-    case AccessAction.Action.CreateUser(x)  => s"create user ${x.name}"
-    case AccessAction.Action.ModifyUser(x)  => s"change user ${x.name}"
-    case AccessAction.Action.DeleteUser(x)  => s"delete user ${x.name}"
-    case AccessAction.Action.CreateGroup(x) => s"create group ${x.name}"
-    case AccessAction.Action.ModifyGroup(x) => s"change group ${x.name}"
-    case AccessAction.Action.DeleteGroup(x) => s"delete group ${x.name}"
+    case AccessAction.Action.CreateUser(x)       => s"create user ${x.name}"
+    case AccessAction.Action.ModifyUser(x)       => s"change user ${x.name}"
+    case AccessAction.Action.DeleteUser(x)       => s"delete user ${x.name}"
+    case AccessAction.Action.CreateGroup(x)      => s"create group ${x.name}"
+    case AccessAction.Action.ModifyGroup(x)      => s"change group ${x.name}"
+    case AccessAction.Action.DeleteGroup(x)      => s"delete group ${x.name}"
     case AccessAction.Action.AddAuthorizedKey(x) => s"add a key for ${x.user}"
     case AccessAction.Action.RemoveAuthorizedKey(x) =>
       s"remove a key of ${x.user}"
@@ -74,7 +81,7 @@ object TypedAccess:
       run("groupdel", List(x.name))
     case AccessAction.Action.AddAuthorizedKey(x)    => addAuthorizedKey(x)
     case AccessAction.Action.RemoveAuthorizedKey(x) => removeAuthorizedKey(x)
-    case AccessAction.Action.ReplaceFstab(x) =>
+    case AccessAction.Action.ReplaceFstab(x)        =>
       TypedFiles.replaceText(
         FstabPath,
         x.content,
@@ -128,7 +135,8 @@ object TypedAccess:
     val createHome = if u.createHome then List("-m") else Nil
     val shell =
       if u.shell.isEmpty then Nil
-      else if !validPathArg(u.shell) then fail(s"not a valid shell: '${u.shell}'")
+      else if !validPathArg(u.shell) then
+        fail(s"not a valid shell: '${u.shell}'")
       else List("-s", u.shell)
     val system = if u.system then List("-r") else Nil
     run(
@@ -158,7 +166,8 @@ object TypedAccess:
       else List("-d", u.home)
     val shell =
       if u.shell.isEmpty then Nil
-      else if !validPathArg(u.shell) then fail(s"not a valid shell: '${u.shell}'")
+      else if !validPathArg(u.shell) then
+        fail(s"not a valid shell: '${u.shell}'")
       else List("-s", u.shell)
     val args = uid ++ group ++ addGroups ++ home ++ shell
     if args.isEmpty then fail("nothing to change")

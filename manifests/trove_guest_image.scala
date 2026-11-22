@@ -79,7 +79,6 @@ object trove_guest_image extends OrpheraApply:
     "ca-certificates"
   )
 
-
   // ---- tst21: the image ------------------------------------------------
 
   private val prepareScript =
@@ -362,7 +361,6 @@ if __name__ == '__main__':
         die('usage: orphera-trove-image upload [--replace] | flavor | present | image-ok | flavor-ok | exists | remove')
 """
 
-
   private val imageHelperPath = "/usr/local/sbin/orphera-trove-image"
 
   private val helper =
@@ -410,7 +408,8 @@ if __name__ == '__main__':
     val uploaded = command(
       "upload the image to Glance",
       s"$imageHelperPath upload$uploadFlags",
-      unless = if rebuild then "" else s"$imageHelperPath image-ok >/dev/null 2>&1",
+      unless =
+        if rebuild then "" else s"$imageHelperPath image-ok >/dev/null 2>&1",
       timeout = 3600
     ).after(build, helperFile, ca)
     val flavor = command(

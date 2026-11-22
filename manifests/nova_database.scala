@@ -36,7 +36,9 @@ object nova_database extends OrpheraApply:
   private val createStatements =
     dbs.map(d => "CREATE DATABASE IF NOT EXISTS " + d + "; ").mkString
   private val grantStatements =
-    dbs.map(d => "GRANT ALL PRIVILEGES ON " + d + ".* TO '" + dbUser + "'@'%'; ").mkString
+    dbs
+      .map(d => "GRANT ALL PRIVILEGES ON " + d + ".* TO '" + dbUser + "'@'%'; ")
+      .mkString
   private val createDatabases =
     s"""mariadb -N -e "${createStatements}CREATE USER IF NOT EXISTS '$dbUser'@'%' IDENTIFIED BY '${dbPassword.reveal}'; ALTER USER '$dbUser'@'%' IDENTIFIED BY '${dbPassword.reveal}'; ${grantStatements}FLUSH PRIVILEGES;""""
 
@@ -51,7 +53,9 @@ object nova_database extends OrpheraApply:
   def describe(node: Node): List[ApplyResource] =
     List(
       command(
-        "the " + dbs.mkString(", ") + " databases and the " + dbUser + " user on the Galera cluster",
+        "the " + dbs.mkString(
+          ", "
+        ) + " databases and the " + dbUser + " user on the Galera cluster",
         createDatabases,
         unless = canLogIn
       )

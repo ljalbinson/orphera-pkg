@@ -59,7 +59,8 @@ object telemetry_prometheus extends OrpheraApply:
   // True when promtool is missing or accepts the configuration.
   private val configOk =
     "! command -v promtool >/dev/null 2>&1 || promtool check config /etc/prometheus/prometheus.yml >/dev/null 2>&1"
-  private val configCheck = "promtool check config /etc/prometheus/prometheus.yml"
+  private val configCheck =
+    "promtool check config /etc/prometheus/prometheus.yml"
 
   private val healthy = "curl -sf http://localhost:9090/-/healthy >/dev/null"
   private val waitHealthy =

@@ -169,7 +169,9 @@ object trove_single_node extends OrpheraApply:
        |done
        |echo "images ready"""".stripMargin
   private val imagesPresent =
-    s"""for img in ${images.mkString(" ")}; do podman image exists $$img || exit 1; done"""
+    s"""for img in ${images.mkString(
+        " "
+      )}; do podman image exists $$img || exit 1; done"""
 
   // Keystone's CA: the last certificate it presents (trust on first use), which must be self-signed.
   // `chainTo DIR` leaves DIR/c1.pem ... DIR/cN.pem, each holding the certificate only: the text s_client
@@ -718,7 +720,9 @@ if __name__ == '__main__':
 
     val tmplFile = secretFile(
       template,
-      Secret(troveConfTemplate), // it holds the database, message bus and service passwords
+      Secret(
+        troveConfTemplate
+      ), // it holds the database, message bus and service passwords
       mode = "0600",
       owner = "root",
       group = "root"
@@ -769,7 +773,8 @@ if __name__ == '__main__':
       renderScript,
       unless = renderCurrent,
       timeout = 60
-    ).after((tmplFile :: mgmt :: srcDirectory :: dirResources)*).notifies(allUnits*)
+    ).after((tmplFile :: mgmt :: srcDirectory :: dirResources)*)
+      .notifies(allUnits*)
 
     val dbSync = command(
       "trove-manage db_sync",

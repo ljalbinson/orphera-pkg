@@ -3,8 +3,8 @@
 package orphera.agent
 
 import java.nio.charset.StandardCharsets
-import java.nio.file.{Files, LinkOption, Path, Paths}
 import java.nio.file.attribute.{BasicFileAttributes, PosixFileAttributes}
+import java.nio.file.{Files, LinkOption, Path, Paths}
 
 import scala.util.{Failure, Success, Try}
 
@@ -33,9 +33,9 @@ object Observe:
 
   /** The files an item reads, for the role's path limits. */
   def paths(it: Observation): List[String] = it.kind match
-    case "path" | "file_text" | "mount"            => List(it.target)
-    case "sysctl" | "module" if it.extra.nonEmpty  => List(it.extra)
-    case _                                         => Nil
+    case "path" | "file_text" | "mount"           => List(it.target)
+    case "sysctl" | "module" if it.extra.nonEmpty => List(it.extra)
+    case _                                        => Nil
 
   def item(it: Observation): ObservedItem =
     Try(one(it)) match
@@ -65,7 +65,7 @@ object Observe:
     if ProtectedPaths.refusal(path).isDefined then fail("protected path")
     val p = Paths.get(path)
     lstat(p) match
-      case None => Map("type" -> "absent")
+      case None                        => Map("type" -> "absent")
       case Some(a) if a.isSymbolicLink =>
         Map("type" -> "link", "target" -> Files.readSymbolicLink(p).toString)
       case Some(a) =>
@@ -105,7 +105,10 @@ object Observe:
         capture("rpm", List("-q", "--qf", "%{VERSION}-%{RELEASE} ", name))
       val base = Map("manager" -> "dnf", "installed" -> "no")
       if code == 0 then
-        base ++ Map("installed" -> "yes", "versions" -> fields(out).mkString(","))
+        base ++ Map(
+          "installed" -> "yes",
+          "versions" -> fields(out).mkString(",")
+        )
       else base
     else Map("manager" -> "none")
 
@@ -187,8 +190,8 @@ object Observe:
       Map("loaded" -> loaded, "persisted" -> firstLineOf(persisted))
     else Map("loaded" -> loaded, "persisted" -> "")
 
-  /** The text of a regular file (up to `MaxText` bytes), for the orchestrator to
-    * work out a line edit from.
+  /** The text of a regular file (up to `MaxText` bytes), for the orchestrator
+    * to work out a line edit from.
     */
   def observeFileText(path: String): Map[String, String] =
     needAbsolute(path)
@@ -197,7 +200,7 @@ object Observe:
     Try(Files.readAttributes(p, classOf[BasicFileAttributes])).toEither match
       case Left(_: java.nio.file.NoSuchFileException) =>
         Map("exists" -> "no")
-      case Left(e) => throw e
+      case Left(e)  => throw e
       case Right(a) =>
         if !a.isRegularFile then fail(s"$path is not a regular file")
         val in = Files.newInputStream(p)
@@ -222,9 +225,10 @@ object Observe:
       case Some(f) =>
         val file = Paths.get(f(5), ".ssh", "authorized_keys")
         val count = Try(Files.readAllBytes(file)).toOption.fold(0) { data =>
-          new String(data, StandardCharsets.UTF_8).split("\n", -1).count { line =>
-            val fs = fields(line)
-            fs.length >= 2 && s"${fs(0)} ${fs(1)}" == keyId
+          new String(data, StandardCharsets.UTF_8).split("\n", -1).count {
+            line =>
+              val fs = fields(line)
+              fs.length >= 2 && s"${fs(0)} ${fs(1)}" == keyId
           }
         }
         Map("exists" -> "yes", "count" -> count.toString)
@@ -275,7 +279,10 @@ object Observe:
       val escaped =
         if bytes(i) == '\\'.toByte && i + 3 < bytes.length then
           Try(
-            Integer.parseInt(new String(bytes, i + 1, 3, StandardCharsets.UTF_8), 8)
+            Integer.parseInt(
+              new String(bytes, i + 1, 3, StandardCharsets.UTF_8),
+              8
+            )
           ).toOption.filter(_ <= 255)
         else None
       escaped match
