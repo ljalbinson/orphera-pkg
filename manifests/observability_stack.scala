@@ -120,7 +120,7 @@ object observability_stack extends OrpheraClusterPlaybook:
       |mkdir -p /etc/apt/keyrings
       |wget -q -O - https://apt.grafana.com/gpg.key | gpg --dearmor > /etc/apt/keyrings/grafana.gpg
       |echo "deb [signed-by=/etc/apt/keyrings/grafana.gpg] https://apt.grafana.com stable main" > /etc/apt/sources.list.d/grafana.list
-      |apt-get update -qq
+      |for try in 1 2 3; do timeout -k 10 180 apt-get update -qq && break; done
       |apt-get install -y -qq grafana
       |echo "grafana package installed from apt.grafana.com"""".stripMargin
 

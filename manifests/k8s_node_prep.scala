@@ -141,8 +141,8 @@ object k8s_node_prep extends OrpheraClusterPlaybook:
        |  | gpg --dearmor --yes -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
        |echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/$k8sMinor/deb/ /" \\
        |  > /etc/apt/sources.list.d/kubernetes.list
-       |apt-get update -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/kubernetes.list \\
-       |  -o Dir::Etc::sourceparts=- -o APT::Get::List-Cleanup=0
+       |for try in 1 2 3; do timeout -k 10 180 apt-get update -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/kubernetes.list \\
+       |  -o Dir::Etc::sourceparts=- -o APT::Get::List-Cleanup=0 && break; done
        |apt-cache policy kubeadm | grep -q 'pkgs.k8s.io' || { echo "kubeadm not offered by pkgs.k8s.io for $k8sMinor" >&2; exit 1; }
        |echo "kubernetes apt repository $k8sMinor configured"""".stripMargin
 
