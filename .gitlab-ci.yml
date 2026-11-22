@@ -28,6 +28,17 @@ compile_and_test:
     - utils/spdx.py --check
     - bash utils/test-shell-sources.sh
     - sbt clean compile "scalafixAll --check" test
+    - sbt agent/assembly orchestrator/assembly scripting/assembly
+  # The three jars, from the same commit that just passed the checks above
+  # (artifacts are kept for a successful job only). Download them from the job
+  # page, or the pipeline's Jobs tab.
+  artifacts:
+    name: "orphera-jars-$CI_COMMIT_SHORT_SHA"
+    expire_in: 2 weeks
+    paths:
+      - agent/target/scala-3.8.4/agent-assembly-*.jar
+      - orchestrator/target/scala-3.8.4/orchestrator-assembly-*.jar
+      - scripting/target/scala-3.8.4/scripting-assembly-*.jar
 
 # Runs on runner0 (shell executor, tag orphera): see docs/GITLAB-RUNNER.md. The
 # global image, cache and before_script above are for the Docker runners, so this
