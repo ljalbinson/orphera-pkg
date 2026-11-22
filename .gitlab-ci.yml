@@ -31,13 +31,15 @@ compile_and_test:
 
 # Runs on runner0 (shell executor, tag orphera): see docs/GITLAB-RUNNER.md. The
 # global image, cache and before_script above are for the Docker runners, so this
-# job turns them off. Needs the protected CI variables ORPHERA_TOKEN,
+# job turns them off. `needs: []` starts it at once instead of after the build stage,
+# which waits for a Docker runner. Needs the protected CI variables ORPHERA_TOKEN,
 # ORPHERA_OPERATOR and ORPHERA_CERTS_DIR, so it runs on protected branches only.
 # The `pipeline` role in access.yaml allows version, facts, uptime and observe on
 # tst0 and nothing else: widen it before adding jobs that touch other nodes.
 orphera-reachable:
   stage: orphera
   tags: [orphera]
+  needs: []
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
   cache: []
