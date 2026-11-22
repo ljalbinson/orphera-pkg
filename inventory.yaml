@@ -327,7 +327,7 @@ nodes:
   - name: runner0
     host: runner0.ljalbinson.com
     vars:
-      cluster_ip: "10.10.5.65"
+      cluster_ip: "10.10.8.20"
 
   - name: gs1
     host: gs1.ljalbinson.com
