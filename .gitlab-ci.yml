@@ -28,7 +28,7 @@ compile_and_test:
     - utils/spdx.py --check
     - bash utils/test-shell-sources.sh
     - sbt clean compile "scalafixAll --check" test
-    - apt-get install -y -qq rpm
+    - apt-get install -y -qq make rpm
     - make deb rpm cli-package
   # The three jars and the packages built from them (the Scala agent's .deb and
   # .rpm; the command line's .deb, .rpm and tarball), from the same commit that
