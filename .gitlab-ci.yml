@@ -40,6 +40,32 @@ compile_and_test:
       - orchestrator/target/scala-3.8.4/orchestrator-assembly-*.jar
       - scripting/target/scala-3.8.4/scripting-assembly-*.jar
 
+# The Go agent: vet and tests with the race detector (`make test`, which `deb` and
+# `rpm` run first), then the amd64 packages. Same Docker runner as the job above,
+# with its own image, so nothing is installed on the runner. The Go version is the
+# `go` line of agent-go/go.mod. The global before_script is for sbt, so this job
+# replaces it with the one tool it needs, rpmbuild.
+go_agent:
+  stage: build
+  image: golang:1.22
+  variables:
+    GOPATH: "$CI_PROJECT_DIR/.go"
+  cache:
+    key: "go-$CI_COMMIT_REF_SLUG"
+    paths:
+      - .go/pkg/mod/
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq rpm
+  script:
+    - go version
+    - make -C agent-go deb rpm
+  artifacts:
+    name: "orphera-agent-go-$CI_COMMIT_SHORT_SHA"
+    expire_in: 2 weeks
+    paths:
+      - agent-go/orphera-agent_*_amd64.deb
+      - agent-go/orphera-agent-*.x86_64.rpm
+
 # Runs on runner0 (shell executor, tag orphera): see docs/GITLAB-RUNNER.md. The
 # global image, cache and before_script above are for the Docker runners, so this
 # job turns them off. `needs: []` starts it at once instead of after the build stage,
