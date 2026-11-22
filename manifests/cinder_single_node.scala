@@ -133,7 +133,8 @@ object cinder_single_node extends OrpheraApply:
     serviceNames.map(n =>
       cinderContainer(
         n,
-        if n == "cinder-volume" then List("SYS_ADMIN", "NET_ADMIN", "DAC_READ_SEARCH")
+        if n == "cinder-volume" then
+          List("SYS_ADMIN", "NET_ADMIN", "DAC_READ_SEARCH")
         else Nil
       )
     )
@@ -229,7 +230,9 @@ object cinder_single_node extends OrpheraApply:
        |done
        |echo "images ready"""".stripMargin
   private val imagesPresent =
-    s"""for img in ${images.mkString(" ")}; do podman image exists $$img || exit 1; done"""
+    s"""for img in ${images.mkString(
+        " "
+      )}; do podman image exists $$img || exit 1; done"""
 
   // Keystone's CA: the last certificate it presents (trust on first use),
   // which must be self-signed. `chainTo DIR` leaves DIR/c1.pem ... DIR/cN.pem,
@@ -638,7 +641,9 @@ if __name__ == '__main__':
       val dirRes = directory(dir, mode = "0755")
       val conf = secretFile(
         s"$dir/cinder.conf",
-        Secret(cinderConfText), // it holds the database, message bus and service passwords
+        Secret(
+          cinderConfText
+        ), // it holds the database, message bus and service passwords
         mode = "0640",
         owner = "root",
         group = "root"

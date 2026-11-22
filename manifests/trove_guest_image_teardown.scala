@@ -32,8 +32,10 @@ object trove_guest_image_teardown extends OrpheraApply:
 
   // ---- tst25 ----
   private val dbHelper = "/usr/local/sbin/orphera-trove-db"
-  private val registerScriptPath = "/var/lib/orphera/trove/register-datastore.sh"
-  private val cleanupInstance = s"""$dbHelper instance-cleanup || echo "instance cleanup failed (continuing)""""
+  private val registerScriptPath =
+    "/var/lib/orphera/trove/register-datastore.sh"
+  private val cleanupInstance =
+    s"""$dbHelper instance-cleanup || echo "instance cleanup failed (continuing)""""
   private val removeNodeFiles =
     s"""rm -f $dbHelper $registerScriptPath
        |echo "database helper removed"""".stripMargin
@@ -62,17 +64,21 @@ object trove_guest_image_teardown extends OrpheraApply:
 
   // ---- tst21 ----
   private val imageHelper = "/usr/local/sbin/orphera-trove-image"
-  private val removeImage = s"$imageHelper remove || echo \"Glance cleanup failed (continuing)\""
+  private val removeImage =
+    s"$imageHelper remove || echo \"Glance cleanup failed (continuing)\""
   // True when Glance has a guest image or the flavor is there.
-  private val imageExists = s"[ -x $imageHelper ] && $imageHelper exists >/dev/null 2>&1"
+  private val imageExists =
+    s"[ -x $imageHelper ] && $imageHelper exists >/dev/null 2>&1"
   private val helperPaths = s"$imageHelper /var/lib/orphera/trove-image/ca.crt"
-  private val helperExists = s"for p in $helperPaths; do [ -e \"$$p\" ] && exit 0; done; exit 1"
+  private val helperExists =
+    s"for p in $helperPaths; do [ -e \"$$p\" ] && exit 0; done; exit 1"
   private val removeHelper =
     s"""rm -f $helperPaths
        |echo "image helper removed"""".stripMargin
   private val buildPaths =
     "/var/lib/orphera/trove-image /opt/diskimage-builder-env /var/cache/orphera-trove-dib /opt/trove-src"
-  private val buildExists = s"for p in $buildPaths; do [ -e \"$$p\" ] && exit 0; done; exit 1"
+  private val buildExists =
+    s"for p in $buildPaths; do [ -e \"$$p\" ] && exit 0; done; exit 1"
   private val removeBuildFiles =
     s"""rm -rf $buildPaths
        |echo "build files removed"""".stripMargin

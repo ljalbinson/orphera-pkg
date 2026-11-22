@@ -60,7 +60,10 @@ object gitlab_runner_docker extends OrpheraClusterPlaybook:
       )
 
   private val gitlabCa: Option[Path] =
-    sys.env.get("GITLAB_CA").filter(_.nonEmpty).map(p => Paths.get(p).toAbsolutePath)
+    sys.env
+      .get("GITLAB_CA")
+      .filter(_.nonEmpty)
+      .map(p => Paths.get(p).toAbsolutePath)
 
   if gitlabCa.exists(p => !Files.exists(p)) then
     throw new RuntimeException(
@@ -74,7 +77,8 @@ object gitlab_runner_docker extends OrpheraClusterPlaybook:
   private val mode644 = 420 // 0644
   private val caDest = "/var/tmp/orphera-gitlab-ca.crt"
 
-  private val packages = List("docker.io", "git", "curl", "gnupg", "ca-certificates")
+  private val packages =
+    List("docker.io", "git", "curl", "gnupg", "ca-certificates")
 
   private val repoScript =
     """set -e
@@ -146,11 +150,13 @@ object gitlab_runner_docker extends OrpheraClusterPlaybook:
       stage("register-the-runner", host)
         .task("GitLab's CA certificate")(
           gitlabCa match
-            case Some(p) => Task.Copy(p.toString, caDest, "root", "root", mode644)
-            case None    => Task.RunCommand(List("true"), timeoutSeconds = 10)
+            case Some(p) =>
+              Task.Copy(p.toString, caDest, "root", "root", mode644)
+            case None => Task.RunCommand(List("true"), timeoutSeconds = 10)
         )
         .task(s"register with $gitlabUrl and start the service")(
-          Task.RunCommand(List("sh", "-c", registerScript), timeoutSeconds = 120)
+          Task
+            .RunCommand(List("sh", "-c", registerScript), timeoutSeconds = 120)
         )
         .build,
       stage("pull-the-image", host)

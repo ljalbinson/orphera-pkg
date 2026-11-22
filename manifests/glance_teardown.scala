@@ -33,7 +33,8 @@ object glance_teardown extends OrpheraApply:
   override def nodes: List[String] = List(cephNode, dbNode, node)
 
   // ---- tst13 ----
-  private val registeredInKeystone = s"[ -x $helper ] && $helper registered >/dev/null 2>&1"
+  private val registeredInKeystone =
+    s"[ -x $helper ] && $helper registered >/dev/null 2>&1"
   private val unregisterScript =
     s"""$helper unregister || echo "keystone cleanup failed (continuing)""""
 
@@ -54,7 +55,8 @@ object glance_teardown extends OrpheraApply:
     "/var/log/kolla/glance"
   )
 
-  private val imageExists = s"command -v podman >/dev/null 2>&1 && podman image exists $image"
+  private val imageExists =
+    s"command -v podman >/dev/null 2>&1 && podman image exists $image"
 
   // ---- tst3 ----
   private val dropDatabaseScript =

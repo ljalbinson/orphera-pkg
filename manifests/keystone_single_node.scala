@@ -557,7 +557,8 @@ object keystone_single_node extends OrpheraApply:
       kollaConfigScript(confDir),
       unless = kollaFilesCurrent,
       timeout = 300
-    ).after(pulled, confDirectory, sslDirectory, logDirectory).notifies(unitService)
+    ).after(pulled, confDirectory, sslDirectory, logDirectory)
+      .notifies(unitService)
 
     val init = command(
       "db_sync, fernet and credential keys, bootstrap",
@@ -573,7 +574,8 @@ object keystone_single_node extends OrpheraApply:
       owner = "root",
       group = "root"
     ).notifies(unitService)
-    val running = unitService.after(init, unitFile, kollaFiles, chain, conf, ssoPage)
+    val running =
+      unitService.after(init, unitFile, kollaFiles, chain, conf, ssoPage)
 
     val tokenHelperFile = secretFile(
       "/usr/local/sbin/keystone-admin-token",

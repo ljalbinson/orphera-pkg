@@ -93,52 +93,54 @@ object dashboard_tls extends OrpheraClusterPlaybook:
 
   val playbook: ClusterPlaybook =
     clusterPlaybook("dashboard-tls")(
-    stage("dashboard-tls-request", node)
-      .task("make the TLS key and certificate request")(
-        Task.RunCommand(List("sh", "-c", tlsRequestScript), timeoutSeconds = 60)
-      )
-      .build,
-    stage("dashboard-tls-sign", ksNode)
-      .task(s"prepare $signDir")(
-        Task.RunCommand(List("sh", "-c", signDirScript))
-      )
-      .task(s"fetch the certificate request from $node")(
-        Task.DistributeFile(
-          node,
-          s"$tlsDir/server.csr",
-          s"$signDir/server.csr",
-          "root",
-          "root",
-          420
+      stage("dashboard-tls-request", node)
+        .task("make the TLS key and certificate request")(
+          Task
+            .RunCommand(List("sh", "-c", tlsRequestScript), timeoutSeconds = 60)
         )
-      )
-      .task(s"sign the certificate for $fqdn with the test CA")(
-        Task.RunCommand(List("sh", "-c", signScript), timeoutSeconds = 60)
-      )
-      .build,
-    stage("dashboard-tls-install", node)
-      .task(s"fetch the certificate from $ksNode")(
-        Task.DistributeFile(
-          ksNode,
-          s"$signDir/server.crt",
-          s"$tlsDir/server.crt",
-          "root",
-          "root",
-          420
+        .build,
+      stage("dashboard-tls-sign", ksNode)
+        .task(s"prepare $signDir")(
+          Task.RunCommand(List("sh", "-c", signDirScript))
         )
-      )
-      .task(s"fetch the CA certificate from $ksNode")(
-        Task.DistributeFile(
-          ksNode,
-          s"$signDir/ca.crt",
-          s"$tlsDir/ca.crt",
-          "root",
-          "root",
-          420
+        .task(s"fetch the certificate request from $node")(
+          Task.DistributeFile(
+            node,
+            s"$tlsDir/server.csr",
+            s"$signDir/server.csr",
+            "root",
+            "root",
+            420
+          )
         )
-      )
-      .task("check the certificate and write the chain")(
-        Task.RunCommand(List("sh", "-c", tlsInstallScript), timeoutSeconds = 60)
-      )
-      .build
-  )
+        .task(s"sign the certificate for $fqdn with the test CA")(
+          Task.RunCommand(List("sh", "-c", signScript), timeoutSeconds = 60)
+        )
+        .build,
+      stage("dashboard-tls-install", node)
+        .task(s"fetch the certificate from $ksNode")(
+          Task.DistributeFile(
+            ksNode,
+            s"$signDir/server.crt",
+            s"$tlsDir/server.crt",
+            "root",
+            "root",
+            420
+          )
+        )
+        .task(s"fetch the CA certificate from $ksNode")(
+          Task.DistributeFile(
+            ksNode,
+            s"$signDir/ca.crt",
+            s"$tlsDir/ca.crt",
+            "root",
+            "root",
+            420
+          )
+        )
+        .task("check the certificate and write the chain")(
+          Task
+            .RunCommand(List("sh", "-c", tlsInstallScript), timeoutSeconds = 60)
+        )
+        .build
+    )

@@ -36,7 +36,9 @@ object nova_compute_discover extends OrpheraApply:
   private val allMapped =
     s"""NM="$nm"
        |OUT=$$($$NM cell_v2 list_hosts 2>/dev/null) || exit 1
-       |for h in ${computeHosts.mkString(" ")}; do printf '%s\\n' "$$OUT" | grep -qw "$$h" || exit 1; done""".stripMargin
+       |for h in ${computeHosts.mkString(
+        " "
+      )}; do printf '%s\\n' "$$OUT" | grep -qw "$$h" || exit 1; done""".stripMargin
 
   // The services may have registered a moment ago: discover, check, and try again for up to a minute.
   private val discoverScript =
@@ -45,7 +47,9 @@ object nova_compute_discover extends OrpheraApply:
        |  $$NM cell_v2 discover_hosts --verbose
        |  OUT=$$($$NM cell_v2 list_hosts)
        |  MISSING=""
-       |  for h in ${computeHosts.mkString(" ")}; do printf '%s\\n' "$$OUT" | grep -qw "$$h" || MISSING="$$MISSING $$h"; done
+       |  for h in ${computeHosts.mkString(
+        " "
+      )}; do printf '%s\\n' "$$OUT" | grep -qw "$$h" || MISSING="$$MISSING $$h"; done
        |  if [ -z "$$MISSING" ]; then echo "compute hosts mapped into cell1"; exit 0; fi
        |  sleep 5
        |done

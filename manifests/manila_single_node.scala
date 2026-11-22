@@ -127,7 +127,8 @@ object manila_single_node extends OrpheraApply:
         .putInt(0)
         .putShort(16.toShort)
         .array()
-      val derived = java.util.Base64.getEncoder.encodeToString(header ++ keyBytes)
+      val derived =
+        java.util.Base64.getEncoder.encodeToString(header ++ keyBytes)
       Secrets.register(derived)
       derived
 
@@ -202,7 +203,9 @@ object manila_single_node extends OrpheraApply:
        |done
        |echo "images ready"""".stripMargin
   private val imagesPresent =
-    s"""for img in ${images.mkString(" ")}; do podman image exists $$img || exit 1; done"""
+    s"""for img in ${images.mkString(
+        " "
+      )}; do podman image exists $$img || exit 1; done"""
 
   // The share service imports rados and cephfs; without them it starts and then fails with an import error.
   private val shareImageHasCeph =
@@ -754,7 +757,6 @@ if __name__ == '__main__':
         die('usage: orphera-manila-api register | registered | unregister | catalog | services | services-up | share-type | share-type-ok | share-cycle')
 """
 
-
   private val helper =
     apiHelperPython
       .replace("@@KS@@", ksFqdn)
@@ -833,7 +835,9 @@ if __name__ == '__main__':
       val dirRes = directory(dir, mode = "0755")
       val conf = secretFile(
         s"$dir/manila.conf",
-        Secret(manilaConf), // it holds the database, message bus and service passwords
+        Secret(
+          manilaConf
+        ), // it holds the database, message bus and service passwords
         mode = "0600",
         owner = "root",
         group = "root"

@@ -205,7 +205,9 @@ object barbican_single_node extends OrpheraApply:
        |done
        |echo "images ready"""".stripMargin
   private val imagesPresent =
-    s"""for img in ${images.mkString(" ")}; do podman image exists $$img || exit 1; done"""
+    s"""for img in ${images.mkString(
+        " "
+      )}; do podman image exists $$img || exit 1; done"""
 
   // Keystone's CA: the last certificate it presents (trust on first use),
   // which must be self-signed. `chainTo DIR` leaves DIR/c1.pem ... DIR/cN.pem,
@@ -648,7 +650,9 @@ if __name__ == '__main__':
       val dirRes = directory(dir, mode = "0755")
       val conf = secretFile(
         s"$dir/barbican.conf",
-        Secret(barbicanConf), // it holds the database, message bus, service and key-encrypting passwords
+        Secret(
+          barbicanConf
+        ), // it holds the database, message bus, service and key-encrypting passwords
         mode = "0640",
         owner = "root",
         group = "root"

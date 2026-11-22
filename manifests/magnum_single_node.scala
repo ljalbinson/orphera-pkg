@@ -165,7 +165,8 @@ object magnum_single_node extends OrpheraApply:
   private def magnumContainer(service: String): Container =
     Container(
       name = ContainerName(service),
-      image = ExternalImage(if service == "magnum-api" then apiBase else conductorBase),
+      image = ExternalImage(if service == "magnum-api" then apiBase
+      else conductorBase),
       mounts = List(
         Mount(s"$confRoot/$service", "/var/lib/kolla/config_files"),
         Mount(logDir, "/var/log/kolla/magnum", Access.ReadWrite),
@@ -210,7 +211,9 @@ object magnum_single_node extends OrpheraApply:
        |done
        |echo "images ready"""".stripMargin
   private val imagesPresent =
-    s"""for img in ${images.mkString(" ")}; do podman image exists $$img || exit 1; done"""
+    s"""for img in ${images.mkString(
+        " "
+      )}; do podman image exists $$img || exit 1; done"""
 
   // The commands the service needs are in its image, and the image can switch off the other Cluster API driver.
   private val imageCommandsScript =
@@ -285,7 +288,8 @@ object magnum_single_node extends OrpheraApply:
        |chmod -R a+rX /out
        |PYTHONPATH=/out "$$PY" -c 'import magnum_capi_helm.driver; print("driver import ok")'""".stripMargin
 
-  private val driverStamp = Resource.sha256(installInImage + apiBase + conductorBase)
+  private val driverStamp =
+    Resource.sha256(installInImage + apiBase + conductorBase)
   private val driverStampFile = s"$stateDir/driver.stamp"
   // True when the driver imports in the conductor image with the directory mounted, helm is there, and the stamp
   // is the one the last install made.
@@ -797,7 +801,6 @@ if __name__ == '__main__':
         die('usage: orphera-magnum-api register | registered | unregister | catalog | mservices | resources | resources-ok | image-present | image-upload FILE KUBE_VERSION OS_VERSION | template | template-ok | cluster-cycle | delete-clusters | teardown')
 """
 
-
   private val helper =
     apiHelperPython
       .replace("@@KS@@", ksFqdn)
@@ -894,7 +897,6 @@ if __name__ == '__main__':
        |lock_path = /var/lib/magnum/tmp
        |""".stripMargin
 
-
   // The files every service's config.json copies in, and the ownership it sets.
   private def configJson(service: String): String =
     s"""{"command": "$service", "config_files": [
@@ -952,7 +954,9 @@ if __name__ == '__main__':
 
   // What was asked for, to tell a downloaded image from one for another choice.
   private val imageChoice =
-    Resource.sha256(k8sVersion + "|" + k8sMinor + "|" + k8sImageUrl + "|" + k8sOsVersion + "|" + manifestUrl)
+    Resource.sha256(
+      k8sVersion + "|" + k8sMinor + "|" + k8sImageUrl + "|" + k8sOsVersion + "|" + manifestUrl
+    )
 
   // Step one: choose the image, download it and check it, and note what was chosen in image.current.
   private val fetchImageScript =
@@ -1051,7 +1055,6 @@ if __name__ == '__main__':
   private val imageFetched =
     s"""$imagePresent || ( [ -s $stateDir/image.current ] && . $stateDir/image.current && [ "$$CHOICE" = "$imageChoice" ] && [ -s "$$IMG" ] )"""
 
-
   // The API answers its version document without a token (200, or 300 for a list of versions).
   private val healthy =
     s"""CODE=$$(curl -s -o /dev/null -w '%{http_code}' http://localhost:$apiPort/); [ "$$CODE" = "200" ] || [ "$$CODE" = "300" ]"""
@@ -1141,50 +1144,56 @@ if __name__ == '__main__':
       unless = driverCurrent,
       timeout = 1800
     ).after(
-      (commandsOk :: pulled :: podman :: tools(1) :: stateDirectory :: pylibDirectory :: buildDirectory :: Nil)*
+      (commandsOk :: pulled :: podman :: tools(
+        1
+      ) :: stateDirectory :: pylibDirectory :: buildDirectory :: Nil)*
     ).notifies(unitServices*)
 
     // One config directory per service, mounted by Kolla at /var/lib/kolla/config_files.
-    val svcs = serviceNames.zip(containers).zip(unitServices).map { case ((name, c), unitService) =>
-      val dir = s"$confRoot/$name"
-      val dirRes = directory(dir, mode = "0755")
-      val conf = secretFile(
-        s"$dir/magnum.conf",
-        Secret(magnumConf), // it holds the database, message bus and service passwords
-        mode = "0600",
-        owner = "root",
-        group = "root"
-      ).after(dirRes).notifies(unitService)
-      val kollaCa = fileCopy(
-        s"$dir/ca.crt",
-        caCert,
-        mode = "0644"
-      ).after(ca, dirRes).notifies(unitService)
-      // The management cluster's kubeconfig (capi_management_cluster.scala) is a file on this node.
-      // (a missing kubeconfig fails with "the source ... is not on the node": apply capi_management_cluster.scala first)
-      val kubeconfig = fileCopy(s"$dir/kubeconfig", mgmtKubeconfig, mode = "0600")
-        .after(dirRes)
-        .notifies(unitService)
-      val kollaJson = file(
-        s"$dir/config.json",
-        configJson(name),
-        mode = "0644",
-        owner = "root",
-        group = "root"
-      ).after(dirRes).notifies(unitService)
-      val unitFile = file(
-        c.unitPath,
-        c.render,
-        mode = "0644",
-        owner = "root",
-        group = "root"
-      ).notifies(unitService)
-      Svc(
-        unitService,
-        List(dirRes, conf, kollaCa, kubeconfig, kollaJson, unitFile),
-        List(conf, kollaCa, kubeconfig, kollaJson, unitFile),
-        conf
-      )
+    val svcs = serviceNames.zip(containers).zip(unitServices).map {
+      case ((name, c), unitService) =>
+        val dir = s"$confRoot/$name"
+        val dirRes = directory(dir, mode = "0755")
+        val conf = secretFile(
+          s"$dir/magnum.conf",
+          Secret(
+            magnumConf
+          ), // it holds the database, message bus and service passwords
+          mode = "0600",
+          owner = "root",
+          group = "root"
+        ).after(dirRes).notifies(unitService)
+        val kollaCa = fileCopy(
+          s"$dir/ca.crt",
+          caCert,
+          mode = "0644"
+        ).after(ca, dirRes).notifies(unitService)
+        // The management cluster's kubeconfig (capi_management_cluster.scala) is a file on this node.
+        // (a missing kubeconfig fails with "the source ... is not on the node": apply capi_management_cluster.scala first)
+        val kubeconfig =
+          fileCopy(s"$dir/kubeconfig", mgmtKubeconfig, mode = "0600")
+            .after(dirRes)
+            .notifies(unitService)
+        val kollaJson = file(
+          s"$dir/config.json",
+          configJson(name),
+          mode = "0644",
+          owner = "root",
+          group = "root"
+        ).after(dirRes).notifies(unitService)
+        val unitFile = file(
+          c.unitPath,
+          c.render,
+          mode = "0644",
+          owner = "root",
+          group = "root"
+        ).notifies(unitService)
+        Svc(
+          unitService,
+          List(dirRes, conf, kollaCa, kubeconfig, kollaJson, unitFile),
+          List(conf, kollaCa, kubeconfig, kollaJson, unitFile),
+          conf
+        )
     }
     val apiConf = svcs.last.conf
 
@@ -1197,7 +1206,9 @@ if __name__ == '__main__':
 
     val helperFile = secretFile(
       helperPath,
-      Secret(helper), // it holds the admin, magnum and trustee domain admin passwords
+      Secret(
+        helper
+      ), // it holds the admin, magnum and trustee domain admin passwords
       mode = "0700",
       owner = "root",
       group = "root"
@@ -1279,4 +1290,13 @@ if __name__ == '__main__':
       pylibDirectory,
       driver
     ) ++ svcs.flatMap(_.resources) ++ List(dbSync, helperFile, registered) ++
-      running ++ List(answering, reporting, flavor, fetchedImage, nodeImage, clusterTemplate, route, cycle)
+      running ++ List(
+        answering,
+        reporting,
+        flavor,
+        fetchedImage,
+        nodeImage,
+        clusterTemplate,
+        route,
+        cycle
+      )

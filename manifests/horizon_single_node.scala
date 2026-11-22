@@ -514,7 +514,8 @@ if __name__ == '__main__':
       group = "root"
     )
 
-    val running = unitService.after(settings, kollaCa, certCopy, vhost, unitFile)
+    val running =
+      unitService.after(settings, kollaCa, certCopy, vhost, unitFile)
     val answering = command(
       "horizon answers on its port",
       waitHealthy,

@@ -267,7 +267,10 @@ object observability_extended extends OrpheraClusterPlaybook:
       mode = "0644"
     )
     val unit = service("prometheus")
-    ApplyPlan.orFail("prometheus-config-extended", List(dir, cfg.after(dir).notifies(unit), unit))
+    ApplyPlan.orFail(
+      "prometheus-config-extended",
+      List(dir, cfg.after(dir).notifies(unit), unit)
+    )
 
   // Same "prove the real thing" shape as observability_stack.scala's own
   // health check: total expected targets is node_exporter(6) +

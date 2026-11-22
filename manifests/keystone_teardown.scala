@@ -62,7 +62,8 @@ object keystone_teardown extends OrpheraApply:
        |fi
        |echo "keystone config, keys, logs and test CA removed"""".stripMargin
 
-  private val imageExists = s"command -v podman >/dev/null 2>&1 && podman image exists $image"
+  private val imageExists =
+    s"command -v podman >/dev/null 2>&1 && podman image exists $image"
 
   def describe(target: Node): List[ApplyResource] =
     if target.name == dbNode then

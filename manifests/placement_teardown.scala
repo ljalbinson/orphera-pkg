@@ -29,7 +29,8 @@ object placement_teardown extends OrpheraApply:
 
   override def nodes: List[String] = List(dbNode, node)
 
-  private val registeredInKeystone = s"[ -x $helper ] && $helper registered >/dev/null 2>&1"
+  private val registeredInKeystone =
+    s"[ -x $helper ] && $helper registered >/dev/null 2>&1"
   private val unregisterScript =
     s"""$helper unregister || echo "keystone cleanup failed (continuing)""""
 

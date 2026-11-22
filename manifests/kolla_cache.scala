@@ -99,7 +99,9 @@ object kolla_cache extends OrpheraApply:
   // True when the catalog lists every image to warm.
   private val warm =
     s"""C=$$(curl -s http://localhost:$port/v2/_catalog)
-       |for name in ${warmImages.mkString(" ")}; do printf '%s' "$$C" | grep -q "openstack.kolla/$$name" || exit 1; done""".stripMargin
+       |for name in ${warmImages.mkString(
+        " "
+      )}; do printf '%s' "$$C" | grep -q "openstack.kolla/$$name" || exit 1; done""".stripMargin
 
   def describe(target: Node): List[ApplyResource] =
     val tools = hostPackages.map(p => pkg(p, updateCache = true))

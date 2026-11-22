@@ -107,7 +107,10 @@ object observability_stack extends OrpheraClusterPlaybook:
       mode = "0644"
     )
     val unit = service("prometheus")
-    ApplyPlan.orFail("prometheus-config", List(dir, cfg.after(dir).notifies(unit), unit))
+    ApplyPlan.orFail(
+      "prometheus-config",
+      List(dir, cfg.after(dir).notifies(unit), unit)
+    )
 
   // tst7 only. The one genuinely new technique in this file — see the
   // header comment. `signed-by` (not the deprecated `apt-key add`) is

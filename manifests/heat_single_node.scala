@@ -207,7 +207,9 @@ object heat_single_node extends OrpheraApply:
        |done
        |echo "images ready"""".stripMargin
   private val imagesPresent =
-    s"""for img in ${images.mkString(" ")}; do podman image exists $$img || exit 1; done"""
+    s"""for img in ${images.mkString(
+        " "
+      )}; do podman image exists $$img || exit 1; done"""
 
   // Keystone's CA: the last certificate it presents (trust on first use),
   // which must be self-signed. `chainTo DIR` leaves DIR/c1.pem ... DIR/cN.pem,
@@ -706,7 +708,9 @@ if __name__ == '__main__':
       val dirRes = directory(dir, mode = "0755")
       val conf = secretFile(
         s"$dir/heat.conf",
-        Secret(heatConf), // it holds the database, message bus and service passwords
+        Secret(
+          heatConf
+        ), // it holds the database, message bus and service passwords
         mode = "0640",
         owner = "root",
         group = "root"
@@ -729,9 +733,17 @@ if __name__ == '__main__':
           val (svc, wsgi, standalone, port, image) =
             if name == "heat-api" then
               ("api", "heat-wsgi-api", "heat-api", apiPort, apiImage)
-            else ("api-cfn", "heat-wsgi-api-cfn", "heat-api-cfn", cfnPort, cfnImage)
+            else
+              (
+                "api-cfn",
+                "heat-wsgi-api-cfn",
+                "heat-api-cfn",
+                cfnPort,
+                cfnImage
+              )
           val real = kollaWebScript(svc, wsgi, standalone, port, image, dir)
-          val temporary = kollaWebScript(svc, wsgi, standalone, port, image, "$T")
+          val temporary =
+            kollaWebScript(svc, wsgi, standalone, port, image, "$T")
           command(
             s"write the Apache vhost and the Kolla config.json for $name",
             real,

@@ -299,7 +299,9 @@ object designate_single_node extends OrpheraApply:
        |done
        |echo "images ready"""".stripMargin
   private val imagesPresent =
-    s"""for img in ${images.mkString(" ")}; do podman image exists $$img || exit 1; done"""
+    s"""for img in ${images.mkString(
+        " "
+      )}; do podman image exists $$img || exit 1; done"""
 
   // Keystone's CA: the last certificate it presents (trust on first use),
   // which must be self-signed. `chainTo DIR` leaves DIR/c1.pem ... DIR/cN.pem,
@@ -831,7 +833,10 @@ if __name__ == '__main__':
     // The units come first so that what they depend on can name them in `notifies`.
     val bindUnit = service(bind9.unitName)
     val unitOf: Map[String, ApplyResource] =
-      designateNames.zip(designateServices).map((n, c) => n -> service(c.unitName)).toMap
+      designateNames
+        .zip(designateServices)
+        .map((n, c) => n -> service(c.unitName))
+        .toMap
 
     // ---- BIND9: its config directory, named.conf, the rndc key (made once) and config.json ----
     val bindDirRes = directory(bindDir, mode = "0755")
@@ -871,7 +876,9 @@ if __name__ == '__main__':
       val dirRes = directory(dir, mode = "0755")
       val conf = secretFile(
         s"$dir/designate.conf",
-        Secret(designateConf), // it holds the database, message bus and service passwords
+        Secret(
+          designateConf
+        ), // it holds the database, message bus and service passwords
         mode = "0640",
         owner = "root",
         group = "root"
@@ -927,7 +934,8 @@ if __name__ == '__main__':
           )
         case "designate-worker" =>
           val rndcHere = fileCopy(s"$dir/rndc.key", rndcKey, mode = "0600")
-            .after(rndcMade, dirRes).notifies(unitService)
+            .after(rndcMade, dirRes)
+            .notifies(unitService)
           val rndcInImage = command(
             "the worker image has rndc",
             workerRndcMissing,
@@ -952,7 +960,9 @@ if __name__ == '__main__':
       unless = dbCurrent,
       timeout = 600
     ).after(
-      (pulled :: logDirectory :: stateDirectory :: byName("designate-central").deps)*
+      (pulled :: logDirectory :: stateDirectory :: byName(
+        "designate-central"
+      ).deps)*
     )
 
     val helperFile = secretFile(

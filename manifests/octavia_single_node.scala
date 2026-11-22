@@ -209,7 +209,9 @@ object octavia_single_node extends OrpheraApply:
        |done
        |echo "images ready"""".stripMargin
   private val imagesPresent =
-    s"""for img in ${images.mkString(" ")}; do podman image exists $$img || exit 1; done"""
+    s"""for img in ${images.mkString(
+        " "
+      )}; do podman image exists $$img || exit 1; done"""
 
   // Every command the units and the database step run must exist in its image.
   private val imageCheckScript: String =
@@ -228,7 +230,6 @@ object octavia_single_node extends OrpheraApply:
        |  exit 1
        |fi
        |echo "the Octavia commands are in the images"""".stripMargin
-
 
   private val imageCheckOk = s"( $imageCheckScript ) >/dev/null 2>&1"
 
@@ -366,7 +367,6 @@ object octavia_single_node extends OrpheraApply:
       |systemctl start orphera-octavia-hm-port.service
       |ip -4 -o addr show dev o-hm0""".stripMargin
 
-
   // Current when all the certificate files are there and the passphrase opens both CA keys (the test the script
   // above makes before it decides to make new ones).
   private val certsCurrent =
@@ -481,7 +481,6 @@ object octavia_single_node extends OrpheraApply:
        |lock_path = /var/lib/octavia/tmp
        |""".stripMargin
 
-
   private val renderConfScript =
     fill(
       """set -e
@@ -495,7 +494,6 @@ object octavia_single_node extends OrpheraApply:
         |mv @@SRC@@/octavia.conf.new @@SRC@@/octavia.conf
         |echo "octavia.conf written (health manager $HM_IP, amphora network $AMP_NET_ID)"""".stripMargin
     )
-
 
   // Current when filling in the template from ids.env gives the installed octavia.conf.
   private val renderCurrent =
@@ -520,9 +518,16 @@ object octavia_single_node extends OrpheraApply:
        |""".stripMargin
 
   // The certificate files every container gets, with their modes.
-  private val certFiles = List("server_ca.key.pem", "server_ca.cert.pem", "client_ca.cert.pem", "client.cert-and-key.pem")
+  private val certFiles = List(
+    "server_ca.key.pem",
+    "server_ca.cert.pem",
+    "client_ca.cert.pem",
+    "client.cert-and-key.pem"
+  )
   private def certsCopyCurrent(dir: String): String =
-    s"""for f in ${certFiles.mkString(" ")}; do cmp -s $certDir/$$f $dir/$$f || exit 1; done"""
+    s"""for f in ${certFiles.mkString(
+        " "
+      )}; do cmp -s $certDir/$$f $dir/$$f || exit 1; done"""
   private def certsCopyScript(dir: String): String =
     s"""set -e
        |for f in ${certFiles.mkString(" ")}; do
@@ -591,7 +596,8 @@ object octavia_single_node extends OrpheraApply:
        |  exit 1
        |fi
        |ls -l $$IMG""".stripMargin
-  private val imageFileOk = s"""[ "$$(head -c 3 $amphoraFile 2>/dev/null)" = "QFI" ]"""
+  private val imageFileOk =
+    s"""[ "$$(head -c 3 $amphoraFile 2>/dev/null)" = "QFI" ]"""
   private val imagePresent = s"$helperPath image-present >/dev/null 2>&1"
   private val uploadImageScript =
     s"""set -e
@@ -1199,7 +1205,6 @@ if __name__ == '__main__':
         die('usage: orphera-octavia-api register | registered | unregister | catalog | image-present | image-upload FILE | plumbing | plumbing-ok | wait-hm | hm-active | providers | lb-cycle | teardown')
 """
 
-
   private val helper =
     apiHelperPython
       .replace("@@KS@@", ksFqdn)
@@ -1237,7 +1242,8 @@ if __name__ == '__main__':
 
   // The load balancer test is made again when this changes: the configuration template, the plug-in script, the
   // image address, and the server CA (read when the guard runs).
-  private val cycleStamp = Resource.sha256(octaviaConfTemplate + hmStamp + amphoraImageUrl)
+  private val cycleStamp =
+    Resource.sha256(octaviaConfTemplate + hmStamp + amphoraImageUrl)
   private val cycleStampFile = s"$stateDir/cycle.stamp"
   private val cycleValue =
     s"""$cycleStamp-$$(sha256sum $certDir/server_ca.cert.pem 2>/dev/null | cut -c1-16)"""
@@ -1365,7 +1371,9 @@ if __name__ == '__main__':
 
     val confTemplate = secretFile(
       s"$srcDir/octavia.conf.in",
-      Secret(octaviaConfTemplate), // it holds the database, message bus, service and heartbeat secrets
+      Secret(
+        octaviaConfTemplate
+      ), // it holds the database, message bus, service and heartbeat secrets
       mode = "0600",
       owner = "root",
       group = "root"
@@ -1382,8 +1390,9 @@ if __name__ == '__main__':
       val dir = s"$confRoot/$name"
       val unitService = service(c.unitName)
       val dirRes = directory(dir, mode = "0755")
-      val conf = fileCopy(s"$dir/octavia.conf", s"$srcDir/octavia.conf", mode = "0600")
-        .after(rendered, dirRes)
+      val conf =
+        fileCopy(s"$dir/octavia.conf", s"$srcDir/octavia.conf", mode = "0600")
+          .after(rendered, dirRes)
       val kollaCa = fileCopy(
         s"$dir/ca.crt",
         caCert,
@@ -1435,7 +1444,8 @@ if __name__ == '__main__':
     val restarts = octaviaServices.zip(running).map { case (c, r) =>
       val dir = s"$confRoot/${c.name.value}"
       val stampFile = s"$stateDir/${c.name.value}.restart.stamp"
-      val hash = s"cat $dir/* ${c.unitPath} 2>/dev/null | sha256sum | cut -c1-32"
+      val hash =
+        s"cat $dir/* ${c.unitPath} 2>/dev/null | sha256sum | cut -c1-32"
       command(
         s"restart ${c.unitName} when its configuration or CA changed",
         s"""set -e

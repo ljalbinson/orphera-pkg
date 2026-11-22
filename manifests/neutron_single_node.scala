@@ -269,7 +269,9 @@ object neutron_single_node extends OrpheraApply:
        |done
        |echo "images ready"""".stripMargin
   private val imagesPresent =
-    s"""for img in ${images.mkString(" ")}; do podman image exists $$img || exit 1; done"""
+    s"""for img in ${images.mkString(
+        " "
+      )}; do podman image exists $$img || exit 1; done"""
 
   // The server's command and the rootwrap config must be in the images.
   private val imagesCarry =
@@ -348,7 +350,10 @@ object neutron_single_node extends OrpheraApply:
     )
 
   private val openvswitchAgentIni: ConfFile =
-    ConfFile.text(s"$confRoot/neutron-server/openvswitch_agent.ini", neutronCatalogue)(
+    ConfFile.text(
+      s"$confRoot/neutron-server/openvswitch_agent.ini",
+      neutronCatalogue
+    )(
       ("ovs", "bridge_mappings", s"$physnet:$providerBridge"),
       ("ovs", "local_ip", nodeIp),
       ("securitygroup", "firewall_driver", "openvswitch"),
@@ -495,7 +500,8 @@ object neutron_single_node extends OrpheraApply:
     s"""set -e
        |podman run --rm --network host --user root --entrypoint neutron-db-manage -v $confRoot/neutron-server/neutron.conf:/etc/neutron/neutron.conf:ro,z -v $confRoot/neutron-server/ml2_conf.ini:/etc/neutron/plugins/ml2/ml2_conf.ini:ro,z -v $logDir:/var/log/kolla/neutron:z $serverImage --config-file /etc/neutron/neutron.conf --config-file /etc/neutron/plugins/ml2/ml2_conf.ini upgrade heads
        |echo "neutron database synced"""".stripMargin
-  private val dbStamp = Resource.sha256(dbSyncScript + neutronConfText + ml2Text)
+  private val dbStamp =
+    Resource.sha256(dbSyncScript + neutronConfText + ml2Text)
 
   // True when the database, queried as the neutron user through the VIP, has the
   // `networks` table. The query runs with the image's own Python (the
@@ -962,7 +968,9 @@ if __name__ == '__main__':
       val dirRes = directory(dir, mode = "0755")
       val conf = secretFile(
         s"$dir/neutron.conf",
-        Secret(neutronConfText), // it holds the database, message bus and service passwords
+        Secret(
+          neutronConfText
+        ), // it holds the database, message bus and service passwords
         mode = "0640",
         owner = "root",
         group = "root"
@@ -993,7 +1001,11 @@ if __name__ == '__main__':
         owner = "root",
         group = "root"
       ).notifies(unitService)
-      (unitService, List(dirRes, conf, ini, kollaCa, json, unitFile), List(conf, ini, kollaCa, json, unitFile))
+      (
+        unitService,
+        List(dirRes, conf, ini, kollaCa, json, unitFile),
+        List(conf, ini, kollaCa, json, unitFile)
+      )
     }
     val serverConf = units.head._2(1)
     val serverIni = units.head._2(2)
