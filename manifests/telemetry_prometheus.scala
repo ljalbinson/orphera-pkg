@@ -9,12 +9,13 @@ import orphera.orchestrator.*
 //   orphera apply manifests/telemetry_prometheus.scala
 //
 // The scrape job goes in its own file, /etc/prometheus/scrape.d/openstack-telemetry.yml, named by a
-// `scrape_config_files` line in prometheus.yml (Prometheus 2.43 or later). observability_stack.scala and
-// observability_extended.scala rewrite prometheus.yml whole and both carry that line, so a re-run of either
-// keeps the job. This description does not touch the rest of prometheus.yml: it adds the line when it is
-// missing (the old file is kept as prometheus.yml.orphera-bak and put back if promtool rejects the new one),
-// writes the job file, has promtool check the configuration and restarts Prometheus only when one of them
-// changed.
+// `scrape_config_files` line in prometheus.yml (Prometheus 2.43 or later). observability_stack.scala writes
+// prometheus.yml with that line, and observability_extended.scala and ceph_observability.scala keep their jobs
+// in scrape.d files of their own, so a re-run of any of them keeps this job. This description does not touch
+// the rest of prometheus.yml: it adds the line when it is missing (the old file is kept as
+// prometheus.yml.orphera-bak and put back if promtool rejects the new one), writes the job file, has promtool
+// check the configuration and restarts Prometheus only when one of them changed. Adding the line is a
+// two-line edit of a YAML file with a rollback, which no apply kind describes, so that step stays a command.
 //
 // Prerequisite, not checked here: Prometheus running on tst7 (observability_stack.scala).
 object telemetry_prometheus extends OrpheraApply:

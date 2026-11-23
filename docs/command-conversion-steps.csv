@@ -45,7 +45,7 @@ manifests/observability_extended.scala,320,RunCommand,configure and (re)start my
 manifests/observability_extended.scala,329,RunCommand,rewrite prometheus.yml with haproxy + mysqld jobs and restart,1,Existing kinds,file+service,"file (or fileFrom) + service, restart by notifies; in a playbook via Task.Apply"
 manifests/observability_stack.scala,307,RunCommand,write prometheus.yml and (re)start prometheus,1,Existing kinds,file+service,"file (or fileFrom) + service, restart by notifies; in a playbook via Task.Apply"
 manifests/observability_stack.scala,322,RunCommand,provision Prometheus datasource and (re)start grafana-server,1,Existing kinds,file+service,"file (or fileFrom) + service, restart by notifies; in a playbook via Task.Apply"
-manifests/telemetry_prometheus.scala,83,apply command,name the scrape.d files in prometheus.yml,1,Existing kinds,file+service,"file (or fileFrom) + service, restart by notifies; in a playbook via Task.Apply"
+manifests/telemetry_prometheus.scala,83,apply command,name the scrape.d files in prometheus.yml,6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo"
 manifests/wordpress_site.scala,278,RunCommand,write wp-config.php,1,Existing kinds,file+service,"file (or fileFrom) + service, restart by notifies; in a playbook via Task.Apply"
 manifests/wordpress_site.scala,281,RunCommand,write nginx site config,1,Existing kinds,file+service,"file (or fileFrom) + service, restart by notifies; in a playbook via Task.Apply"
 manifests/apply_kinds_demo.scala,42,apply command,stop orphera-demo,1,Existing kinds,service,service (enabled/running); a one-off restart needs notifies or a restart action
