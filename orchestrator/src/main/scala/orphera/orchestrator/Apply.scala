@@ -60,7 +60,8 @@ object ApplyResource:
 
     /** Text with `{{...}}` in it, rendered on this node with its facts and vars
       * (and `vars`) when the file is compared: `{{cluster_ip}}`,
-      * `{{nodes.tst4.cluster_ip}}`, `{{default_interface}}` (the interface of
+      * `{{nodes.tst4.cluster_ip}}`, `{{node_name}}` (the node's inventory
+      * name), `{{default_interface}}` (the interface of
       * the node's default route).
       */
     case Template(text: String, vars: Map[String, String])
