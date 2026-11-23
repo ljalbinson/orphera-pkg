@@ -269,44 +269,77 @@ else:
       .replace("@@BUCKET@@", bucket)
       .replace("@@CRED@@", credDest)
 
-  private val prepareScript =
-    """mkdir -p /etc/etcd-backup /var/backups/etcd
-      |chmod 700 /etc/etcd-backup /var/backups/etcd
-      |echo "directories ready"""".stripMargin
+  // The two directories only root may enter: the S3 keys, and the snapshots
+  // and PKI archives (which hold the cluster's keys).
+  private val directoriesPlan: ApplyPlan =
+    import Resources.*
+    ApplyPlan.orFail(
+      "etcd-backup-directories",
+      List(
+        directory("/etc/etcd-backup", mode = "0700", owner = "root", group = "root"),
+        directory("/var/backups/etcd", mode = "0700", owner = "root", group = "root")
+      )
+    )
 
-  private val installScript =
-    s"""set -e
-       |[ -s $credDest ] || { echo "$credDest is missing" >&2; exit 1; }
-       |chmod 600 $credDest
-       |cat > $helper <<'PYEOF'
-       |$helperText
-       |PYEOF
-       |chmod 700 $helper
-       |python3 -m py_compile $helper && rm -rf /usr/local/sbin/__pycache__
-       |case "$$(hostname -s)" in tst30) M=5;; tst31) M=25;; *) M=45;; esac
-       |cat > /etc/systemd/system/orphera-etcd-backup.service <<'EOF'
-       |[Unit]
-       |Description=etcd snapshot and PKI backup (Orphera)
-       |
-       |[Service]
-       |Type=oneshot
-       |ExecStart=$helper backup
-       |EOF
-       |cat > /etc/systemd/system/orphera-etcd-backup.timer <<EOF
-       |[Unit]
-       |Description=hourly etcd backup (Orphera)
-       |
-       |[Timer]
-       |OnCalendar=*-*-* *:$$M:00
-       |Persistent=true
-       |
-       |[Install]
-       |WantedBy=timers.target
-       |EOF
-       |systemctl daemon-reload
-       |systemctl enable --now orphera-etcd-backup.timer
-       |systemctl list-timers orphera-etcd-backup.timer --no-pager
-       |""".stripMargin
+  // The hour's minute is the node's own, so the three do not run together.
+  private def timerMinute(host: String): Int =
+    host match
+      case "tst30" => 5
+      case "tst31" => 25
+      case _       => 45
+
+  // The helper (a template: it carries the object gateway's address, rendered
+  // on the node), the oneshot service, the hourly timer, and the timer enabled
+  // and running, restarted when its file changed (`service` reloads systemd
+  // itself).
+  private def backupPlan(host: String): ApplyPlan =
+    import Resources.*
+    val timer = service("orphera-etcd-backup.timer")
+    val script = fileTemplate(
+      helper,
+      helperText + "\n",
+      mode = "0700",
+      owner = "root",
+      group = "root"
+    )
+    val serviceFile = file(
+      "/etc/systemd/system/orphera-etcd-backup.service",
+      s"""[Unit]
+         |Description=etcd snapshot and PKI backup (Orphera)
+         |
+         |[Service]
+         |Type=oneshot
+         |ExecStart=$helper backup
+         |""".stripMargin,
+      mode = "0644",
+      owner = "root",
+      group = "root"
+    )
+    val timerFile = file(
+      "/etc/systemd/system/orphera-etcd-backup.timer",
+      s"""[Unit]
+         |Description=hourly etcd backup (Orphera)
+         |
+         |[Timer]
+         |OnCalendar=*-*-* *:${timerMinute(host)}:00
+         |Persistent=true
+         |
+         |[Install]
+         |WantedBy=timers.target
+         |""".stripMargin,
+      mode = "0644",
+      owner = "root",
+      group = "root"
+    ).notifies(timer)
+    ApplyPlan.orFail(
+      s"etcd-backup-$host",
+      List(
+        script,
+        serviceFile,
+        timerFile,
+        timer.after(script, serviceFile, timerFile)
+      )
+    )
 
   private val firstRunScript = s"$helper backup"
 
@@ -331,7 +364,7 @@ else:
         .build,
       stage("prepare-nodes", cpNodes*)
         .task("create the backup directories")(
-          Task.RunCommand(List("sh", "-c", prepareScript))
+          Task.Apply(directoriesPlan)
         )
         .build,
       stage("send-credentials", cpNodes*)
@@ -340,9 +373,19 @@ else:
             .DistributeFile(cephNode, credSource, credDest, "root", "root", 384)
         )
         .build,
-      stage("install-backup", cpNodes*)
+      stage("install-backup-tst30", "tst30")
         .task("install the helper and the hourly timer")(
-          Task.RunCommand(List("sh", "-c", installScript), timeoutSeconds = 120)
+          Task.Apply(backupPlan("tst30"))
+        )
+        .build,
+      stage("install-backup-tst31", "tst31")
+        .task("install the helper and the hourly timer")(
+          Task.Apply(backupPlan("tst31"))
+        )
+        .build,
+      stage("install-backup-tst32", "tst32")
+        .task("install the helper and the hourly timer")(
+          Task.Apply(backupPlan("tst32"))
         )
         .build,
       stage("first-backup", cpNodes*)
