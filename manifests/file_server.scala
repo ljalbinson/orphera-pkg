@@ -59,39 +59,72 @@ object file_server extends OrpheraPlaybook:
 
   private val packages = List("samba", "smbclient", "avahi-daemon")
 
-  private val userList = users.mkString(" ")
-
-  // Accounts and the share directories. Each user's lines are written out, with the password from the
-  // store; the password is on the node's command line while this runs (see "Secrets" in the README).
-
-  private val accountsScript: String =
+  // Accounts and the share directories, as one description. A name that is already an account on the node
+  // is left as it is (its shell and its home are not touched) and only added to the group; one that is not
+  // gets a login-less account (no home directory, no shell). Each user's Samba password is the stored one: a
+  // command that only runs when a login with it fails; the password is on the node's command line while it
+  // is checked or set (see "Secrets" in the README).
+  // Not `import Resources.*`: its `group` would clash with this object's `group`.
+  private val accountsPlan: ApplyPlan =
+    import Resources.{command, directory, user}
     if badUsers.nonEmpty then
       val shown = badUsers.mkString(" ").replaceAll("[^A-Za-z0-9_ -]", "?")
-      s"""echo "FILE_SERVER_USERS has names that are not valid account names: $shown" >&2
-         |exit 1""".stripMargin
+      ApplyPlan.orFail(
+        "file-server-accounts",
+        List(
+          command(
+            "refuse names that are not valid account names",
+            s"""echo "FILE_SERVER_USERS has names that are not valid account names: $shown" >&2
+               |exit 1""".stripMargin,
+            unless = "false"
+          )
+        )
+      )
     else
-      val perUser = users
-        .map { u =>
-          val pw = quoted(Secrets.secret(s"fileserver/$u").reveal)
-          s"""id -u $u >/dev/null 2>&1 || useradd --no-create-home --shell /usr/sbin/nologin $u
-             |usermod -aG $group $u
-             |printf '%s\\n%s\\n' $pw $pw | smbpasswd -s -a $u""".stripMargin
-        }
-        .mkString("\n")
-      val timeMachineDir =
-        if timeMachine then s"""mkdir -p $timeMachinePath
-             |chgrp $group $timeMachinePath
-             |chmod 2770 $timeMachinePath""".stripMargin
-        else ""
-      s"""set -e
-         |getent group $group >/dev/null || groupadd $group
-         |$perUser
-         |mkdir -p $sharePath
-         |chgrp $group $sharePath
-         |chmod 2775 $sharePath
-         |$timeMachineDir
-         |[ -f /etc/samba/smb.conf.orig ] || cp -p /etc/samba/smb.conf /etc/samba/smb.conf.orig
-         |echo "accounts and directories ready for: $userList"""".stripMargin
+      val fileUsers = Resources.group(group)
+      val perUser = users.flatMap { u =>
+        val made = command(
+          s"make the login-less account $u if it is missing",
+          s"useradd --no-create-home --shell /usr/sbin/nologin $u",
+          unless = s"id -u $u >/dev/null 2>&1"
+        )
+        val member = user(u, groups = List(group)).after(made, fileUsers)
+        val pw = quoted(Secrets.secret(s"fileserver/$u").reveal)
+        val smbPassword = command(
+          s"set the Samba password of $u",
+          s"""printf '%s\\n%s\\n' $pw $pw | smbpasswd -s -a $u""",
+          unless = s"""smbclient -L localhost -U ${quoted(
+              s"$u%" + Secrets.secret(s"fileserver/$u").reveal
+            )} >/dev/null 2>&1"""
+        ).after(member)
+        List(made, member, smbPassword)
+      }
+      val shareDirectory = directory(
+        sharePath,
+        mode = "2775",
+        owner = "root",
+        group = group
+      ).after(fileUsers)
+      val timeMachineDirectory =
+        if timeMachine then
+          List(
+            directory(
+              timeMachinePath,
+              mode = "2770",
+              owner = "root",
+              group = group
+            ).after(fileUsers)
+          )
+        else Nil
+      val keepOriginal = command(
+        "keep the original smb.conf",
+        "cp -p /etc/samba/smb.conf /etc/samba/smb.conf.orig",
+        creates = "/etc/samba/smb.conf.orig"
+      )
+      ApplyPlan.orFail(
+        "file-server-accounts",
+        fileUsers :: perUser ::: List(shareDirectory) ::: timeMachineDirectory ::: List(keepOriginal)
+      )
 
   // The macOS settings are the ones the Samba project documents for vfs_fruit. `multicast dns register = no`
   // leaves announcing to Avahi, so the two do not both answer. Printing is off: nothing here shares a printer.
@@ -224,7 +257,7 @@ object file_server extends OrpheraPlaybook:
         Task.Install(packages = packages, updateCache = true)
       )
       .task("make the accounts, the group and the share directories")(
-        Task.RunCommand(List("sh", "-c", accountsScript), timeoutSeconds = 120)
+        Task.Apply(accountsPlan)
       )
       .task("write smb.conf")(
         Task.WriteFile(
