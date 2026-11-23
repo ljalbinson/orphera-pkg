@@ -533,7 +533,8 @@ object ApplyCheck:
       outcome(yes, "command[resolved]").contains(ApplyOutcome.Unchanged(""))
         && outcome(yes, "file[/etc/resolved.conf]").exists(
           _.isInstanceOf[ApplyOutcome.Changed]
-        ) && yesNode.fs.contains("/etc/resolved.conf") && yesNode.ran.isEmpty,
+        ) && yesNode.fs.contains("/etc/resolved.conf")
+        && yesNode.ran == Vector("write /etc/resolved.conf"),
       yes.toString + yesNode.ran.toString
     )
     val noNode = new FakeNode(Map.empty, guards = Map("is-resolved" -> false))
@@ -564,7 +565,8 @@ object ApplyCheck:
       "gate: a no changes nothing, the rest still runs, and it is not a failure",
       !noNode.fs.contains("/etc/resolved.conf") && noNode.fs.contains(
         "/etc/always.conf"
-      ) && !no.report.failed && noNode.ran.isEmpty
+      ) && !no.report.failed
+        && noNode.ran == Vector("write /etc/always.conf")
         && no.lines.lastOption.contains("1 changed, 0 unchanged, 3 skipped"),
       no.lines.mkString("\n")
     )
