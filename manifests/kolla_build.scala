@@ -220,9 +220,7 @@ object kolla_build extends OrpheraApply:
       |/opt/devpi/bin/devpi-init --serverdir /var/lib/orphera/devpi
       |echo "devpi initialised"""".stripMargin
   // The image list is written once; after that it is the user's to edit.
-  private val imageListScript =
-    s"""printf '%s\\n' ${images.mkString(" ")} > /etc/kolla-build/images.txt
-       |echo "wrote /etc/kolla-build/images.txt"""".stripMargin
+  private val imageListText = images.mkString("", "\n", "\n")
   // kolla-build is installed through devpi, so wait for it first.
   private val installKollaScript =
     s"""set -e
@@ -418,10 +416,13 @@ esac
     val devpiDir = directory("/var/lib/orphera/devpi")
     val registryData = directory(dataDir)
 
-    val imageList = command(
-      "write the list of images to build (once)",
-      imageListScript,
-      creates = "/etc/kolla-build/images.txt"
+    // seedFile: written when missing, never replaced; the list is the user's after that.
+    val imageList = seedFile(
+      "/etc/kolla-build/images.txt",
+      imageListText,
+      mode = "0644",
+      owner = "root",
+      group = "root"
     ).after(kollaBuildDir)
 
     // nginx serves the source tarballs.

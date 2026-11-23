@@ -435,6 +435,30 @@ object ApplyCheck:
       modeOnly.toString
     )
 
+    // seedFile: written when missing, never replaced.
+    val seedNew = new FakeNode(Map.empty)
+    applyTo(seedNew, List(seedFile("/etc/app/list.txt", "a\nb\n", mode = "0644")))
+    check(
+      "seedFile: written when missing",
+      seedNew.ran.contains("write /etc/app/list.txt"),
+      seedNew.ran.toString
+    )
+    val seedOld = new FakeNode(
+      Map("/etc/app/list.txt" -> Entry.F("mine\n", 0x1a4, "root", "root"))
+    )
+    val seedKept = applyTo(
+      seedOld,
+      List(seedFile("/etc/app/list.txt", "a\nb\n", mode = "0644"))
+    ).report
+    check(
+      "seedFile: an existing file's content is left alone",
+      !seedOld.ran.exists(_.startsWith("write")) &&
+        outcome(seedKept, "file[/etc/app/list.txt]").exists(
+          _.isInstanceOf[ApplyOutcome.Unchanged]
+        ),
+      seedOld.ran.toString
+    )
+
     // A secret is never shown.
     val sn = new FakeNode(
       Map("/etc/key" -> Entry.F("old secret", 0x180, "root", "root"))
