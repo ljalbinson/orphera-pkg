@@ -117,9 +117,12 @@ print(json.dumps(cm))
        |""".stripMargin
 
   // kubelet's config names the resolver file: an apply description (kind
-  // lineInFile) that replaces the resolvConf line, or adds it.
+  // lineInFile) that replaces the resolvConf line, or adds it. kubelet is
+  // restarted by the change, and only by it; the restart returns when the unit
+  // is active.
   private val kubeletResolvPlan: ApplyPlan =
     import Resources.*
+    val kubelet = service("kubelet")
     ApplyPlan.orFail(
       "kubelet-resolv-conf",
       List(
@@ -127,17 +130,10 @@ print(json.dumps(cm))
           "/var/lib/kubelet/config.yaml",
           s"resolvConf: $resolvFile",
           "^resolvConf:"
-        )
+        ).notifies(kubelet),
+        kubelet
       )
     )
-
-  private val kubeletRestartScript =
-    s"""set -e
-       |systemctl restart kubelet
-       |for I in $$(seq 1 30); do systemctl is-active --quiet kubelet && break; sleep 2; done
-       |systemctl is-active --quiet kubelet || { echo "kubelet did not restart" >&2; exit 1; }
-       |echo "$$(hostname): kubelet resolver file: $$(grep -c '^nameserver' $resolvFile) nameserver(s)"
-       |""".stripMargin
 
   private val kubeletConfigScript =
     s"""set -e
@@ -336,13 +332,7 @@ sys.exit(1 if bad else 0)
             timeoutSeconds = 180
           )
         )
-        .task("point kubelet's config at it")(Task.Apply(kubeletResolvPlan))
-        .task("restart kubelet and wait for it")(
-          Task.RunCommand(
-            List("sh", "-c", kubeletRestartScript),
-            timeoutSeconds = 180
-          )
-        )
+        .task("point kubelet's config at it and restart it")(Task.Apply(kubeletResolvPlan))
         .build,
       stage("kubelet-config-and-dns-test", "tst30")
         .task("record it in kubelet-config, restart CoreDNS")(
