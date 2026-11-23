@@ -75,25 +75,24 @@ object etcd_cluster extends OrpheraClusterPlaybook:
   // that's the first thing to try changing to `Type=simple`.
   //
   // The unit and the service as an apply description: the file rendered on the
-  // node (`{{cluster_ip}}`, `{{nodes.<name>.cluster_ip}}`), then etcd enabled and
-  // started, and restarted only when the unit changed (`service` reloads systemd
-  // itself). ExecStart is one line, with the three spaces the old script's heredoc
-  // left where it dropped each `\`-newline, so a node the script built compares
-  // `unchanged` and etcd is not restarted. One plan per node, because `--name` is
-  // the node's inventory name, which the script took from `hostname -s`; the two
-  // are the same in the lab.
-  private def etcdUnitPlan(name: String): ApplyPlan =
+  // node (`{{node_name}}`, `{{cluster_ip}}`, `{{nodes.<name>.cluster_ip}}`), then
+  // etcd enabled and started, and restarted only when the unit changed (`service`
+  // reloads systemd itself). ExecStart is one line, with the three spaces the old
+  // script's heredoc left where it dropped each `\`-newline, so a node the script
+  // built compares `unchanged`. `--name` is the node's inventory name, which the
+  // script took from `hostname -s`; the two are the same in the lab.
+  private val etcdUnitPlan: ApplyPlan =
     import Resources.*
     val unit = fileTemplate(
       "/etc/systemd/system/etcd.service",
-      s"""[Unit]
+      """[Unit]
          |Description=etcd distributed key-value store (orphera etcd_cluster test)
          |After=network.target
          |
          |[Service]
          |Type=notify
          |User=etcd
-         |ExecStart=/usr/local/bin/etcd   --name $name   --data-dir /var/lib/etcd   --listen-peer-urls http://{{cluster_ip}}:2380   --listen-client-urls http://{{cluster_ip}}:2379,http://127.0.0.1:2379   --initial-advertise-peer-urls http://{{cluster_ip}}:2380   --advertise-client-urls http://{{cluster_ip}}:2379   --initial-cluster tst0=http://{{nodes.tst0.cluster_ip}}:2380,tst1=http://{{nodes.tst1.cluster_ip}}:2380,tst2=http://{{nodes.tst2.cluster_ip}}:2380   --initial-cluster-token orphera-etcd-test   --initial-cluster-state new
+         |ExecStart=/usr/local/bin/etcd   --name {{node_name}}   --data-dir /var/lib/etcd   --listen-peer-urls http://{{cluster_ip}}:2380   --listen-client-urls http://{{cluster_ip}}:2379,http://127.0.0.1:2379   --initial-advertise-peer-urls http://{{cluster_ip}}:2380   --advertise-client-urls http://{{cluster_ip}}:2379   --initial-cluster tst0=http://{{nodes.tst0.cluster_ip}}:2380,tst1=http://{{nodes.tst1.cluster_ip}}:2380,tst2=http://{{nodes.tst2.cluster_ip}}:2380   --initial-cluster-token orphera-etcd-test   --initial-cluster-state new
          |Restart=on-failure
          |RestartSec=5
          |
@@ -103,7 +102,7 @@ object etcd_cluster extends OrpheraClusterPlaybook:
       mode = "0644"
     )
     val etcd = service("etcd")
-    ApplyPlan.orFail(s"etcd-unit-$name", List(unit.notifies(etcd), etcd))
+    ApplyPlan.orFail("etcd-unit", List(unit.notifies(etcd), etcd))
 
   private val healthCheckScript =
     "ETCDCTL_API=3 /usr/local/bin/etcdctl --endpoints=http://127.0.0.1:2379 endpoint health >/dev/null 2>&1"
@@ -122,19 +121,12 @@ object etcd_cluster extends OrpheraClusterPlaybook:
         )
         .build,
 
-      stage("configure-and-start-tst0", "tst0")
+      // One stage for all three nodes: etcd is `Type=notify`, so `systemctl start`
+      // returns only once the member is ready, which needs a quorum, so the three
+      // must start together (a stage per node timed out on the first node).
+      stage("configure-and-start", "tst0", "tst1", "tst2")
         .task("write systemd unit and start etcd")(
-          Task.Apply(etcdUnitPlan("tst0"))
-        )
-        .build,
-      stage("configure-and-start-tst1", "tst1")
-        .task("write systemd unit and start etcd")(
-          Task.Apply(etcdUnitPlan("tst1"))
-        )
-        .build,
-      stage("configure-and-start-tst2", "tst2")
-        .task("write systemd unit and start etcd")(
-          Task.Apply(etcdUnitPlan("tst2"))
+          Task.Apply(etcdUnitPlan)
         )
         .build,
 

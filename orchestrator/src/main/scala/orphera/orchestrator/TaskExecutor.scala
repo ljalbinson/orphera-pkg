@@ -1095,7 +1095,8 @@ object TaskExecutor:
   ): IO[Map[String, Any]] =
     env.setFacts.snapshot.map { allSetFacts =>
       val ownInventoryVars: Map[String, Any] =
-        Inventory.groupVarsFor(node.name) ++
+        Map[String, Any]("node_name" -> node.name) ++
+          Inventory.groupVarsFor(node.name) ++
           Inventory.all
             .find(_.name == node.name)
             .map(_.vars)
