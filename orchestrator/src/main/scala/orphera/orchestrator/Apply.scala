@@ -79,7 +79,8 @@ object ApplyResource:
       group: String,
       present: Boolean,
       needs: List[String] = Nil,
-      triggers: List[String] = Nil
+      triggers: List[String] = Nil,
+      onlyIfMissing: Boolean = false
   ) extends ApplyResource:
     def id: String = s"file[$path]"
     protected def relinked(n: List[String], t: List[String]): ApplyResource =
@@ -300,6 +301,26 @@ object Resources:
       group: String = ""
   ): ApplyResource =
     File(path, Some(Content.Text(content)), mode, owner, group, present = true)
+
+  /** A file that is written when it is not there and never again: what it
+    * holds afterwards is the user's. Its mode, owner and group are still kept.
+    */
+  def seedFile(
+      path: String,
+      content: String,
+      mode: String = "",
+      owner: String = "",
+      group: String = ""
+  ): ApplyResource =
+    File(
+      path,
+      Some(Content.Text(content)),
+      mode,
+      owner,
+      group,
+      present = true,
+      onlyIfMissing = true
+    )
 
   /** A file whose content is secret: it is never shown in a plan or diff. */
   def secretFile(
@@ -1221,7 +1242,7 @@ object Apply:
                 )
               case Observed.RegularFile(m, o, g, sum) =>
                 val fix = attrs(f.path, f.mode, f.owner, f.group, m, o, g)
-                if f.content.nonEmpty && sum != sha256(text) then
+                if f.content.nonEmpty && !f.onlyIfMissing && sum != sha256(text) then
                   val diff =
                     if secret then IO.pure(List("(secret: not shown)"))
                     else
