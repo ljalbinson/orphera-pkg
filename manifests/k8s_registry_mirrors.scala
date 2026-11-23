@@ -67,8 +67,14 @@ object k8s_registry_mirrors extends OrpheraClusterPlaybook:
        |pull_retry $registryImage || exit 1
        |echo "registry image ready"""".stripMargin
 
-  private val mkdirScript =
-    s"mkdir -p ${mirrors.map(dataDir).mkString(" ")}"
+  private val dataDirectoriesPlan: ApplyPlan =
+    import Resources.*
+    ApplyPlan.orFail(
+      "data-directories",
+      mirrors.map(m =>
+        directory(dataDir(m), mode = "0755", owner = "root", group = "root")
+      )
+    )
 
   private def installStage =
     val base = stage("install-k8s-mirrors", node)
@@ -82,7 +88,7 @@ object k8s_registry_mirrors extends OrpheraClusterPlaybook:
         )
       )
       .task("create the data directories")(
-        Task.RunCommand(List("sh", "-c", mkdirScript))
+        Task.Apply(dataDirectoriesPlan)
       )
     mirrors
       .foldLeft(base) { (s, m) =>

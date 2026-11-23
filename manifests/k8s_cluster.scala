@@ -85,8 +85,12 @@ object k8s_cluster extends OrpheraClusterPlaybook:
     .map(s => s"  - \"$s\"")
     .mkString("\n")
 
-  private val prepareDirsScript =
-    s"mkdir -p $stateDir && chmod 700 $stateDir && echo \"$stateDir ready\""
+  private val stateDirectoryPlan: ApplyPlan =
+    import Resources.*
+    ApplyPlan.orFail(
+      "state-directory",
+      List(directory(stateDir, mode = "0700", owner = "root", group = "root"))
+    )
 
   // The one disk of 19-21 GiB with no partitions, no file system and no mount.
   private val etcdDiskScript =
@@ -237,7 +241,7 @@ object k8s_cluster extends OrpheraClusterPlaybook:
     clusterPlaybook("k8s-cluster")(
       stage("prepare-state-directory", allNodes*)
         .task("create the Orphera state directory")(
-          Task.RunCommand(List("sh", "-c", prepareDirsScript))
+          Task.Apply(stateDirectoryPlan)
         )
         .build,
       stage("etcd-disk", cpNodes*)
