@@ -10,16 +10,15 @@ object iperf3_test extends OrpheraClusterPlaybook:
   // mesh). tst0 isn't included as a client against itself — that's a
   // loopback test, not a network test.
   //
-  // The server runs as a transient systemd unit (`systemd-run`), not a
-  // backgrounded `nohup ... &` process. The nohup version hit exit=143
-  // (SIGTERM) in testing: RunCommand waits for the command's process
-  // tree/output to fully close before considering it done, and a
-  // `nohup ... &` daemon that's meant to live forever never lets that
-  // happen — eventually something times the whole task out and kills
-  // it. `systemd-run` hands the process off to systemd immediately and
-  // returns, so the task genuinely finishes right away, and the
-  // server's lifecycle isn't tied to the task's own process-tree
-  // tracking at all.
+  // The servers are systemd units (a unit file and a `service` resource
+  // each, applied with Task.Apply), not a backgrounded `nohup ... &`
+  // process: a task that starts a daemon that is meant to live forever
+  // never finishes (the nohup version hit exit=143, SIGTERM, in testing).
+  // They used to be transient units made by `systemd-run`, stopped and
+  // made again on every run; now a server is started once and left
+  // running (it is restarted only if its unit file changes), and it is not
+  // enabled, so it does not outlive a reboot. A transient unit of the same
+  // name left by an older run is stopped first.
   //
   // A default `iperf3 -s` instance only serves ONE client connection
   // at a time — a second concurrent client gets "error - the server is
@@ -38,35 +37,49 @@ object iperf3_test extends OrpheraClusterPlaybook:
   private val serverHost: String = "tst0"
   private val clientHosts: List[String] = portForClient.keys.toList.sorted
 
-  private val installIperf3: Task.RunCommand =
-    Task.RunCommand(
-      List(
-        "sh",
-        "-c",
-        "which iperf3 >/dev/null 2>&1 && exit 0; apt-get update -qq && apt-get install -y iperf3"
-      ),
-      timeoutSeconds = 120
-    )
+  private val installPlan: ApplyPlan =
+    import Resources.*
+    ApplyPlan.orFail("install-iperf3", List(pkg("iperf3", updateCache = true)))
 
-  private val startServersScript: String =
-    val ports = portForClient.values.toList.sorted
-    val portList = ports.mkString(" ")
-    s"""
-      |for PORT in $portList; do
-      |  systemctl stop "iperf3-server-$$PORT" 2>/dev/null || true
-      |  systemctl reset-failed "iperf3-server-$$PORT" 2>/dev/null || true
-      |  systemd-run --unit="iperf3-server-$$PORT" --collect -- iperf3 -s -p "$$PORT"
-      |done
-      |sleep 1
-      |for PORT in $portList; do
-      |  iperf3 -c 127.0.0.1 -p "$$PORT" -t 1 >/dev/null 2>&1 \\
-      |    && echo "iperf3 server on port $$PORT is up" \\
-      |    || { echo "iperf3 server on port $$PORT failed to start — check: systemctl status iperf3-server-$$PORT" >&2; exit 1; }
-      |done
-      |""".stripMargin
-
-  private val startServers: Task.RunCommand =
-    Task.RunCommand(List("sh", "-c", startServersScript), timeoutSeconds = 30)
+  // One unit per client port. The check waits for the server to accept a
+  // one-second test from the node itself, and only runs when it does not yet.
+  private val serversPlan: ApplyPlan =
+    import Resources.*
+    val resources = portForClient.values.toList.sorted.flatMap { port =>
+      val unitName = s"iperf3-server-$port"
+      val retire = command(
+        s"stop the transient $unitName unit of an older run",
+        s"systemctl stop $unitName 2>/dev/null || true; systemctl reset-failed $unitName 2>/dev/null || true",
+        unless = s"[ ! -e /run/systemd/transient/$unitName.service ]"
+      )
+      val running = service(s"$unitName.service", enabled = None, running = Some(true))
+      val unitFile = file(
+        s"/etc/systemd/system/$unitName.service",
+        s"""[Unit]
+           |Description=iperf3 server on port $port (orphera iperf3_test)
+           |After=network-online.target
+           |
+           |[Service]
+           |ExecStart=/usr/bin/iperf3 -s -p $port
+           |Restart=on-failure
+           |""".stripMargin,
+        mode = "0644",
+        owner = "root",
+        group = "root"
+      ).after(retire).notifies(running)
+      val answers = command(
+        s"iperf3 server on port $port answers",
+        s"""for i in $$(seq 1 10); do
+           |  iperf3 -c 127.0.0.1 -p $port -t 1 >/dev/null 2>&1 && { echo "iperf3 server on port $port is up"; exit 0; }
+           |  sleep 1
+           |done
+           |echo "iperf3 server on port $port failed to start — check: systemctl status $unitName" >&2
+           |exit 1""".stripMargin,
+        unless = s"iperf3 -c 127.0.0.1 -p $port -t 1 >/dev/null 2>&1"
+      ).after(running.after(unitFile, retire))
+      List(retire, unitFile, running.after(unitFile, retire), answers)
+    }
+    ApplyPlan.orFail("iperf3-servers", resources)
 
   // Per-client port lookup done in shell via a `case` on the node's own
   // hostname — ClusterPlaybookDsl's stage-level tasks are identical
@@ -98,12 +111,12 @@ object iperf3_test extends OrpheraClusterPlaybook:
   val playbook: ClusterPlaybook =
     clusterPlaybook("iperf3-network-test")(
       stage("install-iperf3", (clientHosts :+ serverHost).sorted*)
-        .task("install iperf3 if missing")(installIperf3)
+        .task("install iperf3 if missing")(Task.Apply(installPlan))
         .build,
 
       stage("start-iperf3-servers", serverHost)
         .task("start one iperf3 server per expected client, on separate ports")(
-          startServers
+          Task.Apply(serversPlan)
         )
         .build,
 
