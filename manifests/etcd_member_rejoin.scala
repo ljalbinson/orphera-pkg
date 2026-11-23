@@ -96,39 +96,34 @@ object etcd_member_rejoin extends OrpheraClusterPlaybook:
        |  echo "tst2 is already registered as a member — skipping member add"
        |fi""".stripMargin
 
-  // Same unit file as etcd_cluster.scala's configureAndStartScript, with
+  // Same unit file as etcd_cluster.scala's etcdUnitPlan, with
   // exactly one change: --initial-cluster-state existing, not new. `new`
   // is only valid for a member starting completely fresh cluster
   // formation; `existing` tells this node it's joining a cluster that
   // already has other members running — using `new` here would make
   // etcd refuse to start, since the cluster (tst0, tst1) already exists.
-  private val rejoinScript =
-    """cat > /etc/systemd/system/etcd.service <<EOF
-      |[Unit]
-      |Description=etcd distributed key-value store (orphera etcd_cluster test)
-      |After=network.target
-      |
-      |[Service]
-      |Type=notify
-      |User=etcd
-      |ExecStart=/usr/local/bin/etcd \
-      |  --name tst2 \
-      |  --data-dir /var/lib/etcd \
-      |  --listen-peer-urls http://{{cluster_ip}}:2380 \
-      |  --listen-client-urls http://{{cluster_ip}}:2379,http://127.0.0.1:2379 \
-      |  --initial-advertise-peer-urls http://{{cluster_ip}}:2380 \
-      |  --advertise-client-urls http://{{cluster_ip}}:2379 \
-      |  --initial-cluster tst0=http://{{nodes.tst0.cluster_ip}}:2380,tst1=http://{{nodes.tst1.cluster_ip}}:2380,tst2=http://{{nodes.tst2.cluster_ip}}:2380 \
-      |  --initial-cluster-token orphera-etcd-test \
-      |  --initial-cluster-state existing
-      |Restart=on-failure
-      |RestartSec=5
-      |
-      |[Install]
-      |WantedBy=multi-user.target
-      |EOF
-      |systemctl daemon-reload
-      |systemctl enable --now etcd""".stripMargin
+  private val rejoinPlan: ApplyPlan =
+    import Resources.*
+    val unit = fileTemplate(
+      "/etc/systemd/system/etcd.service",
+      s"""[Unit]
+         |Description=etcd distributed key-value store (orphera etcd_cluster test)
+         |After=network.target
+         |
+         |[Service]
+         |Type=notify
+         |User=etcd
+         |ExecStart=/usr/local/bin/etcd   --name tst2   --data-dir /var/lib/etcd   --listen-peer-urls http://{{cluster_ip}}:2380   --listen-client-urls http://{{cluster_ip}}:2379,http://127.0.0.1:2379   --initial-advertise-peer-urls http://{{cluster_ip}}:2380   --advertise-client-urls http://{{cluster_ip}}:2379   --initial-cluster tst0=http://{{nodes.tst0.cluster_ip}}:2380,tst1=http://{{nodes.tst1.cluster_ip}}:2380,tst2=http://{{nodes.tst2.cluster_ip}}:2380   --initial-cluster-token orphera-etcd-test   --initial-cluster-state existing
+         |Restart=on-failure
+         |RestartSec=5
+         |
+         |[Install]
+         |WantedBy=multi-user.target
+         |""".stripMargin,
+      mode = "0644"
+    )
+    val etcd = service("etcd")
+    ApplyPlan.orFail("etcd-rejoin-tst2", List(unit.notifies(etcd), etcd))
 
   private val healthCheckScript =
     "ETCDCTL_API=3 /usr/local/bin/etcdctl --endpoints=http://127.0.0.1:2379 endpoint health >/dev/null 2>&1"
@@ -165,7 +160,7 @@ object etcd_member_rejoin extends OrpheraClusterPlaybook:
 
       stage("rejoin-tst2", "tst2")
         .task("rewrite unit as a joiner and start")(
-          Task.RunCommand(List("sh", "-c", rejoinScript))
+          Task.Apply(rejoinPlan)
         )
         .build,
 

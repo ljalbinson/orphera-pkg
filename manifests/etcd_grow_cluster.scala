@@ -117,45 +117,33 @@ object etcd_grow_cluster extends OrpheraClusterPlaybook:
   // `raw"""..."""`, not `s"""..."""`: this string needs $-interpolation
   // (name/clusterIp/initialCluster) but also contains literal `\` line
   // continuations in ExecStart below. An interpolated triple-quoted
-  // string (`s"""`) still validates escape sequences the same as a
-  // normal string, unlike a bare `"""..."""` (fully raw, which is what
-  // etcd_cluster.scala's non-interpolated configureAndStartScript relies
-  // on) — a bare `\` before a newline isn't one of the recognized escapes
-  // ([\b,\t,\n,\f,\r,\\,\",\',\uxxxx]) and fails to compile under `s`.
-  // `raw` keeps $-interpolation but skips escape validation entirely, so
-  // the backslashes pass through untouched — caught by a real compile
-  // error the first time this file was actually run.
-  private def joinScript(
-      name: String,
-      clusterIp: String,
-      initialCluster: String
-  ) =
-    raw"""cat > /etc/systemd/system/etcd.service <<EOF
-       |[Unit]
-       |Description=etcd distributed key-value store (orphera etcd_cluster test)
-       |After=network.target
-       |
-       |[Service]
-       |Type=notify
-       |User=etcd
-       |ExecStart=/usr/local/bin/etcd \
-       |  --name $name \
-       |  --data-dir /var/lib/etcd \
-       |  --listen-peer-urls http://$clusterIp:2380 \
-       |  --listen-client-urls http://$clusterIp:2379,http://127.0.0.1:2379 \
-       |  --initial-advertise-peer-urls http://$clusterIp:2380 \
-       |  --advertise-client-urls http://$clusterIp:2379 \
-       |  --initial-cluster $initialCluster \
-       |  --initial-cluster-token orphera-etcd-test \
-       |  --initial-cluster-state existing
-       |Restart=on-failure
-       |RestartSec=5
-       |
-       |[Install]
-       |WantedBy=multi-user.target
-       |EOF
-       |systemctl daemon-reload
-       |systemctl enable --now etcd""".stripMargin
+  // The unit and the service as an apply description: the file rendered on the
+  // node (`{{cluster_ip}}`, `{{nodes.<name>.cluster_ip}}`), then etcd enabled and
+  // started, and restarted only if the unit changed (`service` reloads systemd
+  // itself). ExecStart is one line, as the old script's heredoc wrote it (it
+  // dropped each `\`-newline and kept the next line's two spaces).
+  private def joinPlan(name: String, initialCluster: String): ApplyPlan =
+    import Resources.*
+    val unit = fileTemplate(
+      "/etc/systemd/system/etcd.service",
+      s"""[Unit]
+         |Description=etcd distributed key-value store (orphera etcd_cluster test)
+         |After=network.target
+         |
+         |[Service]
+         |Type=notify
+         |User=etcd
+         |ExecStart=/usr/local/bin/etcd   --name $name   --data-dir /var/lib/etcd   --listen-peer-urls http://{{cluster_ip}}:2380   --listen-client-urls http://{{cluster_ip}}:2379,http://127.0.0.1:2379   --initial-advertise-peer-urls http://{{cluster_ip}}:2380   --advertise-client-urls http://{{cluster_ip}}:2379   --initial-cluster $initialCluster   --initial-cluster-token orphera-etcd-test   --initial-cluster-state existing
+         |Restart=on-failure
+         |RestartSec=5
+         |
+         |[Install]
+         |WantedBy=multi-user.target
+         |""".stripMargin,
+      mode = "0644"
+    )
+    val etcd = service("etcd")
+    ApplyPlan.orFail(s"etcd-join-$name", List(unit.notifies(etcd), etcd))
 
   // Built once per joining node from static inventory vars — same
   // {{nodes.<name>.cluster_ip}} templating etcd_cluster.scala uses, not
@@ -209,13 +197,7 @@ object etcd_grow_cluster extends OrpheraClusterPlaybook:
 
       stage("join-tst3", "tst3")
         .task("write systemd unit and start etcd")(
-          Task.RunCommand(
-            List(
-              "sh",
-              "-c",
-              joinScript("tst3", "{{cluster_ip}}", clusterAtThreePlusTst3)
-            )
-          )
+          Task.Apply(joinPlan("tst3", clusterAtThreePlusTst3))
         )
         .build,
 
@@ -272,13 +254,7 @@ object etcd_grow_cluster extends OrpheraClusterPlaybook:
 
       stage("join-tst4", "tst4")
         .task("write systemd unit and start etcd")(
-          Task.RunCommand(
-            List(
-              "sh",
-              "-c",
-              joinScript("tst4", "{{cluster_ip}}", clusterAtFourPlusTst4)
-            )
-          )
+          Task.Apply(joinPlan("tst4", clusterAtFourPlusTst4))
         )
         .build,
 

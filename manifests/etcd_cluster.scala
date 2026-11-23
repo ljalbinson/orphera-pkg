@@ -74,43 +74,36 @@ object etcd_cluster extends OrpheraClusterPlaybook:
   // real run shows systemd timing out waiting for the READY notification,
   // that's the first thing to try changing to `Type=simple`.
   //
-  // The ExecStart line's trailing `\` continuations below are for THIS
-  // SOURCE FILE's readability only: an unquoted heredoc (`<<EOF`, no
-  // quotes around the delimiter) has bash ignore every `\<newline>`
-  // sequence it contains, same as inside a double-quoted string — so
-  // those line breaks never make it into the written etcd.service at
-  // all, and ExecStart lands there as one long single line. That's
-  // functionally identical (systemd doesn't care either way) and not a
-  // bug, just worth knowing before "fixing" what looks like a missing
-  // continuation if you ever cat the deployed file.
-  private val configureAndStartScript =
-    """NAME=$(hostname -s)
-      |cat > /etc/systemd/system/etcd.service <<EOF
-      |[Unit]
-      |Description=etcd distributed key-value store (orphera etcd_cluster test)
-      |After=network.target
-      |
-      |[Service]
-      |Type=notify
-      |User=etcd
-      |ExecStart=/usr/local/bin/etcd \
-      |  --name $NAME \
-      |  --data-dir /var/lib/etcd \
-      |  --listen-peer-urls http://{{cluster_ip}}:2380 \
-      |  --listen-client-urls http://{{cluster_ip}}:2379,http://127.0.0.1:2379 \
-      |  --initial-advertise-peer-urls http://{{cluster_ip}}:2380 \
-      |  --advertise-client-urls http://{{cluster_ip}}:2379 \
-      |  --initial-cluster tst0=http://{{nodes.tst0.cluster_ip}}:2380,tst1=http://{{nodes.tst1.cluster_ip}}:2380,tst2=http://{{nodes.tst2.cluster_ip}}:2380 \
-      |  --initial-cluster-token orphera-etcd-test \
-      |  --initial-cluster-state new
-      |Restart=on-failure
-      |RestartSec=5
-      |
-      |[Install]
-      |WantedBy=multi-user.target
-      |EOF
-      |systemctl daemon-reload
-      |systemctl enable --now etcd""".stripMargin
+  // The unit and the service as an apply description: the file rendered on the
+  // node (`{{cluster_ip}}`, `{{nodes.<name>.cluster_ip}}`), then etcd enabled and
+  // started, and restarted only when the unit changed (`service` reloads systemd
+  // itself). ExecStart is one line, with the three spaces the old script's heredoc
+  // left where it dropped each `\`-newline, so a node the script built compares
+  // `unchanged` and etcd is not restarted. One plan per node, because `--name` is
+  // the node's inventory name, which the script took from `hostname -s`; the two
+  // are the same in the lab.
+  private def etcdUnitPlan(name: String): ApplyPlan =
+    import Resources.*
+    val unit = fileTemplate(
+      "/etc/systemd/system/etcd.service",
+      s"""[Unit]
+         |Description=etcd distributed key-value store (orphera etcd_cluster test)
+         |After=network.target
+         |
+         |[Service]
+         |Type=notify
+         |User=etcd
+         |ExecStart=/usr/local/bin/etcd   --name $name   --data-dir /var/lib/etcd   --listen-peer-urls http://{{cluster_ip}}:2380   --listen-client-urls http://{{cluster_ip}}:2379,http://127.0.0.1:2379   --initial-advertise-peer-urls http://{{cluster_ip}}:2380   --advertise-client-urls http://{{cluster_ip}}:2379   --initial-cluster tst0=http://{{nodes.tst0.cluster_ip}}:2380,tst1=http://{{nodes.tst1.cluster_ip}}:2380,tst2=http://{{nodes.tst2.cluster_ip}}:2380   --initial-cluster-token orphera-etcd-test   --initial-cluster-state new
+         |Restart=on-failure
+         |RestartSec=5
+         |
+         |[Install]
+         |WantedBy=multi-user.target
+         |""".stripMargin,
+      mode = "0644"
+    )
+    val etcd = service("etcd")
+    ApplyPlan.orFail(s"etcd-unit-$name", List(unit.notifies(etcd), etcd))
 
   private val healthCheckScript =
     "ETCDCTL_API=3 /usr/local/bin/etcdctl --endpoints=http://127.0.0.1:2379 endpoint health >/dev/null 2>&1"
@@ -129,9 +122,19 @@ object etcd_cluster extends OrpheraClusterPlaybook:
         )
         .build,
 
-      stage("configure-and-start", "tst0", "tst1", "tst2")
+      stage("configure-and-start-tst0", "tst0")
         .task("write systemd unit and start etcd")(
-          Task.RunCommand(List("sh", "-c", configureAndStartScript))
+          Task.Apply(etcdUnitPlan("tst0"))
+        )
+        .build,
+      stage("configure-and-start-tst1", "tst1")
+        .task("write systemd unit and start etcd")(
+          Task.Apply(etcdUnitPlan("tst1"))
+        )
+        .build,
+      stage("configure-and-start-tst2", "tst2")
+        .task("write systemd unit and start etcd")(
+          Task.Apply(etcdUnitPlan("tst2"))
         )
         .build,
 
