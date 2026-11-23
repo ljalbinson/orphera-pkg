@@ -44,11 +44,16 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 //     run: the health check timed out every time because nginx/php-fpm
 //     weren't installed yet when it started polling.
 //
-// wp-config.php and the nginx site config are written the same way every
-// other config file in this project is: a RunCommand heredoc script with the
-// values interpolated at Scala-compile-time. (When this was written, a
-// cluster playbook's Task.Copy did not render `.mustache` templates; it does
-// now, since every runner uses TaskExecutor, so a template would also work.)
+// wp-config.php, the nginx site and the two services are apply descriptions
+// (Task.Apply). wp-config.php is a `secretFile` (it holds the database
+// password and the salts, so its content is never shown). Its authentication
+// salts are no longer fetched from api.wordpress.org on every run, which made
+// the file different each time (and logged every WordPress user out): the
+// eight values are random secrets kept in the orchestrator's secret store
+// (`wordpress/salt-*`, made on first use), so they are the same on every run
+// and need no network access. The step that downloads WordPress still
+// replaces /var/www/wordpress on every run, so wp-config.php is written (and
+// nginx restarted) every run until that step is converted as well.
 object wordpress_site extends OrpheraClusterPlaybook:
 
   // Test-only hardcoded credentials, same convention (and same caveat) as
@@ -109,32 +114,33 @@ object wordpress_site extends OrpheraClusterPlaybook:
          |find /var/www/wordpress -type f -exec chmod 644 {} \;
          |echo "WordPress downloaded and extracted to /var/www/wordpress"""".stripMargin
 
-  // wp-config.php's own DB_* constants are plain Scala-interpolated
-  // literals (known at build time), not shell variables — only the
-  // authentication salts genuinely need a runtime value (fetched from
-  // WordPress's own salt API), so that's the one piece of this heredoc
-  // left unquoted for shell expansion. `raw"""..."""` rather than
-  // `s"""..."""`, same distinction as mariadb_haproxy_keepalived.scala's
-  // clustercheckScript: needs both literal `$`-prefixed shell/PHP tokens
-  // (`$SALTS`, `$table_prefix`) AND Scala's own `$dbName`-style
-  // interpolation in the same string, which plain `s"""..."""` can't do
-  // without every literal `$` doubled into total illegibility.
-  //
-  // `\$$table_prefix` (three characters after the backslash in the
-  // generated shell source: `$`, `$`, then `table_prefix`) collapses to
-  // `\$table_prefix` once Scala's `$$` → `$` substitution runs — the
-  // backslash then tells the *shell* (this heredoc is unquoted, `<<PHP`,
-  // so the salts variable below can expand) not to expand `$table_prefix`
-  // itself, so the literal PHP `$table_prefix = 'wp_';` reaches the file
-  // untouched rather than being replaced by the shell with an empty
-  // string.
-  private val writeWpConfigScript =
-    raw"""SALTS=$$(curl -s https://api.wordpress.org/secret-key/1.1/salt/)
-         |if [ -z "$$SALTS" ]; then
-         |  echo "WARNING: could not fetch unique auth salts from api.wordpress.org — wp-config.php will ship without them (WordPress falls back to its own defaults; functional but not unique/secure, acceptable for a disposable test site, not for anything real)"
-         |fi
-         |cat > /var/www/wordpress/wp-config.php <<PHP
-         |<?php
+  // The eight authentication keys and salts WordPress wants, one stored secret
+  // each (24 random letters and digits: nothing PHP would need escaped).
+  private val saltNames = List(
+    "AUTH_KEY",
+    "SECURE_AUTH_KEY",
+    "LOGGED_IN_KEY",
+    "NONCE_KEY",
+    "AUTH_SALT",
+    "SECURE_AUTH_SALT",
+    "LOGGED_IN_SALT",
+    "NONCE_SALT"
+  )
+
+  private def saltLines: String =
+    saltNames
+      .map { n =>
+        val v = Secrets.get("wordpress/salt-" + n.toLowerCase.replace('_', '-'))
+        s"define( '$n', '$v' );"
+      }
+      .mkString("\n")
+
+  // wp-config.php: database settings (the VIP, the write listener), the salts,
+  // and WordPress's own boilerplate. `$$table_prefix` is the PHP variable.
+  private val wpConfigPlan: ApplyPlan =
+    import Resources.*
+    val text =
+      s"""<?php
          |define( 'DB_NAME', '$dbName' );
          |define( 'DB_USER', '$dbUser' );
          |define( 'DB_PASSWORD', '${dbPassword.reveal}' );
@@ -142,34 +148,41 @@ object wordpress_site extends OrpheraClusterPlaybook:
          |define( 'DB_CHARSET', 'utf8mb4' );
          |define( 'DB_COLLATE', '' );
          |
-         |$$SALTS
+         |$saltLines
          |
-         |\$$table_prefix = 'wp_';
+         |$$table_prefix = 'wp_';
          |
          |define( 'WP_DEBUG', false );
          |
          |if ( ! defined( 'ABSPATH' ) ) {
-         |	define( 'ABSPATH', __DIR__ . '/' );
+         |\tdefine( 'ABSPATH', __DIR__ . '/' );
          |}
          |require_once ABSPATH . 'wp-settings.php';
-         |PHP
-         |chown www-data:www-data /var/www/wordpress/wp-config.php
-         |chmod 640 /var/www/wordpress/wp-config.php
-         |echo "wp-config.php written, pointing at $vip:3306"""".stripMargin
+         |""".stripMargin
+    ApplyPlan.orFail(
+      "wordpress-config",
+      List(
+        secretFile(
+          "/var/www/wordpress/wp-config.php",
+          Secret(text),
+          mode = "0640",
+          owner = "www-data",
+          group = "www-data"
+        )
+      )
+    )
 
-  // A plain, static nginx site — no Scala-interpolated or shell-expanded
-  // values anywhere in it, so this heredoc is deliberately QUOTED
-  // (`<<'NGINX'`), unlike the two scripts above: nginx's own `$uri`/`$args`
-  // variables must reach the file untouched, and a quoted heredoc delimiter
-  // is what stops the shell trying (and failing) to expand them itself —
-  // a much simpler fix than escaping every nginx `$` individually the way
-  // wp-config.php's single `$table_prefix` needed above.
-  // The nginx site as an apply description: the site file, its link in
-  // sites-enabled, and nginx's stock default site removed. The file is plain
-  // text (`$uri` and the other nginx variables are not rendered), and nginx is
-  // restarted by the start-services task that follows, after `nginx -t`.
-  private val nginxSitePlan: ApplyPlan =
+  // The nginx site, its link in sites-enabled, nginx's stock default site
+  // removed, nginx's configuration checked (`nginx -t`, so a bad file never
+  // reaches a restart: the check fails and nginx is left as it is), and the two
+  // services enabled and running, nginx restarted when any of its three files
+  // changed. The site file is plain text (`$uri` and the other nginx variables
+  // are not rendered). php8.3-fpm needs only to be running: the package starts
+  // it, and nothing here changes its configuration.
+  private val webPlan: ApplyPlan =
     import Resources.*
+    val nginx = service("nginx")
+    val php = service("php8.3-fpm")
     val site = file(
       "/etc/nginx/sites-available/wordpress",
       """server {
@@ -193,59 +206,22 @@ object wordpress_site extends OrpheraClusterPlaybook:
          |}
 """.stripMargin,
       mode = "0644"
-    )
+    ).notifies(nginx)
+    val enabled = symlink(
+      "/etc/nginx/sites-enabled/wordpress",
+      "/etc/nginx/sites-available/wordpress"
+    ).after(site).notifies(nginx)
+    val noDefault =
+      absentFile("/etc/nginx/sites-enabled/default").notifies(nginx)
+    val configOk = command(
+      "check the nginx configuration",
+      "nginx -t",
+      unless = "nginx -t >/dev/null 2>&1"
+    ).after(site, enabled, noDefault)
     ApplyPlan.orFail(
-      "wordpress-nginx-site",
-      List(
-        site,
-        symlink(
-          "/etc/nginx/sites-enabled/wordpress",
-          "/etc/nginx/sites-available/wordpress"
-        ).after(site),
-        absentFile("/etc/nginx/sites-enabled/default")
-      )
+      "wordpress-web",
+      List(site, enabled, noDefault, configOk, php, nginx.after(configOk))
     )
-
-  // Applies this session's own lesson from mariadb_haproxy_keepalived.scala's
-  // masked-restart bug proactively, rather than waiting to hit the same
-  // failure a fourth time: `nginx -t` is checked BEFORE reloading (a bad
-  // config must never take down an already-running nginx), and both
-  // services' actual active state is checked AFTER restarting, with a
-  // loud `exit 1` if either isn't.
-  //
-  // Real run finding: a fresh `nginx`/`php8.3-fpm` package install
-  // auto-starts both services as a side effect of their own postinst
-  // scripts (the same class of gotcha as mariadb-server auto-starting
-  // standalone in mariadb_galera_cluster.scala's header comment) — and on
-  // one real run, that auto-started instance was still mid-startup when
-  // `enable --now php8.3-fpm` ran right after it, logging "Another FPM
-  // instance seems to already listen on /run/php/php8.3-fpm.sock" and a
-  // burst of nginx "Address already in use" errors, both self-resolving
-  // within a few seconds — but not reliably within the confirm stage's
-  // original 60s health-check window. `enable --now` only starts a unit
-  // if it isn't already active, so it doesn't force a clean restart the
-  // way `systemctl restart` does; switched `php8.3-fpm` to the same
-  // explicit `restart` pattern nginx already used, so both services go
-  // through one guaranteed clean stop-then-start here regardless of
-  // whatever state the package's own auto-start left them in.
-  private val startServicesScript =
-    """systemctl enable --now php8.3-fpm
-      |systemctl restart php8.3-fpm
-      |if ! systemctl is-active --quiet php8.3-fpm; then
-      |  echo "php8.3-fpm failed to start — see 'journalctl -xeu php8.3-fpm' for the real reason" >&2
-      |  exit 1
-      |fi
-      |if ! nginx -t; then
-      |  echo "nginx config is invalid — see the nginx -t output above" >&2
-      |  exit 1
-      |fi
-      |systemctl enable --now nginx
-      |systemctl restart nginx
-      |if ! systemctl is-active --quiet nginx; then
-      |  echo "nginx failed to start — see 'journalctl -xeu nginx' for the real reason" >&2
-      |  exit 1
-      |fi
-      |echo "nginx and php8.3-fpm running"""".stripMargin
 
   // Not just an HTTP-200 check: a DB-connection failure (wrong VIP, no
   // grant reaching this node's path through haproxy, etc.) still often
@@ -291,13 +267,10 @@ object wordpress_site extends OrpheraClusterPlaybook:
           )
         )
         .task("write wp-config.php")(
-          Task.RunCommand(List("sh", "-c", writeWpConfigScript))
+          Task.Apply(wpConfigPlan)
         )
-        .task("write nginx site config")(
-          Task.Apply(nginxSitePlan)
-        )
-        .task("start nginx and php8.3-fpm")(
-          Task.RunCommand(List("sh", "-c", startServicesScript))
+        .task("write the nginx site; run nginx and php8.3-fpm")(
+          Task.Apply(webPlan)
         )
         .build,
 
