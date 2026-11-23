@@ -26,9 +26,10 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 // pkgs.k8s.io is HTTPS, which the apt cache cannot cache, so the packages
 // (about 100 MB) come straight from the internet.
 //
-// Re-runnable: the kernel modules and sysctls are an apply description, so
-// a node that is already right is left alone; the other steps rewrite the
-// same files and apt only installs what is missing.
+// Re-runnable: the kernel modules and sysctls, the containerd mirror files,
+// crictl's config and the kubelet defaults are apply descriptions, so a node
+// that is already right is left alone; config.toml is replaced only when the
+// generated text differs, and apt only installs what is missing.
 //
 // Not compiled where this was written; the first run on scala0 is the first
 // compile. `k8sMinor` is a version I could not check against the live
@@ -99,40 +100,71 @@ object k8s_node_prep extends OrpheraClusterPlaybook:
       )
     )
 
-  private val mirrorFiles: String =
-    mirrors
-      .map { case (dir, upstream, port) =>
-        s"""mkdir -p /etc/containerd/certs.d/$dir
-           |cat > /etc/containerd/certs.d/$dir/hosts.toml <<'EOF'
-           |server = "$upstream"
-           |
-           |[host."http://$mirrorHost:$port"]
-           |  capabilities = ["pull", "resolve"]
-           |EOF""".stripMargin
-      }
-      .mkString("\n")
-
   // `containerd config default` is the version-appropriate template; two
   // values change: the systemd cgroup driver, and config_path so the
-  // certs.d directories above are read.
-  private val containerdScript =
-    s"""mkdir -p /etc/containerd
-       |containerd config default > /etc/containerd/config.toml
-       |sed -i 's/SystemdCgroup = false/SystemdCgroup = true/' /etc/containerd/config.toml
-       |sed -i 's|config_path = ""|config_path = "/etc/containerd/certs.d"|' /etc/containerd/config.toml
-       |grep -q 'SystemdCgroup = true' /etc/containerd/config.toml || { echo "SystemdCgroup not set" >&2; exit 1; }
-       |grep -q 'certs.d' /etc/containerd/config.toml || { echo "config_path not set" >&2; exit 1; }
-       |$mirrorFiles
-       |cat > /etc/crictl.yaml <<'EOF'
-       |runtime-endpoint: unix:///run/containerd/containerd.sock
-       |image-endpoint: unix:///run/containerd/containerd.sock
-       |timeout: 20
-       |EOF
-       |systemctl enable containerd
-       |systemctl restart containerd
-       |sleep 2
-       |systemctl is-active --quiet containerd || { echo "containerd failed to start" >&2; exit 1; }
-       |echo "containerd running, systemd cgroups, mirrors configured"""".stripMargin
+  // certs.d directories below are read. The text comes from the installed
+  // containerd, so it stays a script, but it replaces config.toml (and
+  // restarts containerd) only when the result differs from what is there.
+  private val containerdConfigScript =
+    """set -e
+      |mkdir -p /etc/containerd
+      |NEW=/etc/containerd/config.toml.new
+      |containerd config default > $NEW
+      |sed -i 's/SystemdCgroup = false/SystemdCgroup = true/' $NEW
+      |sed -i 's|config_path = ""|config_path = "/etc/containerd/certs.d"|' $NEW
+      |grep -q 'SystemdCgroup = true' $NEW || { echo "SystemdCgroup not set" >&2; rm -f $NEW; exit 1; }
+      |grep -q 'certs.d' $NEW || { echo "config_path not set" >&2; rm -f $NEW; exit 1; }
+      |if cmp -s $NEW /etc/containerd/config.toml; then
+      |  rm -f $NEW
+      |  echo "containerd config.toml already right"
+      |else
+      |  mv $NEW /etc/containerd/config.toml
+      |  systemctl restart containerd
+      |  sleep 2
+      |  systemctl is-active --quiet containerd || { echo "containerd failed to start" >&2; exit 1; }
+      |  echo "containerd config.toml written (systemd cgroups, certs.d), containerd restarted"
+      |fi""".stripMargin
+
+  // The mirror files, crictl's config and the service as an apply
+  // description. containerd reads certs.d on each pull, so a changed mirror
+  // file needs no restart.
+  private val containerdPlan: ApplyPlan =
+    import Resources.*
+    val certsDir = directory("/etc/containerd/certs.d", mode = "0755")
+    val mirrorResources = mirrors.flatMap { case (dir, upstream, port) =>
+      val d = directory(s"/etc/containerd/certs.d/$dir", mode = "0755")
+        .after(certsDir)
+      List(
+        d,
+        fileTemplate(
+          s"/etc/containerd/certs.d/$dir/hosts.toml",
+          s"""server = "$upstream"
+             |
+             |[host."http://$mirrorHost:$port"]
+             |  capabilities = ["pull", "resolve"]
+             |""".stripMargin,
+          mode = "0644",
+          owner = "root",
+          group = "root"
+        ).after(d)
+      )
+    }
+    ApplyPlan.orFail(
+      "containerd-mirrors",
+      List(certsDir) ++ mirrorResources ++ List(
+        file(
+          "/etc/crictl.yaml",
+          """runtime-endpoint: unix:///run/containerd/containerd.sock
+            |image-endpoint: unix:///run/containerd/containerd.sock
+            |timeout: 20
+            |""".stripMargin,
+          mode = "0644",
+          owner = "root",
+          group = "root"
+        ),
+        service("containerd")
+      )
+    )
 
   private val repoScript =
     s"""set -e
@@ -159,11 +191,28 @@ object k8s_node_prep extends OrpheraClusterPlaybook:
       |  DEBIAN_FRONTEND=noninteractive apt-get install -y $PKGS
       |fi""".stripMargin
 
-  private val kubeletScript =
+  // No apply kind holds a package yet, so the hold stays a command
+  // (apt-mark hold on a held package changes nothing).
+  private val holdScript =
     """apt-mark hold kubelet kubeadm kubectl cri-tools
-      |echo "KUBELET_EXTRA_ARGS=--node-ip={{cluster_ip}}" > /etc/default/kubelet
-      |systemctl enable kubelet
-      |echo "kubeadm $(kubeadm version -o short), kubelet $(kubelet --version | cut -d' ' -f2), held; node-ip {{cluster_ip}}"""".stripMargin
+      |echo "kubeadm $(kubeadm version -o short), kubelet $(kubelet --version | cut -d' ' -f2), held"""".stripMargin
+
+  // kubelet's --node-ip and enabling it (kubeadm starts it later).
+  private val kubeletPlan: ApplyPlan =
+    import Resources.*
+    ApplyPlan.orFail(
+      "kubelet-defaults",
+      List(
+        fileTemplate(
+          "/etc/default/kubelet",
+          "KUBELET_EXTRA_ARGS=--node-ip={{cluster_ip}}\n",
+          mode = "0644",
+          owner = "root",
+          group = "root"
+        ),
+        service("kubelet", enabled = Some(true), running = None)
+      )
+    )
 
   private val verifyScript =
     """set -e
@@ -187,11 +236,14 @@ object k8s_node_prep extends OrpheraClusterPlaybook:
             updateCache = true
           )
         )
-        .task("configure containerd and the registry mirrors")(
+        .task("write containerd's config.toml")(
           Task.RunCommand(
-            List("sh", "-c", containerdScript),
+            List("sh", "-c", containerdConfigScript),
             timeoutSeconds = 120
           )
+        )
+        .task("the registry mirrors, crictl and the containerd service")(
+          Task.Apply(containerdPlan)
         )
         .build,
       stage("install-kubernetes-packages", nodes*)
@@ -204,8 +256,11 @@ object k8s_node_prep extends OrpheraClusterPlaybook:
             timeoutSeconds = 900
           )
         )
-        .task("hold the packages, set the kubelet node IP")(
-          Task.RunCommand(List("sh", "-c", kubeletScript), timeoutSeconds = 60)
+        .task("hold the packages")(
+          Task.RunCommand(List("sh", "-c", holdScript), timeoutSeconds = 60)
+        )
+        .task("set the kubelet node IP, enable kubelet")(
+          Task.Apply(kubeletPlan)
         )
         .build,
       stage("verify-node-prep", nodes*)
