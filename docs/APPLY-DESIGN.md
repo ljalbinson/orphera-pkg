@@ -114,6 +114,13 @@ write for part of a node.
 unguarded command would run every time and make the description never settle, so a command with no
 guard and not `onChangeOnly` is refused when the description is built.
 
+`gate` is a `command` that runs nothing: it only asks the node a question (`onlyIf`, `unless` or `creates`,
+as for any command). A gate that answers yes is `unchanged`; one that answers no is `skipped`, and so is
+every resource made `after` it (and whatever those notify), on that node only. This is how one description
+holds two ways of doing a thing and lets each node take the one that fits it (`gen_set_dns.scala`: a
+systemd-resolved drop-in on a node that has resolved, a static `resolv.conf` on one that does not). A skipped
+resource is not a failure; the summary counts it (`3 skipped`).
+
 Files with secret content (`Secret` values) never show their content: the diff line says
 `content (secret: not shown)`.
 

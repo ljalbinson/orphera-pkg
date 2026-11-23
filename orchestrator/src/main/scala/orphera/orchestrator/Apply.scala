@@ -114,6 +114,11 @@ object ApplyResource:
   /** A shell command (`sh -c`). It runs when its guard says it is needed
     * (`onlyIf` exits 0, `unless` exits non-zero, `creates` does not exist) and,
     * with `onChangeOnly`, only when a resource that notifies it changed.
+    *
+    * A `gate` runs nothing: it is a question about the node (its guard). When
+    * the guard says no, the gate is skipped and so is everything that comes
+    * after it (`after`), which is how a description says "only on a node that
+    * has systemd-resolved". When the guard says yes, the gate is unchanged.
     */
   final case class Command(
       label: String,
@@ -123,6 +128,7 @@ object ApplyResource:
       creates: String = "",
       onChangeOnly: Boolean = false,
       timeout: Int = 300,
+      gate: Boolean = false,
       needs: List[String] = Nil,
       triggers: List[String] = Nil
   ) extends ApplyResource:
@@ -530,6 +536,28 @@ object Resources:
   ): ApplyResource =
     Command(label, run, onlyIf, unless, creates, onChangeOnly, timeout)
 
+  /** A question about the node, for resources that apply on some nodes only:
+    * give one of `onlyIf` (a shell test that exits 0 when the resources
+    * apply), `unless` (exits non-zero when they apply) or `creates` (a path
+    * that does not exist). Resources made `after` the gate are skipped on a
+    * node where the answer is no, and applied where it is yes. The gate itself
+    * changes nothing.
+    */
+  def gate(
+      label: String,
+      onlyIf: String = "",
+      unless: String = "",
+      creates: String = ""
+  ): ApplyResource =
+    Command(
+      label,
+      run = "",
+      onlyIf = onlyIf,
+      unless = unless,
+      creates = creates,
+      gate = true
+    )
+
 /** A checked description: its resources and the order to apply them in. */
 final case class ApplyPlan private (
     name: String,
@@ -642,10 +670,13 @@ object ApplyPlan:
         then problems += s"${m.id}: no whitespace in an fstab field"
       case c: ApplyResource.Command =>
         if c.label.trim.isEmpty then problems += "a command has no label"
-        if c.run.trim.isEmpty then problems += s"${c.id}: nothing to run"
+        if c.run.trim.isEmpty && !c.gate then
+          problems += s"${c.id}: nothing to run"
         if List(c.onlyIf, c.unless, c.creates).count(_.nonEmpty) > 1 then
           problems += s"${c.id}: give one of onlyIf, unless and creates"
-        if !c.guarded && !c.onChangeOnly then
+        if c.gate && !c.guarded then
+          problems += s"${c.id}: a gate needs onlyIf, unless or creates"
+        if !c.guarded && !c.onChangeOnly && !c.gate then
           problems += s"${c.id}: says neither when it is needed (onlyIf, unless, creates) nor onChangeOnly, " +
             "so it would run every time"
         if c.creates.nonEmpty && !c.creates.startsWith("/") then
@@ -2176,6 +2207,9 @@ object Apply:
                         )
                       case Right(found) =>
                         found.get(i).toRight("the node did not say")
+                    val isGate = r match
+                      case c: ApplyResource.Command => c.gate
+                      case _                        => false
                     val seenIO: IO[Either[String, Observed]] = r match
                       case c: ApplyResource.Command if !c.guarded =>
                         IO.pure(Right(Observed.Guard(needed = true, "")))
@@ -2187,6 +2221,15 @@ object Apply:
                         case (Left(e), _) => finish(ApplyOutcome.Failed(e))
                         case (_, Left(e)) =>
                           finish(ApplyOutcome.Failed(s"its content: $e"))
+                        case (Right(Observed.Guard(needed, note)), _)
+                            if isGate =>
+                          finish(
+                            if needed then ApplyOutcome.Unchanged("")
+                            else
+                              ApplyOutcome.Skipped(
+                                s"not for this node (${note.trim})"
+                              )
+                          )
                         case (Right(Observed.Guard(false, note)), _) =>
                           finish(ApplyOutcome.Unchanged(note))
                         case (Right(s), Right(content)) =>

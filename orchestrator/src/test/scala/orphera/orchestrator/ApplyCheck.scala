@@ -265,6 +265,20 @@ object ApplyCheck:
         .exists(_.contains("one of onlyIf"))
     )
     check(
+      "a gate with no guard",
+      problems(List(gate("g"))).exists(_.contains("a gate needs onlyIf")),
+      problems(List(gate("g"))).toString
+    )
+    check(
+      "a gate with a guard, and a file after it, is a good description",
+      problems(
+        List(
+          gate("g", onlyIf = "test -e /x"),
+          file("/etc/x", "a").afterIds("command[g]")
+        )
+      ).isEmpty
+    )
+    check(
       "after something not described",
       problems(List(file("/etc/x", "a").afterIds("file[/nope]")))
         .exists(_.contains("which is not described"))
@@ -503,6 +517,89 @@ object ApplyCheck:
         _.isInstanceOf[ApplyOutcome.Changed]
       ) && gn.ran.exists(_.contains("echo c")),
       gn.ran.toString
+    )
+
+    // Gates: what comes after a gate that answers no is skipped, the rest runs.
+    val yesNode = new FakeNode(Map.empty, guards = Map("is-resolved" -> true))
+    val yes = applyTo(
+      yesNode,
+      List(
+        gate("resolved", onlyIf = "is-resolved"),
+        file("/etc/resolved.conf", "a").afterIds("command[resolved]")
+      )
+    ).report
+    check(
+      "gate: a yes leaves the gate unchanged and applies what follows",
+      outcome(yes, "command[resolved]").contains(ApplyOutcome.Unchanged(""))
+        && outcome(yes, "file[/etc/resolved.conf]").exists(
+          _.isInstanceOf[ApplyOutcome.Changed]
+        ) && yesNode.fs.contains("/etc/resolved.conf")
+        && yesNode.ran == Vector("write /etc/resolved.conf"),
+      yes.toString + yesNode.ran.toString
+    )
+    val noNode = new FakeNode(Map.empty, guards = Map("is-resolved" -> false))
+    val unitRestart = service("resolved", Some(false), Some(true))
+    val no = applyTo(
+      noNode,
+      List(
+        gate("resolved", onlyIf = "is-resolved"),
+        file("/etc/resolved.conf", "a")
+          .afterIds("command[resolved]")
+          .notifies(unitRestart),
+        unitRestart,
+        file("/etc/always.conf", "b")
+      )
+    )
+    check(
+      "gate: a no skips the gate and what follows it, and what it notifies",
+      outcome(no.report, "command[resolved]").contains(
+        ApplyOutcome.Skipped("not for this node (guard says no)")
+      ) && outcome(no.report, "file[/etc/resolved.conf]").contains(
+        ApplyOutcome.Skipped("command[resolved] was skipped")
+      ) && outcome(no.report, "service[resolved]").contains(
+        ApplyOutcome.Skipped("file[/etc/resolved.conf] was skipped")
+      ),
+      no.report.toString
+    )
+    check(
+      "gate: a no changes nothing, the rest still runs, and it is not a failure",
+      !noNode.fs.contains("/etc/resolved.conf") && noNode.fs.contains(
+        "/etc/always.conf"
+      ) && !no.report.failed
+        && noNode.ran == Vector("write /etc/always.conf")
+        && no.lines.lastOption.contains("1 changed, 0 unchanged, 3 skipped"),
+      no.lines.mkString("\n")
+    )
+    val unlessNode =
+      new FakeNode(Map.empty, guards = Map("has-unit" -> true))
+    val unlessRun = applyTo(
+      unlessNode,
+      List(
+        gate("no unit", unless = "has-unit"),
+        file("/etc/static.conf", "s").afterIds("command[no unit]")
+      )
+    ).report
+    check(
+      "gate: unless true (the test passes) is a no",
+      outcome(unlessRun, "file[/etc/static.conf]").contains(
+        ApplyOutcome.Skipped("command[no unit] was skipped")
+      ) && !unlessNode.fs.contains("/etc/static.conf"),
+      unlessRun.toString
+    )
+    val checkRun = applyTo(
+      new FakeNode(Map.empty, guards = Map("is-resolved" -> false)),
+      List(
+        gate("resolved", onlyIf = "is-resolved"),
+        file("/etc/resolved.conf", "a").afterIds("command[resolved]")
+      ),
+      check = true
+    ).report
+    check(
+      "gate: with check, a no also skips what follows",
+      outcome(checkRun, "file[/etc/resolved.conf]").contains(
+        ApplyOutcome.Skipped("command[resolved] was skipped")
+      ),
+      checkRun.toString
     )
 
     // Failures: a directory where a file should be; what comes after it is skipped, the rest runs.
