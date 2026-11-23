@@ -35,13 +35,11 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 // but the bind is still scoped deliberately rather than left wildcard
 // out of habit.
 //
-// The haproxy config block is appended idempotently: a `sed` delete of
-// any previously-appended block (bounded by BEGIN/END marker comments)
-// runs before every append, so re-running this manifest never duplicates
-// the frontend stanza — appending blindly on every run, the way
-// haproxy.cfg's own full-file rewrite in mariadb_haproxy_keepalived.scala
-// gets to just overwrite wholesale, isn't available here since this file
-// doesn't own that file's other content and can't risk clobbering it.
+// The haproxy metrics frontend is part of the haproxy.cfg that
+// mariadb_haproxy_keepalived.scala writes (BEGIN/END orphera-prometheus-metrics
+// block): that playbook rewrites the whole file, so a block appended from here
+// would be removed by its next run. This playbook only confirms the endpoint
+// answers.
 //
 // mysqld_exporter credentials: a dedicated, minimally-privileged
 // 'exporter'@'localhost' MariaDB user (PROCESS + REPLICATION CLIENT +
@@ -82,44 +80,13 @@ object observability_extended extends OrpheraClusterPlaybook:
   private val exporterUser = "exporter"
   private val exporterPassword = Secrets.secret("observability/mysqld-exporter")
 
-  // tst3/tst4/tst5 only. Appends (idempotently) a small Prometheus-format
-  // stats frontend to the haproxy.cfg that mariadb_haproxy_keepalived.scala
-  // already wrote — assumes that file is already applied; this does not
-  // write a full haproxy.cfg of its own.
+  // tst3/tst4/tst5 only. The Prometheus-format stats frontend itself is in the
+  // haproxy.cfg that mariadb_haproxy_keepalived.scala writes (it writes the file
+  // whole, so a block appended here would be removed by its next run). This only
+  // checks that the endpoint answers.
   private val haproxyMetricsScript =
-    s"""set -e
-       |CFG=/etc/haproxy/haproxy.cfg
-       |NEW=$$CFG.orphera.new
-       |sed '/# BEGIN orphera-prometheus-metrics/,/# END orphera-prometheus-metrics/d' $$CFG > $$NEW
-       |cat >> $$NEW <<'EOF'
-       |# BEGIN orphera-prometheus-metrics
-       |frontend prometheus_metrics
-       |    bind {{cluster_ip}}:$haproxyMetricsPort
-       |    mode http
-       |    http-request use-service prometheus-exporter if { path /metrics }
-       |    no log
-       |# END orphera-prometheus-metrics
-       |EOF
-       |if cmp -s $$NEW $$CFG; then
-       |  rm -f $$NEW
-       |  echo "haproxy.cfg already has the metrics frontend"
-       |else
-       |  if ! haproxy -c -f $$NEW; then
-       |    rm -f $$NEW
-       |    echo "haproxy.cfg failed its own -c config check after adding the metrics frontend — see the haproxy output above" >&2
-       |    exit 1
-       |  fi
-       |  cat $$NEW > $$CFG
-       |  rm -f $$NEW
-       |  systemctl restart haproxy
-       |  if ! systemctl is-active --quiet haproxy; then
-       |    echo "haproxy failed to restart after adding the metrics frontend — see 'journalctl -xeu haproxy' for the real reason" >&2
-       |    exit 1
-       |  fi
-       |  echo "haproxy.cfg: metrics frontend written, haproxy restarted"
-       |fi
-       |if ! curl -sf http://{{cluster_ip}}:$haproxyMetricsPort/metrics | grep -q '^haproxy_'; then
-       |  echo "haproxy is running but {{cluster_ip}}:$haproxyMetricsPort/metrics didn't return haproxy_* series" >&2
+    s"""if ! curl -sf http://{{cluster_ip}}:$haproxyMetricsPort/metrics | grep -q '^haproxy_'; then
+       |  echo "{{cluster_ip}}:$haproxyMetricsPort/metrics didn't return haproxy_* series: run mariadb_haproxy_keepalived.scala (its haproxy.cfg carries the metrics frontend), then this playbook again" >&2
        |  exit 1
        |fi
        |echo "haproxy prometheus-exporter frontend listening on :$haproxyMetricsPort"""".stripMargin
@@ -313,8 +280,8 @@ object observability_extended extends OrpheraClusterPlaybook:
 
   val playbook: ClusterPlaybook =
     clusterPlaybook("observability-extended")(
-      stage("add-haproxy-metrics-endpoint", haProxyNodes*)
-        .task("append prometheus-exporter frontend to haproxy.cfg and restart")(
+      stage("confirm-haproxy-metrics-endpoint", haProxyNodes*)
+        .task("confirm haproxy answers on its metrics port")(
           Task.RunCommand(
             List("sh", "-c", haproxyMetricsScript),
             timeoutSeconds = 60

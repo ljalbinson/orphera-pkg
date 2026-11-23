@@ -126,36 +126,57 @@ object mariadb_haproxy_keepalived extends OrpheraClusterPlaybook:
          |fi
          |""".stripMargin
 
-  // Writes the script above to disk (via a quoted 'SCRIPT_EOF' heredoc
-  // delimiter, so none of the script's own many literal $ characters get
-  // expanded while it's being written out — they're meant for bash to
-  // interpret when the script itself later RUNS, not while this outer
-  // script is writing it), then exposes it on :9200 via a systemd socket
-  // unit (Accept=yes — one short-lived service instance per connection,
-  // exactly matching xinetd's traditional role, without needing xinetd
-  // installed at all).
-  private val installClustercheckScript =
-    s"""cat > /usr/local/bin/galera-clustercheck <<'SCRIPT_EOF'
-       |$clustercheckScript
-       |SCRIPT_EOF
-       |chmod +x /usr/local/bin/galera-clustercheck
-       |cat > /etc/systemd/system/clustercheck.socket <<'EOF'
-       |[Socket]
-       |ListenStream=9200
-       |Accept=yes
-       |
-       |[Install]
-       |WantedBy=sockets.target
-       |EOF
-       |cat > /etc/systemd/system/clustercheck@.service <<'EOF'
-       |[Service]
-       |ExecStart=/usr/local/bin/galera-clustercheck
-       |StandardInput=socket
-       |StandardOutput=socket
-       |EOF
-       |systemctl daemon-reload
-       |systemctl enable --now clustercheck.socket
-       |echo 'clustercheck health-check endpoint listening on :9200'""".stripMargin
+  // The script above, exposed on :9200 through a systemd socket unit
+  // (Accept=yes: one short-lived service instance per connection, exactly
+  // matching xinetd's traditional role, without needing xinetd installed at
+  // all), as an apply description. The script holds the clustercheck password,
+  // so it is a secretFile (never shown in a plan or diff) and readable by root
+  // only: the service runs as root. (It was 0755, readable by every user.)
+  // A change to the socket unit restarts the socket; the service template is
+  // only read when a connection arrives, and service() reloads systemd first.
+  private val clustercheckPlan: ApplyPlan =
+    import Resources.*
+    val socketUnit = service("clustercheck.socket")
+    val script = secretFile(
+      "/usr/local/bin/galera-clustercheck",
+      Secret(clustercheckScript + "\n"),
+      mode = "0700",
+      owner = "root",
+      group = "root"
+    )
+    val socketFile = file(
+      "/etc/systemd/system/clustercheck.socket",
+      """[Socket]
+        |ListenStream=9200
+        |Accept=yes
+        |
+        |[Install]
+        |WantedBy=sockets.target
+        |""".stripMargin,
+      mode = "0644",
+      owner = "root",
+      group = "root"
+    ).notifies(socketUnit)
+    val serviceFile = file(
+      "/etc/systemd/system/clustercheck@.service",
+      """[Service]
+        |ExecStart=/usr/local/bin/galera-clustercheck
+        |StandardInput=socket
+        |StandardOutput=socket
+        |""".stripMargin,
+      mode = "0644",
+      owner = "root",
+      group = "root"
+    )
+    ApplyPlan.orFail(
+      "galera-clustercheck",
+      List(
+        script,
+        socketFile,
+        serviceFile,
+        socketUnit.after(script, socketFile, serviceFile)
+      )
+    )
 
   // Symmetric across all three nodes — same reasoning as Galera's own
   // wsrep_cluster_address: every node's haproxy.cfg lists the identical
@@ -221,6 +242,11 @@ object mariadb_haproxy_keepalived extends OrpheraClusterPlaybook:
   // The haproxy configuration, rendered on each node, as an apply description:
   // the file, then haproxy restarted if it changed (the enable and the start
   // are the service's own). It is no longer restarted when nothing changed.
+  // The file also carries haproxy's Prometheus-format metrics frontend (port
+  // 8404, on the node's address, the BEGIN/END block at the end): this playbook
+  // writes haproxy.cfg whole, so a block that observability_extended.scala
+  // appended would be removed by every re-run of this one. That playbook now
+  // only checks that the endpoint answers and adds the scrape job.
   private val haproxyPlan: ApplyPlan =
     import Resources.*
     val cfg = fileTemplate(
@@ -260,6 +286,13 @@ object mariadb_haproxy_keepalived extends OrpheraClusterPlaybook:
          |    server tst3 {{nodes.tst3.cluster_ip}}:3306 check
          |    server tst4 {{nodes.tst4.cluster_ip}}:3306 check
          |    server tst5 {{nodes.tst5.cluster_ip}}:3306 check
+         |# BEGIN orphera-prometheus-metrics
+         |frontend prometheus_metrics
+         |    bind {{cluster_ip}}:8404
+         |    mode http
+         |    http-request use-service prometheus-exporter if { path /metrics }
+         |    no log
+         |# END orphera-prometheus-metrics
 """.stripMargin,
       mode = "0644"
     )
@@ -418,7 +451,7 @@ object mariadb_haproxy_keepalived extends OrpheraClusterPlaybook:
 
       stage("write-clustercheck-healthcheck", "tst3", "tst4", "tst5")
         .task("install the :9200 clustercheck health-check endpoint")(
-          Task.RunCommand(List("sh", "-c", installClustercheckScript))
+          Task.Apply(clustercheckPlan)
         )
         .build,
 
