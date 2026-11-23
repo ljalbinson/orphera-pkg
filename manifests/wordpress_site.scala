@@ -52,8 +52,9 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 // eight values are random secrets kept in the orchestrator's secret store
 // (`wordpress/salt-*`, made on first use), so they are the same on every run
 // and need no network access. The step that downloads WordPress still
-// replaces /var/www/wordpress on every run, so wp-config.php is written (and
-// nginx restarted) every run until that step is converted as well.
+// replaces /var/www/wordpress on every run, so wp-config.php is written
+// ("created") on every run until that step is converted as well. Nothing in
+// nginx's configuration depends on it, so nginx is not restarted.
 object wordpress_site extends OrpheraClusterPlaybook:
 
   // Test-only hardcoded credentials, same convention (and same caveat) as
