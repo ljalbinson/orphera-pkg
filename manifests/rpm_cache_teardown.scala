@@ -14,14 +14,30 @@ object rpm_cache_teardown extends OrpheraClusterPlaybook:
 
   private val clients = List("tst8")
 
-  private val clientScript =
-    """rm -f /etc/yum.repos.d/orphera-rpm-cache.repo
-      |for f in /etc/yum.repos.d/*.repo.orphera-off; do
-      |  [ -e "$f" ] || continue
-      |  mv "$f" "${f%.orphera-off}"
-      |done
-      |dnf clean metadata -q || true
-      |echo "dnf on this node no longer uses the cache"""".stripMargin
+  // The client side as a description: the cache repository file removed (`absentFile`), the stock Rocky
+  // repository files renamed back (a command, only when some are set aside), and dnf's metadata cleared
+  // only when one of those changed something.
+  private val clientPlan: ApplyPlan =
+    import Resources.*
+    val clean = command(
+      "clear dnf's metadata",
+      "dnf clean metadata -q || true",
+      onChangeOnly = true
+    )
+    val restore = command(
+      "put the stock Rocky repository files back",
+      """for f in /etc/yum.repos.d/*.repo.orphera-off; do
+        |  [ -e "$f" ] || continue
+        |  mv "$f" "${f%.orphera-off}"
+        |done""".stripMargin,
+      onlyIf = "ls /etc/yum.repos.d/*.repo.orphera-off >/dev/null 2>&1"
+    ).notifies(clean)
+    val repoFile = absentFile("/etc/yum.repos.d/orphera-rpm-cache.repo")
+      .notifies(clean)
+    ApplyPlan.orFail(
+      "rpm-cache-unpoint",
+      List(repoFile, restore.after(repoFile), clean.after(repoFile, restore))
+    )
 
   private val cacheScript =
     """systemctl disable --now nginx 2>/dev/null || true
@@ -34,7 +50,7 @@ object rpm_cache_teardown extends OrpheraClusterPlaybook:
     clusterPlaybook("rpm-cache-teardown")(
       stage("unpoint-dnf", clients*)
         .task("remove the rpm cache settings")(
-          Task.RunCommand(List("sh", "-c", clientScript), timeoutSeconds = 120)
+          Task.Apply(clientPlan)
         )
         .build,
 
