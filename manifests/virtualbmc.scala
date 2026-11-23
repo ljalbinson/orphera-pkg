@@ -37,7 +37,7 @@ object virtualbmc extends OrpheraClusterPlaybook:
       .filter(_.nonEmpty)
       .toList
   private val spec = env("VBMC_SPEC", "virtualbmc")
-  private val user = "admin"
+  private val ipmiUser = "admin"
   private val password = Secrets.secret("vbmc/password")
 
   private val waitAptIdleScript =
@@ -79,15 +79,37 @@ object virtualbmc extends OrpheraClusterPlaybook:
       |WantedBy=multi-user.target
       |""".stripMargin
 
-  private val startScript =
-    """systemctl daemon-reload
-      |systemctl enable --now orphera-vbmcd.service
-      |for i in $(seq 1 20); do
-      |  if HOME=/root /opt/virtualbmc/bin/vbmc list >/dev/null 2>&1; then echo "vbmcd answers"; exit 0; fi
-      |  sleep 2
-      |done
-      |echo "vbmcd does not answer - see 'journalctl -u orphera-vbmcd'" >&2
-      |exit 1""".stripMargin
+  // The configuration, the unit and the running daemon as one description. The unit file notifies the service,
+  // so vbmcd is restarted only when the unit changed; the daemon is also enabled and running. The check
+  // waits for vbmcd to answer, and only runs when it does not answer yet.
+  private val vbmcdPlan: ApplyPlan =
+    import Resources.*
+    val conf = secretFile(
+      "/etc/orphera-vbmc.conf",
+      Secret(s"VBMC_USER=$ipmiUser\nVBMC_PASSWORD='${password.reveal.take(16)}'\n"),
+      mode = "0600",
+      owner = "root",
+      group = "root"
+    )
+    val vbmcd = service("orphera-vbmcd.service", enabled = Some(true), running = Some(true))
+    val unitFile = file(
+      "/etc/systemd/system/orphera-vbmcd.service",
+      unit,
+      mode = "0644",
+      owner = "root",
+      group = "root"
+    ).notifies(vbmcd)
+    val answers = command(
+      "wait for vbmcd to answer",
+      """for i in $(seq 1 20); do
+        |  if HOME=/root /opt/virtualbmc/bin/vbmc list >/dev/null 2>&1; then echo "vbmcd answers"; exit 0; fi
+        |  sleep 2
+        |done
+        |echo "vbmcd does not answer - see 'journalctl -u orphera-vbmcd'" >&2
+        |exit 1""".stripMargin,
+      unless = "HOME=/root /opt/virtualbmc/bin/vbmc list >/dev/null 2>&1"
+    ).after(vbmcd)
+    ApplyPlan.orFail("vbmcd", List(conf, unitFile, vbmcd, answers))
 
   val playbook: ClusterPlaybook =
     clusterPlaybook("virtualbmc")(
@@ -107,27 +129,8 @@ object virtualbmc extends OrpheraClusterPlaybook:
         .task("install VirtualBMC into /opt/virtualbmc")(
           Task.RunCommand(List("sh", "-c", venvScript), timeoutSeconds = 600)
         )
-        .task("write /etc/orphera-vbmc.conf")(
-          Task.WriteFile(
-            content =
-              s"VBMC_USER=$user\nVBMC_PASSWORD='${password.reveal.take(16)}'\n",
-            dest = "/etc/orphera-vbmc.conf",
-            owner = "root",
-            group = "root",
-            mode = 384 // 0600
-          )
-        )
-        .task("write orphera-vbmcd.service")(
-          Task.WriteFile(
-            content = unit,
-            dest = "/etc/systemd/system/orphera-vbmcd.service",
-            owner = "root",
-            group = "root",
-            mode = 420 // 0644
-          )
-        )
-        .task("start vbmcd")(
-          Task.RunCommand(List("sh", "-c", startScript), timeoutSeconds = 120)
+        .task("write the configuration and the unit; run vbmcd")(
+          Task.Apply(vbmcdPlan)
         )
         .build
     )
