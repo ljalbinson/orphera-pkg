@@ -37,7 +37,7 @@ object virtualbmc extends OrpheraClusterPlaybook:
       .filter(_.nonEmpty)
       .toList
   private val spec = env("VBMC_SPEC", "virtualbmc")
-  private val user = "admin"
+  private val ipmiUser = "admin"
   private val password = Secrets.secret("vbmc/password")
 
   private val waitAptIdleScript =
@@ -86,7 +86,7 @@ object virtualbmc extends OrpheraClusterPlaybook:
     import Resources.*
     val conf = secretFile(
       "/etc/orphera-vbmc.conf",
-      Secret(s"VBMC_USER=$user\nVBMC_PASSWORD='${password.reveal.take(16)}'\n"),
+      Secret(s"VBMC_USER=$ipmiUser\nVBMC_PASSWORD='${password.reveal.take(16)}'\n"),
       mode = "0600",
       owner = "root",
       group = "root"
