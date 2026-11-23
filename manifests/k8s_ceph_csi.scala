@@ -72,10 +72,18 @@ object k8s_ceph_csi extends OrpheraClusterPlaybook:
        |echo "pool $pool and client.$cephUser ready"
        |""".stripMargin
 
-  private val moduleScript =
-    """modprobe rbd
-      |echo rbd > /etc/modules-load.d/rbd.conf
-      |lsmod | grep -q '^rbd' && echo "$(hostname): rbd module loaded"""".stripMargin
+  // The kernel RBD client, loaded now and at boot (a `kernelModule`, which keeps
+  // /etc/modules-load.d/orphera-rbd.conf). The earlier version wrote rbd.conf there by hand; that file
+  // is removed, so the module is not listed twice.
+  private val modulePlan: ApplyPlan =
+    import Resources.*
+    ApplyPlan.orFail(
+      "rbd-module",
+      List(
+        kernelModule("rbd"),
+        absentFile("/etc/modules-load.d/rbd.conf")
+      )
+    )
 
   private val installScript =
     s"""set -e
@@ -179,7 +187,7 @@ object k8s_ceph_csi extends OrpheraClusterPlaybook:
         .build,
       stage("rbd-module", allNodes*)
         .task("load the rbd kernel module")(
-          Task.RunCommand(List("sh", "-c", moduleScript), timeoutSeconds = 60)
+          Task.Apply(modulePlan)
         )
         .build,
       stage("install-ceph-csi", node)
