@@ -201,25 +201,11 @@ object nova_compute extends OrpheraApply:
   // libvirtd also looks the caller's uid up in the host's user database to build its
   // identity ("Failed to find user record for uid"), so a host user with the
   // container nova user's uid (42436) is created first.
+  // What stays a command: waiting for libvirtd to answer, removing the default NAT network, and the check that
+  // the socket is world-accessible. Everything before that (the host user, the socket drop-in, the settings in
+  // libvirtd.conf, the services) is described in `describe`.
   private val libvirtScript =
     """set -e
-      |if ! getent group 42436 >/dev/null; then groupadd -g 42436 nova-kolla; fi
-      |if ! getent passwd 42436 >/dev/null; then useradd -r -u 42436 -g 42436 -M -s /usr/sbin/nologin nova-kolla; fi
-      |getent passwd 42436
-      |mkdir -p /etc/systemd/system/libvirtd.socket.d
-      |printf '[Socket]\nSocketMode=0777\n' > /etc/systemd/system/libvirtd.socket.d/orphera.conf
-      |if ! grep -q '^unix_sock_rw_perms' /etc/libvirt/libvirtd.conf; then
-      |  printf 'unix_sock_rw_perms = "0777"\n' >> /etc/libvirt/libvirtd.conf
-      |fi
-      |for opt in auth_unix_rw auth_unix_ro; do
-      |  if ! grep -q "^$opt " /etc/libvirt/libvirtd.conf; then
-      |    printf '%s = "none"\n' "$opt" >> /etc/libvirt/libvirtd.conf
-      |  fi
-      |done
-      |systemctl daemon-reload
-      |systemctl stop libvirtd.service libvirtd.socket libvirtd-ro.socket libvirtd-admin.socket 2>/dev/null || true
-      |systemctl start libvirtd.socket
-      |systemctl enable --now libvirtd
       |for i in $(seq 1 20); do
       |  if virsh -c qemu:///system list --all >/dev/null 2>&1; then break; fi
       |  sleep 2
@@ -231,15 +217,9 @@ object nova_compute extends OrpheraApply:
       |if [ "$MODE" != "777" ]; then echo "libvirt socket mode is $MODE, expected 777" >&2; exit 1; fi
       |virsh -c qemu:///system version | head -3
       |echo "libvirtd running, socket mode $MODE"""".stripMargin
-  // True when everything the script above makes is in place and libvirtd answers.
+  // True when libvirtd answers, its socket is world-accessible and the default network is gone.
   private val libvirtReady =
-    s"""getent group 42436 >/dev/null && getent passwd 42436 >/dev/null &&
-       |grep -qx 'SocketMode=0777' /etc/systemd/system/libvirtd.socket.d/orphera.conf 2>/dev/null &&
-       |grep -q '^unix_sock_rw_perms' /etc/libvirt/libvirtd.conf &&
-       |grep -q '^auth_unix_rw ' /etc/libvirt/libvirtd.conf &&
-       |grep -q '^auth_unix_ro ' /etc/libvirt/libvirtd.conf &&
-       |[ "$$(stat -c %a /run/libvirt/libvirt-sock 2>/dev/null)" = "777" ] &&
-       |systemctl is-active --quiet libvirtd &&
+    s"""[ "$$(stat -c %a /run/libvirt/libvirt-sock 2>/dev/null)" = "777" ] &&
        |virsh -c qemu:///system list --all >/dev/null 2>&1 &&
        |! virsh -c qemu:///system net-list --name 2>/dev/null | grep -qx default &&
        |! virsh -c qemu:///system net-list --all --autostart --name 2>/dev/null | grep -qx default""".stripMargin
@@ -901,12 +881,64 @@ if __name__ == '__main__':
     val podman = tools(0)
 
     // libvirtd, the libvirt secret for the Ceph volumes, the provider NIC and its bridge.
+    // libvirtd from the host package. The container's nova user (uid 42436) must exist on the host, because
+    // libvirtd looks the caller's uid up to build its identity. The socket's mode is set in a drop-in for
+    // libvirtd.socket (Ubuntu's systemd creates the socket), and polkit is off (auth_unix_rw/ro = "none"). A
+    // changed drop-in restarts the socket, a changed libvirtd.conf restarts libvirtd; nothing is restarted when
+    // the files are already right.
+    val kollaGroup = group("nova-kolla", gid = 42436, system = true)
+    val kollaUser = user(
+      "nova-kolla",
+      uid = 42436,
+      group = "nova-kolla",
+      shell = "/usr/sbin/nologin",
+      system = true
+    ).after(kollaGroup)
+    val socketDir = directory(
+      "/etc/systemd/system/libvirtd.socket.d",
+      mode = "0755",
+      owner = "root",
+      group = "root"
+    ).after(tools*)
+    val libvirtSocket = service(
+      "libvirtd.socket",
+      enabled = None,
+      running = Some(true)
+    )
+    val libvirtd = service("libvirtd.service")
+    val socketMode = file(
+      "/etc/systemd/system/libvirtd.socket.d/orphera.conf",
+      "[Socket]\nSocketMode=0777\n",
+      mode = "0644",
+      owner = "root",
+      group = "root"
+    ).after(socketDir).notifies(libvirtSocket)
+    val libvirtSettings = List(
+      lineInFile(
+        "/etc/libvirt/libvirtd.conf",
+        """unix_sock_rw_perms = "0777"""",
+        matching = "^unix_sock_rw_perms"
+      ),
+      lineInFile(
+        "/etc/libvirt/libvirtd.conf",
+        """auth_unix_rw = "none"""",
+        matching = "^auth_unix_rw "
+      ),
+      lineInFile(
+        "/etc/libvirt/libvirtd.conf",
+        """auth_unix_ro = "none"""",
+        matching = "^auth_unix_ro "
+      )
+    ).map(_.after(tools*).notifies(libvirtd))
+    val libvirtRunning = libvirtd.after(
+      (libvirtSocket :: socketMode :: kollaUser :: libvirtSettings)*
+    )
     val libvirt = command(
-      "start libvirtd with the sockets and settings nova-compute needs",
+      "wait for libvirtd; remove its default network",
       libvirtScript,
       unless = libvirtReady,
       timeout = 120
-    ).after(tools*)
+    ).after(libvirtRunning)
     val cephSecret = command(
       "define the libvirt secret for the Ceph volumes",
       cephSecretScript,
@@ -1077,6 +1109,13 @@ if __name__ == '__main__':
 
     tools ++ List(
       kvm,
+      kollaGroup,
+      kollaUser,
+      socketDir,
+      socketMode
+    ) ++ libvirtSettings ++ List(
+      libvirtSocket,
+      libvirtRunning,
       libvirt,
       cephSecret,
       addressless,
