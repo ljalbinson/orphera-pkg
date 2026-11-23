@@ -311,22 +311,37 @@ else:
        |      prefix: "oidc:"
        |EOF
        |} > authn.yaml
-       |cat > encryption.yaml <<EOF
-       |apiVersion: apiserver.config.k8s.io/v1
-       |kind: EncryptionConfiguration
-       |resources:
-       |- resources:
-       |  - secrets
-       |  providers:
-       |  - secretbox:
-       |      keys:
-       |      - name: key1
-       |        secret: $encryptionKey
-       |  - identity: {}
-       |EOF
-       |chmod 600 authn.yaml encryption.yaml
-       |echo "authn.yaml and encryption.yaml written"
+       |chmod 600 authn.yaml
+       |echo "authn.yaml written"
        |""".stripMargin
+
+  // encryption.yaml as an apply description: a secret file (the key is never
+  // shown in a plan or diff), mode 0600, no restart (the API servers read it when
+  // the flag is added, a later stage). authn.yaml stays a script: it embeds
+  // ca.crt, a file on the node, which a template cannot include.
+  private val encryptionPlan: ApplyPlan =
+    import Resources.*
+    ApplyPlan.orFail(
+      "k8s-encryption-config",
+      List(
+        secretFile(
+          s"$stateDir/encryption.yaml",
+          Secret(s"""apiVersion: apiserver.config.k8s.io/v1
+                    |kind: EncryptionConfiguration
+                    |resources:
+                    |- resources:
+                    |  - secrets
+                    |  providers:
+                    |  - secretbox:
+                    |      keys:
+                    |      - name: key1
+                    |        secret: $encryptionKey
+                    |  - identity: {}
+                    |""".stripMargin),
+          mode = "0600"
+        )
+      )
+    )
 
   // Adds the two flags, the volume and the mount to the kube-apiserver static
   // pod, waits for the new pod, and puts the old manifest back if it does not
@@ -470,11 +485,14 @@ yaml.safe_dump(d, open('/etc/kubernetes/manifests/.kube-apiserver.yaml.new', 'w'
         )
         .build,
       stage("write-config-files", "tst30")
-        .task("write authn.yaml and encryption.yaml")(
+        .task("write authn.yaml")(
           Task.RunCommand(
             List("sh", "-c", configFilesScript),
             timeoutSeconds = 60
           )
+        )
+        .task("write encryption.yaml")(
+          Task.Apply(encryptionPlan)
         )
         .build,
       stage("distribute-config-files", "tst31", "tst32")

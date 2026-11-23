@@ -46,33 +46,39 @@ object k8s_pod_security extends OrpheraClusterPlaybook:
   private val exemptNamespaces = List("kube-system")
   private val flag = "admission-control-config-file"
 
-  private val configScript =
-    s"""set -e
-       |cd $stateDir
-       |umask 022
-       |cat > admission.yaml <<EOF
-       |apiVersion: apiserver.config.k8s.io/v1
-       |kind: AdmissionConfiguration
-       |plugins:
-       |- name: PodSecurity
-       |  configuration:
-       |    apiVersion: pod-security.admission.config.k8s.io/v1
-       |    kind: PodSecurityConfiguration
-       |    defaults:
-       |      enforce: baseline
-       |      enforce-version: latest
-       |      audit: restricted
-       |      audit-version: latest
-       |      warn: restricted
-       |      warn-version: latest
-       |    exemptions:
-       |      usernames: []
-       |      runtimeClasses: []
-       |      namespaces: [${exemptNamespaces.mkString(", ")}]
-       |EOF
-       |chmod 644 admission.yaml
-       |echo "admission.yaml written"
-       |""".stripMargin
+  // admission.yaml as an apply description: the file only, with no restart (the
+  // API servers pick it up when the flag is added, a later stage). The directory
+  // is made by k8s_cluster.scala, as before. Byte for byte what the heredoc wrote.
+  private val configPlan: ApplyPlan =
+    import Resources.*
+    ApplyPlan.orFail(
+      "k8s-admission-config",
+      List(
+        file(
+          s"$stateDir/admission.yaml",
+          s"""apiVersion: apiserver.config.k8s.io/v1
+             |kind: AdmissionConfiguration
+             |plugins:
+             |- name: PodSecurity
+             |  configuration:
+             |    apiVersion: pod-security.admission.config.k8s.io/v1
+             |    kind: PodSecurityConfiguration
+             |    defaults:
+             |      enforce: baseline
+             |      enforce-version: latest
+             |      audit: restricted
+             |      audit-version: latest
+             |      warn: restricted
+             |      warn-version: latest
+             |    exemptions:
+             |      usernames: []
+             |      runtimeClasses: []
+             |      namespaces: [${exemptNamespaces.mkString(", ")}]
+             |""".stripMargin,
+          mode = "0644"
+        )
+      )
+    )
 
   // Label the namespaces that need privileged, then see which other namespaces
   // hold pods that baseline would refuse.
@@ -251,7 +257,7 @@ print(json.dumps(cm))
         .build,
       stage("write-admission-config", "tst30")
         .task("write admission.yaml")(
-          Task.RunCommand(List("sh", "-c", configScript), timeoutSeconds = 60)
+          Task.Apply(configPlan)
         )
         .build,
       stage("distribute-admission-config", "tst31", "tst32")
