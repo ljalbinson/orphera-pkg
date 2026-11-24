@@ -452,15 +452,6 @@ if __name__ == '__main__':
       .replace("@@SKYLINEPW@@", skylinePassword.reveal)
       .replace("@@CA@@", caCert)
 
-  private val healthy =
-    s"""CODE=$$(curl -s --cacert $tlsDir/ca.crt --resolve $fqdn:$port:127.0.0.1 -o /dev/null -w '%{http_code}' https://$fqdn:$port/); [ "$$CODE" = "200" ]"""
-  private val waitHealthy =
-    s"""for i in $$(seq 1 36); do
-       |  $healthy && exit 0
-       |  sleep 5
-       |done
-       |echo "skyline does not answer on https://$fqdn:$port/ - see 'journalctl -xeu orphera-skyline' and $logDir" >&2
-       |exit 1""".stripMargin
   private val loggedIn = s"$helperPath login-check >/dev/null 2>&1"
 
   def describe(target: Node): List[ApplyResource] =
@@ -567,11 +558,13 @@ if __name__ == '__main__':
       unless = catalogCurrent,
       timeout = 180
     ).after(running, helperFile)
-    val answering = command(
+    val answering = waitForHttp(
       "skyline answers on its port",
-      waitHealthy,
-      unless = healthy,
-      timeout = 200
+      s"https://$fqdn:$port/",
+      ca = s"$tlsDir/ca.crt",
+      resolve = s"$fqdn:$port:127.0.0.1",
+      timeout = 180,
+      hint = s"see 'journalctl -xeu orphera-skyline' and $logDir"
     ).after(catalogRestart)
     val login = command(
       "the console, the API docs and an admin login answer",

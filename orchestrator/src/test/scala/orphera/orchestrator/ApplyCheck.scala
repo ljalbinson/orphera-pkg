@@ -2477,6 +2477,22 @@ object ApplyCheck:
       val soon = runShell(body(waitForHttp("the api", s"$base/ok", timeout = 5, interval = 1)))
       check("waitForHttp: the script exits 0 at once when it answers", soon._1 == 0 && soon._2.isEmpty, soon.toString)
       check(
+        "waitForHttp: a name is resolved to this node",
+        runShell(
+          guard(
+            waitForHttp(
+              "r",
+              s"http://named.invalid:$port/ok",
+              resolve = s"named.invalid:$port:127.0.0.1"
+            )
+          )
+        )._1 == 0
+      )
+      check(
+        "waitForHttp: without the mapping the name does not resolve",
+        runShell(guard(waitForHttp("r", s"http://named.invalid:$port/ok")))._1 != 0
+      )
+      check(
         "waitForPort: an open port answers",
         runShell(guard(waitForPort("port", "127.0.0.1", port)))._1 == 0
       )
