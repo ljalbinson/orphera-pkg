@@ -2340,7 +2340,10 @@ object Apply:
           skippedOrFailed && plan.notifiers(i).nonEmpty && (
             before.contains(rs(i).id) ||
               plan.notifiers(i).exists(j =>
-                done.get(j).exists(_.isInstanceOf[ApplyOutcome.Changed])
+                done.get(j).exists {
+                  case _: ApplyOutcome.Changed => true
+                  case _                       => false
+                }
               )
           )
         }
