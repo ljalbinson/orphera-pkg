@@ -12,8 +12,8 @@ import orphera.orchestrator.*
 //   orphera apply manifests/rabbitmq_teardown.scala --check
 //   orphera apply manifests/rabbitmq_teardown.scala
 //
-// Each step is a command that runs only while there is something to remove
-// (`onlyIf`), so a second run changes nothing.
+// The container and unit go with a command that runs only while there is something to remove
+// (`onlyIf`); the data directory is removed with `absentDirectory`, so a second run changes nothing.
 object rabbitmq_teardown extends OrpheraApply:
   import Resources.*
 
@@ -33,11 +33,6 @@ object rabbitmq_teardown extends OrpheraApply:
        |systemctl daemon-reload
        |echo "rabbitmq container and unit removed"""".stripMargin
 
-  private val dataExists = s"[ -e $dataDir ]"
-  private val dataScript =
-    s"""rm -rf $dataDir
-       |echo "rabbitmq data removed"""".stripMargin
-
   def describe(target: Node): List[ApplyResource] =
     val stopped = command(
       "stop and remove the rabbitmq container and unit",
@@ -45,10 +40,5 @@ object rabbitmq_teardown extends OrpheraApply:
       onlyIf = unitExists,
       timeout = 240
     )
-    val cleaned = command(
-      "remove the rabbitmq data directory",
-      dataScript,
-      onlyIf = dataExists,
-      timeout = 120
-    ).after(stopped)
+    val cleaned = absentDirectory(dataDir, recursive = true).after(stopped)
     List(stopped, cleaned)
