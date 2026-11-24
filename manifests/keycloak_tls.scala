@@ -96,12 +96,24 @@ object keycloak_tls extends OrpheraClusterPlaybook:
        |chmod 644 server.csr
        |echo "key and certificate request ready in $tlsDir"""".stripMargin
 
-  private val signDirScript =
-    s"""set -e
-       |[ -f $ksCaDir/ca.key ] || { echo "no CA key in $ksCaDir: keystone_single_node.scala makes it" >&2; exit 1; }
-       |mkdir -p $signDir
-       |chmod 700 $signDir
-       |echo "$signDir ready"""".stripMargin
+  // The CA key must be there (keystone_single_node.scala makes it); then the directory for the certificates
+  // of this node, readable by root only.
+  private val signDirPlan: ApplyPlan =
+    import Resources.{command, directory}
+    val caKey = command(
+      s"check that the CA key exists in $ksCaDir",
+      s"""echo "no CA key in $ksCaDir: keystone_single_node.scala makes it" >&2
+         |exit 1""".stripMargin,
+      unless = s"[ -f $ksCaDir/ca.key ]"
+    )
+    ApplyPlan.orFail(
+      "keycloak-tls-signdir",
+      List(
+        caKey,
+        directory(signDir, mode = "0700", owner = "root", group = "root")
+          .after(caKey)
+      )
+    )
 
   // Signs only when needed: no certificate yet, a certificate for another key (the key on tst26 was remade), one
   // that does not verify against the CA, lacks the name, or expires within 30 days.
@@ -175,7 +187,7 @@ object keycloak_tls extends OrpheraClusterPlaybook:
 
       stage("keycloak-tls-sign", ksNode)
         .task(s"prepare $signDir")(
-          Task.RunCommand(List("sh", "-c", signDirScript))
+          Task.Apply(signDirPlan)
         )
         .task(s"fetch the certificate request from $node")(
           Task.DistributeFile(
