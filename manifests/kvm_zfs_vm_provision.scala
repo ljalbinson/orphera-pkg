@@ -279,11 +279,27 @@ object kvm_zfs_vm_provision extends OrpheraClusterPlaybook:
        |zfs destroy -r '$workingFs' 2>/dev/null || true
        |echo "'$vmName' destroyed/undefined if it existed; '$workingFs' removed if present"""".stripMargin
 
-  private val createFilesystemScript =
-    s"""zfs create '$workingFs'
-       |chown localadmin:localadmin '$workingDir'
-       |chmod 0755 '$workingDir'
-       |echo "zfs filesystem '$workingFs' mounted at '$workingDir'"""".stripMargin
+  // The VM's ZFS filesystem (a command: there is no resource for a dataset, and it only runs when the
+  // dataset is missing) and its mount point, owned by localadmin.
+  private val vmFilesystemPlan: ApplyPlan =
+    import Resources.{command, directory}
+    val dataset = command(
+      s"create the zfs filesystem $workingFs",
+      s"zfs create '$workingFs'",
+      unless = s"zfs list -H -o name '$workingFs' >/dev/null 2>&1"
+    )
+    ApplyPlan.orFail(
+      "vm-filesystem",
+      List(
+        dataset,
+        directory(
+          workingDir,
+          mode = "0755",
+          owner = "localadmin",
+          group = "localadmin"
+        ).after(dataset)
+      )
+    )
 
   // `cp --no-clobber` mirrors the original's `copy: ... force: false` —
   // never overwrite an image that's already there from a previous
@@ -409,10 +425,7 @@ object kvm_zfs_vm_provision extends OrpheraClusterPlaybook:
 
       stage("create-vm-filesystem", hypervisorNode)
         .task(s"create $workingFs and set ownership")(
-          Task.RunCommand(
-            List("sh", "-c", createFilesystemScript),
-            timeoutSeconds = 30
-          )
+          Task.Apply(vmFilesystemPlan)
         )
         .build,
 
