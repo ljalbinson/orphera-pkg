@@ -1021,11 +1021,9 @@ if __name__ == '__main__':
       owner = "root",
       group = "root"
     ).after(ovsDirRes).notifies(ovsUnit)
-    val ovsCa = command(
-      "copy Keystone's CA to the neutron-openvswitch-agent config",
-      s"cp $caCert $ovsDir/ca.crt",
-      unless = s"cmp -s $caCert $ovsDir/ca.crt"
-    ).after(ca, ovsDirRes).notifies(ovsUnit)
+    val ovsCa = fileCopy(s"$ovsDir/ca.crt", caCert, mode = "0644")
+      .after(ca, ovsDirRes)
+      .notifies(ovsUnit)
     val ovsJson = file(
       s"$ovsDir/config.json",
       ovsConfigJson,
@@ -1055,11 +1053,9 @@ if __name__ == '__main__':
       owner = "root",
       group = "root"
     ).after(novaDirRes).notifies(novaUnit)
-    val novaCa = command(
-      "copy Keystone's CA to the nova-compute config",
-      s"cp $caCert $novaDir/ca.crt",
-      unless = s"cmp -s $caCert $novaDir/ca.crt"
-    ).after(ca, novaDirRes).notifies(novaUnit)
+    val novaCa = fileCopy(s"$novaDir/ca.crt", caCert, mode = "0644")
+      .after(ca, novaDirRes)
+      .notifies(novaUnit)
     val novaJson = file(
       s"$novaDir/config.json",
       novaConfigJson,
