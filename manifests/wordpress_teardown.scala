@@ -42,10 +42,17 @@ object wordpress_teardown extends OrpheraClusterPlaybook:
   // same "don't trust purge's own behavior for anything this project
   // wrote itself" reasoning as mariadb_galera_teardown.scala's
   // haproxyKeepalivedCleanupScript.
-  private val wordpressCleanupScript =
-    """rm -rf /var/www/wordpress
-      |rm -f /etc/nginx/sites-available/wordpress /etc/nginx/sites-enabled/wordpress
-      |echo 'WordPress site files and nginx site config removed'""".stripMargin
+  private val wordpressCleanupPlan: ApplyPlan =
+    import Resources.{absentDirectory, absentFile, absentSymlink}
+    val link = absentSymlink("/etc/nginx/sites-enabled/wordpress")
+    ApplyPlan.orFail(
+      "wordpress-cleanup",
+      List(
+        link,
+        absentFile("/etc/nginx/sites-available/wordpress").after(link),
+        absentDirectory("/var/www/wordpress", recursive = true)
+      )
+    )
 
   // Stopped through the apply engine: nothing to do for a unit that is not there or is already stopped.
   private val stopWebPlan: ApplyPlan =
@@ -87,7 +94,7 @@ object wordpress_teardown extends OrpheraClusterPlaybook:
           Task.AutoRemove(purge = true)
         )
         .task("remove leftover WordPress files and nginx site config")(
-          Task.RunCommand(List("sh", "-c", wordpressCleanupScript))
+          Task.Apply(wordpressCleanupPlan)
         )
         .build
     )

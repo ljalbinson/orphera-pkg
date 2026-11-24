@@ -10,8 +10,8 @@ import orphera.orchestrator.*
 //   orphera apply manifests/kolla_cache_teardown.scala --check
 //   orphera apply manifests/kolla_cache_teardown.scala
 //
-// Each step is a command that runs only while there is something to remove (`onlyIf`), so a second run
-// changes nothing.
+// The container and unit go with a command that runs only while there is something to remove (`onlyIf`); the
+// cached images are removed with `absentDirectory`, so a second run changes nothing.
 object kolla_cache_teardown extends OrpheraApply:
   import Resources.*
 
@@ -28,11 +28,6 @@ object kolla_cache_teardown extends OrpheraApply:
       |if command -v podman >/dev/null 2>&1; then podman rm -f kolla-cache 2>/dev/null || true; fi
       |echo "kolla cache container and unit removed"""".stripMargin
 
-  private val dataExists = "[ -e /var/lib/orphera/kolla-cache ]"
-  private val dataScript =
-    """rm -rf /var/lib/orphera/kolla-cache
-      |echo "cached images removed"""".stripMargin
-
   def describe(target: Node): List[ApplyResource] =
     val stopped = command(
       "stop and remove the Kolla cache container and unit",
@@ -40,10 +35,7 @@ object kolla_cache_teardown extends OrpheraApply:
       onlyIf = unitExists,
       timeout = 120
     )
-    val cleaned = command(
-      "delete the cached images",
-      dataScript,
-      onlyIf = dataExists,
-      timeout = 120
-    ).after(stopped)
+    val cleaned =
+      absentDirectory("/var/lib/orphera/kolla-cache", recursive = true)
+        .after(stopped)
     List(stopped, cleaned)
