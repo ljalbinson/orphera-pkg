@@ -247,11 +247,9 @@ object telemetry_compute extends OrpheraApply:
       owner = "root",
       group = "root"
     ).after(dirRes).notifies(unit)
-    val kollaCa = command(
-      "copy Keystone's CA to the ceilometer-compute config",
-      s"cp $caCert $dir/ca.crt",
-      unless = s"cmp -s $caCert $dir/ca.crt"
-    ).after(ca, dirRes).notifies(unit)
+    val kollaCa = fileCopy(s"$dir/ca.crt", caCert, mode = "0644")
+      .after(ca, dirRes)
+      .notifies(unit)
     val json = file(
       s"$dir/config.json",
       configJson,
