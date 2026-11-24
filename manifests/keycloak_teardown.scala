@@ -48,20 +48,7 @@ object keycloak_teardown extends OrpheraApply:
        |systemctl daemon-reload
        |echo "keycloak container and unit removed"""".stripMargin
 
-  private val paths = s"/etc/keycloak /tmp/kc-ready.json $helper"
-  // True when ANY of them exists.
-  private val filesExist =
-    s"for p in $paths; do [ -e \"$$p\" ] && exit 0; done; exit 1"
-  private val cleanupScript =
-    s"""rm -rf $paths
-       |echo "keycloak configuration, TLS files and helper removed"""".stripMargin
-
   // ---- tst6 ----
-  private val hasSignDir = s"[ -e $signDir ]"
-  private val signDirScript =
-    s"""rm -rf $signDir
-       |echo "removed the certificate kept for $node"""".stripMargin
-
   // ---- tst3 ----
   private val dropDatabaseScript =
     s"""mariadb -N -e "DROP DATABASE IF EXISTS $dbName; DROP USER IF EXISTS '$dbUser'@'%'; FLUSH PRIVILEGES;""""
@@ -81,11 +68,7 @@ object keycloak_teardown extends OrpheraApply:
       )
     else if target.name == ksNode then
       List(
-        command(
-          s"remove the certificate signed for $node",
-          signDirScript,
-          onlyIf = hasSignDir
-        )
+        absentDirectory(signDir, recursive = true)
       )
     else
       val unfederated = command(
@@ -100,10 +83,10 @@ object keycloak_teardown extends OrpheraApply:
         onlyIf = anyUnit,
         timeout = 240
       ).after(unfederated)
-      val cleaned = command(
-        "remove keycloak files, TLS files and the helper",
-        cleanupScript,
-        onlyIf = filesExist,
-        timeout = 120
-      ).after(stopped)
-      List(unfederated, stopped, cleaned)
+      // The configuration and TLS files, the readiness file and the helper (the helper stays until the last step).
+      val cleaned = List(
+        absentDirectory("/etc/keycloak", recursive = true),
+        absentFile("/tmp/kc-ready.json"),
+        absentFile(helper)
+      ).map(_.after(stopped))
+      List(unfederated, stopped) ++ cleaned
