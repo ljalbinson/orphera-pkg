@@ -1393,23 +1393,24 @@ if __name__ == '__main__':
       val conf =
         fileCopy(s"$dir/octavia.conf", s"$srcDir/octavia.conf", mode = "0600")
           .after(rendered, dirRes)
+          .notifies(unitService)
       val kollaCa = fileCopy(
         s"$dir/ca.crt",
         caCert,
         mode = "0644"
-      ).after(ca, dirRes)
+      ).after(ca, dirRes).notifies(unitService)
       val certCopies = command(
         s"copy the certificates to the $name config",
         certsCopyScript(dir),
         unless = certsCopyCurrent(dir)
-      ).after(certs, dirRes)
+      ).after(certs, dirRes).notifies(unitService)
       val kollaJson = file(
         s"$dir/config.json",
         configJson(name),
         mode = "0644",
         owner = "root",
         group = "root"
-      ).after(dirRes)
+      ).after(dirRes).notifies(unitService)
       val unitFile = file(
         c.unitPath,
         c.render,
@@ -1437,37 +1438,23 @@ if __name__ == '__main__':
       )
     }
 
-    // A container reads its configuration and CA at start. So each unit is restarted when the hash of its config
-    // directory and unit file differs from the one noted at its last restart here. The stamp is written after the
-    // restart, so a change that came while the unit was skipped (an earlier step failed) is still picked up by the
-    // next run. The first run restarts each unit once.
-    val restarts = octaviaServices.zip(running).map { case (c, r) =>
-      val dir = s"$confRoot/${c.name.value}"
-      val stampFile = s"$stateDir/${c.name.value}.restart.stamp"
-      val hash =
-        s"cat $dir/* ${c.unitPath} 2>/dev/null | sha256sum | cut -c1-32"
-      command(
-        s"restart ${c.unitName} when its configuration or CA changed",
-        s"""set -e
-           |systemctl restart ${c.unitName}
-           |$hash > $stampFile""".stripMargin,
-        unless = s"""[ "$$($hash)" = "$$(cat $stampFile 2>/dev/null)" ]""",
-        timeout = 180
-      ).after(r)
-    }
+    // A container reads its configuration and CA at start. Each of its config files, the CA, the certificate copies
+    // and the unit file notifies its unit, so the unit is restarted when one of them changed and only then. A
+    // notification that could not be delivered (an earlier step failed) is kept by the node and delivered by the
+    // next run.
 
     val answering = command(
       "octavia-api answers on its port",
       waitHealthy,
       unless = healthy,
       timeout = 240
-    ).after((running ++ restarts)*)
+    ).after(running*)
     val providerListed = command(
       "the amphora provider is listed",
       waitProviders,
       unless = providersListed,
       timeout = 240
-    ).after((answering :: (running ++ restarts))*)
+    ).after((answering :: running)*)
     val cycle = command(
       "make a load balancer, send an HTTP request through its amphora, delete it",
       cycleScript,
@@ -1499,5 +1486,5 @@ if __name__ == '__main__':
       certs,
       confTemplate,
       rendered
-    ) ++ svcs.flatMap(_.resources) ++ List(dbSync) ++ running ++ restarts ++
+    ) ++ svcs.flatMap(_.resources) ++ List(dbSync) ++ running ++
       List(answering, providerListed, cycle)
