@@ -49,7 +49,7 @@ object ApplyCheck:
   private class FakeNode(
       var fs: Map[String, Entry],
       guards: Map[String, Boolean] = Map.empty,
-      failing: Set[String] = Set.empty,
+      var failing: Set[String] = Set.empty,
       var pkgs: Map[String, String] = Map.empty,
       var units: Map[String, (String, String)] = Map.empty,
       var users: Map[String, Observed.Account] = Map.empty,
@@ -58,6 +58,13 @@ object ApplyCheck:
     var ran: Vector[String] = Vector.empty
     var observed: Int = 0
     def node = "fake"
+
+    // Notifications still owed, as a node keeps them between runs.
+    var owed: Set[String] = Set.empty
+    var kept: Int = 0
+    override def pendingNotices(plan: String): IO[Set[String]] = IO(owed)
+    override def keepPendingNotices(plan: String, ids: Set[String]): IO[Unit] =
+      IO { kept += 1; owed = ids }
 
     private def sha(t: String) =
       java.security.MessageDigest
@@ -755,6 +762,72 @@ object ApplyCheck:
     check(
       "fileTemplate: second run changed nothing",
       !applyTo(tt, tplPlan).report.changed
+    )
+
+  // A file changes and the service it restarts is skipped because a step before the service fails:
+  // the restart is owed, kept, and delivered by the next run although the file no longer differs.
+  private def owedChecks(): Unit =
+    def desc(conf: String) =
+      val prep = command("prep", "prep-script", unless = "prep-done")
+      List(
+        file("/etc/app.conf", conf).notifiesIds("service[app.service]"),
+        prep,
+        service("app.service").after(prep)
+      )
+    val n = new FakeNode(
+      Map.empty,
+      failing = Set("command[prep]"),
+      units = Map("app.service" -> ("enabled", "active"))
+    )
+    val first = applyTo(n, desc("a\n"))
+    check(
+      "owed: the service is skipped when its step fails",
+      outcome(first.report, "service[app.service]").contains(
+        ApplyOutcome.Skipped("command[prep] failed")
+      ),
+      first.lines.mkString("\n")
+    )
+    check(
+      "owed: the skipped restart is kept and said",
+      n.owed == Set("service[app.service]") && first.lines.exists(
+        _.contains("still owed a notification")
+      ),
+      n.owed.toString + first.lines.mkString("\n")
+    )
+    n.failing = Set.empty
+    val keptBefore = n.kept
+    val planned = applyTo(n, desc("a\n"), check = true)
+    check(
+      "owed: check says who notifies and records nothing",
+      planned.lines.exists(l =>
+        l.contains("service[app.service]") && l.contains(
+          "restarted (notified by an earlier run)"
+        )
+      ) && n.kept == keptBefore && n.owed == Set("service[app.service]"),
+      planned.lines.mkString("\n")
+    )
+    n.ran = Vector.empty
+    val third = applyTo(n, desc("a\n"))
+    check(
+      "owed: the next run restarts it, though the file is unchanged",
+      outcome(third.report, "file[/etc/app.conf]").exists(
+        _.isInstanceOf[ApplyOutcome.Unchanged]
+      ) && third.lines.exists(l =>
+        l.contains("service[app.service]") && l.contains(
+          "restarted (notified by an earlier run)"
+        )
+      ) && n.ran.exists(_.contains("systemctl restart 'app.service'")),
+      third.lines.mkString("\n") + n.ran
+    )
+    check("owed: and the record is cleared", n.owed.isEmpty, n.owed.toString)
+    n.ran = Vector.empty
+    val fourth = applyTo(n, desc("a\n"))
+    check(
+      "owed: after that nothing is restarted",
+      !n.ran.exists(_.contains("systemctl restart")) && !fourth.lines.exists(
+        _.contains("restarted")
+      ),
+      fourth.lines.mkString("\n") + n.ran
     )
 
   private def kindChecks(): Unit =
@@ -2340,6 +2413,7 @@ object ApplyCheck:
     observeChecks()
     planChecks()
     runChecks()
+    owedChecks()
     kindChecks()
     yamlChecks()
     newKindChecks()
