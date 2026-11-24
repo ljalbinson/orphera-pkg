@@ -69,29 +69,29 @@ manifests/virtualbmc.scala,130,RunCommand,start vbmcd,1,Existing kinds,service,s
 manifests/wordpress_site.scala,284,RunCommand,start nginx and php8.3-fpm,1,Existing kinds,service,service (enabled/running); a one-off restart needs notifies or a restart action,done
 manifests/wordpress_teardown.scala,60,RunCommand,stop nginx and php8.3-fpm,1,Existing kinds,service,service (enabled/running); a one-off restart needs notifies or a restart action,done
 manifests/octavia_single_node.scala,1463,apply command,restart ${c.unitName} when its configuration or CA changed,1,Existing kinds,service (notify),service restarted by notifies from the files,done
-manifests/barbican_single_node.scala,633,apply command,wait for apt and dpkg to be idle,2,Small additions to existing kinds,package lock wait,pkg waits for the dpkg lock itself,not started
-manifests/cinder_single_node.scala,623,apply command,wait for apt and dpkg to be idle,2,Small additions to existing kinds,package lock wait,pkg waits for the dpkg lock itself,not started
-manifests/designate_single_node.scala,819,apply command,wait for apt and dpkg to be idle,2,Small additions to existing kinds,package lock wait,pkg waits for the dpkg lock itself,not started
-manifests/heat_single_node.scala,691,apply command,wait for apt and dpkg to be idle,2,Small additions to existing kinds,package lock wait,pkg waits for the dpkg lock itself,not started
-manifests/horizon_single_node.scala,462,apply command,wait for apt and dpkg to be idle,2,Small additions to existing kinds,package lock wait,pkg waits for the dpkg lock itself,not started
-manifests/keycloak_single_node.scala,922,apply command,wait for apt and dpkg to be idle,2,Small additions to existing kinds,package lock wait,pkg waits for the dpkg lock itself,not started
-manifests/keycloak_tls.scala,162,RunCommand,wait for apt and dpkg to be idle,2,Small additions to existing kinds,package lock wait,pkg waits for the dpkg lock itself,not started
-manifests/kolla_build.scala,410,apply command,wait for apt and dpkg to be idle,2,Small additions to existing kinds,package lock wait,pkg waits for the dpkg lock itself,not started
-manifests/magnum_single_node.scala,1115,apply command,wait for apt and dpkg to be idle,2,Small additions to existing kinds,package lock wait,pkg waits for the dpkg lock itself,not started
-manifests/manila_single_node.scala,810,apply command,wait for apt and dpkg to be idle,2,Small additions to existing kinds,package lock wait,pkg waits for the dpkg lock itself,not started
-manifests/neutron_single_node.scala,926,apply command,wait for apt and dpkg to be idle,2,Small additions to existing kinds,package lock wait,pkg waits for the dpkg lock itself,not started
-manifests/nova_compute.scala,906,apply command,wait for apt and dpkg to be idle,2,Small additions to existing kinds,package lock wait,pkg waits for the dpkg lock itself,not started
-manifests/nova_single_node.scala,627,apply command,wait for apt and dpkg to be idle,2,Small additions to existing kinds,package lock wait,pkg waits for the dpkg lock itself,not started
-manifests/octavia_single_node.scala,1275,apply command,wait for apt and dpkg to be idle,2,Small additions to existing kinds,package lock wait,pkg waits for the dpkg lock itself,not started
+manifests/barbican_single_node.scala,633,apply command,wait for apt and dpkg to be idle,2,Small additions to existing kinds,package lock wait,pkg waits for the dpkg lock itself,done
+manifests/cinder_single_node.scala,623,apply command,wait for apt and dpkg to be idle,2,Small additions to existing kinds,package lock wait,pkg waits for the dpkg lock itself,done
+manifests/designate_single_node.scala,819,apply command,wait for apt and dpkg to be idle,2,Small additions to existing kinds,package lock wait,pkg waits for the dpkg lock itself,done
+manifests/heat_single_node.scala,691,apply command,wait for apt and dpkg to be idle,2,Small additions to existing kinds,package lock wait,pkg waits for the dpkg lock itself,done
+manifests/horizon_single_node.scala,462,apply command,wait for apt and dpkg to be idle,2,Small additions to existing kinds,package lock wait,pkg waits for the dpkg lock itself,done
+manifests/keycloak_single_node.scala,922,apply command,wait for apt and dpkg to be idle,2,Small additions to existing kinds,package lock wait,pkg waits for the dpkg lock itself,done
+manifests/keycloak_tls.scala,162,RunCommand,wait for apt and dpkg to be idle,2,Small additions to existing kinds,package lock wait,pkg waits for the dpkg lock itself,done
+manifests/kolla_build.scala,410,apply command,wait for apt and dpkg to be idle,2,Small additions to existing kinds,package lock wait,pkg waits for the dpkg lock itself,done
+manifests/magnum_single_node.scala,1115,apply command,wait for apt and dpkg to be idle,2,Small additions to existing kinds,package lock wait,pkg waits for the dpkg lock itself,done
+manifests/manila_single_node.scala,810,apply command,wait for apt and dpkg to be idle,2,Small additions to existing kinds,package lock wait,pkg waits for the dpkg lock itself,done
+manifests/neutron_single_node.scala,926,apply command,wait for apt and dpkg to be idle,2,Small additions to existing kinds,package lock wait,pkg waits for the dpkg lock itself,done
+manifests/nova_compute.scala,906,apply command,wait for apt and dpkg to be idle,2,Small additions to existing kinds,package lock wait,pkg waits for the dpkg lock itself,done
+manifests/nova_single_node.scala,627,apply command,wait for apt and dpkg to be idle,2,Small additions to existing kinds,package lock wait,pkg waits for the dpkg lock itself,done
+manifests/octavia_single_node.scala,1275,apply command,wait for apt and dpkg to be idle,2,Small additions to existing kinds,package lock wait,pkg waits for the dpkg lock itself,done
 manifests/p420_hba.scala,224,RunCommand,wait for apt and dpkg to be idle,2,Small additions to existing kinds,package lock wait,pkg waits for the dpkg lock itself,not started
-manifests/rabbitmq_single_node.scala,113,apply command,wait for apt and dpkg to be idle,2,Small additions to existing kinds,package lock wait,pkg waits for the dpkg lock itself,not started
-manifests/rgw_single_node.scala,554,apply command,wait for apt and dpkg to be idle,2,Small additions to existing kinds,package lock wait,pkg waits for the dpkg lock itself,not started
-manifests/skyline_single_node.scala,488,apply command,wait for apt and dpkg to be idle,2,Small additions to existing kinds,package lock wait,pkg waits for the dpkg lock itself,not started
-manifests/telemetry_compute.scala,214,apply command,wait for apt and dpkg to be idle,2,Small additions to existing kinds,package lock wait,pkg waits for the dpkg lock itself,not started
-manifests/telemetry_single_node.scala,724,apply command,wait for apt and dpkg to be idle,2,Small additions to existing kinds,package lock wait,pkg waits for the dpkg lock itself,not started
-manifests/trove_guest_image.scala,392,apply command,wait for apt and dpkg to be idle,2,Small additions to existing kinds,package lock wait,pkg waits for the dpkg lock itself,not started
-manifests/trove_single_node.scala,677,apply command,wait for apt and dpkg to be idle,2,Small additions to existing kinds,package lock wait,pkg waits for the dpkg lock itself,not started
-manifests/virtualbmc.scala,96,RunCommand,wait for apt and dpkg to be idle,2,Small additions to existing kinds,package lock wait,pkg waits for the dpkg lock itself,not started
+manifests/rabbitmq_single_node.scala,113,apply command,wait for apt and dpkg to be idle,2,Small additions to existing kinds,package lock wait,pkg waits for the dpkg lock itself,done
+manifests/rgw_single_node.scala,554,apply command,wait for apt and dpkg to be idle,2,Small additions to existing kinds,package lock wait,pkg waits for the dpkg lock itself,done
+manifests/skyline_single_node.scala,488,apply command,wait for apt and dpkg to be idle,2,Small additions to existing kinds,package lock wait,pkg waits for the dpkg lock itself,done
+manifests/telemetry_compute.scala,214,apply command,wait for apt and dpkg to be idle,2,Small additions to existing kinds,package lock wait,pkg waits for the dpkg lock itself,done
+manifests/telemetry_single_node.scala,724,apply command,wait for apt and dpkg to be idle,2,Small additions to existing kinds,package lock wait,pkg waits for the dpkg lock itself,done
+manifests/trove_guest_image.scala,392,apply command,wait for apt and dpkg to be idle,2,Small additions to existing kinds,package lock wait,pkg waits for the dpkg lock itself,done
+manifests/trove_single_node.scala,677,apply command,wait for apt and dpkg to be idle,2,Small additions to existing kinds,package lock wait,pkg waits for the dpkg lock itself,done
+manifests/virtualbmc.scala,96,RunCommand,wait for apt and dpkg to be idle,2,Small additions to existing kinds,package lock wait,pkg waits for the dpkg lock itself,done
 manifests/apply_kinds_demo.scala,52,apply command,remove the demo directory,2,Small additions to existing kinds,recursive absent / copy on node,"absentDirectory(recursive = true), or file content copied from a path on the node",not started
 manifests/barbican_single_node.scala,678,apply command,copy Keystone's CA to the $name config,2,Small additions to existing kinds,recursive absent / copy on node,"absentDirectory(recursive = true), or file content copied from a path on the node",not started
 manifests/barbican_teardown.scala,118,apply command,"remove barbican files, state and the helper",2,Small additions to existing kinds,recursive absent / copy on node,"absentDirectory(recursive = true), or file content copied from a path on the node",not started

@@ -50,17 +50,13 @@ object keycloak_tls extends OrpheraClusterPlaybook:
 
   private val hostPackages = List("openssl", "ca-certificates")
 
-  private val waitAptIdleScript =
-    """for i in $(seq 1 180); do
-      |  if pgrep -f '^/usr/bin/python3 /usr/bin/unattended-upgrade$' >/dev/null || pgrep -x apt-get >/dev/null || pgrep -x apt >/dev/null || pgrep -x dpkg >/dev/null; then
-      |    sleep 5
-      |  else
-      |    echo "apt and dpkg are idle"
-      |    exit 0
-      |  fi
-      |done
-      |echo "apt/dpkg still busy after 15 minutes (unattended-upgrades?)" >&2
-      |exit 1""".stripMargin
+  // `pkg` waits for apt and dpkg to be idle itself (unattended-upgrades on a fresh VM).
+  private val packagesPlan: ApplyPlan =
+    import Resources.pkg
+    ApplyPlan.orFail(
+      "keycloak-tls-packages",
+      hostPackages.map(pkg(_, updateCache = true))
+    )
 
   // ---- tst6: is Keystone ready for federation? ---------------------------
 
@@ -170,15 +166,7 @@ object keycloak_tls extends OrpheraClusterPlaybook:
         .build,
 
       stage("keycloak-tls-request", node)
-        .task("wait for apt and dpkg to be idle")(
-          Task.RunCommand(
-            List("sh", "-c", waitAptIdleScript),
-            timeoutSeconds = 960
-          )
-        )
-        .task("install openssl")(
-          Task.Install(packages = hostPackages, updateCache = true)
-        )
+        .task("install openssl")(Task.Apply(packagesPlan))
         .task("make the TLS key and certificate request")(
           Task
             .RunCommand(List("sh", "-c", tlsRequestScript), timeoutSeconds = 60)
