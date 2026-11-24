@@ -36,23 +36,6 @@ object kolla_build_teardown extends OrpheraApply:
        |if command -v podman >/dev/null 2>&1; then podman rm -f kolla-registry 2>/dev/null || true; fi
        |echo "registry and devpi stopped, units removed"""".stripMargin
 
-  private val paths =
-    "/etc/nginx/conf.d/orphera-kolla-sources.conf /etc/containers/registries.conf.d/orphera-kolla-registry.conf /usr/local/sbin/orphera-kolla-build /opt/kolla-build /opt/devpi /etc/kolla-build"
-  private val filesExist =
-    s"for p in $paths; do [ -e \"$$p\" ] && exit 0; done; exit 1"
-  private val cleanupScript =
-    s"""rm -rf $paths
-       |systemctl reload nginx 2>/dev/null || true
-       |echo "builder config, helper and installations removed"""".stripMargin
-
-  private val dataPaths =
-    "/var/lib/orphera/kolla-registry /srv/kolla-sources /var/lib/orphera/devpi /var/lib/orphera/kolla-build"
-  private val dataExists =
-    s"for p in $dataPaths; do [ -e \"$$p\" ] && exit 0; done; exit 1"
-  private val purgeScript =
-    s"""rm -rf $dataPaths
-       |echo "builder data deleted"""".stripMargin
-
   def describe(target: Node): List[ApplyResource] =
     val stopped = command(
       "stop the Kolla registry and devpi and remove their units",
@@ -60,18 +43,29 @@ object kolla_build_teardown extends OrpheraApply:
       onlyIf = anyUnit,
       timeout = 120
     )
-    val cleaned = command(
-      "remove the kolla-build and devpi installations, the helper and the config",
-      cleanupScript,
-      onlyIf = filesExist,
-      timeout = 120
-    ).after(stopped)
+    // nginx is reloaded only when the site file was there to remove.
+    val reloadNginx = command(
+      "reload nginx after its Kolla sources site is gone",
+      "systemctl reload nginx 2>/dev/null || true",
+      onChangeOnly = true
+    )
+    val cleaned = List(
+      absentFile("/etc/nginx/conf.d/orphera-kolla-sources.conf")
+        .notifies(reloadNginx),
+      absentFile("/etc/containers/registries.conf.d/orphera-kolla-registry.conf"),
+      absentFile("/usr/local/sbin/orphera-kolla-build"),
+      absentDirectory("/opt/kolla-build", recursive = true),
+      absentDirectory("/opt/devpi", recursive = true),
+      absentDirectory("/etc/kolla-build", recursive = true)
+    ).map(_.after(stopped))
+    val installed = cleaned :+ reloadNginx.after(cleaned*)
     if purge then
-      val purged = command(
-        "delete the built images, source tarballs and pip cache (KOLLA_BUILD_PURGE=yes)",
-        purgeScript,
-        onlyIf = dataExists,
-        timeout = 300
-      ).after(cleaned)
-      List(stopped, cleaned, purged)
-    else List(stopped, cleaned)
+      // The built images, source tarballs and pip cache (KOLLA_BUILD_PURGE=yes).
+      val purged = List(
+        "/var/lib/orphera/kolla-registry",
+        "/srv/kolla-sources",
+        "/var/lib/orphera/devpi",
+        "/var/lib/orphera/kolla-build"
+      ).map(d => absentDirectory(d, recursive = true).after(installed*))
+      List(stopped) ++ installed ++ purged
+    else List(stopped) ++ installed

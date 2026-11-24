@@ -71,21 +71,13 @@ object octavia_teardown extends OrpheraApply:
       |echo "o-hm0 removed from br-int"""".stripMargin
 
   // /etc/kolla/octavia is where the config and the certificates are kept.
-  private val paths =
-    (List(
+  private val directories =
+    List(
       "/etc/kolla/octavia",
       "/etc/kolla/octavia-ca",
       "/var/lib/orphera/octavia",
-      "/var/log/kolla/octavia",
-      helper
-    ) ++
-      units.map(u => s"/etc/kolla/$u")).mkString(" ")
-  // True when ANY of them exists.
-  private val filesExist =
-    s"for p in $paths; do [ -e \"$$p\" ] && exit 0; done; exit 1"
-  private val cleanupScript =
-    s"""rm -rf $paths
-       |echo "octavia config, certificates, state and helper removed"""".stripMargin
+      "/var/log/kolla/octavia"
+    ) ++ units.map(u => s"/etc/kolla/$u")
 
   // ---- tst10 ----
   private val rabbitUp =
@@ -143,10 +135,9 @@ object octavia_teardown extends OrpheraApply:
         onlyIf = hasHmPort,
         timeout = 60
       ).after(stopped)
-      val cleaned = command(
-        "remove octavia files, certificates, state and the helper",
-        cleanupScript,
-        onlyIf = filesExist,
-        timeout = 120
-      ).after(unplugged)
-      List(openstack, stopped, unplugged, cleaned)
+      // The helper goes with the files: the first step above needed it, and runs before them.
+      val cleaned =
+        (directories.map(absentDirectory(_, recursive = true)) :+ absentFile(
+          helper
+        )).map(_.after(unplugged))
+      List(openstack, stopped, unplugged) ++ cleaned

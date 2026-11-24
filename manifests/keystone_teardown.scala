@@ -45,22 +45,13 @@ object keystone_teardown extends OrpheraApply:
        |if command -v podman >/dev/null 2>&1; then podman rm -f keystone 2>/dev/null || true; fi
        |echo "keystone container and unit removed"""".stripMargin
 
-  // True when ANY of them exists (`ls -d` with several arguments fails if one
-  // is missing, which is the opposite).
-  private val filesExist =
-    "for p in /etc/kolla/keystone /etc/kolla/keystone-ca /var/lib/orphera/keystone /var/log/kolla/keystone /usr/local/sbin/keystone-admin-token /usr/local/share/ca-certificates/orphera-test-ca.crt /etc/pki/ca-trust/source/anchors/orphera-test-ca.crt; do [ -e \"$p\" ] && exit 0; done; exit 1"
-
-  private val cleanupScript =
-    s"""rm -rf /etc/kolla/keystone /etc/kolla/keystone-ca /var/lib/orphera/keystone /var/log/kolla/keystone
-       |rm -f /usr/local/sbin/keystone-admin-token
-       |if command -v update-ca-certificates >/dev/null 2>&1; then
-       |  rm -f /usr/local/share/ca-certificates/orphera-test-ca.crt
-       |  update-ca-certificates --fresh
-       |elif command -v update-ca-trust >/dev/null 2>&1; then
-       |  rm -f /etc/pki/ca-trust/source/anchors/orphera-test-ca.crt
-       |  update-ca-trust
-       |fi
-       |echo "keystone config, keys, logs and test CA removed"""".stripMargin
+  // The system's trust store is rebuilt only when the test CA was there to remove.
+  private val updateTrustScript =
+    """if command -v update-ca-certificates >/dev/null 2>&1; then
+      |  update-ca-certificates --fresh
+      |elif command -v update-ca-trust >/dev/null 2>&1; then
+      |  update-ca-trust
+      |fi""".stripMargin
 
   private val imageExists =
     s"command -v podman >/dev/null 2>&1 && podman image exists $image"
@@ -80,16 +71,29 @@ object keystone_teardown extends OrpheraApply:
         stopScript,
         onlyIf = unitExists
       )
-      val cleaned = command(
-        "remove keystone files and the test CA",
-        cleanupScript,
-        onlyIf = filesExist,
+      val updateTrust = command(
+        "rebuild the system CA trust after the test CA is gone",
+        updateTrustScript,
+        onChangeOnly = true,
         timeout = 120
-      ).after(stopped)
+      )
+      // Keystone's configuration, keys and logs, the admin token helper and the test CA in the trust store (the
+      // path is the Debian one or the Red Hat one).
+      val cleaned = List(
+        absentDirectory("/etc/kolla/keystone", recursive = true),
+        absentDirectory("/etc/kolla/keystone-ca", recursive = true),
+        absentDirectory("/var/lib/orphera/keystone", recursive = true),
+        absentDirectory("/var/log/kolla/keystone", recursive = true),
+        absentFile("/usr/local/sbin/keystone-admin-token"),
+        absentFile("/usr/local/share/ca-certificates/orphera-test-ca.crt")
+          .notifies(updateTrust),
+        absentFile("/etc/pki/ca-trust/source/anchors/orphera-test-ca.crt")
+          .notifies(updateTrust)
+      ).map(_.after(stopped))
       val image_ = command(
         "remove the keystone image",
         s"podman rmi -f $image",
         onlyIf = imageExists,
         timeout = 120
       ).after(stopped)
-      List(stopped, cleaned, image_)
+      List(stopped) ++ cleaned ++ List(updateTrust.after(cleaned*), image_)
