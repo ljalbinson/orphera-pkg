@@ -40,18 +40,6 @@ object virtualbmc extends OrpheraClusterPlaybook:
   private val ipmiUser = "admin"
   private val password = Secrets.secret("vbmc/password")
 
-  private val waitAptIdleScript =
-    """for i in $(seq 1 180); do
-      |  if pgrep -f '^/usr/bin/python3 /usr/bin/unattended-upgrade$' >/dev/null || pgrep -x apt-get >/dev/null || pgrep -x apt >/dev/null || pgrep -x dpkg >/dev/null; then
-      |    sleep 5
-      |  else
-      |    echo "apt and dpkg are idle"
-      |    exit 0
-      |  fi
-      |done
-      |echo "apt/dpkg still busy after 15 minutes (unattended-upgrades?)" >&2
-      |exit 1""".stripMargin
-
   // --system-site-packages: python3-libvirt comes from apt, and building libvirt-python from source needs the
   // libvirt development files.
   private val venvScript =
@@ -111,21 +99,19 @@ object virtualbmc extends OrpheraClusterPlaybook:
     ).after(vbmcd)
     ApplyPlan.orFail("vbmcd", List(conf, unitFile, vbmcd, answers))
 
+  // `pkg` waits for apt and dpkg to be idle itself (unattended-upgrades on a fresh VM).
+  private val packagesPlan: ApplyPlan =
+    import Resources.pkg
+    ApplyPlan.orFail(
+      "virtualbmc-packages",
+      List("python3-venv", "python3-libvirt", "ipmitool")
+        .map(pkg(_, updateCache = true))
+    )
+
   val playbook: ClusterPlaybook =
     clusterPlaybook("virtualbmc")(
       stage("install-virtualbmc", hosts*)
-        .task("wait for apt and dpkg to be idle")(
-          Task.RunCommand(
-            List("sh", "-c", waitAptIdleScript),
-            timeoutSeconds = 960
-          )
-        )
-        .task("install the packages")(
-          Task.Install(
-            packages = List("python3-venv", "python3-libvirt", "ipmitool"),
-            updateCache = true
-          )
-        )
+        .task("install the packages")(Task.Apply(packagesPlan))
         .task("install VirtualBMC into /opt/virtualbmc")(
           Task.RunCommand(List("sh", "-c", venvScript), timeoutSeconds = 600)
         )

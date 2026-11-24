@@ -71,18 +71,6 @@ object capi_management_cluster extends OrpheraClusterPlaybook:
       .replace("@@JANITOR@@", janitorVersion)
       .replace("@@ORC@@", orcVersion)
 
-  private val waitAptIdleScript =
-    """for i in $(seq 1 180); do
-      |  if pgrep -f '^/usr/bin/python3 /usr/bin/unattended-upgrade$' >/dev/null || pgrep -x apt-get >/dev/null || pgrep -x apt >/dev/null || pgrep -x dpkg >/dev/null; then
-      |    sleep 5
-      |  else
-      |    echo "apt and dpkg are idle"
-      |    exit 0
-      |  fi
-      |done
-      |echo "apt/dpkg still busy after 15 minutes" >&2
-      |exit 1""".stripMargin
-
   private val k3sScript =
     fill("""set -e
       |mkdir -p @@STATE@@
@@ -195,19 +183,22 @@ object capi_management_cluster extends OrpheraClusterPlaybook:
       |echo "management cluster ready at https://@@FQDN@@:6443"
       |""".stripMargin)
 
+  // The tools the scripts below call. `pkg` waits for apt and dpkg to be idle itself (unattended-upgrades on a
+  // fresh VM), as the wait step it replaces did.
+  private val packagesPlan: ApplyPlan =
+    import Resources.pkg
+    ApplyPlan.orFail(
+      "capi-packages",
+      List("curl", "ca-certificates", "tar").map(pkg(_, updateCache = true))
+    )
+
   private def run(script: String, seconds: Int = 120): Task =
     Task.RunCommand(List("sh", "-c", script), timeoutSeconds = seconds)
 
   val playbook: ClusterPlaybook =
     clusterPlaybook("capi-management-cluster")(
       stage("install-capi-management-cluster", node)
-        .task("wait for apt and dpkg to be idle")(run(waitAptIdleScript, 960))
-        .task("install curl and tar")(
-          Task.Install(
-            packages = List("curl", "ca-certificates", "tar"),
-            updateCache = true
-          )
-        )
+        .task("install curl and tar")(Task.Apply(packagesPlan))
         .task("install k3s")(run(k3sScript, 900))
         .task("install helm and clusterctl")(run(toolsScript, 600))
         .task("write the kubeconfig for Magnum")(run(kubeconfigScript))
