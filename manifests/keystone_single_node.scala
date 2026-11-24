@@ -472,20 +472,6 @@ object keystone_single_node extends OrpheraApply:
        |curl -s --cacert $caCert -D - -o /dev/null -H 'Content-Type: application/json' -d '{"auth":{"identity":{"methods":["password"],"password":{"user":{"name":"admin","domain":{"name":"Default"},"password":"${adminPassword.reveal}"}}},"scope":{"project":{"name":"admin","domain":{"name":"Default"}}}}}' https://$fqdn:5000/v3/auth/tokens | tr -d '\\r' | awk -F': ' 'tolower($$1)=="x-subject-token"{print $$2}'
        |""".stripMargin
 
-  // Over TLS with the test CA, and the body must look like the v3 version
-  // document, so a 200 from some unrelated listener does not pass.
-  private val healthy =
-    s"""CODE=$$(curl -s --cacert $caCert -o /tmp/ks-check.json -w '%{http_code}' https://$fqdn:5000/v3/); [ "$$CODE" = "200" ] && grep -q '"version"' /tmp/ks-check.json"""
-
-  // Up to 90 s for Keystone to answer after a (re)start.
-  private val waitHealthy =
-    s"""for i in $$(seq 1 18); do
-       |  $healthy && exit 0
-       |  sleep 5
-       |done
-       |echo "keystone does not answer on $endpoint - see 'journalctl -xeu ${keystoneContainer.unitName}' and $logDir" >&2
-       |exit 1""".stripMargin
-
   // A real authentication against the database, not just a reachable port.
   private val canAuthenticate =
     """[ -n "$(/usr/local/sbin/keystone-admin-token)" ]"""
@@ -584,11 +570,15 @@ object keystone_single_node extends OrpheraApply:
       owner = "root",
       group = "root"
     )
-    val answering = command(
+    // Over TLS with the test CA, and the body must look like the v3 version document, so a 200 from some
+    // unrelated listener does not pass. Up to 90 s for Keystone to answer after a (re)start.
+    val answering = waitForHttp(
       "keystone answers over TLS",
-      waitHealthy,
-      unless = healthy,
-      timeout = 120
+      endpoint,
+      ca = caCert,
+      contains = "\"version\"",
+      timeout = 90,
+      hint = s"see 'journalctl -xeu ${keystoneContainer.unitName}' and $logDir"
     ).after(running, ca)
     val authenticating = command(
       "the admin can authenticate",

@@ -391,7 +391,6 @@ ADMIN_PW = '@@ADMINPW@@'
 NOVA_PW = '@@NOVAPW@@'
 CTX = ssl.create_default_context(cafile='@@CA@@')
 
-
 def call(method, url, body=None, token=None):
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(url, data=data, method=method)
@@ -410,11 +409,9 @@ def call(method, url, body=None, token=None):
         parsed = {}
     return status, parsed, headers
 
-
 def die(msg):
     sys.stderr.write(msg + '\n')
     sys.exit(1)
-
 
 def get_token(user, password, project):
     body = {'auth': {'identity': {'methods': ['password'], 'password': {'user': {'name': user, 'domain': {'name': 'Default'}, 'password': password}}}, 'scope': {'project': {'name': project, 'domain': {'name': 'Default'}}}}}
@@ -423,12 +420,10 @@ def get_token(user, password, project):
         die('token request for %s failed: HTTP %s %s' % (user, status, parsed))
     return headers['X-Subject-Token'], parsed
 
-
 def find(token, path, key):
     status, parsed, _ = call('GET', KS + path, token=token)
     items = parsed.get(key, [])
     return items[0] if items else None
-
 
 def register():
     token, _ = get_token('admin', ADMIN_PW, 'admin')
@@ -468,7 +463,6 @@ def register():
             call('PATCH', KS + '/endpoints/' + ep['id'], {'endpoint': {'url': NOVA}}, token)
     print('registered nova in keystone (project service, user nova, service type compute, 3 endpoints)')
 
-
 def registered():
     # Exit 0 only when everything register() makes is in place: the nova user
     # can get a token in project service, and service `compute` has the three
@@ -484,7 +478,6 @@ def registered():
             die('endpoint %s missing or wrong' % iface)
     print('nova is registered in keystone')
 
-
 def unregister():
     token, _ = get_token('admin', ADMIN_PW, 'admin')
     service = find(token, '/services?type=compute', 'services')
@@ -495,11 +488,9 @@ def unregister():
         call('DELETE', KS + '/users/' + user['id'], None, token)
     print('removed nova from keystone (service compute, its endpoints, user nova)')
 
-
 def catalog():
     _, p = get_token('admin', ADMIN_PW, 'admin')
     print('catalog types: ' + ' '.join(sorted(c['type'] for c in p['token']['catalog'])))
-
 
 def service_list():
     token, _ = get_token('admin', ADMIN_PW, 'admin')
@@ -508,13 +499,11 @@ def service_list():
         die('service list failed: HTTP %s %s' % (s, p))
     return p.get('services', [])
 
-
 def services():
     rows = service_list()
     for r in rows:
         print('service %s host=%s state=%s status=%s' % (r.get('binary'), r.get('host'), r.get('state'), r.get('status')))
     print('services: %d' % len(rows))
-
 
 def services_up():
     up = set(r.get('binary') for r in service_list() if r.get('state') == 'up' and r.get('status') == 'enabled')
@@ -522,7 +511,6 @@ def services_up():
     if missing:
         die('not up yet: ' + ', '.join(missing))
     print('nova-scheduler and nova-conductor are up')
-
 
 def flavor_list():
     token, _ = get_token('admin', ADMIN_PW, 'admin')
@@ -532,7 +520,6 @@ def flavor_list():
     for f in p.get('flavors', []):
         print('flavor %s name=%s' % (f.get('id'), f.get('name')))
     print('flavors: %d' % len(p.get('flavors', [])))
-
 
 def flavor_create():
     token, _ = get_token('admin', ADMIN_PW, 'admin')
@@ -546,7 +533,6 @@ def flavor_create():
         die('created flavor %s cannot be read back: HTTP %s %s' % (fid, s, p))
     print(fid)
 
-
 def flavor_delete(fid):
     token, _ = get_token('admin', ADMIN_PW, 'admin')
     s, p, _ = call('DELETE', NOVA + '/flavors/' + fid, None, token)
@@ -556,7 +542,6 @@ def flavor_delete(fid):
     if s != 404:
         die('flavor %s still present: HTTP %s' % (fid, s))
     print('deleted ' + fid)
-
 
 if __name__ == '__main__':
     cmd = sys.argv[1] if len(sys.argv) > 1 else ''
@@ -590,18 +575,6 @@ if __name__ == '__main__':
       .replace("@@NOVAPW@@", novaPassword.reveal)
       .replace("@@CA@@", caCert)
   private val helperPath = "/usr/local/sbin/orphera-nova-api"
-
-  // The root answers its version document without a token (200, or 300 when it
-  // offers several versions).
-  private val healthy =
-    s"""CODE=$$(curl -s -o /dev/null -w '%{http_code}' http://localhost:$apiPort/); [ "$$CODE" = "200" ] || [ "$$CODE" = "300" ]"""
-  private val waitHealthy =
-    s"""for i in $$(seq 1 24); do
-       |  $healthy && exit 0
-       |  sleep 5
-       |done
-       |echo "nova-api does not answer on http://localhost:$apiPort - see 'journalctl -xeu orphera-nova-api' and $logDir" >&2
-       |exit 1""".stripMargin
 
   private val servicesUp = s"$helperPath services-up >/dev/null 2>&1"
   private val waitServicesUp =
@@ -726,11 +699,13 @@ if __name__ == '__main__':
         )
     }
 
-    val answering = command(
+    // The root answers its version document without a token (200, or 300 when it offers several versions).
+    val answering = waitForHttp(
       "nova-api answers on its port",
-      waitHealthy,
-      unless = healthy,
-      timeout = 180
+      s"http://localhost:$apiPort/",
+      status = List(200, 300),
+      timeout = 120,
+      hint = s"see 'journalctl -xeu orphera-nova-api' and $logDir"
     ).after(running*)
     val reporting = command(
       "scheduler and conductor report in through the API",

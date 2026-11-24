@@ -536,6 +536,88 @@ object Resources:
   ): ApplyResource =
     Command(label, run, onlyIf, unless, creates, onChangeOnly, timeout)
 
+  /** Waits until an HTTP(S) endpoint answers, as a description: the URL, the status codes that count as an
+    * answer, the CA that signs it, and text the body must hold. It changes nothing: when the endpoint already
+    * answers it reports `unchanged`, otherwise it waits (every `interval` seconds, for up to `timeout`) and fails
+    * with a message that names the URL and carries `hint` (where to look). The check runs on the node, with
+    * curl.
+    */
+  def waitForHttp(
+      label: String,
+      url: String,
+      status: List[Int] = List(200),
+      ca: String = "",
+      contains: String = "",
+      timeout: Int = 120,
+      interval: Int = 5,
+      hint: String = ""
+  ): ApplyResource =
+    require(
+      status.nonEmpty && status.forall(c => c >= 100 && c <= 599),
+      s"waitForHttp needs status codes between 100 and 599, not $status"
+    )
+    require(
+      interval > 0 && timeout >= interval,
+      s"waitForHttp needs 0 < interval <= timeout, not $interval and $timeout"
+    )
+    val caOption = if ca.isEmpty then "" else s"--cacert ${Apply.quote(ca)} "
+    val body =
+      if contains.isEmpty then ""
+      else s"""printf '%s' "$$OUT" | grep -qF -- ${Apply.quote(contains)} && """
+    val codes = status.mkString("|")
+    val check =
+      s"""OUT=$$(curl -s --max-time 10 ${caOption}-w '\\n%{http_code}' ${Apply.quote(url)}); CODE=$$(printf '%s' "$$OUT" | tail -n 1); ${body}case "$$CODE" in $codes) true;; *) false;; esac"""
+    waiting(label, check, url, timeout, interval, hint)
+
+  /** Waits until a TCP port accepts a connection, as a description (see `waitForHttp`). */
+  def waitForPort(
+      label: String,
+      host: String,
+      port: Int,
+      timeout: Int = 120,
+      interval: Int = 5,
+      hint: String = ""
+  ): ApplyResource =
+    require(
+      host.nonEmpty && host.forall(c => c.isLetterOrDigit || ".-_:".contains(c)),
+      s"waitForPort needs a plain host name or address, not '$host'"
+    )
+    require(port >= 1 && port <= 65535, s"waitForPort needs a port, not $port")
+    require(
+      interval > 0 && timeout >= interval,
+      s"waitForPort needs 0 < interval <= timeout, not $interval and $timeout"
+    )
+    val probe = s"exec 3<>/dev/tcp/$host/$port"
+    val check = s"timeout 3 bash -c ${Apply.quote(probe)} >/dev/null 2>&1"
+    waiting(label, check, s"$host:$port", timeout, interval, hint)
+
+  private def waiting(
+      label: String,
+      check: String,
+      what: String,
+      timeout: Int,
+      interval: Int,
+      hint: String
+  ): ApplyResource =
+    val tries = (timeout + interval - 1) / interval
+    val failure =
+      s"$label: no answer from $what after $timeout s" +
+        (if hint.isEmpty then "" else s" - $hint")
+    val run =
+      s"""for i in $$(seq 1 $tries); do
+         |  { $check; } && exit 0
+         |  sleep $interval
+         |done
+         |echo ${Apply.quote(failure)} >&2
+         |exit 1""".stripMargin
+    // Each try may take its 10 s of curl or 3 s of connect on top of the pause.
+    command(
+      label,
+      run,
+      unless = check,
+      timeout = tries * (interval + 10) + 30
+    )
+
   /** A question about the node, for resources that apply on some nodes only:
     * give one of `onlyIf` (a shell test that exits 0 when the resources
     * apply), `unless` (exits non-zero when they apply) or `creates` (a path

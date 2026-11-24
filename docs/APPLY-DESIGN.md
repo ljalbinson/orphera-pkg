@@ -121,6 +121,13 @@ holds two ways of doing a thing and lets each node take the one that fits it (`g
 systemd-resolved drop-in on a node that has resolved, a static `resolv.conf` on one that does not). A skipped
 resource is not a failure; the summary counts it (`3 skipped`).
 
+`waitForHttp` and `waitForPort` describe a wait instead of a script: the URL (or host and port), the status
+codes that count as an answer (`status = List(200, 300)`), the CA that signs it (`ca`), text the body must hold
+(`contains`), how long to wait (`timeout`, in seconds, polled every `interval`) and where to look when it does
+not come up (`hint`). They are a `command` underneath, so they report like one: `unchanged (unless: true)` when
+the endpoint already answers, `ran` after a wait, and a failure that names the URL and carries the hint when the
+time is up. Nothing is changed on the node. The generated shell is run against a local server by `ApplyCheck`.
+
 Files with secret content (`Secret` values) never show their content: the diff line says
 `content (secret: not shown)`.
 

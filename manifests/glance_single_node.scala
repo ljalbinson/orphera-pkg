@@ -263,7 +263,6 @@ ADMIN_PW = '@@ADMINPW@@'
 GLANCE_PW = '@@GLANCEPW@@'
 CTX = ssl.create_default_context(cafile='@@CA@@')
 
-
 def call(method, url, body=None, token=None, raw=None, ctype='application/json'):
     if raw is not None:
         data = raw
@@ -285,11 +284,9 @@ def call(method, url, body=None, token=None, raw=None, ctype='application/json')
         parsed = {}
     return status, parsed, headers
 
-
 def die(msg):
     sys.stderr.write(msg + '\n')
     sys.exit(1)
-
 
 def get_token(user, password, project):
     body = {'auth': {'identity': {'methods': ['password'], 'password': {'user': {'name': user, 'domain': {'name': 'Default'}, 'password': password}}}, 'scope': {'project': {'name': project, 'domain': {'name': 'Default'}}}}}
@@ -298,12 +295,10 @@ def get_token(user, password, project):
         die('token request for %s failed: HTTP %s %s' % (user, status, parsed))
     return headers['X-Subject-Token']
 
-
 def find(token, path, key):
     status, parsed, _ = call('GET', KS + path, token=token)
     items = parsed.get(key, [])
     return items[0] if items else None
-
 
 def register():
     token = get_token('admin', ADMIN_PW, 'admin')
@@ -343,7 +338,6 @@ def register():
             call('PATCH', KS + '/endpoints/' + ep['id'], {'endpoint': {'url': GLANCE}}, token)
     print('registered glance in keystone (project service, user glance, service image, 3 endpoints)')
 
-
 def registered():
     # Exit 0 only when everything register() makes is in place: the glance user
     # can get a token in project service, and service `image` has the three
@@ -359,7 +353,6 @@ def registered():
             die('endpoint %s missing or wrong' % iface)
     print('glance is registered in keystone')
 
-
 def unregister():
     token = get_token('admin', ADMIN_PW, 'admin')
     service = find(token, '/services?type=image', 'services')
@@ -370,7 +363,6 @@ def unregister():
         call('DELETE', KS + '/users/' + user['id'], None, token)
     print('removed glance from keystone (service image, its endpoints, user glance)')
 
-
 def catalog():
     body = {'auth': {'identity': {'methods': ['password'], 'password': {'user': {'name': 'admin', 'domain': {'name': 'Default'}, 'password': ADMIN_PW}}}, 'scope': {'project': {'name': 'admin', 'domain': {'name': 'Default'}}}}}
     s, p, _ = call('POST', KS + '/auth/tokens', body)
@@ -378,10 +370,8 @@ def catalog():
         die('token request failed: HTTP %s %s' % (s, p))
     print('catalog types: ' + ' '.join(sorted(c['type'] for c in p['token']['catalog'])))
 
-
 def admin_token():
     return get_token('admin', ADMIN_PW, 'admin')
-
 
 def image_list():
     token = admin_token()
@@ -391,7 +381,6 @@ def image_list():
     for img in p.get('images', []):
         print('image %s name=%s status=%s' % (img.get('id'), img.get('name'), img.get('status')))
     print('images: %d' % len(p.get('images', [])))
-
 
 def image_create():
     token = admin_token()
@@ -414,7 +403,6 @@ def image_create():
         time.sleep(2)
     die('image %s not active after 60s (last status %s)' % (iid, status))
 
-
 def image_delete(iid):
     token = admin_token()
     s, p, _ = call('DELETE', GLANCE + '/v2/images/' + iid, None, token)
@@ -427,7 +415,6 @@ def image_delete(iid):
             return
         time.sleep(2)
     die('image %s still present after 60s' % iid)
-
 
 if __name__ == '__main__':
     cmd = sys.argv[1] if len(sys.argv) > 1 else ''
@@ -457,17 +444,6 @@ if __name__ == '__main__':
       .replace("@@GLANCEPW@@", glancePassword.reveal)
       .replace("@@CA@@", caCert)
   private val helperPath = "/usr/local/sbin/orphera-glance-api"
-
-  // Glance answers with a version document (HTTP 200 or 300) once it is up.
-  private val healthy =
-    """CODE=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:9292/); [ "$CODE" = "200" ] || [ "$CODE" = "300" ]"""
-  private val waitHealthy =
-    s"""for i in $$(seq 1 18); do
-       |  $healthy && exit 0
-       |  sleep 5
-       |done
-       |echo "glance does not answer on http://localhost:9292 - see 'journalctl -xeu ${glanceApi.unitName}' and $logDir" >&2
-       |exit 1""".stripMargin
 
   def describe(target: Node): List[ApplyResource] =
     val tools = hostPackages.map(p => pkg(p, updateCache = true))
@@ -565,11 +541,13 @@ if __name__ == '__main__':
       owner = "root",
       group = "root"
     )
-    val answering = command(
+    // Glance answers with a version document (HTTP 200 or 300) once it is up.
+    val answering = waitForHttp(
       "glance answers on 9292",
-      waitHealthy,
-      unless = healthy,
-      timeout = 120
+      "http://localhost:9292/",
+      status = List(200, 300),
+      timeout = 90,
+      hint = s"see 'journalctl -xeu ${glanceApi.unitName}' and $logDir"
     ).after(running)
     val registered = command(
       "register Glance in Keystone",

@@ -2406,6 +2406,103 @@ object ApplyCheck:
       s"${sh.scripts} ${r.lines}"
     )
 
+  // ---- waitForHttp and waitForPort: the checks they generate, run against a server on this machine ----
+
+  private def runShell(script: String): (Int, String) =
+    val pb = new ProcessBuilder("sh", "-c", script)
+    pb.redirectErrorStream(true)
+    val proc = pb.start()
+    val out = new String(proc.getInputStream.readAllBytes(), StandardCharsets.UTF_8)
+    (proc.waitFor(), out.trim)
+
+  private def waitForChecks(): Unit =
+    val server = com.sun.net.httpserver.HttpServer
+      .create(new java.net.InetSocketAddress("127.0.0.1", 0), 0)
+    def reply(path: String, code: Int, text: String): Unit =
+      server.createContext(
+        path,
+        exchange =>
+          val bytes = text.getBytes(StandardCharsets.UTF_8)
+          exchange.sendResponseHeaders(code, bytes.length.toLong)
+          exchange.getResponseBody.write(bytes)
+          exchange.close()
+      )
+    reply("/ok", 200, "{\"version\": \"v3\"}")
+    reply("/multi", 300, "several versions")
+    reply("/down", 503, "not ready")
+    server.start()
+    val port = server.getAddress.getPort
+    val base = s"http://127.0.0.1:$port"
+    def guard(r: ApplyResource): String = r match
+      case c: ApplyResource.Command => c.unless
+      case other                    => s"not a command: $other"
+    def body(r: ApplyResource): String = r match
+      case c: ApplyResource.Command => c.run
+      case other                    => s"not a command: $other"
+    try
+      check(
+        "waitForHttp: a 200 answers",
+        runShell(guard(waitForHttp("ok", s"$base/ok")))._1 == 0
+      )
+      check(
+        "waitForHttp: a 300 is not 200",
+        runShell(guard(waitForHttp("multi", s"$base/multi")))._1 != 0
+      )
+      check(
+        "waitForHttp: a 300 counts when listed",
+        runShell(guard(waitForHttp("multi", s"$base/multi", status = List(200, 300))))._1 == 0
+      )
+      check(
+        "waitForHttp: a 503 is not an answer",
+        runShell(guard(waitForHttp("down", s"$base/down")))._1 != 0
+      )
+      check(
+        "waitForHttp: the body text is found",
+        runShell(guard(waitForHttp("v", s"$base/ok", contains = "\"version\"")))._1 == 0
+      )
+      check(
+        "waitForHttp: the body text is missing",
+        runShell(guard(waitForHttp("v", s"$base/ok", contains = "nothing like this")))._1 != 0
+      )
+      check(
+        "waitForHttp: a text with a quote is passed safely",
+        runShell(guard(waitForHttp("q", s"$base/ok", contains = "it's")))._1 != 0
+      )
+      val waited = runShell(body(waitForHttp("the api", s"$base/down", timeout = 2, interval = 1, hint = "see the log")))
+      check(
+        "waitForHttp: gives up with the URL and the hint",
+        waited._1 == 1 && waited._2.contains(s"the api: no answer from $base/down after 2 s - see the log"),
+        waited.toString
+      )
+      val soon = runShell(body(waitForHttp("the api", s"$base/ok", timeout = 5, interval = 1)))
+      check("waitForHttp: the script exits 0 at once when it answers", soon._1 == 0 && soon._2.isEmpty, soon.toString)
+      check(
+        "waitForPort: an open port answers",
+        runShell(guard(waitForPort("port", "127.0.0.1", port)))._1 == 0
+      )
+      server.stop(0)
+      check(
+        "waitForPort: a closed port does not",
+        runShell(guard(waitForPort("port", "127.0.0.1", port)))._1 != 0
+      )
+      val closed = runShell(body(waitForPort("the port", "127.0.0.1", port, timeout = 2, interval = 1)))
+      check(
+        "waitForPort: gives up with the address",
+        closed._1 == 1 && closed._2.contains(s"the port: no answer from 127.0.0.1:$port after 2 s"),
+        closed.toString
+      )
+    finally server.stop(0)
+    check("waitForHttp: no status codes is refused", scala.util.Try(waitForHttp("x", "http://h/", status = Nil)).isFailure)
+    check("waitForHttp: a timeout below the interval is refused", scala.util.Try(waitForHttp("x", "http://h/", timeout = 1, interval = 5)).isFailure)
+    check("waitForPort: a host with a space is refused", scala.util.Try(waitForPort("x", "a b", 80)).isFailure)
+    check("waitForPort: port 0 is refused", scala.util.Try(waitForPort("x", "h", 0)).isFailure)
+    val http = waitForHttp("l", "http://h/", ca = "/etc/ca.crt")
+    check(
+      "waitForHttp: the CA is passed to curl",
+      guard(http).contains("--cacert '/etc/ca.crt'"),
+      guard(http)
+    )
+
   def main(args: Array[String]): Unit =
     typedChecks()
     accessChecks()
@@ -2414,6 +2511,7 @@ object ApplyCheck:
     planChecks()
     runChecks()
     owedChecks()
+    waitForChecks()
     kindChecks()
     yamlChecks()
     newKindChecks()

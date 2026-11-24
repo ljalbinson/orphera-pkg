@@ -279,7 +279,7 @@ manifests/barbican_single_node.scala,741,apply command,barbican-api answers on i
 manifests/cinder_single_node.scala,759,apply command,cinder-api answers on its port,3,New general kinds,wait for port/HTTP,"waitFor (TCP port, or HTTP(S) status with a CA)",not started
 manifests/designate_single_node.scala,1025,apply command,designate-api and BIND9 answer on their ports,3,New general kinds,wait for port/HTTP,"waitFor (TCP port, or HTTP(S) status with a CA)",not started
 manifests/galera_cold_start.scala,265,RunCommand,wait for $n to be healthy,3,New general kinds,wait for port/HTTP,"waitFor (TCP port, or HTTP(S) status with a CA)",not started
-manifests/glance_single_node.scala,568,apply command,glance answers on 9292,3,New general kinds,wait for port/HTTP,"waitFor (TCP port, or HTTP(S) status with a CA)",not started
+manifests/glance_single_node.scala,568,apply command,glance answers on 9292,3,New general kinds,wait for port/HTTP,"waitFor (TCP port, or HTTP(S) status with a CA)",done
 manifests/heat_single_node.scala,805,apply command,heat-api and heat-api-cfn answer on their ports,3,New general kinds,wait for port/HTTP,"waitFor (TCP port, or HTTP(S) status with a CA)",not started
 manifests/horizon_single_node.scala,540,apply command,horizon answers on its port,3,New general kinds,wait for port/HTTP,"waitFor (TCP port, or HTTP(S) status with a CA)",not started
 manifests/k8s_api_vip.scala,178,RunCommand,check that nothing outside the nodes answers for $vip,3,New general kinds,wait for port/HTTP,"waitFor (TCP port, or HTTP(S) status with a CA)",not started
@@ -288,7 +288,7 @@ manifests/k8s_kubeadm_config.scala,341,RunCommand,restart kubelet and wait for i
 manifests/k8s_metrics_server.scala,50,RunCommand,kubectl top nodes answers,3,New general kinds,wait for port/HTTP,"waitFor (TCP port, or HTTP(S) status with a CA)",not started
 manifests/k8s_node_prep.scala,213,RunCommand,containerd and kubeadm answer,3,New general kinds,wait for port/HTTP,"waitFor (TCP port, or HTTP(S) status with a CA)",not started
 manifests/keycloak_single_node.scala,984,apply command,Keycloak reports ready on its management port,3,New general kinds,wait for port/HTTP,"waitFor (TCP port, or HTTP(S) status with a CA)",not started
-manifests/keystone_single_node.scala,585,apply command,keystone answers over TLS,3,New general kinds,wait for port/HTTP,"waitFor (TCP port, or HTTP(S) status with a CA)",not started
+manifests/keystone_single_node.scala,585,apply command,keystone answers over TLS,3,New general kinds,wait for port/HTTP,"waitFor (TCP port, or HTTP(S) status with a CA)",done
 manifests/kolla_build.scala,519,apply command,"the registry, the source server and devpi answer",3,New general kinds,wait for port/HTTP,"waitFor (TCP port, or HTTP(S) status with a CA)",not started
 manifests/kolla_cache.scala,123,apply command,the registry answers,3,New general kinds,wait for port/HTTP,"waitFor (TCP port, or HTTP(S) status with a CA)",not started
 manifests/magnum_single_node.scala,1243,apply command,magnum-api answers on its port,3,New general kinds,wait for port/HTTP,"waitFor (TCP port, or HTTP(S) status with a CA)",not started
@@ -297,7 +297,7 @@ manifests/manila_single_node.scala,957,apply command,manila-api answers on its p
 manifests/mariadb_haproxy_keepalived.scala,405,RunCommand,check that nothing outside the cluster answers for $vip,3,New general kinds,wait for port/HTTP,"waitFor (TCP port, or HTTP(S) status with a CA)",not started
 manifests/mariadb_haproxy_keepalived.scala,467,RunCommand,connect through the VIP ($vip:3306) and confirm a response,3,New general kinds,wait for port/HTTP,"waitFor (TCP port, or HTTP(S) status with a CA)",not started
 manifests/neutron_single_node.scala,1049,apply command,neutron-server answers on its port,3,New general kinds,wait for port/HTTP,"waitFor (TCP port, or HTTP(S) status with a CA)",not started
-manifests/nova_single_node.scala,731,apply command,nova-api answers on its port,3,New general kinds,wait for port/HTTP,"waitFor (TCP port, or HTTP(S) status with a CA)",not started
+manifests/nova_single_node.scala,731,apply command,nova-api answers on its port,3,New general kinds,wait for port/HTTP,"waitFor (TCP port, or HTTP(S) status with a CA)",done
 manifests/octavia_single_node.scala,1473,apply command,octavia-api answers on its port,3,New general kinds,wait for port/HTTP,"waitFor (TCP port, or HTTP(S) status with a CA)",not started
 manifests/placement_single_node.scala,551,apply command,placement answers on its port,3,New general kinds,wait for port/HTTP,"waitFor (TCP port, or HTTP(S) status with a CA)",not started
 manifests/rabbitmq_single_node.scala,136,apply command,RabbitMQ answers,3,New general kinds,wait for port/HTTP,"waitFor (TCP port, or HTTP(S) status with a CA)",not started
