@@ -37,8 +37,21 @@ object ceph_mon_quorum extends OrpheraClusterPlaybook:
       |test -f /var/lib/ceph/mon/ceph-$MONID/keyring || { echo "mkfs did not produce a keyring — treating as failure"; exit 1; }
       |chown -R ceph:ceph /var/lib/ceph/mon/ceph-$MONID /etc/ceph""".stripMargin
 
-  private val startServiceScript =
-    "systemctl reset-failed ceph-mon@$(hostname -s) 2>/dev/null; systemctl enable --now ceph-mon@$(hostname -s)"
+  // The mon unit is named after the host, and a description names its units outright, so each mon has its own
+  // description and its own stage below. A unit that failed earlier is reset first (as the script it replaces
+  // did), or systemd would refuse to start it again; the unit is then enabled and started, and a second run
+  // finds it running and changes nothing (before: `systemctl enable --now` every run).
+  private def startMonPlan(id: String): ApplyPlan =
+    import Resources.{command, service}
+    val reset = command(
+      s"reset the failed state of ceph-mon@$id",
+      s"systemctl reset-failed ceph-mon@$id",
+      onlyIf = s"systemctl is-failed --quiet ceph-mon@$id"
+    )
+    ApplyPlan.orFail(
+      s"ceph-mon-$id-running",
+      List(reset, service(s"ceph-mon@$id").after(reset))
+    )
 
   private val quorumCheckScript =
     """ceph --admin-daemon /var/run/ceph/ceph-mon.$(hostname -s).asok mon_status 2>/dev/null | grep -Eq '"state":\s*"(leader|peon)"'"""
@@ -87,12 +100,27 @@ object ceph_mon_quorum extends OrpheraClusterPlaybook:
         )
         .build,
 
-      stage("mkfs-and-start", "tst0", "tst1", "tst2")
+      stage("mkfs", "tst0", "tst1", "tst2")
         .task("prepare mon data dir and mkfs")(
           Task.RunCommand(List("sh", "-c", mkfsScript))
         )
+        .build,
+
+      stage("start-mon-tst0", "tst0")
         .task("enable and start mon service")(
-          Task.RunCommand(List("sh", "-c", startServiceScript))
+          Task.Apply(startMonPlan("tst0"))
+        )
+        .build,
+
+      stage("start-mon-tst1", "tst1")
+        .task("enable and start mon service")(
+          Task.Apply(startMonPlan("tst1"))
+        )
+        .build,
+
+      stage("start-mon-tst2", "tst2")
+        .task("enable and start mon service")(
+          Task.Apply(startMonPlan("tst2"))
         )
         .build,
 
