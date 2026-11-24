@@ -8,7 +8,7 @@ manifests/file_server.scala,227,RunCommand,"make the accounts, the group and the
 manifests/k8s_ceph_csi.scala,182,RunCommand,load the rbd kernel module,1,Existing kinds,directory/file,directory / file / authorizedKey / kernelModule / mount / pkg,done
 manifests/k8s_cluster.scala,240,RunCommand,create the Orphera state directory,1,Existing kinds,directory/file,directory / file / authorizedKey / kernelModule / mount / pkg,done
 manifests/k8s_etcd_backup.scala,334,RunCommand,create the backup directories,1,Existing kinds,directory/file,directory / file / authorizedKey / kernelModule / mount / pkg,done
-manifests/k8s_node_prep.scala,179,RunCommand,swap off,1,Existing kinds,directory/file,directory / file / authorizedKey / kernelModule / mount / pkg,open
+manifests/k8s_node_prep.scala,179,RunCommand,swap off,1,Existing kinds,directory/file,directory / file / authorizedKey / kernelModule / mount / pkg,done
 manifests/k8s_node_prep.scala,208,RunCommand,"hold the packages, set the kubelet node IP",1,Existing kinds,directory/file,directory / file / authorizedKey / kernelModule / mount / pkg,done
 manifests/k8s_registry_mirrors.scala,85,RunCommand,create the data directories,1,Existing kinds,directory/file,directory / file / authorizedKey / kernelModule / mount / pkg,done
 manifests/keycloak_tls.scala,178,RunCommand,prepare $signDir,1,Existing kinds,directory/file,directory / file / authorizedKey / kernelModule / mount / pkg,done
@@ -29,8 +29,8 @@ manifests/k8s_api_vip.scala,191,RunCommand,write keepalived.conf and (re)start k
 manifests/k8s_api_vip.scala,199,RunCommand,write keepalived.conf and (re)start keepalived,1,Existing kinds,file+service,"file (or fileFrom) + service, restart by notifies; in a playbook via Task.Apply",done
 manifests/k8s_api_vip.scala,207,RunCommand,write keepalived.conf and (re)start keepalived,1,Existing kinds,file+service,"file (or fileFrom) + service, restart by notifies; in a playbook via Task.Apply",done
 manifests/k8s_etcd_backup.scala,345,RunCommand,install the helper and the hourly timer,1,Existing kinds,file+service,"file (or fileFrom) + service, restart by notifies; in a playbook via Task.Apply",done
-manifests/k8s_kubeadm_config.scala,334,RunCommand,give kubelet a resolver file with each server once,1,Existing kinds,file+service,"file (or fileFrom) + service, restart by notifies; in a playbook via Task.Apply",open
-manifests/k8s_kubeadm_config.scala,349,RunCommand,"record it in kubelet-config, restart CoreDNS",1,Existing kinds,file+service,"file (or fileFrom) + service, restart by notifies; in a playbook via Task.Apply",open
+manifests/k8s_kubeadm_config.scala,334,RunCommand,give kubelet a resolver file with each server once,1,Existing kinds,file+service,"file (or fileFrom) + service, restart by notifies; in a playbook via Task.Apply",done
+manifests/k8s_kubeadm_config.scala,349,RunCommand,"record it in kubelet-config, restart CoreDNS",1,Existing kinds,file+service,"file (or fileFrom) + service, restart by notifies; in a playbook via Task.Apply",done
 manifests/k8s_node_prep.scala,191,RunCommand,configure containerd and the registry mirrors,1,Existing kinds,file+service,"file (or fileFrom) + service, restart by notifies; in a playbook via Task.Apply",done
 manifests/k8s_oidc.scala,474,RunCommand,write authn.yaml and encryption.yaml,1,Existing kinds,file+service,"file (or fileFrom) + service, restart by notifies; in a playbook via Task.Apply",done
 manifests/k8s_pod_security.scala,254,RunCommand,write admission.yaml,1,Existing kinds,file+service,"file (or fileFrom) + service, restart by notifies; in a playbook via Task.Apply",done
