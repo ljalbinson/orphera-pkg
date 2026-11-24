@@ -5,9 +5,10 @@ Status: proposed 2026-11-20. Group 1 is built (progress 2026-11-24 below); group
 
 ## Progress (2026-11-24)
 
-Group 1: 50 of its 69 listed steps are now typed (`Task.Apply` or an apply description with a typed resource), each run on
-the lab with a second run that changed nothing; the CHANGELOG has an entry for each. `docs/command-conversion-steps.csv`
-has a `status` column (`done`, `open`, or `not started` for groups 2 to 6). Change-path tests (something broken by hand,
+Group 1: 50 of its 69 listed steps are now typed (`Task.Apply` or an apply description with a typed resource); the
+CHANGELOG records them under "Group 1". `docs/command-conversion-steps.csv` has a `status` column (`done`, `open`, or
+`not started` for groups 2 to 6; `done` was worked out by checking whether the step is still a command, so it is
+as good as that check). Change-path tests (something broken by hand,
 the playbook run, the fix confirmed) have been done for `file_server`, `iperf3_test`, `virtualbmc` and `wordpress_site`;
 the others were tested only on the "already correct" path.
 
