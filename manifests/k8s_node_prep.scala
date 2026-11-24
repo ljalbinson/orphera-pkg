@@ -63,13 +63,30 @@ object k8s_node_prep extends OrpheraClusterPlaybook:
     ("ghcr.io", "https://ghcr.io", 5003)
   )
 
-  // Swap stays a command: commenting out the swap line of fstab is a
-  // selective edit that no apply kind describes.
+  // Swap stays a script: commenting out the swap line of fstab is a selective
+  // edit that no apply kind describes. It is a guarded command, though: it runs
+  // only while swap is on or fstab has an active swap line, so a node that is
+  // already prepared reports it unchanged.
   private val swapScript =
     """swapoff -a
       |sed -i -E '/\sswap\s/ s/^([^#])/#\1/' /etc/fstab
       |if swapon --show | grep -q .; then echo "swap is still on" >&2; exit 1; fi
       |echo "swap off"""".stripMargin
+
+  private val swapPlan: ApplyPlan =
+    import Resources.*
+    ApplyPlan.orFail(
+      "swap-off",
+      List(
+        command(
+          "swap off and out of fstab",
+          swapScript,
+          unless =
+            "! swapon --show | grep -q . && ! grep -Eq '^[^#].*[[:space:]]swap[[:space:]]' /etc/fstab",
+          timeout = 60
+        )
+      )
+    )
 
   // The modules and sysctls as a declarative description (apply kinds
   // kernelModule and sysctl): changed only where the node differs, and listed
@@ -224,9 +241,7 @@ object k8s_node_prep extends OrpheraClusterPlaybook:
   val playbook: ClusterPlaybook =
     clusterPlaybook("k8s-node-prep")(
       stage("prepare-kernel", nodes*)
-        .task("swap off")(
-          Task.RunCommand(List("sh", "-c", swapScript), timeoutSeconds = 60)
-        )
+        .task("swap off")(Task.Apply(swapPlan))
         .task("kernel modules and sysctls")(Task.Apply(kernelPlan))
         .build,
       stage("install-containerd", nodes*)
