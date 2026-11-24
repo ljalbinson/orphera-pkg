@@ -116,6 +116,23 @@ print(json.dumps(cm))
        |echo "resolver file $resolvFile written"
        |""".stripMargin
 
+  // The resolver file is rewritten only when what the script would write differs from what is
+  // there (before: written every run).
+  private val resolverFilePlan: ApplyPlan =
+    import Resources.*
+    ApplyPlan.orFail(
+      "kubelet-resolver-file",
+      List(
+        command(
+          "give kubelet a resolver file with each server once",
+          kubeletResolvScript,
+          unless =
+            s"""{ grep '^nameserver' /run/systemd/resolve/resolv.conf | awk '!seen[$$2]++' | head -3; grep '^search' /run/systemd/resolve/resolv.conf | head -1; } | cmp -s - $resolvFile""",
+          timeout = 180
+        )
+      )
+    )
+
   // kubelet's config names the resolver file: an apply description (kind
   // lineInFile) that replaces the resolvConf line, or adds it. kubelet is
   // restarted by the change, and only by it; the restart returns when the unit
@@ -148,6 +165,25 @@ print(json.dumps(cm))
        |$kc -n kube-system rollout restart deployment/coredns
        |$kc -n kube-system rollout status deployment/coredns --timeout=180s
        |""".stripMargin
+
+  // The kubelet-config ConfigMap is replaced, and CoreDNS restarted, only while the ConfigMap does
+  // not name the resolver file yet (before: both on every run, so CoreDNS was restarted each time). A
+  // cluster that cannot be queried fails the step: the guard then says "needed" and the script fails
+  // with kubectl's own message.
+  private val kubeletConfigPlan: ApplyPlan =
+    import Resources.*
+    ApplyPlan.orFail(
+      "kubelet-config-resolv-conf",
+      List(
+        command(
+          "record it in kubelet-config, restart CoreDNS",
+          kubeletConfigScript,
+          unless =
+            s"""$kc -n kube-system get configmap kubelet-config -o jsonpath='{.data.kubelet}' | grep -qx 'resolvConf: $resolvFile'""",
+          timeout = 300
+        )
+      )
+    )
 
   private val dnsTestScript =
     s"""set -e
@@ -327,19 +363,13 @@ sys.exit(1 if bad else 0)
         .build,
       stage("kubelet-resolver", (30 to 39).map(n => s"tst$n")*)
         .task("give kubelet a resolver file with each server once")(
-          Task.RunCommand(
-            List("sh", "-c", kubeletResolvScript),
-            timeoutSeconds = 180
-          )
+          Task.Apply(resolverFilePlan)
         )
         .task("point kubelet's config at it and restart it")(Task.Apply(kubeletResolvPlan))
         .build,
       stage("kubelet-config-and-dns-test", "tst30")
         .task("record it in kubelet-config, restart CoreDNS")(
-          Task.RunCommand(
-            List("sh", "-c", kubeletConfigScript),
-            timeoutSeconds = 300
-          )
+          Task.Apply(kubeletConfigPlan)
         )
         .task("a host-network pod sees two nameservers")(
           Task.RunCommand(List("sh", "-c", dnsTestScript), timeoutSeconds = 300)
