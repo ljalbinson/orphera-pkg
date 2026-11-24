@@ -990,12 +990,17 @@ trait ApplyTarget:
     * notification and did not deliver, because what they depend on failed.
     * A target that keeps nothing says none.
     */
-  def pendingNotices(plan: String): IO[Set[String]] = IO.pure(Set.empty)
+  def pendingNotices(
+      @scala.annotation.unused plan: String
+  ): IO[Set[String]] = IO.pure(Set.empty)
 
   /** Records which resources are still owed a notification (replacing the
     * earlier record; empty clears it).
     */
-  def keepPendingNotices(plan: String, ids: Set[String]): IO[Unit] = IO.unit
+  def keepPendingNotices(
+      @scala.annotation.unused plan: String,
+      @scala.annotation.unused ids: Set[String]
+  ): IO[Unit] = IO.unit
 
 object Apply:
 
