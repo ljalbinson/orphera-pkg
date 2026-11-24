@@ -5,14 +5,17 @@ Status: proposed 2026-11-20. Group 1 is built (progress 2026-11-24 below); group
 
 ## Progress (2026-11-24)
 
-Group 1: 50 of its 69 listed steps are now typed (`Task.Apply` or an apply description with a typed resource); the
+Group 1: 53 of its 69 listed steps are now typed (`Task.Apply` or an apply description with a typed resource); the
 CHANGELOG records them under "Group 1". `docs/command-conversion-steps.csv` has a `status` column (`done`, `open`, or
 `not started` for groups 2 to 6; `done` was worked out by checking whether the step is still a command, so it is
 as good as that check). Change-path tests (something broken by hand,
 the playbook run, the fix confirmed) have been done for `file_server`, `iperf3_test`, `virtualbmc` and `wordpress_site`;
-the others were tested only on the "already correct" path.
+the others were tested only on the "already correct" path, apart from swap off and the kubelet resolver file
+(`k8s_node_prep`, `k8s_kubeadm_config`), tested on tst35. Swap off, the kubelet resolver file and the kubelet-config
+step stay scripts (no typed kind for a selective fstab edit, a generated file or a ConfigMap edit) but are guarded
+commands in a `Task.Apply`, so a node that is already set up reports them unchanged.
 
-The 19 open group 1 steps:
+The 16 open group 1 steps:
 
 | Steps | Why open |
 |---|---|
@@ -22,7 +25,6 @@ The 19 open group 1 steps:
 | `rpm_cache_clients` (1) | renaming the stock repository files has no typed resource |
 | `octavia_single_node` (1) | restarts through a stamp file, which keeps a restart that a failed step would otherwise lose; the typed notification was judged weaker. Since then a notification that could not be delivered is kept by the engine, so this could be looked at again |
 | `apply_kinds_demo` (2) | a demonstration of the kinds |
-| `k8s_node_prep` swap off (1), `k8s_kubeadm_config` (2) | not converted; the reason was not recorded |
 
 Counts of steps by group below are as proposed on 2026-11-20.
 
