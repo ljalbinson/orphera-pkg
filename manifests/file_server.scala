@@ -212,21 +212,63 @@ object file_server extends OrpheraPlaybook:
        |</service-group>
        |""".stripMargin
 
-  // testparm refuses a configuration Samba would not load, so a typo stops the playbook before the restart.
-  private val startScript: String =
-    s"""set -e
-       |testparm -s /etc/samba/smb.conf >/dev/null
-       |systemctl enable smbd avahi-daemon
-       |systemctl restart smbd avahi-daemon
-       |sleep 2
-       |systemctl is-active --quiet smbd || { echo "smbd is not running: journalctl -xeu smbd" >&2; exit 1; }
-       |systemctl is-active --quiet avahi-daemon || { echo "avahi-daemon is not running: journalctl -xeu avahi-daemon" >&2; exit 1; }
-       |if command -v ufw >/dev/null 2>&1 && ufw status | grep -q '^Status: active'; then
-       |  ufw allow Samba >/dev/null
-       |  ufw allow 5353/udp >/dev/null
-       |  echo "ufw: Samba and mDNS allowed"
-       |fi
-       |echo "smbd and avahi-daemon running"""".stripMargin
+  // smb.conf, the Avahi announcement and the two services as one description. Each file notifies its service,
+  // so smbd and avahi-daemon are restarted only when their own file changed (before: both restarted on every
+  // run, which dropped the connected clients). testparm refuses a configuration Samba would not load: it runs
+  // after smb.conf is written and, when it fails, stops before smbd is touched (smbd keeps running on the old
+  // configuration; the restart it was owed is delivered by the next run). The firewall rules are added only
+  // when ufw is active and one of them is missing.
+  private val servicesPlan: ApplyPlan =
+    import Resources.{command, file, service}
+    val smbd = service("smbd.service")
+    val avahi = service("avahi-daemon.service")
+    val smbConfFile = file(
+      "/etc/samba/smb.conf",
+      smbConf,
+      mode = "0644",
+      owner = "root",
+      group = "root"
+    ).notifies(smbd)
+    val avahiFile = file(
+      "/etc/avahi/services/orphera-fileserver.service",
+      avahiService,
+      mode = "0644",
+      owner = "root",
+      group = "root"
+    ).notifies(avahi)
+    val configOk = command(
+      "check smb.conf with testparm",
+      "testparm -s /etc/samba/smb.conf >/dev/null",
+      unless = "testparm -s /etc/samba/smb.conf >/dev/null 2>&1"
+    ).after(smbConfFile)
+    val smbdRunning = smbd.after(configOk)
+    val avahiRunning = avahi.after(avahiFile)
+    val firewall = command(
+      "allow Samba and mDNS through ufw",
+      """ufw allow Samba >/dev/null
+        |ufw allow 5353/udp >/dev/null
+        |echo "ufw: Samba and mDNS allowed"""".stripMargin,
+      onlyIf =
+        "command -v ufw >/dev/null 2>&1 && ufw status | grep -q '^Status: active' && { ! ufw status | grep -qw Samba || ! ufw status | grep -q '5353/udp'; }"
+    ).after(smbdRunning, avahiRunning)
+    val running = command(
+      "smbd and avahi-daemon are running",
+      """systemctl is-active --quiet smbd || { echo "smbd is not running: journalctl -xeu smbd" >&2; exit 1; }
+        |systemctl is-active --quiet avahi-daemon || { echo "avahi-daemon is not running: journalctl -xeu avahi-daemon" >&2; exit 1; }""".stripMargin,
+      unless = "systemctl is-active --quiet smbd && systemctl is-active --quiet avahi-daemon"
+    ).after(smbdRunning, avahiRunning)
+    ApplyPlan.orFail(
+      "file-server-services",
+      List(
+        smbConfFile,
+        avahiFile,
+        configOk,
+        smbdRunning,
+        avahiRunning,
+        firewall,
+        running
+      )
+    )
 
   // A real login, a listing and a file written, read back and removed, through the share the way a client
   // does it. The first user is enough: the others have the same group and the same share.
@@ -259,26 +301,8 @@ object file_server extends OrpheraPlaybook:
       .task("make the accounts, the group and the share directories")(
         Task.Apply(accountsPlan)
       )
-      .task("write smb.conf")(
-        Task.WriteFile(
-          content = smbConf,
-          dest = "/etc/samba/smb.conf",
-          owner = "root",
-          group = "root",
-          mode = 420
-        )
-      )
-      .task("announce the server with avahi")(
-        Task.WriteFile(
-          content = avahiService,
-          dest = "/etc/avahi/services/orphera-fileserver.service",
-          owner = "root",
-          group = "root",
-          mode = 420
-        )
-      )
-      .task("check the configuration and start the services")(
-        Task.RunCommand(List("sh", "-c", startScript), timeoutSeconds = 120)
+      .task("write smb.conf and the Avahi announcement; run smbd and avahi-daemon")(
+        Task.Apply(servicesPlan)
       )
       .task("check the share by using it")(
         Task.RunCommand(List("sh", "-c", checkScript), timeoutSeconds = 60)
