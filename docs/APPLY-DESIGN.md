@@ -191,6 +191,14 @@ others still run, and the node is reported failed at the end. That leaves the no
 description as possible and names everything that did not happen. A strict mode (`--stop-on-failure`)
 stops the node at the first failure instead.
 
+**A notification that could not be delivered is kept.** A file that changed has been written; if what it
+notifies (a service, an `onChangeOnly` command) is skipped or fails because something before it failed, the
+next run would see the file unchanged and never notify. So the run records the resources still owed a
+notification on the node (`/var/lib/orphera/apply-pending/<description name>`, one resource id per line;
+nothing is written when nothing is owed), says so, and the next run delivers them as if the file had just
+changed (`notified by an earlier run`), then clears the record. `--check` shows the delivery and writes
+nothing.
+
 **No checkpoints.** A description is its own resume: running it again does only what is still
 different. The run log (`apply-<name>.jsonl`, read by `log-summary`) records each resource's outcome.
 

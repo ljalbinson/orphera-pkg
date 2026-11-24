@@ -986,6 +986,17 @@ trait ApplyTarget:
       timeout: Int
   ): IO[Unit] = shell(label, fallback, timeout)
 
+  /** The resources (by id) that an earlier run of this description owed a
+    * notification and did not deliver, because what they depend on failed.
+    * A target that keeps nothing says none.
+    */
+  def pendingNotices(plan: String): IO[Set[String]] = IO.pure(Set.empty)
+
+  /** Records which resources are still owed a notification (replacing the
+    * earlier record; empty clears it).
+    */
+  def keepPendingNotices(plan: String, ids: Set[String]): IO[Unit] = IO.unit
+
 object Apply:
 
   /** The checked plan for `resources`, or an error naming every problem. */
@@ -2130,6 +2141,12 @@ object Apply:
         .map(_.swap)
       observableIds = observable.map(_._1).toSet
       seenOrError <- target.observe(observable).attempt
+      // Notifications an earlier run owed and did not deliver (a file changed, but the unit it
+      // restarts was skipped because something before it failed): delivered now, so a change
+      // that is already on the node is not left without its restart.
+      before <- target.pendingNotices(plan.name).attempt.map(_.getOrElse(Set.empty[String]))
+      owedEarlier = (i: Int) =>
+        plan.notifiers(i).nonEmpty && before.contains(rs(i).id)
       outcomes <- Ref.of[IO, Map[Int, ApplyOutcome]](Map.empty)
       _ <- plan.order.toList.traverse_ { i =>
         val r = rs(i)
@@ -2142,10 +2159,10 @@ object Apply:
               )
             case ApplyOutcome.NotNotified          => line(r.id, "not notified")
             case ApplyOutcome.WouldChange(ch, det) =>
-              line(r.id, describe(r, ch, would = true, plan, i)) >> det
+              line(r.id, describe(r, ch, would = true, plan, i, owedEarlier(i))) >> det
                 .traverse_(d => say(s"  $d"))
             case ApplyOutcome.Changed(ch, det) =>
-              line(r.id, describe(r, ch, would = false, plan, i)) >> det
+              line(r.id, describe(r, ch, would = false, plan, i, owedEarlier(i))) >> det
                 .traverse_(d => say(s"  $d"))
             case ApplyOutcome.Skipped(reason) => line(r.id, s"skipped: $reason")
             case ApplyOutcome.Failed(error)   => line(r.id, s"FAILED: $error"))
@@ -2186,9 +2203,12 @@ object Apply:
                       case _ => false
                     }
                   )
+                val notifiedIds =
+                  notifiedBy.map(rs(_).id) ++
+                    Option.when(owedEarlier(i))(EarlierRun)
                 r match
                   case c: ApplyResource.Command
-                      if c.onChangeOnly && notifiedBy.isEmpty =>
+                      if c.onChangeOnly && notifiedIds.isEmpty =>
                     finish(ApplyOutcome.NotNotified)
                   case _ =>
                     // After a real change, what the node holds may have moved (a package brings a unit,
@@ -2243,7 +2263,7 @@ object Apply:
                             wanted,
                             target,
                             check,
-                            notifiedBy.map(rs(_).id)
+                            notifiedIds
                           ).attempt.flatMap {
                             case Left(err) =>
                               finish(
@@ -2311,6 +2331,37 @@ object Apply:
         }
       }
       done <- outcomes.get
+      // Still owed: notified (by a change now, or by an earlier run) and not delivered.
+      owed = plan.order.toList
+        .filter { i =>
+          val skippedOrFailed = done(i) match
+            case ApplyOutcome.Skipped(_) | _: ApplyOutcome.Failed => true
+            case _                                                => false
+          skippedOrFailed && plan.notifiers(i).nonEmpty && (
+            before.contains(rs(i).id) ||
+              plan.notifiers(i).exists(j =>
+                done.get(j).exists(_.isInstanceOf[ApplyOutcome.Changed])
+              )
+          )
+        }
+        .map(rs(_).id)
+        .toSet
+      _ <-
+        if check || owed == before then IO.unit
+        else
+          target
+            .keepPendingNotices(plan.name, owed)
+            .handleErrorWith(e =>
+              say(
+                s"could not record the notifications still owed: ${Option(e.getMessage).getOrElse(e.toString)}"
+              )
+            )
+      _ <-
+        if check || owed.isEmpty then IO.unit
+        else
+          say(
+            s"still owed a notification, delivered by the next run: ${owed.toList.sorted.mkString(", ")}"
+          )
       report = ApplyReport(
         target.node,
         plan.name,
@@ -2320,16 +2371,21 @@ object Apply:
       _ <- say(report.summary)
     yield report
 
+  /** What the lines say when the notification is one an earlier run owed. */
+  private val EarlierRun = "an earlier run"
+
   private def describe(
       r: ApplyResource,
       changes: List[String],
       would: Boolean,
       plan: ApplyPlan,
-      i: Int
+      i: Int,
+      earlier: Boolean
   ): String =
     r match
       case _: ApplyResource.Command =>
-        val by = plan.notifiers(i).toList.sorted.map(plan.resources(_).id)
+        val by = plan.notifiers(i).toList.sorted.map(plan.resources(_).id) ++
+          Option.when(earlier)(EarlierRun)
         val verb = if would then "would run" else "ran"
         if by.isEmpty then verb else s"$verb (notified by ${by.mkString(", ")})"
       case _ =>
