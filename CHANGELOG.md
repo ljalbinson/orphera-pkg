@@ -4284,6 +4284,7 @@ end-to-end, not by adding timing workarounds.
 
 ### Added
 
+- Group 3, `waitFor`: `waitForHttp` takes a `resolve` option (curl's `host:port:address`) to reach the name on a certificate at this node whatever DNS says; `ApplyCheck` covers it with a name that only resolves through the option. The wait steps of `horizon_single_node.scala`, `skyline_single_node.scala` and `keycloak_single_node.scala` (CA, resolve, and for Keycloak the `"UP"` body check, 420 s), `rpm_cache.scala` (body `ok`), `apt_cache.scala`, `telemetry_prometheus.scala` and `telemetry_compute.scala` are now `waitForHttp`, with the same waits and hints as before, instead of hand-written `healthy` and `waitHealthy` scripts. Not compiled or run here; needs `make test` and a run of the seven manifests (the wait steps `unchanged (unless: true)`).
 - **`reboot` command/RPC** (`TriggerReboot`/`RebootRequest`/`RebootAck`).
   Runs fully detached from the agent's own process via `systemd-run
   --no-block`, for the same reason as `deploy-agent`'s fix below —

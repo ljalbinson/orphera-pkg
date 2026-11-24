@@ -112,15 +112,6 @@ object rpm_cache extends OrpheraApply:
       |    }
       |}""".stripMargin.replace("@PORT@", port.toString)
 
-  private val healthy =
-    s"""[ "$$(curl -s http://localhost:$port/healthz)" = "ok" ]"""
-
-  // Up to a minute for nginx to answer after a (re)start.
-  private val waitHealthy =
-    s"""for i in $$(seq 1 20); do $healthy && exit 0; sleep 3; done
-       |echo "nginx does not answer on port $port - see 'journalctl -xeu nginx'" >&2
-       |exit 1""".stripMargin
-
   private def code(repo: String): String =
     s"$$(curl -s -o /dev/null -w '%{http_code}' http://localhost:$port/rocky/$release/$repo/$arch/os/repodata/repomd.xml)"
 
@@ -141,8 +132,15 @@ object rpm_cache extends OrpheraApply:
     val checkConf =
       command("check the nginx configuration", "nginx -t", onChangeOnly = true)
     val server = service("nginx").after(checkConf)
-    val answering =
-      command("the cache answers", waitHealthy, unless = healthy).after(server)
+    // Up to a minute for nginx to answer after a (re)start.
+    val answering = waitForHttp(
+      "the cache answers",
+      s"http://localhost:$port/healthz",
+      contains = "ok",
+      timeout = 60,
+      interval = 3,
+      hint = "see 'journalctl -xeu nginx'"
+    ).after(server)
     List(
       nginx,
       pkg("curl"),

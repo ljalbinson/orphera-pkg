@@ -188,17 +188,6 @@ object telemetry_compute extends OrpheraApply:
     """{"command": "ceilometer-polling --polling-namespaces compute --config-file /etc/ceilometer/ceilometer.conf", "config_files": [{"source": "/var/lib/kolla/config_files/ceilometer.conf", "dest": "/etc/ceilometer/ceilometer.conf", "owner": "ceilometer", "perm": "0600"}, {"source": "/var/lib/kolla/config_files/polling.yaml", "dest": "/etc/ceilometer/polling.yaml", "owner": "ceilometer", "perm": "0600"}, {"source": "/var/lib/kolla/config_files/ca.crt", "dest": "/etc/ceilometer/ssl/ca.crt", "owner": "ceilometer", "perm": "0644"}], "permissions": [{"path": "/var/log/kolla/ceilometer", "owner": "ceilometer:kolla", "recurse": true}, {"path": "/var/lib/ceilometer", "owner": "ceilometer:ceilometer", "recurse": true}]}
       |""".stripMargin
 
-  // The polling agent's exporter answers once the first poll cycle has started.
-  private val healthy =
-    s"curl -sf http://localhost:$exporterPort/metrics >/dev/null"
-  private val waitHealthy =
-    s"""for i in $$(seq 1 36); do
-       |  $healthy && exit 0
-       |  sleep 5
-       |done
-       |echo "the exporter on $exporterPort does not answer - see 'journalctl -xeu orphera-ceilometer-compute' and $ceilometerLogDir" >&2
-       |exit 1""".stripMargin
-
   def describe(target: Node): List[ApplyResource] =
     val tools = hostPackages.map(p => pkg(p, updateCache = true))
     val podman = tools(0)
@@ -276,11 +265,12 @@ object telemetry_compute extends OrpheraApply:
       json,
       unitFile
     )
-    val answering = command(
+    // The polling agent's exporter answers once the first poll cycle has started.
+    val answering = waitForHttp(
       "the exporter answers on its port",
-      waitHealthy,
-      unless = healthy,
-      timeout = 240
+      s"http://localhost:$exporterPort/metrics",
+      timeout = 180,
+      hint = s"see 'journalctl -xeu orphera-ceilometer-compute' and $ceilometerLogDir"
     ).after(running)
 
     tools ++ List(

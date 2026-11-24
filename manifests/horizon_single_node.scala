@@ -424,17 +424,6 @@ if __name__ == '__main__':
       .replace("@@ADMINPW@@", adminPassword.reveal)
   private val helperPath = "/usr/local/sbin/orphera-horizon-check"
 
-  // The login page answers 200 (the root redirects to it).
-  private val healthy =
-    s"""CODE=$$(curl -s --cacert $tlsDir/ca.crt --resolve $fqdn:$port:127.0.0.1 -o /dev/null -w '%{http_code}' https://$fqdn:$port/auth/login/); [ "$$CODE" = "200" ]"""
-  private val waitHealthy =
-    s"""for i in $$(seq 1 24); do
-       |  $healthy && exit 0
-       |  sleep 5
-       |done
-       |echo "horizon does not answer on https://$fqdn:$port/auth/login/ - see 'journalctl -xeu orphera-horizon' and $logDir" >&2
-       |exit 1""".stripMargin
-
   private val signedIn = s"$helperPath login >/dev/null 2>&1"
 
   def describe(target: Node): List[ApplyResource] =
@@ -516,11 +505,14 @@ if __name__ == '__main__':
 
     val running =
       unitService.after(settings, kollaCa, certCopy, vhost, unitFile)
-    val answering = command(
+    // The login page answers 200 (the root redirects to it).
+    val answering = waitForHttp(
       "horizon answers on its port",
-      waitHealthy,
-      unless = healthy,
-      timeout = 180
+      s"https://$fqdn:$port/auth/login/",
+      ca = s"$tlsDir/ca.crt",
+      resolve = s"$fqdn:$port:127.0.0.1",
+      timeout = 120,
+      hint = s"see 'journalctl -xeu orphera-horizon' and $logDir"
     ).after(running)
     val login = command(
       "sign in as admin like a browser would",

@@ -63,15 +63,6 @@ object telemetry_prometheus extends OrpheraApply:
   private val configCheck =
     "promtool check config /etc/prometheus/prometheus.yml"
 
-  private val healthy = "curl -sf http://localhost:9090/-/healthy >/dev/null"
-  private val waitHealthy =
-    s"""for i in $$(seq 1 12); do
-       |  $healthy && exit 0
-       |  sleep 5
-       |done
-       |echo "prometheus did not come back healthy - see 'journalctl -xeu prometheus'" >&2
-       |exit 1""".stripMargin
-
   def describe(target: Node): List[ApplyResource] =
     val prometheus = service("prometheus")
     val scrapeDir = directory("/etc/prometheus/scrape.d")
@@ -95,10 +86,10 @@ object telemetry_prometheus extends OrpheraApply:
       timeout = 60
     ).after(job, line)
     val running = prometheus.after(accepted, job, line)
-    val answering = command(
+    val answering = waitForHttp(
       "prometheus answers",
-      waitHealthy,
-      unless = healthy,
-      timeout = 90
+      "http://localhost:9090/-/healthy",
+      timeout = 60,
+      hint = "see 'journalctl -xeu prometheus'"
     ).after(running)
     List(scrapeDir, job, line, accepted, running, answering)

@@ -539,8 +539,9 @@ object Resources:
   /** Waits until an HTTP(S) endpoint answers, as a description: the URL, the status codes that count as an
     * answer, the CA that signs it, and text the body must hold. It changes nothing: when the endpoint already
     * answers it reports `unchanged`, otherwise it waits (every `interval` seconds, for up to `timeout`) and fails
-    * with a message that names the URL and carries `hint` (where to look). The check runs on the node, with
-    * curl.
+    * with a message that names the URL and carries `hint` (where to look). `resolve` is curl's
+    * `host:port:address`, to reach a name on the certificate at an address of this node whatever DNS says. The
+    * check runs on the node, with curl.
     */
   def waitForHttp(
       label: String,
@@ -548,6 +549,7 @@ object Resources:
       status: List[Int] = List(200),
       ca: String = "",
       contains: String = "",
+      resolve: String = "",
       timeout: Int = 120,
       interval: Int = 5,
       hint: String = ""
@@ -560,7 +562,10 @@ object Resources:
       interval > 0 && timeout >= interval,
       s"waitForHttp needs 0 < interval <= timeout, not $interval and $timeout"
     )
-    val caOption = if ca.isEmpty then "" else s"--cacert ${Apply.quote(ca)} "
+    val caOption =
+      (if ca.isEmpty then "" else s"--cacert ${Apply.quote(ca)} ") +
+        (if resolve.isEmpty then ""
+         else s"--resolve ${Apply.quote(resolve)} ")
     val body =
       if contains.isEmpty then ""
       else s"""printf '%s' "$$OUT" | grep -qF -- ${Apply.quote(contains)} && """

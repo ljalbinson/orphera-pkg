@@ -892,19 +892,6 @@ if __name__ == '__main__':
       .replace("@@HORIZON@@", horizonUrl)
       .replace("@@SKYLINE@@", skylineUrl) + "\n"
 
-  // --resolve: the name on the certificate, the address of this host, whatever DNS says.
-  private val healthy =
-    s"""CODE=$$(curl -s --cacert $tlsDir/ca.crt --resolve $fqdn:$mgmtPort:127.0.0.1 -o /tmp/kc-ready.json -w '%{http_code}' https://$fqdn:$mgmtPort/health/ready); [ "$$CODE" = "200" ] && grep -q '"UP"' /tmp/kc-ready.json"""
-  // Keycloak builds itself for MariaDB at each start and runs its database migrations at the first, so it takes
-  // minutes to answer: wait up to seven.
-  private val waitHealthy =
-    s"""for i in $$(seq 1 84); do
-       |  ( $healthy ) && exit 0
-       |  sleep 5
-       |done
-       |echo "Keycloak does not report ready on $mgmtPort - see 'journalctl -xeu orphera-keycloak' and 'podman logs keycloak'" >&2
-       |exit 1""".stripMargin
-
   def describe(target: Node): List[ApplyResource] =
     val tools = hostPackages.map(p => pkg(p, updateCache = true))
     val podman = tools(0)
@@ -965,11 +952,17 @@ if __name__ == '__main__':
       owner = "root",
       group = "root"
     )
-    val ready = command(
+    // resolve: the name on the certificate, the address of this host, whatever DNS says. Keycloak builds itself
+    // for MariaDB at each start and runs its database migrations at the first, so it takes minutes to answer:
+    // wait up to seven.
+    val ready = waitForHttp(
       "Keycloak reports ready on its management port",
-      waitHealthy,
-      unless = healthy,
-      timeout = 480
+      s"https://$fqdn:$mgmtPort/health/ready",
+      ca = s"$tlsDir/ca.crt",
+      resolve = s"$fqdn:$mgmtPort:127.0.0.1",
+      contains = "\"UP\"",
+      timeout = 420,
+      hint = "see 'journalctl -xeu orphera-keycloak' and 'podman logs keycloak'"
     ).after(running)
     val realmMade = command(
       s"realm $realm, client keystone, groups and the test users",
