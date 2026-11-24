@@ -275,8 +275,8 @@ manifests/telemetry_teardown.scala,132,apply command,stop and remove the ceilome
 manifests/telemetry_teardown.scala,153,apply command,stop and remove the telemetry containers and units,3,New general kinds,container+unit (absent),container absent (plus service absent and absentFile for the unit),not started
 manifests/trove_teardown.scala,108,apply command,stop and remove the trove containers and units,3,New general kinds,container+unit (absent),container absent (plus service absent and absentFile for the unit),not started
 manifests/apt_cache.scala,84,apply command,the cache answers,3,New general kinds,wait for port/HTTP,"waitFor (TCP port, or HTTP(S) status with a CA)",not started
-manifests/barbican_single_node.scala,741,apply command,barbican-api answers on its port,3,New general kinds,wait for port/HTTP,"waitFor (TCP port, or HTTP(S) status with a CA)",not started
-manifests/cinder_single_node.scala,759,apply command,cinder-api answers on its port,3,New general kinds,wait for port/HTTP,"waitFor (TCP port, or HTTP(S) status with a CA)",not started
+manifests/barbican_single_node.scala,741,apply command,barbican-api answers on its port,3,New general kinds,wait for port/HTTP,"waitFor (TCP port, or HTTP(S) status with a CA)",done
+manifests/cinder_single_node.scala,759,apply command,cinder-api answers on its port,3,New general kinds,wait for port/HTTP,"waitFor (TCP port, or HTTP(S) status with a CA)",done
 manifests/designate_single_node.scala,1025,apply command,designate-api and BIND9 answer on their ports,3,New general kinds,wait for port/HTTP,"waitFor (TCP port, or HTTP(S) status with a CA)",not started
 manifests/galera_cold_start.scala,265,RunCommand,wait for $n to be healthy,3,New general kinds,wait for port/HTTP,"waitFor (TCP port, or HTTP(S) status with a CA)",not started
 manifests/glance_single_node.scala,568,apply command,glance answers on 9292,3,New general kinds,wait for port/HTTP,"waitFor (TCP port, or HTTP(S) status with a CA)",done
@@ -291,15 +291,15 @@ manifests/keycloak_single_node.scala,984,apply command,Keycloak reports ready on
 manifests/keystone_single_node.scala,585,apply command,keystone answers over TLS,3,New general kinds,wait for port/HTTP,"waitFor (TCP port, or HTTP(S) status with a CA)",done
 manifests/kolla_build.scala,519,apply command,"the registry, the source server and devpi answer",3,New general kinds,wait for port/HTTP,"waitFor (TCP port, or HTTP(S) status with a CA)",not started
 manifests/kolla_cache.scala,123,apply command,the registry answers,3,New general kinds,wait for port/HTTP,"waitFor (TCP port, or HTTP(S) status with a CA)",not started
-manifests/magnum_single_node.scala,1243,apply command,magnum-api answers on its port,3,New general kinds,wait for port/HTTP,"waitFor (TCP port, or HTTP(S) status with a CA)",not started
+manifests/magnum_single_node.scala,1243,apply command,magnum-api answers on its port,3,New general kinds,wait for port/HTTP,"waitFor (TCP port, or HTTP(S) status with a CA)",done
 manifests/manila_ceph.scala,154,apply command,wait for NFS-Ganesha on $nfsIp:2049,3,New general kinds,wait for port/HTTP,"waitFor (TCP port, or HTTP(S) status with a CA)",not started
-manifests/manila_single_node.scala,957,apply command,manila-api answers on its port,3,New general kinds,wait for port/HTTP,"waitFor (TCP port, or HTTP(S) status with a CA)",not started
+manifests/manila_single_node.scala,957,apply command,manila-api answers on its port,3,New general kinds,wait for port/HTTP,"waitFor (TCP port, or HTTP(S) status with a CA)",done
 manifests/mariadb_haproxy_keepalived.scala,405,RunCommand,check that nothing outside the cluster answers for $vip,3,New general kinds,wait for port/HTTP,"waitFor (TCP port, or HTTP(S) status with a CA)",not started
 manifests/mariadb_haproxy_keepalived.scala,467,RunCommand,connect through the VIP ($vip:3306) and confirm a response,3,New general kinds,wait for port/HTTP,"waitFor (TCP port, or HTTP(S) status with a CA)",not started
-manifests/neutron_single_node.scala,1049,apply command,neutron-server answers on its port,3,New general kinds,wait for port/HTTP,"waitFor (TCP port, or HTTP(S) status with a CA)",not started
+manifests/neutron_single_node.scala,1049,apply command,neutron-server answers on its port,3,New general kinds,wait for port/HTTP,"waitFor (TCP port, or HTTP(S) status with a CA)",done
 manifests/nova_single_node.scala,731,apply command,nova-api answers on its port,3,New general kinds,wait for port/HTTP,"waitFor (TCP port, or HTTP(S) status with a CA)",done
-manifests/octavia_single_node.scala,1473,apply command,octavia-api answers on its port,3,New general kinds,wait for port/HTTP,"waitFor (TCP port, or HTTP(S) status with a CA)",not started
-manifests/placement_single_node.scala,551,apply command,placement answers on its port,3,New general kinds,wait for port/HTTP,"waitFor (TCP port, or HTTP(S) status with a CA)",not started
+manifests/octavia_single_node.scala,1473,apply command,octavia-api answers on its port,3,New general kinds,wait for port/HTTP,"waitFor (TCP port, or HTTP(S) status with a CA)",done
+manifests/placement_single_node.scala,551,apply command,placement answers on its port,3,New general kinds,wait for port/HTTP,"waitFor (TCP port, or HTTP(S) status with a CA)",done
 manifests/rabbitmq_single_node.scala,136,apply command,RabbitMQ answers,3,New general kinds,wait for port/HTTP,"waitFor (TCP port, or HTTP(S) status with a CA)",not started
 manifests/rpm_cache.scala,145,apply command,the cache answers,3,New general kinds,wait for port/HTTP,"waitFor (TCP port, or HTTP(S) status with a CA)",not started
 manifests/skyline_single_node.scala,589,apply command,skyline answers on its port,3,New general kinds,wait for port/HTTP,"waitFor (TCP port, or HTTP(S) status with a CA)",not started
@@ -307,7 +307,7 @@ manifests/skyline_single_node.scala,595,apply command,"the console, the API docs
 manifests/telemetry_compute.scala,294,apply command,the exporter answers on its port,3,New general kinds,wait for port/HTTP,"waitFor (TCP port, or HTTP(S) status with a CA)",not started
 manifests/telemetry_prometheus.scala,96,apply command,prometheus answers,3,New general kinds,wait for port/HTTP,"waitFor (TCP port, or HTTP(S) status with a CA)",not started
 manifests/telemetry_single_node.scala,887,apply command,the Aodh API and the exporter answer on their ports,3,New general kinds,wait for port/HTTP,"waitFor (TCP port, or HTTP(S) status with a CA)",not started
-manifests/trove_single_node.scala,808,apply command,trove-api answers on its port,3,New general kinds,wait for port/HTTP,"waitFor (TCP port, or HTTP(S) status with a CA)",not started
+manifests/trove_single_node.scala,808,apply command,trove-api answers on its port,3,New general kinds,wait for port/HTTP,"waitFor (TCP port, or HTTP(S) status with a CA)",done
 manifests/barbican_single_node.scala,656,apply command,fetch Keystone's CA from its TLS handshake,3,New general kinds,x509 cert/CA,"certificate kinds: CA, key and signed certificate, chain, trusted CA, CA fetched from a TLS endpoint",not started
 manifests/cinder_single_node.scala,646,apply command,fetch Keystone's CA from its TLS handshake,3,New general kinds,x509 cert/CA,"certificate kinds: CA, key and signed certificate, chain, trusted CA, CA fetched from a TLS endpoint",not started
 manifests/dashboard_tls.scala,98,RunCommand,make the TLS key and certificate request,3,New general kinds,x509 cert/CA,"certificate kinds: CA, key and signed certificate, chain, trusted CA, CA fetched from a TLS endpoint",not started

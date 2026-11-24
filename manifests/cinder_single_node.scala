@@ -578,17 +578,6 @@ if __name__ == '__main__':
       .replace("@@CA@@", caCert)
   private val helperPath = "/usr/local/sbin/orphera-openstack-api"
 
-  // Cinder answers with a version document (HTTP 200 or 300) once Apache is up.
-  private val healthy =
-    s"""CODE=$$(curl -s -o /dev/null -w '%{http_code}' http://localhost:$apiPort/); [ "$$CODE" = "200" ] || [ "$$CODE" = "300" ]"""
-  private val waitHealthy =
-    s"""for i in $$(seq 1 24); do
-       |  $healthy && exit 0
-       |  sleep 5
-       |done
-       |echo "cinder-api does not answer on http://localhost:$apiPort - see 'journalctl -xeu orphera-cinder-api' and $logDir" >&2
-       |exit 1""".stripMargin
-
   // The scheduler and volume services report in every few seconds; give them a
   // minute and a half to appear as `up` through the API.
   private val servicesUp = s"$helperPath volume-services >/dev/null 2>&1"
@@ -739,11 +728,13 @@ if __name__ == '__main__':
       s.unit.after((dbSync :: registered :: s.deps)*)
     }
 
-    val answering = command(
+    // Cinder answers with a version document (HTTP 200 or 300) once Apache is up.
+    val answering = waitForHttp(
       "cinder-api answers on its port",
-      waitHealthy,
-      unless = healthy,
-      timeout = 180
+      s"http://localhost:$apiPort/",
+      status = List(200, 300),
+      timeout = 120,
+      hint = s"see 'journalctl -xeu orphera-cinder-api' and $logDir"
     ).after(running*)
     val reporting = command(
       "scheduler and volume services report up through the API",

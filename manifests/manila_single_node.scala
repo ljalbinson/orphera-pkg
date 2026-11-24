@@ -766,17 +766,6 @@ if __name__ == '__main__':
       .replace("@@MANILAPW@@", manilaPassword.reveal)
       .replace("@@CA@@", caCert)
 
-  // The API answers its version document without a token (200, or 300 for a list of versions).
-  private val healthy =
-    s"""CODE=$$(curl -s -o /dev/null -w '%{http_code}' http://localhost:$apiPort/); [ "$$CODE" = "200" ] || [ "$$CODE" = "300" ]"""
-  private val waitHealthy =
-    s"""for i in $$(seq 1 36); do
-       |  ( $healthy ) && exit 0
-       |  sleep 5
-       |done
-       |echo "manila-api does not answer on $apiPort - see 'journalctl -xeu orphera-manila-api' and $logDir" >&2
-       |exit 1""".stripMargin
-
   // The scheduler and the share service report in every few seconds; give them three minutes to appear as `up`
   // through the API.
   private val servicesUp = s"$helperPath services-up >/dev/null 2>&1"
@@ -937,11 +926,13 @@ if __name__ == '__main__':
       )
     }
 
-    val answering = command(
+    // The API answers its version document without a token (200, or 300 for a list of versions).
+    val answering = waitForHttp(
       "manila-api answers on its port",
-      waitHealthy,
-      unless = healthy,
-      timeout = 240
+      s"http://localhost:$apiPort/",
+      status = List(200, 300),
+      timeout = 180,
+      hint = s"see 'journalctl -xeu orphera-manila-api' and $logDir"
     ).after(running*)
     val reporting = command(
       "scheduler and share service report up through the API",

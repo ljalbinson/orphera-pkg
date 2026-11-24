@@ -1055,17 +1055,6 @@ if __name__ == '__main__':
   private val imageFetched =
     s"""$imagePresent || ( [ -s $stateDir/image.current ] && . $stateDir/image.current && [ "$$CHOICE" = "$imageChoice" ] && [ -s "$$IMG" ] )"""
 
-  // The API answers its version document without a token (200, or 300 for a list of versions).
-  private val healthy =
-    s"""CODE=$$(curl -s -o /dev/null -w '%{http_code}' http://localhost:$apiPort/); [ "$$CODE" = "200" ] || [ "$$CODE" = "300" ]"""
-  private val waitHealthy =
-    s"""for i in $$(seq 1 36); do
-       |  ( $healthy ) && exit 0
-       |  sleep 5
-       |done
-       |echo "magnum-api does not answer on $apiPort - see 'journalctl -xeu orphera-magnum-api' and $logDir" >&2
-       |exit 1""".stripMargin
-
   // The conductor reports in every few seconds; give it three minutes to appear as `up` through the API.
   private val conductorUp = s"$helperPath mservices >/dev/null 2>&1"
   private val waitConductorUp =
@@ -1227,11 +1216,13 @@ if __name__ == '__main__':
       )
     }
 
-    val answering = command(
+    // The API answers its version document without a token (200, or 300 for a list of versions).
+    val answering = waitForHttp(
       "magnum-api answers on its port",
-      waitHealthy,
-      unless = healthy,
-      timeout = 240
+      s"http://localhost:$apiPort/",
+      status = List(200, 300),
+      timeout = 180,
+      hint = s"see 'journalctl -xeu orphera-magnum-api' and $logDir"
     ).after(running*)
     val reporting = command(
       "the conductor reports up through the API",
