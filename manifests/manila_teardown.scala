@@ -50,13 +50,6 @@ object manila_teardown extends OrpheraApply:
   private val unregisterScript =
     s"""$helper unregister || echo "keystone cleanup failed (continuing)""""
 
-  // A test mount or its directory left by a failed share round trip.
-  private val hasTestMount = s"[ -d $mountDir ]"
-  private val unmountScript =
-    s"""if mountpoint -q $mountDir 2>/dev/null; then umount $mountDir || true; fi
-       |rmdir $mountDir 2>/dev/null || true
-       |echo "test mount removed"""".stripMargin
-
   private val unitList = units.mkString(" ")
   // True when ANY of the units has a unit file, or is active or enabled.
   private val anyUnit =
@@ -174,19 +167,17 @@ object manila_teardown extends OrpheraApply:
         onlyIf = hasHelper,
         timeout = 120
       )
-      val unmounted = command(
-        "remove a test mount left by a share round trip",
-        unmountScript,
-        onlyIf = hasTestMount,
-        timeout = 120
-      )
+      // A test mount or its directory left by a failed share round trip: unmounted if mounted, no fstab entry
+      // (none is made), then the directory removed if it is empty.
+      val unmounted = absentMount(mountDir)
+      val testDir = absentDirectory(mountDir).after(unmounted)
       val stopped = command(
         "stop and remove the manila containers and units",
         stopScript,
         onlyIf = anyUnit,
         timeout = 240
-      ).after(unregistered, unmounted)
+      ).after(unregistered, testDir)
       // Typed removal, no script: each directory with its contents, then the helper.
       val cleaned = (dirs.map(absentDirectory(_, recursive = true)) :+
         absentFile(helper)).map(_.after(stopped))
-      List(unregistered, unmounted, stopped) ++ cleaned
+      List(unregistered, unmounted, testDir, stopped) ++ cleaned
