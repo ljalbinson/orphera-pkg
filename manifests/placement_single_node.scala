@@ -464,17 +464,6 @@ if __name__ == '__main__':
       .replace("@@CA@@", caCert)
   private val helperPath = "/usr/local/sbin/orphera-placement-api"
 
-  // Placement answers its version document (HTTP 200) without a token.
-  private val healthy =
-    s"""CODE=$$(curl -s -o /dev/null -w '%{http_code}' http://localhost:$port/); [ "$$CODE" = "200" ]"""
-  private val waitHealthy =
-    s"""for i in $$(seq 1 18); do
-       |  $healthy && exit 0
-       |  sleep 5
-       |done
-       |echo "placement does not answer on http://localhost:$port - see 'journalctl -xeu ${placementApi.unitName}' and $logDir" >&2
-       |exit 1""".stripMargin
-
   def describe(target: Node): List[ApplyResource] =
     val tools = hostPackages.map(p => pkg(p, updateCache = true))
     val podman = tools(0)
@@ -548,11 +537,13 @@ if __name__ == '__main__':
       owner = "root",
       group = "root"
     )
-    val answering = command(
+    // Placement answers its version document (HTTP 200) without a token.
+    val answering = waitForHttp(
       "placement answers on its port",
-      waitHealthy,
-      unless = healthy,
-      timeout = 120
+      s"http://localhost:$port/",
+      status = List(200),
+      timeout = 90,
+      hint = s"see 'journalctl -xeu ${placementApi.unitName}' and $logDir"
     ).after(running)
     val registered = command(
       "register Placement in Keystone",

@@ -588,17 +588,6 @@ if __name__ == '__main__':
       .replace("@@CA@@", caCert)
   private val helperPath = "/usr/local/sbin/orphera-barbican-api"
 
-  // The API answers its version document without a token (200, or 300 for a list of versions).
-  private val healthy =
-    s"""CODE=$$(curl -s -o /dev/null -w '%{http_code}' http://localhost:$apiPort/); [ "$$CODE" = "200" ] || [ "$$CODE" = "300" ]"""
-  private val waitHealthy =
-    s"""for i in $$(seq 1 24); do
-       |  ( $healthy ) && exit 0
-       |  sleep 5
-       |done
-       |echo "barbican-api does not answer on $apiPort - see 'journalctl -xeu orphera-barbican-api' and $logDir" >&2
-       |exit 1""".stripMargin
-
   // The API accepts an admin token from Keystone (it validated it with the barbican user's credentials) and
   // reaches its database.
   private val acceptsToken = s"$helperPath secret-list >/dev/null 2>&1"
@@ -720,11 +709,13 @@ if __name__ == '__main__':
       s.unit.after((dbSync :: registered :: s.deps)*)
     }
 
-    val answering = command(
+    // The API answers its version document without a token (200, or 300 for a list of versions).
+    val answering = waitForHttp(
       "barbican-api answers on its port",
-      waitHealthy,
-      unless = healthy,
-      timeout = 180
+      s"http://localhost:$apiPort/",
+      status = List(200, 300),
+      timeout = 120,
+      hint = s"see 'journalctl -xeu orphera-barbican-api' and $logDir"
     ).after(running*)
     val authenticating = command(
       "the API accepts an admin token and reaches its database",

@@ -570,8 +570,8 @@ object keystone_single_node extends OrpheraApply:
       owner = "root",
       group = "root"
     )
-    // Over TLS with the test CA, and the body must look like the v3 version document, so a 200 from some
-    // unrelated listener does not pass. Up to 90 s for Keystone to answer after a (re)start.
+    // Over TLS with the test CA, and the body must look like the v3 version
+    // document, so a 200 from some unrelated listener does not pass.
     val answering = waitForHttp(
       "keystone answers over TLS",
       endpoint,

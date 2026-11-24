@@ -895,17 +895,6 @@ if __name__ == '__main__':
       .replace("@@CA@@", caCert)
   private val helperPath = "/usr/local/sbin/orphera-neutron-api"
 
-  // The root answers its version document without a token (200, or 300).
-  private val healthy =
-    s"""CODE=$$(curl -s -o /dev/null -w '%{http_code}' http://localhost:$apiPort/); [ "$$CODE" = "200" ] || [ "$$CODE" = "300" ]"""
-  private val waitHealthy =
-    s"""for i in $$(seq 1 24); do
-       |  $healthy && exit 0
-       |  sleep 5
-       |done
-       |echo "neutron-server does not answer on http://localhost:$apiPort - see 'journalctl -xeu orphera-neutron-server' and $logDir" >&2
-       |exit 1""".stripMargin
-
   private val agentsUp = s"$helperPath agents-up >/dev/null 2>&1"
   private val waitAgentsUp =
     s"""for i in $$(seq 1 30); do $helperPath agents-up && exit 0; sleep 5; done
@@ -1036,11 +1025,13 @@ if __name__ == '__main__':
       unitService.after((dbSync :: registered :: bridge :: carried :: deps)*)
     }
 
-    val answering = command(
+    // The root answers its version document without a token (200, or 300).
+    val answering = waitForHttp(
       "neutron-server answers on its port",
-      waitHealthy,
-      unless = healthy,
-      timeout = 180
+      s"http://localhost:$apiPort/",
+      status = List(200, 300),
+      timeout = 120,
+      hint = s"see 'journalctl -xeu orphera-neutron-server' and $logDir"
     ).after(running*)
     val reporting = command(
       "the Open vSwitch, DHCP and L3 agents report in through the API",
