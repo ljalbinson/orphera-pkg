@@ -68,7 +68,7 @@ manifests/observability_stack.scala,298,RunCommand,start node_exporter,1,Existin
 manifests/virtualbmc.scala,130,RunCommand,start vbmcd,1,Existing kinds,service,service (enabled/running); a one-off restart needs notifies or a restart action,done
 manifests/wordpress_site.scala,284,RunCommand,start nginx and php8.3-fpm,1,Existing kinds,service,service (enabled/running); a one-off restart needs notifies or a restart action,done
 manifests/wordpress_teardown.scala,60,RunCommand,stop nginx and php8.3-fpm,1,Existing kinds,service,service (enabled/running); a one-off restart needs notifies or a restart action,done
-manifests/octavia_single_node.scala,1463,apply command,restart ${c.unitName} when its configuration or CA changed,1,Existing kinds,service (notify),service restarted by notifies from the files,open
+manifests/octavia_single_node.scala,1463,apply command,restart ${c.unitName} when its configuration or CA changed,1,Existing kinds,service (notify),service restarted by notifies from the files,done
 manifests/barbican_single_node.scala,633,apply command,wait for apt and dpkg to be idle,2,Small additions to existing kinds,package lock wait,pkg waits for the dpkg lock itself,not started
 manifests/cinder_single_node.scala,623,apply command,wait for apt and dpkg to be idle,2,Small additions to existing kinds,package lock wait,pkg waits for the dpkg lock itself,not started
 manifests/designate_single_node.scala,819,apply command,wait for apt and dpkg to be idle,2,Small additions to existing kinds,package lock wait,pkg waits for the dpkg lock itself,not started
