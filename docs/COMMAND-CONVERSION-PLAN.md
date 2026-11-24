@@ -1,6 +1,29 @@
 # Command steps: which could be typed actions
 
-Status: proposed 2026-11-20. Nothing built. Follows `docs/TYPED-ACTIONS-PLAN.md`, whose phases 1 to 5 are built.
+Status: proposed 2026-11-20. Group 1 is built (progress 2026-11-24 below); groups 2 to 6 are not started. Follows
+`docs/TYPED-ACTIONS-PLAN.md`, whose phases 1 to 5 are built.
+
+## Progress (2026-11-24)
+
+Group 1: 50 of its 69 listed steps are now typed (`Task.Apply` or an apply description with a typed resource), each run on
+the lab with a second run that changed nothing; the CHANGELOG has an entry for each. `docs/command-conversion-steps.csv`
+has a `status` column (`done`, `open`, or `not started` for groups 2 to 6). Change-path tests (something broken by hand,
+the playbook run, the fix confirmed) have been done for `file_server`, `iperf3_test`, `virtualbmc` and `wordpress_site`;
+the others were tested only on the "already correct" path.
+
+The 19 open group 1 steps:
+
+| Steps | Why open |
+|---|---|
+| `ceph_mgr`, `ceph_mon_quorum`, `ceph_teardown` and their `.yaml` twins (7) | the manual Ceph path; testing needs the cephadm cluster rebuilt. Not decided |
+| `cephadm_mon_rolling_upgrade` (2), `mariadb_galera_rolling_restart` (1) | a restart at a point in a rolling upgrade is an action, not a state (see the gap below). Assumed to stay commands |
+| `cephadm_add_mons.yaml` (1), `iperf3_test.yaml` (1) | the YAML form has no apply tasks |
+| `rpm_cache_clients` (1) | renaming the stock repository files has no typed resource |
+| `octavia_single_node` (1) | restarts through a stamp file, which keeps a restart that a failed step would otherwise lose; the typed notification was judged weaker. Since then a notification that could not be delivered is kept by the engine, so this could be looked at again |
+| `apply_kinds_demo` (2) | a demonstration of the kinds |
+| `k8s_node_prep` swap off (1), `k8s_kubeadm_config` (2) | not converted; the reason was not recorded |
+
+Counts of steps by group below are as proposed on 2026-11-20.
 
 ## Why
 
