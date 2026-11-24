@@ -14,14 +14,14 @@ stages:
         distribute_file:
           source_node: tst0
           source_path: /etc/ceph/ceph.pub
-          dest_path: /root/.ssh/authorized_keys_cephadm_tmp
+          dest_path: /root/.ssh/orphera-cephadm.pub
           owner: root
           group: root
           mode: "0600"
 
       - name: append cephadm key to authorized_keys
         run_command:
-          command: ["sh", "-c", "cat /root/.ssh/authorized_keys_cephadm_tmp >> /root/.ssh/authorized_keys && rm /root/.ssh/authorized_keys_cephadm_tmp"]
+          command: ["sh", "-c", "grep -qxF \"$(cat /root/.ssh/orphera-cephadm.pub)\" /root/.ssh/authorized_keys || cat /root/.ssh/orphera-cephadm.pub >> /root/.ssh/authorized_keys"]
 
   - name: register-hosts
     nodes: [tst0]
