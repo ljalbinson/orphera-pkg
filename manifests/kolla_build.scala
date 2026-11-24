@@ -359,20 +359,6 @@ esac
       .replace("@@PROJECTS@@", projects.mkString(" "))
   private val helperPath = "/usr/local/sbin/orphera-kolla-build"
 
-  private val servicesAnswer =
-    s"""curl -sf http://localhost:$registryPort/v2/ >/dev/null &&
-       |curl -sf http://localhost:$sourcesPort/ >/dev/null &&
-       |curl -sf http://localhost:$devpiPort/ >/dev/null""".stripMargin
-  private val waitServicesScript =
-    s"""for i in $$(seq 1 40); do
-       |  if $servicesAnswer; then echo "registry, sources and devpi answer"; exit 0; fi
-       |  sleep 3
-       |done
-       |curl -s -o /dev/null -w 'registry http=%{http_code}\\n' http://localhost:$registryPort/v2/ || true
-       |curl -s -o /dev/null -w 'sources http=%{http_code}\\n' http://localhost:$sourcesPort/ || true
-       |curl -s -o /dev/null -w 'devpi http=%{http_code}\\n' http://localhost:$devpiPort/ || true
-       |exit 1""".stripMargin
-
   // True when every project's tarball and the checksum list are there and the base image is in the registry.
   private val warm =
     s"""for p in ${projects.mkString(
@@ -505,12 +491,32 @@ esac
       byName("skopeo"),
       byName("curl")
     )
-    val answering = command(
-      "the registry, the source server and devpi answer",
-      waitServicesScript,
-      unless = servicesAnswer,
-      timeout = 150
-    ).after(registryRunning, nginxRunning, devpiRunning)
+    // curl -f counted any status below 400 as an answer, so redirects count here too.
+    val answerStatus = List(200, 301, 302)
+    val registryAnswers = waitForHttp(
+      "the registry answers",
+      s"http://localhost:$registryPort/v2/",
+      status = answerStatus,
+      timeout = 120,
+      interval = 3,
+      hint = s"see 'journalctl -xeu ${registryContainer.unitName}'"
+    ).after(registryRunning)
+    val sourcesAnswer = waitForHttp(
+      "the source server answers",
+      s"http://localhost:$sourcesPort/",
+      status = answerStatus,
+      timeout = 120,
+      interval = 3,
+      hint = "see 'journalctl -xeu nginx'"
+    ).after(nginxRunning)
+    val devpiAnswers = waitForHttp(
+      "devpi answers",
+      s"http://localhost:$devpiPort/",
+      status = answerStatus,
+      timeout = 120,
+      interval = 3,
+      hint = "see 'journalctl -xeu orphera-devpi'"
+    ).after(devpiRunning)
 
     tools ++ List(
       pulled,
@@ -535,5 +541,7 @@ esac
       kollaInstalled,
       helperFile,
       warmed,
-      answering
+      registryAnswers,
+      sourcesAnswer,
+      devpiAnswers
     )

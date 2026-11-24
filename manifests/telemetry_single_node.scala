@@ -692,21 +692,6 @@ if __name__ == '__main__':
       .replace("@@CEILOMETERPW@@", ceilometerPassword.reveal)
       .replace("@@CA@@", caCert)
 
-  // The API answers its version document without a token (200, or 300 for a list of versions).
-  private val apiHealthy =
-    s"""CODE=$$(curl -s -o /dev/null -w '%{http_code}' http://localhost:$aodhPort/); [ "$$CODE" = "200" ] || [ "$$CODE" = "300" ]"""
-  // The polling agent's exporter answers once the first poll cycle has started.
-  private val exporterHealthy =
-    s"""curl -sf http://localhost:$exporterPort/metrics >/dev/null"""
-  private val healthy = s"( $apiHealthy ) && $exporterHealthy"
-  private val waitHealthy =
-    s"""for i in $$(seq 1 36); do
-       |  ( $healthy ) && exit 0
-       |  sleep 5
-       |done
-       |echo "the Aodh API on $aodhPort or the exporter on $exporterPort does not answer - see 'journalctl -xeu orphera-aodh-api' and $aodhLogDir" >&2
-       |exit 1""".stripMargin
-
   def describe(target: Node): List[ApplyResource] =
     val tools = hostPackages.map(p => pkg(p, updateCache = true))
     val podman = tools(0)
@@ -874,24 +859,33 @@ if __name__ == '__main__':
       )
     }
 
-    val answering = command(
-      "the Aodh API and the exporter answer on their ports",
-      waitHealthy,
-      unless = healthy,
-      timeout = 240
+    // The API answers its version document without a token (200, or 300 for a list of versions).
+    val apiAnswers = waitForHttp(
+      "the Aodh API answers on its port",
+      s"http://localhost:$aodhPort/",
+      status = List(200, 300),
+      timeout = 180,
+      hint = s"see 'journalctl -xeu orphera-aodh-api' and $aodhLogDir"
+    ).after(running*)
+    // The polling agent's exporter answers once the first poll cycle has started.
+    val exporterAnswers = waitForHttp(
+      "the exporter answers on its port",
+      s"http://localhost:$exporterPort/metrics",
+      timeout = 180,
+      hint = s"see 'journalctl -xeu orphera-ceilometer-central' and $ceilometerLogDir"
     ).after(running*)
     val series = command(
       "wait for the Ceilometer exporters to be up in Prometheus",
       s"$helperPath metrics",
       unless = s"$helperPath exporters-up >/dev/null 2>&1",
       timeout = 420
-    ).after((answering :: running)*)
+    ).after((apiAnswers :: exporterAnswers :: running)*)
     val alarms = command(
       "two PromQL alarms reach the states alarm and ok",
       s"$helperPath alarm-cycle",
       unless = s"$helperPath alarm-cycle >/dev/null 2>&1",
       timeout = 480
-    ).after((series :: answering :: running)*)
+    ).after((series :: apiAnswers :: exporterAnswers :: running)*)
 
     tools ++ List(
       mirrorDir,
@@ -909,4 +903,4 @@ if __name__ == '__main__':
       helperFile,
       registered
     ) ++ centralResources ++ aodhResources ++ List(dbSync) ++ running ++
-      List(answering, series, alarms)
+      List(apiAnswers, exporterAnswers, series, alarms)
