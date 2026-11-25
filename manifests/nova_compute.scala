@@ -302,28 +302,6 @@ object nova_compute extends OrpheraApply:
        |sys.exit(0)
        |PY""".stripMargin
 
-  // Open vSwitch comes from the host (apt). br-provider's only physical port is the
-  // provider NIC; the OVS agent in the container creates br-int and the patch
-  // ports.
-  private val bridgeScript =
-    s"""set -e
-       |systemctl enable --now openvswitch-switch
-       |ovs-vsctl --may-exist add-br $providerBridge
-       |ovs-vsctl --may-exist add-port $providerBridge $providerNic
-       |# nova-compute (uid 42436 in its container) cannot open the root-only unix socket;
-       |# it talks to ovsdb over loopback TCP instead (os-vif's default). Stored in the OVS DB.
-       |if ! ovs-vsctl get-manager | grep -qx 'ptcp:6640:127.0.0.1'; then ovs-vsctl set-manager ptcp:6640:127.0.0.1; fi
-       |ip link set $providerBridge up
-       |ovs-vsctl show
-       |echo "$providerBridge has $providerNic"""".stripMargin
-  private val bridgeReady =
-    s"""systemctl is-active --quiet openvswitch-switch &&
-       |systemctl is-enabled --quiet openvswitch-switch &&
-       |ovs-vsctl br-exists $providerBridge &&
-       |ovs-vsctl list-ports $providerBridge | grep -qx $providerNic &&
-       |ovs-vsctl get-manager | grep -qx 'ptcp:6640:127.0.0.1' &&
-       |ip link show $providerBridge | grep -q '<[^>]*UP'""".stripMargin
-
   // The Kolla cache as a mirror of quay.io (podman registries.conf.d drop-in).
   private val registryMirror =
     s"""[[registry]]
@@ -891,12 +869,18 @@ if __name__ == '__main__':
       unless = addressDropped,
       timeout = 120
     ).after(tools*)
-    val bridge = command(
+    // Open vSwitch comes from the host (apt). br-provider's only physical port is the provider NIC; the OVS agent
+    // in the container creates br-int and the patch ports. nova-compute (uid 42436 in its container) cannot open
+    // the root-only unix socket; it talks to ovsdb over loopback TCP instead (os-vif's default), stored in the OVS
+    // database.
+    val ovsHost = service("openvswitch-switch.service").after(tools*)
+    val ovsLoopback = ovsManager("let nova-compute reach Open vSwitch over loopback TCP", "ptcp:6640:127.0.0.1")
+      .after(ovsHost)
+    val bridge = ovsBridge(
       s"create $providerBridge with $providerNic as its port",
-      bridgeScript,
-      unless = bridgeReady,
-      timeout = 60
-    ).after((addressless :: tools)*)
+      providerBridge,
+      List(providerNic)
+    ).after((addressless :: ovsLoopback :: tools)*)
 
     val mirrorDir = directory("/etc/containers/registries.conf.d").after(podman)
     val mirror = file(
@@ -1056,6 +1040,8 @@ if __name__ == '__main__':
       libvirt,
       cephSecret,
       addressless,
+      ovsHost,
+      ovsLoopback,
       bridge,
       mirrorDir,
       mirror,
