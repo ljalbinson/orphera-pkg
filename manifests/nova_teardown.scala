@@ -60,22 +60,13 @@ object nova_teardown extends OrpheraApply:
       |podman exec rabbitmq rabbitmqctl delete_user nova || true
       |echo "rabbitmq vhost nova and user nova removed"""".stripMargin
 
-  // ---- tst3 ----
-  private val dropDatabasesScript =
-    s"""mariadb -N -e "DROP DATABASE IF EXISTS nova_api; DROP DATABASE IF EXISTS nova; DROP DATABASE IF EXISTS nova_cell0; DROP USER IF EXISTS '$dbUser'@'%'; FLUSH PRIVILEGES;""""
-  // True when any of the databases or the user exists. When MariaDB cannot be
-  // queried this is also true, so that the drop runs and fails with MariaDB's own
-  // message: a database that is down is not "nothing to remove".
-  private val databasesExist =
-    s"""OUT=$$(mariadb -N -e "SELECT 1 FROM information_schema.SCHEMATA WHERE SCHEMA_NAME IN ('nova_api','nova','nova_cell0') UNION SELECT 1 FROM mysql.user WHERE User='$dbUser'" 2>/dev/null) || exit 0; [ -n "$$OUT" ]"""
-
   def describe(target: Node): List[ApplyResource] =
     if target.name == dbNode then
       List(
-        command(
+        absentSqlDatabase(
           "drop nova_api, nova, nova_cell0 and the nova user on the Galera cluster",
-          dropDatabasesScript,
-          onlyIf = databasesExist
+          List("nova_api", "nova", "nova_cell0"),
+          dbUser
         )
       )
     else if target.name == rabbitNode then

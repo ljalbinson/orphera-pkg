@@ -65,13 +65,6 @@ object telemetry_teardown extends OrpheraApply:
        |echo "ceilometer scrape job removed from prometheus"""".stripMargin
 
   // ---- tst3 ----
-  private val dropDatabaseScript =
-    s"""mariadb -N -e "DROP DATABASE IF EXISTS $dbName; DROP USER IF EXISTS '$dbUser'@'%'; FLUSH PRIVILEGES;""""
-  // True when the database or the user exists. When MariaDB cannot be queried this is also true, so that the
-  // drop runs and fails with MariaDB's own message: a database that is down is not "nothing to remove".
-  private val databaseExists =
-    s"""OUT=$$(mariadb -N -e "SELECT 1 FROM information_schema.SCHEMATA WHERE SCHEMA_NAME='$dbName' UNION SELECT 1 FROM mysql.user WHERE User='$dbUser'" 2>/dev/null) || exit 0; [ -n "$$OUT" ]"""
-
   // ---- tst10 ----
   private val rabbitUp =
     "podman ps -q --filter 'name=^rabbitmq$' 2>/dev/null | grep -q ."
@@ -88,10 +81,10 @@ object telemetry_teardown extends OrpheraApply:
   def describe(target: Node): List[ApplyResource] =
     if target.name == dbNode then
       List(
-        command(
+        absentSqlDatabase(
           s"drop the $dbName database and the $dbUser user on the Galera cluster",
-          dropDatabaseScript,
-          onlyIf = databaseExists
+          List(dbName),
+          dbUser
         )
       )
     else if target.name == rabbitNode then

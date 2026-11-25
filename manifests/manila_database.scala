@@ -32,18 +32,13 @@ object manila_database extends OrpheraApply:
   private val dbUser = "manila"
   private val dbPassword = Secrets.secret("manila/db")
 
-  private val createDatabase =
-    s"""mariadb -N -e "CREATE DATABASE IF NOT EXISTS $dbName; CREATE USER IF NOT EXISTS '$dbUser'@'%' IDENTIFIED BY '${dbPassword.reveal}'; ALTER USER '$dbUser'@'%' IDENTIFIED BY '${dbPassword.reveal}'; GRANT ALL PRIVILEGES ON $dbName.* TO '$dbUser'@'%'; FLUSH PRIVILEGES;""""
-
-  // A real login as the manila user through the VIP.
-  private val canLogIn =
-    s"""MYSQL_PWD='${dbPassword.reveal}' mariadb -N -h $vip -u $dbUser $dbName -e 'SELECT 1' >/dev/null 2>&1"""
-
   def describe(node: Node): List[ApplyResource] =
     List(
-      command(
+      sqlDatabase(
         s"the $dbName database and the $dbUser user on the Galera cluster",
-        createDatabase,
-        unless = canLogIn
+        List(dbName),
+        dbUser,
+        dbPassword,
+        vip
       )
     )
