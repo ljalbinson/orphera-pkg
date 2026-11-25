@@ -34,15 +34,6 @@ object placement_teardown extends OrpheraApply:
   private val unregisterScript =
     s"""$helper unregister || echo "keystone cleanup failed (continuing)""""
 
-  private val unitExists =
-    s"[ -f /etc/systemd/system/$unit.service ] || systemctl is-active --quiet $unit || systemctl is-enabled --quiet $unit"
-  private val stopScript =
-    s"""systemctl disable --now $unit 2>/dev/null || true
-       |rm -f /etc/systemd/system/$unit.service
-       |systemctl daemon-reload
-       |if command -v podman >/dev/null 2>&1; then podman rm -f placement-api 2>/dev/null || true; fi
-       |echo "placement-api container and unit removed"""".stripMargin
-
   private val dirs = List(
     "/etc/kolla/placement",
     "/etc/kolla/placement-api",
@@ -75,12 +66,8 @@ object placement_teardown extends OrpheraApply:
         onlyIf = registeredInKeystone,
         timeout = 120
       )
-      val stopped = command(
-        "stop and remove the placement-api container and unit",
-        stopScript,
-        onlyIf = unitExists
-      ).after(unregistered)
+      val stopped = absentContainerUnits(List(unit -> "placement-api")).map(_.after(unregistered))
       // Typed removal, no script: each directory with its contents, then the helper.
       val cleaned = (dirs.map(absentDirectory(_, recursive = true)) :+
-        absentFile(helper)).map(_.after(stopped))
-      List(unregistered, stopped) ++ cleaned
+        absentFile(helper)).map(_.after(stopped*))
+      List(unregistered) ++ stopped ++ cleaned

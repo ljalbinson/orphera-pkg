@@ -36,15 +36,6 @@ object keystone_teardown extends OrpheraApply:
   private val databaseExists =
     s"""OUT=$$(mariadb -N -e "SELECT 1 FROM information_schema.SCHEMATA WHERE SCHEMA_NAME='$dbName' UNION SELECT 1 FROM mysql.user WHERE User='$dbUser'" 2>/dev/null) || exit 0; [ -n "$$OUT" ]"""
 
-  private val unitExists =
-    s"[ -f /etc/systemd/system/$unit.service ] || systemctl is-active --quiet $unit || systemctl is-enabled --quiet $unit"
-  private val stopScript =
-    s"""systemctl disable --now $unit 2>/dev/null || true
-       |rm -f /etc/systemd/system/$unit.service
-       |systemctl daemon-reload
-       |if command -v podman >/dev/null 2>&1; then podman rm -f keystone 2>/dev/null || true; fi
-       |echo "keystone container and unit removed"""".stripMargin
-
   // The system's trust store is rebuilt only when the test CA was there to remove.
   private val updateTrustScript =
     """if command -v update-ca-certificates >/dev/null 2>&1; then
@@ -66,11 +57,7 @@ object keystone_teardown extends OrpheraApply:
         )
       )
     else
-      val stopped = command(
-        "stop and remove the keystone container and unit",
-        stopScript,
-        onlyIf = unitExists
-      )
+      val stopped = absentContainerUnits(List(unit -> "keystone"))
       val updateTrust = command(
         "rebuild the system CA trust after the test CA is gone",
         updateTrustScript,
@@ -89,11 +76,11 @@ object keystone_teardown extends OrpheraApply:
           .notifies(updateTrust),
         absentFile("/etc/pki/ca-trust/source/anchors/orphera-test-ca.crt")
           .notifies(updateTrust)
-      ).map(_.after(stopped))
+      ).map(_.after(stopped*))
       val image_ = command(
         "remove the keystone image",
         s"podman rmi -f $image",
         onlyIf = imageExists,
         timeout = 120
-      ).after(stopped)
-      List(stopped) ++ cleaned ++ List(updateTrust.after(cleaned*), image_)
+      ).after(stopped*)
+      stopped ++ cleaned ++ List(updateTrust.after(cleaned*), image_)

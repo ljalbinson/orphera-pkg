@@ -38,16 +38,6 @@ object keycloak_teardown extends OrpheraApply:
   private val unfederateScript =
     s"""$helper unfederate || echo "keystone cleanup failed (continuing)""""
 
-  // True when the unit file exists, or the unit is active or enabled.
-  private val anyUnit =
-    s"""[ -f /etc/systemd/system/$unit.service ] || systemctl is-active --quiet $unit || systemctl is-enabled --quiet $unit"""
-  private val stopScript =
-    s"""systemctl disable --now $unit 2>/dev/null || true
-       |rm -f /etc/systemd/system/$unit.service
-       |if command -v podman >/dev/null 2>&1; then podman rm -f keycloak 2>/dev/null || true; fi
-       |systemctl daemon-reload
-       |echo "keycloak container and unit removed"""".stripMargin
-
   // ---- tst6 ----
   // ---- tst3 ----
   private val dropDatabaseScript =
@@ -77,16 +67,11 @@ object keycloak_teardown extends OrpheraApply:
         onlyIf = hasHelper,
         timeout = 180
       )
-      val stopped = command(
-        "stop and remove the keycloak container and unit",
-        stopScript,
-        onlyIf = anyUnit,
-        timeout = 240
-      ).after(unfederated)
+      val stopped = absentContainerUnits(List(unit -> "keycloak")).map(_.after(unfederated))
       // The configuration and TLS files, the readiness file and the helper (the helper stays until the last step).
       val cleaned = List(
         absentDirectory("/etc/keycloak", recursive = true),
         absentFile("/tmp/kc-ready.json"),
         absentFile(helper)
-      ).map(_.after(stopped))
-      List(unfederated, stopped) ++ cleaned
+      ).map(_.after(stopped*))
+      List(unfederated) ++ stopped ++ cleaned
