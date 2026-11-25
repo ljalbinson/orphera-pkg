@@ -25,7 +25,7 @@ object glance_teardown extends OrpheraApply:
   private val cephNode = "tst0"
   private val dbName = "glance"
   private val dbUser = "glance"
-  private val cephPool = "images"
+  private val imagesPool = "images"
   private val unit = "orphera-glance-api"
   private val image = "quay.io/openstack.kolla/glance-api:2025.1-ubuntu-noble"
   private val helper = "/usr/local/sbin/orphera-glance-api"
@@ -46,15 +46,6 @@ object glance_teardown extends OrpheraApply:
     s"command -v podman >/dev/null 2>&1 && podman image exists $image"
 
   // ---- tst0 ----
-  private val cephScript =
-    s"""cephadm shell -- ceph config set mon mon_allow_pool_delete true
-       |cephadm shell -- ceph osd pool delete $cephPool $cephPool --yes-i-really-really-mean-it || true
-       |cephadm shell -- ceph config set mon mon_allow_pool_delete false
-       |cephadm shell -- ceph auth del client.glance || true
-       |echo "pool $cephPool and client.glance removed"""".stripMargin
-  private val cephExists =
-    s"""cephadm shell -- ceph osd pool ls 2>/dev/null | grep -qx $cephPool || cephadm shell -- ceph auth get client.glance >/dev/null 2>&1"""
-
   def describe(target: Node): List[ApplyResource] =
     if target.name == dbNode then
       List(
@@ -65,14 +56,9 @@ object glance_teardown extends OrpheraApply:
         )
       )
     else if target.name == cephNode then
-      List(
-        command(
-          s"delete the $cephPool pool and client.glance",
-          cephScript,
-          onlyIf = cephExists,
-          timeout = 180
-        )
-      )
+      val user = absentCephUser("remove the client.glance cephx user", "client.glance")
+      val pool = absentCephPool(s"delete the $imagesPool pool", imagesPool).after(user)
+      List(user, pool)
     else
       val unregistered = absentKeystoneEntries("remove Glance from Keystone", "glance")
       val stopped = absentContainerUnits(List(unit -> "glance-api")).map(_.after(unregistered))

@@ -144,6 +144,8 @@ time is up. Nothing is changed on the node. The generated shell is run against a
 
 `keystoneEntries(...)` and `absentKeystoneEntries(...)` make the Keystone entries of a service through a generated Python helper on the node (standard library, the Keystone REST API with the admin password and the CA), because Keystone is reached over the network from the node that runs the service, not from the orchestrator. The helper holds the whole description, so its check, ensure and remove always agree. It is written as a root-only file like the other helpers, and the description lives there, not in a command line, so no password appears in a command or its log. `services` may be empty for a service that only has a user (Ceilometer, Skyline); a service with two users (Telemetry) calls it once per user.
 
+`cephPool(...)` and `cephUser(...)` (and `absentCephPool`, `absentCephUser`) describe a Ceph pool and a cephx user for a node that has `cephadm`, through `cephadm shell`. The pool is initialised for RBD (or another application) when it is made, and left alone when it exists. The user has a fixed whole cephx key and its capabilities; the check compares the key in Ceph and each capability line, so a rotated key or a changed capability is put right by running it again. An old `aes` key makes the step allow `aes` on the monitors first (CVE-2025-30156), as `CephKeys.allowCiphersFor` always did. The removal steps run when the pool or user is listed or when Ceph cannot be queried, so a cluster that is down fails with its own message.
+
 Files with secret content (`Secret` values) never show their content: the diff line says
 `content (secret: not shown)`.
 

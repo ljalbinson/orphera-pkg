@@ -31,7 +31,7 @@ object cinder_teardown extends OrpheraApply:
   private val cephNode = "tst0"
   private val dbName = "cinder"
   private val dbUser = "cinder"
-  private val cephPool = "volumes"
+  private val volumesPool = "volumes"
   private val helper = "/usr/local/sbin/orphera-openstack-api"
   private val units = List("cinder-api", "cinder-scheduler", "cinder-volume")
 
@@ -50,22 +50,6 @@ object cinder_teardown extends OrpheraApply:
   )
 
   // ---- tst0 ----
-  // True when the pool or the user exists. When Ceph cannot be queried this is
-  // also true, so that the removal runs and fails with Ceph's own message.
-  private val cephHasCinder =
-    s"""OUT=$$(cephadm shell -- ceph osd pool ls 2>/dev/null) || exit 0
-       |echo "$$OUT" | grep -qx $cephPool && exit 0
-       |cephadm shell -- ceph auth get client.cinder >/dev/null 2>&1 && exit 0
-       |exit 1""".stripMargin
-  private val cephScript =
-    s"""R=0
-       |cephadm shell -- ceph config set mon mon_allow_pool_delete true || R=1
-       |cephadm shell -- ceph osd pool delete $cephPool $cephPool --yes-i-really-really-mean-it || R=1
-       |cephadm shell -- ceph config set mon mon_allow_pool_delete false || R=1
-       |cephadm shell -- ceph auth del client.cinder || R=1
-       |[ "$$R" = 0 ] && echo "pool $cephPool and client.cinder removed"
-       |exit $$R""".stripMargin
-
   def describe(target: Node): List[ApplyResource] =
     if target.name == dbNode then
       List(
@@ -76,14 +60,9 @@ object cinder_teardown extends OrpheraApply:
         )
       )
     else if target.name == cephNode then
-      List(
-        command(
-          s"delete the $cephPool pool and the client.cinder cephx user",
-          cephScript,
-          onlyIf = cephHasCinder,
-          timeout = 180
-        )
-      )
+      val user = absentCephUser("remove the client.cinder cephx user", "client.cinder")
+      val pool = absentCephPool(s"delete the $volumesPool pool", volumesPool).after(user)
+      List(user, pool)
     else
       val unregistered = absentKeystoneEntries("remove Cinder from Keystone", "cinder")
       val stopped = absentContainerUnits(units.map(u => s"orphera-$u" -> u)).map(_.after(unregistered))

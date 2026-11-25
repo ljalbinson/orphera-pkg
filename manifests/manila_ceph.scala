@@ -112,27 +112,6 @@ object manila_ceph extends OrpheraApply:
        |echo "NFS-Ganesha does not answer on $nfsIp:2049 after 5 minutes - check 'ceph nfs cluster info $nfsCluster'" >&2
        |exit 1""".stripMargin
 
-  // ---- client.manila -----------------------------------------------------
-
-  private val clientScript =
-    s"""set -e
-       |# Same cephx cipher rule as cinder_ceph.scala: `aes` is allowed only for an `aes` key.
-       |${CephKeys.allowCiphersFor(cephKey, "client.manila")}
-       |cat > /tmp/manila.keyring <<'KEYRING'
-       |[client.manila]
-       |    key = $cephKey
-       |    caps mon = "allow r"
-       |    caps mgr = "allow rw"
-       |KEYRING
-       |cephadm shell --mount /tmp/manila.keyring -- ceph auth import -i /mnt/manila.keyring
-       |rm -f /tmp/manila.keyring
-       |cephadm shell -- ceph auth get client.manila >/dev/null
-       |echo "client.manila ready"""".stripMargin
-
-  // True when the key in Ceph is the one wanted and both capabilities are there.
-  private val clientInPlace =
-    s"""[ "$$(cephadm shell -- ceph auth get-key client.manila 2>/dev/null)" = "$cephKey" ] && CAPS=$$(cephadm shell -- ceph auth get client.manila 2>/dev/null) && echo "$$CAPS" | grep -q 'caps mon = "allow r"' && echo "$$CAPS" | grep -q 'caps mgr = "allow rw"'"""
-
   def describe(target: Node): List[ApplyResource] =
     val fs = command(
       s"create the CephFS filesystem $cephFs",
@@ -158,10 +137,10 @@ object manila_ceph extends OrpheraApply:
       unless = nfsUp,
       timeout = 360
     ).after(nfs)
-    val client = command(
+    val client = cephUser(
       "the client.manila cephx user and its key",
-      clientScript,
-      unless = clientInPlace,
-      timeout = 180
+      "client.manila",
+      Secret(cephKey),
+      List("mon" -> "allow r", "mgr" -> "allow rw")
     )
     List(fs, mds, nfs, nfsWait, client)

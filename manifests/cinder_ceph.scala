@@ -11,11 +11,11 @@ import orphera.orchestrator.*
 //   orphera apply manifests/cinder_ceph.scala --check
 //   orphera apply manifests/cinder_ceph.scala
 //
-// The check is on the cluster itself: the pool exists, and client.cinder has
-// the key from the secret store and the capabilities for that pool. Where all
-// three hold, nothing is changed. Otherwise the pool is created (an existing
-// pool is left as it is), initialised for RBD, and the user is imported with the
-// key, so a rotated key is applied by running this again.
+// The check is on the cluster itself: the pool exists (cephPool), and client.cinder
+// has the key from the secret store and the capabilities for that pool
+// (cephUser). Where both hold, nothing is changed. Otherwise the pool is created
+// (an existing pool is left as it is) and initialised for RBD, and the user is
+// imported with the key, so a rotated key is applied by running this again.
 //
 // The key is a FIXED test key from the secret store (`cinder/ceph-key`): a
 // description cannot capture another node's output, and a key we already know
@@ -31,33 +31,14 @@ object cinder_ceph extends OrpheraApply:
 
   // Keep in step with cinder_single_node.scala.
   private val cephKey = Secrets.secret("cinder/ceph-key")
-  private val cephPool = "volumes"
-
-  private val createPoolAndUser =
-    s"""set -e
-       |${CephKeys.allowCiphersFor(cephKey.reveal, "client.cinder")}
-       |cephadm shell -- ceph osd pool create $cephPool
-       |cephadm shell -- rbd pool init $cephPool
-       |cat > /tmp/cinder.keyring <<'KEYRING'
-       |[client.cinder]
-       |    key = ${cephKey.reveal}
-       |    caps mon = "profile rbd"
-       |    caps osd = "profile rbd pool=$cephPool"
-       |KEYRING
-       |cephadm shell --mount /tmp/cinder.keyring -- ceph auth import -i /mnt/cinder.keyring
-       |rm -f /tmp/cinder.keyring
-       |cephadm shell -- ceph auth get client.cinder >/dev/null
-       |echo "pool $cephPool and client.cinder ready"""".stripMargin
-
-  private val inPlace =
-    s"""cephadm shell -- ceph osd pool ls 2>/dev/null | grep -qx $cephPool && [ "$$(cephadm shell -- ceph auth get-key client.cinder 2>/dev/null)" = "${cephKey.reveal}" ] && cephadm shell -- ceph auth get client.cinder 2>/dev/null | grep -q 'pool=$cephPool'"""
+  private val volumesPool = "volumes"
 
   def describe(node: Node): List[ApplyResource] =
-    List(
-      command(
-        s"the $cephPool pool and the client.cinder cephx user",
-        createPoolAndUser,
-        unless = inPlace,
-        timeout = 180
-      )
-    )
+    val pool = cephPool(s"the $volumesPool pool", volumesPool)
+    val user = cephUser(
+      "the client.cinder cephx user and its key",
+      "client.cinder",
+      cephKey,
+      List("mon" -> "profile rbd", "osd" -> s"profile rbd pool=$volumesPool")
+    ).after(pool)
+    List(pool, user)
