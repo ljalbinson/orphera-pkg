@@ -5,7 +5,7 @@ import orphera.orchestrator.*
 // Undoes magnum_database.scala, magnum_rabbitmq.scala and magnum_single_node.scala, as a declarative description
 // (OrpheraApply, docs/APPLY-DESIGN.md): on tst23, through the helper if it is still there, deletes every Magnum
 // cluster (and waits for them to go), the cluster template, the flavor orphera.k8s, the key pair, the Kubernetes
-// node image, and removes Magnum from Keystone (service type container-infra, its endpoints, user magnum, domain
+// node image, then removes Magnum from Keystone (service type container-infra, its endpoints, user magnum, domain
 // magnum); then the two containers, their units, the config, state (with the downloaded image file and the
 // installed driver) and the helper. On tst10 it removes the `magnum` vhost and user from RabbitMQ (the broker
 // itself and the other services' use of it are untouched); on tst3 it drops the magnum database and user.
@@ -35,8 +35,8 @@ object magnum_teardown extends OrpheraApply:
   override def nodes: List[String] = List(dbNode, rabbitNode, node)
 
   // ---- tst23 ----
-  // The helper deletes the clusters, template, flavor, key pair, image and the Keystone entries; it is there
-  // until the last step removes it.
+  // The helper deletes the clusters, template, flavor, key pair and image; it is there until the last step
+  // removes it. The Keystone entries are removed by their own helper after it.
   private val hasHelper = s"[ -x $helper ]"
   private val openstackScript =
     s"""$helper teardown || echo "openstack cleanup failed (continuing)""""
@@ -71,13 +71,14 @@ object magnum_teardown extends OrpheraApply:
       )
     else
       val openstack = command(
-        "delete the clusters, template, flavor, key pair, image and the Keystone entries",
+        "delete the clusters, template, flavor, key pair and image",
         openstackScript,
         onlyIf = hasHelper,
         timeout = 3600
       )
-      val stopped = absentContainerUnits(units.map(u => s"orphera-$u" -> u)).map(_.after(openstack))
+      val unregistered = absentKeystoneEntries("remove Magnum from Keystone", "magnum").after(openstack)
+      val stopped = absentContainerUnits(units.map(u => s"orphera-$u" -> u)).map(_.after(unregistered))
       // Typed removal, no script: each directory with its contents, then the helper.
-      val cleaned = (dirs.map(absentDirectory(_, recursive = true)) :+
-        absentFile(helper)).map(_.after(stopped*))
-      List(openstack) ++ stopped ++ cleaned
+      val cleaned = (dirs.map(absentDirectory(_, recursive = true)) ++
+        List(absentFile(helper), absentFile(keystoneHelperPath("magnum")))).map(_.after(stopped*))
+      List(openstack, unregistered) ++ stopped ++ cleaned

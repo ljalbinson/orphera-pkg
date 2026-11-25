@@ -5,7 +5,7 @@ import orphera.orchestrator.*
 // Undoes octavia_database.scala, octavia_rabbitmq.scala and octavia_single_node.scala, as a declarative
 // description (OrpheraApply, docs/APPLY-DESIGN.md): on tst19, through the helper if it is still there, deletes
 // the amphora VMs (Nova servers named amphora-*), the health manager port, the network lb-mgmt-net, the two
-// security groups, the flavor orphera.amphora and the amphora image, and removes Octavia from Keystone (service
+// security groups, the flavor orphera.amphora and the amphora image, then removes Octavia from Keystone (service
 // type load-balancer, its endpoints, user octavia). Then it stops and removes the four containers, their units
 // and the o-hm0 unit, deletes the o-hm0 port from br-int, and removes the config (with the certificates), the
 // state (with the downloaded image file) and the helper. On tst10 it removes the `octavia` vhost and user from
@@ -98,17 +98,18 @@ object octavia_teardown extends OrpheraApply:
       )
     else
       val openstack = command(
-        "delete the amphorae, network, security groups, flavor, image and the Keystone entries",
+        "delete the amphorae, network, security groups, flavor and image",
         openstackScript,
         onlyIf = hasHelper,
         timeout = 900
       )
+      val unregistered = absentKeystoneEntries("remove Octavia from Keystone", "octavia").after(openstack)
       val stopped = command(
         "stop and remove the octavia containers and units",
         stopScript,
         onlyIf = anyUnit,
         timeout = 240
-      ).after(openstack)
+      ).after(unregistered)
       val unplugged = command(
         "remove the health manager port o-hm0 from br-int",
         unplugScript,
@@ -117,7 +118,6 @@ object octavia_teardown extends OrpheraApply:
       ).after(stopped)
       // The helper goes with the files: the first step above needed it, and runs before them.
       val cleaned =
-        (directories.map(absentDirectory(_, recursive = true)) :+ absentFile(
-          helper
-        )).map(_.after(unplugged))
-      List(openstack, stopped, unplugged) ++ cleaned
+        (directories.map(absentDirectory(_, recursive = true)) ++
+          List(absentFile(helper), absentFile(keystoneHelperPath("octavia")))).map(_.after(unplugged))
+      List(openstack, unregistered, stopped, unplugged) ++ cleaned

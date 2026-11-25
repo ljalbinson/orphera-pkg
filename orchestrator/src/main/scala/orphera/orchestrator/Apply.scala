@@ -836,6 +836,11 @@ object Resources:
     */
   final case class KeystoneService(name: String, serviceType: String, url: String)
 
+  /** A Keystone domain a service owns (Heat's stack domain, Magnum's trustee domain): its `name` and
+    * `description`, and its admin user `adminUser`, who has `adminPassword` and the admin role on the domain.
+    */
+  final case class KeystoneDomain(name: String, description: String, adminUser: String, adminPassword: Secret)
+
   private val keystoneHelperPython: String =
     """#!/usr/bin/python3
 # Makes, checks and removes the Keystone entries one service needs (written by Orphera).
@@ -916,6 +921,20 @@ def ensure(spec):
         die('granting admin to %s failed: HTTP %s %s' % (spec['name'], s, p))
     for role in spec.get('roles', []):
         ensure_one(token, 'roles', '/roles?name=' + role, 'roles', {'role': {'name': role}}, 'role')
+    dom = spec.get('domain')
+    if dom:
+        domain = ensure_one(token, 'domains', '/domains?name=' + dom['name'], 'domains', {'domain': {'name': dom['name'], 'description': dom['description']}}, 'domain')
+        dadmin = find(token, '/users?name=%s&domain_id=%s' % (dom['admin'], domain['id']), 'users')
+        if dadmin is None:
+            s, p, _ = call('POST', KS + '/users', {'user': {'name': dom['admin'], 'domain_id': domain['id'], 'password': dom['password']}}, token)
+            if s != 201:
+                die('creating user %s failed: HTTP %s %s' % (dom['admin'], s, p))
+            dadmin = p['user']
+        else:
+            call('PATCH', KS + '/users/' + dadmin['id'], {'user': {'password': dom['password']}}, token)
+        s, p, _ = call('PUT', KS + '/domains/%s/users/%s/roles/%s' % (domain['id'], dadmin['id'], admin_role['id']), None, token)
+        if s not in (200, 204):
+            die('granting admin on domain %s to %s failed: HTTP %s %s' % (dom['name'], dom['admin'], s, p))
     for svc in spec['services']:
         service = ensure_one(token, 'services', '/services?type=' + svc['type'], 'services', {'service': {'name': svc['name'], 'type': svc['type']}}, 'service')
         for iface in IFACES:
@@ -926,7 +945,7 @@ def ensure(spec):
                     die('creating %s endpoint of %s failed: HTTP %s %s' % (iface, svc['type'], s, p))
             elif ep['url'] != svc['url']:
                 call('PATCH', KS + '/endpoints/' + ep['id'], {'endpoint': {'url': svc['url']}}, token)
-    print('registered %s in keystone (project %s, user %s, services %s)' % (spec['name'], spec['project'], spec['name'], ' '.join(s['type'] for s in spec['services']) or 'none'))
+    print('registered %s in keystone (project %s, user %s, domain %s, services %s)' % (spec['name'], spec['project'], spec['name'], dom['name'] if dom else 'none', ' '.join(s['type'] for s in spec['services']) or 'none'))
 
 
 def check(spec):
@@ -936,6 +955,22 @@ def check(spec):
     for role in spec.get('roles', []):
         if find(token, '/roles?name=' + role, 'roles') is None:
             die('role %s missing' % role)
+    dom = spec.get('domain')
+    if dom:
+        domain = find(token, '/domains?name=' + dom['name'], 'domains')
+        if domain is None:
+            die('no domain ' + dom['name'])
+        dadmin = find(token, '/users?name=%s&domain_id=%s' % (dom['admin'], domain['id']), 'users')
+        if dadmin is None:
+            die('no user ' + dom['admin'])
+        body = {'auth': {'identity': {'methods': ['password'], 'password': {'user': {'name': dom['admin'], 'domain': {'name': dom['name']}, 'password': dom['password']}}}}}
+        s, p, _ = call('POST', KS + '/auth/tokens', body)
+        if s != 201:
+            die('%s cannot get a token: HTTP %s %s' % (dom['admin'], s, p))
+        admin_role = find(token, '/roles?name=admin', 'roles')
+        s, p, _ = call('HEAD', KS + '/domains/%s/users/%s/roles/%s' % (domain['id'], dadmin['id'], admin_role['id']), None, token)
+        if s != 204:
+            die('%s does not hold admin on domain %s: HTTP %s' % (dom['admin'], dom['name'], s))
     for svc in spec['services']:
         service = find(token, '/services?type=' + svc['type'], 'services')
         if service is None:
@@ -948,9 +983,11 @@ def check(spec):
 
 
 def exists(spec):
-    # Exit 0 when anything ensure() makes is still there: the user, or a service of one of the types.
+    # Exit 0 when anything ensure() makes is still there: the user, the domain, or a service of one of the types.
     token = get_token('admin', ADMIN_PW, 'admin')
     if find(token, '/users?name=' + spec['name'], 'users') is not None:
+        return
+    if spec.get('domain') and find(token, '/domains?name=' + spec['domain']['name'], 'domains') is not None:
         return
     for svc in spec['services']:
         if find(token, '/services?type=' + svc['type'], 'services') is not None:
@@ -967,7 +1004,19 @@ def remove(spec):
     user = find(token, '/users?name=' + spec['name'], 'users')
     if user is not None:
         call('DELETE', KS + '/users/' + user['id'], None, token)
-    print('removed %s from keystone (services %s, their endpoints, user %s)' % (spec['name'], ' '.join(s['type'] for s in spec['services']) or 'none', spec['name']))
+    dom = spec.get('domain')
+    domain = find(token, '/domains?name=' + dom['name'], 'domains') if dom else None
+    if domain is not None:
+        # The service makes users and projects in its domain: remove them all, disable the domain, then delete it.
+        s, p, _ = call('GET', KS + '/users?domain_id=' + domain['id'], None, token)
+        for u in p.get('users', []):
+            call('DELETE', KS + '/users/' + u['id'], None, token)
+        s, p, _ = call('GET', KS + '/projects?domain_id=' + domain['id'], None, token)
+        for pr in p.get('projects', []):
+            call('DELETE', KS + '/projects/' + pr['id'], None, token)
+        call('PATCH', KS + '/domains/' + domain['id'], {'domain': {'enabled': False}}, token)
+        call('DELETE', KS + '/domains/' + domain['id'], None, token)
+    print('removed %s from keystone (services %s, their endpoints, user %s, domain %s)' % (spec['name'], ' '.join(s['type'] for s in spec['services']) or 'none', spec['name'], dom['name'] if dom else 'none'))
 
 
 if __name__ == '__main__':
@@ -996,11 +1045,12 @@ if __name__ == '__main__':
 
   /** The Keystone entries a service needs, as a description: a user `name` with `password` and the admin role in
     * `project`, the extra `roles` made if missing, and each service of `services` (found by its type) with its
-    * public, internal and admin endpoints at the given URL (`services` may be empty: a user only). The result is the helper (a root-only script that
+    * public, internal and admin endpoints at the given URL (`services` may be empty: a user only; `domain` adds a domain with its admin, who holds the admin role on it). The result is the helper (a root-only script that
     * holds the admin password, `keystone` being the base URL such as `https://tst6.example.com:5000`, and `ca`
     * the CA file that verifies it) and the command that runs it. The command is `unchanged` while the user can
-    * get a token in the project, the roles exist and every service has its three endpoints at the URL, so a
-    * changed password, role or URL is put right by running it again.
+    * get a token in the project, the roles exist, the domain admin can get a token and holds admin on the domain, and
+    * every service has its three endpoints at the URL, so a changed password, role or URL is put right by running
+    * it again.
     */
   def keystoneEntries(
       label: String,
@@ -1012,9 +1062,14 @@ if __name__ == '__main__':
       ca: String,
       roles: List[String] = Nil,
       project: String = "service",
+      domain: Option[KeystoneDomain] = None,
       timeout: Int = 120
   ): (ApplyResource, ApplyResource) =
     keystoneName("name", name)
+    domain.foreach { d =>
+      keystoneName("the domain name", d.name)
+      keystoneName("the domain admin", d.adminUser)
+    }
     keystoneName("project", project)
     roles.foreach(keystoneName("a role", _))
     services.foreach { sv =>
@@ -1031,13 +1086,24 @@ if __name__ == '__main__':
         field("url", pyString("a URL", sv.url))
       ).mkString(", ") + "}"
     }
+    val domainSpec = domain.fold("") { d =>
+      ", " + field(
+        "domain",
+        "{" + List(
+          field("name", pyString("the domain name", d.name)),
+          field("description", pyString("the domain description", d.description)),
+          field("admin", pyString("the domain admin", d.adminUser)),
+          field("password", pyString("the domain admin password", d.adminPassword.reveal))
+        ).mkString(", ") + "}"
+      )
+    }
     val spec = "{" + List(
       field("name", pyString("name", name)),
       field("password", pyString("password", password.reveal)),
       field("project", pyString("project", project)),
       field("roles", roles.map(pyString("a role", _)).mkString("[", ", ", "]")),
       field("services", serviceSpecs.mkString("[", ", ", "]"))
-    ).mkString(", ") + "}"
+    ).mkString(", ") + domainSpec + "}"
     val script = keystoneHelperPython
       .replace("@@KS@@", pyString("keystone", keystone.stripSuffix("/") + "/v3"))
       .replace("@@ADMINPW@@", pyString("the admin password", adminPassword.reveal))
@@ -1053,8 +1119,8 @@ if __name__ == '__main__':
     ).after(helper)
     (helper, ensure)
 
-  /** What `keystoneEntries` made, removed again: the services of the registration with their endpoints, and the
-    * user. It does nothing without the helper on the node or while nothing is there, and a failure is reported
+  /** What `keystoneEntries` made, removed again: the services of the registration with their endpoints, the
+    * user, and the domain with every user and project in it. It does nothing without the helper on the node or while nothing is there, and a failure is reported
     * but does not stop the run (the node is being torn down). The helper is left for the caller to remove.
     */
   def absentKeystoneEntries(label: String, name: String, timeout: Int = 120): ApplyResource =

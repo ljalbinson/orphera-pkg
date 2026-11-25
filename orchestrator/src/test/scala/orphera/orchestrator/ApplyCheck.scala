@@ -2714,7 +2714,7 @@ object ApplyCheck:
     """import json, sys, uuid
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import urlparse, parse_qs
-DB = {'projects': [{'id':'p-admin','name':'admin'}], 'users':[{'id':'u-admin','name':'admin','password':'adminpw'}], 'roles':[{'id':'r-admin','name':'admin'}], 'services':[], 'endpoints':[], 'grants':[]}
+DB = {'projects': [{'id':'p-admin','name':'admin'}], 'users':[{'id':'u-admin','name':'admin','password':'adminpw'}], 'roles':[{'id':'r-admin','name':'admin'}], 'services':[], 'endpoints':[], 'grants':[], 'domains':[]}
 class H(BaseHTTPRequestHandler):
     def log_message(self,*a): pass
     def send(self,code,obj=None,headers=None):
@@ -2732,9 +2732,12 @@ class H(BaseHTTPRequestHandler):
     def do_POST(self):
         u=urlparse(self.path); b=self.body()
         if u.path.endswith('/auth/tokens'):
-            us=b['auth']['identity']['password']['user']; proj=b['auth']['scope']['project']['name']
-            usr=next((x for x in DB['users'] if x['name']==us['name'] and x['password']==us['password']),None)
+            us=b['auth']['identity']['password']['user']; dn=us['domain']['name']
+            did='default' if dn=='Default' else next((d['id'] for d in DB['domains'] if d['name']==dn),None)
+            usr=next((x for x in DB['users'] if x['name']==us['name'] and x['password']==us['password'] and x.get('domain_id','default')==did),None)
             if not usr: return self.send(401,{})
+            if 'scope' not in b['auth']: return self.send(201,{'token':{}},{'X-Subject-Token':'tok'})
+            proj=b['auth']['scope']['project']['name']
             if proj not in [p['name'] for p in DB['projects']]: return self.send(401,{})
             if us['name']!='admin' and not any(g[0]==usr['id'] and g[1]==next(p['id'] for p in DB['projects'] if p['name']==proj) for g in DB['grants']): return self.send(401,{})
             return self.send(201,{'token':{}},{'X-Subject-Token':'tok'})
@@ -2744,11 +2747,15 @@ class H(BaseHTTPRequestHandler):
         for x in DB[coll]:
             if x['id']==i: x.update(b[key])
         self.send(200,{})
+    def do_HEAD(self):
+        p=urlparse(self.path).path.strip('/').split('/')
+        self.send(204 if (p[-3],p[-5],p[-1]) in [tuple(g) for g in DB['grants']] else 404)
     def do_PUT(self):
         p=urlparse(self.path).path.strip('/').split('/')
         DB['grants'].append((p[-3],p[-5],p[-1])); self.send(204)
     def do_DELETE(self):
         parts=urlparse(self.path).path.strip('/').split('/'); coll,i=parts[-2],parts[-1]
+        if coll=='domains' and any(x['id']==i and x.get('enabled',True) for x in DB[coll]): return self.send(403,{})
         DB[coll]=[x for x in DB[coll] if x['id']!=i]
         if coll=='services': DB['endpoints']=[e for e in DB['endpoints'] if e['service_id']!=i]
         self.send(204)
@@ -2831,6 +2838,55 @@ HTTPServer(('127.0.0.1',int(sys.argv[1])),H).serve_forever()
       check("keystone: ensure makes only the user, and the check then passes", userRun("ensure")._1 == 0 && userRun("check")._1 == 0 && userRun("exists")._1 == 0, userRun("check").toString)
       val userRemoved = userRun("remove")
       check("keystone: remove takes the user away", userRemoved._1 == 0 && userRun("exists")._1 != 0, userRemoved.toString)
+      // A domain with its admin (Heat's stack domain, Magnum's trustee domain), and a service on top.
+      def dumpDb: String =
+        scala.util.Using.resource(java.net.URI.create(s"$url/dump").toURL.openStream())(in => new String(in.readAllBytes(), "UTF-8"))
+      def domainEntries(password: String) =
+        keystoneEntries(
+          "register heat",
+          "heat",
+          Secret("heatpw"),
+          List(
+            KeystoneService("heat", "orchestration", "http://tst20:8004/v1/%(tenant_id)s"),
+            KeystoneService("heat-cfn", "cloudformation", "http://tst20:8000/v1")
+          ),
+          url,
+          Secret("adminpw"),
+          "/no/ca.crt",
+          roles = List("heat_stack_owner", "heat_stack_user"),
+          domain = Some(KeystoneDomain("heat", "Owns stack users", "heat_domain_admin", Secret(password)))
+        )
+      val (domHelper, _) = domainEntries("dom\"pw")
+      val domText = fileText(domHelper)
+      def domRun(arg: String): (Int, String) = helperRun(domHelper, domText, arg)
+      check("keystone: a domain registration fails the check before it exists", domRun("check")._1 != 0 && domRun("exists")._1 != 0)
+      val domMade = domRun("ensure")
+      check("keystone: ensure makes the domain, its admin and the services", domMade._1 == 0 && domMade._2.contains("domain heat") && domMade._2.contains("orchestration cloudformation"), domMade.toString)
+      check("keystone: the domain registration then passes the check", domRun("check")._1 == 0, domRun("check").toString)
+      check("keystone: and ensure again changes nothing", domRun("ensure")._1 == 0 && domRun("check")._1 == 0 && dumpDb.split("\"name\": \"heat_domain_admin\"").length == 2)
+      val (domPwHelper, _) = domainEntries("another")
+      val domPwText = fileText(domPwHelper)
+      check("keystone: another domain admin password fails the check", helperRun(domPwHelper, domPwText, "check")._1 != 0)
+      check("keystone: ensure sets it", helperRun(domPwHelper, domPwText, "ensure")._1 == 0 && helperRun(domPwHelper, domPwText, "check")._1 == 0)
+      // The service makes a user and a project of its own in the domain, as Heat does for stacks.
+      val domainId = "\"name\": \"heat\", \"description\": \"Owns stack users\", \"id\": \"([^\"]+)\"".r.findFirstMatchIn(dumpDb).map(_.group(1)).getOrElse("none")
+      check("keystone: the domain is in the database", domainId != "none", dumpDb)
+      val seeded = runShell(
+        s"""python3 -I -c "
+import json, urllib.request
+def post(path, body):
+    r = urllib.request.Request('$url/v3/' + path, data=json.dumps(body).encode(), method='POST')
+    urllib.request.urlopen(r)
+post('users', {'user': {'name': 'stack-user', 'domain_id': '$domainId', 'password': 'x'}})
+post('projects', {'project': {'name': 'stack-project', 'domain_id': '$domainId'}})
+" """
+      )
+      check("keystone: a stack user and project are made in the domain", seeded._1 == 0 && dumpDb.contains("stack-user") && dumpDb.contains("stack-project"), seeded.toString)
+      val domRemoved = helperRun(domPwHelper, domPwText, "remove")
+      check("keystone: remove succeeds and says what went", domRemoved._1 == 0 && domRemoved._2.contains("domain heat"), domRemoved.toString)
+      check("keystone: the domain, its users and projects, and the services are all gone", domRun("exists")._1 != 0 && !dumpDb.contains("stack-user") && !dumpDb.contains("stack-project") && !dumpDb.contains("heat_domain_admin"), dumpDb)
+      check("keystone: removing a domain registration again succeeds", domRun("remove")._1 == 0)
+      check("keystone: a domain name with a space is refused", scala.util.Try(keystoneEntries("x", "a", Secret("x"), Nil, url, Secret("x"), "/ca", domain = Some(KeystoneDomain("a b", "d", "adm", Secret("x"))))).isFailure)
       check("keystone: an endpoint that is not a URL is refused", scala.util.Try(keystoneEntries("x", "a", Secret("x"), List(KeystoneService("a", "a", "tst13:80")), url, Secret("x"), "/ca")).isFailure)
       check("keystone: a password with a non-ASCII character is refused", scala.util.Try(keystoneEntries("x", "a", Secret("pä"), List(KeystoneService("a", "a", "http://h")), url, Secret("x"), "/ca")).isFailure)
     finally proc.destroy()
