@@ -140,6 +140,8 @@ time is up. Nothing is changed on the node. The generated shell is run against a
 
 `aptRepository(label, keyUrl, keyring, sourcesFile, repository, offers, update)` puts a repository's key in a keyring of its own and a one-line sources file beside it (`signed-by`, not `apt-key`). The guard is the keyring and the exact line, so a changed repository (a new Kubernetes minor, say) is rewritten by running it again; the key itself is not fetched again while the keyring is there.
 
+`download(label, url, path, magic, sha256, skipIf)` and `archiveFiles(label, url, files, mode)` fetch what a step needs from the network. The download is made beside its destination and checked before it is moved, so an interrupted or wrong download never looks like the real file; the guard is the checked file itself. `archiveFiles` does not check a version: it is `unchanged` while its targets exist, so a new release means removing the old files or naming them differently.
+
 Files with secret content (`Secret` values) never show their content: the diff line says
 `content (secret: not shown)`.
 
