@@ -467,17 +467,8 @@ object octavia_single_node extends OrpheraApply:
     "client_ca.cert.pem",
     "client.cert-and-key.pem"
   )
-  private def certsCopyCurrent(dir: String): String =
-    s"""for f in ${certFiles.mkString(
-        " "
-      )}; do cmp -s $certDir/$$f $dir/$$f || exit 1; done"""
-  private def certsCopyScript(dir: String): String =
-    s"""set -e
-       |for f in ${certFiles.mkString(" ")}; do
-       |  case $$f in *.key.pem|*cert-and-key.pem) m=0600 ;; *) m=0644 ;; esac
-       |  install -m $$m $certDir/$$f $dir/$$f
-       |done
-       |echo "certificates copied to $dir"""".stripMargin
+  private def certMode(file: String): String =
+    if file.endsWith(".key.pem") || file.endsWith("cert-and-key.pem") then "0600" else "0644"
 
   // octavia-db-manage runs in a one-off container with octavia.conf bind-mounted (entrypoint overridden, so
   // kolla_set_configs does not run).
@@ -1314,11 +1305,11 @@ if __name__ == '__main__':
         caCert,
         mode = "0644"
       ).after(ca, dirRes).notifies(unitService)
-      val certCopies = command(
-        s"copy the certificates to the $name config",
-        certsCopyScript(dir),
-        unless = certsCopyCurrent(dir)
-      ).after(certs, dirRes).notifies(unitService)
+      val certCopies = certFiles.map { f =>
+        fileCopy(s"$dir/$f", s"$certDir/$f", mode = certMode(f))
+          .after(certs, dirRes)
+          .notifies(unitService)
+      }
       val kollaJson = file(
         s"$dir/config.json",
         configJson(name),
@@ -1335,8 +1326,8 @@ if __name__ == '__main__':
       ).notifies(unitService)
       Svc(
         unitService,
-        List(dirRes, conf, kollaCa, certCopies, kollaJson, unitFile),
-        List(conf, kollaCa, certCopies, kollaJson, unitFile)
+        List(dirRes, conf, kollaCa) ::: certCopies ::: List(kollaJson, unitFile),
+        List(conf, kollaCa) ::: certCopies ::: List(kollaJson, unitFile)
       )
     }
 

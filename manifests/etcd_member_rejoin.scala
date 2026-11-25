@@ -77,11 +77,12 @@ object etcd_member_rejoin extends OrpheraClusterPlaybook:
   // against stale data here would fail (or worse, silently confuse
   // raft) rather than rejoin cleanly, so the data dir has to actually
   // be empty, not just have the service stopped.
-  private val stopAndWipeScript =
-    """systemctl stop etcd 2>/dev/null || true
-      |rm -rf /var/lib/etcd
-      |mkdir -p /var/lib/etcd
-      |chown etcd:etcd /var/lib/etcd""".stripMargin
+  private val stopAndWipePlan: ApplyPlan =
+    import Resources.*
+    val stopped = service("etcd", enabled = None, running = Some(false))
+    val wiped = absentDirectory("/var/lib/etcd", recursive = true).after(stopped)
+    val fresh = directory("/var/lib/etcd", owner = "etcd", group = "etcd").after(wiped)
+    ApplyPlan.orFail("etcd-stop-and-wipe", List(stopped, wiped, fresh))
 
   // Guarded the same way as removeMemberScript: safe to re-run this
   // whole playbook even if a previous attempt got partway through.
@@ -146,7 +147,7 @@ object etcd_member_rejoin extends OrpheraClusterPlaybook:
 
       stage("stop-and-wipe", "tst2")
         .task("stop etcd and wipe stale data dir")(
-          Task.RunCommand(List("sh", "-c", stopAndWipeScript))
+          Task.Apply(stopAndWipePlan)
         )
         .build,
 

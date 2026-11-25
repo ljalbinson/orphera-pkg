@@ -41,7 +41,7 @@ object wordpress_teardown extends OrpheraClusterPlaybook:
   // directly, not packaged conffiles nginx's own postrm knows to remove —
   // same "don't trust purge's own behavior for anything this project
   // wrote itself" reasoning as mariadb_galera_teardown.scala's
-  // haproxyKeepalivedCleanupScript.
+  // haproxyKeepalivedCleanupPlan.
   private val wordpressCleanupPlan: ApplyPlan =
     import Resources.{absentDirectory, absentFile, absentSymlink}
     val link = absentSymlink("/etc/nginx/sites-enabled/wordpress")
