@@ -1179,7 +1179,8 @@ if __name__ == '__main__':
     cephEntity(entity)
     command(
       label,
-      s"""cephadm shell -- ceph auth del $entity
+      s"""set -e
+         |cephadm shell -- ceph auth del $entity
          |echo "$entity removed"""".stripMargin,
       onlyIf =
         s"""OUT=$$(cephadm shell -- ceph auth ls 2>/dev/null) || exit 0
