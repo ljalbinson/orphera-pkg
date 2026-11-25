@@ -142,6 +142,8 @@ time is up. Nothing is changed on the node. The generated shell is run against a
 
 `download(label, url, path, magic, sha256, skipIf)` and `archiveFiles(label, url, files, mode)` fetch what a step needs from the network. The download is made beside its destination and checked before it is moved, so an interrupted or wrong download never looks like the real file; the guard is the checked file itself. `archiveFiles` does not check a version: it is `unchanged` while its targets exist, so a new release means removing the old files or naming them differently.
 
+`keystoneEntries(...)` and `absentKeystoneEntries(...)` make the Keystone entries of a service through a generated Python helper on the node (standard library, the Keystone REST API with the admin password and the CA), because Keystone is reached over the network from the node that runs the service, not from the orchestrator. The helper holds the whole description, so its check, ensure and remove always agree. It is written as a root-only file like the other helpers, and the description lives there, not in a command line, so no password appears in a command or its log.
+
 Files with secret content (`Secret` values) never show their content: the diff line says
 `content (secret: not shown)`.
 

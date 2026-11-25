@@ -37,9 +37,8 @@ import orphera.orchestrator.conf.*
 //   - db_sync (and the stamp of what it was run with) is skipped while the stamp
 //     matches and `glance-manage db check` says the schema is current, so a
 //     database dropped since the last run is synced again.
-//   - The Keystone registration is skipped while the helper's `registered`
-//     check (a real token for the glance user, the service and three endpoint
-//     URLs) passes.
+//   - The Keystone registration is skipped while its check (a real token for the
+//     glance user, the service and three endpoint URLs) passes.
 //
 // Ceph: Glance's RBD store keeps each image as an RBD image in pool `images`
 // with a protected snapshot, so Cinder can later create volumes from it by
@@ -197,7 +196,7 @@ object glance_single_node extends OrpheraApply:
 
   // Standard-library Python, as in cinder_single_node.scala. Plain string filled
   // in with replace(). Subcommands:
-  //   register | registered | unregister | catalog | image-list | image-create | image-delete <id>
+  //   catalog | image-list | image-create | image-delete <id>
   private val apiHelperPython =
     """#!/usr/bin/python3
 import json, ssl, sys, time, urllib.request, urllib.error
@@ -205,7 +204,6 @@ import json, ssl, sys, time, urllib.request, urllib.error
 KS = 'https://@@KS@@:5000/v3'
 GLANCE = '@@GLANCE@@'
 ADMIN_PW = '@@ADMINPW@@'
-GLANCE_PW = '@@GLANCEPW@@'
 CTX = ssl.create_default_context(cafile='@@CA@@')
 
 
@@ -248,72 +246,6 @@ def find(token, path, key):
     status, parsed, _ = call('GET', KS + path, token=token)
     items = parsed.get(key, [])
     return items[0] if items else None
-
-
-def register():
-    token = get_token('admin', ADMIN_PW, 'admin')
-    project = find(token, '/projects?name=service', 'projects')
-    if project is None:
-        s, p, _ = call('POST', KS + '/projects', {'project': {'name': 'service', 'domain_id': 'default'}}, token)
-        if s != 201:
-            die('creating project service failed: HTTP %s %s' % (s, p))
-        project = p['project']
-    user = find(token, '/users?name=glance', 'users')
-    if user is None:
-        s, p, _ = call('POST', KS + '/users', {'user': {'name': 'glance', 'domain_id': 'default', 'password': GLANCE_PW}}, token)
-        if s != 201:
-            die('creating user glance failed: HTTP %s %s' % (s, p))
-        user = p['user']
-    else:
-        call('PATCH', KS + '/users/' + user['id'], {'user': {'password': GLANCE_PW}}, token)
-    role = find(token, '/roles?name=admin', 'roles')
-    if role is None:
-        die('role admin not found')
-    s, p, _ = call('PUT', KS + '/projects/%s/users/%s/roles/%s' % (project['id'], user['id'], role['id']), None, token)
-    if s not in (200, 204):
-        die('granting admin to glance failed: HTTP %s %s' % (s, p))
-    service = find(token, '/services?type=image', 'services')
-    if service is None:
-        s, p, _ = call('POST', KS + '/services', {'service': {'name': 'glance', 'type': 'image'}}, token)
-        if s != 201:
-            die('creating service image failed: HTTP %s %s' % (s, p))
-        service = p['service']
-    for iface in ('public', 'internal', 'admin'):
-        ep = find(token, '/endpoints?service_id=%s&interface=%s' % (service['id'], iface), 'endpoints')
-        if ep is None:
-            s, p, _ = call('POST', KS + '/endpoints', {'endpoint': {'interface': iface, 'url': GLANCE, 'service_id': service['id'], 'region_id': 'RegionOne'}}, token)
-            if s != 201:
-                die('creating %s endpoint failed: HTTP %s %s' % (iface, s, p))
-        elif ep['url'] != GLANCE:
-            call('PATCH', KS + '/endpoints/' + ep['id'], {'endpoint': {'url': GLANCE}}, token)
-    print('registered glance in keystone (project service, user glance, service image, 3 endpoints)')
-
-
-def registered():
-    # Exit 0 only when everything register() makes is in place: the glance user
-    # can get a token in project service, and service `image` has the three
-    # endpoints at GLANCE. Makes no change.
-    get_token('glance', GLANCE_PW, 'service')
-    token = get_token('admin', ADMIN_PW, 'admin')
-    service = find(token, '/services?type=image', 'services')
-    if service is None:
-        die('no service of type image')
-    for iface in ('public', 'internal', 'admin'):
-        ep = find(token, '/endpoints?service_id=%s&interface=%s' % (service['id'], iface), 'endpoints')
-        if ep is None or ep['url'] != GLANCE:
-            die('endpoint %s missing or wrong' % iface)
-    print('glance is registered in keystone')
-
-
-def unregister():
-    token = get_token('admin', ADMIN_PW, 'admin')
-    service = find(token, '/services?type=image', 'services')
-    if service is not None:
-        call('DELETE', KS + '/services/' + service['id'], None, token)
-    user = find(token, '/users?name=glance', 'users')
-    if user is not None:
-        call('DELETE', KS + '/users/' + user['id'], None, token)
-    print('removed glance from keystone (service image, its endpoints, user glance)')
 
 
 def catalog():
@@ -376,13 +308,7 @@ def image_delete(iid):
 
 if __name__ == '__main__':
     cmd = sys.argv[1] if len(sys.argv) > 1 else ''
-    if cmd == 'register':
-        register()
-    elif cmd == 'registered':
-        registered()
-    elif cmd == 'unregister':
-        unregister()
-    elif cmd == 'catalog':
+    if cmd == 'catalog':
         catalog()
     elif cmd == 'image-list':
         image_list()
@@ -391,7 +317,7 @@ if __name__ == '__main__':
     elif cmd == 'image-delete' and len(sys.argv) > 2:
         image_delete(sys.argv[2])
     else:
-        die('usage: orphera-glance-api register | registered | unregister | catalog | image-list | image-create | image-delete <id>')
+        die('usage: orphera-glance-api catalog | image-list | image-create | image-delete <id>')
 """
 
   private val helper =
@@ -399,7 +325,6 @@ if __name__ == '__main__':
       .replace("@@KS@@", ksFqdn)
       .replace("@@GLANCE@@", s"http://$fqdn:9292")
       .replace("@@ADMINPW@@", adminPassword.reveal)
-      .replace("@@GLANCEPW@@", glancePassword.reveal)
       .replace("@@CA@@", caCert)
   private val helperPath = "/usr/local/sbin/orphera-glance-api"
 
@@ -508,12 +433,16 @@ if __name__ == '__main__':
       timeout = 90,
       hint = s"see 'journalctl -xeu ${glanceApi.unitName}' and $logDir"
     ).after(running)
-    val registered = command(
+    val (keystoneHelper, ensured) = keystoneEntries(
       "register Glance in Keystone",
-      s"$helperPath register",
-      unless = s"$helperPath registered >/dev/null 2>&1",
-      timeout = 120
-    ).after(answering, helperFile, ca)
+      "glance",
+      glancePassword,
+      List(KeystoneService("glance", "image", s"http://$fqdn:9292")),
+      s"https://$ksFqdn:5000",
+      adminPassword,
+      caCert
+    )
+    val registered = ensured.after(answering, ca)
     val listing = command(
       "list images through Keystone-authenticated access",
       s"echo 'the image list failed: see the Keystone registration, glance-api.conf and the logs' >&2; exit 1",
@@ -540,6 +469,7 @@ if __name__ == '__main__':
       running,
       helperFile,
       answering,
+      keystoneHelper,
       registered,
       listing
     )

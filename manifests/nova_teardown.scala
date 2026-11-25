@@ -32,10 +32,6 @@ object nova_teardown extends OrpheraApply:
   override def nodes: List[String] = List(dbNode, rabbitNode, node)
 
   // ---- tst14 ----
-  private val registeredInKeystone =
-    s"[ -x $helper ] && $helper registered >/dev/null 2>&1"
-  private val unregisterScript =
-    s"""$helper unregister || echo "keystone cleanup failed (continuing)""""
 
   private val dirs = List(
     "/etc/kolla/nova",
@@ -66,14 +62,9 @@ object nova_teardown extends OrpheraApply:
         )
       )
     else
-      val unregistered = command(
-        "remove Nova from Keystone",
-        unregisterScript,
-        onlyIf = registeredInKeystone,
-        timeout = 120
-      )
+      val unregistered = absentKeystoneEntries("remove Nova from Keystone", "nova")
       val stopped = absentContainerUnits(units.map(u => s"orphera-$u" -> u)).map(_.after(unregistered))
       // Typed removal, no script: each directory with its contents, then the helper.
       val cleaned = (dirs.map(absentDirectory(_, recursive = true)) :+
-        absentFile(helper)).map(_.after(stopped*))
+        absentFile(helper) :+ absentFile(keystoneHelperPath("nova"))).map(_.after(stopped*))
       List(unregistered) ++ stopped ++ cleaned

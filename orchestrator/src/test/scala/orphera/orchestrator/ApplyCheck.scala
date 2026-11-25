@@ -2708,6 +2708,126 @@ object ApplyCheck:
     check("archiveFiles: a bad mode is refused", scala.util.Try(archiveFiles("x", "https://e/x", List("one" -> t1), mode = "755")).isFailure)
     check("archiveFiles: no files is refused", scala.util.Try(archiveFiles("x", "https://e/x", Nil)).isFailure)
 
+  // A small Keystone in Python (projects, users, roles, services, endpoints and tokens in memory), for the helper
+  // that keystoneEntries writes.
+  private val fakeKeystone: String =
+    """import json, sys, uuid
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from urllib.parse import urlparse, parse_qs
+DB = {'projects': [{'id':'p-admin','name':'admin'}], 'users':[{'id':'u-admin','name':'admin','password':'adminpw'}], 'roles':[{'id':'r-admin','name':'admin'}], 'services':[], 'endpoints':[], 'grants':[]}
+class H(BaseHTTPRequestHandler):
+    def log_message(self,*a): pass
+    def send(self,code,obj=None,headers=None):
+        b=json.dumps(obj).encode() if obj is not None else b''
+        self.send_response(code)
+        for k,v in (headers or {}).items(): self.send_header(k,v)
+        self.send_header('Content-Length',str(len(b))); self.end_headers(); self.wfile.write(b)
+    def body(self):
+        n=int(self.headers.get('Content-Length') or 0); return json.loads(self.rfile.read(n)) if n else None
+    def do_GET(self):
+        u=urlparse(self.path); q={k:v[0] for k,v in parse_qs(u.query).items()}; coll=u.path.strip('/').split('/')[-1]
+        if coll=='dump': return self.send(200,DB)
+        items=[x for x in DB.get(coll,[]) if all(str(x.get(k))==v for k,v in q.items())]
+        self.send(200,{coll:[{k:v for k,v in x.items() if k!='password'} for x in items]})
+    def do_POST(self):
+        u=urlparse(self.path); b=self.body()
+        if u.path.endswith('/auth/tokens'):
+            us=b['auth']['identity']['password']['user']; proj=b['auth']['scope']['project']['name']
+            usr=next((x for x in DB['users'] if x['name']==us['name'] and x['password']==us['password']),None)
+            if not usr: return self.send(401,{})
+            if proj not in [p['name'] for p in DB['projects']]: return self.send(401,{})
+            if us['name']!='admin' and not any(g[0]==usr['id'] and g[1]==next(p['id'] for p in DB['projects'] if p['name']==proj) for g in DB['grants']): return self.send(401,{})
+            return self.send(201,{'token':{}},{'X-Subject-Token':'tok'})
+        coll=u.path.strip('/').split('/')[-1]; key=coll[:-1]; obj=dict(b[key]); obj['id']=str(uuid.uuid4()); DB[coll].append(obj); self.send(201,{key:{k:v for k,v in obj.items() if k!='password'}})
+    def do_PATCH(self):
+        u=urlparse(self.path); b=self.body(); parts=u.path.strip('/').split('/'); coll,i=parts[-2],parts[-1]; key=coll[:-1]
+        for x in DB[coll]:
+            if x['id']==i: x.update(b[key])
+        self.send(200,{})
+    def do_PUT(self):
+        p=urlparse(self.path).path.strip('/').split('/')
+        DB['grants'].append((p[-3],p[-5],p[-1])); self.send(204)
+    def do_DELETE(self):
+        parts=urlparse(self.path).path.strip('/').split('/'); coll,i=parts[-2],parts[-1]
+        DB[coll]=[x for x in DB[coll] if x['id']!=i]
+        if coll=='services': DB['endpoints']=[e for e in DB['endpoints'] if e['service_id']!=i]
+        self.send(204)
+HTTPServer(('127.0.0.1',int(sys.argv[1])),H).serve_forever()
+"""
+
+  private def keystoneChecks(): Unit =
+    val dir = Files.createTempDirectory("keystone")
+    val server = dir.resolve("fake_ks.py")
+    Files.writeString(server, fakeKeystone)
+    val port =
+      val sock = new java.net.ServerSocket(0)
+      try sock.getLocalPort
+      finally sock.close()
+    val proc = new ProcessBuilder("python3", server.toString, port.toString).redirectErrorStream(true).start()
+    try
+      def up: Boolean = scala.util.Try(new java.net.Socket("127.0.0.1", port).close()).isSuccess
+      var tries = 0
+      while !up && tries < 50 do
+        Thread.sleep(100)
+        tries += 1
+      check("keystone: the fake Keystone is up", up)
+      val url = s"http://127.0.0.1:$port"
+      def fileText(r: ApplyResource): String = r match
+        case f: ApplyResource.File =>
+          f.content match
+            case Some(ApplyResource.Content.Hidden(secret)) => secret.reveal
+            case other                                      => s"not hidden text: $other"
+        case other => s"not a file: $other"
+      def part(r: ApplyResource, pick: ApplyResource.Command => String): String = r match
+        case c: ApplyResource.Command => pick(c)
+        case other                    => s"not a command: $other"
+      def helperRun(r: ApplyResource, text: String, args: String*): (Int, String) =
+        val script = dir.resolve(s"helper-${r.id.hashCode.abs}.py")
+        Files.writeString(script, text)
+        runShell(s"python3 -I ${script} ${args.mkString(" ")}")
+      def entries(password: String, urlPath: String) =
+        keystoneEntries(
+          "register placement",
+          "placement",
+          Secret(password),
+          List(KeystoneService("placement", "placement", s"http://tst13:8780$urlPath")),
+          url,
+          Secret("adminpw"),
+          "/no/ca.crt",
+          roles = List("creator")
+        )
+      val (helper, ensure) = entries("p\"w\\1", "")
+      check("keystone: the helper is a root-only secret file named for the service", helper.id == "file[/usr/local/sbin/orphera-keystone-placement]")
+      check("keystone: the command runs the helper and is guarded by its check", part(ensure, _.run).contains("orphera-keystone-placement' ensure") && part(ensure, _.unless).contains("check"), part(ensure, _.run))
+      val text = fileText(helper)
+      def run(arg: String): (Int, String) = helperRun(helper, text, arg)
+      check("keystone: nothing registered fails the check", run("check")._1 != 0)
+      check("keystone: and exists finds nothing", run("exists")._1 != 0)
+      val made = run("ensure")
+      check("keystone: ensure succeeds", made._1 == 0 && made._2.contains("registered placement"), made.toString)
+      check("keystone: then the check passes (a password with a quote and a backslash works)", run("check")._1 == 0, run("check").toString)
+      check("keystone: and exists finds the entries", run("exists")._1 == 0)
+      check("keystone: ensure again changes nothing and succeeds", run("ensure")._1 == 0 && run("check")._1 == 0)
+      val (urlHelper, _) = entries("p\"w\\1", "/v2")
+      val urlText = fileText(urlHelper)
+      check("keystone: another endpoint URL fails the check", helperRun(urlHelper, urlText, "check")._1 != 0)
+      check("keystone: ensure puts the URL right", helperRun(urlHelper, urlText, "ensure")._1 == 0 && helperRun(urlHelper, urlText, "check")._1 == 0)
+      val (pwHelper, _) = entries("another", "/v2")
+      val pwText = fileText(pwHelper)
+      check("keystone: another password fails the check", helperRun(pwHelper, pwText, "check")._1 != 0)
+      check("keystone: ensure sets the password", helperRun(pwHelper, pwText, "ensure")._1 == 0 && helperRun(pwHelper, pwText, "check")._1 == 0)
+      val gone = absentKeystoneEntries("remove placement", "placement")
+      check("keystone: removal is guarded by the helper being there and an entry existing", part(gone, _.onlyIf).contains("orphera-keystone-placement' exists"), part(gone, _.onlyIf))
+      val removed = helperRun(pwHelper, pwText, "remove")
+      check("keystone: remove succeeds", removed._1 == 0 && removed._2.contains("removed placement"), removed.toString)
+      check("keystone: and nothing is left", helperRun(pwHelper, pwText, "exists")._1 != 0 && helperRun(pwHelper, pwText, "check")._1 != 0)
+      check("keystone: removing again succeeds", helperRun(pwHelper, pwText, "remove")._1 == 0)
+      check("keystone: a name with a space is refused", scala.util.Try(keystoneEntries("x", "a b", Secret("x"), List(KeystoneService("a", "a", "http://h")), url, Secret("x"), "/ca")).isFailure)
+      check("keystone: no services is refused", scala.util.Try(keystoneEntries("x", "a", Secret("x"), Nil, url, Secret("x"), "/ca")).isFailure)
+      check("keystone: an endpoint that is not a URL is refused", scala.util.Try(keystoneEntries("x", "a", Secret("x"), List(KeystoneService("a", "a", "tst13:80")), url, Secret("x"), "/ca")).isFailure)
+      check("keystone: a password with a non-ASCII character is refused", scala.util.Try(keystoneEntries("x", "a", Secret("pä"), List(KeystoneService("a", "a", "http://h")), url, Secret("x"), "/ca")).isFailure)
+    finally proc.destroy()
+
   private def sqlChecks(): Unit =
     val dir = Files.createTempDirectory("sqldb")
     val bin = dir.resolve("bin")
@@ -2982,6 +3102,7 @@ object ApplyCheck:
     aptRepositoryChecks()
     downloadChecks()
     archiveFilesChecks()
+    keystoneChecks()
     kindChecks()
     yamlChecks()
     newKindChecks()

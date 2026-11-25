@@ -33,10 +33,6 @@ object glance_teardown extends OrpheraApply:
   override def nodes: List[String] = List(cephNode, dbNode, node)
 
   // ---- tst13 ----
-  private val registeredInKeystone =
-    s"[ -x $helper ] && $helper registered >/dev/null 2>&1"
-  private val unregisterScript =
-    s"""$helper unregister || echo "keystone cleanup failed (continuing)""""
 
   private val dirs = List(
     "/etc/kolla/glance",
@@ -78,16 +74,11 @@ object glance_teardown extends OrpheraApply:
         )
       )
     else
-      val unregistered = command(
-        "remove Glance from Keystone",
-        unregisterScript,
-        onlyIf = registeredInKeystone,
-        timeout = 120
-      )
+      val unregistered = absentKeystoneEntries("remove Glance from Keystone", "glance")
       val stopped = absentContainerUnits(List(unit -> "glance-api")).map(_.after(unregistered))
       // Typed removal, no script: each directory with its contents, then the helper.
       val cleaned = (dirs.map(absentDirectory(_, recursive = true)) :+
-        absentFile(helper)).map(_.after(stopped*))
+        absentFile(helper) :+ absentFile(keystoneHelperPath("glance"))).map(_.after(stopped*))
       val removedImage = command(
         "remove the glance-api image",
         s"podman rmi -f $image",
