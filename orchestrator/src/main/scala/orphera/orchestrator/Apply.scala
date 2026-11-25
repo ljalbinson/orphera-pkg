@@ -1067,6 +1067,126 @@ if __name__ == '__main__':
       timeout = timeout
     )
 
+  private def cephName(what: String, text: String): Unit =
+    require(
+      text.nonEmpty && text.forall(c => c.isLetterOrDigit || "_-.".contains(c)),
+      s"$what must be letters, digits and _ - . , not '$text'"
+    )
+
+  private def cephEntity(entity: String): Unit =
+    val parts = entity.split("\\.", 2)
+    require(
+      parts.length == 2 && parts(0).nonEmpty && parts(0).forall(_.isLower) && parts(1).nonEmpty &&
+        parts(1).forall(c => c.isLetterOrDigit || "_-.".contains(c)),
+      s"a cephx user is TYPE.NAME such as client.cinder, not '$entity'"
+    )
+
+  /** A pool on a Ceph cluster, as a description, for a node that has `cephadm` (the commands run in
+    * `cephadm shell`). It is `unchanged` while the pool is listed; otherwise it is created (an existing pool is
+    * never touched) and initialised for `application`: `rbd pool init` for `rbd`, and
+    * `ceph osd pool application enable` for any other.
+    */
+  def cephPool(label: String, pool: String, application: String = "rbd", timeout: Int = 180): ApplyResource =
+    cephName("a pool name", pool)
+    cephName("an application", application)
+    val init =
+      if application == "rbd" then s"cephadm shell -- rbd pool init $pool"
+      else s"cephadm shell -- ceph osd pool application enable $pool $application"
+    command(
+      label,
+      s"""set -e
+         |cephadm shell -- ceph osd pool create $pool
+         |$init
+         |echo "pool $pool ready"""".stripMargin,
+      unless = s"cephadm shell -- ceph osd pool ls 2>/dev/null | grep -qx $pool",
+      timeout = timeout
+    )
+
+  /** The pool gone, with every object in it: the monitors are allowed to delete pools for the removal only. It
+    * does nothing while the pool is not listed. When Ceph cannot be queried the guard says yes, so the removal
+    * runs and fails with Ceph's own message: a cluster that is down is not "nothing to remove".
+    */
+  def absentCephPool(label: String, pool: String, timeout: Int = 180): ApplyResource =
+    cephName("a pool name", pool)
+    command(
+      label,
+      s"""R=0
+         |cephadm shell -- ceph config set mon mon_allow_pool_delete true || R=1
+         |cephadm shell -- ceph osd pool delete $pool $pool --yes-i-really-really-mean-it || R=1
+         |cephadm shell -- ceph config set mon mon_allow_pool_delete false || R=1
+         |[ "$$R" = 0 ] || exit 1
+         |echo "pool $pool removed"""".stripMargin,
+      onlyIf =
+        s"""OUT=$$(cephadm shell -- ceph osd pool ls 2>/dev/null) || exit 0
+           |echo "$$OUT" | tr -d '\\r' | grep -qx $pool""".stripMargin,
+      timeout = timeout
+    )
+
+  /** A cephx user (`client.cinder`) with a fixed key and capabilities, as a description, for a node with
+    * `cephadm`. `caps` are pairs such as `"mon" -> "profile rbd"` and `"osd" -> "profile rbd pool=volumes"`.
+    * It is `unchanged` while the key in Ceph is the one given and every capability is there, so a rotated key
+    * is applied by running it again; otherwise the user is imported from a keyring file that exists only for
+    * the import. The key must be a whole cephx key. For an old `aes` key the monitors are first allowed to
+    * accept `aes` (CVE-2025-30156), and for an `aes256k` key their setting is left as it is. Other
+    * capabilities the user has are not looked at: an import sets exactly the ones given.
+    */
+  def cephUser(
+      label: String,
+      entity: String,
+      key: Secret,
+      caps: List[(String, String)],
+      timeout: Int = 180
+  ): ApplyResource =
+    cephEntity(entity)
+    require(caps.nonEmpty, "cephUser needs at least one capability")
+    caps.foreach { (kind, value) =>
+      require(Set("mon", "osd", "mgr", "mds").contains(kind), s"not a capability type: '$kind'")
+      require(
+        value.nonEmpty && value.forall(c => c >= ' ' && c <= '~' && !"\"'\\$`".contains(c)),
+        s"a capability must be printable ASCII without quotes, backslashes, $$ or backticks: '$value'"
+      )
+    }
+    require(CephKeys.isKey(key.reveal), "cephUser: not a cephx key")
+    val capLines = caps.map((kind, value) => s"    caps $kind = \"$value\"").mkString("\n")
+    val file = s"orphera-$entity.keyring"
+    val matches = caps
+      .map((kind, value) => s"""echo "$$CAPS" | grep -qF 'caps $kind = "$value"'""")
+      .mkString(" && ")
+    command(
+      label,
+      s"""set -e
+         |${CephKeys.allowCiphersFor(key.reveal, entity)}
+         |umask 077
+         |KEYRING=/tmp/$file
+         |trap 'rm -f "$$KEYRING"' EXIT
+         |cat > "$$KEYRING" <<'KEYRING_END'
+         |[$entity]
+         |    key = ${key.reveal}
+         |$capLines
+         |KEYRING_END
+         |cephadm shell --mount "$$KEYRING" -- ceph auth import -i /mnt/$file
+         |cephadm shell -- ceph auth get $entity >/dev/null
+         |echo "$entity ready"""".stripMargin,
+      unless =
+        s"""[ "$$(cephadm shell -- ceph auth get-key $entity 2>/dev/null)" = "${key.reveal}" ] && CAPS=$$(cephadm shell -- ceph auth get $entity 2>/dev/null) && $matches""",
+      timeout = timeout
+    )
+
+  /** The cephx user gone, as a description; nothing happens while it is not listed. When Ceph cannot be queried
+    * the guard says yes, so the removal runs and fails with Ceph's own message.
+    */
+  def absentCephUser(label: String, entity: String, timeout: Int = 180): ApplyResource =
+    cephEntity(entity)
+    command(
+      label,
+      s"""cephadm shell -- ceph auth del $entity
+         |echo "$entity removed"""".stripMargin,
+      onlyIf =
+        s"""OUT=$$(cephadm shell -- ceph auth ls 2>/dev/null) || exit 0
+           |echo "$$OUT" | tr -d '\\r' | grep -qx '$entity'""".stripMargin,
+      timeout = timeout
+    )
+
   private def sqlName(what: String, text: String): Unit =
     require(
       text.nonEmpty && text.forall(c => c.isLetterOrDigit || c == '_'),

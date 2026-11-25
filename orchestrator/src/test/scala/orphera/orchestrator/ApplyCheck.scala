@@ -2835,6 +2835,160 @@ HTTPServer(('127.0.0.1',int(sys.argv[1])),H).serve_forever()
       check("keystone: a password with a non-ASCII character is refused", scala.util.Try(keystoneEntries("x", "a", Secret("pä"), List(KeystoneService("a", "a", "http://h")), url, Secret("x"), "/ca")).isFailure)
     finally proc.destroy()
 
+  // A stand-in `cephadm shell` for the Ceph helpers: pools, cephx users and settings in a JSON file, and `dump` to
+  // read it back. FAKE_CEPH_DOWN makes every command fail, as a cluster that cannot be reached does.
+  private val fakeCephadm: String =
+    """#!/usr/bin/python3
+import json, os, sys
+S = os.environ['FAKE_CEPH']
+if os.environ.get('FAKE_CEPH_DOWN'):
+    sys.exit(1)
+a = sys.argv[1:]
+assert a[0] == 'shell'
+a = a[1:]
+mount = None
+if a[0] == '--mount':
+    mount = a[1]
+    a = a[2:]
+assert a[0] == '--'
+a = a[1:]
+st = json.load(open(S)) if os.path.exists(S) else {'pools': [], 'users': {}, 'conf': {}, 'log': []}
+def save():
+    json.dump(st, open(S, 'w'))
+c = ' '.join(a)
+if a[0] == 'dump':
+    print(json.dumps(st))
+elif c == 'ceph osd pool ls':
+    print('\n'.join(st['pools']))
+elif c.startswith('ceph osd pool create '):
+    st['pools'].append(a[4]); st['log'].append(c); save()
+elif c.startswith('rbd pool init '):
+    if a[3] not in st['pools']:
+        sys.exit(2)
+    st['log'].append(c); save()
+elif c.startswith('ceph osd pool application enable '):
+    st['log'].append(c); save()
+elif c.startswith('ceph osd pool delete '):
+    if st['conf'].get('mon_allow_pool_delete') != 'true' or a[4] != a[5] or a[4] not in st['pools']:
+        sys.exit(1)
+    st['pools'].remove(a[4]); st['log'].append(c); save()
+elif c.startswith('ceph config set mon '):
+    st['conf'][a[4]] = a[5]; save()
+elif c.startswith('ceph mon set auth_allowed_ciphers '):
+    st['log'].append(c); save()
+elif a[:3] == ['ceph', 'auth', 'get-key']:
+    if a[3] not in st['users']:
+        sys.exit(2)
+    print(st['users'][a[3]]['key'])
+elif a[:3] == ['ceph', 'auth', 'get']:
+    u = st['users'].get(a[3])
+    if u is None:
+        sys.exit(2)
+    print('[%s]\n\tkey = %s' % (a[3], u['key']))
+    for k, v in u['caps'].items():
+        print('\tcaps %s = "%s"' % (k, v))
+elif a[:3] == ['ceph', 'auth', 'import']:
+    assert mount is not None and a[4] == '/mnt/' + os.path.basename(mount), (mount, a)
+    name = None
+    for line in open(mount).read().splitlines():
+        line = line.strip()
+        if line.startswith('['):
+            name = line.strip('[]'); st['users'][name] = {'key': '', 'caps': {}}
+        elif line.startswith('key = '):
+            st['users'][name]['key'] = line[6:]
+        elif line.startswith('caps '):
+            k, v = line[5:].split(' = ', 1)
+            st['users'][name]['caps'][k] = v.strip('"')
+    st['log'].append('import ' + name); save()
+elif a[:3] == ['ceph', 'auth', 'del']:
+    if a[3] not in st['users']:
+        sys.exit(2)
+    del st['users'][a[3]]; save()
+elif a[:3] == ['ceph', 'auth', 'ls']:
+    print('installed auth entries:\n')
+    for n in st['users']:
+        print(n)
+else:
+    sys.stderr.write('fake cephadm: unknown ' + c + '\n'); sys.exit(3)
+"""
+
+  // A whole cephx key of the given type (1 = aes, 2 = aes256k) over 16 bytes of `seed`.
+  private def cephKeyText(keyType: Int, seed: Int): String =
+    val b = java.nio.ByteBuffer.allocate(28).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+    b.putShort(keyType.toShort).putInt(1700000000).putInt(0).putShort(16.toShort)
+    (0 until 16).foreach(i => b.put((seed + i).toByte))
+    java.util.Base64.getEncoder.encodeToString(b.array())
+
+  private def cephChecks(): Unit =
+    val dir = Files.createTempDirectory("ceph")
+    val bin = dir.resolve("bin")
+    Files.createDirectory(bin)
+    val fake = bin.resolve("cephadm")
+    Files.writeString(fake, fakeCephadm)
+    check("ceph: the fake cephadm is executable", fake.toFile.setExecutable(true))
+    val state = dir.resolve("state")
+    def sh(script: String, down: Boolean = false): (Int, String) =
+      val env = if down then "FAKE_CEPH_DOWN=1\nexport FAKE_CEPH_DOWN\n" else ""
+      runShell(s"PATH=$bin:$$PATH\nFAKE_CEPH=$state\nexport FAKE_CEPH\n$env$script")
+    def dump: String = sh("cephadm shell -- dump")._2
+    def part(r: ApplyResource, pick: ApplyResource.Command => String): String = r match
+      case c: ApplyResource.Command => pick(c)
+      case other                    => s"not a command: $other"
+    // pools
+    val pool = cephPool("the volumes pool", "volumes")
+    check("cephPool: no pool means it is needed", sh(part(pool, _.unless))._1 != 0)
+    val made = sh(part(pool, _.run))
+    check("cephPool: it makes the pool and initialises it for rbd", made._1 == 0 && made._2.contains("pool volumes ready") && dump.contains("rbd pool init volumes"), made.toString + dump)
+    check("cephPool: the pool then means unchanged", sh(part(pool, _.unless))._1 == 0)
+    check("cephPool: a pool with a similar name does not count", sh(part(cephPool("x", "vol"), _.unless))._1 != 0)
+    val fs = cephPool("the data pool", "cephfs_data", application = "cephfs")
+    sh(part(fs, _.run))
+    check("cephPool: another application is enabled instead of rbd init", dump.contains("pool application enable cephfs_data cephfs") && !dump.contains("rbd pool init cephfs_data"), dump)
+    check("cephPool: a bad pool name is refused", scala.util.Try(cephPool("x", "a b")).isFailure)
+    // users
+    val aes = cephKeyText(1, 10)
+    val user = cephUser("client.cinder", "client.cinder", Secret(aes), List("mon" -> "profile rbd", "osd" -> "profile rbd pool=volumes"))
+    check("cephUser: no user means it is needed", sh(part(user, _.unless))._1 != 0)
+    val imported = sh(part(user, _.run))
+    check("cephUser: it imports the user and says so", imported._1 == 0 && imported._2.contains("client.cinder ready"), imported.toString)
+    check("cephUser: an aes key first allows aes", dump.contains("auth_allowed_ciphers aes,aes256k"), dump)
+    check("cephUser: the key and both capabilities are in Ceph", dump.contains(aes) && dump.contains("profile rbd pool=volumes") && dump.contains("\"mon\": \"profile rbd\""), dump)
+    check("cephUser: the keyring file is gone afterwards", !Files.exists(Path.of("/tmp/orphera-client.cinder.keyring")))
+    check("cephUser: it then means unchanged", sh(part(user, _.unless))._1 == 0)
+    val rotated = cephUser("rotated", "client.cinder", Secret(cephKeyText(1, 40)), List("mon" -> "profile rbd", "osd" -> "profile rbd pool=volumes"))
+    check("cephUser: another key means it is needed", sh(part(rotated, _.unless))._1 != 0)
+    sh(part(rotated, _.run))
+    check("cephUser: running it puts the new key right", sh(part(rotated, _.unless))._1 == 0 && sh(part(user, _.unless))._1 != 0)
+    val widerCaps = cephUser("wider", "client.cinder", Secret(cephKeyText(1, 40)), List("mon" -> "profile rbd", "osd" -> "profile rbd pool=images"))
+    check("cephUser: a different capability means it is needed", sh(part(widerCaps, _.unless))._1 != 0)
+    val newer = cephKeyText(2, 70)
+    val modern = cephUser("modern", "client.glance", Secret(newer), List("mon" -> "allow r", "mgr" -> "allow rw"))
+    val before = dump
+    val m = sh(part(modern, _.run))
+    check("cephUser: an aes256k key leaves the cipher setting alone and says so", m._1 == 0 && m._2.contains("client.glance has an aes256k key") && dump.split("auth_allowed_ciphers").length == before.split("auth_allowed_ciphers").length, m.toString)
+    check("cephUser: and the user is made", sh(part(modern, _.unless))._1 == 0)
+    check("cephUser: a name without a type is refused", scala.util.Try(cephUser("x", "cinder", Secret(aes), List("mon" -> "profile rbd"))).isFailure)
+    check("cephUser: text that is not a cephx key is refused", scala.util.Try(cephUser("x", "client.a", Secret("not a key"), List("mon" -> "profile rbd"))).isFailure)
+    check("cephUser: a capability with a quote is refused", scala.util.Try(cephUser("x", "client.a", Secret(aes), List("mon" -> "profile \"rbd\""))).isFailure)
+    check("cephUser: an unknown capability type is refused", scala.util.Try(cephUser("x", "client.a", Secret(aes), List("net" -> "allow"))).isFailure)
+    check("cephUser: no capabilities is refused", scala.util.Try(cephUser("x", "client.a", Secret(aes), Nil)).isFailure)
+    // removal
+    val noUser = absentCephUser("remove client.cinder", "client.cinder")
+    check("absentCephUser: it is wanted while the user is listed", sh(part(noUser, _.onlyIf))._1 == 0)
+    check("absentCephUser: and also when Ceph cannot be queried, so the failure is shown", sh(part(noUser, _.onlyIf), down = true)._1 == 0)
+    val removedUser = sh(part(noUser, _.run))
+    check("absentCephUser: it removes the user", removedUser._1 == 0 && removedUser._2.contains("client.cinder removed") && !dump.contains("\"client.cinder\""), removedUser.toString + dump)
+    check("absentCephUser: nothing to do afterwards", sh(part(noUser, _.onlyIf))._1 != 0)
+    check("absentCephUser: a cluster that is down fails the removal", sh(part(noUser, _.run), down = true)._1 != 0)
+    val noPool = absentCephPool("remove the volumes pool", "volumes")
+    check("absentCephPool: it is wanted while the pool is listed", sh(part(noPool, _.onlyIf))._1 == 0)
+    check("absentCephPool: and when Ceph cannot be queried", sh(part(noPool, _.onlyIf), down = true)._1 == 0)
+    val removedPool = sh(part(noPool, _.run))
+    check("absentCephPool: it deletes the pool", removedPool._1 == 0 && removedPool._2.contains("pool volumes removed") && !dump.contains("\"volumes\""), removedPool.toString + dump)
+    check("absentCephPool: and sets pool deletion back to false", dump.contains("\"mon_allow_pool_delete\": \"false\""), dump)
+    check("absentCephPool: nothing to do afterwards", sh(part(noPool, _.onlyIf))._1 != 0)
+    check("absentCephPool: a pool that is not there fails the removal", sh(part(noPool, _.run))._1 != 0)
+
   private def sqlChecks(): Unit =
     val dir = Files.createTempDirectory("sqldb")
     val bin = dir.resolve("bin")
@@ -3110,6 +3264,7 @@ HTTPServer(('127.0.0.1',int(sys.argv[1])),H).serve_forever()
     downloadChecks()
     archiveFilesChecks()
     keystoneChecks()
+    cephChecks()
     kindChecks()
     yamlChecks()
     newKindChecks()

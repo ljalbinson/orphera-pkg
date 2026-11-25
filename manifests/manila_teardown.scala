@@ -59,14 +59,6 @@ object manila_teardown extends OrpheraApply:
   )
 
   // ---- tst0 ----
-  // True when `ceph auth ls` lists client.manila. When the cluster cannot be queried this is also true, so
-  // that the removal runs and fails with Ceph's own message.
-  private val clientExists =
-    """OUT=$(cephadm shell -- ceph auth ls 2>/dev/null) || exit 0; echo "$OUT" | tr -d '\r' | grep -qx 'client.manila'"""
-  private val clientScript =
-    """cephadm shell -- ceph auth del client.manila
-      |echo "cephx user client.manila removed"""".stripMargin
-
   private val nfsExists =
     s"""OUT=$$(cephadm shell -- ceph nfs cluster ls 2>/dev/null) || exit 0; echo "$$OUT" | tr -d '\\r' | grep -qw '$nfsCluster'"""
   private val nfsScript =
@@ -98,12 +90,7 @@ object manila_teardown extends OrpheraApply:
         )
       )
     else if target.name == cephNode then
-      val client = command(
-        "remove the cephx user client.manila",
-        clientScript,
-        onlyIf = clientExists,
-        timeout = 120
-      )
+      val client = absentCephUser("remove the cephx user client.manila", "client.manila")
       // CephFS and the NFS cluster are removed only when asked (MANILA_PURGE_CEPH=yes): shares live there.
       val purge: List[ApplyResource] =
         if purgeCeph then
