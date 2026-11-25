@@ -604,6 +604,78 @@ object Resources:
       timeout = 60
     )
 
+  /** The CA behind a TLS server, as a description: the last certificate the server presents (trust on first
+    * use), which must be self-signed and must verify the server's own certificate. It is written to `caFile`
+    * (its directory is made) and, unless `trust` is false, added to the system trust store (a file in
+    * `anchorsDeb` where `update-ca-certificates` exists, otherwise in `anchorsRpm`, followed by the matching
+    * refresh). It is `unchanged` while `caFile` equals the CA the server presents now (and the trust store
+    * holds it). The server must present at least the leaf and the CA; `hint` is appended to the message when
+    * it does not.
+    */
+  def serverCa(
+      label: String,
+      host: String,
+      port: Int,
+      caFile: String,
+      trust: Boolean = true,
+      hint: String = "",
+      anchorsDeb: String = "/usr/local/share/ca-certificates",
+      anchorsRpm: String = "/etc/pki/ca-trust/source/anchors"
+  ): ApplyResource =
+    require(host.nonEmpty && host.forall(c => c.isLetterOrDigit || c == '.' || c == '-'), s"not a host name: '$host'")
+    require(port >= 1 && port <= 65535, s"not a port: $port")
+    require(caFile.startsWith("/") && !caFile.endsWith("/"), s"caFile must be an absolute file path: '$caFile'")
+    require(!hint.exists(c => c == '"' || c == '$' || c == '`' || c == '\\'), "hint must not hold \" $ ` or \\")
+    val cf = Apply.quote(caFile)
+    val parent = caFile.substring(0, caFile.lastIndexOf('/'))
+    val dir = Apply.quote(if parent.isEmpty then "/" else parent)
+    val chainTo =
+      s"""chainTo() { openssl s_client -connect $host:$port -servername $host -showcerts </dev/null 2>/dev/null | awk -v d="$$1" '/-----BEGIN CERTIFICATE-----/{n++; p=1} p{print > (d "/c" n ".pem")} /-----END CERTIFICATE-----/{p=0}'; }"""
+    val trustTarget =
+      s"""if command -v update-ca-certificates >/dev/null 2>&1; then t=${Apply.quote(s"$anchorsDeb/orphera-test-ca.crt")}; else t=${Apply.quote(s"$anchorsRpm/orphera-test-ca.crt")}; fi"""
+    val current =
+      if trust then s"""  $trustTarget
+         |  cmp -s "$$D/c$$N.pem" $cf && cmp -s $cf "$$t" && R=0""".stripMargin
+      else s"""  cmp -s "$$D/c$$N.pem" $cf && R=0"""
+    val unless =
+      s"""$chainTo
+         |D=$$(mktemp -d)
+         |chainTo "$$D"
+         |N=$$(ls "$$D"/c*.pem 2>/dev/null | wc -l)
+         |R=1
+         |if [ "$$N" -ge 2 ]; then
+         |$current
+         |fi
+         |rm -rf "$$D"
+         |exit $$R""".stripMargin
+    val more = if hint.isEmpty then "" else s" - $hint"
+    val install =
+      if trust then
+        s"""$trustTarget
+           |cp $cf "$$t"
+           |if command -v update-ca-certificates >/dev/null 2>&1; then update-ca-certificates; else update-ca-trust; fi
+           |""".stripMargin
+      else ""
+    val run =
+      s"""set -e
+         |$chainTo
+         |mkdir -p $dir
+         |D=$$(mktemp -d)
+         |trap 'rm -rf "$$D"' EXIT
+         |chainTo "$$D"
+         |COUNT=$$(ls "$$D"/c*.pem 2>/dev/null | wc -l)
+         |if [ "$$COUNT" -lt 2 ]; then
+         |  echo "$host:$port presented $$COUNT certificate(s); expected leaf + CA$more" >&2
+         |  exit 1
+         |fi
+         |cp "$$D/c$$COUNT.pem" $cf
+         |openssl verify -CAfile $cf "$$D/c1.pem"
+         |SUBJ=$$(openssl x509 -in $cf -noout -subject | sed 's/^subject=//')
+         |ISS=$$(openssl x509 -in $cf -noout -issuer | sed 's/^issuer=//')
+         |if [ "$$SUBJ" != "$$ISS" ]; then echo "last certificate is not self-signed: $$SUBJ / $$ISS" >&2; exit 1; fi
+         |${install}echo "CA of $host:$port installed: $$SUBJ"""".stripMargin
+    command(label, run, unless = unless, timeout = 60)
+
   private def sqlName(what: String, text: String): Unit =
     require(
       text.nonEmpty && text.forall(c => c.isLetterOrDigit || c == '_'),

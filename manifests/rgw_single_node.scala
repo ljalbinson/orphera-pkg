@@ -83,48 +83,6 @@ object rgw_single_node extends OrpheraApply:
   private val hostPackages =
     List("openssl", "curl", "ca-certificates", "python3")
 
-  // Keystone's CA: the last certificate it presents (trust on first use), which must be self-signed.
-  // `chainTo DIR` leaves DIR/c1.pem ... DIR/cN.pem, each holding the certificate only: the text s_client
-  // prints after the last one differs on every handshake, and would make the comparison fail. Installed into
-  // the host's trust store, which RGW then gets as its bundle.
-  private val chainTo =
-    s"""chainTo() { openssl s_client -connect $ksFqdn:5000 -servername $ksFqdn -showcerts </dev/null 2>/dev/null | awk -v d="$$1" '/-----BEGIN CERTIFICATE-----/{n++; p=1} p{print > (d "/c" n ".pem")} /-----END CERTIFICATE-----/{p=0}'; }"""
-  private val trustTarget =
-    """if command -v update-ca-certificates >/dev/null 2>&1; then t=/usr/local/share/ca-certificates/orphera-test-ca.crt; else t=/etc/pki/ca-trust/source/anchors/orphera-test-ca.crt; fi"""
-  private val caCurrent =
-    s"""$chainTo
-       |D=$$(mktemp -d)
-       |chainTo $$D
-       |N=$$(ls $$D/c*.pem 2>/dev/null | wc -l)
-       |R=1
-       |if [ "$$N" -ge 2 ]; then
-       |  $trustTarget
-       |  cmp -s $$D/c$$N.pem $caCert && cmp -s $caCert "$$t" && R=0
-       |fi
-       |rm -rf $$D
-       |exit $$R""".stripMargin
-  private val caScript =
-    s"""set -e
-       |$chainTo
-       |mkdir -p $caDir
-       |D=$$(mktemp -d)
-       |trap 'rm -rf $$D' EXIT
-       |chainTo $$D
-       |COUNT=$$(ls $$D/c*.pem 2>/dev/null | wc -l)
-       |if [ "$$COUNT" -lt 2 ]; then
-       |  echo "keystone at $ksFqdn:5000 presented $$COUNT certificate(s); expected leaf + CA - apply keystone_single_node.scala (it must serve server-chain.crt)" >&2
-       |  exit 1
-       |fi
-       |cp $$D/c$$COUNT.pem $caCert
-       |openssl verify -CAfile $caCert $$D/c1.pem
-       |SUBJ=$$(openssl x509 -in $caCert -noout -subject | sed 's/^subject=//')
-       |ISS=$$(openssl x509 -in $caCert -noout -issuer | sed 's/^issuer=//')
-       |if [ "$$SUBJ" != "$$ISS" ]; then echo "last certificate is not self-signed: $$SUBJ / $$ISS" >&2; exit 1; fi
-       |$trustTarget
-       |cp $caCert "$$t"
-       |if command -v update-ca-certificates >/dev/null 2>&1; then update-ca-certificates; else update-ca-trust; fi
-       |echo "Keystone CA installed: $$SUBJ"""".stripMargin
-
   // Standard-library Python, as in the other service descriptions. Plain string filled in with replace().
   // Subcommands: register | registered | unregister | catalog | swift-cycle | s3-cycle
   // registered: read-only; user rgw gets a token and both services have the endpoints register makes
@@ -539,11 +497,12 @@ if __name__ == '__main__':
     val tools = hostPackages.map(p => pkg(p, updateCache = true))
 
     val caDirectory = directory(caDir, mode = "0755").after(tools*)
-    val ca = command(
+    val ca = serverCa(
       "fetch Keystone's CA from its TLS handshake",
-      caScript,
-      unless = caCurrent,
-      timeout = 60
+      ksFqdn,
+      5000,
+      caCert,
+      hint = "apply keystone_single_node.scala (it must serve server-chain.crt)"
     ).after(caDirectory)
 
     val helperFile = secretFile(

@@ -102,38 +102,6 @@ object trove_guest_image extends OrpheraApply:
   private val prepared =
     s"""[ -x $venvDir/bin/disk-image-create ] && [ -d $srcDir/.git ] && for e in guest-agent ubuntu-docker ubuntu-guest; do [ -d "$srcDir/integration/scripts/files/elements/$$e" ] || exit 1; done"""
 
-  // Keystone's CA: the last certificate it presents (trust on first use), which must be self-signed. `chainTo
-  // DIR` leaves DIR/c1.pem ... DIR/cN.pem, each holding the certificate only. Only the helper reads it (it
-  // is not added to the system trust store).
-  private val chainTo =
-    s"""chainTo() { openssl s_client -connect $ksFqdn:5000 -servername $ksFqdn -showcerts </dev/null 2>/dev/null | awk -v d="$$1" '/-----BEGIN CERTIFICATE-----/{n++; p=1} p{print > (d "/c" n ".pem")} /-----END CERTIFICATE-----/{p=0}'; }"""
-
-  private val caCurrent =
-    s"""$chainTo
-       |D=$$(mktemp -d)
-       |chainTo $$D
-       |N=$$(ls $$D/c*.pem 2>/dev/null | wc -l)
-       |R=1
-       |if [ "$$N" -ge 2 ]; then cmp -s $$D/c$$N.pem $caFile && R=0; fi
-       |rm -rf $$D
-       |exit $$R""".stripMargin
-
-  private val fetchCaScript =
-    s"""set -e
-       |$chainTo
-       |mkdir -p $imageDir
-       |D=$$(mktemp -d)
-       |trap 'rm -rf $$D' EXIT
-       |chainTo $$D
-       |COUNT=$$(ls $$D/c*.pem 2>/dev/null | wc -l)
-       |if [ "$$COUNT" -lt 2 ]; then
-       |  echo "keystone at $ksFqdn:5000 presented $$COUNT certificate(s); expected leaf + CA" >&2
-       |  exit 1
-       |fi
-       |cp $$D/c$$COUNT.pem $caFile
-       |openssl verify -CAfile $caFile $$D/c1.pem
-       |echo "Keystone CA saved in $caFile"""".stripMargin
-
   // The variables are those of build_guest_image in functions_qemu; the guest-agent install script runs with
   // `set -u` and reads SYNC_LOG_TO_CONTROLLER and DEV_MODE, so they must be set.
   private val buildScript =
@@ -384,11 +352,12 @@ if __name__ == '__main__':
       unless = prepared,
       timeout = 900
     ).after(tools*)
-    val ca = command(
+    val ca = serverCa(
       "fetch Keystone's CA from its TLS handshake",
-      fetchCaScript,
-      unless = caCurrent,
-      timeout = 60
+      ksFqdn,
+      5000,
+      caFile,
+      trust = false
     ).after(imageDirectory)
     val build = command(
       "build the Ubuntu noble guest image",

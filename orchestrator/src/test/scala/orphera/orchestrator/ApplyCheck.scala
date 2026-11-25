@@ -2492,6 +2492,75 @@ object ApplyCheck:
     check("absentRabbitAccount: the vhost and the user are deleted", c3.contains("delete_vhost svc") && c3.contains("delete_user svcuser"), c3)
     check("absentRabbitAccount: the default vhost is refused", scala.util.Try(absentRabbitAccount("x", "/", "u")).isFailure)
 
+  private def serverCaChecks(): Unit =
+    val dir = Files.createTempDirectory("serverca")
+    val bin = dir.resolve("bin")
+    Files.createDirectory(bin)
+    val calls = dir.resolve("calls")
+    val realOpenssl = runShell("command -v openssl")
+    check("serverCa: openssl is installed", realOpenssl._1 == 0, realOpenssl.toString)
+    if realOpenssl._1 == 0 then
+      // A CA, a certificate it signed, and the chain a server would present.
+      val made = runShell(s"""cd $dir
+        |openssl req -x509 -newkey rsa:2048 -nodes -keyout ca.key -out ca.crt -subj /CN=testca -days 2 >/dev/null 2>&1
+        |openssl req -newkey rsa:2048 -nodes -keyout leaf.key -out leaf.csr -subj /CN=leaf >/dev/null 2>&1
+        |openssl x509 -req -in leaf.csr -CA ca.crt -CAkey ca.key -CAcreateserial -out leaf.crt -days 2 >/dev/null 2>&1
+        |cat leaf.crt ca.crt > chain.pem""".stripMargin)
+      check("serverCa: the test certificates are made", made._1 == 0 && Files.exists(dir.resolve("chain.pem")), made.toString)
+      // A stand-in openssl answers s_client from a file (with text after the certificates that differs on each
+      // call, as a real handshake's does) and passes everything else to the real one.
+      val fakeOpenssl = bin.resolve("openssl")
+      Files.writeString(
+        fakeOpenssl,
+        s"""#!/bin/sh
+           |if [ "$$1" = s_client ]; then cat "$dir/served"; echo "read bytes $$(date +%s%N)"; exit 0; fi
+           |exec ${realOpenssl._2} "$$@"
+           |""".stripMargin
+      )
+      val fakeUpdate = bin.resolve("update-ca-certificates")
+      Files.writeString(fakeUpdate, s"""#!/bin/sh
+          |echo update >> "$calls"
+          |""".stripMargin)
+      check("serverCa: the stand-ins are executable", fakeOpenssl.toFile.setExecutable(true) && fakeUpdate.toFile.setExecutable(true))
+      def sh(script: String): (Int, String) = runShell(s"PATH=$bin:$$PATH\n$script")
+      def serve(file: String): Unit = { val _ = Files.writeString(dir.resolve("served"), "Certificate chain\n" + Files.readString(dir.resolve(file))) }
+      def part(r: ApplyResource, pick: ApplyResource.Command => String): String = r match
+        case c: ApplyResource.Command => pick(c)
+        case other                    => s"not a command: $other"
+      val caFile = s"$dir/out/ca.crt"
+      val anchor = s"$dir/anchors/orphera-test-ca.crt"
+      val step = serverCa("ca", "ks.example.com", 5000, caFile, hint = "apply keystone_single_node.scala", anchorsDeb = s"$dir/anchors", anchorsRpm = s"$dir/rpm")
+      serve("chain.pem")
+      Files.createDirectory(dir.resolve("anchors"))
+      check("serverCa: nothing installed means it is needed", sh(part(step, _.unless))._1 != 0)
+      val ran = sh(part(step, _.run))
+      check("serverCa: the run succeeds and says what it installed", ran._1 == 0 && ran._2.contains("installed: CN"), ran.toString)
+      check("serverCa: the CA is saved, in a directory the run made", sh(s"cmp $dir/ca.crt $caFile")._1 == 0)
+      check("serverCa: and put in the trust store, which is refreshed", sh(s"cmp $dir/ca.crt $anchor")._1 == 0 && Files.exists(calls))
+      check("serverCa: the installed CA means unchanged, whatever the handshake adds", sh(part(step, _.unless))._1 == 0 && sh(part(step, _.unless))._1 == 0)
+      Files.delete(dir.resolve("anchors/orphera-test-ca.crt"))
+      check("serverCa: a CA missing from the trust store means it is needed", sh(part(step, _.unless))._1 != 0)
+      sh(part(step, _.run))
+      check("serverCa: and the run puts it back", sh(part(step, _.unless))._1 == 0)
+      val leafOnly = sh(s"cp $dir/leaf.crt $dir/leafonly.pem")
+      check("serverCa: leaf copy made", leafOnly._1 == 0, leafOnly.toString)
+      serve("leafonly.pem")
+      check("serverCa: a server presenting one certificate leaves it needed", sh(part(step, _.unless))._1 != 0)
+      val one = sh(part(step, _.run))
+      check("serverCa: and the run fails with the count and the hint", one._1 != 0 && one._2.contains("presented 1 certificate") && one._2.contains("apply keystone_single_node.scala"), one.toString)
+      sh(s"cat $dir/leaf.crt $dir/leaf.crt > $dir/twoleaves.pem")
+      serve("twoleaves.pem")
+      check("serverCa: a last certificate that is not self-signed fails", sh(part(step, _.run))._1 != 0)
+      val noTrust = serverCa("ca", "ks.example.com", 5000, s"$dir/img/ca.crt", trust = false, anchorsDeb = s"$dir/anchors2")
+      serve("chain.pem")
+      check("serverCa: trust = false: needed at first", sh(part(noTrust, _.unless))._1 != 0)
+      check("serverCa: trust = false: the run succeeds", sh(part(noTrust, _.run))._1 == 0)
+      check("serverCa: trust = false: then unchanged, with no trust store file made", sh(part(noTrust, _.unless))._1 == 0 && !Files.exists(dir.resolve("anchors2")))
+      check("serverCa: a bad host is refused", scala.util.Try(serverCa("x", "a b", 5000, "/x/ca.crt")).isFailure)
+      check("serverCa: a bad port is refused", scala.util.Try(serverCa("x", "h", 0, "/x/ca.crt")).isFailure)
+      check("serverCa: a relative file is refused", scala.util.Try(serverCa("x", "h", 5000, "ca.crt")).isFailure)
+      check("serverCa: a hint with a quote is refused", scala.util.Try(serverCa("x", "h", 5000, "/x/ca.crt", hint = "say \"no\"")).isFailure)
+
   private def sqlChecks(): Unit =
     val dir = Files.createTempDirectory("sqldb")
     val bin = dir.resolve("bin")
@@ -2762,6 +2831,7 @@ object ApplyCheck:
     absentContainerUnitsChecks()
     sqlChecks()
     rabbitChecks()
+    serverCaChecks()
     kindChecks()
     yamlChecks()
     newKindChecks()
