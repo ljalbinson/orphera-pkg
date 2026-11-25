@@ -51,7 +51,7 @@ import orphera.orchestrator.conf.*
 //   - `cinder-manage db sync` is skipped while its stamp matches and the
 //     `volumes` table exists (a query as the cinder user, through the VIP).
 //   - Cinder is registered in Keystone before the units start. The registration
-//     is skipped while the helper's `registered` check passes.
+//     is skipped while its check passes.
 //
 // Test-only credentials from the secret store (`orphera secrets`), as before.
 object cinder_single_node extends OrpheraApply:
@@ -314,7 +314,7 @@ object cinder_single_node extends OrpheraApply:
 
   // Standard-library Python, as in the other services. Plain string filled in
   // with replace(). Subcommands:
-  //   register | registered | unregister | catalog | volume-services |
+  //   catalog | volume-services |
   //   volume-create | volume-delete <id>
   private val apiHelperPython =
     """#!/usr/bin/python3
@@ -323,7 +323,6 @@ import json, ssl, sys, time, urllib.request, urllib.error
 KS = 'https://@@KS@@:5000/v3'
 CINDER = '@@CINDER@@'
 ADMIN_PW = '@@ADMINPW@@'
-CINDER_PW = '@@CINDERPW@@'
 CTX = ssl.create_default_context(cafile='@@CA@@')
 
 
@@ -371,72 +370,6 @@ def find(token, path, key):
 
 
 ENDPOINT = CINDER + '/v3/%(project_id)s'
-
-
-def register():
-    token, _ = admin()
-    project = find(token, '/projects?name=service', 'projects')
-    if project is None:
-        s, p, _ = call('POST', KS + '/projects', {'project': {'name': 'service', 'domain_id': 'default'}}, token)
-        if s != 201:
-            die('creating project service failed: HTTP %s %s' % (s, p))
-        project = p['project']
-    user = find(token, '/users?name=cinder', 'users')
-    if user is None:
-        s, p, _ = call('POST', KS + '/users', {'user': {'name': 'cinder', 'domain_id': 'default', 'password': CINDER_PW}}, token)
-        if s != 201:
-            die('creating user cinder failed: HTTP %s %s' % (s, p))
-        user = p['user']
-    else:
-        call('PATCH', KS + '/users/' + user['id'], {'user': {'password': CINDER_PW}}, token)
-    role = find(token, '/roles?name=admin', 'roles')
-    if role is None:
-        die('role admin not found')
-    s, p, _ = call('PUT', KS + '/projects/%s/users/%s/roles/%s' % (project['id'], user['id'], role['id']), None, token)
-    if s not in (200, 204):
-        die('granting admin to cinder failed: HTTP %s %s' % (s, p))
-    service = find(token, '/services?type=volumev3', 'services')
-    if service is None:
-        s, p, _ = call('POST', KS + '/services', {'service': {'name': 'cinderv3', 'type': 'volumev3'}}, token)
-        if s != 201:
-            die('creating service volumev3 failed: HTTP %s %s' % (s, p))
-        service = p['service']
-    for iface in ('public', 'internal', 'admin'):
-        ep = find(token, '/endpoints?service_id=%s&interface=%s' % (service['id'], iface), 'endpoints')
-        if ep is None:
-            s, p, _ = call('POST', KS + '/endpoints', {'endpoint': {'interface': iface, 'url': ENDPOINT, 'service_id': service['id'], 'region_id': 'RegionOne'}}, token)
-            if s != 201:
-                die('creating %s endpoint failed: HTTP %s %s' % (iface, s, p))
-        elif ep['url'] != ENDPOINT:
-            call('PATCH', KS + '/endpoints/' + ep['id'], {'endpoint': {'url': ENDPOINT}}, token)
-    print('registered cinder in keystone (project service, user cinder, service volumev3, 3 endpoints)')
-
-
-def registered():
-    # Exit 0 only when everything register() makes is in place: the cinder user
-    # can get a token in project service, and service volumev3 has the three
-    # endpoints at ENDPOINT. Makes no change.
-    get_token('cinder', CINDER_PW, 'service')
-    token, _ = admin()
-    service = find(token, '/services?type=volumev3', 'services')
-    if service is None:
-        die('no service of type volumev3')
-    for iface in ('public', 'internal', 'admin'):
-        ep = find(token, '/endpoints?service_id=%s&interface=%s' % (service['id'], iface), 'endpoints')
-        if ep is None or ep['url'] != ENDPOINT:
-            die('endpoint %s missing or wrong' % iface)
-    print('cinder is registered in keystone')
-
-
-def unregister():
-    token, _ = admin()
-    service = find(token, '/services?type=volumev3', 'services')
-    if service is not None:
-        call('DELETE', KS + '/services/' + service['id'], None, token)
-    user = find(token, '/users?name=cinder', 'users')
-    if user is not None:
-        call('DELETE', KS + '/users/' + user['id'], None, token)
-    print('removed cinder from keystone (service volumev3, its endpoints, user cinder)')
 
 
 def catalog():
@@ -491,13 +424,7 @@ def volume_delete(vid):
 
 if __name__ == '__main__':
     cmd = sys.argv[1] if len(sys.argv) > 1 else ''
-    if cmd == 'register':
-        register()
-    elif cmd == 'registered':
-        registered()
-    elif cmd == 'unregister':
-        unregister()
-    elif cmd == 'catalog':
+    if cmd == 'catalog':
         catalog()
     elif cmd == 'volume-services':
         volume_services()
@@ -506,7 +433,7 @@ if __name__ == '__main__':
     elif cmd == 'volume-delete' and len(sys.argv) > 2:
         volume_delete(sys.argv[2])
     else:
-        die('usage: orphera-openstack-api register | registered | unregister | catalog | volume-services | volume-create | volume-delete <id>')
+        die('usage: orphera-openstack-api catalog | volume-services | volume-create | volume-delete <id>')
 """
 
   private val helper =
@@ -514,7 +441,6 @@ if __name__ == '__main__':
       .replace("@@KS@@", ksFqdn)
       .replace("@@CINDER@@", s"http://$fqdn:$apiPort")
       .replace("@@ADMINPW@@", adminPassword.reveal)
-      .replace("@@CINDERPW@@", cinderPassword.reveal)
       .replace("@@CA@@", caCert)
   private val helperPath = "/usr/local/sbin/orphera-openstack-api"
 
@@ -658,12 +584,16 @@ if __name__ == '__main__':
       group = "root"
     )
     // Registration comes before the services start, as for Nova.
-    val registered = command(
+    val (keystoneHelper, ensured) = keystoneEntries(
       "register Cinder in Keystone",
-      s"$helperPath register",
-      unless = s"$helperPath registered >/dev/null 2>&1",
-      timeout = 120
-    ).after(helperFile, ca)
+      "cinder",
+      cinderPassword,
+      List(KeystoneService("cinderv3", "volumev3", s"http://$fqdn:$apiPort/v3/%(project_id)s")),
+      s"https://$ksFqdn:5000",
+      adminPassword,
+      caCert
+    )
+    val registered = ensured.after(ca)
 
     val running = svcs.map { s =>
       s.unit.after((dbSync :: registered :: s.deps)*)
@@ -692,5 +622,5 @@ if __name__ == '__main__':
       ca,
       logDirectory,
       stateDirectory
-    ) ++ svcs.flatMap(_.resources) ++ List(dbSync, helperFile, registered) ++
+    ) ++ svcs.flatMap(_.resources) ++ List(dbSync, helperFile, keystoneHelper, registered) ++
       running ++ List(answering, reporting)

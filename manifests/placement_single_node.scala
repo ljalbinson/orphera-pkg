@@ -35,9 +35,8 @@ import orphera.orchestrator.conf.*
 //     database has the `resource_providers` table (a query as the placement
 //     user, through the VIP), so a database dropped since the last run is
 //     synced again.
-//   - The Keystone registration is skipped while the helper's `registered`
-//     check (a token for the placement user, the service and three endpoint
-//     URLs) passes.
+//   - The Keystone registration is skipped while its check (a token for the
+//     placement user, the service and three endpoint URLs) passes.
 //
 // Test-only credentials from the secret store (`orphera secrets`), as before.
 object placement_single_node extends OrpheraApply:
@@ -219,7 +218,7 @@ object placement_single_node extends OrpheraApply:
 
   // Standard-library Python, as in the other services. Plain string filled in
   // with replace(). Subcommands:
-  //   register | registered | unregister | catalog | rp-list | rp-create | rp-delete <uuid>
+  //   catalog | rp-list | rp-create | rp-delete <uuid>
   // (rp = resource provider, the object Placement manages; the test makes and
   // deletes one.)
   private val apiHelperPython =
@@ -229,7 +228,6 @@ import json, ssl, sys, time, urllib.request, urllib.error
 KS = 'https://@@KS@@:5000/v3'
 PLACEMENT = '@@PLACEMENT@@'
 ADMIN_PW = '@@ADMINPW@@'
-PLACEMENT_PW = '@@PLACEMENTPW@@'
 CTX = ssl.create_default_context(cafile='@@CA@@')
 MICROVERSION = {'OpenStack-API-Version': 'placement 1.30'}
 
@@ -274,72 +272,6 @@ def find(token, path, key):
     return items[0] if items else None
 
 
-def register():
-    token, _ = get_token('admin', ADMIN_PW, 'admin')
-    project = find(token, '/projects?name=service', 'projects')
-    if project is None:
-        s, p, _ = call('POST', KS + '/projects', {'project': {'name': 'service', 'domain_id': 'default'}}, token)
-        if s != 201:
-            die('creating project service failed: HTTP %s %s' % (s, p))
-        project = p['project']
-    user = find(token, '/users?name=placement', 'users')
-    if user is None:
-        s, p, _ = call('POST', KS + '/users', {'user': {'name': 'placement', 'domain_id': 'default', 'password': PLACEMENT_PW}}, token)
-        if s != 201:
-            die('creating user placement failed: HTTP %s %s' % (s, p))
-        user = p['user']
-    else:
-        call('PATCH', KS + '/users/' + user['id'], {'user': {'password': PLACEMENT_PW}}, token)
-    role = find(token, '/roles?name=admin', 'roles')
-    if role is None:
-        die('role admin not found')
-    s, p, _ = call('PUT', KS + '/projects/%s/users/%s/roles/%s' % (project['id'], user['id'], role['id']), None, token)
-    if s not in (200, 204):
-        die('granting admin to placement failed: HTTP %s %s' % (s, p))
-    service = find(token, '/services?type=placement', 'services')
-    if service is None:
-        s, p, _ = call('POST', KS + '/services', {'service': {'name': 'placement', 'type': 'placement'}}, token)
-        if s != 201:
-            die('creating service placement failed: HTTP %s %s' % (s, p))
-        service = p['service']
-    for iface in ('public', 'internal', 'admin'):
-        ep = find(token, '/endpoints?service_id=%s&interface=%s' % (service['id'], iface), 'endpoints')
-        if ep is None:
-            s, p, _ = call('POST', KS + '/endpoints', {'endpoint': {'interface': iface, 'url': PLACEMENT, 'service_id': service['id'], 'region_id': 'RegionOne'}}, token)
-            if s != 201:
-                die('creating %s endpoint failed: HTTP %s %s' % (iface, s, p))
-        elif ep['url'] != PLACEMENT:
-            call('PATCH', KS + '/endpoints/' + ep['id'], {'endpoint': {'url': PLACEMENT}}, token)
-    print('registered placement in keystone (project service, user placement, service placement, 3 endpoints)')
-
-
-def registered():
-    # Exit 0 only when everything register() makes is in place: the placement
-    # user can get a token in project service, and service `placement` has the
-    # three endpoints at PLACEMENT. Makes no change.
-    get_token('placement', PLACEMENT_PW, 'service')
-    token, _ = get_token('admin', ADMIN_PW, 'admin')
-    service = find(token, '/services?type=placement', 'services')
-    if service is None:
-        die('no service of type placement')
-    for iface in ('public', 'internal', 'admin'):
-        ep = find(token, '/endpoints?service_id=%s&interface=%s' % (service['id'], iface), 'endpoints')
-        if ep is None or ep['url'] != PLACEMENT:
-            die('endpoint %s missing or wrong' % iface)
-    print('placement is registered in keystone')
-
-
-def unregister():
-    token, _ = get_token('admin', ADMIN_PW, 'admin')
-    service = find(token, '/services?type=placement', 'services')
-    if service is not None:
-        call('DELETE', KS + '/services/' + service['id'], None, token)
-    user = find(token, '/users?name=placement', 'users')
-    if user is not None:
-        call('DELETE', KS + '/users/' + user['id'], None, token)
-    print('removed placement from keystone (service placement, its endpoints, user placement)')
-
-
 def catalog():
     _, p = get_token('admin', ADMIN_PW, 'admin')
     print('catalog types: ' + ' '.join(sorted(c['type'] for c in p['token']['catalog'])))
@@ -382,13 +314,7 @@ def rp_delete(uuid):
 
 if __name__ == '__main__':
     cmd = sys.argv[1] if len(sys.argv) > 1 else ''
-    if cmd == 'register':
-        register()
-    elif cmd == 'registered':
-        registered()
-    elif cmd == 'unregister':
-        unregister()
-    elif cmd == 'catalog':
+    if cmd == 'catalog':
         catalog()
     elif cmd == 'rp-list':
         rp_list()
@@ -397,7 +323,7 @@ if __name__ == '__main__':
     elif cmd == 'rp-delete' and len(sys.argv) > 2:
         rp_delete(sys.argv[2])
     else:
-        die('usage: orphera-placement-api register | registered | unregister | catalog | rp-list | rp-create | rp-delete <uuid>')
+        die('usage: orphera-placement-api catalog | rp-list | rp-create | rp-delete <uuid>')
 """
 
   private val helper =
@@ -405,7 +331,6 @@ if __name__ == '__main__':
       .replace("@@KS@@", ksFqdn)
       .replace("@@PLACEMENT@@", s"http://$fqdn:$port")
       .replace("@@ADMINPW@@", adminPassword.reveal)
-      .replace("@@PLACEMENTPW@@", placementPassword.reveal)
       .replace("@@CA@@", caCert)
   private val helperPath = "/usr/local/sbin/orphera-placement-api"
 
@@ -491,12 +416,16 @@ if __name__ == '__main__':
       timeout = 90,
       hint = s"see 'journalctl -xeu ${placementApi.unitName}' and $logDir"
     ).after(running)
-    val registered = command(
+    val (keystoneHelper, ensured) = keystoneEntries(
       "register Placement in Keystone",
-      s"$helperPath register",
-      unless = s"$helperPath registered >/dev/null 2>&1",
-      timeout = 120
-    ).after(answering, helperFile, ca)
+      "placement",
+      placementPassword,
+      List(KeystoneService("placement", "placement", s"http://$fqdn:$port")),
+      s"https://$ksFqdn:5000",
+      adminPassword,
+      caCert
+    )
+    val registered = ensured.after(answering, ca)
     val listing = command(
       "list resource providers with an admin token",
       "echo 'the resource provider list failed: see the Keystone registration, placement.conf and the logs' >&2; exit 1",
@@ -521,6 +450,7 @@ if __name__ == '__main__':
       running,
       helperFile,
       answering,
+      keystoneHelper,
       registered,
       listing
     )

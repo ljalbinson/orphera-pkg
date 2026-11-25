@@ -831,6 +831,243 @@ object Resources:
          |echo "installed ${files.map(_._2).mkString(", ")}"""".stripMargin
     command(label, run, unless = unless, timeout = timeout)
 
+  /** One Keystone service of a registration: its name, its type and the URL of its public, internal and admin
+    * endpoints.
+    */
+  final case class KeystoneService(name: String, serviceType: String, url: String)
+
+  private val keystoneHelperPython: String =
+    """#!/usr/bin/python3
+# Makes, checks and removes the Keystone entries one service needs (written by Orphera).
+#   ensure | check | exists | remove
+import ssl, sys, urllib.request, urllib.error
+import json
+
+KS = @@KS@@
+ADMIN_PW = @@ADMINPW@@
+SPEC = @@SPEC@@
+CTX = ssl.create_default_context(cafile=@@CA@@) if KS.startswith('https') else None
+IFACES = ('public', 'internal', 'admin')
+
+
+def call(method, url, body=None, token=None):
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(url, data=data, method=method)
+    req.add_header('Content-Type', 'application/json')
+    if token:
+        req.add_header('X-Auth-Token', token)
+    try:
+        r = urllib.request.urlopen(req, context=CTX, timeout=60)
+        status, text, headers = r.status, r.read().decode(), r.headers
+    except urllib.error.HTTPError as e:
+        status, text, headers = e.code, e.read().decode(), e.headers
+    try:
+        parsed = json.loads(text) if text else {}
+    except ValueError:
+        parsed = {}
+    return status, parsed, headers
+
+
+def die(msg):
+    sys.stderr.write(msg + '\n')
+    sys.exit(1)
+
+
+def get_token(user, password, project, domain='Default'):
+    body = {'auth': {'identity': {'methods': ['password'], 'password': {'user': {'name': user, 'domain': {'name': 'Default'}, 'password': password}}}, 'scope': {'project': {'name': project, 'domain': {'name': domain}}}}}
+    status, parsed, headers = call('POST', KS + '/auth/tokens', body)
+    if status != 201:
+        die('token request for %s failed: HTTP %s %s' % (user, status, parsed))
+    return headers['X-Subject-Token']
+
+
+def find(token, path, key):
+    status, parsed, _ = call('GET', KS + path, token=token)
+    items = parsed.get(key, [])
+    return items[0] if items else None
+
+
+def ensure_one(token, what, path, key, body, create_key):
+    found = find(token, path, key)
+    if found is not None:
+        return found
+    s, p, _ = call('POST', KS + '/' + what, body, token)
+    if s != 201:
+        die('creating %s failed: HTTP %s %s' % (what, s, p))
+    return p[create_key]
+
+
+def ensure(spec):
+    token = get_token('admin', ADMIN_PW, 'admin')
+    project = ensure_one(token, 'projects', '/projects?name=' + spec['project'], 'projects', {'project': {'name': spec['project'], 'domain_id': 'default'}}, 'project')
+    user = find(token, '/users?name=' + spec['name'], 'users')
+    if user is None:
+        s, p, _ = call('POST', KS + '/users', {'user': {'name': spec['name'], 'domain_id': 'default', 'password': spec['password']}}, token)
+        if s != 201:
+            die('creating user %s failed: HTTP %s %s' % (spec['name'], s, p))
+        user = p['user']
+    else:
+        call('PATCH', KS + '/users/' + user['id'], {'user': {'password': spec['password']}}, token)
+    admin_role = find(token, '/roles?name=admin', 'roles')
+    if admin_role is None:
+        die('role admin not found')
+    s, p, _ = call('PUT', KS + '/projects/%s/users/%s/roles/%s' % (project['id'], user['id'], admin_role['id']), None, token)
+    if s not in (200, 204):
+        die('granting admin to %s failed: HTTP %s %s' % (spec['name'], s, p))
+    for role in spec.get('roles', []):
+        ensure_one(token, 'roles', '/roles?name=' + role, 'roles', {'role': {'name': role}}, 'role')
+    for svc in spec['services']:
+        service = ensure_one(token, 'services', '/services?type=' + svc['type'], 'services', {'service': {'name': svc['name'], 'type': svc['type']}}, 'service')
+        for iface in IFACES:
+            ep = find(token, '/endpoints?service_id=%s&interface=%s' % (service['id'], iface), 'endpoints')
+            if ep is None:
+                s, p, _ = call('POST', KS + '/endpoints', {'endpoint': {'interface': iface, 'url': svc['url'], 'service_id': service['id'], 'region_id': 'RegionOne'}}, token)
+                if s != 201:
+                    die('creating %s endpoint of %s failed: HTTP %s %s' % (iface, svc['type'], s, p))
+            elif ep['url'] != svc['url']:
+                call('PATCH', KS + '/endpoints/' + ep['id'], {'endpoint': {'url': svc['url']}}, token)
+    print('registered %s in keystone (project %s, user %s, services %s)' % (spec['name'], spec['project'], spec['name'], ' '.join(s['type'] for s in spec['services'])))
+
+
+def check(spec):
+    # Exit 0 only when everything ensure() makes is in place. Makes no change.
+    get_token(spec['name'], spec['password'], spec['project'])
+    token = get_token('admin', ADMIN_PW, 'admin')
+    for role in spec.get('roles', []):
+        if find(token, '/roles?name=' + role, 'roles') is None:
+            die('role %s missing' % role)
+    for svc in spec['services']:
+        service = find(token, '/services?type=' + svc['type'], 'services')
+        if service is None:
+            die('no service of type %s' % svc['type'])
+        for iface in IFACES:
+            ep = find(token, '/endpoints?service_id=%s&interface=%s' % (service['id'], iface), 'endpoints')
+            if ep is None or ep['url'] != svc['url']:
+                die('endpoint %s of %s missing or wrong' % (iface, svc['type']))
+    print('%s is registered in keystone' % spec['name'])
+
+
+def exists(spec):
+    # Exit 0 when anything ensure() makes is still there: the user, or a service of one of the types.
+    token = get_token('admin', ADMIN_PW, 'admin')
+    if find(token, '/users?name=' + spec['name'], 'users') is not None:
+        return
+    for svc in spec['services']:
+        if find(token, '/services?type=' + svc['type'], 'services') is not None:
+            return
+    die('nothing of %s is in keystone' % spec['name'])
+
+
+def remove(spec):
+    token = get_token('admin', ADMIN_PW, 'admin')
+    for svc in spec['services']:
+        service = find(token, '/services?type=' + svc['type'], 'services')
+        if service is not None:
+            call('DELETE', KS + '/services/' + service['id'], None, token)
+    user = find(token, '/users?name=' + spec['name'], 'users')
+    if user is not None:
+        call('DELETE', KS + '/users/' + user['id'], None, token)
+    print('removed %s from keystone (services %s, their endpoints, user %s)' % (spec['name'], ' '.join(s['type'] for s in spec['services']), spec['name']))
+
+
+if __name__ == '__main__':
+    if len(sys.argv) != 2 or sys.argv[1] not in ('ensure', 'check', 'exists', 'remove'):
+        die('usage: ensure | check | exists | remove')
+    {'ensure': ensure, 'check': check, 'exists': exists, 'remove': remove}[sys.argv[1]](SPEC)
+"""
+
+  /** A string as a Python (and JSON) literal; printable ASCII only. */
+  private def pyString(what: String, text: String): String =
+    require(text.forall(c => c >= ' ' && c <= '~'), s"$what must be printable ASCII")
+    "\"" + text.flatMap {
+      case '"'  => "\\\""
+      case '\\' => "\\\\"
+      case c    => c.toString
+    } + "\""
+
+  private def keystoneName(what: String, text: String): Unit =
+    require(
+      text.nonEmpty && text.forall(c => c.isLetterOrDigit || "_-.".contains(c)),
+      s"$what must be letters, digits and _ - . , not '$text'"
+    )
+
+  /** The path of the helper `keystoneEntries` writes for the entries of `name`. */
+  def keystoneHelperPath(name: String): String = s"/usr/local/sbin/orphera-keystone-$name"
+
+  /** The Keystone entries a service needs, as a description: a user `name` with `password` and the admin role in
+    * `project`, the extra `roles` made if missing, and each service of `services` (found by its type) with its
+    * public, internal and admin endpoints at the given URL. The result is the helper (a root-only script that
+    * holds the admin password, `keystone` being the base URL such as `https://tst6.example.com:5000`, and `ca`
+    * the CA file that verifies it) and the command that runs it. The command is `unchanged` while the user can
+    * get a token in the project, the roles exist and every service has its three endpoints at the URL, so a
+    * changed password, role or URL is put right by running it again.
+    */
+  def keystoneEntries(
+      label: String,
+      name: String,
+      password: Secret,
+      services: List[KeystoneService],
+      keystone: String,
+      adminPassword: Secret,
+      ca: String,
+      roles: List[String] = Nil,
+      project: String = "service",
+      timeout: Int = 120
+  ): (ApplyResource, ApplyResource) =
+    keystoneName("name", name)
+    keystoneName("project", project)
+    roles.foreach(keystoneName("a role", _))
+    require(services.nonEmpty, "keystoneEntries needs at least one service")
+    services.foreach { sv =>
+      keystoneName("a service name", sv.name)
+      keystoneName("a service type", sv.serviceType)
+      require(sv.url.startsWith("http://") || sv.url.startsWith("https://"), s"not an endpoint URL: '${sv.url}'")
+    }
+    require(keystone.startsWith("https://") || keystone.startsWith("http://"), s"not a Keystone URL: '$keystone'")
+    def field(key: String, value: String): String = pyString(key, key) + ": " + value
+    val serviceSpecs = services.map { sv =>
+      "{" + List(
+        field("name", pyString("a service name", sv.name)),
+        field("type", pyString("a service type", sv.serviceType)),
+        field("url", pyString("a URL", sv.url))
+      ).mkString(", ") + "}"
+    }
+    val spec = "{" + List(
+      field("name", pyString("name", name)),
+      field("password", pyString("password", password.reveal)),
+      field("project", pyString("project", project)),
+      field("roles", roles.map(pyString("a role", _)).mkString("[", ", ", "]")),
+      field("services", serviceSpecs.mkString("[", ", ", "]"))
+    ).mkString(", ") + "}"
+    val script = keystoneHelperPython
+      .replace("@@KS@@", pyString("keystone", keystone.stripSuffix("/") + "/v3"))
+      .replace("@@ADMINPW@@", pyString("the admin password", adminPassword.reveal))
+      .replace("@@CA@@", pyString("ca", ca))
+      .replace("@@SPEC@@", spec)
+    val path = keystoneHelperPath(name)
+    val helper = secretFile(path, Secret(script), mode = "0700", owner = "root", group = "root")
+    val ensure = command(
+      label,
+      s"${Apply.quote(path)} ensure",
+      unless = s"${Apply.quote(path)} check >/dev/null 2>&1",
+      timeout = timeout
+    ).after(helper)
+    (helper, ensure)
+
+  /** What `keystoneEntries` made, removed again: the services of the registration with their endpoints, and the
+    * user. It does nothing without the helper on the node or while nothing is there, and a failure is reported
+    * but does not stop the run (the node is being torn down). The helper is left for the caller to remove.
+    */
+  def absentKeystoneEntries(label: String, name: String, timeout: Int = 120): ApplyResource =
+    keystoneName("name", name)
+    val path = Apply.quote(keystoneHelperPath(name))
+    command(
+      label,
+      s"""$path remove || echo "keystone cleanup failed (continuing)"""",
+      onlyIf = s"[ -x $path ] && $path exists >/dev/null 2>&1",
+      timeout = timeout
+    )
+
   private def sqlName(what: String, text: String): Unit =
     require(
       text.nonEmpty && text.forall(c => c.isLetterOrDigit || c == '_'),
