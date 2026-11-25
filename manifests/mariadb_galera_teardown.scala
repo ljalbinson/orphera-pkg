@@ -41,26 +41,52 @@ object mariadb_galera_teardown extends OrpheraClusterPlaybook:
   // All removed explicitly below rather than trusted to purge's own
   // behavior, since leftover state from either exercise is exactly what
   // would make the next build run unpredictably.
-  private val mariadbCleanupScript =
-    """rm -f /etc/mysql/mariadb.conf.d/60-galera.cnf
-      |rm -rf /var/lib/mysql
-      |echo 'mariadb Galera config and data directory removed'""".stripMargin
+  private val mariadbCleanupPlan: ApplyPlan =
+    import Resources.*
+    ApplyPlan.orFail(
+      "galera-cleanup",
+      List(
+        absentFile("/etc/mysql/mariadb.conf.d/60-galera.cnf"),
+        absentDirectory("/var/lib/mysql", recursive = true)
+      )
+    )
 
   // Not package-owned, so purging haproxy/keepalived doesn't touch any of
   // this — the clustercheck endpoint, the sysctl override that let
   // haproxy bind the not-yet-present VIP, and (belt-and-suspenders, in
   // case keepalived's own shutdown didn't get to it in time) any VIP
   // still lingering on this node's interface.
-  private val haproxyKeepalivedCleanupScript =
-    """systemctl stop clustercheck.socket 2>/dev/null || true
-      |systemctl disable clustercheck.socket 2>/dev/null || true
-      |rm -f /usr/local/bin/galera-clustercheck /etc/systemd/system/clustercheck.socket /etc/systemd/system/clustercheck@.service
-      |systemctl daemon-reload
-      |rm -f /etc/sysctl.d/99-orphera-haproxy-vip.conf /etc/sysctl.d/60-orphera-net.ipv4.ip_nonlocal_bind.conf
-      |sysctl -w net.ipv4.ip_nonlocal_bind=0 2>/dev/null || true
-      |IFACE=$(ip -4 route show default | awk '{print $5; exit}')
-      |ip addr del 10.10.5.100/24 dev "$IFACE" 2>/dev/null || true
-      |echo 'haproxy/keepalived VIP frontend state removed (clustercheck endpoint, sysctl override, any lingering VIP)'""".stripMargin
+  private val haproxyKeepalivedCleanupPlan: ApplyPlan =
+    import Resources.*
+    val reload = command(
+      "reload systemd after the clustercheck units were removed",
+      "systemctl daemon-reload",
+      onChangeOnly = true
+    )
+    val units = List(
+      "/etc/systemd/system/clustercheck.socket",
+      "/etc/systemd/system/clustercheck@.service"
+    ).map(p => absentFile(p).notifies(reload))
+    val others = List(
+      "/usr/local/bin/galera-clustercheck",
+      "/etc/sysctl.d/99-orphera-haproxy-vip.conf",
+      "/etc/sysctl.d/60-orphera-net.ipv4.ip_nonlocal_bind.conf"
+    ).map(absentFile)
+    val nonLocalBind = command(
+      "turn net.ipv4.ip_nonlocal_bind off again",
+      "sysctl -w net.ipv4.ip_nonlocal_bind=0",
+      unless = """[ "$(sysctl -n net.ipv4.ip_nonlocal_bind 2>/dev/null)" = 0 ]"""
+    ).after(others*)
+    val vip = command(
+      "remove a lingering VIP from the interface",
+      """IFACE=$(ip -4 route show default | awk '{print $5; exit}')
+        |ip addr del 10.10.5.100/24 dev "$IFACE" 2>/dev/null || true""".stripMargin,
+      onlyIf = "ip -4 addr show | grep -q 'inet 10.10.5.100/'"
+    )
+    ApplyPlan.orFail(
+      "galera-vip-cleanup",
+      units ::: others ::: List(reload, nonLocalBind, vip)
+    )
 
   // Stopped through the apply engine: a unit that is not there, or is already stopped, is left alone.
   private val stopServicesPlan: ApplyPlan =
@@ -97,10 +123,10 @@ object mariadb_galera_teardown extends OrpheraClusterPlaybook:
         Task.AutoRemove(purge = true)
       )
       .task(s"remove leftover Galera config/data on $host")(
-        Task.RunCommand(List("sh", "-c", mariadbCleanupScript))
+        Task.Apply(mariadbCleanupPlan)
       )
       .task(s"remove leftover haproxy/keepalived VIP-frontend state on $host")(
-        Task.RunCommand(List("sh", "-c", haproxyKeepalivedCleanupScript))
+        Task.Apply(haproxyKeepalivedCleanupPlan)
       )
       .build
 

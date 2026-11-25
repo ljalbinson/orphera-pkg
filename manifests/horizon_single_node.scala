@@ -417,14 +417,15 @@ if __name__ == '__main__':
       caCert,
       mode = "0644"
     ).after(ca, web).notifies(unitService)
-    val certCopy = command(
-      "copy the certificate chain and key to the Kolla config",
-      s"""cp $tlsDir/server-chain.crt $webDir/server-chain.crt
-         |cp $tlsDir/server.key $webDir/server.key
-         |chmod 600 $webDir/server.key
-         |echo "certificate and key copied"""".stripMargin,
-      unless =
-        s"cmp -s $tlsDir/server-chain.crt $webDir/server-chain.crt && cmp -s $tlsDir/server.key $webDir/server.key"
+    val chainCopy = fileCopy(
+      s"$webDir/server-chain.crt",
+      s"$tlsDir/server-chain.crt",
+      mode = "0644"
+    ).after(tls, web).notifies(unitService)
+    val keyCopy = fileCopy(
+      s"$webDir/server.key",
+      s"$tlsDir/server.key",
+      mode = "0600"
     ).after(tls, web).notifies(unitService)
     val vhost = command(
       "write the Apache vhost and the Kolla config.json",
@@ -449,7 +450,7 @@ if __name__ == '__main__':
     )
 
     val running =
-      unitService.after(settings, kollaCa, certCopy, vhost, unitFile)
+      unitService.after(settings, kollaCa, chainCopy, keyCopy, vhost, unitFile)
     // The login page answers 200 (the root redirects to it).
     val answering = waitForHttp(
       "horizon answers on its port",
@@ -477,7 +478,8 @@ if __name__ == '__main__':
       web,
       settings,
       kollaCa,
-      certCopy,
+      chainCopy,
+      keyCopy,
       vhost,
       unitFile,
       helperFile,
