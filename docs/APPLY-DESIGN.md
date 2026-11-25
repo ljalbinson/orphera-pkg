@@ -128,6 +128,8 @@ not come up (`hint`). They are a `command` underneath, so they report like one: 
 the endpoint already answers, `ran` after a wait, and a failure that names the URL and carries the hint when the
 time is up. Nothing is changed on the node. The generated shell is run against a local server by `ApplyCheck`.
 
+`pullImages(label, images, hint, timeout)` does the same for container images: the references to have on the node, a hint for where to look when one is wrong, and the time to allow. The guard is `podman image exists` for each reference; the run pulls only the missing ones, with the retry in `kolla.Pull`.
+
 Files with secret content (`Secret` values) never show their content: the diff line says
 `content (secret: not shown)`.
 

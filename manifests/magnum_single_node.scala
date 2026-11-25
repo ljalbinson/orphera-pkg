@@ -202,18 +202,6 @@ object magnum_single_node extends OrpheraApply:
        |""".stripMargin
 
   private val images = List(apiBase, conductorBase)
-  private val pullScript =
-    s"""${Pull.shellFunction(
-        "the Image(...) values in magnum_single_node.scala"
-      )}
-       |for img in ${images.mkString(" ")}; do
-       |  pull_retry $$img || exit 1
-       |done
-       |echo "images ready"""".stripMargin
-  private val imagesPresent =
-    s"""for img in ${images.mkString(
-        " "
-      )}; do podman image exists $$img || exit 1; done"""
 
   // The commands the service needs are in its image, and the image can switch off the other Cluster API driver.
   private val imageCommandsScript =
@@ -1098,10 +1086,10 @@ if __name__ == '__main__':
       registryMirror,
       mode = "0644"
     ).after(mirrorDir)
-    val pulled = command(
+    val pulled = pullImages(
       "pull the Magnum images",
-      pullScript,
-      unless = imagesPresent,
+      images,
+      hint = "the Image(...) values in magnum_single_node.scala",
       timeout = 2400
     ).after(podman, mirror)
     val commandsOk = command(

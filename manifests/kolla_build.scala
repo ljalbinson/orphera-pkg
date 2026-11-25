@@ -167,13 +167,6 @@ object kolla_build extends OrpheraApply:
     "ca-certificates"
   )
 
-  private val pullRegistryScript =
-    s"""${Pull.shellFunction(
-        "the registry image name in kolla_build.scala; the pull is from Docker Hub"
-      )}
-       |pull_retry $registryImage || exit 1
-       |echo "registry image ready"""".stripMargin
-
   // podman may talk to the local registry over plain HTTP (the registry is on this LAN, as tst9's is).
   private val registriesConf =
     s"""# Managed by Orphera (kolla_build.scala)
@@ -382,10 +375,10 @@ esac
     val venvTools =
       List(byName("python3"), byName("python3-venv"), byName("python3-pip"))
 
-    val pulled = command(
+    val pulled = pullImages(
       "pull the registry image",
-      pullRegistryScript,
-      unless = s"podman image exists $registryImage",
+      List(registryImage),
+      hint = "the registry image name in kolla_build.scala; the pull is from Docker Hub",
       timeout = 600
     ).after(podman)
     val registriesDir =

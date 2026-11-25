@@ -150,14 +150,6 @@ object skyline_single_node extends OrpheraApply:
     s"""echo "no certificate in $tlsDir - run: orphera cluster-playbook manifests/dashboard_tls.scala" >&2
        |exit 1""".stripMargin
 
-  private val pullScript =
-    s"""${Pull.shellFunction(
-        "SKYLINE_IMAGE or the Image in skyline_single_node.scala"
-      )}
-       |pull_retry $imageRef || exit 1
-       |echo "image ready: $$(podman images -q $imageRef | head -1)"""".stripMargin
-  private val imagePresent = s"podman image exists $imageRef"
-
   // Keystone's CA: the last certificate it presents (trust on first use), which must be self-signed.
   // `chainTo DIR` leaves DIR/c1.pem ... DIR/cN.pem, each holding the certificate only: the text s_client
   // prints after the last one differs on every handshake, and would make the comparison fail.
@@ -463,10 +455,10 @@ if __name__ == '__main__':
     val tools = hostPackages.map(p => pkg(p, updateCache = true))
     val podman = tools(0)
 
-    val pulled = command(
+    val pulled = pullImages(
       "pull the Skyline image",
-      pullScript,
-      unless = imagePresent,
+      List(imageRef),
+      hint = "SKYLINE_IMAGE or the Image in skyline_single_node.scala",
       timeout = 1800
     ).after(podman)
 

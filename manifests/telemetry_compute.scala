@@ -75,13 +75,6 @@ object telemetry_compute extends OrpheraApply:
        |""".stripMargin
 
   private val image = computeContainer.image.ref
-  private val pullScript =
-    s"""${Pull.shellFunction(
-        "the Image(...) values in telemetry_compute.scala"
-      )}
-       |pull_retry $image || exit 1
-       |echo "image ready"""".stripMargin
-  private val imagePresent = s"podman image exists $image"
 
   // Keystone's CA: the last certificate it presents (trust on first use), which must be self-signed. `chainTo
   // DIR` leaves DIR/c1.pem ... DIR/cN.pem, each holding the certificate only: the text s_client prints after
@@ -197,10 +190,10 @@ object telemetry_compute extends OrpheraApply:
       registryMirror,
       mode = "0644"
     ).after(mirrorDir)
-    val pulled = command(
+    val pulled = pullImages(
       "pull the Ceilometer compute image",
-      pullScript,
-      unless = imagePresent,
+      List(image),
+      hint = "the Image(...) values in telemetry_compute.scala",
       timeout = 2400
     ).after(podman, mirror)
 

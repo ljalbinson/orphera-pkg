@@ -225,33 +225,33 @@ manifests/skyline_single_node.scala,540,apply command,install the PyMySQL driver
 manifests/trove_guest_image.scala,402,apply command,diskimage-builder and the Trove elements,3,New general kinds,apt repository / download,"aptRepository (key + source), or archive (URL, checksum, unpack)",not started
 manifests/virtualbmc.scala,108,RunCommand,install VirtualBMC into /opt/virtualbmc,3,New general kinds,apt repository / download,"aptRepository (key + source), or archive (URL, checksum, unpack)",not started
 manifests/wordpress_site.scala,272,RunCommand,download and extract WordPress,3,New general kinds,apt repository / download,"aptRepository (key + source), or archive (URL, checksum, unpack)",not started
-manifests/barbican_single_node.scala,648,apply command,pull the Barbican images,3,New general kinds,container image,"containerImage (present/absent, pull through a mirror)",not started
-manifests/cinder_single_node.scala,638,apply command,pull the Cinder images,3,New general kinds,container image,"containerImage (present/absent, pull through a mirror)",not started
-manifests/designate_single_node.scala,834,apply command,pull the Designate and BIND9 images,3,New general kinds,container image,"containerImage (present/absent, pull through a mirror)",not started
-manifests/glance_single_node.scala,484,apply command,pull the Kolla glance-api image,3,New general kinds,container image,"containerImage (present/absent, pull through a mirror)",not started
+manifests/barbican_single_node.scala,648,apply command,pull the Barbican images,3,New general kinds,container image,"containerImage (present/absent, pull through a mirror)",done
+manifests/cinder_single_node.scala,638,apply command,pull the Cinder images,3,New general kinds,container image,"containerImage (present/absent, pull through a mirror)",done
+manifests/designate_single_node.scala,834,apply command,pull the Designate and BIND9 images,3,New general kinds,container image,"containerImage (present/absent, pull through a mirror)",done
+manifests/glance_single_node.scala,484,apply command,pull the Kolla glance-api image,3,New general kinds,container image,"containerImage (present/absent, pull through a mirror)",done
 manifests/glance_teardown.scala,115,apply command,remove the glance-api image,3,New general kinds,container image,"containerImage (present/absent, pull through a mirror)",not started
-manifests/heat_single_node.scala,706,apply command,pull the Heat images,3,New general kinds,container image,"containerImage (present/absent, pull through a mirror)",not started
-manifests/horizon_single_node.scala,477,apply command,pull the Horizon image,3,New general kinds,container image,"containerImage (present/absent, pull through a mirror)",not started
+manifests/heat_single_node.scala,706,apply command,pull the Heat images,3,New general kinds,container image,"containerImage (present/absent, pull through a mirror)",done
+manifests/horizon_single_node.scala,477,apply command,pull the Horizon image,3,New general kinds,container image,"containerImage (present/absent, pull through a mirror)",done
 manifests/k8s_cluster.scala,251,RunCommand,kubeadm config images pull,3,New general kinds,container image,"containerImage (present/absent, pull through a mirror)",not started
 manifests/k8s_registry_mirrors.scala,79,RunCommand,pull the registry image,3,New general kinds,container image,"containerImage (present/absent, pull through a mirror)",not started
-manifests/keycloak_single_node.scala,937,apply command,pull the Keycloak image,3,New general kinds,container image,"containerImage (present/absent, pull through a mirror)",not started
-manifests/keystone_single_node.scala,506,apply command,pull the Kolla keystone image,3,New general kinds,container image,"containerImage (present/absent, pull through a mirror)",not started
+manifests/keycloak_single_node.scala,937,apply command,pull the Keycloak image,3,New general kinds,container image,"containerImage (present/absent, pull through a mirror)",done
+manifests/keystone_single_node.scala,506,apply command,pull the Kolla keystone image,3,New general kinds,container image,"containerImage (present/absent, pull through a mirror)",done
 manifests/keystone_teardown.scala,88,apply command,remove the keystone image,3,New general kinds,container image,"containerImage (present/absent, pull through a mirror)",not started
-manifests/kolla_build.scala,422,apply command,pull the registry image,3,New general kinds,container image,"containerImage (present/absent, pull through a mirror)",not started
-manifests/kolla_cache.scala,107,apply command,pull the registry image,3,New general kinds,container image,"containerImage (present/absent, pull through a mirror)",not started
+manifests/kolla_build.scala,422,apply command,pull the registry image,3,New general kinds,container image,"containerImage (present/absent, pull through a mirror)",done
+manifests/kolla_cache.scala,107,apply command,pull the registry image,3,New general kinds,container image,"containerImage (present/absent, pull through a mirror)",done
 manifests/kolla_cache.scala,129,apply command,pre-pull the Kolla images through the cache,3,New general kinds,container image,"containerImage (present/absent, pull through a mirror)",not started
-manifests/magnum_single_node.scala,1130,apply command,pull the Magnum images,3,New general kinds,container image,"containerImage (present/absent, pull through a mirror)",not started
-manifests/manila_single_node.scala,825,apply command,pull the Manila images,3,New general kinds,container image,"containerImage (present/absent, pull through a mirror)",not started
-manifests/neutron_single_node.scala,956,apply command,pull the Neutron images,3,New general kinds,container image,"containerImage (present/absent, pull through a mirror)",not started
-manifests/nova_compute.scala,952,apply command,pull the Nova compute and Neutron OVS agent images,3,New general kinds,container image,"containerImage (present/absent, pull through a mirror)",not started
-manifests/nova_single_node.scala,642,apply command,pull the Nova images,3,New general kinds,container image,"containerImage (present/absent, pull through a mirror)",not started
-manifests/octavia_single_node.scala,1291,apply command,pull the Octavia images,3,New general kinds,container image,"containerImage (present/absent, pull through a mirror)",not started
-manifests/placement_single_node.scala,490,apply command,pull the Kolla placement-api image,3,New general kinds,container image,"containerImage (present/absent, pull through a mirror)",not started
-manifests/rabbitmq_single_node.scala,120,apply command,pull the RabbitMQ image,3,New general kinds,container image,"containerImage (present/absent, pull through a mirror)",not started
-manifests/skyline_single_node.scala,497,apply command,pull the Skyline image,3,New general kinds,container image,"containerImage (present/absent, pull through a mirror)",not started
-manifests/telemetry_compute.scala,228,apply command,pull the Ceilometer compute image,3,New general kinds,container image,"containerImage (present/absent, pull through a mirror)",not started
-manifests/telemetry_single_node.scala,739,apply command,pull the Ceilometer and Aodh images,3,New general kinds,container image,"containerImage (present/absent, pull through a mirror)",not started
-manifests/trove_single_node.scala,692,apply command,pull the Trove images,3,New general kinds,container image,"containerImage (present/absent, pull through a mirror)",not started
+manifests/magnum_single_node.scala,1130,apply command,pull the Magnum images,3,New general kinds,container image,"containerImage (present/absent, pull through a mirror)",done
+manifests/manila_single_node.scala,825,apply command,pull the Manila images,3,New general kinds,container image,"containerImage (present/absent, pull through a mirror)",done
+manifests/neutron_single_node.scala,956,apply command,pull the Neutron images,3,New general kinds,container image,"containerImage (present/absent, pull through a mirror)",done
+manifests/nova_compute.scala,952,apply command,pull the Nova compute and Neutron OVS agent images,3,New general kinds,container image,"containerImage (present/absent, pull through a mirror)",done
+manifests/nova_single_node.scala,642,apply command,pull the Nova images,3,New general kinds,container image,"containerImage (present/absent, pull through a mirror)",done
+manifests/octavia_single_node.scala,1291,apply command,pull the Octavia images,3,New general kinds,container image,"containerImage (present/absent, pull through a mirror)",done
+manifests/placement_single_node.scala,490,apply command,pull the Kolla placement-api image,3,New general kinds,container image,"containerImage (present/absent, pull through a mirror)",done
+manifests/rabbitmq_single_node.scala,120,apply command,pull the RabbitMQ image,3,New general kinds,container image,"containerImage (present/absent, pull through a mirror)",done
+manifests/skyline_single_node.scala,497,apply command,pull the Skyline image,3,New general kinds,container image,"containerImage (present/absent, pull through a mirror)",done
+manifests/telemetry_compute.scala,228,apply command,pull the Ceilometer compute image,3,New general kinds,container image,"containerImage (present/absent, pull through a mirror)",done
+manifests/telemetry_single_node.scala,739,apply command,pull the Ceilometer and Aodh images,3,New general kinds,container image,"containerImage (present/absent, pull through a mirror)",done
+manifests/trove_single_node.scala,692,apply command,pull the Trove images,3,New general kinds,container image,"containerImage (present/absent, pull through a mirror)",done
 manifests/barbican_teardown.scala,112,apply command,stop and remove the barbican containers and units,3,New general kinds,container+unit (absent),container absent (plus service absent and absentFile for the unit),not started
 manifests/cinder_teardown.scala,119,apply command,stop and remove the cinder containers and units,3,New general kinds,container+unit (absent),container absent (plus service absent and absentFile for the unit),not started
 manifests/designate_teardown.scala,119,apply command,stop and remove the designate containers and units,3,New general kinds,container+unit (absent),container absent (plus service absent and absentFile for the unit),not started

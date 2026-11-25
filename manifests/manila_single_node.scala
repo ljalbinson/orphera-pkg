@@ -194,18 +194,6 @@ object manila_single_node extends OrpheraApply:
        |""".stripMargin
 
   private val images = containers.map(_.image.ref)
-  private val pullScript =
-    s"""${Pull.shellFunction(
-        "the Image(...) values in manila_single_node.scala"
-      )}
-       |for img in ${images.mkString(" ")}; do
-       |  pull_retry $$img || exit 1
-       |done
-       |echo "images ready"""".stripMargin
-  private val imagesPresent =
-    s"""for img in ${images.mkString(
-        " "
-      )}; do podman image exists $$img || exit 1; done"""
 
   // The share service imports rados and cephfs; without them it starts and then fails with an import error.
   private val shareImageHasCeph =
@@ -792,10 +780,10 @@ if __name__ == '__main__':
       registryMirror,
       mode = "0644"
     ).after(mirrorDir)
-    val pulled = command(
+    val pulled = pullImages(
       "pull the Manila images",
-      pullScript,
-      unless = imagesPresent,
+      images,
+      hint = "the Image(...) values in manila_single_node.scala",
       timeout = 2400
     ).after(podman, mirror)
     val shareImageOk = command(
