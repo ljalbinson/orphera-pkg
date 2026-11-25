@@ -51,18 +51,6 @@ object heat_teardown extends OrpheraApply:
     "/var/log/kolla/heat"
   )
 
-  // ---- tst10 ----
-  private val rabbitUp =
-    "podman ps -q --filter 'name=^rabbitmq$' 2>/dev/null | grep -q ."
-  // True when the vhost or user exists in a running broker; with no running
-  // broker there is nothing to remove.
-  private val rabbitHasHeat =
-    s"""$rabbitUp && { podman exec rabbitmq rabbitmqctl list_vhosts -q | grep -qx heat || podman exec rabbitmq rabbitmqctl list_users -q | awk '{print $$1}' | grep -qx heat; }"""
-  private val rabbitScript =
-    """podman exec rabbitmq rabbitmqctl delete_vhost heat || true
-      |podman exec rabbitmq rabbitmqctl delete_user heat || true
-      |echo "rabbitmq vhost heat and user heat removed"""".stripMargin
-
   def describe(target: Node): List[ApplyResource] =
     if target.name == dbNode then
       List(
@@ -74,11 +62,10 @@ object heat_teardown extends OrpheraApply:
       )
     else if target.name == rabbitNode then
       List(
-        command(
+        absentRabbitAccount(
           "remove the heat vhost and user from RabbitMQ",
-          rabbitScript,
-          onlyIf = rabbitHasHeat,
-          timeout = 60
+          "heat",
+          "heat"
         )
       )
     else

@@ -29,47 +29,12 @@ object telemetry_rabbitmq extends OrpheraApply:
     "ceilometer" -> Secrets.secret("ceilometer/rabbit")
   )
 
-  // No {{...}} in any command: Orphera renders those as a template before running the command, so
-  // `podman ps --format '{{.Names}}'` arrives empty. Use filters.
-  private def createPart(name: String, password: String): String =
-    s"""if ! podman exec rabbitmq rabbitmqctl list_vhosts -q | grep -qx '$name'; then
-       |  podman exec rabbitmq rabbitmqctl add_vhost '$name'
-       |fi
-       |if podman exec rabbitmq rabbitmqctl list_users -q | awk '{print $$1}' | grep -qx '$name'; then
-       |  podman exec rabbitmq rabbitmqctl change_password '$name' '$password'
-       |else
-       |  podman exec rabbitmq rabbitmqctl add_user '$name' '$password'
-       |fi
-       |podman exec rabbitmq rabbitmqctl set_permissions -p '$name' '$name' '.*' '.*' '.*'
-       |echo "rabbitmq vhost $name and user $name ready"""".stripMargin
-
-  private val createVhostsAndUsers =
-    s"""set -e
-       |if ! podman ps -q --filter 'name=^rabbitmq$$' | grep -q .; then
-       |  echo "no running 'rabbitmq' container on this node - apply rabbitmq_single_node.scala first" >&2
-       |  exit 1
-       |fi
-       |${accounts
-        .map((n, p) => createPart(n, p.reveal))
-        .mkString("\n")}""".stripMargin
-
-  private def inPlace(name: String, password: String): String =
-    val vhostExists =
-      s"""podman exec rabbitmq rabbitmqctl list_vhosts -q | grep -qx '$name'"""
-    val canAuthenticate =
-      s"""podman exec rabbitmq rabbitmqctl authenticate_user '$name' '$password' >/dev/null 2>&1"""
-    val hasFullPermissions =
-      s"""podman exec rabbitmq rabbitmqctl list_permissions -p '$name' -q | awk -F'\t' '$$1=="$name" && $$2==".*" && $$3==".*" && $$4==".*" {found=1} END {exit !found}'"""
-    s"$vhostExists && $canAuthenticate && $hasFullPermissions"
-  private val allInPlace =
-    accounts.map((n, p) => s"( ${inPlace(n, p.reveal)} )").mkString(" && ")
-
   def describe(node: Node): List[ApplyResource] =
-    List(
-      command(
-        "the aodh and ceilometer vhosts and users on RabbitMQ",
-        createVhostsAndUsers,
-        unless = allInPlace,
-        timeout = 120
+    accounts.map((name, password) =>
+      rabbitAccount(
+        s"the $name vhost and the $name user on RabbitMQ",
+        name,
+        name,
+        password
       )
     )

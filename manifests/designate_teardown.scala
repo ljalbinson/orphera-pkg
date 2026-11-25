@@ -61,18 +61,6 @@ object designate_teardown extends OrpheraApply:
     "/var/log/kolla/designate"
   )
 
-  // ---- tst10 ----
-  private val rabbitUp =
-    "podman ps -q --filter 'name=^rabbitmq$' 2>/dev/null | grep -q ."
-  // True when the vhost or user exists in a running broker; with no running
-  // broker there is nothing to remove.
-  private val rabbitHasDesignate =
-    s"""$rabbitUp && { podman exec rabbitmq rabbitmqctl list_vhosts -q | grep -qx designate || podman exec rabbitmq rabbitmqctl list_users -q | awk '{print $$1}' | grep -qx designate; }"""
-  private val rabbitScript =
-    """podman exec rabbitmq rabbitmqctl delete_vhost designate || true
-      |podman exec rabbitmq rabbitmqctl delete_user designate || true
-      |echo "rabbitmq vhost designate and user designate removed"""".stripMargin
-
   def describe(target: Node): List[ApplyResource] =
     if target.name == dbNode then
       List(
@@ -84,11 +72,10 @@ object designate_teardown extends OrpheraApply:
       )
     else if target.name == rabbitNode then
       List(
-        command(
+        absentRabbitAccount(
           "remove the designate vhost and user from RabbitMQ",
-          rabbitScript,
-          onlyIf = rabbitHasDesignate,
-          timeout = 60
+          "designate",
+          "designate"
         )
       )
     else

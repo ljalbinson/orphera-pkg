@@ -70,21 +70,6 @@ object rabbitmq_single_node extends OrpheraApply:
        |echo "rabbitmq did not come up - see 'journalctl -xeu orphera-rabbitmq'" >&2
        |exit 1""".stripMargin
 
-  private val canAuthenticate =
-    s"""podman exec rabbitmq rabbitmqctl authenticate_user '$rabbitUser' '${rabbitPassword.reveal}' >/dev/null 2>&1"""
-  private val hasFullPermissions =
-    s"""podman exec rabbitmq rabbitmqctl list_permissions -p '/' -q | awk -F'\t' '$$1=="$rabbitUser" && $$2==".*" && $$3==".*" && $$4==".*" {found=1} END {exit !found}'"""
-  private val userInPlace = s"$canAuthenticate && $hasFullPermissions"
-  private val userScript =
-    s"""set -e
-       |if podman exec rabbitmq rabbitmqctl list_users -q | awk '{print $$1}' | grep -qx '$rabbitUser'; then
-       |  podman exec rabbitmq rabbitmqctl change_password '$rabbitUser' '${rabbitPassword.reveal}'
-       |else
-       |  podman exec rabbitmq rabbitmqctl add_user '$rabbitUser' '${rabbitPassword.reveal}'
-       |fi
-       |podman exec rabbitmq rabbitmqctl set_permissions -p '/' '$rabbitUser' '.*' '.*' '.*'
-       |echo "rabbitmq user $rabbitUser ready"""".stripMargin
-
   def describe(target: Node): List[ApplyResource] =
     val podman = pkg("podman", updateCache = true)
     val pulled = pullImages(
@@ -109,10 +94,10 @@ object rabbitmq_single_node extends OrpheraApply:
       unless = ping,
       timeout = 150
     ).after(running)
-    val user = command(
+    val user = rabbitAccount(
       s"the $rabbitUser user and its permissions on RabbitMQ",
-      userScript,
-      unless = userInPlace,
-      timeout = 120
+      "/",
+      rabbitUser,
+      rabbitPassword
     ).after(answering)
     List(podman, pulled, data, unitFile, running, answering, user)

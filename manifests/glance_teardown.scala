@@ -49,7 +49,6 @@ object glance_teardown extends OrpheraApply:
   private val imageExists =
     s"command -v podman >/dev/null 2>&1 && podman image exists $image"
 
-  // ---- tst3 ----
   // ---- tst0 ----
   private val cephScript =
     s"""cephadm shell -- ceph config set mon mon_allow_pool_delete true

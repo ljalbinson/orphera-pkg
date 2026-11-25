@@ -134,6 +134,8 @@ time is up. Nothing is changed on the node. The generated shell is run against a
 
 `sqlDatabase(label, databases, user, password, via)` and `absentSqlDatabase(label, databases, user)` describe MariaDB databases and their owner (and their removal) for a node where the `mariadb` client logs in as root. The guard of `sqlDatabase` is a real login as the user through `via`, so a dropped database or a changed password is put right by running it again; `absentSqlDatabase` runs when a database or the user exists, and also when MariaDB cannot be queried, so that a database that is down is not taken for "nothing to remove".
 
+`rabbitAccount(label, vhost, user, password)` and `absentRabbitAccount(label, vhost, user)` do the same for RabbitMQ: a vhost and its user with full permissions (and their removal), on the broker that runs as the `rabbitmq` container on the node. The guard is the vhost, a real authentication with the password and the permissions, so a rotated password is put right by running it again.
+
 Files with secret content (`Secret` values) never show their content: the diff line says
 `content (secret: not shown)`.
 
