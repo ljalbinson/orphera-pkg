@@ -49,10 +49,6 @@ object telemetry_teardown extends OrpheraApply:
     List("aodh-api", "aodh-evaluator", "aodh-notifier", "ceilometer-central")
   private val computeUnits = List("ceilometer-compute")
 
-  // The helper removes the Keystone entries; it is there until the last step removes it.
-  private val hasHelper = s"[ -x $helper ]"
-  private val unregisterScript =
-    s"""$helper unregister || echo "keystone cleanup failed (continuing)""""
 
   // ---- tst7 ----
   private val scrapeFile = "/etc/prometheus/scrape.d/openstack-telemetry.yml"
@@ -100,17 +96,15 @@ object telemetry_teardown extends OrpheraApply:
         )
       stopped ++ cleaned
     else
-      val unregistered = command(
-        "remove Aodh, Ceilometer and the Prometheus entry from Keystone",
-        unregisterScript,
-        onlyIf = hasHelper,
-        timeout = 120
-      )
+      val unregisteredAodh = absentKeystoneEntries("remove Aodh and the Prometheus entry from Keystone", "aodh")
+      val unregisteredCeilometer = absentKeystoneEntries("remove Ceilometer from Keystone", "ceilometer")
+      val unregistered = List(unregisteredAodh, unregisteredCeilometer)
       val stopped =
         absentContainerUnits(nodeUnits.map(u => s"orphera-$u" -> u))
-          .map(_.after(unregistered))
+          .map(_.after(unregistered*))
       // Typed removal, no script: each directory with its contents, then the helper.
       val cleaned =
         (dirs(nodeUnits).map(absentDirectory(_, recursive = true)) :+
-          absentFile(helper)).map(_.after(stopped*))
-      List(unregistered) ++ stopped ++ cleaned
+          absentFile(helper) :+ absentFile(keystoneHelperPath("aodh")) :+
+          absentFile(keystoneHelperPath("ceilometer"))).map(_.after(stopped*))
+      unregistered ++ stopped ++ cleaned
