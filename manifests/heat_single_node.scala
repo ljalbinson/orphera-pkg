@@ -648,17 +648,6 @@ if __name__ == '__main__':
       .replace("@@CA@@", caCert)
   private val helperPath = "/usr/local/sbin/orphera-heat-api"
 
-  // Both APIs answer their version document without a token (300 for a list of versions, or 200).
-  private val healthy =
-    s"""for port in $apiPort $cfnPort; do CODE=$$(curl -s -o /dev/null -w '%{http_code}' http://localhost:$$port/); [ "$$CODE" = "200" ] || [ "$$CODE" = "300" ] || exit 1; done"""
-  private val waitHealthy =
-    s"""for i in $$(seq 1 24); do
-       |  ( $healthy ) && exit 0
-       |  sleep 5
-       |done
-       |echo "heat-api or heat-api-cfn does not answer on $apiPort / $cfnPort - see 'journalctl -xeu orphera-heat-api' and $logDir" >&2
-       |exit 1""".stripMargin
-
   private val enginesUp = s"$helperPath engines-up >/dev/null 2>&1"
   private val waitEnginesUp =
     s"""for i in $$(seq 1 24); do $helperPath engines-up && exit 0; sleep 5; done
@@ -792,18 +781,27 @@ if __name__ == '__main__':
       s.unit.after((dbSync :: registered :: s.deps)*)
     }
 
-    val answering = command(
-      "heat-api and heat-api-cfn answer on their ports",
-      waitHealthy,
-      unless = healthy,
-      timeout = 180
+    // Both APIs answer their version document without a token (300 for a list of versions, or 200).
+    val apiAnswers = waitForHttp(
+      "heat-api answers on its port",
+      s"http://localhost:$apiPort/",
+      status = List(200, 300),
+      timeout = 120,
+      hint = s"see 'journalctl -xeu orphera-heat-api' and $logDir"
+    ).after(running*)
+    val cfnAnswers = waitForHttp(
+      "heat-api-cfn answers on its port",
+      s"http://localhost:$cfnPort/",
+      status = List(200, 300),
+      timeout = 120,
+      hint = s"see 'journalctl -xeu orphera-heat-api-cfn' and $logDir"
     ).after(running*)
     val reporting = command(
       "the engine reports in through the API",
       waitEnginesUp,
       unless = enginesUp,
       timeout = 180
-    ).after((answering :: running)*)
+    ).after((apiAnswers :: cfnAnswers :: running)*)
 
     tools ++ List(
       mirrorDir,
@@ -814,4 +812,4 @@ if __name__ == '__main__':
       logDirectory,
       stateDirectory
     ) ++ svcs.flatMap(_.resources) ++ List(dbSync, helperFile, registered) ++
-      running ++ List(answering, reporting)
+      running ++ List(apiAnswers, cfnAnswers, reporting)

@@ -772,19 +772,6 @@ if __name__ == '__main__':
       .replace("@@CA@@", caCert)
   private val helperPath = "/usr/local/sbin/orphera-designate-api"
 
-  // The API answers its version document without a token (200, or 300 for a list of versions), and BIND9
-  // answers on port 53 of the node's address (any reply, even REFUSED, ends dig with status 0; a timeout
-  // does not).
-  private val healthy =
-    s"""CODE=$$(curl -s -o /dev/null -w '%{http_code}' http://localhost:$apiPort/); { [ "$$CODE" = "200" ] || [ "$$CODE" = "300" ]; } && dig +time=3 +tries=1 @$nodeIp version.bind txt chaos >/dev/null"""
-  private val waitHealthy =
-    s"""for i in $$(seq 1 24); do
-       |  ( $healthy ) && exit 0
-       |  sleep 5
-       |done
-       |echo "designate-api on $apiPort or BIND9 on $nodeIp:$dnsPort does not answer - see 'journalctl -xeu orphera-designate-api' and $logDir" >&2
-       |exit 1""".stripMargin
-
   // The API accepts an admin token from Keystone and reaches its database.
   private val acceptsToken = s"$helperPath zone-list >/dev/null 2>&1"
   private val waitAcceptsToken =
@@ -1007,18 +994,28 @@ if __name__ == '__main__':
       start("designate-worker", pool, bindRunning)
     )
 
-    val answering = command(
-      "designate-api and BIND9 answer on their ports",
-      waitHealthy,
-      unless = healthy,
-      timeout = 180
+    // The API answers its version document without a token (200, or 300 for a list of versions), and BIND9
+    // accepts connections on port 53 of the node's address.
+    val apiAnswers = waitForHttp(
+      "designate-api answers on its port",
+      s"http://localhost:$apiPort/",
+      status = List(200, 300),
+      timeout = 120,
+      hint = s"see 'journalctl -xeu orphera-designate-api' and $logDir"
+    ).after(running*)
+    val bindAnswers = waitForPort(
+      "BIND9 answers on its port",
+      nodeIp,
+      dnsPort,
+      timeout = 120,
+      hint = s"see 'journalctl -xeu ${bind9.unitName}'"
     ).after(running*)
     val authenticating = command(
       "the API accepts an admin token and reaches its database",
       waitAcceptsToken,
       unless = acceptsToken,
       timeout = 180
-    ).after((answering :: running)*)
+    ).after((apiAnswers :: bindAnswers :: running)*)
 
     tools ++ List(
       mirrorDir,
@@ -1030,4 +1027,4 @@ if __name__ == '__main__':
       stateDirectory
     ) ++ bindResources ++ svcs.flatMap(_.resources) ++
       List(dbSync, helperFile, registered, pool) ++ running ++
-      List(answering, authenticating)
+      List(apiAnswers, bindAnswers, authenticating)
