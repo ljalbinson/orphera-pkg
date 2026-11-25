@@ -50,19 +50,6 @@ object manila_teardown extends OrpheraApply:
   private val unregisterScript =
     s"""$helper unregister || echo "keystone cleanup failed (continuing)""""
 
-  private val unitList = units.mkString(" ")
-  // True when ANY of the units has a unit file, or is active or enabled.
-  private val anyUnit =
-    s"""for u in $unitList; do if [ -f /etc/systemd/system/orphera-$$u.service ] || systemctl is-active --quiet orphera-$$u || systemctl is-enabled --quiet orphera-$$u; then exit 0; fi; done; exit 1"""
-  private val stopScript =
-    s"""for u in $unitList; do
-       |  systemctl disable --now orphera-$$u 2>/dev/null || true
-       |  rm -f /etc/systemd/system/orphera-$$u.service
-       |  if command -v podman >/dev/null 2>&1; then podman rm -f $$u 2>/dev/null || true; fi
-       |done
-       |systemctl daemon-reload
-       |echo "manila containers and units removed"""".stripMargin
-
   // /etc/kolla/manila is where the cluster playbook kept manila.conf and the Ceph client files; it is listed
   // so that a node set up by the playbook is cleaned too.
   private val dirs = List(
@@ -171,13 +158,8 @@ object manila_teardown extends OrpheraApply:
       // (none is made), then the directory removed if it is empty.
       val unmounted = absentMount(mountDir)
       val testDir = absentDirectory(mountDir).after(unmounted)
-      val stopped = command(
-        "stop and remove the manila containers and units",
-        stopScript,
-        onlyIf = anyUnit,
-        timeout = 240
-      ).after(unregistered, testDir)
+      val stopped = absentContainerUnits(units.map(u => s"orphera-$u" -> u)).map(_.after(unregistered, testDir))
       // Typed removal, no script: each directory with its contents, then the helper.
       val cleaned = (dirs.map(absentDirectory(_, recursive = true)) :+
-        absentFile(helper)).map(_.after(stopped))
-      List(unregistered, unmounted, testDir, stopped) ++ cleaned
+        absentFile(helper)).map(_.after(stopped*))
+      List(unregistered, unmounted, testDir) ++ stopped ++ cleaned

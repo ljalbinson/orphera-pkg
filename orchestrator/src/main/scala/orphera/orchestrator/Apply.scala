@@ -536,6 +536,40 @@ object Resources:
   ): ApplyResource =
     Command(label, run, onlyIf, unless, creates, onChangeOnly, timeout)
 
+  /** Services gone from the node, as a description. Each pair is a systemd unit (its name without `.service`)
+    * and the container it runs. The unit is stopped and disabled (nothing happens when it does not exist),
+    * its file under /etc/systemd/system is removed, and the container is removed with `podman rm -f` when
+    * podman has it; systemd reloads its units once, when a file went. The resources are returned in the order
+    * they run, and what must follow the removal is made `.after` all of them.
+    */
+  def absentContainerUnits(units: List[(String, String)]): List[ApplyResource] =
+    require(units.nonEmpty, "absentContainerUnits needs at least one unit")
+    require(
+      units.forall((u, c) =>
+        u.nonEmpty && c.nonEmpty && !u.exists(ch => ch.isWhitespace || ch == '/') && !c.exists(_.isWhitespace)
+      ),
+      s"absentContainerUnits: a unit or container name with a space or a slash in $units"
+    )
+    val reload = command(
+      "reload systemd after the unit files were removed",
+      "systemctl daemon-reload",
+      onChangeOnly = true
+    )
+    val each = units.flatMap { (unit, container) =>
+      val stopped = service(unit, Some(false), Some(false))
+      val file = absentFile(s"/etc/systemd/system/$unit.service")
+        .after(stopped)
+        .notifies(reload)
+      val name = Apply.quote(container)
+      val gone = command(
+        s"remove the $container container",
+        s"podman rm -f $name",
+        onlyIf = s"command -v podman >/dev/null 2>&1 && podman container exists $name"
+      ).after(stopped)
+      List(stopped, file, gone)
+    }
+    each :+ reload
+
   /** Has the container images on the node, as a description: every reference in `images` is pulled with
     * `podman pull` (three tries, with a pause, through `kolla.Pull`) unless the node already has it, so a run
     * with all of them present changes nothing. `hint` says where to look if a reference is wrong, and appears

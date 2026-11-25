@@ -33,19 +33,6 @@ object telemetry_teardown extends OrpheraApply:
     List(dbNode, rabbitNode, promNode) ++ computeNodes :+ node
 
   // ---- the containers (tst24, and the compute nodes) ----
-  private def anyUnit(units: List[String]): String =
-    s"""for u in ${units.mkString(
-        " "
-      )}; do if [ -f /etc/systemd/system/orphera-$$u.service ] || systemctl is-active --quiet orphera-$$u || systemctl is-enabled --quiet orphera-$$u; then exit 0; fi; done; exit 1"""
-  private def stopScript(units: List[String]): String =
-    s"""for u in ${units.mkString(" ")}; do
-       |  systemctl disable --now orphera-$$u 2>/dev/null || true
-       |  rm -f /etc/systemd/system/orphera-$$u.service
-       |  if command -v podman >/dev/null 2>&1; then podman rm -f $$u 2>/dev/null || true; fi
-       |done
-       |systemctl daemon-reload
-       |echo "telemetry containers and units removed"""".stripMargin
-
   // /etc/kolla/telemetry is where the cluster playbook kept its staging copies; it is listed so that a node set
   // up by the playbook is cleaned too.
   private def dirs(units: List[String]): List[String] =
@@ -126,18 +113,14 @@ object telemetry_teardown extends OrpheraApply:
         )
       )
     else if computeNodes.contains(target.name) then
-      val stopped = command(
-        "stop and remove the ceilometer-compute container and unit",
-        stopScript(computeUnits),
-        onlyIf = anyUnit(computeUnits),
-        timeout = 240
-      )
+      val stopped =
+        absentContainerUnits(computeUnits.map(u => s"orphera-$u" -> u))
       // Typed removal, no script.
       val cleaned =
         dirs(computeUnits).map(
-          absentDirectory(_, recursive = true).after(stopped)
+          absentDirectory(_, recursive = true).after(stopped*)
         )
-      List(stopped) ++ cleaned
+      stopped ++ cleaned
     else
       val unregistered = command(
         "remove Aodh, Ceilometer and the Prometheus entry from Keystone",
@@ -145,14 +128,11 @@ object telemetry_teardown extends OrpheraApply:
         onlyIf = hasHelper,
         timeout = 120
       )
-      val stopped = command(
-        "stop and remove the telemetry containers and units",
-        stopScript(nodeUnits),
-        onlyIf = anyUnit(nodeUnits),
-        timeout = 240
-      ).after(unregistered)
+      val stopped =
+        absentContainerUnits(nodeUnits.map(u => s"orphera-$u" -> u))
+          .map(_.after(unregistered))
       // Typed removal, no script: each directory with its contents, then the helper.
       val cleaned =
         (dirs(nodeUnits).map(absentDirectory(_, recursive = true)) :+
-          absentFile(helper)).map(_.after(stopped))
-      List(unregistered, stopped) ++ cleaned
+          absentFile(helper)).map(_.after(stopped*))
+      List(unregistered) ++ stopped ++ cleaned

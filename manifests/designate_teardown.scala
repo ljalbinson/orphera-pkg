@@ -46,19 +46,6 @@ object designate_teardown extends OrpheraApply:
   private val unregisterScript =
     s"""$helper unregister || echo "keystone cleanup failed (continuing)""""
 
-  private val unitList = units.mkString(" ")
-  // True when ANY of the units has a unit file, or is active or enabled.
-  private val anyUnit =
-    s"""for u in $unitList; do if [ -f /etc/systemd/system/orphera-$$u.service ] || systemctl is-active --quiet orphera-$$u || systemctl is-enabled --quiet orphera-$$u; then exit 0; fi; done; exit 1"""
-  private val stopScript =
-    s"""for u in $unitList; do
-       |  systemctl disable --now orphera-$$u 2>/dev/null || true
-       |  rm -f /etc/systemd/system/orphera-$$u.service
-       |  if command -v podman >/dev/null 2>&1; then podman rm -f $$u 2>/dev/null || true; fi
-       |done
-       |systemctl daemon-reload
-       |echo "designate containers and units removed"""".stripMargin
-
   // /etc/kolla/designate is where the cluster playbook kept designate.conf, pools.yaml, named.conf and the
   // rndc key; it is listed so that a node set up by the playbook is cleaned too.
   private val dirs = List(
@@ -120,13 +107,8 @@ object designate_teardown extends OrpheraApply:
         onlyIf = registeredInKeystone,
         timeout = 120
       )
-      val stopped = command(
-        "stop and remove the designate containers and units",
-        stopScript,
-        onlyIf = anyUnit,
-        timeout = 240
-      ).after(unregistered)
+      val stopped = absentContainerUnits(units.map(u => s"orphera-$u" -> u)).map(_.after(unregistered))
       // Typed removal, no script: each directory with its contents, then the helper.
       val cleaned = (dirs.map(absentDirectory(_, recursive = true)) :+
-        absentFile(helper)).map(_.after(stopped))
-      List(unregistered, stopped) ++ cleaned
+        absentFile(helper)).map(_.after(stopped*))
+      List(unregistered) ++ stopped ++ cleaned

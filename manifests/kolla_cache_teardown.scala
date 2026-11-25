@@ -19,23 +19,9 @@ object kolla_cache_teardown extends OrpheraApply:
 
   override def nodes: List[String] = List(node)
 
-  private val unitExists =
-    """[ -f /etc/systemd/system/orphera-kolla-cache.service ] || systemctl is-active --quiet orphera-kolla-cache || systemctl is-enabled --quiet orphera-kolla-cache || { command -v podman >/dev/null 2>&1 && podman container exists kolla-cache; }"""
-  private val stopScript =
-    """systemctl disable --now orphera-kolla-cache 2>/dev/null || true
-      |rm -f /etc/systemd/system/orphera-kolla-cache.service
-      |systemctl daemon-reload
-      |if command -v podman >/dev/null 2>&1; then podman rm -f kolla-cache 2>/dev/null || true; fi
-      |echo "kolla cache container and unit removed"""".stripMargin
-
   def describe(target: Node): List[ApplyResource] =
-    val stopped = command(
-      "stop and remove the Kolla cache container and unit",
-      stopScript,
-      onlyIf = unitExists,
-      timeout = 120
-    )
+    val stopped = absentContainerUnits(List("orphera-kolla-cache" -> "kolla-cache"))
     val cleaned =
       absentDirectory("/var/lib/orphera/kolla-cache", recursive = true)
-        .after(stopped)
-    List(stopped, cleaned)
+        .after(stopped*)
+    stopped ++ List(cleaned)

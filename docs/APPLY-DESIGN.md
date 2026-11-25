@@ -130,6 +130,8 @@ time is up. Nothing is changed on the node. The generated shell is run against a
 
 `pullImages(label, images, hint, timeout)` does the same for container images: the references to have on the node, a hint for where to look when one is wrong, and the time to allow. The guard is `podman image exists` for each reference; the run pulls only the missing ones, with the retry in `kolla.Pull`.
 
+`absentContainerUnits(List(unit -> container))` is the removal of services that run in containers: stop and disable each unit, remove its file, remove the container if podman has it, and reload systemd once if a file went. It returns the resources in order; what must follow takes them all with `.after(stopped*)`.
+
 Files with secret content (`Secret` values) never show their content: the diff line says
 `content (secret: not shown)`.
 

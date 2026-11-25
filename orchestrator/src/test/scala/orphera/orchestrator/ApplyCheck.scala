@@ -2415,6 +2415,39 @@ object ApplyCheck:
     val out = new String(proc.getInputStream.readAllBytes(), StandardCharsets.UTF_8)
     (proc.waitFor(), out.trim)
 
+  private def absentContainerUnitsChecks(): Unit =
+    val rs = absentContainerUnits(List("orphera-a" -> "a", "orphera-b" -> "b"))
+    check("absentContainerUnits: three resources a unit and a reload", rs.size == 7, rs.map(_.id).toString)
+    check("absentContainerUnits: the description is valid", ApplyPlan("gone", rs).isRight, ApplyPlan("gone", rs).toString)
+    check(
+      "absentContainerUnits: the units are stopped and disabled",
+      rs.contains(service("orphera-a", Some(false), Some(false))) &&
+        rs.contains(service("orphera-b", Some(false), Some(false)))
+    )
+    check(
+      "absentContainerUnits: the unit files go",
+      rs.exists(_.id == "file[/etc/systemd/system/orphera-a.service]") &&
+        rs.exists(_.id == "file[/etc/systemd/system/orphera-b.service]")
+    )
+    val removal = rs.collectFirst { case c: ApplyResource.Command if c.label == "remove the a container" => c }
+    check(
+      "absentContainerUnits: a container is removed only when podman has it",
+      removal.exists(c => c.run == "podman rm -f 'a'" && c.onlyIf.contains("podman container exists 'a'")),
+      removal.toString
+    )
+    check(
+      "absentContainerUnits: systemd reloads once, when notified",
+      rs.collect { case c: ApplyResource.Command if c.onChangeOnly => c }.size == 1
+    )
+    check(
+      "absentContainerUnits: no units is refused",
+      scala.util.Try(absentContainerUnits(Nil)).isFailure
+    )
+    check(
+      "absentContainerUnits: a space in a name is refused",
+      scala.util.Try(absentContainerUnits(List("a b" -> "c"))).isFailure
+    )
+
   private def pullImagesChecks(): Unit =
     val dir = java.nio.file.Files.createTempDirectory("pullimages")
     val bin = dir.resolve("bin")
@@ -2574,6 +2607,7 @@ object ApplyCheck:
     owedChecks()
     waitForChecks()
     pullImagesChecks()
+    absentContainerUnitsChecks()
     kindChecks()
     yamlChecks()
     newKindChecks()
