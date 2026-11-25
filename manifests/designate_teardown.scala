@@ -41,10 +41,6 @@ object designate_teardown extends OrpheraApply:
   override def nodes: List[String] = List(dbNode, rabbitNode, node)
 
   // ---- tst16 ----
-  private val registeredInKeystone =
-    s"[ -x $helper ] && $helper registered >/dev/null 2>&1"
-  private val unregisterScript =
-    s"""$helper unregister || echo "keystone cleanup failed (continuing)""""
 
   // /etc/kolla/designate is where the cluster playbook kept designate.conf, pools.yaml, named.conf and the
   // rndc key; it is listed so that a node set up by the playbook is cleaned too.
@@ -79,14 +75,9 @@ object designate_teardown extends OrpheraApply:
         )
       )
     else
-      val unregistered = command(
-        "remove Designate from Keystone",
-        unregisterScript,
-        onlyIf = registeredInKeystone,
-        timeout = 120
-      )
+      val unregistered = absentKeystoneEntries("remove Designate from Keystone", "designate")
       val stopped = absentContainerUnits(units.map(u => s"orphera-$u" -> u)).map(_.after(unregistered))
       // Typed removal, no script: each directory with its contents, then the helper.
       val cleaned = (dirs.map(absentDirectory(_, recursive = true)) :+
-        absentFile(helper)).map(_.after(stopped*))
+        absentFile(helper) :+ absentFile(keystoneHelperPath("designate"))).map(_.after(stopped*))
       List(unregistered) ++ stopped ++ cleaned

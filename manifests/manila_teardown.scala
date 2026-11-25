@@ -45,10 +45,6 @@ object manila_teardown extends OrpheraApply:
   override def nodes: List[String] = List(dbNode, rabbitNode, cephNode, node)
 
   // ---- tst22 ----
-  // The helper removes the Keystone entries; it is there until the last step removes it.
-  private val hasHelper = s"[ -x $helper ]"
-  private val unregisterScript =
-    s"""$helper unregister || echo "keystone cleanup failed (continuing)""""
 
   // /etc/kolla/manila is where the cluster playbook kept manila.conf and the Ceph client files; it is listed
   // so that a node set up by the playbook is cleaned too.
@@ -127,12 +123,7 @@ object manila_teardown extends OrpheraApply:
         else Nil
       client :: purge
     else
-      val unregistered = command(
-        "remove Manila from Keystone",
-        unregisterScript,
-        onlyIf = hasHelper,
-        timeout = 120
-      )
+      val unregistered = absentKeystoneEntries("remove Manila from Keystone", "manila")
       // A test mount or its directory left by a failed share round trip: unmounted if mounted, no fstab entry
       // (none is made), then the directory removed if it is empty.
       val unmounted = absentMount(mountDir)
@@ -140,5 +131,5 @@ object manila_teardown extends OrpheraApply:
       val stopped = absentContainerUnits(units.map(u => s"orphera-$u" -> u)).map(_.after(unregistered, testDir))
       // Typed removal, no script: each directory with its contents, then the helper.
       val cleaned = (dirs.map(absentDirectory(_, recursive = true)) :+
-        absentFile(helper)).map(_.after(stopped*))
+        absentFile(helper) :+ absentFile(keystoneHelperPath("manila"))).map(_.after(stopped*))
       List(unregistered, unmounted, testDir) ++ stopped ++ cleaned

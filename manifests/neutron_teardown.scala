@@ -41,10 +41,6 @@ object neutron_teardown extends OrpheraApply:
   override def nodes: List[String] = List(dbNode, rabbitNode, node)
 
   // ---- tst19 ----
-  private val registeredInKeystone =
-    s"[ -x $helper ] && $helper registered >/dev/null 2>&1"
-  private val unregisterScript =
-    s"""$helper unregister || echo "keystone cleanup failed (continuing)""""
 
   private val bridgesExist =
     "command -v ovs-vsctl >/dev/null 2>&1 && { ovs-vsctl br-exists br-provider || ovs-vsctl br-exists br-int; }"
@@ -82,12 +78,7 @@ object neutron_teardown extends OrpheraApply:
         )
       )
     else
-      val unregistered = command(
-        "remove Neutron from Keystone",
-        unregisterScript,
-        onlyIf = registeredInKeystone,
-        timeout = 120
-      )
+      val unregistered = absentKeystoneEntries("remove Neutron from Keystone", "neutron")
       val stopped = absentContainerUnits(units.map(u => s"orphera-$u" -> u)).map(_.after(unregistered))
       val bridges = command(
         "delete the Open vSwitch bridges br-provider and br-int",
@@ -97,5 +88,5 @@ object neutron_teardown extends OrpheraApply:
       ).after(stopped*)
       // Typed removal, no script: each directory with its contents, then the helper.
       val cleaned = (dirs.map(absentDirectory(_, recursive = true)) :+
-        absentFile(helper)).map(_.after(stopped*))
+        absentFile(helper) :+ absentFile(keystoneHelperPath("neutron"))).map(_.after(stopped*))
       List(unregistered) ++ stopped ++ List(bridges) ++ cleaned

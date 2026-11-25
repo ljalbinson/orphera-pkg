@@ -54,8 +54,8 @@ import orphera.orchestrator.kolla.*
 //     it talks to central over RabbitMQ, and the worker and mdns start after it (they read the pool when
 //     they start). When pools.yaml changes later, the pool is loaded again and the worker and mdns are
 //     restarted.
-//   - Designate is registered in Keystone before the units start, skipped while the helper's `registered`
-//     check passes.
+//   - Designate is registered in Keystone before the units start, skipped while the
+//     registration check passes.
 //
 // Not done here, on purpose (later): Neutron's DNS integration and the notification sink, which
 // need changes to neutron_single_node.scala and nova_single_node.scala.
@@ -442,7 +442,7 @@ object designate_single_node extends OrpheraApply:
 
   // Standard-library Python, as in the other services. Plain string filled in with replace().
   // Subcommands:
-  //   register | registered | unregister | catalog | zone-list | zone-create <name> <email> | zone-wait <id> |
+  //   catalog | zone-list | zone-create <name> <email> | zone-wait <id> |
   //   record-create <zone-id> <name> <ipv4> | record-wait <zone-id> <id> | zone-delete <id> | zone-cycle
   // zone-cycle is the whole path: a zone and an A record made through the API, BIND9 asked for them on
   // port 53, then the zone deleted.
@@ -454,7 +454,6 @@ KS = 'https://@@KS@@:5000/v3'
 DNS = '@@DNS@@'
 NS_IP = '@@NSIP@@'
 ADMIN_PW = '@@ADMINPW@@'
-DESIGNATE_PW = '@@DESIGNATEPW@@'
 CTX = ssl.create_default_context(cafile='@@CA@@')
 
 
@@ -492,78 +491,6 @@ def get_token(user, password, project):
 
 def admin_token():
     return get_token('admin', ADMIN_PW, 'admin')[0]
-
-
-def find(token, path, key):
-    status, parsed, _ = call('GET', KS + path, token=token)
-    items = parsed.get(key, [])
-    return items[0] if items else None
-
-
-def register():
-    token, _ = get_token('admin', ADMIN_PW, 'admin')
-    project = find(token, '/projects?name=service', 'projects')
-    if project is None:
-        s, p, _ = call('POST', KS + '/projects', {'project': {'name': 'service', 'domain_id': 'default'}}, token)
-        if s != 201:
-            die('creating project service failed: HTTP %s %s' % (s, p))
-        project = p['project']
-    user = find(token, '/users?name=designate', 'users')
-    if user is None:
-        s, p, _ = call('POST', KS + '/users', {'user': {'name': 'designate', 'domain_id': 'default', 'password': DESIGNATE_PW}}, token)
-        if s != 201:
-            die('creating user designate failed: HTTP %s %s' % (s, p))
-        user = p['user']
-    else:
-        call('PATCH', KS + '/users/' + user['id'], {'user': {'password': DESIGNATE_PW}}, token)
-    role = find(token, '/roles?name=admin', 'roles')
-    if role is None:
-        die('role admin not found')
-    s, p, _ = call('PUT', KS + '/projects/%s/users/%s/roles/%s' % (project['id'], user['id'], role['id']), None, token)
-    if s not in (200, 204):
-        die('granting admin to designate failed: HTTP %s %s' % (s, p))
-    service = find(token, '/services?type=dns', 'services')
-    if service is None:
-        s, p, _ = call('POST', KS + '/services', {'service': {'name': 'designate', 'type': 'dns'}}, token)
-        if s != 201:
-            die('creating service designate failed: HTTP %s %s' % (s, p))
-        service = p['service']
-    for iface in ('public', 'internal', 'admin'):
-        ep = find(token, '/endpoints?service_id=%s&interface=%s' % (service['id'], iface), 'endpoints')
-        if ep is None:
-            s, p, _ = call('POST', KS + '/endpoints', {'endpoint': {'interface': iface, 'url': DNS, 'service_id': service['id'], 'region_id': 'RegionOne'}}, token)
-            if s != 201:
-                die('creating %s endpoint failed: HTTP %s %s' % (iface, s, p))
-        elif ep['url'] != DNS:
-            call('PATCH', KS + '/endpoints/' + ep['id'], {'endpoint': {'url': DNS}}, token)
-    print('registered designate in keystone (project service, user designate, service type dns, 3 endpoints)')
-
-
-def registered():
-    # Exit 0 only when everything register() makes is in place: the designate user can get a token in project
-    # service (so it holds a role there), and the dns service has its three endpoints at the right URL.
-    # Makes no change.
-    get_token('designate', DESIGNATE_PW, 'service')
-    token, _ = get_token('admin', ADMIN_PW, 'admin')
-    service = find(token, '/services?type=dns', 'services')
-    if service is None:
-        die('no service of type dns')
-    for iface in ('public', 'internal', 'admin'):
-        ep = find(token, '/endpoints?service_id=%s&interface=%s' % (service['id'], iface), 'endpoints')
-        if ep is None or ep['url'] != DNS:
-            die('endpoint %s of dns missing or wrong' % iface)
-    print('designate is registered in keystone')
-
-
-def unregister():
-    token, _ = get_token('admin', ADMIN_PW, 'admin')
-    service = find(token, '/services?type=dns', 'services')
-    if service is not None:
-        call('DELETE', KS + '/services/' + service['id'], None, token)
-    user = find(token, '/users?name=designate', 'users')
-    if user is not None:
-        call('DELETE', KS + '/users/' + user['id'], None, token)
-    print('removed designate from keystone (service dns, its endpoints, user designate)')
 
 
 def catalog():
@@ -676,13 +603,7 @@ def zone_cycle():
 if __name__ == '__main__':
     cmd = sys.argv[1] if len(sys.argv) > 1 else ''
     args = sys.argv[2:]
-    if cmd == 'register':
-        register()
-    elif cmd == 'registered':
-        registered()
-    elif cmd == 'unregister':
-        unregister()
-    elif cmd == 'catalog':
+    if cmd == 'catalog':
         catalog()
     elif cmd == 'zone-list':
         zone_list()
@@ -699,7 +620,7 @@ if __name__ == '__main__':
     elif cmd == 'zone-cycle':
         zone_cycle()
     else:
-        die('usage: orphera-designate-api register | registered | unregister | catalog | zone-list | zone-create <name> <email> | zone-wait <id> | record-create <zone-id> <name> <ipv4> | record-wait <zone-id> <id> | zone-delete <id> | zone-cycle')
+        die('usage: orphera-designate-api catalog | zone-list | zone-create <name> <email> | zone-wait <id> | record-create <zone-id> <name> <ipv4> | record-wait <zone-id> <id> | zone-delete <id> | zone-cycle')
 """
 
   private val helper =
@@ -708,7 +629,6 @@ if __name__ == '__main__':
       .replace("@@DNS@@", s"http://$fqdn:$apiPort")
       .replace("@@NSIP@@", nodeIp)
       .replace("@@ADMINPW@@", adminPassword.reveal)
-      .replace("@@DESIGNATEPW@@", designatePassword.reveal)
       .replace("@@CA@@", caCert)
   private val helperPath = "/usr/local/sbin/orphera-designate-api"
 
@@ -895,18 +815,22 @@ if __name__ == '__main__':
 
     val helperFile = secretFile(
       helperPath,
-      Secret(helper), // it holds the admin and designate passwords
+      Secret(helper), // it holds the admin password
       mode = "0700",
       owner = "root",
       group = "root"
     )
     // Registration comes before the services start.
-    val registered = command(
+    val (keystoneHelper, ensured) = keystoneEntries(
       "register Designate in Keystone",
-      s"$helperPath register",
-      unless = s"$helperPath registered >/dev/null 2>&1",
-      timeout = 120
-    ).after(helperFile, ca)
+      "designate",
+      designatePassword,
+      List(KeystoneService("designate", "dns", s"http://$fqdn:$apiPort")),
+      ksUrl,
+      adminPassword,
+      caCert
+    )
+    val registered = ensured.after(ca)
 
     def start(name: String, more: ApplyResource*): ApplyResource =
       val s = byName(name)
@@ -967,5 +891,5 @@ if __name__ == '__main__':
       logDirectory,
       stateDirectory
     ) ++ bindResources ++ svcs.flatMap(_.resources) ++
-      List(dbSync, helperFile, registered, pool) ++ running ++
+      List(dbSync, helperFile, keystoneHelper, registered, pool) ++ running ++
       List(apiAnswers, bindAnswers, authenticating)
