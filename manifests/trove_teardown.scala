@@ -3,8 +3,8 @@
 import orphera.orchestrator.*
 
 // Undoes trove_database.scala, trove_rabbitmq.scala and trove_single_node.scala, as a declarative description
-// (OrpheraApply, docs/APPLY-DESIGN.md): on tst25 removes Trove, its guest security group and keypair, and the
-// service from Keystone through the helper if it is still there, then the three containers, units, config,
+// (OrpheraApply, docs/APPLY-DESIGN.md): on tst25 removes Trove's guest security group and keypair through the
+// helper if it is still there, then Trove (the service and user) from Keystone, then the three containers, units, config,
 // state and helper; on tst10 removes the `trove` vhost and user from RabbitMQ (the broker itself and the other
 // services' use of it are untouched); on tst3 drops the trove database and user. podman, the images and
 // project `service` stay. Keep `node` in step with trove_single_node.
@@ -32,11 +32,11 @@ object trove_teardown extends OrpheraApply:
   override def nodes: List[String] = List(dbNode, rabbitNode, node)
 
   // ---- tst25 ----
-  // The helper removes the Keystone entries and the guest security group and keypair; it is there until the
-  // last step removes it.
+  // The helper removes the guest security group and keypair (as the trove user, so before the Keystone entries
+  // go); it is there until the last step removes it.
   private val hasHelper = s"[ -x $helper ]"
-  private val unregisterScript =
-    s"""$helper unregister || echo "keystone cleanup failed (continuing)""""
+  private val cleanupScript =
+    s"""$helper cleanup-mgmt || echo "guest resource cleanup failed (continuing)""""
 
   private val dirs = List(
     "/etc/kolla/trove",
@@ -66,14 +66,15 @@ object trove_teardown extends OrpheraApply:
         )
       )
     else
-      val unregistered = command(
-        "remove Trove, its guest security group and keypair from Keystone, Neutron and Nova",
-        unregisterScript,
+      val guestCleaned = command(
+        "remove the guest security group and keypair from Neutron and Nova",
+        cleanupScript,
         onlyIf = hasHelper,
         timeout = 120
       )
+      val unregistered = absentKeystoneEntries("remove Trove from Keystone", "trove").after(guestCleaned)
       val stopped = absentContainerUnits(units.map(u => s"orphera-$u" -> u)).map(_.after(unregistered))
       // Typed removal, no script: each directory with its contents, then the helper.
-      val cleaned = (dirs.map(absentDirectory(_, recursive = true)) :+
-        absentFile(helper)).map(_.after(stopped*))
-      List(unregistered) ++ stopped ++ cleaned
+      val cleaned = (dirs.map(absentDirectory(_, recursive = true)) ++
+        List(absentFile(helper), absentFile(keystoneHelperPath("trove")))).map(_.after(stopped*))
+      List(guestCleaned, unregistered) ++ stopped ++ cleaned

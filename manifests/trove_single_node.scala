@@ -32,7 +32,7 @@ import orphera.orchestrator.kolla.*
 //     private key is kept in /var/lib/orphera/trove/trove-mgmt.pem on tst25 for troubleshooting.
 //   - `default_neutron_networks` is the same network, so a database can be created without `--nic`.
 //
-// What it adds to Keystone (done by the helper's `register`, repeatable): the user `trove` in project `service`
+// What it adds to Keystone (done by `keystoneEntries`, repeatable): the user `trove` in project `service`
 // with the admin role; the service `trove` of type `database` with the endpoints
 // http://<fqdn>:8779/v1.0/$(tenant_id)s.
 //
@@ -55,8 +55,7 @@ import orphera.orchestrator.kolla.*
 //     the name resolves to now, and the security group and keypair it names exist.
 //   - `trove-manage db_sync` is skipped while its stamp matches and the `datastores` table exists (a query as
 //     the trove user, through the VIP).
-//   - Trove is registered in Keystone before the units start, skipped while the helper's `registered`
-//     check passes.
+//   - Trove is registered in Keystone before the units start, skipped while its check passes.
 //
 // Facts this was written from, to check if a run fails: the Kolla commands are `trove-api`,
 // `trove-taskmanager` and `trove-conductor` with --config-file /etc/trove/trove.conf, user `trove`; the options
@@ -308,7 +307,7 @@ object trove_single_node extends OrpheraApply:
 
   // Standard-library Python, as in the other service descriptions. Plain string filled in with replace().
   // Subcommands:
-  //   register | registered | unregister | mgmt-resources | mgmt-ready | check | catalog
+  //   cleanup-mgmt | mgmt-resources | mgmt-ready | check | catalog
   // mgmt-resources finds the management network by name and makes the security group and the keypair of the
   // guests in project service; it writes the result to /var/lib/orphera/trove/mgmt.json.
   // mgmt-ready is the check for it (no change). check calls the Trove API with an admin token and looks at
@@ -358,22 +357,6 @@ def get_token(user, password, project):
     return headers['X-Subject-Token'], parsed
 
 
-def find(token, path, key):
-    status, parsed, _ = call('GET', KS + path, token=token)
-    items = parsed.get(key, [])
-    return items[0] if items else None
-
-
-def ensure(token, what, path, key, body, create_key):
-    found = find(token, path, key)
-    if found is not None:
-        return found
-    s, p, _ = call('POST', KS + '/' + what, body, token)
-    if s != 201:
-        die('creating %s failed: HTTP %s %s' % (what, s, p))
-    return p[create_key]
-
-
 def endpoint(token_body, stype):
     for c in token_body['token']['catalog']:
         if c['type'] == stype:
@@ -381,58 +364,6 @@ def endpoint(token_body, stype):
                 if e['interface'] == 'public':
                     return e['url'].rstrip('/')
     die('no public endpoint of service type %s in the Keystone catalog' % stype)
-
-
-def ensure_user(token, project, admin_role, name, password):
-    user = find(token, '/users?name=' + name, 'users')
-    if user is None:
-        s, p, _ = call('POST', KS + '/users', {'user': {'name': name, 'domain_id': 'default', 'password': password}}, token)
-        if s != 201:
-            die('creating user %s failed: HTTP %s %s' % (name, s, p))
-        user = p['user']
-    else:
-        call('PATCH', KS + '/users/' + user['id'], {'user': {'password': password}}, token)
-    s, p, _ = call('PUT', KS + '/projects/%s/users/%s/roles/%s' % (project['id'], user['id'], admin_role['id']), None, token)
-    if s not in (200, 204):
-        die('granting admin to %s failed: HTTP %s %s' % (name, s, p))
-
-
-def ensure_endpoints(token, stype, sname, url):
-    service = ensure(token, 'services', '/services?type=' + stype, 'services', {'service': {'name': sname, 'type': stype}}, 'service')
-    for iface in ('public', 'internal', 'admin'):
-        ep = find(token, '/endpoints?service_id=%s&interface=%s' % (service['id'], iface), 'endpoints')
-        if ep is None:
-            s, p, _ = call('POST', KS + '/endpoints', {'endpoint': {'interface': iface, 'url': url, 'service_id': service['id'], 'region_id': 'RegionOne'}}, token)
-            if s != 201:
-                die('creating %s endpoint of %s failed: HTTP %s %s' % (iface, stype, s, p))
-        elif ep['url'] != url:
-            call('PATCH', KS + '/endpoints/' + ep['id'], {'endpoint': {'url': url}}, token)
-
-
-def register():
-    token, _ = get_token('admin', ADMIN_PW, 'admin')
-    project = ensure(token, 'projects', '/projects?name=service', 'projects', {'project': {'name': 'service', 'domain_id': 'default'}}, 'project')
-    admin_role = find(token, '/roles?name=admin', 'roles')
-    if admin_role is None:
-        die('role admin not found')
-    ensure_user(token, project, admin_role, 'trove', TROVE_PW)
-    ensure_endpoints(token, 'database', 'trove', TROVE)
-    print('registered in keystone (user trove, service type database, 3 endpoints)')
-
-
-def registered():
-    # Exit 0 only when everything register() makes is in place: the trove user can get a token in project
-    # service, and the database service has its three endpoints at the right URL. Makes no change.
-    get_token('trove', TROVE_PW, 'service')
-    token, _ = get_token('admin', ADMIN_PW, 'admin')
-    service = find(token, '/services?type=database', 'services')
-    if service is None:
-        die('no service of type database')
-    for iface in ('public', 'internal', 'admin'):
-        ep = find(token, '/endpoints?service_id=%s&interface=%s' % (service['id'], iface), 'endpoints')
-        if ep is None or ep['url'] != TROVE:
-            die('endpoint %s of database missing or wrong' % iface)
-    print('trove is registered in keystone')
 
 
 def verify_guest(st, token, body):
@@ -508,9 +439,11 @@ def mgmt_resources():
 
 
 def cleanup_mgmt():
+    # Removes the guest security group and keypair (as the trove user). Nothing to do when that user is gone.
     try:
         token, body = get_token('trove', TROVE_PW, 'service')
     except SystemExit:
+        print('trove cannot log in: no guest security group or keypair to remove')
         return
     project_id = body['token']['project']['id']
     neutron = endpoint(body, 'network')
@@ -519,18 +452,7 @@ def cleanup_mgmt():
     for g in (p.get('security_groups', []) if s == 200 else []):
         call('DELETE', neutron + '/v2.0/security-groups/' + g['id'], None, token)
     call('DELETE', nova + '/os-keypairs/trove-mgmt', None, token)
-
-
-def unregister():
-    cleanup_mgmt()
-    token, _ = get_token('admin', ADMIN_PW, 'admin')
-    service = find(token, '/services?type=database', 'services')
-    if service is not None:
-        call('DELETE', KS + '/services/' + service['id'], None, token)
-    user = find(token, '/users?name=trove', 'users')
-    if user is not None:
-        call('DELETE', KS + '/users/' + user['id'], None, token)
-    print('removed trove, its security group and keypair from keystone, neutron and nova')
+    print('removed the guest security group trove-mgmt and keypair trove-mgmt')
 
 
 def catalog():
@@ -557,14 +479,10 @@ def check():
 
 if __name__ == '__main__':
     cmd = sys.argv[1] if len(sys.argv) > 1 else ''
-    if cmd == 'register':
-        register()
-    elif cmd == 'registered':
-        registered()
-    elif cmd == 'mgmt-ready':
+    if cmd == 'mgmt-ready':
         mgmt_ready()
-    elif cmd == 'unregister':
-        unregister()
+    elif cmd == 'cleanup-mgmt':
+        cleanup_mgmt()
     elif cmd == 'mgmt-resources':
         mgmt_resources()
     elif cmd == 'check':
@@ -572,7 +490,7 @@ if __name__ == '__main__':
     elif cmd == 'catalog':
         catalog()
     else:
-        die('usage: orphera-trove-api register | registered | unregister | mgmt-resources | mgmt-ready | check | catalog')
+        die('usage: orphera-trove-api cleanup-mgmt | mgmt-resources | mgmt-ready | check | catalog')
 """
 
   private val helper =
@@ -638,12 +556,16 @@ if __name__ == '__main__':
       group = "root"
     )
     // Registration comes before the services start.
-    val registered = command(
+    val (keystoneHelper, ensured) = keystoneEntries(
       "register Trove in Keystone",
-      s"$helperPath register",
-      unless = s"$helperPath registered >/dev/null 2>&1",
-      timeout = 120
-    ).after(helperFile, ca)
+      "trove",
+      trovePassword,
+      List(KeystoneService("trove", "database", s"$troveUrl/v1.0/$$(tenant_id)s")),
+      ksUrl,
+      adminPassword,
+      caCert
+    )
+    val registered = ensured.after(ca)
     val mgmt = command(
       "make the guest security group and keypair, find the management network",
       s"$helperPath mgmt-resources",
@@ -749,6 +671,7 @@ if __name__ == '__main__':
       troveTmp,
       srcDirectory,
       helperFile,
+      keystoneHelper,
       registered,
       mgmt,
       tmplFile

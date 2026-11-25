@@ -6,8 +6,8 @@ import orphera.orchestrator.*
 // a declarative description (OrpheraApply, docs/APPLY-DESIGN.md): on tst20
 // removes Heat from Keystone (the services `orchestration` and `cloudformation`,
 // their endpoints, user `heat`, and the stack user domain `heat` with every user
-// and project Heat made in it) through the helper if it is still there, then the
-// three containers, units, config, state, helper and Keystone CA copy; on tst10
+// and project Heat made in it) through the Keystone helper if it is still there, then the
+// three containers, units, config, state, helpers and Keystone CA copy; on tst10
 // removes the `heat` vhost and user from RabbitMQ (the broker itself and the
 // other services' use of it are untouched); on tst3 drops the heat database and
 // user. The roles `heat_stack_owner` and `heat_stack_user` stay, as do podman,
@@ -36,11 +36,6 @@ object heat_teardown extends OrpheraApply:
   override def nodes: List[String] = List(dbNode, rabbitNode, node)
 
   // ---- tst20 ----
-  private val registeredInKeystone =
-    s"[ -x $helper ] && $helper registered >/dev/null 2>&1"
-  private val unregisterScript =
-    s"""$helper unregister || echo "keystone cleanup failed (continuing)""""
-
   private val dirs = List(
     "/etc/kolla/heat",
     "/etc/kolla/heat-engine",
@@ -69,14 +64,9 @@ object heat_teardown extends OrpheraApply:
         )
       )
     else
-      val unregistered = command(
-        "remove Heat from Keystone",
-        unregisterScript,
-        onlyIf = registeredInKeystone,
-        timeout = 120
-      )
+      val unregistered = absentKeystoneEntries("remove Heat from Keystone", "heat")
       val stopped = absentContainerUnits(units.map(u => s"orphera-$u" -> u)).map(_.after(unregistered))
       // Typed removal, no script: each directory with its contents, then the helper.
-      val cleaned = (dirs.map(absentDirectory(_, recursive = true)) :+
-        absentFile(helper)).map(_.after(stopped*))
+      val cleaned = (dirs.map(absentDirectory(_, recursive = true)) ++
+        List(absentFile(helper), absentFile(keystoneHelperPath("heat")))).map(_.after(stopped*))
       List(unregistered) ++ stopped ++ cleaned

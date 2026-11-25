@@ -46,10 +46,10 @@ import orphera.orchestrator.kolla.*
 //     octavia/ca-passphrase. The keys and certificates are made once and kept; they are made again only if a
 //     file is missing or the passphrase no longer opens the key (existing amphorae then stop working).
 //
-// What it adds to Keystone (the helper's `register`): user `octavia` in project `service` with the admin role;
+// What it adds to Keystone (`keystoneEntries`): user `octavia` in project `service` with the admin role;
 // the roles load-balancer_admin, _member, _observer, _global_observer and _quota_admin; the service `octavia`
 // of type `load-balancer` with the endpoint http://<fqdn>:9876. The password of an existing user is changed
-// only if a login with the stored one fails (a change revokes its tokens).
+// only when the registration's check fails (a change revokes its tokens).
 //
 // Prerequisites, not checked here:
 //   - Galera + VIP, Keystone, RabbitMQ (tst10, rabbitmq_single_node.scala) healthy
@@ -71,7 +71,7 @@ import orphera.orchestrator.kolla.*
 //     address and MAC on br-int, the unit is enabled and active, and the stamp of the script and unit matches.
 //   - `octavia-db-manage upgrade head` is skipped while its stamp matches and the `load_balancer` table
 //     exists (a query as the octavia user, through the VIP).
-//   - Octavia is registered in Keystone before the units start, skipped while the helper's `registered` passes.
+//   - Octavia is registered in Keystone before the units start, skipped while its check passes.
 //   - The amphora image is downloaded and uploaded in two steps (each prints a line every 20 seconds while it
 //     works), skipped while Glance has an active image with the tag `amphora`.
 //   - The load balancer test (an amphora is booted: several minutes) is made again only when its stamp changes
@@ -528,7 +528,6 @@ KS = 'https://@@KS@@:5000/v3'
 OCTAVIA = '@@OCTAVIA@@'
 NODE = '@@NODE@@'
 ADMIN_PW = '@@ADMINPW@@'
-OCTAVIA_PW = '@@OCTAVIAPW@@'
 CTX = ssl.create_default_context(cafile='@@CAFILE@@')
 STATE = '@@STATE@@'
 MGMT_NET = 'lb-mgmt-net'
@@ -541,7 +540,6 @@ FLAVOR_ID = '@@FLAVORID@@'
 FLAVOR_NAME = 'orphera.amphora'
 IMAGE_NAME = 'amphora-x64-haproxy-test'
 IMAGE_TAG = 'amphora'
-ROLES = ['load-balancer_admin', 'load-balancer_member', 'load-balancer_observer', 'load-balancer_global_observer', 'load-balancer_quota_admin']
 
 
 def call(method, url, body=None, token=None, timeout=60):
@@ -598,62 +596,6 @@ def find(token, path, key):
     status, parsed, _ = call('GET', KS + path, token=token)
     items = parsed.get(key, [])
     return items[0] if items else None
-
-
-def ensure(token, what, path, key, body, create_key):
-    found = find(token, path, key)
-    if found is not None:
-        return found
-    s, p, _ = call('POST', KS + '/' + what, body, token)
-    if s != 201:
-        die('creating %s failed: HTTP %s %s' % (what, s, p))
-    return p[create_key]
-
-
-def register():
-    token, _ = admin()
-    project = ensure(token, 'projects', '/projects?name=service', 'projects', {'project': {'name': 'service', 'domain_id': 'default'}}, 'project')
-    user = find(token, '/users?name=octavia', 'users')
-    if user is None:
-        s, p, _ = call('POST', KS + '/users', {'user': {'name': 'octavia', 'domain_id': 'default', 'password': OCTAVIA_PW}}, token)
-        if s != 201:
-            die('creating user octavia failed: HTTP %s %s' % (s, p))
-        user = p['user']
-    else:
-        # A password change revokes the user's tokens, so change it only if the stored one does not work.
-        body = {'auth': {'identity': {'methods': ['password'], 'password': {'user': {'name': 'octavia', 'domain': {'name': 'Default'}, 'password': OCTAVIA_PW}}}}}
-        s, _, _ = call('POST', KS + '/auth/tokens', body)
-        if s != 201:
-            call('PATCH', KS + '/users/' + user['id'], {'user': {'password': OCTAVIA_PW}}, token)
-    admin_role = find(token, '/roles?name=admin', 'roles')
-    if admin_role is None:
-        die('role admin not found')
-    s, p, _ = call('PUT', KS + '/projects/%s/users/%s/roles/%s' % (project['id'], user['id'], admin_role['id']), None, token)
-    if s not in (200, 204):
-        die('granting admin to octavia failed: HTTP %s %s' % (s, p))
-    for name in ROLES:
-        ensure(token, 'roles', '/roles?name=' + name, 'roles', {'role': {'name': name}}, 'role')
-    service = ensure(token, 'services', '/services?type=load-balancer', 'services', {'service': {'name': 'octavia', 'type': 'load-balancer'}}, 'service')
-    for iface in ('public', 'internal', 'admin'):
-        ep = find(token, '/endpoints?service_id=%s&interface=%s' % (service['id'], iface), 'endpoints')
-        if ep is None:
-            s, p, _ = call('POST', KS + '/endpoints', {'endpoint': {'interface': iface, 'url': OCTAVIA, 'service_id': service['id'], 'region_id': 'RegionOne'}}, token)
-            if s != 201:
-                die('creating %s endpoint failed: HTTP %s %s' % (iface, s, p))
-        elif ep['url'] != OCTAVIA:
-            call('PATCH', KS + '/endpoints/' + ep['id'], {'endpoint': {'url': OCTAVIA}}, token)
-    print('registered octavia in keystone (user octavia, service type load-balancer, 3 endpoints, %d roles)' % len(ROLES))
-
-
-def unregister():
-    token, _ = admin()
-    service = find(token, '/services?type=load-balancer', 'services')
-    if service is not None:
-        call('DELETE', KS + '/services/' + service['id'], None, token)
-    user = find(token, '/users?name=octavia', 'users')
-    if user is not None:
-        call('DELETE', KS + '/users/' + user['id'], None, token)
-    print('removed octavia from keystone (service load-balancer, its endpoints, user octavia)')
 
 
 def catalog():
@@ -994,38 +936,7 @@ def teardown():
     cl.c('DELETE', '/flavors/' + FLAVOR_ID)
     for i in amphora_images(cl):
         cl.g('DELETE', '/images/' + i['id'])
-    unregister()
-    print('removed the Octavia network, security groups, flavor, image and Keystone entries')
-
-
-def registered():
-    # Exit 0 only when everything register() makes is in place: the user octavia (able to log in with the stored
-    # password) with the admin role on project service, the five load-balancer roles, and the service of type
-    # load-balancer with its three endpoints. Makes no change.
-    token, _ = admin()
-    project = find(token, '/projects?name=service', 'projects')
-    user = find(token, '/users?name=octavia', 'users')
-    admin_role = find(token, '/roles?name=admin', 'roles')
-    if project is None or user is None or admin_role is None:
-        die('project service, user octavia or role admin is missing')
-    body = {'auth': {'identity': {'methods': ['password'], 'password': {'user': {'name': 'octavia', 'domain': {'name': 'Default'}, 'password': OCTAVIA_PW}}}}}
-    s, _, _ = call('POST', KS + '/auth/tokens', body)
-    if s != 201:
-        die('user octavia cannot log in with the stored password')
-    s, _, _ = call('GET', KS + '/projects/%s/users/%s/roles/%s' % (project['id'], user['id'], admin_role['id']), None, token)
-    if s != 204:
-        die('user octavia has no admin role on project service (HTTP %s)' % s)
-    for name in ROLES:
-        if find(token, '/roles?name=' + name, 'roles') is None:
-            die('role %s is missing' % name)
-    service = find(token, '/services?type=load-balancer', 'services')
-    if service is None:
-        die('service of type load-balancer is missing')
-    for iface in ('public', 'internal', 'admin'):
-        ep = find(token, '/endpoints?service_id=%s&interface=%s' % (service['id'], iface), 'endpoints')
-        if ep is None or ep['url'] != OCTAVIA:
-            die('the %s endpoint is missing or differs' % iface)
-    print('octavia is registered in keystone')
+    print('removed the Octavia network, security groups, flavor and image')
 
 
 def sg_ok(cl, pid, name, rules):
@@ -1089,13 +1000,7 @@ def hm_active():
 
 if __name__ == '__main__':
     cmd = sys.argv[1] if len(sys.argv) > 1 else ''
-    if cmd == 'register':
-        register()
-    elif cmd == 'registered':
-        registered()
-    elif cmd == 'unregister':
-        unregister()
-    elif cmd == 'catalog':
+    if cmd == 'catalog':
         catalog()
     elif cmd == 'image-present':
         image_present()
@@ -1116,7 +1021,7 @@ if __name__ == '__main__':
     elif cmd == 'teardown':
         teardown()
     else:
-        die('usage: orphera-octavia-api register | registered | unregister | catalog | image-present | image-upload FILE | plumbing | plumbing-ok | wait-hm | hm-active | providers | lb-cycle | teardown')
+        die('usage: orphera-octavia-api catalog | image-present | image-upload FILE | plumbing | plumbing-ok | wait-hm | hm-active | providers | lb-cycle | teardown')
 """
 
   private val helper =
@@ -1125,7 +1030,6 @@ if __name__ == '__main__':
       .replace("@@OCTAVIA@@", s"http://$fqdn:$apiPort")
       .replace("@@NODE@@", node)
       .replace("@@ADMINPW@@", adminPassword.reveal)
-      .replace("@@OCTAVIAPW@@", octaviaPassword.reveal)
       .replace("@@CAFILE@@", caCert)
       .replace("@@STATE@@", stateDir)
       .replace("@@FLAVORID@@", amphoraFlavorId)
@@ -1206,18 +1110,29 @@ if __name__ == '__main__':
 
     val helperFile = secretFile(
       helperPath,
-      Secret(helper), // it holds the admin and octavia passwords
+      Secret(helper), // it holds the admin password
       mode = "0700",
       owner = "root",
       group = "root"
     )
     // Registration comes before the services start.
-    val registered = command(
+    val (keystoneHelper, ensured) = keystoneEntries(
       "register Octavia in Keystone",
-      s"$helperPath register",
-      unless = s"$helperPath registered >/dev/null 2>&1",
-      timeout = 120
-    ).after(helperFile, ca)
+      "octavia",
+      octaviaPassword,
+      List(KeystoneService("octavia", "load-balancer", s"http://$fqdn:$apiPort")),
+      ksUrl,
+      adminPassword,
+      caCert,
+      roles = List(
+        "load-balancer_admin",
+        "load-balancer_member",
+        "load-balancer_observer",
+        "load-balancer_global_observer",
+        "load-balancer_quota_admin"
+      )
+    )
+    val registered = ensured.after(ca)
 
     val fetchedImage = download(
       "download the amphora image",
@@ -1383,6 +1298,7 @@ if __name__ == '__main__':
       tmpDirectory,
       srcDirectory,
       helperFile,
+      keystoneHelper,
       registered,
       fetchedImage,
       uploadedImage,

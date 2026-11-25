@@ -79,7 +79,7 @@ import orphera.orchestrator.kolla.*
 //     /var/lib/orphera/magnum/driver.stamp to take a newer release.
 //   - `magnum-db-manage upgrade` is skipped while its stamp matches and the `cluster_template` table exists (a
 //     query as the magnum user, through the VIP).
-//   - Magnum is registered in Keystone before the units start, skipped while the helper's `registered` passes.
+//   - Magnum is registered in Keystone before the units start, skipped while its check passes.
 //   - The flavor and key pair, the node image and the cluster template each run only while their read-only
 //     checks (`resources-ok`, `image-present`, `template-ok`) fail.
 //   - The test cluster (a control-plane node and a worker are made, the API answers /version, the cluster is
@@ -264,8 +264,6 @@ import json, os, ssl, subprocess, sys, time, urllib.request, urllib.error
 KS = 'https://@@KS@@:5000/v3'
 MAGNUM = '@@MAGNUM@@'
 ADMIN_PW = '@@ADMINPW@@'
-MAGNUM_PW = '@@MAGNUMPW@@'
-DOMAIN_PW = '@@DOMAINPW@@'
 CTX = ssl.create_default_context(cafile='@@CAFILE@@')
 FLAVOR_ID = '@@FLAVORID@@'
 FLAVOR_NAME = 'orphera.k8s'
@@ -322,22 +320,6 @@ def versioned(url, suffix):
     return url if url.endswith(suffix) else url + suffix
 
 
-def find(token, path, key):
-    status, parsed, _ = call('GET', KS + path, token=token)
-    items = parsed.get(key, [])
-    return items[0] if items else None
-
-
-def ensure(token, what, path, key, body, create_key):
-    found = find(token, path, key)
-    if found is not None:
-        return found
-    s, p, _ = call('POST', KS + '/' + what, body, token)
-    if s != 201:
-        die('creating %s failed: HTTP %s %s' % (what, s, p))
-    return p[create_key]
-
-
 class Clients(object):
     def __init__(self):
         self.token, parsed = get_token('admin', ADMIN_PW, 'admin')
@@ -357,53 +339,6 @@ class Clients(object):
 
     def m(self, method, path, body=None):
         return call(method, MAGNUM + '/v1' + path, body, self.token, {'OpenStack-API-Version': 'container-infra latest'}, 120)
-
-
-def register():
-    token, _ = get_token('admin', ADMIN_PW, 'admin')
-    project = ensure(token, 'projects', '/projects?name=service', 'projects', {'project': {'name': 'service', 'domain_id': 'default'}}, 'project')
-    user = find(token, '/users?name=magnum', 'users')
-    if user is None:
-        s, p, _ = call('POST', KS + '/users', {'user': {'name': 'magnum', 'domain_id': 'default', 'password': MAGNUM_PW}}, token)
-        if s != 201:
-            die('creating user magnum failed: HTTP %s %s' % (s, p))
-        user = p['user']
-    else:
-        body = {'auth': {'identity': {'methods': ['password'], 'password': {'user': {'name': 'magnum', 'domain': {'name': 'Default'}, 'password': MAGNUM_PW}}}}}
-        s, _, _ = call('POST', KS + '/auth/tokens', body)
-        if s != 201:
-            call('PATCH', KS + '/users/' + user['id'], {'user': {'password': MAGNUM_PW}}, token)
-    admin_role = find(token, '/roles?name=admin', 'roles')
-    if admin_role is None:
-        die('role admin not found')
-    s, p, _ = call('PUT', KS + '/projects/%s/users/%s/roles/%s' % (project['id'], user['id'], admin_role['id']), None, token)
-    if s not in (200, 204):
-        die('granting admin to magnum failed: HTTP %s %s' % (s, p))
-    service = ensure(token, 'services', '/services?type=container-infra', 'services', {'service': {'name': 'magnum', 'type': 'container-infra'}}, 'service')
-    for iface in ('public', 'internal', 'admin'):
-        ep = find(token, '/endpoints?service_id=%s&interface=%s' % (service['id'], iface), 'endpoints')
-        if ep is None:
-            s, p, _ = call('POST', KS + '/endpoints', {'endpoint': {'interface': iface, 'url': MAGNUM + '/v1', 'service_id': service['id'], 'region_id': 'RegionOne'}}, token)
-            if s != 201:
-                die('creating %s endpoint failed: HTTP %s %s' % (iface, s, p))
-        elif ep['url'] != MAGNUM + '/v1':
-            call('PATCH', KS + '/endpoints/' + ep['id'], {'endpoint': {'url': MAGNUM + '/v1'}}, token)
-    domain = ensure(token, 'domains', '/domains?name=magnum', 'domains', {'domain': {'name': 'magnum', 'description': 'Owns users and projects created by magnum'}}, 'domain')
-    dadmin = find(token, '/users?name=magnum_domain_admin&domain_id=' + domain['id'], 'users')
-    if dadmin is None:
-        s, p, _ = call('POST', KS + '/users', {'user': {'name': 'magnum_domain_admin', 'domain_id': domain['id'], 'password': DOMAIN_PW}}, token)
-        if s != 201:
-            die('creating user magnum_domain_admin failed: HTTP %s %s' % (s, p))
-        dadmin = p['user']
-    else:
-        body = {'auth': {'identity': {'methods': ['password'], 'password': {'user': {'name': 'magnum_domain_admin', 'domain': {'name': 'magnum'}, 'password': DOMAIN_PW}}}}}
-        s, _, _ = call('POST', KS + '/auth/tokens', body)
-        if s != 201:
-            call('PATCH', KS + '/users/' + dadmin['id'], {'user': {'password': DOMAIN_PW}}, token)
-    s, p, _ = call('PUT', KS + '/domains/%s/users/%s/roles/%s' % (domain['id'], dadmin['id'], admin_role['id']), None, token)
-    if s not in (200, 204):
-        die('granting admin on the domain failed: HTTP %s %s' % (s, p))
-    print('registered magnum in keystone (user magnum, service type container-infra, 3 endpoints, domain magnum with magnum_domain_admin)')
 
 
 def catalog():
@@ -602,21 +537,6 @@ def delete_clusters():
     die('clusters are still there after 30 minutes')
 
 
-def unregister():
-    token, _ = get_token('admin', ADMIN_PW, 'admin')
-    service = find(token, '/services?type=container-infra', 'services')
-    if service is not None:
-        call('DELETE', KS + '/services/' + service['id'], None, token)
-    user = find(token, '/users?name=magnum', 'users')
-    if user is not None:
-        call('DELETE', KS + '/users/' + user['id'], None, token)
-    domain = find(token, '/domains?name=magnum', 'domains')
-    if domain is not None:
-        call('PATCH', KS + '/domains/' + domain['id'], {'domain': {'enabled': False}}, token)
-        call('DELETE', KS + '/domains/' + domain['id'], None, token)
-    print('removed magnum from keystone (service container-infra, its endpoints, user magnum, domain magnum)')
-
-
 def teardown():
     cl = Clients()
     s, p, _ = cl.m('GET', '/clusters')
@@ -636,49 +556,7 @@ def teardown():
     cl.c('DELETE', '/os-keypairs/' + KEYPAIR)
     for i in k8s_images(cl):
         cl.g('DELETE', '/images/' + i['id'])
-    unregister()
-    print('removed the Magnum clusters, template, flavor, key pair, image and Keystone entries')
-
-
-def registered():
-    # Exit 0 only when everything register() makes is in place: the user magnum (able to log in with the stored
-    # password) with the admin role on project service, the service of type container-infra with its three
-    # endpoints, the trustee domain magnum and its admin user (able to log in, with the admin role on the
-    # domain). Makes no change.
-    token, _ = get_token('admin', ADMIN_PW, 'admin')
-    project = find(token, '/projects?name=service', 'projects')
-    user = find(token, '/users?name=magnum', 'users')
-    admin_role = find(token, '/roles?name=admin', 'roles')
-    if project is None or user is None or admin_role is None:
-        die('project service, user magnum or role admin is missing')
-    body = {'auth': {'identity': {'methods': ['password'], 'password': {'user': {'name': 'magnum', 'domain': {'name': 'Default'}, 'password': MAGNUM_PW}}}}}
-    s, _, _ = call('POST', KS + '/auth/tokens', body)
-    if s != 201:
-        die('user magnum cannot log in with the stored password')
-    s, _, _ = call('GET', KS + '/projects/%s/users/%s/roles/%s' % (project['id'], user['id'], admin_role['id']), None, token)
-    if s != 204:
-        die('user magnum has no admin role on project service (HTTP %s)' % s)
-    service = find(token, '/services?type=container-infra', 'services')
-    if service is None:
-        die('service of type container-infra is missing')
-    for iface in ('public', 'internal', 'admin'):
-        ep = find(token, '/endpoints?service_id=%s&interface=%s' % (service['id'], iface), 'endpoints')
-        if ep is None or ep['url'] != MAGNUM + '/v1':
-            die('the %s endpoint is missing or differs' % iface)
-    domain = find(token, '/domains?name=magnum', 'domains')
-    if domain is None:
-        die('domain magnum is missing')
-    dadmin = find(token, '/users?name=magnum_domain_admin&domain_id=' + domain['id'], 'users')
-    if dadmin is None:
-        die('user magnum_domain_admin is missing')
-    body = {'auth': {'identity': {'methods': ['password'], 'password': {'user': {'name': 'magnum_domain_admin', 'domain': {'name': 'magnum'}, 'password': DOMAIN_PW}}}}}
-    s, _, _ = call('POST', KS + '/auth/tokens', body)
-    if s != 201:
-        die('user magnum_domain_admin cannot log in with the stored password')
-    s, _, _ = call('GET', KS + '/domains/%s/users/%s/roles/%s' % (domain['id'], dadmin['id'], admin_role['id']), None, token)
-    if s != 204:
-        die('user magnum_domain_admin has no admin role on domain magnum (HTTP %s)' % s)
-    print('magnum is registered in keystone')
+    print('removed the Magnum clusters, template, flavor, key pair and image')
 
 
 def resources_ok():
@@ -712,13 +590,7 @@ def template_ok():
 
 if __name__ == '__main__':
     cmd = sys.argv[1] if len(sys.argv) > 1 else ''
-    if cmd == 'register':
-        register()
-    elif cmd == 'registered':
-        registered()
-    elif cmd == 'unregister':
-        unregister()
-    elif cmd == 'catalog':
+    if cmd == 'catalog':
         catalog()
     elif cmd == 'mservices':
         mservices()
@@ -741,7 +613,7 @@ if __name__ == '__main__':
     elif cmd == 'teardown':
         teardown()
     else:
-        die('usage: orphera-magnum-api register | registered | unregister | catalog | mservices | resources | resources-ok | image-present | image-upload FILE KUBE_VERSION OS_VERSION | template | template-ok | cluster-cycle | delete-clusters | teardown')
+        die('usage: orphera-magnum-api catalog | mservices | resources | resources-ok | image-present | image-upload FILE KUBE_VERSION OS_VERSION | template | template-ok | cluster-cycle | delete-clusters | teardown')
 """
 
   private val helper =
@@ -749,8 +621,6 @@ if __name__ == '__main__':
       .replace("@@KS@@", ksFqdn)
       .replace("@@MAGNUM@@", s"http://$fqdn:$apiPort")
       .replace("@@ADMINPW@@", adminPassword.reveal)
-      .replace("@@MAGNUMPW@@", magnumPassword.reveal)
-      .replace("@@DOMAINPW@@", domainAdminPassword.reveal)
       .replace("@@CAFILE@@", caCert)
       .replace("@@FLAVORID@@", k8sFlavorId)
       .replace("@@DNS@@", dnsServer)
@@ -1141,18 +1011,25 @@ if __name__ == '__main__':
       helperPath,
       Secret(
         helper
-      ), // it holds the admin, magnum and trustee domain admin passwords
+      ), // it holds the admin password
       mode = "0700",
       owner = "root",
       group = "root"
     )
     // Registration comes before the services start.
-    val registered = command(
+    val (keystoneHelper, ensured) = keystoneEntries(
       "register Magnum and its trustee domain in Keystone",
-      s"$helperPath register",
-      unless = s"$helperPath registered >/dev/null 2>&1",
-      timeout = 120
-    ).after(helperFile, ca)
+      "magnum",
+      magnumPassword,
+      List(KeystoneService("magnum", "container-infra", s"http://$fqdn:$apiPort/v1")),
+      ksUrl,
+      adminPassword,
+      caCert,
+      domain = Some(
+        KeystoneDomain("magnum", "Owns users and projects created by magnum", "magnum_domain_admin", domainAdminPassword)
+      )
+    )
+    val registered = ensured.after(ca)
 
     val running = svcs.map { s =>
       s.unit.after(
@@ -1224,7 +1101,7 @@ if __name__ == '__main__':
       buildDirectory,
       pylibDirectory,
       driver
-    ) ++ svcs.flatMap(_.resources) ++ List(dbSync, helperFile, registered) ++
+    ) ++ svcs.flatMap(_.resources) ++ List(dbSync, helperFile, keystoneHelper, registered) ++
       running ++ List(
         answering,
         reporting,

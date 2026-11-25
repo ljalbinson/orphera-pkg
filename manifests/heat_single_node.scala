@@ -27,7 +27,7 @@ import orphera.orchestrator.kolla.*
 //   - heat-engine    does the work: reads the template, calls Nova, Neutron, Cinder ... as the stack's owner
 //                    through a Keystone trust, and keeps the state in the database
 //
-// What it adds to Keystone (done by the helper's `register`, repeatable): user `heat` in project `service`
+// What it adds to Keystone (done by `keystoneEntries`, repeatable): user `heat` in project `service`
 // with the admin role; the stack user domain `heat` with its admin user `heat_domain_admin` (Heat makes
 // the users that instances use for metadata there, so they never touch the Default domain); the roles
 // `heat_stack_owner` and `heat_stack_user`; the services `heat` (type orchestration, endpoint
@@ -51,10 +51,10 @@ import orphera.orchestrator.kolla.*
 //   - `heat-manage db_sync` is skipped while its stamp matches and the `stack` table exists (a query as the
 //     heat user, through the VIP).
 //   - Heat is registered in Keystone before the units start (the stack domain must exist before the engine
-//     does). The registration is skipped while the helper's `registered` check passes.
+//     does). The registration is skipped while its check passes.
 //
 // Facts about Heat this was written from, to check if a run fails: heat.conf needs stack_user_domain_name,
-// stack_domain_admin and its password (the domain admin made by `register`); trusts are the default way the
+// stack_domain_admin and its password (the domain admin made by the registration); trusts are the default way the
 // engine acts for a user (deferred_auth_method), and trusts_delegated_roles is left unset, which delegates
 // all of the user's roles; the Kolla images are the 2025.1 ubuntu-noble ones, as for the other services;
 // heat.conf is plain text, a typed version needs a catalogue of the image's options
@@ -127,7 +127,7 @@ object heat_single_node extends OrpheraApply:
     List("podman", "openssl", "curl", "ca-certificates", "python3")
 
   // heat.conf, plain text (see the header). The same file goes to all three containers. The stack user
-  // domain and its admin are made by the helper's `register`. `trustee` and the `clients` groups are how the
+  // domain and its admin are made by the registration. `trustee` and the `clients` groups are how the
   // engine reaches Keystone (and, through the catalog, Nova, Neutron and the rest) as the stack's owner.
   private val heatConf: String =
     s"""# Managed by Orphera (heat_single_node.scala)
@@ -303,7 +303,7 @@ object heat_single_node extends OrpheraApply:
 
   // Standard-library Python, as in the other services. Plain string filled in with replace().
   // Subcommands:
-  //   register | registered | unregister | catalog | stack-list | engines-up | stack-cycle [basic]
+  //   catalog | stack-list | engines-up | stack-cycle [basic]
   // stack-cycle makes a stack from a template (a random string, and a Nova flavor unless `basic`), waits for
   // CREATE_COMPLETE, reads an output back, deletes the stack and waits until it is gone. The flavor is made
   // by the engine through a Keystone trust, so a pass means the whole path works: API, RabbitMQ, engine,
@@ -314,10 +314,7 @@ import json, ssl, sys, time, urllib.request, urllib.error
 
 KS = 'https://@@KS@@:5000/v3'
 HEAT = '@@HEAT@@'
-CFN = '@@CFN@@'
 ADMIN_PW = '@@ADMINPW@@'
-HEAT_PW = '@@HEATPW@@'
-DOMAIN_ADMIN_PW = '@@DOMAINADMINPW@@'
 CTX = ssl.create_default_context(cafile='@@CA@@')
 
 
@@ -351,128 +348,6 @@ def get_token(user, password, project):
     if status != 201:
         die('token request for %s failed: HTTP %s %s' % (user, status, parsed))
     return headers['X-Subject-Token'], parsed
-
-
-def find(token, path, key):
-    status, parsed, _ = call('GET', KS + path, token=token)
-    items = parsed.get(key, [])
-    return items[0] if items else None
-
-
-def ensure(token, what, path, key, body, create_key):
-    # the first object that matches `path`, or the one made from `body`
-    found = find(token, path, key)
-    if found is not None:
-        return found
-    s, p, _ = call('POST', KS + '/' + what, body, token)
-    if s != 201:
-        die('creating %s failed: HTTP %s %s' % (what, s, p))
-    return p[create_key]
-
-
-def ensure_service(token, svc_type, name, url):
-    service = ensure(token, 'services', '/services?type=' + svc_type, 'services', {'service': {'name': name, 'type': svc_type}}, 'service')
-    for iface in ('public', 'internal', 'admin'):
-        ep = find(token, '/endpoints?service_id=%s&interface=%s' % (service['id'], iface), 'endpoints')
-        if ep is None:
-            s, p, _ = call('POST', KS + '/endpoints', {'endpoint': {'interface': iface, 'url': url, 'service_id': service['id'], 'region_id': 'RegionOne'}}, token)
-            if s != 201:
-                die('creating %s endpoint of %s failed: HTTP %s %s' % (iface, name, s, p))
-        elif ep['url'] != url:
-            call('PATCH', KS + '/endpoints/' + ep['id'], {'endpoint': {'url': url}}, token)
-
-
-def register():
-    token, _ = get_token('admin', ADMIN_PW, 'admin')
-    project = ensure(token, 'projects', '/projects?name=service', 'projects', {'project': {'name': 'service', 'domain_id': 'default'}}, 'project')
-    user = find(token, '/users?name=heat', 'users')
-    if user is None:
-        s, p, _ = call('POST', KS + '/users', {'user': {'name': 'heat', 'domain_id': 'default', 'password': HEAT_PW}}, token)
-        if s != 201:
-            die('creating user heat failed: HTTP %s %s' % (s, p))
-        user = p['user']
-    else:
-        call('PATCH', KS + '/users/' + user['id'], {'user': {'password': HEAT_PW}}, token)
-    admin_role = find(token, '/roles?name=admin', 'roles')
-    if admin_role is None:
-        die('role admin not found')
-    s, p, _ = call('PUT', KS + '/projects/%s/users/%s/roles/%s' % (project['id'], user['id'], admin_role['id']), None, token)
-    if s not in (200, 204):
-        die('granting admin to heat failed: HTTP %s %s' % (s, p))
-    for role in ('heat_stack_owner', 'heat_stack_user'):
-        ensure(token, 'roles', '/roles?name=' + role, 'roles', {'role': {'name': role}}, 'role')
-    domain = ensure(token, 'domains', '/domains?name=heat', 'domains', {'domain': {'name': 'heat', 'description': 'Owns the users and projects that Heat makes for stacks'}}, 'domain')
-    dadmin = find(token, '/users?name=heat_domain_admin&domain_id=' + domain['id'], 'users')
-    if dadmin is None:
-        s, p, _ = call('POST', KS + '/users', {'user': {'name': 'heat_domain_admin', 'domain_id': domain['id'], 'password': DOMAIN_ADMIN_PW}}, token)
-        if s != 201:
-            die('creating user heat_domain_admin failed: HTTP %s %s' % (s, p))
-        dadmin = p['user']
-    else:
-        call('PATCH', KS + '/users/' + dadmin['id'], {'user': {'password': DOMAIN_ADMIN_PW}}, token)
-    s, p, _ = call('PUT', KS + '/domains/%s/users/%s/roles/%s' % (domain['id'], dadmin['id'], admin_role['id']), None, token)
-    if s not in (200, 204):
-        die('granting admin on domain heat to heat_domain_admin failed: HTTP %s %s' % (s, p))
-    ensure_service(token, 'orchestration', 'heat', HEAT + '/%(tenant_id)s')
-    ensure_service(token, 'cloudformation', 'heat-cfn', CFN)
-    print('registered heat in keystone (user heat, domain heat with heat_domain_admin, roles heat_stack_owner and heat_stack_user, services orchestration and cloudformation with 3 endpoints each)')
-
-
-def registered():
-    # Exit 0 only when everything register() makes is in place: the heat user can get a token in project
-    # service, the roles, the stack domain and its admin (who can authenticate and holds admin on the
-    # domain), and both services with their three endpoints. Makes no change.
-    get_token('heat', HEAT_PW, 'service')
-    token, _ = get_token('admin', ADMIN_PW, 'admin')
-    for role in ('heat_stack_owner', 'heat_stack_user'):
-        if find(token, '/roles?name=' + role, 'roles') is None:
-            die('role %s missing' % role)
-    domain = find(token, '/domains?name=heat', 'domains')
-    if domain is None:
-        die('no domain heat')
-    dadmin = find(token, '/users?name=heat_domain_admin&domain_id=' + domain['id'], 'users')
-    if dadmin is None:
-        die('no user heat_domain_admin')
-    body = {'auth': {'identity': {'methods': ['password'], 'password': {'user': {'name': 'heat_domain_admin', 'domain': {'name': 'heat'}, 'password': DOMAIN_ADMIN_PW}}}}}
-    s, p, _ = call('POST', KS + '/auth/tokens', body)
-    if s != 201:
-        die('heat_domain_admin cannot get a token: HTTP %s %s' % (s, p))
-    admin_role = find(token, '/roles?name=admin', 'roles')
-    s, p, _ = call('HEAD', KS + '/domains/%s/users/%s/roles/%s' % (domain['id'], dadmin['id'], admin_role['id']), None, token)
-    if s != 204:
-        die('heat_domain_admin does not hold admin on domain heat: HTTP %s' % s)
-    for svc_type, url in (('orchestration', HEAT + '/%(tenant_id)s'), ('cloudformation', CFN)):
-        service = find(token, '/services?type=' + svc_type, 'services')
-        if service is None:
-            die('no service of type ' + svc_type)
-        for iface in ('public', 'internal', 'admin'):
-            ep = find(token, '/endpoints?service_id=%s&interface=%s' % (service['id'], iface), 'endpoints')
-            if ep is None or ep['url'] != url:
-                die('endpoint %s of %s missing or wrong' % (iface, svc_type))
-    print('heat is registered in keystone')
-
-
-def unregister():
-    token, _ = get_token('admin', ADMIN_PW, 'admin')
-    for svc_type in ('orchestration', 'cloudformation'):
-        service = find(token, '/services?type=' + svc_type, 'services')
-        if service is not None:
-            call('DELETE', KS + '/services/' + service['id'], None, token)
-    user = find(token, '/users?name=heat', 'users')
-    if user is not None:
-        call('DELETE', KS + '/users/' + user['id'], None, token)
-    domain = find(token, '/domains?name=heat', 'domains')
-    if domain is not None:
-        # Heat makes users and projects in this domain for its stacks: remove them all, then the domain.
-        s, p, _ = call('GET', KS + '/users?domain_id=' + domain['id'], None, token)
-        for u in p.get('users', []):
-            call('DELETE', KS + '/users/' + u['id'], None, token)
-        s, p, _ = call('GET', KS + '/projects?domain_id=' + domain['id'], None, token)
-        for pr in p.get('projects', []):
-            call('DELETE', KS + '/projects/' + pr['id'], None, token)
-        call('PATCH', KS + '/domains/' + domain['id'], {'domain': {'enabled': False}}, token)
-        call('DELETE', KS + '/domains/' + domain['id'], None, token)
-    print('removed heat from keystone (services orchestration and cloudformation, their endpoints, user heat, domain heat)')
 
 
 def catalog():
@@ -559,13 +434,7 @@ def stack_cycle(basic):
 if __name__ == '__main__':
     cmd = sys.argv[1] if len(sys.argv) > 1 else ''
     args = sys.argv[2:]
-    if cmd == 'register':
-        register()
-    elif cmd == 'registered':
-        registered()
-    elif cmd == 'unregister':
-        unregister()
-    elif cmd == 'catalog':
+    if cmd == 'catalog':
         catalog()
     elif cmd == 'stack-list':
         stack_list()
@@ -574,17 +443,14 @@ if __name__ == '__main__':
     elif cmd == 'stack-cycle':
         stack_cycle(args == ['basic'])
     else:
-        die('usage: orphera-heat-api register | registered | unregister | catalog | stack-list | engines-up | stack-cycle [basic]')
+        die('usage: orphera-heat-api catalog | stack-list | engines-up | stack-cycle [basic]')
 """
 
   private val helper =
     apiHelperPython
       .replace("@@KS@@", ksFqdn)
       .replace("@@HEAT@@", s"http://$fqdn:$apiPort/v1")
-      .replace("@@CFN@@", s"http://$fqdn:$cfnPort/v1")
       .replace("@@ADMINPW@@", adminPassword.reveal)
-      .replace("@@HEATPW@@", heatPassword.reveal)
-      .replace("@@DOMAINADMINPW@@", domainAdminPassword.reveal)
       .replace("@@CA@@", caCert)
   private val helperPath = "/usr/local/sbin/orphera-heat-api"
 
@@ -711,12 +577,23 @@ if __name__ == '__main__':
       group = "root"
     )
     // Registration comes before the services start: the engine needs the stack domain.
-    val registered = command(
+    val (keystoneHelper, ensured) = keystoneEntries(
       "register Heat in Keystone (the stack domain and its admin)",
-      s"$helperPath register",
-      unless = s"$helperPath registered >/dev/null 2>&1",
-      timeout = 120
-    ).after(helperFile, ca)
+      "heat",
+      heatPassword,
+      List(
+        KeystoneService("heat", "orchestration", s"http://$fqdn:$apiPort/v1/%(tenant_id)s"),
+        KeystoneService("heat-cfn", "cloudformation", s"http://$fqdn:$cfnPort/v1")
+      ),
+      ksUrl,
+      adminPassword,
+      caCert,
+      roles = List("heat_stack_owner", "heat_stack_user"),
+      domain = Some(
+        KeystoneDomain("heat", "Owns the users and projects that Heat makes for stacks", "heat_domain_admin", domainAdminPassword)
+      )
+    )
+    val registered = ensured.after(ca)
 
     val running = svcs.map { s =>
       s.unit.after((dbSync :: registered :: s.deps)*)
@@ -752,5 +629,5 @@ if __name__ == '__main__':
       ca,
       logDirectory,
       stateDirectory
-    ) ++ svcs.flatMap(_.resources) ++ List(dbSync, helperFile, registered) ++
+    ) ++ svcs.flatMap(_.resources) ++ List(dbSync, helperFile, keystoneHelper, registered) ++
       running ++ List(apiAnswers, cfnAnswers, reporting)
