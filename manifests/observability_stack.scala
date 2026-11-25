@@ -111,18 +111,29 @@ object observability_stack extends OrpheraClusterPlaybook:
   // header comment. `signed-by` (not the deprecated `apt-key add`) is
   // Debian/Ubuntu's current recommended way to scope a keyring to one
   // repo rather than trusting it for every repo on the system.
-  private val installGrafanaScript =
-    """apt-get install -y -qq apt-transport-https software-properties-common wget gpg
-      |mkdir -p /etc/apt/keyrings
-      |wget -q -O - https://apt.grafana.com/gpg.key | gpg --dearmor > /etc/apt/keyrings/grafana.gpg
-      |echo "deb [signed-by=/etc/apt/keyrings/grafana.gpg] https://apt.grafana.com stable main" > /etc/apt/sources.list.d/grafana.list
-      |for try in 1 2 3; do timeout -k 10 180 apt-get update -qq && break; done
-      |apt-get install -y -qq grafana
-      |echo "grafana package installed from apt.grafana.com"""".stripMargin
+  private val installGrafanaPlan: ApplyPlan =
+    import Resources.*
+    val tools = List(
+      pkg("curl", updateCache = true),
+      pkg("gpg"),
+      pkg("ca-certificates")
+    )
+    val repository = aptRepository(
+      "Grafana's apt repository",
+      "https://apt.grafana.com/gpg.key",
+      "/etc/apt/keyrings/grafana.gpg",
+      "/etc/apt/sources.list.d/grafana.list",
+      "https://apt.grafana.com stable main",
+      update = true
+    ).after(tools*)
+    ApplyPlan.orFail(
+      "install-grafana",
+      tools ::: List(repository, pkg("grafana").after(repository))
+    )
 
   // tst7 only. Grafana only reads its provisioning directory at startup,
   // so writing this file alone does nothing until the next restart —
-  // deliberately a separate task/script from installGrafanaScript so the
+  // deliberately a separate task/script from installGrafanaPlan so the
   // restart-and-check pattern below applies to both the initial install
   // AND this config change, not just the first one.
   //
@@ -337,10 +348,7 @@ object observability_stack extends OrpheraClusterPlaybook:
 
       stage("install-grafana", monitoringNode)
         .task("add Grafana's apt repo and install grafana")(
-          Task.RunCommand(
-            List("sh", "-c", installGrafanaScript),
-            timeoutSeconds = 720
-          )
+          Task.Apply(installGrafanaPlan)
         )
         .task("set Grafana's admin credentials in grafana.ini")(
           Task.RunCommand(List("sh", "-c", grafanaIniScript), timeoutSeconds = 60)

@@ -2561,6 +2561,57 @@ object ApplyCheck:
       check("serverCa: a relative file is refused", scala.util.Try(serverCa("x", "h", 5000, "ca.crt")).isFailure)
       check("serverCa: a hint with a quote is refused", scala.util.Try(serverCa("x", "h", 5000, "/x/ca.crt", hint = "say \"no\"")).isFailure)
 
+  private def aptRepositoryChecks(): Unit =
+    val dir = Files.createTempDirectory("aptrepo")
+    val bin = dir.resolve("bin")
+    Files.createDirectory(bin)
+    val calls = dir.resolve("calls")
+    def stand(name: String, body: String): Unit =
+      val f = bin.resolve(name)
+      Files.writeString(f, s"#!/bin/sh\n$body\n")
+      check(s"aptRepository: the stand-in $name is executable", f.toFile.setExecutable(true))
+    // curl gives a key unless told otherwise, gpg --dearmor copies it to the -o file, apt-get records its
+    // arguments, and apt-cache answers from a file.
+    stand("curl", s"""[ -e "$dir/nokey" ] && exit 22; echo "KEYDATA $$*"; exit 0""")
+    stand("gpg", """while [ $# -gt 0 ]; do [ "$1" = -o ] && OUT="$2"; shift; done; cat > "$OUT"; exit 0""")
+    stand("apt-get", s"""echo "apt-get $$*" >> "$calls"; exit 0""")
+    stand("apt-cache", s"""cat "$dir/policy" 2>/dev/null; exit 0""")
+    def sh(script: String): (Int, String) = runShell(s"PATH=$bin:$$PATH\n$script")
+    def part(r: ApplyResource, pick: ApplyResource.Command => String): String = r match
+      case c: ApplyResource.Command => pick(c)
+      case other                    => s"not a command: $other"
+    val keyring = s"$dir/keys/repo.gpg"
+    val list = s"$dir/lists/repo.list"
+    val repo = "https://apt.example.com/deb stable main"
+    val step = aptRepository("repo", "https://apt.example.com/key.asc", keyring, list, repo, offers = "foo", update = true)
+    check("aptRepository: nothing configured means it is needed", sh(part(step, _.unless))._1 != 0)
+    Files.writeString(dir.resolve("policy"), "foo:\n  Candidate: 1\n     500 https://other.example.org stable/main Packages\n")
+    val bad = sh(part(step, _.run))
+    check("aptRepository: a package the repository does not offer fails the run, and says so", bad._1 != 0 && bad._2.contains("foo is not offered by apt.example.com"), bad.toString)
+    Files.writeString(dir.resolve("policy"), "foo:\n  Candidate: 1\n     500 https://apt.example.com/deb stable/main Packages\n")
+    val ran = sh(part(step, _.run))
+    check("aptRepository: the run succeeds", ran._1 == 0 && ran._2.contains("apt repository apt.example.com configured"), ran.toString)
+    check("aptRepository: the key is in the keyring, in a directory the run made", Files.readString(Path.of(keyring)).startsWith("KEYDATA"))
+    check("aptRepository: the sources file holds the one line", Files.readString(Path.of(list)) == s"deb [signed-by=$keyring] $repo\n", Files.readString(Path.of(list)))
+    check("aptRepository: with update, only this source's lists are refreshed", Files.readString(calls).contains(s"update -o Dir::Etc::sourcelist=$list -o Dir::Etc::sourceparts=-"), Files.readString(calls))
+    check("aptRepository: configured and offered means unchanged", sh(part(step, _.unless))._1 == 0)
+    Files.writeString(dir.resolve("policy"), "foo:\n  Candidate: (none)\n")
+    check("aptRepository: a package no longer offered means it is needed", sh(part(step, _.unless))._1 != 0)
+    val other = aptRepository("repo", "https://apt.example.com/key.asc", keyring, list, "https://apt.example.com/deb stable contrib")
+    check("aptRepository: a different line means it is needed", sh(part(other, _.unless))._1 != 0)
+    sh(part(other, _.run))
+    check("aptRepository: and the run rewrites the line", Files.readString(Path.of(list)).contains("stable contrib") && sh(part(other, _.unless))._1 == 0)
+    check("aptRepository: without update there is no apt-get call", !part(other, _.run).contains("apt-get"))
+    Files.delete(Path.of(keyring))
+    Files.writeString(dir.resolve("nokey"), "")
+    val noKey = sh(part(other, _.run))
+    check("aptRepository: a key that cannot be fetched fails the run", noKey._1 != 0, noKey.toString)
+    check("aptRepository: and leaves it needed", sh(part(other, _.unless))._1 != 0)
+    check("aptRepository: a key URL that is not https is refused", scala.util.Try(aptRepository("x", "http://k/x", keyring, list, repo)).isFailure)
+    check("aptRepository: a relative keyring is refused", scala.util.Try(aptRepository("x", "https://k/x", "k.gpg", list, repo)).isFailure)
+    check("aptRepository: a repository with a quote is refused", scala.util.Try(aptRepository("x", "https://k/x", keyring, list, "https://r/ 'x'")).isFailure)
+    check("aptRepository: a bad package name is refused", scala.util.Try(aptRepository("x", "https://k/x", keyring, list, repo, offers = "a b")).isFailure)
+
   private def sqlChecks(): Unit =
     val dir = Files.createTempDirectory("sqldb")
     val bin = dir.resolve("bin")
@@ -2832,6 +2883,7 @@ object ApplyCheck:
     sqlChecks()
     rabbitChecks()
     serverCaChecks()
+    aptRepositoryChecks()
     kindChecks()
     yamlChecks()
     newKindChecks()

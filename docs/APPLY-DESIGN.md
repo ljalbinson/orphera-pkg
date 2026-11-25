@@ -138,6 +138,8 @@ time is up. Nothing is changed on the node. The generated shell is run against a
 
 `serverCa(label, host, port, caFile, trust, hint)` fetches the CA of a TLS server the way the services did by script: the last certificate in the chain the server presents, accepted on first use, which must be self-signed and verify the server's certificate. The guard compares the certificates only, since the text a handshake prints after them differs every time; `update-ca-certificates` also puts the CA in `/etc/ssl/certs/ca-certificates.crt`, which the containers mount.
 
+`aptRepository(label, keyUrl, keyring, sourcesFile, repository, offers, update)` puts a repository's key in a keyring of its own and a one-line sources file beside it (`signed-by`, not `apt-key`). The guard is the keyring and the exact line, so a changed repository (a new Kubernetes minor, say) is rewritten by running it again; the key itself is not fetched again while the keyring is there.
+
 Files with secret content (`Secret` values) never show their content: the diff line says
 `content (secret: not shown)`.
 

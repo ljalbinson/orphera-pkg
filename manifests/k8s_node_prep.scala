@@ -183,17 +183,22 @@ object k8s_node_prep extends OrpheraClusterPlaybook:
       )
     )
 
-  private val repoScript =
-    s"""set -e
-       |install -m 0755 -d /etc/apt/keyrings
-       |curl -fsSL --retry 3 https://pkgs.k8s.io/core:/stable:/$k8sMinor/deb/Release.key \\
-       |  | gpg --dearmor --yes -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
-       |echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/$k8sMinor/deb/ /" \\
-       |  > /etc/apt/sources.list.d/kubernetes.list
-       |for try in 1 2 3; do timeout -k 10 180 apt-get update -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/kubernetes.list \\
-       |  -o Dir::Etc::sourceparts=- -o APT::Get::List-Cleanup=0 && break; done
-       |apt-cache policy kubeadm | grep -q 'pkgs.k8s.io' || { echo "kubeadm not offered by pkgs.k8s.io for $k8sMinor" >&2; exit 1; }
-       |echo "kubernetes apt repository $k8sMinor configured"""".stripMargin
+  private val repositoryPlan: ApplyPlan =
+    import Resources.*
+    ApplyPlan.orFail(
+      "kubernetes-apt-repository",
+      List(
+        aptRepository(
+          "the pkgs.k8s.io repository",
+          s"https://pkgs.k8s.io/core:/stable:/$k8sMinor/deb/Release.key",
+          "/etc/apt/keyrings/kubernetes-apt-keyring.gpg",
+          "/etc/apt/sources.list.d/kubernetes.list",
+          s"https://pkgs.k8s.io/core:/stable:/$k8sMinor/deb/ /",
+          offers = "kubeadm",
+          update = true
+        )
+      )
+    )
 
   // Only when one of them is missing. The packages are held (apt-mark hold,
   // below) so that nothing moves the cluster's version; a second run with
@@ -263,7 +268,7 @@ object k8s_node_prep extends OrpheraClusterPlaybook:
         .build,
       stage("install-kubernetes-packages", nodes*)
         .task("add the pkgs.k8s.io repository")(
-          Task.RunCommand(List("sh", "-c", repoScript), timeoutSeconds = 720)
+          Task.Apply(repositoryPlan)
         )
         .task("install kubeadm, kubelet, kubectl, crictl")(
           Task.RunCommand(
