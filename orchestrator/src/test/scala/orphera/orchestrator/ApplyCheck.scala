@@ -2415,6 +2415,83 @@ object ApplyCheck:
     val out = new String(proc.getInputStream.readAllBytes(), StandardCharsets.UTF_8)
     (proc.waitFor(), out.trim)
 
+  private def rabbitChecks(): Unit =
+    val dir = Files.createTempDirectory("rabbit")
+    val bin = dir.resolve("bin")
+    Files.createDirectory(bin)
+    val calls = dir.resolve("calls")
+    // A stand-in podman: it answers from files in the test directory and records the commands that change things.
+    val fake = bin.resolve("podman")
+    Files.writeString(
+      fake,
+      s"""#!/bin/sh
+         |case "$$*" in
+         |  "ps "*) [ -e "$dir/up" ] && echo abc123; exit 0 ;;
+         |  *list_vhosts*) cat "$dir/vhosts" 2>/dev/null; exit 0 ;;
+         |  *list_users*) cat "$dir/users" 2>/dev/null; exit 0 ;;
+         |  *authenticate_user*) [ -e "$dir/authok" ] ;;
+         |  *list_permissions*) cat "$dir/perms" 2>/dev/null; exit 0 ;;
+         |  *) echo "$$*" >> "$calls"; exit 0 ;;
+         |esac
+         |""".stripMargin
+    )
+    check("rabbit: the fake podman is executable", fake.toFile.setExecutable(true))
+    def sh(script: String): (Int, String) = runShell(s"PATH=$bin:$$PATH\n$script")
+    def put(n: String, text: String): Unit = { val _ = Files.writeString(dir.resolve(n), text) }
+    def gone(n: String): Unit = { val _ = Files.deleteIfExists(dir.resolve(n)) }
+    def part(r: ApplyResource, pick: ApplyResource.Command => String): String = r match
+      case c: ApplyResource.Command => pick(c)
+      case other                    => s"not a command: $other"
+    val acct = rabbitAccount("acct", "svc", "svcuser", Secret("pa'ss"))
+    put("vhosts", "/\n")
+    put("users", "guest\t[administrator]\n")
+    check("rabbitAccount: no vhost means it is needed", sh(part(acct, _.unless))._1 != 0)
+    put("vhosts", "/\nsvc\n")
+    put("users", "guest\t[administrator]\nsvcuser\t[]\n")
+    put("authok", "")
+    put("perms", "svcuser\t.*\t.*\t.*\n")
+    check("rabbitAccount: vhost, login and permissions mean unchanged", sh(part(acct, _.unless))._1 == 0)
+    put("perms", "svcuser\t.*\t.*\t\n")
+    check("rabbitAccount: lesser permissions mean it is needed", sh(part(acct, _.unless))._1 != 0)
+    gone("up")
+    val down = sh(part(acct, _.run))
+    check(
+      "rabbitAccount: no running broker fails and says so",
+      down._1 != 0 && down._2.contains("apply rabbitmq_single_node.scala first"),
+      down.toString
+    )
+    put("up", "")
+    put("vhosts", "/\n")
+    put("users", "guest\t[administrator]\n")
+    gone("authok")
+    put("calls", "")
+    val made = sh(part(acct, _.run))
+    val c1 = Files.readString(calls)
+    check("rabbitAccount: a new vhost and user are made", made._1 == 0 && c1.contains("add_vhost svc") && c1.contains("add_user svcuser pa'ss"), made.toString + c1)
+    check("rabbitAccount: and given full permissions", c1.contains("set_permissions -p svc svcuser .* .* .*"), c1)
+    put("vhosts", "/\nsvc\n")
+    put("users", "svcuser\t[]\n")
+    put("calls", "")
+    sh(part(acct, _.run))
+    val c2 = Files.readString(calls)
+    check("rabbitAccount: an existing user gets the password set, no vhost is added", c2.contains("change_password svcuser") && !c2.contains("add_vhost") && !c2.contains("add_user"), c2)
+    val root = rabbitAccount("root", "/", "svcuser", Secret("x"))
+    check("rabbitAccount: the default vhost is not made", !part(root, _.run).contains("add_vhost") && !part(root, _.unless).contains("list_vhosts"))
+    check("rabbitAccount: a bad name is refused", scala.util.Try(rabbitAccount("x", "a b", "u", Secret("x"))).isFailure)
+    val drop = absentRabbitAccount("drop", "svc", "svcuser")
+    put("vhosts", "/\n")
+    put("users", "guest\t[administrator]\n")
+    check("absentRabbitAccount: nothing there means nothing to do", sh(part(drop, _.onlyIf))._1 != 0)
+    put("users", "guest\t[administrator]\nsvcuser\t[]\n")
+    check("absentRabbitAccount: the user there means it runs", sh(part(drop, _.onlyIf))._1 == 0)
+    gone("up")
+    check("absentRabbitAccount: no running broker means nothing to do", sh(part(drop, _.onlyIf))._1 != 0)
+    put("calls", "")
+    sh(part(drop, _.run))
+    val c3 = Files.readString(calls)
+    check("absentRabbitAccount: the vhost and the user are deleted", c3.contains("delete_vhost svc") && c3.contains("delete_user svcuser"), c3)
+    check("absentRabbitAccount: the default vhost is refused", scala.util.Try(absentRabbitAccount("x", "/", "u")).isFailure)
+
   private def sqlChecks(): Unit =
     val dir = Files.createTempDirectory("sqldb")
     val bin = dir.resolve("bin")
@@ -2684,6 +2761,7 @@ object ApplyCheck:
     pullImagesChecks()
     absentContainerUnitsChecks()
     sqlChecks()
+    rabbitChecks()
     kindChecks()
     yamlChecks()
     newKindChecks()

@@ -64,20 +64,6 @@ object telemetry_teardown extends OrpheraApply:
        |fi
        |echo "ceilometer scrape job removed from prometheus"""".stripMargin
 
-  // ---- tst3 ----
-  // ---- tst10 ----
-  private val rabbitUp =
-    "podman ps -q --filter 'name=^rabbitmq$' 2>/dev/null | grep -q ."
-  // True when a vhost or user exists in a running broker; with no running broker there is nothing to remove.
-  private val rabbitHasTelemetry =
-    s"""$rabbitUp && { podman exec rabbitmq rabbitmqctl list_vhosts -q | grep -qxE 'aodh|ceilometer' || podman exec rabbitmq rabbitmqctl list_users -q | awk '{print $$1}' | grep -qxE 'aodh|ceilometer'; }"""
-  private val rabbitScript =
-    """for n in aodh ceilometer; do
-      |  podman exec rabbitmq rabbitmqctl delete_vhost $n || true
-      |  podman exec rabbitmq rabbitmqctl delete_user $n || true
-      |done
-      |echo "rabbitmq vhosts and users aodh and ceilometer removed"""".stripMargin
-
   def describe(target: Node): List[ApplyResource] =
     if target.name == dbNode then
       List(
@@ -88,12 +74,11 @@ object telemetry_teardown extends OrpheraApply:
         )
       )
     else if target.name == rabbitNode then
-      List(
-        command(
-          "remove the aodh and ceilometer vhosts and users from RabbitMQ",
-          rabbitScript,
-          onlyIf = rabbitHasTelemetry,
-          timeout = 60
+      List("aodh", "ceilometer").map(name =>
+        absentRabbitAccount(
+          s"remove the $name vhost and user from RabbitMQ",
+          name,
+          name
         )
       )
     else if target.name == promNode then

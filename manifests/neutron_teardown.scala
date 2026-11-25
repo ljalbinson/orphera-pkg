@@ -64,18 +64,6 @@ object neutron_teardown extends OrpheraApply:
     "/var/log/kolla/neutron"
   )
 
-  // ---- tst10 ----
-  private val rabbitUp =
-    "podman ps -q --filter 'name=^rabbitmq$' 2>/dev/null | grep -q ."
-  // True when the vhost or user exists in a running broker; with no running
-  // broker there is nothing to remove.
-  private val rabbitHasNeutron =
-    s"""$rabbitUp && { podman exec rabbitmq rabbitmqctl list_vhosts -q | grep -qx neutron || podman exec rabbitmq rabbitmqctl list_users -q | awk '{print $$1}' | grep -qx neutron; }"""
-  private val rabbitScript =
-    """podman exec rabbitmq rabbitmqctl delete_vhost neutron || true
-      |podman exec rabbitmq rabbitmqctl delete_user neutron || true
-      |echo "rabbitmq vhost neutron and user neutron removed"""".stripMargin
-
   def describe(target: Node): List[ApplyResource] =
     if target.name == dbNode then
       List(
@@ -87,11 +75,10 @@ object neutron_teardown extends OrpheraApply:
       )
     else if target.name == rabbitNode then
       List(
-        command(
+        absentRabbitAccount(
           "remove the neutron vhost and user from RabbitMQ",
-          rabbitScript,
-          onlyIf = rabbitHasNeutron,
-          timeout = 60
+          "neutron",
+          "neutron"
         )
       )
     else

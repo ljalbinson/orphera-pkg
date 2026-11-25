@@ -536,6 +536,74 @@ object Resources:
   ): ApplyResource =
     Command(label, run, onlyIf, unless, creates, onChangeOnly, timeout)
 
+  private def rabbitName(what: String, text: String): Unit =
+    require(
+      text.nonEmpty && text.forall(c => c.isLetterOrDigit || c == '_' || c == '-' || c == '.'),
+      s"$what must be letters, digits, underscores, hyphens and dots, not '$text'"
+    )
+
+  private val RabbitUp = "podman ps -q --filter 'name=^rabbitmq$' 2>/dev/null | grep -q ."
+
+  /** A vhost and its user on a RabbitMQ broker that runs as the container `rabbitmq` on the node, as a
+    * description. The user has the password and full permissions on the vhost, so a rotated password is
+    * applied by running it again. It is `unchanged` while the vhost exists, the user can authenticate with
+    * the password and has full permissions on it. With the vhost `/` (always there) only the user is made.
+    * The broker is not touched otherwise; with no running `rabbitmq` container the step fails and says so.
+    */
+  def rabbitAccount(label: String, vhost: String, user: String, password: Secret): ApplyResource =
+    rabbitName("a vhost", if vhost == "/" then "default" else vhost)
+    rabbitName("a user", user)
+    val vh = Apply.quote(vhost)
+    val u = Apply.quote(user)
+    val pw = Apply.quote(password.reveal)
+    val vhostCheck = s"podman exec rabbitmq rabbitmqctl list_vhosts -q | grep -qx $vh"
+    val makeVhost =
+      if vhost == "/" then ""
+      else
+        s"""if ! $vhostCheck; then
+           |  podman exec rabbitmq rabbitmqctl add_vhost $vh
+           |fi
+           |""".stripMargin
+    val run =
+      s"""set -e
+         |if ! podman ps -q --filter 'name=^rabbitmq$$' | grep -q .; then
+         |  echo "no running 'rabbitmq' container on this node - apply rabbitmq_single_node.scala first" >&2
+         |  exit 1
+         |fi
+         |$makeVhost""".stripMargin +
+        s"""if podman exec rabbitmq rabbitmqctl list_users -q | awk '{print $$1}' | grep -qx $u; then
+           |  podman exec rabbitmq rabbitmqctl change_password $u $pw
+           |else
+           |  podman exec rabbitmq rabbitmqctl add_user $u $pw
+           |fi
+           |podman exec rabbitmq rabbitmqctl set_permissions -p $vh $u '.*' '.*' '.*'""".stripMargin
+    val canAuthenticate =
+      s"podman exec rabbitmq rabbitmqctl authenticate_user $u $pw >/dev/null 2>&1"
+    val hasFullPermissions =
+      s"""podman exec rabbitmq rabbitmqctl list_permissions -p $vh -q | awk -F'\t' '$$1=="$user" && $$2==".*" && $$3==".*" && $$4==".*" {found=1} END {exit !found}'"""
+    val inPlace =
+      (if vhost == "/" then Nil else List(vhostCheck)) ::: List(canAuthenticate, hasFullPermissions)
+    command(label, run, unless = inPlace.mkString(" && "), timeout = 120)
+
+  /** The vhost and the user gone from the broker, as a description: removed when either exists in a running
+    * broker. With no running broker there is nothing to remove.
+    */
+  def absentRabbitAccount(label: String, vhost: String, user: String): ApplyResource =
+    require(vhost != "/", "absentRabbitAccount does not remove the default vhost")
+    rabbitName("a vhost", vhost)
+    rabbitName("a user", user)
+    val vh = Apply.quote(vhost)
+    val u = Apply.quote(user)
+    val exists =
+      s"""$RabbitUp && { podman exec rabbitmq rabbitmqctl list_vhosts -q | grep -qx $vh || podman exec rabbitmq rabbitmqctl list_users -q | awk '{print $$1}' | grep -qx $u; }"""
+    command(
+      label,
+      s"""podman exec rabbitmq rabbitmqctl delete_vhost $vh || true
+         |podman exec rabbitmq rabbitmqctl delete_user $u || true""".stripMargin,
+      onlyIf = exists,
+      timeout = 60
+    )
+
   private def sqlName(what: String, text: String): Unit =
     require(
       text.nonEmpty && text.forall(c => c.isLetterOrDigit || c == '_'),

@@ -62,19 +62,6 @@ object manila_teardown extends OrpheraApply:
     "/var/log/kolla/manila"
   )
 
-  // ---- tst10 ----
-  private val rabbitUp =
-    "podman ps -q --filter 'name=^rabbitmq$' 2>/dev/null | grep -q ."
-  // True when the vhost or user exists in a running broker; with no running broker there is nothing to
-  // remove.
-  private val rabbitHasManila =
-    s"""$rabbitUp && { podman exec rabbitmq rabbitmqctl list_vhosts -q | grep -qx '$rabbitVhost' || podman exec rabbitmq rabbitmqctl list_users -q | awk '{print $$1}' | grep -qx '$rabbitUser'; }"""
-  private val rabbitScript =
-    s"""podman exec rabbitmq rabbitmqctl delete_vhost '$rabbitVhost' || true
-       |podman exec rabbitmq rabbitmqctl delete_user '$rabbitUser' || true
-       |echo "rabbitmq vhost $rabbitVhost and user $rabbitUser removed"""".stripMargin
-
-  // ---- tst3 ----
   // ---- tst0 ----
   // True when `ceph auth ls` lists client.manila. When the cluster cannot be queried this is also true, so
   // that the removal runs and fails with Ceph's own message.
@@ -108,11 +95,10 @@ object manila_teardown extends OrpheraApply:
       )
     else if target.name == rabbitNode then
       List(
-        command(
+        absentRabbitAccount(
           "remove the manila vhost and user from RabbitMQ",
-          rabbitScript,
-          onlyIf = rabbitHasManila,
-          timeout = 60
+          rabbitVhost,
+          rabbitUser
         )
       )
     else if target.name == cephNode then

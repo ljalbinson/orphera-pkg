@@ -52,17 +52,6 @@ object magnum_teardown extends OrpheraApply:
     "/var/log/kolla/magnum"
   )
 
-  // ---- tst10 ----
-  private val rabbitUp =
-    "podman ps -q --filter 'name=^rabbitmq$' 2>/dev/null | grep -q ."
-  // True when the vhost or user exists in a running broker; with no running broker there is nothing to remove.
-  private val rabbitHasMagnum =
-    s"""$rabbitUp && { podman exec rabbitmq rabbitmqctl list_vhosts -q | grep -qx '$rabbitVhost' || podman exec rabbitmq rabbitmqctl list_users -q | awk '{print $$1}' | grep -qx '$rabbitUser'; }"""
-  private val rabbitScript =
-    s"""podman exec rabbitmq rabbitmqctl delete_vhost '$rabbitVhost' || true
-       |podman exec rabbitmq rabbitmqctl delete_user '$rabbitUser' || true
-       |echo "rabbitmq vhost $rabbitVhost and user $rabbitUser removed"""".stripMargin
-
   def describe(target: Node): List[ApplyResource] =
     if target.name == dbNode then
       List(
@@ -74,11 +63,10 @@ object magnum_teardown extends OrpheraApply:
       )
     else if target.name == rabbitNode then
       List(
-        command(
+        absentRabbitAccount(
           "remove the magnum vhost and user from RabbitMQ",
-          rabbitScript,
-          onlyIf = rabbitHasMagnum,
-          timeout = 60
+          rabbitVhost,
+          rabbitUser
         )
       )
     else

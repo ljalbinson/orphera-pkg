@@ -48,18 +48,6 @@ object trove_teardown extends OrpheraApply:
     "/var/log/kolla/trove"
   )
 
-  // ---- tst10 ----
-  private val rabbitUp =
-    "podman ps -q --filter 'name=^rabbitmq$' 2>/dev/null | grep -q ."
-  // True when the vhost or user exists in a running broker; with no running broker there is nothing to
-  // remove.
-  private val rabbitHasTrove =
-    s"""$rabbitUp && { podman exec rabbitmq rabbitmqctl list_vhosts -q | grep -qx trove || podman exec rabbitmq rabbitmqctl list_users -q | awk '{print $$1}' | grep -qx trove; }"""
-  private val rabbitScript =
-    """podman exec rabbitmq rabbitmqctl delete_vhost trove || true
-      |podman exec rabbitmq rabbitmqctl delete_user trove || true
-      |echo "rabbitmq vhost trove and user trove removed"""".stripMargin
-
   def describe(target: Node): List[ApplyResource] =
     if target.name == dbNode then
       List(
@@ -71,11 +59,10 @@ object trove_teardown extends OrpheraApply:
       )
     else if target.name == rabbitNode then
       List(
-        command(
+        absentRabbitAccount(
           "remove the trove vhost and user from RabbitMQ",
-          rabbitScript,
-          onlyIf = rabbitHasTrove,
-          timeout = 60
+          "trove",
+          "trove"
         )
       )
     else

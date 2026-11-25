@@ -48,18 +48,6 @@ object nova_teardown extends OrpheraApply:
     "/var/log/kolla/nova"
   )
 
-  // ---- tst10 ----
-  private val rabbitUp =
-    "podman ps -q --filter 'name=^rabbitmq$' 2>/dev/null | grep -q ."
-  // True when the vhost or user exists in a running broker; with no running
-  // broker there is nothing to remove.
-  private val rabbitHasNova =
-    s"""$rabbitUp && { podman exec rabbitmq rabbitmqctl list_vhosts -q | grep -qx nova || podman exec rabbitmq rabbitmqctl list_users -q | awk '{print $$1}' | grep -qx nova; }"""
-  private val rabbitScript =
-    """podman exec rabbitmq rabbitmqctl delete_vhost nova || true
-      |podman exec rabbitmq rabbitmqctl delete_user nova || true
-      |echo "rabbitmq vhost nova and user nova removed"""".stripMargin
-
   def describe(target: Node): List[ApplyResource] =
     if target.name == dbNode then
       List(
@@ -71,11 +59,10 @@ object nova_teardown extends OrpheraApply:
       )
     else if target.name == rabbitNode then
       List(
-        command(
+        absentRabbitAccount(
           "remove the nova vhost and user from RabbitMQ",
-          rabbitScript,
-          onlyIf = rabbitHasNova,
-          timeout = 60
+          "nova",
+          "nova"
         )
       )
     else
