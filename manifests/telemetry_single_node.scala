@@ -43,7 +43,7 @@ import orphera.orchestrator.kolla.*
 // notifications the services publish, and none of Nova, Cinder, Glance or Neutron here sends them yet
 // ([oslo_messaging_notifications] driver = messagingv2 in each service's config). Event alarms need them.
 //
-// What it adds to Keystone (done by the helper's `register`, repeatable): users `ceilometer` and `aodh` in
+// What it adds to Keystone (done by keystoneEntries, repeatable): users `ceilometer` and `aodh` in
 // project `service` with the admin role; the service `aodh` of type `alarming` with the endpoint
 // http://<fqdn>:8042; the service `prometheus` of type `prometheus` with the endpoint of Prometheus on tst7.
 //
@@ -64,8 +64,8 @@ import orphera.orchestrator.kolla.*
 //     are generated into a temporary directory and compared with the installed files.
 //   - `aodh-dbsync` is skipped while its stamp matches and the `alarm` table exists (a query as the aodh user,
 //     through the VIP).
-//   - The services are registered in Keystone before the units start, skipped while the helper's `registered`
-//     check passes.
+//   - The services are registered in Keystone before the units start, skipped while the registration
+//     checks pass.
 //   - The last steps wait for the three exporters to be up in Prometheus and for two PromQL alarms to reach the
 //     states they should; both are skipped while they already hold (the alarm round trip is run as the guard).
 //
@@ -373,7 +373,7 @@ object telemetry_single_node extends OrpheraApply:
 
   // Standard-library Python, as in the other services. Plain string filled in with replace().
   // Subcommands:
-  //   register | registered | unregister | catalog | metrics | exporters-up | alarm-cycle
+  //   catalog | metrics | exporters-up | alarm-cycle
   // metrics waits (up to 5 minutes) for series of job=ceilometer in Prometheus and prints their names.
   // exporters-up is the quick check that every exporter is up in Prometheus (no waiting).
   // alarm-cycle makes two Prometheus alarms on the query up{job="prometheus"} (one that must be true, one that
@@ -386,8 +386,6 @@ KS = 'https://@@KS@@:5000/v3'
 AODH = '@@AODH@@'
 PROM = '@@PROM@@'
 ADMIN_PW = '@@ADMINPW@@'
-AODH_PW = '@@AODHPW@@'
-CEILOMETER_PW = '@@CEILOMETERPW@@'
 CTX = ssl.create_default_context(cafile='@@CA@@')
 
 
@@ -425,74 +423,6 @@ def get_token(user, password, project):
 
 def admin_token():
     return get_token('admin', ADMIN_PW, 'admin')[0]
-
-
-def find(token, path, key):
-    status, parsed, _ = call('GET', KS + path, token=token)
-    items = parsed.get(key, [])
-    return items[0] if items else None
-
-
-def ensure(token, what, path, key, body, create_key):
-    found = find(token, path, key)
-    if found is not None:
-        return found
-    s, p, _ = call('POST', KS + '/' + what, body, token)
-    if s != 201:
-        die('creating %s failed: HTTP %s %s' % (what, s, p))
-    return p[create_key]
-
-
-def ensure_user(token, project, admin_role, name, password):
-    user = find(token, '/users?name=' + name, 'users')
-    if user is None:
-        s, p, _ = call('POST', KS + '/users', {'user': {'name': name, 'domain_id': 'default', 'password': password}}, token)
-        if s != 201:
-            die('creating user %s failed: HTTP %s %s' % (name, s, p))
-        user = p['user']
-    else:
-        call('PATCH', KS + '/users/' + user['id'], {'user': {'password': password}}, token)
-    s, p, _ = call('PUT', KS + '/projects/%s/users/%s/roles/%s' % (project['id'], user['id'], admin_role['id']), None, token)
-    if s not in (200, 204):
-        die('granting admin to %s failed: HTTP %s %s' % (name, s, p))
-
-
-def ensure_endpoints(token, stype, sname, url):
-    service = ensure(token, 'services', '/services?type=' + stype, 'services', {'service': {'name': sname, 'type': stype}}, 'service')
-    for iface in ('public', 'internal', 'admin'):
-        ep = find(token, '/endpoints?service_id=%s&interface=%s' % (service['id'], iface), 'endpoints')
-        if ep is None:
-            s, p, _ = call('POST', KS + '/endpoints', {'endpoint': {'interface': iface, 'url': url, 'service_id': service['id'], 'region_id': 'RegionOne'}}, token)
-            if s != 201:
-                die('creating %s endpoint of %s failed: HTTP %s %s' % (iface, stype, s, p))
-        elif ep['url'] != url:
-            call('PATCH', KS + '/endpoints/' + ep['id'], {'endpoint': {'url': url}}, token)
-
-
-def register():
-    token, _ = get_token('admin', ADMIN_PW, 'admin')
-    project = ensure(token, 'projects', '/projects?name=service', 'projects', {'project': {'name': 'service', 'domain_id': 'default'}}, 'project')
-    admin_role = find(token, '/roles?name=admin', 'roles')
-    if admin_role is None:
-        die('role admin not found')
-    ensure_user(token, project, admin_role, 'aodh', AODH_PW)
-    ensure_user(token, project, admin_role, 'ceilometer', CEILOMETER_PW)
-    ensure_endpoints(token, 'alarming', 'aodh', AODH)
-    ensure_endpoints(token, 'prometheus', 'prometheus', PROM)
-    print('registered in keystone (users aodh and ceilometer, service types alarming and prometheus, 6 endpoints)')
-
-
-def unregister():
-    token, _ = get_token('admin', ADMIN_PW, 'admin')
-    for stype in ('alarming', 'prometheus'):
-        service = find(token, '/services?type=' + stype, 'services')
-        if service is not None:
-            call('DELETE', KS + '/services/' + service['id'], None, token)
-    for name in ('aodh', 'ceilometer'):
-        user = find(token, '/users?name=' + name, 'users')
-        if user is not None:
-            call('DELETE', KS + '/users/' + user['id'], None, token)
-    print('removed aodh, ceilometer and the prometheus entry from keystone (services, endpoints, users)')
 
 
 def catalog():
@@ -539,24 +469,6 @@ def metrics():
 
 def acall(method, path, token, body=None):
     return call(method, AODH + path, body, token)
-
-
-def registered():
-    # Exit 0 only when everything register() makes is in place: the users aodh and ceilometer can get a token in
-    # project service, and the services alarming and prometheus have their three endpoints at the right URLs.
-    # Makes no change.
-    get_token('aodh', AODH_PW, 'service')
-    get_token('ceilometer', CEILOMETER_PW, 'service')
-    token, _ = get_token('admin', ADMIN_PW, 'admin')
-    for stype, url in (('alarming', AODH), ('prometheus', PROM)):
-        service = find(token, '/services?type=' + stype, 'services')
-        if service is None:
-            die('no service of type ' + stype)
-        for iface in ('public', 'internal', 'admin'):
-            ep = find(token, '/endpoints?service_id=%s&interface=%s' % (service['id'], iface), 'endpoints')
-            if ep is None or ep['url'] != url:
-                die('endpoint %s of %s missing or wrong' % (iface, stype))
-    print('telemetry is registered in keystone')
 
 
 def exporters_up():
@@ -606,14 +518,8 @@ def alarm_cycle():
 
 if __name__ == '__main__':
     cmd = sys.argv[1] if len(sys.argv) > 1 else ''
-    if cmd == 'register':
-        register()
-    elif cmd == 'registered':
-        registered()
-    elif cmd == 'exporters-up':
+    if cmd == 'exporters-up':
         exporters_up()
-    elif cmd == 'unregister':
-        unregister()
     elif cmd == 'catalog':
         catalog()
     elif cmd == 'metrics':
@@ -621,7 +527,7 @@ if __name__ == '__main__':
     elif cmd == 'alarm-cycle':
         alarm_cycle()
     else:
-        die('usage: orphera-telemetry-api register | registered | unregister | catalog | metrics | exporters-up | alarm-cycle')
+        die('usage: orphera-telemetry-api catalog | metrics | exporters-up | alarm-cycle')
 """
 
   private val helper =
@@ -631,8 +537,6 @@ if __name__ == '__main__':
       .replace("@@PROM@@", promUrl)
       .replace("@@NTARGETS@@", (node :: computeNodes).size.toString)
       .replace("@@ADMINPW@@", adminPassword.reveal)
-      .replace("@@AODHPW@@", aodhPassword.reveal)
-      .replace("@@CEILOMETERPW@@", ceilometerPassword.reveal)
       .replace("@@CA@@", caCert)
 
   def describe(target: Node): List[ApplyResource] =
@@ -680,18 +584,36 @@ if __name__ == '__main__':
 
     val helperFile = secretFile(
       helperPath,
-      Secret(helper), // it holds the admin, aodh and ceilometer passwords
+      Secret(helper), // it holds the admin password
       mode = "0700",
       owner = "root",
       group = "root"
     )
-    // Registration comes before the services start.
-    val registered = command(
-      "register Aodh, Ceilometer and Prometheus in Keystone",
-      s"$helperPath register",
-      unless = s"$helperPath registered >/dev/null 2>&1",
-      timeout = 120
-    ).after(helperFile, ca)
+    // Registration comes before the services start. Aodh has the alarming service and the Prometheus entry,
+    // Ceilometer only its user.
+    val (aodhKeystoneHelper, aodhEnsured) = keystoneEntries(
+      "register Aodh and the Prometheus entry in Keystone",
+      "aodh",
+      aodhPassword,
+      List(
+        KeystoneService("aodh", "alarming", s"http://$fqdn:$aodhPort"),
+        KeystoneService("prometheus", "prometheus", promUrl)
+      ),
+      ksUrl,
+      adminPassword,
+      caCert
+    )
+    val registered = aodhEnsured.after(ca)
+    val (ceilometerKeystoneHelper, ceilometerEnsured) = keystoneEntries(
+      "register Ceilometer in Keystone",
+      "ceilometer",
+      ceilometerPassword,
+      Nil,
+      ksUrl,
+      adminPassword,
+      caCert
+    )
+    val ceilometerRegistered = ceilometerEnsured.after(ca)
 
     // ---- ceilometer-central ----
     val centralDir = s"$confRoot/ceilometer-central"
@@ -796,7 +718,7 @@ if __name__ == '__main__':
     ).after(pulled, aodhLog, stateDirectory, apiConf, apiDirRes)
 
     val running = unitOf("ceilometer-central").after(
-      (registered :: pulled :: ceilometerLog :: ceilometerTmp :: centralResources)*
+      (ceilometerRegistered :: pulled :: ceilometerLog :: ceilometerTmp :: centralResources)*
     ) :: aodhServices.map { (name, resources, _) =>
       unitOf(name).after(
         (dbSync :: registered :: pulled :: aodhLog :: aodhTmp :: resources)*
@@ -845,6 +767,9 @@ if __name__ == '__main__':
       ceilometerState,
       ceilometerTmp,
       helperFile,
-      registered
+      aodhKeystoneHelper,
+      ceilometerKeystoneHelper,
+      registered,
+      ceilometerRegistered
     ) ++ centralResources ++ aodhResources ++ List(dbSync) ++ running ++
       List(apiAnswers, exporterAnswers, series, alarms)

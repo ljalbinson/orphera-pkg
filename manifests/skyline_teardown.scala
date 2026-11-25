@@ -26,10 +26,6 @@ object skyline_teardown extends OrpheraApply:
 
   override def nodes: List[String] = List(dbNode, node)
 
-  private val registeredInKeystone =
-    s"[ -x $helper ] && $helper registered >/dev/null 2>&1"
-  private val unregisterScript =
-    s"""$helper unregister || echo "keystone cleanup failed (continuing)""""
 
   private val anyUnit =
     """[ -f /etc/systemd/system/orphera-skyline.service ] || systemctl is-active --quiet orphera-skyline || systemctl is-enabled --quiet orphera-skyline || { command -v podman >/dev/null 2>&1 && { podman container exists skyline || podman container exists skyline_bootstrap; }; }"""
@@ -58,12 +54,7 @@ object skyline_teardown extends OrpheraApply:
         )
       )
     else
-      val unregistered = command(
-        "remove the Skyline user from Keystone",
-        unregisterScript,
-        onlyIf = registeredInKeystone,
-        timeout = 120
-      )
+      val unregistered = absentKeystoneEntries("remove the Skyline user from Keystone", "skyline")
       val stopped = command(
         "stop and remove the skyline container and unit",
         stopScript,
@@ -76,6 +67,7 @@ object skyline_teardown extends OrpheraApply:
         absentDirectory("/var/lib/orphera/skyline", recursive = true),
         absentDirectory("/var/log/skyline", recursive = true),
         absentFile("/tmp/skyline-bootstrap.log"),
-        absentFile(helper)
+        absentFile(helper),
+        absentFile(keystoneHelperPath("skyline"))
       ).map(_.after(stopped))
       List(unregistered, stopped) ++ cleaned

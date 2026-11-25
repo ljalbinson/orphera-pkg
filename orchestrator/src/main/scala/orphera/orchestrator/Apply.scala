@@ -926,7 +926,7 @@ def ensure(spec):
                     die('creating %s endpoint of %s failed: HTTP %s %s' % (iface, svc['type'], s, p))
             elif ep['url'] != svc['url']:
                 call('PATCH', KS + '/endpoints/' + ep['id'], {'endpoint': {'url': svc['url']}}, token)
-    print('registered %s in keystone (project %s, user %s, services %s)' % (spec['name'], spec['project'], spec['name'], ' '.join(s['type'] for s in spec['services'])))
+    print('registered %s in keystone (project %s, user %s, services %s)' % (spec['name'], spec['project'], spec['name'], ' '.join(s['type'] for s in spec['services']) or 'none'))
 
 
 def check(spec):
@@ -967,7 +967,7 @@ def remove(spec):
     user = find(token, '/users?name=' + spec['name'], 'users')
     if user is not None:
         call('DELETE', KS + '/users/' + user['id'], None, token)
-    print('removed %s from keystone (services %s, their endpoints, user %s)' % (spec['name'], ' '.join(s['type'] for s in spec['services']), spec['name']))
+    print('removed %s from keystone (services %s, their endpoints, user %s)' % (spec['name'], ' '.join(s['type'] for s in spec['services']) or 'none', spec['name']))
 
 
 if __name__ == '__main__':
@@ -996,7 +996,7 @@ if __name__ == '__main__':
 
   /** The Keystone entries a service needs, as a description: a user `name` with `password` and the admin role in
     * `project`, the extra `roles` made if missing, and each service of `services` (found by its type) with its
-    * public, internal and admin endpoints at the given URL. The result is the helper (a root-only script that
+    * public, internal and admin endpoints at the given URL (`services` may be empty: a user only). The result is the helper (a root-only script that
     * holds the admin password, `keystone` being the base URL such as `https://tst6.example.com:5000`, and `ca`
     * the CA file that verifies it) and the command that runs it. The command is `unchanged` while the user can
     * get a token in the project, the roles exist and every service has its three endpoints at the URL, so a
@@ -1017,7 +1017,6 @@ if __name__ == '__main__':
     keystoneName("name", name)
     keystoneName("project", project)
     roles.foreach(keystoneName("a role", _))
-    require(services.nonEmpty, "keystoneEntries needs at least one service")
     services.foreach { sv =>
       keystoneName("a service name", sv.name)
       keystoneName("a service type", sv.serviceType)

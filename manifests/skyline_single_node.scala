@@ -28,7 +28,7 @@ import orphera.orchestrator.kolla.*
 // it starts. A Kolla-style split into apiserver and console containers needs that file made by hand.
 //
 // What it does:
-//   - the Keystone user `skyline` (project `service`, role admin), made by the helper's `register`; Skyline
+//   - the Keystone user `skyline` (project `service`, role admin), made by keystoneEntries; Skyline
 //     itself has no service entry in the catalog;
 //   - skyline.yaml (database, Keystone URL, the service password, a secret key from the secret store, the
 //     Prometheus on tst7 for the monitoring pages, `ssl_enabled: true` because the console is served over
@@ -259,7 +259,7 @@ object skyline_single_node extends OrpheraApply:
   // ---- the helper ------------------------------------------------------
 
   // Standard-library Python, as in the other service playbooks. Plain string filled in with replace().
-  // Subcommands: register | registered | unregister | catalog-hash | login-check
+  // Subcommands: catalog-hash | login-check
   private val apiHelperPython =
     """#!/usr/bin/python3
 import hashlib, json, ssl, sys, urllib.error, urllib.request
@@ -268,7 +268,6 @@ KS = 'https://@@KS@@:5000/v3'
 SKY = 'https://@@FQDN@@:@@PORT@@'
 REGION = '@@REGION@@'
 ADMIN_PW = '@@ADMINPW@@'
-SKYLINE_PW = '@@SKYLINEPW@@'
 CTX = ssl.create_default_context(cafile='@@CA@@')
 # The test CA has no keyUsage extension, which Python 3.13 and later reject by default.
 CTX.verify_flags &= ~getattr(ssl, 'VERIFY_X509_STRICT', 0)
@@ -306,51 +305,6 @@ def get_token(user, password, project):
     return headers['X-Subject-Token'], parsed
 
 
-def find(token, path, key):
-    status, parsed, _ = call('GET', KS + path, token=token)
-    items = parsed.get(key, [])
-    return items[0] if items else None
-
-
-def register():
-    token, _ = get_token('admin', ADMIN_PW, 'admin')
-    project = find(token, '/projects?name=service', 'projects')
-    if project is None:
-        s, p, _ = call('POST', KS + '/projects', {'project': {'name': 'service', 'domain_id': 'default'}}, token)
-        if s != 201:
-            die('creating project service failed: HTTP %s %s' % (s, p))
-        project = p['project']
-    user = find(token, '/users?name=skyline', 'users')
-    if user is None:
-        s, p, _ = call('POST', KS + '/users', {'user': {'name': 'skyline', 'domain_id': 'default', 'password': SKYLINE_PW}}, token)
-        if s != 201:
-            die('creating user skyline failed: HTTP %s %s' % (s, p))
-        user = p['user']
-    else:
-        call('PATCH', KS + '/users/' + user['id'], {'user': {'password': SKYLINE_PW}}, token)
-    role = find(token, '/roles?name=admin', 'roles')
-    if role is None:
-        die('role admin not found')
-    s, p, _ = call('PUT', KS + '/projects/%s/users/%s/roles/%s' % (project['id'], user['id'], role['id']), None, token)
-    if s not in (200, 204):
-        die('granting admin to skyline failed: HTTP %s %s' % (s, p))
-    print('registered skyline in keystone (user skyline, role admin in project service)')
-
-
-def registered():
-    # The Skyline user exists, has its password from the secret store and a role in project service.
-    get_token('skyline', SKYLINE_PW, 'service')
-    print('skyline is registered in keystone')
-
-
-def unregister():
-    token, _ = get_token('admin', ADMIN_PW, 'admin')
-    user = find(token, '/users?name=skyline', 'users')
-    if user is not None:
-        call('DELETE', KS + '/users/' + user['id'], None, token)
-    print('removed user skyline from keystone')
-
-
 def catalog_hash():
     _, p = get_token('admin', ADMIN_PW, 'admin')
     rows = []
@@ -377,18 +331,12 @@ def login_check():
 
 if __name__ == '__main__':
     cmd = sys.argv[1] if len(sys.argv) > 1 else ''
-    if cmd == 'register':
-        register()
-    elif cmd == 'registered':
-        registered()
-    elif cmd == 'unregister':
-        unregister()
-    elif cmd == 'catalog-hash':
+    if cmd == 'catalog-hash':
         catalog_hash()
     elif cmd == 'login-check':
         login_check()
     else:
-        die('usage: orphera-skyline-api register | registered | unregister | catalog-hash | login-check')
+        die('usage: orphera-skyline-api catalog-hash | login-check')
 """
 
   private val helper =
@@ -398,7 +346,6 @@ if __name__ == '__main__':
       .replace("@@FQDN@@", fqdn)
       .replace("@@REGION@@", region)
       .replace("@@ADMINPW@@", adminPassword.reveal)
-      .replace("@@SKYLINEPW@@", skylinePassword.reveal)
       .replace("@@CA@@", caCert)
 
   private val loggedIn = s"$helperPath login-check >/dev/null 2>&1"
@@ -445,17 +392,21 @@ if __name__ == '__main__':
 
     val helperFile = secretFile(
       helperPath,
-      Secret(helper), // it holds the admin and skyline passwords
+      Secret(helper), // it holds the admin password
       mode = "0700",
       owner = "root",
       group = "root"
     ).after(ca)
-    val registered = command(
+    val (keystoneHelper, ensured) = keystoneEntries(
       "register the Skyline user in Keystone",
-      s"$helperPath register",
-      unless = s"$helperPath registered >/dev/null 2>&1",
-      timeout = 120
-    ).after(helperFile)
+      "skyline",
+      skylinePassword,
+      Nil,
+      ksUrl,
+      adminPassword,
+      caCert
+    )
+    val registered = ensured.after(ca)
 
     val driver = command(
       "install the PyMySQL driver with the image's Python",
@@ -535,6 +486,7 @@ if __name__ == '__main__':
       ca,
       tlsCopy,
       helperFile,
+      keystoneHelper,
       registered,
       driver,
       config,
