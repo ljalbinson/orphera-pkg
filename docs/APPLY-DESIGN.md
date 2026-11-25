@@ -136,6 +136,8 @@ time is up. Nothing is changed on the node. The generated shell is run against a
 
 `rabbitAccount(label, vhost, user, password)` and `absentRabbitAccount(label, vhost, user)` do the same for RabbitMQ: a vhost and its user with full permissions (and their removal), on the broker that runs as the `rabbitmq` container on the node. The guard is the vhost, a real authentication with the password and the permissions, so a rotated password is put right by running it again.
 
+`serverCa(label, host, port, caFile, trust, hint)` fetches the CA of a TLS server the way the services did by script: the last certificate in the chain the server presents, accepted on first use, which must be self-signed and verify the server's certificate. The guard compares the certificates only, since the text a handshake prints after them differs every time; `update-ca-certificates` also puts the CA in `/etc/ssl/certs/ca-certificates.crt`, which the containers mount.
+
 Files with secret content (`Secret` values) never show their content: the diff line says
 `content (secret: not shown)`.
 
