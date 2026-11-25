@@ -676,6 +676,62 @@ object Resources:
          |${install}echo "CA of $host:$port installed: $$SUBJ"""".stripMargin
     command(label, run, unless = unless, timeout = 60)
 
+  /** An apt repository with its signing key, as a description: the key fetched from `keyUrl` and dearmored
+    * into `keyring`, and `sourcesFile` holding the one line `deb [signed-by=<keyring>] <repository>`
+    * (`repository` is what follows, such as `https://apt.example.com stable main`). It is `unchanged` while the
+    * keyring is there and the sources file holds exactly that line (and, when `offers` names a package, apt
+    * offers that package from the repository's host). With `update` the run also refreshes the package lists
+    * of this source alone (with up to three tries), so a package installed right after sees it. The node needs
+    * `curl` and `gpg`.
+    */
+  def aptRepository(
+      label: String,
+      keyUrl: String,
+      keyring: String,
+      sourcesFile: String,
+      repository: String,
+      offers: String = "",
+      update: Boolean = false,
+      timeout: Int = 720
+  ): ApplyResource =
+    def absolute(what: String, path: String): Unit =
+      require(
+        path.startsWith("/") && !path.endsWith("/") && path.forall(c => c.isLetterOrDigit || "/._-".contains(c)),
+        s"$what must be an absolute file path of letters, digits and / . _ -: '$path'"
+      )
+    absolute("keyring", keyring)
+    absolute("sourcesFile", sourcesFile)
+    require(keyUrl.startsWith("https://") && !keyUrl.exists(c => c.isWhitespace || c == '\''), s"keyUrl must be an https URL: '$keyUrl'")
+    require(
+      repository.startsWith("https://") && repository.forall(c => c.isLetterOrDigit || ":/._+~- ".contains(c)),
+      s"repository must start with https:// and hold letters, digits and : / . _ + ~ - and spaces: '$repository'"
+    )
+    require(offers.forall(c => c.isLetterOrDigit || "._+-".contains(c)), s"not a package name: '$offers'")
+    val line = s"deb [signed-by=$keyring] $repository"
+    val host = repository.stripPrefix("https://").takeWhile(c => c != '/' && c != ' ')
+    val offered = if offers.isEmpty then "" else s" && apt-cache policy ${Apply.quote(offers)} 2>/dev/null | grep -qF ${Apply.quote(host)}"
+    val unless =
+      s"""[ -s ${Apply.quote(keyring)} ] && [ "$$(cat ${Apply.quote(sourcesFile)} 2>/dev/null)" = ${Apply.quote(line)} ]$offered"""
+    def parent(path: String): String = Apply.quote(if path.lastIndexOf('/') == 0 then "/" else path.substring(0, path.lastIndexOf('/')))
+    val refresh =
+      if update then
+        s"""for try in 1 2 3; do timeout -k 10 180 apt-get update -o Dir::Etc::sourcelist=${Apply.quote(sourcesFile)} -o Dir::Etc::sourceparts=- -o APT::Get::List-Cleanup=0 && break; done
+           |""".stripMargin
+      else ""
+    val check =
+      if offers.isEmpty then ""
+      else s"""apt-cache policy ${Apply.quote(offers)} | grep -qF ${Apply.quote(host)} || { echo "$offers is not offered by $host" >&2; exit 1; }
+              |""".stripMargin
+    val run =
+      s"""set -e
+         |install -d -m 755 ${parent(keyring)} ${parent(sourcesFile)}
+         |curl -fsSL --retry 3 ${Apply.quote(keyUrl)} | gpg --dearmor --yes -o ${Apply.quote(keyring)}
+         |[ -s ${Apply.quote(keyring)} ] || { echo "no key came from $keyUrl" >&2; exit 1; }
+         |chmod 644 ${Apply.quote(keyring)}
+         |printf '%s\\n' ${Apply.quote(line)} > ${Apply.quote(sourcesFile)}
+         |$refresh$check""".stripMargin + s"""echo "apt repository $host configured""""
+    command(label, run, unless = unless, timeout = timeout)
+
   private def sqlName(what: String, text: String): Unit =
     require(
       text.nonEmpty && text.forall(c => c.isLetterOrDigit || c == '_'),

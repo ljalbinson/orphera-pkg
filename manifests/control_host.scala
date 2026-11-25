@@ -66,17 +66,22 @@ object control_host extends OrpheraClusterPlaybook:
       timeoutSeconds = timeout
     )
 
-  private val sbtRepoScript =
-    """set -e
-      |install -d -m 755 /etc/apt/keyrings
-      |if [ ! -s /etc/apt/keyrings/scalasbt.gpg ]; then
-      |  curl -fsSL 'https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x2EE0EA64E40A89B84B2DF73499E82A75642AC823' \
-      |    | gpg --dearmor -o /etc/apt/keyrings/scalasbt.gpg
-      |  chmod 644 /etc/apt/keyrings/scalasbt.gpg
-      |fi
-      |echo 'deb [signed-by=/etc/apt/keyrings/scalasbt.gpg] https://repo.scala-sbt.org/scalasbt/debian all main' \
-      |  > /etc/apt/sources.list.d/sbt.list
-      |echo "sbt apt repository configured"""".stripMargin
+  // The key comes from the Ubuntu keyserver, as the sbt documentation has it, into a keyring of its own.
+  private val sbtRepositoryPlan: ApplyPlan =
+    import Resources.*
+    ApplyPlan.orFail(
+      "sbt-apt-repository",
+      List(
+        aptRepository(
+          "the scala-sbt apt repository and its key",
+          "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x2EE0EA64E40A89B84B2DF73499E82A75642AC823",
+          "/etc/apt/keyrings/scalasbt.gpg",
+          "/etc/apt/sources.list.d/sbt.list",
+          "https://repo.scala-sbt.org/scalasbt/debian all main",
+          timeout = 120
+        )
+      )
+    )
 
   private val packages = List(
     // build
@@ -157,7 +162,7 @@ object control_host extends OrpheraClusterPlaybook:
     clusterPlaybook("control-host")(
       stage("sbt-apt-repository", host)
         .task("add the scala-sbt apt repository and its key")(
-          Task.RunCommand(List("sh", "-c", sbtRepoScript), timeoutSeconds = 120)
+          Task.Apply(sbtRepositoryPlan)
         )
         .build,
       stage("toolchain-packages", host)
