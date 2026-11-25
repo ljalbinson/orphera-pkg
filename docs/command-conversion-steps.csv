@@ -48,7 +48,7 @@ manifests/observability_stack.scala,322,RunCommand,provision Prometheus datasour
 manifests/telemetry_prometheus.scala,83,apply command,name the scrape.d files in prometheus.yml,6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
 manifests/wordpress_site.scala,278,RunCommand,write wp-config.php,1,Existing kinds,file+service,"file (or fileFrom) + service, restart by notifies; in a playbook via Task.Apply",done
 manifests/wordpress_site.scala,281,RunCommand,write nginx site config,1,Existing kinds,file+service,"file (or fileFrom) + service, restart by notifies; in a playbook via Task.Apply",done
-manifests/apply_kinds_demo.scala,42,apply command,stop orphera-demo,1,Existing kinds,service,service (enabled/running); a one-off restart needs notifies or a restart action,open
+manifests/apply_kinds_demo.scala,42,apply command,stop orphera-demo,1,Existing kinds,service,service (enabled/running); a one-off restart needs notifies or a restart action,done
 manifests/apply_kinds_demo.scala,47,apply command,reload systemd,1,Existing kinds,service,service (enabled/running); a one-off restart needs notifies or a restart action,open
 manifests/ceph-mgr.yaml,32,yaml command,enable and start mgr service,1,Existing kinds,service,service (enabled/running); a one-off restart needs notifies or a restart action,open
 manifests/ceph-mon-quorum.yaml,89,yaml command,enable and start mon service,1,Existing kinds,service,service (enabled/running); a one-off restart needs notifies or a restart action,open
