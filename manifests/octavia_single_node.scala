@@ -521,26 +521,6 @@ object octavia_single_node extends OrpheraApply:
     """heartbeat() { "$@" & P=$!; while kill -0 $P 2>/dev/null; do sleep 20; echo "still working ($(date +%H:%M:%S))"; done; wait $P; }"""
 
   private val amphoraFile = s"$stateDir/amphora.qcow2"
-  private val fetchImageScript =
-    s"""set -e
-       |$heartbeat
-       |IMG=$amphoraFile
-       |if [ ! -s $$IMG ]; then
-       |  if ! heartbeat curl -fsSL --retry 3 --connect-timeout 30 -o $$IMG.part $amphoraImageUrl; then
-       |    rm -f $$IMG.part
-       |    echo "cannot download $amphoraImageUrl - put the image file at $$IMG and run again" >&2
-       |    exit 1
-       |  fi
-       |  mv $$IMG.part $$IMG
-       |fi
-       |MAGIC=$$(head -c 3 $$IMG)
-       |if [ "$$MAGIC" != "QFI" ]; then
-       |  echo "$$IMG is not a qcow2 file - delete it and run again" >&2
-       |  exit 1
-       |fi
-       |ls -l $$IMG""".stripMargin
-  private val imageFileOk =
-    s"""[ "$$(head -c 3 $amphoraFile 2>/dev/null)" = "QFI" ]"""
   private val imagePresent = s"$helperPath image-present >/dev/null 2>&1"
   private val uploadImageScript =
     s"""set -e
@@ -1248,10 +1228,12 @@ if __name__ == '__main__':
       timeout = 120
     ).after(helperFile, ca)
 
-    val fetchedImage = command(
+    val fetchedImage = download(
       "download the amphora image",
-      fetchImageScript,
-      unless = s"$imagePresent || $imageFileOk",
+      amphoraImageUrl,
+      amphoraFile,
+      magic = "QFI",
+      skipIf = imagePresent,
       timeout = 1800
     ).after(stateDirectory, tools(2))
     val uploadedImage = command(

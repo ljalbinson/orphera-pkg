@@ -2612,6 +2612,102 @@ object ApplyCheck:
     check("aptRepository: a repository with a quote is refused", scala.util.Try(aptRepository("x", "https://k/x", keyring, list, "https://r/ 'x'")).isFailure)
     check("aptRepository: a bad package name is refused", scala.util.Try(aptRepository("x", "https://k/x", keyring, list, repo, offers = "a b")).isFailure)
 
+  private def downloadChecks(): Unit =
+    val dir = Files.createTempDirectory("download")
+    val bin = dir.resolve("bin")
+    Files.createDirectory(bin)
+    val curl = bin.resolve("curl")
+    // A stand-in curl: it copies the file `served` to the -o file, or fails when `fail` exists.
+    Files.writeString(
+      curl,
+      s"""#!/bin/sh
+         |while [ $$# -gt 0 ]; do [ "$$1" = -o ] && OUT="$$2"; shift; done
+         |[ -e "$dir/fail" ] && exit 22
+         |cat "$dir/served" > "$$OUT"
+         |""".stripMargin
+    )
+    check("download: the stand-in curl is executable", curl.toFile.setExecutable(true))
+    def sh(script: String): (Int, String) = runShell(s"PATH=$bin:$$PATH\n$script")
+    def serve(text: String): Unit = { val _ = Files.writeString(dir.resolve("served"), text) }
+    def part(r: ApplyResource, pick: ApplyResource.Command => String): String = r match
+      case c: ApplyResource.Command => pick(c)
+      case other                    => s"not a command: $other"
+    val img = s"$dir/img/a.qcow2"
+    val step = download("img", "https://example.com/a.qcow2", img, magic = "QFI")
+    serve("QFIdata")
+    check("download: no file means it is needed", sh(part(step, _.unless))._1 != 0)
+    val ran = sh(part(step, _.run))
+    check("download: the run succeeds and puts the file in place", ran._1 == 0 && Files.readString(Path.of(img)) == "QFIdata", ran.toString)
+    check("download: and leaves no .part file", !Files.exists(Path.of(img + ".part")))
+    check("download: a file that passes the checks means unchanged", sh(part(step, _.unless))._1 == 0)
+    Files.writeString(Path.of(img), "XXXdata")
+    check("download: a file with the wrong magic means it is needed", sh(part(step, _.unless))._1 != 0)
+    sh(part(step, _.run))
+    check("download: and the run replaces it", Files.readString(Path.of(img)) == "QFIdata")
+    Files.delete(Path.of(img))
+    serve("XXXdata")
+    val wrong = sh(part(step, _.run))
+    check("download: a download with the wrong magic fails, says so and leaves nothing", wrong._1 != 0 && wrong._2.contains("not what was expected") && !Files.exists(Path.of(img)) && !Files.exists(Path.of(img + ".part")), wrong.toString)
+    Files.writeString(dir.resolve("fail"), "")
+    val failed = sh(part(step, _.run))
+    check("download: a failing curl fails the run and names the file to put there", failed._1 != 0 && failed._2.contains(s"put the file at $img"), failed.toString)
+    Files.delete(dir.resolve("fail"))
+    val skipped = download("img", "https://example.com/a.qcow2", img, magic = "QFI", skipIf = "true")
+    check("download: skipIf true means unchanged without the file", sh(part(skipped, _.unless))._1 == 0)
+    val notSkipped = download("img", "https://example.com/a.qcow2", img, magic = "QFI", skipIf = "false")
+    check("download: skipIf false means the checks decide", sh(part(notSkipped, _.unless))._1 != 0)
+    val sum = sh("printf QFIdata | sha256sum | cut -d' ' -f1")._2
+    val summed = download("img", "https://example.com/a.qcow2", img, sha256 = sum)
+    serve("QFIdata")
+    check("download: a matching checksum is accepted", sh(part(summed, _.run))._1 == 0 && sh(part(summed, _.unless))._1 == 0)
+    val badSum = download("img", "https://example.com/a.qcow2", img, sha256 = "0" * 64)
+    check("download: a file with another checksum means it is needed", sh(part(badSum, _.unless))._1 != 0)
+    check("download: a bad checksum is refused", scala.util.Try(download("x", "https://e/x", img, sha256 = "abc")).isFailure)
+    check("download: a relative path is refused", scala.util.Try(download("x", "https://e/x", "a.qcow2")).isFailure)
+    check("download: a path with .. is refused", scala.util.Try(download("x", "https://e/x", "/a/../b")).isFailure)
+    check("download: a URL with a quote is refused", scala.util.Try(download("x", "https://e/'x", img)).isFailure)
+
+  private def archiveFilesChecks(): Unit =
+    val dir = Files.createTempDirectory("archive")
+    val bin = dir.resolve("bin")
+    Files.createDirectory(bin)
+    val curl = bin.resolve("curl")
+    Files.writeString(
+      curl,
+      s"""#!/bin/sh
+         |while [ $$# -gt 0 ]; do [ "$$1" = -o ] && OUT="$$2"; shift; done
+         |cat "$dir/served.tar.gz" > "$$OUT"
+         |""".stripMargin
+    )
+    check("archiveFiles: the stand-in curl is executable", curl.toFile.setExecutable(true))
+    def sh(script: String): (Int, String) = runShell(s"PATH=$bin:$$PATH\n$script")
+    def part(r: ApplyResource, pick: ApplyResource.Command => String): String = r match
+      case c: ApplyResource.Command => pick(c)
+      case other                    => s"not a command: $other"
+    val made = sh(s"""cd $dir && mkdir -p pkg-1/sub && printf 'one' > pkg-1/one && printf 'two' > pkg-1/sub/two && tar czf served.tar.gz pkg-1""")
+    check("archiveFiles: the test archive is made", made._1 == 0, made.toString)
+    val t1 = s"$dir/out/bin/one"
+    val t2 = s"$dir/out/lib/two"
+    val step = archiveFiles("tools", "https://example.com/pkg.tar.gz", List("pkg-1/one" -> t1, "pkg-1/sub/two" -> t2))
+    check("archiveFiles: nothing installed means it is needed", sh(part(step, _.unless))._1 != 0)
+    val ran = sh(part(step, _.run))
+    check("archiveFiles: the run succeeds", ran._1 == 0, ran.toString)
+    check("archiveFiles: both files are in place, with their directories made", Files.readString(Path.of(t1)) == "one" && Files.readString(Path.of(t2)) == "two")
+    check("archiveFiles: and executable", Files.isExecutable(Path.of(t1)) && Files.isExecutable(Path.of(t2)))
+    check("archiveFiles: everything there means unchanged", sh(part(step, _.unless))._1 == 0)
+    Files.delete(Path.of(t2))
+    check("archiveFiles: one missing means it is needed", sh(part(step, _.unless))._1 != 0)
+    val missing = archiveFiles("tools", "https://example.com/pkg.tar.gz", List("pkg-1/nothing" -> s"$dir/out/x"))
+    val bad = sh(part(missing, _.run))
+    check("archiveFiles: a file not in the archive fails the run and says so", bad._1 != 0 && bad._2.contains("pkg-1/nothing is not in the archive"), bad.toString)
+    val data = archiveFiles("data", "https://example.com/pkg.tar.gz", List("pkg-1/one" -> s"$dir/out/data"), mode = "0644")
+    sh(part(data, _.run))
+    check("archiveFiles: mode 0644 gives a file that is not executable", Files.exists(Path.of(s"$dir/out/data")) && !Files.isExecutable(Path.of(s"$dir/out/data")) && sh(part(data, _.unless))._1 == 0)
+    check("archiveFiles: a path with .. inside is refused", scala.util.Try(archiveFiles("x", "https://e/x", List("../one" -> t1))).isFailure)
+    check("archiveFiles: a relative target is refused", scala.util.Try(archiveFiles("x", "https://e/x", List("one" -> "bin/one"))).isFailure)
+    check("archiveFiles: a bad mode is refused", scala.util.Try(archiveFiles("x", "https://e/x", List("one" -> t1), mode = "755")).isFailure)
+    check("archiveFiles: no files is refused", scala.util.Try(archiveFiles("x", "https://e/x", Nil)).isFailure)
+
   private def sqlChecks(): Unit =
     val dir = Files.createTempDirectory("sqldb")
     val bin = dir.resolve("bin")
@@ -2884,6 +2980,8 @@ object ApplyCheck:
     rabbitChecks()
     serverCaChecks()
     aptRepositoryChecks()
+    downloadChecks()
+    archiveFilesChecks()
     kindChecks()
     yamlChecks()
     newKindChecks()

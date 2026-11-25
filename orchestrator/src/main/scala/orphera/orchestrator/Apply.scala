@@ -732,6 +732,105 @@ object Resources:
          |$refresh$check""".stripMargin + s"""echo "apt repository $host configured""""
     command(label, run, unless = unless, timeout = timeout)
 
+  private def absoluteClean(what: String, path: String): Unit =
+    require(
+      path.startsWith("/") && !path.endsWith("/") && !path.contains("//") && !path.split('/').contains("..") &&
+        path.forall(c => c.isLetterOrDigit || "/._+-".contains(c)),
+      s"$what must be a clean absolute file path of letters, digits and / . _ + -: '$path'"
+    )
+
+  private def plainUrl(url: String): Unit =
+    require(
+      (url.startsWith("https://") || url.startsWith("http://")) && !url.exists(c => c.isWhitespace || "'\"`$\\".contains(c)),
+      s"not a plain http(s) URL: '$url'"
+    )
+
+  /** A file downloaded to `path`, as a description. It is fetched to `path.part` (with a line printed every 20
+    * seconds, so that a long download does not lose its connection to the agent), checked, and only then moved
+    * into place; a failed download leaves nothing at `path`. `magic` is what the file must start with (such as
+    * `QFI` for qcow2) and `sha256` its checksum, each checked when given. It is `unchanged` while `path` is not
+    * empty and passes the checks, or while `skipIf` (a shell test, such as "the image is already in Glance")
+    * succeeds. A file that fails the checks is fetched again.
+    */
+  def download(
+      label: String,
+      url: String,
+      path: String,
+      magic: String = "",
+      sha256: String = "",
+      skipIf: String = "",
+      timeout: Int = 1800
+  ): ApplyResource =
+    plainUrl(url)
+    absoluteClean("path", path)
+    require(magic.length <= 8 && magic.forall(c => c.isLetterOrDigit), s"magic must be up to 8 letters or digits: '$magic'")
+    require(sha256.isEmpty || (sha256.length == 64 && sha256.forall(c => "0123456789abcdef".contains(c))), "sha256 must be 64 lower-case hex digits")
+    def ok(file: String): String =
+      val f = Apply.quote(file)
+      val tests =
+        List(s"[ -s $f ]") :::
+          (if magic.isEmpty then Nil else List(s"""[ "$$(head -c ${magic.length} $f 2>/dev/null)" = ${Apply.quote(magic)} ]""")) :::
+          (if sha256.isEmpty then Nil else List(s"""[ "$$(sha256sum $f 2>/dev/null | cut -d' ' -f1)" = "$sha256" ]"""))
+      tests.mkString(" && ")
+    val unless = if skipIf.isEmpty then ok(path) else s"$skipIf || { ${ok(path)}; }"
+    val dir = Apply.quote(if path.lastIndexOf('/') == 0 then "/" else path.substring(0, path.lastIndexOf('/')))
+    val run =
+      s"""set -e
+         |heartbeat() { "$$@" & P=$$!; N=0; while kill -0 $$P 2>/dev/null; do sleep 1; N=$$((N+1)); if [ $$((N % 20)) -eq 0 ]; then echo "still working ($$(date +%H:%M:%S))"; fi; done; wait $$P; }
+         |mkdir -p $dir
+         |rm -f ${Apply.quote(path + ".part")}
+         |if ! heartbeat curl -fsSL --retry 3 --connect-timeout 30 -o ${Apply.quote(path + ".part")} ${Apply.quote(url)}; then
+         |  rm -f ${Apply.quote(path + ".part")}
+         |  echo "cannot download $url - put the file at $path and run again" >&2
+         |  exit 1
+         |fi
+         |if ! { ${ok(path + ".part")}; }; then
+         |  rm -f ${Apply.quote(path + ".part")}
+         |  echo "the file from $url is not what was expected (magic '$magic', sha256 '$sha256')" >&2
+         |  exit 1
+         |fi
+         |mv ${Apply.quote(path + ".part")} ${Apply.quote(path)}
+         |ls -l ${Apply.quote(path)}""".stripMargin
+    command(label, run, unless = unless, timeout = timeout)
+
+  /** Files taken out of a `.tar.gz` archive from `url` and installed with `mode`, as a description: each pair is
+    * the path inside the archive and the file to make (its directory is made). It is `unchanged` while every
+    * target exists (and is executable when `mode` makes it so for its owner). The node needs `curl` and `tar`.
+    */
+  def archiveFiles(
+      label: String,
+      url: String,
+      files: List[(String, String)],
+      mode: String = "0755",
+      timeout: Int = 300
+  ): ApplyResource =
+    plainUrl(url)
+    require(files.nonEmpty, "archiveFiles needs at least one file")
+    require(mode.length == 4 && mode.forall(c => c >= '0' && c <= '7'), s"mode must be four octal digits: '$mode'")
+    files.foreach { (inside, target) =>
+      require(
+        inside.nonEmpty && !inside.startsWith("/") && !inside.split('/').contains("..") &&
+          inside.forall(c => c.isLetterOrDigit || "/._+-".contains(c)),
+        s"not a path inside an archive: '$inside'"
+      )
+      absoluteClean("target", target)
+    }
+    val executable = ((mode(1) - '0') & 1) == 1
+    val unless = files.map((_, target) => s"[ ${if executable then "-x" else "-f"} ${Apply.quote(target)} ]").mkString(" && ")
+    val installs = files.map { (inside, target) =>
+      s"""[ -f "$$T/$inside" ] || { echo "${inside} is not in the archive from $url" >&2; exit 1; }
+         |install -m $mode -D "$$T/$inside" ${Apply.quote(target)}""".stripMargin
+    }.mkString("\n")
+    val run =
+      s"""set -e
+         |T=$$(mktemp -d)
+         |trap 'rm -rf "$$T"' EXIT
+         |curl -fsSL --retry 3 --connect-timeout 30 -o "$$T/archive.tar.gz" ${Apply.quote(url)}
+         |tar xzf "$$T/archive.tar.gz" -C "$$T"
+         |$installs
+         |echo "installed ${files.map(_._2).mkString(", ")}"""".stripMargin
+    command(label, run, unless = unless, timeout = timeout)
+
   private def sqlName(what: String, text: String): Unit =
     require(
       text.nonEmpty && text.forall(c => c.isLetterOrDigit || c == '_'),

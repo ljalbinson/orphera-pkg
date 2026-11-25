@@ -44,20 +44,26 @@ object etcd_grow_cluster extends OrpheraClusterPlaybook:
 
   private val etcdVersion = "v3.5.21"
 
-  // Identical to etcd_cluster.scala's installEtcdScript — duplicated
+  // Identical to etcd_cluster.scala's etcdBinariesPlan — duplicated
   // rather than shared, since each manifest here is a standalone object.
-  private val installEtcdScript =
-    s"""test -x /usr/local/bin/etcd && test -x /usr/local/bin/etcdctl && exit 0
-       |set -e
-       |cd /tmp
-       |curl -fsSL -o etcd.tar.gz "https://github.com/etcd-io/etcd/releases/download/$etcdVersion/etcd-$etcdVersion-linux-amd64.tar.gz"
-       |tar xzf etcd.tar.gz
-       |install -m 0755 "etcd-$etcdVersion-linux-amd64/etcd" /usr/local/bin/etcd
-       |install -m 0755 "etcd-$etcdVersion-linux-amd64/etcdctl" /usr/local/bin/etcdctl
-       |rm -rf etcd.tar.gz "etcd-$etcdVersion-linux-amd64"
-       |id etcd >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin etcd
-       |mkdir -p /var/lib/etcd /etc/etcd
-       |chown etcd:etcd /var/lib/etcd""".stripMargin
+  private val etcdBinariesPlan: ApplyPlan =
+    import Resources.*
+    val dir = s"etcd-$etcdVersion-linux-amd64"
+    val binaries = archiveFiles(
+      "the etcd binaries",
+      s"https://github.com/etcd-io/etcd/releases/download/$etcdVersion/$dir.tar.gz",
+      List(s"$dir/etcd" -> "/usr/local/bin/etcd", s"$dir/etcdctl" -> "/usr/local/bin/etcdctl")
+    )
+    val etcdUser = user("etcd", system = true, shell = "/usr/sbin/nologin")
+    ApplyPlan.orFail(
+      "etcd-binaries",
+      List(
+        binaries,
+        etcdUser,
+        directory("/var/lib/etcd", owner = "etcd", group = "etcd").after(etcdUser),
+        directory("/etc/etcd")
+      )
+    )
 
   private def etcdCtl(cmd: String) =
     s"ETCDCTL_API=3 /usr/local/bin/etcdctl --endpoints=http://127.0.0.1:2379 $cmd"
@@ -165,10 +171,7 @@ object etcd_grow_cluster extends OrpheraClusterPlaybook:
           Task.Install(packages = List("curl", "tar"), updateCache = true)
         )
         .task("download and install etcd binaries")(
-          Task.RunCommand(
-            List("sh", "-c", installEtcdScript),
-            timeoutSeconds = 120
-          )
+          Task.Apply(etcdBinariesPlan)
         )
         .build,
 

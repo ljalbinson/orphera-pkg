@@ -60,7 +60,7 @@ object etcd_member_rejoin extends OrpheraClusterPlaybook:
   // Idempotent: if tst2 isn't currently a member (already removed by an
   // earlier attempt at this playbook), this is a no-op rather than an
   // error — same "check first, act only if needed" convention as
-  // etcd_cluster.scala's installEtcdScript.
+  // etcd_cluster.scala's etcdBinariesPlan.
   private val removeMemberScript =
     s"""MEMBER_ID=$$(${etcdCtl(
         "member list"

@@ -40,19 +40,25 @@ object etcd_cluster extends OrpheraClusterPlaybook:
   // the node itself, not the orchestrator host — these test nodes need
   // outbound internet access to github.com for this to work at all,
   // which is a real prerequisite worth confirming before running this
-  // for the first time.
-  private val installEtcdScript =
-    s"""test -x /usr/local/bin/etcd && test -x /usr/local/bin/etcdctl && exit 0
-       |set -e
-       |cd /tmp
-       |curl -fsSL -o etcd.tar.gz "https://github.com/etcd-io/etcd/releases/download/$etcdVersion/etcd-$etcdVersion-linux-amd64.tar.gz"
-       |tar xzf etcd.tar.gz
-       |install -m 0755 "etcd-$etcdVersion-linux-amd64/etcd" /usr/local/bin/etcd
-       |install -m 0755 "etcd-$etcdVersion-linux-amd64/etcdctl" /usr/local/bin/etcdctl
-       |rm -rf etcd.tar.gz "etcd-$etcdVersion-linux-amd64"
-       |id etcd >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin etcd
-       |mkdir -p /var/lib/etcd /etc/etcd
-       |chown etcd:etcd /var/lib/etcd""".stripMargin
+  // for the first time. The binaries come from the release archive, with the etcd user and its directories.
+  private val etcdBinariesPlan: ApplyPlan =
+    import Resources.*
+    val dir = s"etcd-$etcdVersion-linux-amd64"
+    val binaries = archiveFiles(
+      "the etcd binaries",
+      s"https://github.com/etcd-io/etcd/releases/download/$etcdVersion/$dir.tar.gz",
+      List(s"$dir/etcd" -> "/usr/local/bin/etcd", s"$dir/etcdctl" -> "/usr/local/bin/etcdctl")
+    )
+    val etcdUser = user("etcd", system = true, shell = "/usr/sbin/nologin")
+    ApplyPlan.orFail(
+      "etcd-binaries",
+      List(
+        binaries,
+        etcdUser,
+        directory("/var/lib/etcd", owner = "etcd", group = "etcd").after(etcdUser),
+        directory("/etc/etcd")
+      )
+    )
 
   // The only per-node-varying piece is $NAME (resolved remotely via
   // `hostname -s`, matching ceph_mon_quorum.scala's $MONID convention —
@@ -114,10 +120,7 @@ object etcd_cluster extends OrpheraClusterPlaybook:
           Task.Install(packages = List("curl", "tar"), updateCache = true)
         )
         .task("download and install etcd binaries")(
-          Task.RunCommand(
-            List("sh", "-c", installEtcdScript),
-            timeoutSeconds = 120
-          )
+          Task.Apply(etcdBinariesPlan)
         )
         .build,
 
