@@ -4,9 +4,10 @@ import orphera.orchestrator.*
 
 // Undoes rgw_single_node.scala, as a declarative description (OrpheraApply, docs/APPLY-DESIGN.md): removes
 // object storage from Keystone (the services of type object-store and s3, their endpoints and user rgw)
-// through the helper installed by the main description if it is still there, removes the cephadm service
+// through the helper that keystoneEntries installed if it is still there, removes the cephadm service
 // rgw.orphera (the RGW daemon stops), clears its options from the monitors' configuration database, and
-// removes the helper, the Keystone CA copy and the applied-hash file on tst0. The CA that was added to the
+// removes the helpers, the Keystone CA copy and the applied-hash file on tst0 (and the state file that older
+// descriptions kept). The CA that was added to the
 // host's trust store stays (other descriptions use the same file name).
 //
 // The pools that RGW made (.rgw.root, default.rgw.*) and everything stored in them are KEPT, so a later
@@ -33,11 +34,6 @@ object rgw_teardown extends OrpheraApply:
   private val purgePools = sys.env.get("RGW_PURGE_POOLS").contains("yes")
 
   override def nodes: List[String] = List(node)
-
-  private val registeredInKeystone =
-    s"[ -x $helper ] && $helper registered >/dev/null 2>&1"
-  private val unregisterScript =
-    s"""$helper unregister || echo "keystone cleanup failed (continuing)""""
 
   private val serviceListed =
     s"cephadm shell -- ceph orch ls rgw 2>/dev/null | grep -q 'rgw.$serviceId'"
@@ -74,18 +70,14 @@ object rgw_teardown extends OrpheraApply:
       |echo "RGW pools removed (RGW_PURGE_POOLS=yes)"""".stripMargin
 
   def describe(target: Node): List[ApplyResource] =
-    val unregistered = command(
-      "remove object storage from Keystone",
-      unregisterScript,
-      onlyIf = registeredInKeystone,
-      timeout = 120
-    )
+    val unregistered = absentKeystoneEntries("remove object storage from Keystone", "rgw")
     val removed = command(
-      "remove the RGW service, its options, the helper and the CA copy",
+      "remove the RGW service, its options, the helpers and the CA copy",
       removeScript,
       onlyIf = somethingToRemove,
       timeout = 600
     ).after(unregistered)
+    val keystoneHelperGone = absentFile(keystoneHelperPath("rgw")).after(unregistered)
     if purgePools then
       val purged = command(
         "delete the RGW pools and every object in them (RGW_PURGE_POOLS=yes)",
@@ -93,5 +85,5 @@ object rgw_teardown extends OrpheraApply:
         onlyIf = poolsExist,
         timeout = 600
       ).after(removed)
-      List(unregistered, removed, purged)
-    else List(unregistered, removed)
+      List(unregistered, keystoneHelperGone, removed, purged)
+    else List(unregistered, keystoneHelperGone, removed)

@@ -2889,6 +2889,41 @@ post('projects', {'project': {'name': 'stack-project', 'domain_id': '$domainId'}
       check("keystone: a domain name with a space is refused", scala.util.Try(keystoneEntries("x", "a", Secret("x"), Nil, url, Secret("x"), "/ca", domain = Some(KeystoneDomain("a b", "d", "adm", Secret("x"))))).isFailure)
       check("keystone: an endpoint that is not a URL is refused", scala.util.Try(keystoneEntries("x", "a", Secret("x"), List(KeystoneService("a", "a", "tst13:80")), url, Secret("x"), "/ca")).isFailure)
       check("keystone: a password with a non-ASCII character is refused", scala.util.Try(keystoneEntries("x", "a", Secret("pä"), List(KeystoneService("a", "a", "http://h")), url, Secret("x"), "/ca")).isFailure)
+      // Swift: the admin endpoint has no project in its URL, the other two have.
+      val swiftPublic = "http://rgw:8080/swift/v1/AUTH_%(project_id)s"
+      val swiftAdmin = "http://rgw:8080/swift/v1"
+      def swiftEntries(adminUrl: String) =
+        keystoneEntries(
+          "register object storage",
+          "rgw",
+          Secret("rgwpw"),
+          List(
+            KeystoneService("swift", "object-store", swiftPublic, Some(adminUrl)),
+            KeystoneService("s3", "s3", "http://rgw:8080")
+          ),
+          url,
+          Secret("adminpw"),
+          "/no/ca.crt",
+          roles = List("member")
+        )
+      val (swiftHelper, _) = swiftEntries(swiftAdmin)
+      val swiftText = fileText(swiftHelper)
+      def swiftRun(arg: String): (Int, String) = helperRun(swiftHelper, swiftText, arg)
+      check("keystone: object storage fails the check before it exists", swiftRun("check")._1 != 0)
+      check("keystone: ensure makes both services", swiftRun("ensure")._1 == 0 && swiftRun("check")._1 == 0, swiftRun("check").toString)
+      val swiftDb = dumpDb
+      check(
+        "keystone: the admin endpoint has its own URL and the other two the project one",
+        swiftDb.split(java.util.regex.Pattern.quote("\"url\": \"" + swiftPublic + "\"")).length == 3 &&
+          swiftDb.split(java.util.regex.Pattern.quote("\"url\": \"" + swiftAdmin + "\"")).length == 2,
+        swiftDb
+      )
+      val (swiftOtherHelper, _) = swiftEntries("http://rgw:8080/swift/v2")
+      val swiftOtherText = fileText(swiftOtherHelper)
+      check("keystone: another admin URL fails the check", helperRun(swiftOtherHelper, swiftOtherText, "check")._1 != 0)
+      check("keystone: ensure puts the admin URL right and leaves the others", helperRun(swiftOtherHelper, swiftOtherText, "ensure")._1 == 0 && helperRun(swiftOtherHelper, swiftOtherText, "check")._1 == 0 && swiftRun("check")._1 != 0)
+      check("keystone: an admin URL that is not a URL is refused", scala.util.Try(swiftEntries("rgw:8080")).isFailure)
+      check("keystone: object storage is removed with its user", helperRun(swiftOtherHelper, swiftOtherText, "remove")._1 == 0 && helperRun(swiftOtherHelper, swiftOtherText, "exists")._1 != 0)
     finally proc.destroy()
 
   // A stand-in `cephadm shell` for the Ceph helpers: pools, cephx users and settings in a JSON file, and `dump` to
