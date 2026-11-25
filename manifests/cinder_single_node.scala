@@ -588,7 +588,7 @@ if __name__ == '__main__':
       "register Cinder in Keystone",
       "cinder",
       cinderPassword,
-      List(KeystoneService("cinderv3", "volumev3", s"http://$fqdn:$apiPort")),
+      List(KeystoneService("cinderv3", "volumev3", s"http://$fqdn:$apiPort/v3/%(project_id)s")),
       s"https://$ksFqdn:5000",
       adminPassword,
       caCert
