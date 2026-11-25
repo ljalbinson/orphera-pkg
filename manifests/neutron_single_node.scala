@@ -58,7 +58,7 @@ import orphera.orchestrator.conf.*
 //     restarts only when its own files or the CA changed.
 //   - `neutron-db-manage upgrade heads` is skipped while its stamp matches and a
 //     query as the neutron user finds the `networks` table.
-//   - The Keystone registration is skipped while the helper's `registered` check
+//   - The Keystone registration is skipped while the registration check
 //     passes. Registration comes before the units start.
 //
 // Test-only credentials from the secret store (`orphera secrets`), as before.
@@ -464,7 +464,7 @@ object neutron_single_node extends OrpheraApply:
 
   // Standard-library Python, as in the other service playbooks. Plain string filled
   // in with replace(). Subcommands:
-  //   register | registered | unregister | catalog | agents | agents-up |
+  //   catalog | agents | agents-up |
   //   net-list | net-create | net-delete <id> | tenant-cycle | provider-net
   // (net-create makes a flat network on the physical network `provider` and a
   // subnet with DHCP off, net-delete removes both: that exercises the API, the
@@ -485,7 +485,6 @@ import json, ssl, sys, time, urllib.request, urllib.error
 KS = 'https://@@KS@@:5000/v3'
 NEUTRON = '@@NEUTRON@@'
 ADMIN_PW = '@@ADMINPW@@'
-NEUTRON_PW = '@@NEUTRONPW@@'
 PHYSNET = '@@PHYSNET@@'
 CTX = ssl.create_default_context(cafile='@@CA@@')
 
@@ -520,78 +519,6 @@ def get_token(user, password, project):
     if status != 201:
         die('token request for %s failed: HTTP %s %s' % (user, status, parsed))
     return headers['X-Subject-Token'], parsed
-
-
-def find(token, path, key):
-    status, parsed, _ = call('GET', KS + path, token=token)
-    items = parsed.get(key, [])
-    return items[0] if items else None
-
-
-def register():
-    token, _ = get_token('admin', ADMIN_PW, 'admin')
-    project = find(token, '/projects?name=service', 'projects')
-    if project is None:
-        s, p, _ = call('POST', KS + '/projects', {'project': {'name': 'service', 'domain_id': 'default'}}, token)
-        if s != 201:
-            die('creating project service failed: HTTP %s %s' % (s, p))
-        project = p['project']
-    user = find(token, '/users?name=neutron', 'users')
-    if user is None:
-        s, p, _ = call('POST', KS + '/users', {'user': {'name': 'neutron', 'domain_id': 'default', 'password': NEUTRON_PW}}, token)
-        if s != 201:
-            die('creating user neutron failed: HTTP %s %s' % (s, p))
-        user = p['user']
-    else:
-        call('PATCH', KS + '/users/' + user['id'], {'user': {'password': NEUTRON_PW}}, token)
-    role = find(token, '/roles?name=admin', 'roles')
-    if role is None:
-        die('role admin not found')
-    s, p, _ = call('PUT', KS + '/projects/%s/users/%s/roles/%s' % (project['id'], user['id'], role['id']), None, token)
-    if s not in (200, 204):
-        die('granting admin to neutron failed: HTTP %s %s' % (s, p))
-    service = find(token, '/services?type=network', 'services')
-    if service is None:
-        s, p, _ = call('POST', KS + '/services', {'service': {'name': 'neutron', 'type': 'network'}}, token)
-        if s != 201:
-            die('creating service neutron failed: HTTP %s %s' % (s, p))
-        service = p['service']
-    for iface in ('public', 'internal', 'admin'):
-        ep = find(token, '/endpoints?service_id=%s&interface=%s' % (service['id'], iface), 'endpoints')
-        if ep is None:
-            s, p, _ = call('POST', KS + '/endpoints', {'endpoint': {'interface': iface, 'url': NEUTRON, 'service_id': service['id'], 'region_id': 'RegionOne'}}, token)
-            if s != 201:
-                die('creating %s endpoint failed: HTTP %s %s' % (iface, s, p))
-        elif ep['url'] != NEUTRON:
-            call('PATCH', KS + '/endpoints/' + ep['id'], {'endpoint': {'url': NEUTRON}}, token)
-    print('registered neutron in keystone (project service, user neutron, service type network, 3 endpoints)')
-
-
-def registered():
-    # Exit 0 only when everything register() makes is in place: the neutron
-    # user can get a token in project service, and service `network` has the
-    # three endpoints at NEUTRON. Makes no change.
-    get_token('neutron', NEUTRON_PW, 'service')
-    token, _ = get_token('admin', ADMIN_PW, 'admin')
-    service = find(token, '/services?type=network', 'services')
-    if service is None:
-        die('no service of type network')
-    for iface in ('public', 'internal', 'admin'):
-        ep = find(token, '/endpoints?service_id=%s&interface=%s' % (service['id'], iface), 'endpoints')
-        if ep is None or ep['url'] != NEUTRON:
-            die('endpoint %s missing or wrong' % iface)
-    print('neutron is registered in keystone')
-
-
-def unregister():
-    token, _ = get_token('admin', ADMIN_PW, 'admin')
-    service = find(token, '/services?type=network', 'services')
-    if service is not None:
-        call('DELETE', KS + '/services/' + service['id'], None, token)
-    user = find(token, '/users?name=neutron', 'users')
-    if user is not None:
-        call('DELETE', KS + '/users/' + user['id'], None, token)
-    print('removed neutron from keystone (service network, its endpoints, user neutron)')
 
 
 def catalog():
@@ -799,13 +726,7 @@ def tenant_cycle():
 
 if __name__ == '__main__':
     cmd = sys.argv[1] if len(sys.argv) > 1 else ''
-    if cmd == 'register':
-        register()
-    elif cmd == 'registered':
-        registered()
-    elif cmd == 'unregister':
-        unregister()
-    elif cmd == 'catalog':
+    if cmd == 'catalog':
         catalog()
     elif cmd == 'agents':
         agents()
@@ -822,7 +743,7 @@ if __name__ == '__main__':
     elif cmd == 'provider-net':
         provider_net()
     else:
-        die('usage: orphera-neutron-api register | registered | unregister | catalog | agents | agents-up | net-list | net-create | net-delete <id> | tenant-cycle | provider-net')
+        die('usage: orphera-neutron-api catalog | agents | agents-up | net-list | net-create | net-delete <id> | tenant-cycle | provider-net')
 """
 
   private val helper =
@@ -830,7 +751,6 @@ if __name__ == '__main__':
       .replace("@@KS@@", ksFqdn)
       .replace("@@NEUTRON@@", s"http://$fqdn:$apiPort")
       .replace("@@ADMINPW@@", adminPassword.reveal)
-      .replace("@@NEUTRONPW@@", neutronPassword.reveal)
       .replace("@@PHYSNET@@", physnet)
       .replace("@@CA@@", caCert)
   private val helperPath = "/usr/local/sbin/orphera-neutron-api"
@@ -949,18 +869,22 @@ if __name__ == '__main__':
 
     val helperFile = secretFile(
       helperPath,
-      Secret(helper), // it holds the admin and neutron passwords
+      Secret(helper), // it holds the admin password
       mode = "0700",
       owner = "root",
       group = "root"
     )
     // Registration comes before the services start, as for Nova.
-    val registered = command(
+    val (keystoneHelper, ensured) = keystoneEntries(
       "register Neutron in Keystone",
-      s"$helperPath register",
-      unless = s"$helperPath registered >/dev/null 2>&1",
-      timeout = 120
-    ).after(helperFile, ca)
+      "neutron",
+      neutronPassword,
+      List(KeystoneService("neutron", "network", s"http://$fqdn:$apiPort")),
+      ksUrl,
+      adminPassword,
+      caCert
+    )
+    val registered = ensured.after(ca)
 
     val running = units.map { (unitService, _, deps) =>
       unitService.after((dbSync :: registered :: bridge :: carried :: deps)*)
@@ -993,5 +917,5 @@ if __name__ == '__main__':
       ca,
       logDirectory,
       stateDirectory
-    ) ++ units.flatMap(_._2) ++ List(dbSync, helperFile, registered) ++
+    ) ++ units.flatMap(_._2) ++ List(dbSync, helperFile, keystoneHelper, registered) ++
       running ++ List(answering, reporting)
