@@ -3045,6 +3045,136 @@ else:
     check("absentCephPool: nothing to do afterwards", sh(part(noPool, _.onlyIf))._1 != 0)
     check("absentCephPool: a pool that is not there fails the removal", sh(part(noPool, _.run))._1 != 0)
 
+  // Stand-ins for `ovs-vsctl` and `ip` that keep Open vSwitch bridges, their ports and the manager in a JSON file;
+  // `ovs-vsctl dump` prints it. A port on a bridge that does not exist fails, as it does for real.
+  private val fakeOvs: String =
+    """#!/usr/bin/python3
+import json, os, sys
+S = os.environ['FAKE_OVS']
+st = json.load(open(S)) if os.path.exists(S) else {'bridges': {}, 'manager': ''}
+def save():
+    json.dump(st, open(S, 'w'))
+a = sys.argv[1:]
+prog = os.path.basename(sys.argv[0])
+if prog == 'ip':
+    if a[:2] == ['link', 'set']:
+        if a[2] not in st['bridges']:
+            print('Cannot find device "%s"' % a[2], file=sys.stderr); sys.exit(1)
+        st['bridges'][a[2]]['up'] = (a[3] == 'up'); save(); sys.exit(0)
+    if a[:3] == ['-o', 'link', 'show']:
+        b = st['bridges'].get(a[3])
+        if b is None:
+            print('Device "%s" does not exist.' % a[3], file=sys.stderr); sys.exit(1)
+        print('7: %s: <BROADCAST,MULTICAST%s> mtu 1500 state UNKNOWN' % (a[3], ',UP,LOWER_UP' if b['up'] else ''))
+        sys.exit(0)
+    sys.exit(2)
+flag = ''
+if a and a[0] in ('--may-exist', '--if-exists'):
+    flag = a.pop(0)
+cmd = a[0]
+def need(name):
+    if name not in st['bridges']:
+        print('ovs-vsctl: no bridge named %s' % name, file=sys.stderr); sys.exit(1)
+if cmd == 'dump':
+    print(json.dumps(st, sort_keys=True))
+elif cmd == 'br-exists':
+    sys.exit(0 if a[1] in st['bridges'] else 2)
+elif cmd == 'add-br':
+    if a[1] in st['bridges'] and flag != '--may-exist':
+        print('ovs-vsctl: bridge %s already exists' % a[1], file=sys.stderr); sys.exit(1)
+    st['bridges'].setdefault(a[1], {'ports': [], 'up': False}); save()
+elif cmd == 'add-port':
+    need(a[1])
+    if a[2] in st['bridges'][a[1]]['ports'] and flag != '--may-exist':
+        sys.exit(1)
+    if a[2] not in st['bridges'][a[1]]['ports']:
+        st['bridges'][a[1]]['ports'].append(a[2])
+    save()
+elif cmd == 'list-ports':
+    need(a[1])
+    print('\n'.join(st['bridges'][a[1]]['ports']))
+elif cmd == 'del-br':
+    if a[1] not in st['bridges'] and flag != '--if-exists':
+        need(a[1])
+    st['bridges'].pop(a[1], None); save()
+elif cmd == 'del-port':
+    need(a[1])
+    if a[2] in st['bridges'][a[1]]['ports']:
+        st['bridges'][a[1]]['ports'].remove(a[2])
+    elif flag != '--if-exists':
+        sys.exit(1)
+    save()
+elif cmd == 'set-manager':
+    st['manager'] = a[1]; save()
+elif cmd == 'get-manager':
+    print(st['manager'])
+else:
+    sys.exit(2)
+"""
+
+  private def ovsChecks(): Unit =
+    val dir = Files.createTempDirectory("ovs")
+    val bin = dir.resolve("bin")
+    Files.createDirectory(bin)
+    val real = bin.resolve("ovs-vsctl")
+    Files.writeString(real, fakeOvs)
+    check("ovs: the fake ovs-vsctl is executable", real.toFile.setExecutable(true))
+    Files.createSymbolicLink(bin.resolve("ip"), real)
+    val state = dir.resolve("state.json")
+    def sh(script: String, installed: Boolean = true): (Int, String) =
+      val path = if installed then s"$bin:$$PATH" else "/nonexistent"
+      runShell(s"PATH=$path\nFAKE_OVS=$state\nexport FAKE_OVS\n$script")
+    def dump: String = sh("ovs-vsctl dump")._2
+    def part(r: ApplyResource, pick: ApplyResource.Command => String): String = r match
+      case c: ApplyResource.Command => pick(c)
+      case other                    => s"not a command: $other"
+    // bridge
+    val bridge = ovsBridge("br-provider with enp2s0", "br-provider", List("enp2s0"))
+    check("ovsBridge: no bridge means it is needed", sh(part(bridge, _.unless))._1 != 0)
+    val made = sh(part(bridge, _.run))
+    check("ovsBridge: it makes the bridge, its port and brings it up", made._1 == 0 && made._2.contains("br-provider has enp2s0") && dump.contains("\"ports\": [\"enp2s0\"]") && dump.contains("\"up\": true"), made.toString + dump)
+    check("ovsBridge: it then means unchanged", sh(part(bridge, _.unless))._1 == 0)
+    sh("ovs-vsctl del-port br-provider enp2s0")
+    check("ovsBridge: a missing port means it is needed", sh(part(bridge, _.unless))._1 != 0)
+    sh(part(bridge, _.run))
+    check("ovsBridge: running it puts the port back", sh(part(bridge, _.unless))._1 == 0)
+    sh("ip link set br-provider down")
+    check("ovsBridge: a bridge whose link is down means it is needed", sh(part(bridge, _.unless))._1 != 0)
+    sh(part(bridge, _.run))
+    check("ovsBridge: running it brings the link up", sh(part(bridge, _.unless))._1 == 0)
+    check("ovsBridge: a port whose name only starts the same does not count", sh(part(ovsBridge("x", "br-provider", List("enp2s")), _.unless))._1 != 0)
+    val bare = ovsBridge("a bridge with no ports", "br-int")
+    check("ovsBridge: a bridge with no ports is made and says so", sh(part(bare, _.run))._2.contains("br-int has no ports") && sh(part(bare, _.unless))._1 == 0)
+    check("ovsBridge: a name with a space is refused", scala.util.Try(ovsBridge("x", "br x")).isFailure)
+    check("ovsBridge: a port name that is too long is refused", scala.util.Try(ovsBridge("x", "br0", List("a" * 16))).isFailure)
+    // manager
+    val manager = ovsManager("loopback manager", "ptcp:6640:127.0.0.1")
+    check("ovsManager: no manager means it is needed", sh(part(manager, _.unless))._1 != 0)
+    val set = sh(part(manager, _.run))
+    check("ovsManager: it sets the manager", set._1 == 0 && dump.contains("\"manager\": \"ptcp:6640:127.0.0.1\""), set.toString + dump)
+    check("ovsManager: it then means unchanged", sh(part(manager, _.unless))._1 == 0)
+    check("ovsManager: another manager means it is needed", sh(part(ovsManager("x", "ptcp:6640:127.0.0.2"), _.unless))._1 != 0)
+    check("ovsManager: a target with a quote is refused", scala.util.Try(ovsManager("x", "a'b")).isFailure)
+    // port removal
+    sh("ovs-vsctl add-port br-int o-hm0")
+    val port = absentOvsPort("remove o-hm0", "br-int", "o-hm0")
+    check("absentOvsPort: it is wanted while the bridge has the port", sh(part(port, _.onlyIf))._1 == 0)
+    check("absentOvsPort: it is not wanted without Open vSwitch", sh(part(port, _.onlyIf), installed = false)._1 != 0)
+    val unplugged = sh(part(port, _.run))
+    check("absentOvsPort: it removes the port and says so", unplugged._1 == 0 && unplugged._2.contains("o-hm0 removed from br-int") && !dump.contains("o-hm0"), unplugged.toString + dump)
+    check("absentOvsPort: nothing to do afterwards", sh(part(port, _.onlyIf))._1 != 0)
+    check("absentOvsPort: nor when the bridge is gone", sh(part(absentOvsPort("x", "br-gone", "o-hm0"), _.onlyIf))._1 != 0)
+    check("absentOvsPort: removing again still succeeds", sh(part(port, _.run))._1 == 0)
+    // bridge removal
+    val gone = absentOvsBridge("delete the bridges", List("br-provider", "br-int"))
+    check("absentOvsBridge: it is wanted while either bridge exists", sh(part(gone, _.onlyIf))._1 == 0 && sh(part(absentOvsBridge("x", List("br-gone", "br-int")), _.onlyIf))._1 == 0)
+    check("absentOvsBridge: it is not wanted without Open vSwitch", sh(part(gone, _.onlyIf), installed = false)._1 != 0)
+    val removed = sh(part(gone, _.run))
+    check("absentOvsBridge: it removes both and says so", removed._1 == 0 && removed._2.contains("br-provider br-int removed") && dump.contains("\"bridges\": {}"), removed.toString + dump)
+    check("absentOvsBridge: nothing to do afterwards", sh(part(gone, _.onlyIf))._1 != 0)
+    check("absentOvsBridge: removing bridges that are gone still succeeds", sh(part(gone, _.run))._1 == 0)
+    check("absentOvsBridge: no bridge is refused", scala.util.Try(absentOvsBridge("x", Nil)).isFailure)
+
   private def sqlChecks(): Unit =
     val dir = Files.createTempDirectory("sqldb")
     val bin = dir.resolve("bin")
@@ -3321,6 +3451,7 @@ else:
     archiveFilesChecks()
     keystoneChecks()
     cephChecks()
+    ovsChecks()
     kindChecks()
     yamlChecks()
     newKindChecks()

@@ -1254,6 +1254,82 @@ if __name__ == '__main__':
       timeout = timeout
     )
 
+  private def ovsName(what: String, text: String): Unit =
+    require(
+      text.nonEmpty && text.length <= 15 && text.forall(c => c.isLetterOrDigit || "_-.".contains(c)),
+      s"$what must be 1 to 15 letters, digits and _ - . , not '$text'"
+    )
+
+  /** An Open vSwitch bridge with the given physical (or other) ports, up. Nothing happens while the bridge exists,
+    * has every port and its link is up; a missing bridge or port is added, and a port the bridge already has is
+    * left alone. Needs Open vSwitch on the node (declare the `openvswitch-switch` package and service before it).
+    */
+  def ovsBridge(label: String, bridge: String, ports: List[String] = Nil, timeout: Int = 60): ApplyResource =
+    ovsName("the bridge", bridge)
+    ports.foreach(ovsName("a port", _))
+    val portCommands = ports.map(p => s"ovs-vsctl --may-exist add-port $bridge $p")
+    val portChecks = ports.map(p => s"ovs-vsctl list-ports $bridge | grep -qx $p")
+    val portText = if ports.isEmpty then "no ports" else ports.mkString(" ")
+    command(
+      label,
+      (List("set -e", s"ovs-vsctl --may-exist add-br $bridge") ++ portCommands ++
+        List(
+          s"ip link set $bridge up",
+          s"""echo "$bridge has $portText""""
+        )).mkString("\n"),
+      unless = (List(s"ovs-vsctl br-exists $bridge") ++ portChecks ++
+        List(s"""ip -o link show $bridge | grep -q '<[^>]*UP'""")).mkString(" && "),
+      timeout = timeout
+    )
+
+  /** Open vSwitch's database manager set to `target` (such as `ptcp:6640:127.0.0.1`, which lets a container reach
+    * ovsdb over loopback TCP). Nothing happens while it already is that.
+    */
+  def ovsManager(label: String, target: String, timeout: Int = 60): ApplyResource =
+    require(
+      target.nonEmpty && target.forall(c => c.isLetterOrDigit || ":._-".contains(c)),
+      s"the manager target must be letters, digits and : . _ - , not '$target'"
+    )
+    command(
+      label,
+      s"""set -e
+         |ovs-vsctl set-manager $target
+         |echo "the Open vSwitch manager is $target"""".stripMargin,
+      unless = s"ovs-vsctl get-manager | grep -qx '$target'",
+      timeout = timeout
+    )
+
+  /** The Open vSwitch bridges gone, with their ports. Nothing happens while none of them exists, or while Open
+    * vSwitch is not installed.
+    */
+  def absentOvsBridge(label: String, bridges: List[String], timeout: Int = 60): ApplyResource =
+    require(bridges.nonEmpty, "absentOvsBridge needs a bridge")
+    bridges.foreach(ovsName("a bridge", _))
+    val bridgeText = bridges.mkString(" ")
+    command(
+      label,
+      (List("set -e") ++ bridges.map(b => s"ovs-vsctl --if-exists del-br $b") ++
+        List(s"""echo "$bridgeText removed"""")).mkString("\n"),
+      onlyIf = s"command -v ovs-vsctl >/dev/null 2>&1 && { " +
+        bridges.map(b => s"ovs-vsctl br-exists $b").mkString(" || ") + "; }",
+      timeout = timeout
+    )
+
+  /** One port gone from a bridge. Nothing happens while the bridge does not have it, or while Open vSwitch is not
+    * installed.
+    */
+  def absentOvsPort(label: String, bridge: String, port: String, timeout: Int = 60): ApplyResource =
+    ovsName("the bridge", bridge)
+    ovsName("the port", port)
+    command(
+      label,
+      s"""set -e
+         |ovs-vsctl --if-exists del-port $bridge $port
+         |echo "$port removed from $bridge"""".stripMargin,
+      onlyIf = s"command -v ovs-vsctl >/dev/null 2>&1 && ovs-vsctl list-ports $bridge 2>/dev/null | grep -qx $port",
+      timeout = timeout
+    )
+
   private def sqlName(what: String, text: String): Unit =
     require(
       text.nonEmpty && text.forall(c => c.isLetterOrDigit || c == '_'),

@@ -231,19 +231,6 @@ object neutron_single_node extends OrpheraApply:
        |$stripPython
        |PY""".stripMargin
 
-  // Open vSwitch comes from the host (apt). br-provider's only physical port is
-  // the provider NIC; the OVS agent in the container creates br-int and the
-  // patch ports.
-  private val bridgeScript =
-    s"""set -e
-       |ovs-vsctl --may-exist add-br $providerBridge
-       |ovs-vsctl --may-exist add-port $providerBridge $providerNic
-       |ip link set $providerBridge up
-       |ovs-vsctl show
-       |echo "$providerBridge has $providerNic"""".stripMargin
-  private val bridgeDone =
-    s"""ovs-vsctl br-exists $providerBridge && ovs-vsctl list-ports $providerBridge | grep -qx $providerNic && ip -o link show $providerBridge | grep -q '<[^>]*UP'"""
-
   // The Kolla cache as a mirror of quay.io (podman registries.conf.d drop-in).
   private val registryMirror =
     s"""[[registry]]
@@ -773,11 +760,10 @@ if __name__ == '__main__':
       unless = addressDropped,
       timeout = 120
     ).after(tools*)
-    val bridge = command(
+    val bridge = ovsBridge(
       s"create $providerBridge with $providerNic as its port",
-      bridgeScript,
-      unless = bridgeDone,
-      timeout = 60
+      providerBridge,
+      List(providerNic)
     ).after(ovsService, noAddress)
 
     val mirrorDir = directory("/etc/containers/registries.conf.d").after(podman)

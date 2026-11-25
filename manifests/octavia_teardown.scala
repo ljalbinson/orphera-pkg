@@ -63,13 +63,6 @@ object octavia_teardown extends OrpheraApply:
        |systemctl daemon-reload
        |echo "octavia containers and units removed"""".stripMargin
 
-  // True when o-hm0 is a port of br-int.
-  private val hasHmPort =
-    "command -v ovs-vsctl >/dev/null 2>&1 && ovs-vsctl list-ports br-int 2>/dev/null | grep -qx o-hm0"
-  private val unplugScript =
-    """ovs-vsctl --if-exists del-port br-int o-hm0
-      |echo "o-hm0 removed from br-int"""".stripMargin
-
   // /etc/kolla/octavia is where the config and the certificates are kept.
   private val directories =
     List(
@@ -110,12 +103,8 @@ object octavia_teardown extends OrpheraApply:
         onlyIf = anyUnit,
         timeout = 240
       ).after(unregistered)
-      val unplugged = command(
-        "remove the health manager port o-hm0 from br-int",
-        unplugScript,
-        onlyIf = hasHmPort,
-        timeout = 60
-      ).after(stopped)
+      val unplugged = absentOvsPort("remove the health manager port o-hm0 from br-int", "br-int", "o-hm0")
+        .after(stopped)
       // The helper goes with the files: the first step above needed it, and runs before them.
       val cleaned =
         (directories.map(absentDirectory(_, recursive = true)) ++

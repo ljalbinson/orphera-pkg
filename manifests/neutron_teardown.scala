@@ -42,13 +42,6 @@ object neutron_teardown extends OrpheraApply:
 
   // ---- tst19 ----
 
-  private val bridgesExist =
-    "command -v ovs-vsctl >/dev/null 2>&1 && { ovs-vsctl br-exists br-provider || ovs-vsctl br-exists br-int; }"
-  private val bridgesScript =
-    """ovs-vsctl --if-exists del-br br-provider || true
-      |ovs-vsctl --if-exists del-br br-int || true
-      |echo "br-provider and br-int removed"""".stripMargin
-
   private val dirs = List(
     "/etc/kolla/neutron",
     "/etc/kolla/neutron-server",
@@ -80,11 +73,9 @@ object neutron_teardown extends OrpheraApply:
     else
       val unregistered = absentKeystoneEntries("remove Neutron from Keystone", "neutron")
       val stopped = absentContainerUnits(units.map(u => s"orphera-$u" -> u)).map(_.after(unregistered))
-      val bridges = command(
+      val bridges = absentOvsBridge(
         "delete the Open vSwitch bridges br-provider and br-int",
-        bridgesScript,
-        onlyIf = bridgesExist,
-        timeout = 60
+        List("br-provider", "br-int")
       ).after(stopped*)
       // Typed removal, no script: each directory with its contents, then the helper.
       val cleaned = (dirs.map(absentDirectory(_, recursive = true)) :+
