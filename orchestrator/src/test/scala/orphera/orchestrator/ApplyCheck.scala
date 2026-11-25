@@ -2415,6 +2415,81 @@ object ApplyCheck:
     val out = new String(proc.getInputStream.readAllBytes(), StandardCharsets.UTF_8)
     (proc.waitFor(), out.trim)
 
+  private def sqlChecks(): Unit =
+    val dir = Files.createTempDirectory("sqldb")
+    val bin = dir.resolve("bin")
+    Files.createDirectory(bin)
+    val log = dir.resolve("log")
+    // A stand-in mariadb: it records its arguments and the password variable, and answers as the test says.
+    val fake = bin.resolve("mariadb")
+    Files.writeString(
+      fake,
+      s"""#!/bin/sh
+         |echo "pw=$$MYSQL_PWD args=$$*" >> "$log"
+         |case "$$*" in
+         |  *information_schema*) [ -e "$dir/exists" ] && echo 1; [ -e "$dir/down" ] && exit 1; exit 0 ;;
+         |  *"SELECT 1"*) [ -e "$dir/login" ] ;;
+         |  *) exit 0 ;;
+         |esac
+         |""".stripMargin
+    )
+    check("sql: the fake mariadb is executable", fake.toFile.setExecutable(true))
+    def sh(script: String): Int = runShell(s"PATH=$bin:$$PATH\n$script")._1
+    def touch(n: String): Unit = { val _ = Files.writeString(dir.resolve(n), "") }
+    def gone(n: String): Unit = { val _ = Files.deleteIfExists(dir.resolve(n)) }
+    def part(r: ApplyResource, pick: ApplyResource.Command => String): String = r match
+      case c: ApplyResource.Command => pick(c)
+      case other                    => s"not a command: $other"
+    val pw = Secret("p'a\"s$s")
+    val db = sqlDatabase("db", List("alpha", "beta"), "owner", pw, "10.0.0.5", charset = "utf8mb4", collation = "utf8mb4_unicode_ci")
+    val run = part(db, _.run)
+    check(
+      "sqlDatabase: each database is created with the character set",
+      run.contains("CREATE DATABASE IF NOT EXISTS alpha DEFAULT CHARACTER SET utf8mb4 DEFAULT COLLATE utf8mb4_unicode_ci; CREATE DATABASE IF NOT EXISTS beta"),
+      run
+    )
+    check(
+      "sqlDatabase: the user is created, set and granted on each database",
+      run.contains("CREATE USER IF NOT EXISTS 'owner'@'%'") && run.contains("ALTER USER 'owner'@'%'") &&
+        run.contains("GRANT ALL PRIVILEGES ON alpha.* TO 'owner'@'%'") &&
+        run.contains("GRANT ALL PRIVILEGES ON beta.* TO 'owner'@'%'") && run.endsWith("FLUSH PRIVILEGES;\"")
+    )
+    gone("login")
+    check("sqlDatabase: no login means it is needed", sh(part(db, _.unless)) != 0)
+    touch("login")
+    check("sqlDatabase: a login on every database means unchanged", sh(part(db, _.unless)) == 0)
+    val seen = Files.readString(log)
+    check(
+      "sqlDatabase: it logs in as the user through the address, with the password",
+      seen.contains("pw=p'a\"s$s args=-N -h 10.0.0.5 -u owner alpha -e SELECT 1") && seen.contains("owner beta -e"),
+      seen
+    )
+    Files.writeString(log, "")
+    check("sqlDatabase: the run is accepted by sh", sh(run) == 0)
+    val ran = Files.readString(log)
+    check(
+      "sqlDatabase: the password reaches the SQL with its quote escaped",
+      ran.contains("IDENTIFIED BY 'p\\'a\"s$s'"),
+      ran
+    )
+    check("sqlDatabase: a name with a quote is refused", scala.util.Try(sqlDatabase("x", List("a'b"), "u", pw, "h")).isFailure)
+    check("sqlDatabase: no databases is refused", scala.util.Try(sqlDatabase("x", Nil, "u", pw, "h")).isFailure)
+    check("sqlDatabase: a bad address is refused", scala.util.Try(sqlDatabase("x", List("a"), "u", pw, "a b")).isFailure)
+    val drop = absentSqlDatabase("drop", List("alpha", "beta"), "owner")
+    check(
+      "absentSqlDatabase: both databases and the user are dropped",
+      part(drop, _.run) == "mariadb -N -e \"DROP DATABASE IF EXISTS alpha; DROP DATABASE IF EXISTS beta; DROP USER IF EXISTS 'owner'@'%'; FLUSH PRIVILEGES;\"",
+      part(drop, _.run)
+    )
+    gone("exists")
+    check("absentSqlDatabase: nothing there means nothing to do", sh(part(drop, _.onlyIf)) != 0)
+    touch("exists")
+    check("absentSqlDatabase: something there means it runs", sh(part(drop, _.onlyIf)) == 0)
+    gone("exists")
+    touch("down")
+    check("absentSqlDatabase: a server that cannot be queried means it runs", sh(part(drop, _.onlyIf)) == 0)
+    check("absentSqlDatabase: no databases is refused", scala.util.Try(absentSqlDatabase("x", Nil, "u")).isFailure)
+
   private def absentContainerUnitsChecks(): Unit =
     val rs = absentContainerUnits(List("orphera-a" -> "a", "orphera-b" -> "b"))
     check("absentContainerUnits: three resources a unit and a reload", rs.size == 7, rs.map(_.id).toString)
@@ -2608,6 +2683,7 @@ object ApplyCheck:
     waitForChecks()
     pullImagesChecks()
     absentContainerUnitsChecks()
+    sqlChecks()
     kindChecks()
     yamlChecks()
     newKindChecks()

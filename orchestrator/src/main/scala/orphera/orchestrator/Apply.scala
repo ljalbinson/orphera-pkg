@@ -536,6 +536,79 @@ object Resources:
   ): ApplyResource =
     Command(label, run, onlyIf, unless, creates, onChangeOnly, timeout)
 
+  private def sqlName(what: String, text: String): Unit =
+    require(
+      text.nonEmpty && text.forall(c => c.isLetterOrDigit || c == '_'),
+      s"$what must be letters, digits and underscores, not '$text'"
+    )
+
+  /** The password as SQL text between single quotes, inside a shell string between double quotes. */
+  private def sqlPassword(password: Secret): String =
+    password.reveal
+      .replace("\\", "\\\\")
+      .replace("'", "\\'")
+      .flatMap {
+        case c @ ('\\' | '"' | '$' | '`') => s"\\$c"
+        case c                            => c.toString
+      }
+
+  /** Databases and the user who owns them on a MariaDB server, as a description, for a node where the
+    * `mariadb` client logs in as root (the unix socket, as on a Galera node). The user (`'user'@'%'`, since a
+    * proxy hides the client's address) gets all privileges on each database and the given password, so a
+    * rotated password is applied by running it again. It is `unchanged` while a real login as the user
+    * through `via` (the address clients use, such as the VIP) reaches every database with that password.
+    * `charset` and `collation` apply to databases the run creates.
+    */
+  def sqlDatabase(
+      label: String,
+      databases: List[String],
+      user: String,
+      password: Secret,
+      via: String,
+      charset: String = "",
+      collation: String = ""
+  ): ApplyResource =
+    require(databases.nonEmpty, "sqlDatabase needs at least one database")
+    databases.foreach(sqlName("a database name", _))
+    sqlName("a user name", user)
+    require(
+      via.nonEmpty && via.forall(c => c.isLetterOrDigit || c == '.' || c == '-'),
+      s"sqlDatabase: not an address: '$via'"
+    )
+    List(charset, collation).foreach(w =>
+      require(w.forall(c => c.isLetterOrDigit || c == '_'), s"sqlDatabase: not a character set or collation: '$w'")
+    )
+    val settings =
+      (if charset.isEmpty then "" else s" DEFAULT CHARACTER SET $charset") +
+        (if collation.isEmpty then "" else s" DEFAULT COLLATE $collation")
+    val pw = sqlPassword(password)
+    val statements =
+      databases.map(d => s"CREATE DATABASE IF NOT EXISTS $d$settings; ").mkString +
+        s"CREATE USER IF NOT EXISTS '$user'@'%' IDENTIFIED BY '$pw'; " +
+        s"ALTER USER '$user'@'%' IDENTIFIED BY '$pw'; " +
+        databases.map(d => s"GRANT ALL PRIVILEGES ON $d.* TO '$user'@'%'; ").mkString +
+        "FLUSH PRIVILEGES;"
+    val login = databases
+      .map(d =>
+        s"MYSQL_PWD=${Apply.quote(password.reveal)} mariadb -N -h $via -u $user $d -e 'SELECT 1' >/dev/null 2>&1"
+      )
+      .mkString(" && ")
+    command(label, s"""mariadb -N -e "$statements"""", unless = login)
+
+  /** The same databases and user gone, as a description: dropped when either exists. When MariaDB cannot be
+    * queried the guard says yes, so the drop runs and fails with MariaDB's own message: a database that is
+    * down is not "nothing to remove".
+    */
+  def absentSqlDatabase(label: String, databases: List[String], user: String): ApplyResource =
+    require(databases.nonEmpty, "absentSqlDatabase needs at least one database")
+    databases.foreach(sqlName("a database name", _))
+    sqlName("a user name", user)
+    val drops = databases.map(d => s"DROP DATABASE IF EXISTS $d; ").mkString
+    val names = databases.map(d => s"'$d'").mkString(",")
+    val exists =
+      s"""OUT=$$(mariadb -N -e "SELECT 1 FROM information_schema.SCHEMATA WHERE SCHEMA_NAME IN ($names) UNION SELECT 1 FROM mysql.user WHERE User='$user'" 2>/dev/null) || exit 0; [ -n "$$OUT" ]"""
+    command(label, s"""mariadb -N -e "${drops}DROP USER IF EXISTS '$user'@'%'; FLUSH PRIVILEGES;"""", onlyIf = exists)
+
   /** Services gone from the node, as a description. Each pair is a systemd unit (its name without `.service`)
     * and the container it runs. The unit is stopped and disabled (nothing happens when it does not exist),
     * its file under /etc/systemd/system is removed, and the container is removed with `podman rm -f` when

@@ -132,6 +132,8 @@ time is up. Nothing is changed on the node. The generated shell is run against a
 
 `absentContainerUnits(List(unit -> container))` is the removal of services that run in containers: stop and disable each unit, remove its file, remove the container if podman has it, and reload systemd once if a file went. It returns the resources in order; what must follow takes them all with `.after(stopped*)`.
 
+`sqlDatabase(label, databases, user, password, via)` and `absentSqlDatabase(label, databases, user)` describe MariaDB databases and their owner (and their removal) for a node where the `mariadb` client logs in as root. The guard of `sqlDatabase` is a real login as the user through `via`, so a dropped database or a changed password is put right by running it again; `absentSqlDatabase` runs when a database or the user exists, and also when MariaDB cannot be queried, so that a database that is down is not taken for "nothing to remove".
+
 Files with secret content (`Secret` values) never show their content: the diff line says
 `content (secret: not shown)`.
 
