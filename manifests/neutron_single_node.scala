@@ -260,18 +260,6 @@ object neutron_single_node extends OrpheraApply:
        |""".stripMargin
 
   private val images = neutronServices.map(_.image.ref)
-  private val pullScript =
-    s"""${Pull.shellFunction(
-        "the Image(...) in neutronContainer in neutron_single_node.scala"
-      )}
-       |for img in ${images.mkString(" ")}; do
-       |  pull_retry $$img || exit 1
-       |done
-       |echo "images ready"""".stripMargin
-  private val imagesPresent =
-    s"""for img in ${images.mkString(
-        " "
-      )}; do podman image exists $$img || exit 1; done"""
 
   // The server's command and the rootwrap config must be in the images.
   private val imagesCarry =
@@ -926,10 +914,10 @@ if __name__ == '__main__':
       registryMirror,
       mode = "0644"
     ).after(mirrorDir)
-    val pulled = command(
+    val pulled = pullImages(
       "pull the Neutron images",
-      pullScript,
-      unless = imagesPresent,
+      images,
+      hint = "the Image(...) in neutronContainer in neutron_single_node.scala",
       timeout = 2400
     ).after(podman, mirror)
     val carried = command(

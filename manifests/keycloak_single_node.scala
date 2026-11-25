@@ -155,13 +155,6 @@ object keycloak_single_node extends OrpheraApply:
       |""".stripMargin
 
   private val imageRef = keycloakImage.ref
-  private val pullScript =
-    s"""${Pull.shellFunction(
-        "KEYCLOAK_IMAGE or the ExternalImage in keycloak_single_node.scala"
-      )}
-       |pull_retry $imageRef || exit 1
-       |echo "image ready: $$(podman images -q $imageRef | head -1)"""".stripMargin
-  private val imagePresent = s"podman image exists $imageRef"
 
   // The files keycloak_tls.scala leaves: they must be there, and the certificate must be for the key.
   private val tlsPresent =
@@ -902,10 +895,10 @@ if __name__ == '__main__':
       registryMirror,
       mode = "0644"
     ).after(mirrorDir)
-    val pulled = command(
+    val pulled = pullImages(
       "pull the Keycloak image",
-      pullScript,
-      unless = imagePresent,
+      List(imageRef),
+      hint = "KEYCLOAK_IMAGE or the ExternalImage in keycloak_single_node.scala",
       timeout = 1800
     ).after(podman, mirror)
 

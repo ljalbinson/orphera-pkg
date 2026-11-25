@@ -2415,6 +2415,51 @@ object ApplyCheck:
     val out = new String(proc.getInputStream.readAllBytes(), StandardCharsets.UTF_8)
     (proc.waitFor(), out.trim)
 
+  private def pullImagesChecks(): Unit =
+    val dir = java.nio.file.Files.createTempDirectory("pullimages")
+    val bin = dir.resolve("bin")
+    java.nio.file.Files.createDirectory(bin)
+    val state = dir.resolve("state")
+    java.nio.file.Files.createDirectory(state)
+    val fake = bin.resolve("podman")
+    java.nio.file.Files.writeString(
+      fake,
+      s"""#!/bin/sh
+         |case "$$1" in
+         |  image) [ -e "${state}/$$(echo "$$3" | tr / _)" ] ;;
+         |  pull) echo "$$2" >> "${state}/log"; : > "${state}/$$(echo "$$2" | tr / _)" ;;
+         |esac
+         |""".stripMargin
+    )
+    check("pullImages: the fake podman is executable", fake.toFile.setExecutable(true))
+    def sh(script: String): (Int, String) = runShell(s"PATH=$bin:$$PATH\n$script")
+    def part(r: ApplyResource, pick: ApplyResource.Command => String): String = r match
+      case c: ApplyResource.Command => pick(c)
+      case other                    => s"not a command: $other"
+    val r = pullImages("images", List("quay.io/a/one:1", "quay.io/a/two:2"), hint = "the manifest")
+    check("pullImages: missing images are not present", sh(part(r, _.unless))._1 != 0)
+    val first = sh(part(r, _.run))
+    check("pullImages: the run pulls them", first._1 == 0, first.toString)
+    check(
+      "pullImages: both were pulled once",
+      java.nio.file.Files.readAllLines(state.resolve("log")).toArray.toList == List("quay.io/a/one:1", "quay.io/a/two:2")
+    )
+    check("pullImages: present images are not missing", sh(part(r, _.unless))._1 == 0)
+    sh(part(r, _.run))
+    check(
+      "pullImages: a run with them present pulls nothing more",
+      java.nio.file.Files.readAllLines(state.resolve("log")).size == 2
+    )
+    val more = pullImages("images", List("quay.io/a/one:1", "quay.io/a/three:3"))
+    sh(part(more, _.run))
+    check(
+      "pullImages: only the missing one is pulled",
+      java.nio.file.Files.readAllLines(state.resolve("log")).toArray.toList.last == "quay.io/a/three:3" &&
+        java.nio.file.Files.readAllLines(state.resolve("log")).size == 3
+    )
+    check("pullImages: no images is refused", scala.util.Try(pullImages("x", Nil)).isFailure)
+    check("pullImages: a space in a reference is refused", scala.util.Try(pullImages("x", List("a b"))).isFailure)
+
   private def waitForChecks(): Unit =
     val server = com.sun.net.httpserver.HttpServer
       .create(new java.net.InetSocketAddress("127.0.0.1", 0), 0)
@@ -2528,6 +2573,7 @@ object ApplyCheck:
     runChecks()
     owedChecks()
     waitForChecks()
+    pullImagesChecks()
     kindChecks()
     yamlChecks()
     newKindChecks()

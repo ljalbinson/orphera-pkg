@@ -52,14 +52,6 @@ object rabbitmq_single_node extends OrpheraApply:
   )
   private val rabbitImage = rabbitContainer.image.ref
 
-  private val pullScript =
-    s"""${Pull.shellFunction(
-        "the ExternalImage in rabbitContainer in rabbitmq_single_node.scala"
-      )}
-       |pull_retry $rabbitImage || exit 1
-       |echo "image ready"""".stripMargin
-  private val imagePresent = s"podman image exists $rabbitImage"
-
   // No {{...}} in any command: Orphera renders those as a template before
   // running the command. Use filters, not --format.
   // `ping` passes as soon as the Erlang node is up, before the `rabbit` application
@@ -95,10 +87,10 @@ object rabbitmq_single_node extends OrpheraApply:
 
   def describe(target: Node): List[ApplyResource] =
     val podman = pkg("podman", updateCache = true)
-    val pulled = command(
+    val pulled = pullImages(
       "pull the RabbitMQ image",
-      pullScript,
-      unless = imagePresent,
+      List(rabbitImage),
+      hint = "the ExternalImage in rabbitContainer in rabbitmq_single_node.scala",
       timeout = 1200
     ).after(podman)
     val data = directory(dataDir).after(podman)

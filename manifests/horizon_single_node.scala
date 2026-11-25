@@ -104,14 +104,6 @@ object horizon_single_node extends OrpheraApply:
        |insecure = true
        |""".stripMargin
 
-  private val pullScript =
-    s"""${Pull.shellFunction(
-        "the Image(...) in horizonWeb in horizon_single_node.scala"
-      )}
-       |pull_retry $webImage || exit 1
-       |echo "image ready"""".stripMargin
-  private val imagePresent = s"podman image exists $webImage"
-
   // The certificate files dashboard_tls.scala leaves on the node.
   private val tlsPresent =
     s"[ -f $tlsDir/server-chain.crt ] && [ -f $tlsDir/server.key ] && [ -f $tlsDir/ca.crt ]"
@@ -441,10 +433,10 @@ if __name__ == '__main__':
       registryMirror,
       mode = "0644"
     ).after(mirrorDir)
-    val pulled = command(
+    val pulled = pullImages(
       "pull the Horizon image",
-      pullScript,
-      unless = imagePresent,
+      List(webImage),
+      hint = "the Image(...) in horizonWeb in horizon_single_node.scala",
       timeout = 1800
     ).after(podman, mirror)
 

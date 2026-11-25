@@ -536,6 +536,32 @@ object Resources:
   ): ApplyResource =
     Command(label, run, onlyIf, unless, creates, onChangeOnly, timeout)
 
+  /** Has the container images on the node, as a description: every reference in `images` is pulled with
+    * `podman pull` (three tries, with a pause, through `kolla.Pull`) unless the node already has it, so a run
+    * with all of them present changes nothing. `hint` says where to look if a reference is wrong, and appears
+    * in the message of a failed pull. The images the node already has are left as they are.
+    */
+  def pullImages(
+      label: String,
+      images: List[String],
+      hint: String = "",
+      timeout: Int = 1800
+  ): ApplyResource =
+    require(images.nonEmpty, "pullImages needs at least one image")
+    require(
+      images.forall(i => i.nonEmpty && !i.exists(c => c.isWhitespace || c == '\'')),
+      s"pullImages: an image reference with a space or a quote in $images"
+    )
+    val refs = images.map(Apply.quote).mkString(" ")
+    val where = if hint.isEmpty then "the image names in the manifest" else hint
+    val present = s"""for img in $refs; do podman image exists "$$img" || exit 1; done"""
+    val run =
+      s"""${kolla.Pull.shellFunction(where)}
+         |for img in $refs; do
+         |  podman image exists "$$img" || pull_retry "$$img" || exit 1
+         |done""".stripMargin
+    command(label, run, unless = present, timeout = timeout)
+
   /** Waits until an HTTP(S) endpoint answers, as a description: the URL, the status codes that count as an
     * answer, the CA that signs it, and text the body must hold. It changes nothing: when the endpoint already
     * answers it reports `unchanged`, otherwise it waits (every `interval` seconds, for up to `timeout`) and fails

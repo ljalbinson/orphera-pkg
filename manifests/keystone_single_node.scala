@@ -392,13 +392,6 @@ object keystone_single_node extends OrpheraApply:
        |insecure = true
        |""".stripMargin
 
-  private val pullScript =
-    s"""${Pull.shellFunction(
-        "the registry path and tag, the Image(...) in keystoneContainer in keystone_single_node.scala"
-      )}
-       |pull_retry $image || exit 1
-       |echo "image ready: $image"""".stripMargin
-
   // CA and server certificate are created once and then reused, so the CA
   // clients already trust never changes under them. SAN: FQDN, short name, IP.
   private val caExists = s"[ -f $caDir/ca.key ] && [ -f $caDir/ca.crt ]"
@@ -489,10 +482,10 @@ object keystone_single_node extends OrpheraApply:
       registryMirror,
       mode = "0644"
     ).after(mirrorDir)
-    val pulled = command(
+    val pulled = pullImages(
       "pull the Kolla keystone image",
-      pullScript,
-      unless = s"podman image exists $image",
+      List(image),
+      hint = "the registry path and tag, the Image(...) in keystoneContainer in keystone_single_node.scala",
       timeout = 1200
     ).after(podman, mirror)
 

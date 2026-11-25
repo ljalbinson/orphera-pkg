@@ -142,13 +142,6 @@ object placement_single_node extends OrpheraApply:
        |insecure = true
        |""".stripMargin
 
-  private val pullScript =
-    s"""${Pull.shellFunction(
-        "the Image(...) in placementApi in placement_single_node.scala"
-      )}
-       |pull_retry $apiImage || exit 1
-       |echo "image ready: $apiImage"""".stripMargin
-
   // Keystone's CA: the last certificate it presents (trust on first use),
   // which must be self-signed. `chainTo DIR` leaves DIR/c1.pem ... DIR/cN.pem,
   // each holding the certificate only: the text s_client prints after the
@@ -476,10 +469,10 @@ if __name__ == '__main__':
       registryMirror,
       mode = "0644"
     ).after(mirrorDir)
-    val pulled = command(
+    val pulled = pullImages(
       "pull the Kolla placement-api image",
-      pullScript,
-      unless = s"podman image exists $apiImage",
+      List(apiImage),
+      hint = "the Image(...) in placementApi in placement_single_node.scala",
       timeout = 1800
     ).after(podman, mirror)
 

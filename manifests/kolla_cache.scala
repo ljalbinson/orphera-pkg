@@ -66,13 +66,6 @@ object kolla_cache extends OrpheraApply:
 
   private val hostPackages = List("podman", "curl")
 
-  private val pullRegistryScript =
-    s"""${Pull.shellFunction(
-        "the registry image name in kolla_cache.scala; the pull is from Docker Hub"
-      )}
-       |pull_retry $registryImage || exit 1
-       |echo "registry image ready"""".stripMargin
-
   // Pulling through localhost:<port> makes the registry fetch from quay.io and
   // keep the layers; the local podman copy is then deleted so the VM's own
   // image store does not hold a second copy. One script for the whole list.
@@ -96,10 +89,10 @@ object kolla_cache extends OrpheraApply:
   def describe(target: Node): List[ApplyResource] =
     val tools = hostPackages.map(p => pkg(p, updateCache = true))
     val podman = tools.head
-    val pulled = command(
+    val pulled = pullImages(
       "pull the registry image",
-      pullRegistryScript,
-      unless = s"podman image exists $registryImage",
+      List(registryImage),
+      hint = "the registry image name in kolla_cache.scala; the pull is from Docker Hub",
       timeout = 600
     ).after(podman)
     val data = directory(dataDir)

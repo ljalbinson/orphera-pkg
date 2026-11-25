@@ -290,18 +290,6 @@ object designate_single_node extends OrpheraApply:
        |""".stripMargin
 
   private val images = allContainers.map(_.image.ref)
-  private val pullScript =
-    s"""${Pull.shellFunction(
-        "the Image(...) values in designate_single_node.scala"
-      )}
-       |for img in ${images.mkString(" ")}; do
-       |  pull_retry $$img || exit 1
-       |done
-       |echo "images ready"""".stripMargin
-  private val imagesPresent =
-    s"""for img in ${images.mkString(
-        " "
-      )}; do podman image exists $$img || exit 1; done"""
 
   // Keystone's CA: the last certificate it presents (trust on first use),
   // which must be self-signed. `chainTo DIR` leaves DIR/c1.pem ... DIR/cN.pem,
@@ -798,10 +786,10 @@ if __name__ == '__main__':
       registryMirror,
       mode = "0644"
     ).after(mirrorDir)
-    val pulled = command(
+    val pulled = pullImages(
       "pull the Designate and BIND9 images",
-      pullScript,
-      unless = imagesPresent,
+      images,
+      hint = "the Image(...) values in designate_single_node.scala",
       timeout = 2400
     ).after(podman, mirror)
 
