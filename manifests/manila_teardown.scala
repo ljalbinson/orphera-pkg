@@ -59,19 +59,6 @@ object manila_teardown extends OrpheraApply:
   )
 
   // ---- tst0 ----
-  private val nfsExists =
-    s"""OUT=$$(cephadm shell -- ceph nfs cluster ls 2>/dev/null) || exit 0; echo "$$OUT" | tr -d '\\r' | grep -qw '$nfsCluster'"""
-  private val nfsScript =
-    s"""cephadm shell -- ceph nfs cluster rm $nfsCluster
-       |echo "NFS cluster $nfsCluster removed"""".stripMargin
-
-  private val fsExists =
-    s"""OUT=$$(cephadm shell -- ceph fs ls 2>/dev/null) || exit 0; echo "$$OUT" | grep -q '^name: $cephFs,'"""
-  private val fsScript =
-    s"""cephadm shell -- ceph config set mon mon_allow_pool_delete true
-       |cephadm shell -- ceph fs volume rm $cephFs --yes-i-really-mean-it
-       |echo "filesystem $cephFs removed"""".stripMargin
-
   def describe(target: Node): List[ApplyResource] =
     if target.name == dbNode then
       List(
@@ -94,17 +81,10 @@ object manila_teardown extends OrpheraApply:
       // CephFS and the NFS cluster are removed only when asked (MANILA_PURGE_CEPH=yes): shares live there.
       val purge: List[ApplyResource] =
         if purgeCeph then
-          val nfs = command(
-            s"remove the NFS cluster $nfsCluster (MANILA_PURGE_CEPH=yes)",
-            nfsScript,
-            onlyIf = nfsExists,
-            timeout = 300
-          )
-          val fs = command(
+          val nfs = absentCephNfsCluster(s"remove the NFS cluster $nfsCluster (MANILA_PURGE_CEPH=yes)", nfsCluster)
+          val fs = absentCephFilesystem(
             s"remove the filesystem $cephFs and all its data (MANILA_PURGE_CEPH=yes)",
-            fsScript,
-            onlyIf = fsExists,
-            timeout = 600
+            cephFs
           ).after(nfs)
           List(nfs, fs)
         else Nil

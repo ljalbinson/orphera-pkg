@@ -3107,6 +3107,8 @@ if a[0] == '--mount':
 assert a[0] == '--'
 a = a[1:]
 st = json.load(open(S)) if os.path.exists(S) else {'pools': [], 'users': {}, 'conf': {}, 'log': []}
+for k in ('fs', 'nfs'):
+    st.setdefault(k, [])
 def save():
     json.dump(st, open(S, 'w'))
 c = ' '.join(a)
@@ -3158,6 +3160,29 @@ elif a[:3] == ['ceph', 'auth', 'del']:
     if a[3] not in st['users']:
         sys.exit(2)
     del st['users'][a[3]]; save()
+elif c == 'ceph fs ls':
+    for n in st['fs']:
+        print('name: %s, metadata pool: %s_meta, data pools: [%s_data ]' % (n, n, n))
+    if not st['fs']:
+        print('No filesystems enabled')
+elif c.startswith('ceph fs volume create '):
+    st['fs'].append(a[4]); st['log'].append(c); save()
+elif c.startswith('ceph fs volume rm '):
+    if st['conf'].get('mon_allow_pool_delete') != 'true' or a[4] not in st['fs'] or a[5] != '--yes-i-really-mean-it':
+        sys.exit(1)
+    st['fs'].remove(a[4]); st['log'].append(c); save()
+elif c == 'ceph mds stat':
+    print('%s:1 {0=a=up:active}' % st['fs'][0] if st['fs'] and not os.environ.get('FAKE_NO_MDS') else 'cephfs:0')
+elif c == 'ceph orch host ls --format json':
+    print(json.dumps([{'hostname': 'tst0.example', 'addr': '10.10.5.12'}, {'hostname': 'tst1.example', 'addr': '10.10.5.13'}]))
+elif c == 'ceph nfs cluster ls':
+    print(json.dumps(st['nfs']))
+elif c.startswith('ceph nfs cluster create '):
+    st['nfs'].append(a[4]); st['log'].append(c); save()
+elif c.startswith('ceph nfs cluster rm '):
+    if a[4] not in st['nfs']:
+        sys.exit(2)
+    st['nfs'].remove(a[4]); st['log'].append(c); save()
 elif a[:3] == ['ceph', 'auth', 'ls']:
     print('installed auth entries:\n')
     for n in st['users']:
@@ -3242,6 +3267,45 @@ else:
     check("absentCephPool: and sets pool deletion back to false", dump.contains("\"mon_allow_pool_delete\": \"false\""), dump)
     check("absentCephPool: nothing to do afterwards", sh(part(noPool, _.onlyIf))._1 != 0)
     check("absentCephPool: a pool that is not there fails the removal", sh(part(noPool, _.run))._1 != 0)
+    // filesystem and NFS cluster
+    val fsRes = cephFilesystem("the filesystem", "cephfs")
+    check("cephFilesystem: no filesystem means it is needed", sh(part(fsRes, _.unless))._1 != 0)
+    val fsMade = sh(part(fsRes, _.run))
+    check("cephFilesystem: it creates the filesystem and sees an active MDS", fsMade._1 == 0 && fsMade._2.contains("filesystem cephfs created") && fsMade._2.contains("an MDS is active"), fsMade.toString)
+    check("cephFilesystem: it then means unchanged", sh(part(fsRes, _.unless))._1 == 0)
+    val fsAgain = sh(part(fsRes, _.run))
+    check("cephFilesystem: running it again does not create it twice", fsAgain._1 == 0 && dump.split("fs volume create").length == 2, fsAgain.toString + dump)
+    check("cephFilesystem: a filesystem with a similar name does not count", sh(part(cephFilesystem("x", "ceph"), _.unless))._1 != 0)
+    check("cephFilesystem: a bad name is refused", scala.util.Try(cephFilesystem("x", "a b")).isFailure)
+    val noFs = absentCephFilesystem("remove the filesystem", "cephfs")
+    check("absentCephFilesystem: it is wanted while the filesystem is listed, and when Ceph is down", sh(part(noFs, _.onlyIf))._1 == 0 && sh(part(noFs, _.onlyIf), down = true)._1 == 0)
+    val fsGone = sh(part(noFs, _.run))
+    check("absentCephFilesystem: it removes it and puts pool deletion back to false", fsGone._1 == 0 && fsGone._2.contains("filesystem cephfs removed") && dump.contains("\"fs\": []") && dump.contains("\"mon_allow_pool_delete\": \"false\""), fsGone.toString + dump)
+    check("absentCephFilesystem: nothing to do afterwards", sh(part(noFs, _.onlyIf))._1 != 0)
+    check("absentCephFilesystem: a cluster that is down fails the removal", sh(part(noFs, _.run), down = true)._1 != 0)
+    val listener = new java.net.ServerSocket(0, 5, java.net.InetAddress.getByName("127.0.0.1"))
+    try
+      val nfsPort = listener.getLocalPort
+      val nfsRes = cephNfsCluster("the NFS cluster", "manila", "10.10.5.12", "tst0", nfsPort)
+      val nfsLocal = cephNfsCluster("the NFS cluster", "manila", "127.0.0.1", "tst0", nfsPort)
+      check("cephNfsCluster: no cluster means it is needed", sh(part(nfsLocal, _.unless))._1 != 0)
+      val nfsMade = sh(part(nfsLocal, _.run))
+      check("cephNfsCluster: it creates the cluster on the matching host and waits for the port", nfsMade._1 == 0 && nfsMade._2.contains("NFS cluster manila created on tst0.example") && nfsMade._2.contains("answers on") , nfsMade.toString)
+      check("cephNfsCluster: it then means unchanged", sh(part(nfsLocal, _.unless))._1 == 0)
+      val byName = cephNfsCluster("x", "other", "10.9.9.9", "tst1", nfsPort)
+      val viaName = sh(part(byName, _.run).replace("10.9.9.9", "127.0.0.1"))
+      check("cephNfsCluster: the host is found by its short name too", viaName._1 == 0 && viaName._2.contains("created on tst1.example"), viaName.toString)
+      val nobody = cephNfsCluster("x", "third", "10.9.9.9", "nowhere", nfsPort)
+      val noHost = sh(part(nobody, _.run))
+      check("cephNfsCluster: an address and name that match no host fail with a message", noHost._1 != 0 && noHost._2.contains("no Ceph orchestrator host"), noHost.toString)
+      check("cephNfsCluster: a listed cluster whose port does not answer is still needed", sh(part(nfsRes, _.unless).replace("10.10.5.12", "127.0.0.1").replace(nfsPort.toString, "1"))._1 != 0)
+      check("cephNfsCluster: a bad address is refused", scala.util.Try(cephNfsCluster("x", "a", "1.2.3.4; id", "h")).isFailure)
+      val noNfs = absentCephNfsCluster("remove the NFS cluster", "manila")
+      check("absentCephNfsCluster: it is wanted while the cluster is listed, and when Ceph is down", sh(part(noNfs, _.onlyIf))._1 == 0 && sh(part(noNfs, _.onlyIf), down = true)._1 == 0)
+      val nfsGone = sh(part(noNfs, _.run))
+      check("absentCephNfsCluster: it removes it", nfsGone._1 == 0 && nfsGone._2.contains("NFS cluster manila removed"), nfsGone.toString)
+      check("absentCephNfsCluster: nothing to do afterwards", sh(part(noNfs, _.onlyIf))._1 != 0)
+    finally listener.close()
 
   // Stand-ins for `ovs-vsctl` and `ip` that keep Open vSwitch bridges, their ports and the manager in a JSON file;
   // `ovs-vsctl dump` prints it. A port on a bridge that does not exist fails, as it does for real.
