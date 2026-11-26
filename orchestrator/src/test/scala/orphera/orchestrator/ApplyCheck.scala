@@ -2950,12 +2950,13 @@ class H(BaseHTTPRequestHandler):
         raw = self.body()
         if path == '/v3/auth/tokens' and method == 'POST':
             b = json.loads(raw)
-            if b['auth']['identity']['password']['user']['password'] != 'adminpw': return self.send(401, {})
+            who = b['auth']['identity']['password']['user']
+            if who['password'] != ('adminpw' if who['name'] == 'admin' else 'userpw'): return self.send(401, {})
             base = 'http://127.0.0.1:%d' % PORT
             cat = [{'type': 'image', 'endpoints': [{'interface': 'public', 'url': base}]}, {'type': 'compute', 'endpoints': [{'interface': 'public', 'url': base + '/v2.1'}]}, {'type': 'network', 'endpoints': [{'interface': 'public', 'url': base}]}]
-            return self.send(201, {'token': {'catalog': cat}}, {'X-Subject-Token': 'tok'})
+            return self.send(201, {'token': {'catalog': cat}}, {'X-Subject-Token': 'tok' if who['name'] == 'admin' else 'tok-' + who['name']})
         if path == '/dump': return self.send(200, DB)
-        if self.headers.get('X-Auth-Token') != 'tok': return self.send(401, {})
+        if not (self.headers.get('X-Auth-Token') or '').startswith('tok'): return self.send(401, {})
         if path == '/v2/images' and method == 'GET':
             imgs = [i for i in DB['images'].values() if 'name' not in q or i['name'] == q['name'][0]]
             return self.send(200, {'images': imgs})
@@ -3018,7 +3019,7 @@ class H(BaseHTTPRequestHandler):
                 if k: del DB['keypairs'][m.group(1)]; return self.send(202)
                 return self.send(404, {})
         if path == '/v2.1/os-keypairs' and method == 'POST':
-            k = json.loads(raw)['keypair']; DB['keypairs'][k['name']] = k; return self.send(200, {'keypair': dict(k, private_key='secret')})
+            k = json.loads(raw)['keypair']; k['owner'] = (self.headers.get('X-Auth-Token') or 'tok')[4:] or 'admin'; DB['keypairs'][k['name']] = k; return self.send(200, {'keypair': dict(k, private_key='secret')})
         if path == '/v2.1/flavors' and method == 'POST':
             f = json.loads(raw)['flavor']; DB['flavors'][f['id']] = f; return self.send(200, {'flavor': f})
         self.send(404, {})
@@ -3142,6 +3143,19 @@ HTTPServer(('127.0.0.1', PORT), H).serve_forever()
       check("openstack: key pair removal is guarded by the helper and the pair existing", part(pairGone, _.onlyIf).contains("orphera-keypair-guest-key' exists"), part(pairGone, _.onlyIf))
       check("openstack: remove deletes the key pair", keypairRun("remove")._1 == 0 && keypairRun("exists")._1 != 0)
       check("openstack: a key pair name with a space is refused", scala.util.Try(openstackKeypair("x", "a b", url, Secret("x"), "/ca")).isFailure)
+      // a key pair of another user, with its private key kept
+      val keyFile = dir.resolve("state/guest.pem")
+      val (ownedHelper, ownedEnsure) = openstackKeypair("make the user's key pair", "user-key", url, Secret("adminpw"), "/no/ca.crt", owner = Some(("trove", Secret("userpw"))), project = "service", privateKeyFile = Some(keyFile.toString))
+      check("openstack: an owned key pair has a helper named for the pair and the user", ownedHelper.id == "file[/usr/local/sbin/orphera-keypair-user-key-trove]", ownedHelper.id)
+      check("openstack: an owned key pair is guarded by its check", part(ownedEnsure, _.unless).contains("orphera-keypair-user-key-trove' check"))
+      val ownedText = fileText(ownedHelper)
+      val ownedMade = helperRun(ownedHelper, ownedText, "ensure")
+      check("openstack: the owned key pair is made as that user", ownedMade._1 == 0 && ownedMade._2.contains("key pair user-key made") && scala.io.Source.fromURL(s"$url/dump").mkString.contains("\"owner\": \"trove\""), ownedMade.toString)
+      check("openstack: the private key is written, for root only", Files.exists(keyFile) && Files.readString(keyFile) == "secret" && runShell(s"stat -c %a ${keyFile}")._2.trim == "600")
+      check("openstack: ensure again keeps the key file and changes nothing", { Files.writeString(keyFile, "kept"); val again = helperRun(ownedHelper, ownedText, "ensure"); again._2.contains("exists") && Files.readString(keyFile) == "kept" })
+      check("openstack: the owned key pair checks and is removed", helperRun(ownedHelper, ownedText, "check")._1 == 0 && helperRun(ownedHelper, ownedText, "remove")._1 == 0 && helperRun(ownedHelper, ownedText, "exists")._1 != 0)
+      check("openstack: removal of an owned key pair names the user's helper", part(absentOpenstackKeypair("remove it", "user-key", "trove"), _.onlyIf).contains("orphera-keypair-user-key-trove' exists"))
+      check("openstack: a relative private key path is refused", scala.util.Try(openstackKeypair("x", "k", url, Secret("x"), "/ca", privateKeyFile = Some("k.pem"))).isFailure)
       // networks and security groups
       val sn = OpenstackSubnet("provider", "10.10.6.0/24", Some("10.10.6.1"), Some(("10.10.6.200", "10.10.6.220")))
       def nets(shared: Boolean = true, cidr: String = "10.10.6.0/24") =

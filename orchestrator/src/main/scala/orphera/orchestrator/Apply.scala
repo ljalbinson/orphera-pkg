@@ -1369,6 +1369,19 @@ if __name__ == '__main__':
   private val openstackKeypairPython: String = openstackClientPython +
     """
 
+class KClients(Clients):
+    # The key pair belongs to the user in SPEC (the admin user unless another one is named).
+    def __init__(self):
+        body = {'auth': {'identity': {'methods': ['password'], 'password': {'user': {'name': SPEC['user'], 'domain': {'name': 'Default'}, 'password': SPEC['password']}}}, 'scope': {'project': {'name': SPEC['project'], 'domain': {'name': 'Default'}}}}}
+        status, parsed, headers = call('POST', KS + '/auth/tokens', body)
+        if status != 201:
+            die('token request for %s failed: HTTP %s %s' % (SPEC['user'], status, parsed))
+        self.token = headers['X-Subject-Token']
+        self.doc = parsed
+        self.nova = versioned(endpoint(parsed, 'compute'), '/v2.1')
+        self.glance = versioned(endpoint(parsed, 'image'), '/v2')
+
+
 def exists_now(cl):
     s, p, _ = cl.c('GET', '/os-keypairs/' + SPEC['name'])
     if s == 200:
@@ -1379,30 +1392,36 @@ def exists_now(cl):
 
 
 def ensure():
-    cl = Clients()
+    cl = KClients()
     if exists_now(cl):
         print('key pair %s exists' % SPEC['name'])
         return
-    # No public key is given, so Nova makes a pair and keeps the public half; the private half is not kept.
+    # No public key is given, so Nova makes a pair and keeps the public half. The private half is written to
+    # SPEC['keyfile'] (root only) when one is named, and is otherwise not kept.
     s, p, _ = cl.c('POST', '/os-keypairs', {'keypair': {'name': SPEC['name']}})
     if s not in (200, 201):
         die('creating key pair %s failed: HTTP %s %s' % (SPEC['name'], s, p))
+    if SPEC['keyfile']:
+        os.makedirs(os.path.dirname(SPEC['keyfile']), exist_ok=True)
+        fd = os.open(SPEC['keyfile'], os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, 'w') as f:
+            f.write(p['keypair']['private_key'])
     print('key pair %s made' % SPEC['name'])
 
 
 def check():
-    if not exists_now(Clients()):
+    if not exists_now(KClients()):
         die('key pair %s does not exist' % SPEC['name'])
     print('key pair %s exists' % SPEC['name'])
 
 
 def exists():
-    if not exists_now(Clients()):
+    if not exists_now(KClients()):
         die('no key pair %s' % SPEC['name'])
 
 
 def remove():
-    s, _, _ = Clients().c('DELETE', '/os-keypairs/' + SPEC['name'])
+    s, _, _ = KClients().c('DELETE', '/os-keypairs/' + SPEC['name'])
     print('key pair %s: HTTP %s' % (SPEC['name'], s))
 
 
@@ -1421,7 +1440,8 @@ if __name__ == '__main__':
 """
 
   /** The path of the helper `openstackKeypair` writes for the key pair `name`. */
-  def openstackKeypairHelperPath(name: String): String = s"/usr/local/sbin/orphera-keypair-$name"
+  def openstackKeypairHelperPath(name: String, user: String = "admin"): String =
+    if user == "admin" then s"/usr/local/sbin/orphera-keypair-$name" else s"/usr/local/sbin/orphera-keypair-$name-$user"
 
   // The helpers of `openstackNetwork` and `openstackSecurityGroup`: the base plus Neutron and the project lookup.
   private val openstackNeutronClientPython: String = openstackClientPython +
@@ -1775,9 +1795,11 @@ if __name__ == '__main__':
       timeout = timeout
     )
 
-  /** A Nova key pair of the admin user as a description: the pair `name`, made by Nova with no public key given
-    * (the private half is not kept; clusters only need the name to exist). The result is the helper and the
-    * command that runs it, which is `unchanged` while the key pair exists.
+  /** A Nova key pair as a description: the pair `name`, made by Nova with no public key given. By default it
+    * belongs to the admin user; with `owner` (a user name and its password) it belongs to that user and is made
+    * in `project`, which is where a service looks it up as itself. The private half is written to `privateKeyFile`
+    * (root only, when the pair is made) if one is named, and is otherwise not kept. The result is the helper and
+    * the command that runs it, which is `unchanged` while the key pair exists.
     */
   def openstackKeypair(
       label: String,
@@ -1785,11 +1807,24 @@ if __name__ == '__main__':
       keystone: String,
       adminPassword: Secret,
       ca: String,
+      owner: Option[(String, Secret)] = None,
+      project: String = "admin",
+      privateKeyFile: Option[String] = None,
       timeout: Int = 120
   ): (ApplyResource, ApplyResource) =
     keystoneName("key pair name", name)
-    val spec = "{" + "'name': " + pyString("name", name) + "}"
-    val path = openstackKeypairHelperPath(name)
+    keystoneName("project", project)
+    owner.foreach((user, _) => keystoneName("key pair owner", user))
+    privateKeyFile.foreach(f => require(f.startsWith("/"), s"the private key file must be an absolute path: '$f'"))
+    val user = owner.map(_._1).getOrElse("admin")
+    val spec = "{" + List(
+      "'name': " + pyString("name", name),
+      "'user': " + pyString("user", user),
+      "'password': " + owner.map((_, pw) => pyString("the owner's password", pw.reveal)).getOrElse("ADMIN_PW"),
+      "'project': " + pyString("project", project),
+      "'keyfile': " + privateKeyFile.map(pyString("private key file", _)).getOrElse("None")
+    ).mkString(", ") + "}"
+    val path = openstackKeypairHelperPath(name, user)
     val helper = secretFile(path, Secret(openstackScript(openstackKeypairPython, keystone, adminPassword, ca, spec)), mode = "0700", owner = "root", group = "root")
     val ensure = command(
       label,
@@ -1799,12 +1834,13 @@ if __name__ == '__main__':
     ).after(helper)
     (helper, ensure)
 
-  /** What `openstackKeypair` made, removed again. It does nothing without the helper or while the key pair is not
-    * there.
+  /** What `openstackKeypair` made, removed again (`user` is the owner it was made for). It does nothing without
+    * the helper or while the key pair is not there.
     */
-  def absentOpenstackKeypair(label: String, name: String, timeout: Int = 120): ApplyResource =
+  def absentOpenstackKeypair(label: String, name: String, user: String = "admin", timeout: Int = 120): ApplyResource =
     keystoneName("key pair name", name)
-    val path = Apply.quote(openstackKeypairHelperPath(name))
+    keystoneName("key pair owner", user)
+    val path = Apply.quote(openstackKeypairHelperPath(name, user))
     command(
       label,
       s"""$path remove || echo "Nova cleanup failed (continuing)"""",
