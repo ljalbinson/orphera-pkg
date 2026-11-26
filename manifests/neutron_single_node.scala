@@ -23,9 +23,10 @@ import orphera.orchestrator.conf.*
 // here opens a firewall), so tenant ports get an MTU of 1450 from Neutron's own
 // calculation. The flat provider network `provider` (plain layer 2 on the second
 // NIC) is the external network: routers take their gateway address from it and
-// floating IPs come from it. Mark that network external (`openstack network set
-// --external <name>`); the L3 agent does the NAT in router namespaces on this
-// node. There is no metadata agent: Nova's metadata API is not deployed, so
+// floating IPs come from it. The last step of this description makes it (flat,
+// shared, external, 10.10.6.0/24 with DHCP, pool .200-.220) and keeps it that
+// way; Magnum, Trove and the compute boot test find it by name. The L3 agent
+// does the NAT in router namespaces on this node. There is no metadata agent: Nova's metadata API is not deployed, so
 // instances use a config drive. The compute nodes need the matching VXLAN
 // settings (nova_compute.scala); apply that description after this one.
 //
@@ -452,7 +453,7 @@ object neutron_single_node extends OrpheraApply:
   // Standard-library Python, as in the other service playbooks. Plain string filled
   // in with replace(). Subcommands:
   //   catalog | agents | agents-up |
-  //   net-list | net-create | net-delete <id> | tenant-cycle | provider-net
+  //   net-list | net-create | net-delete <id> | tenant-cycle | provider-net | provider-net-ok
   // (net-create makes a flat network on the physical network `provider` and a
   // subnet with DHCP off, net-delete removes both: that exercises the API, the
   // database and the ML2 flat type driver. Only one flat network can exist per
@@ -626,6 +627,25 @@ def provider_net():
     print('provider network ready: %s (%s), flat on %s, shared, external, subnet %s' % (PROVIDER_NAME, nid, PHYSNET, subs[0].get('cidr')))
 
 
+def provider_net_ok():
+    # Exit 0 only when provider_net() would change nothing: the flat network named PROVIDER_NAME is on PHYSNET, shared
+    # and external, with a subnet of PROVIDER_CIDR. Makes no change.
+    token, _ = get_token('admin', ADMIN_PW, 'admin')
+    flat = [n for n in get_json(token, '/networks').get('networks', [])
+            if n.get('provider:network_type') == 'flat' and n.get('provider:physical_network') == PHYSNET]
+    if not flat:
+        die('no flat network on the physical network %s' % PHYSNET)
+    n = flat[0]
+    if n.get('name') != PROVIDER_NAME:
+        die('the flat network on %s is called %s, not %s' % (PHYSNET, n.get('name'), PROVIDER_NAME))
+    if not n.get('shared') or not n.get('router:external'):
+        die('network %s is not both shared and external' % PROVIDER_NAME)
+    subs = get_json(token, '/subnets?network_id=' + n['id']).get('subnets', [])
+    if PROVIDER_CIDR not in [x.get('cidr') for x in subs]:
+        die('network %s has no subnet %s' % (PROVIDER_NAME, PROVIDER_CIDR))
+    print('provider network %s (%s) is in place' % (PROVIDER_NAME, n['id']))
+
+
 def get_json(token, path):
     s, p, _ = call('GET', NEUTRON + '/v2.0' + path, None, token)
     if s != 200:
@@ -729,8 +749,10 @@ if __name__ == '__main__':
         tenant_cycle()
     elif cmd == 'provider-net':
         provider_net()
+    elif cmd == 'provider-net-ok':
+        provider_net_ok()
     else:
-        die('usage: orphera-neutron-api catalog | agents | agents-up | net-list | net-create | net-delete <id> | tenant-cycle | provider-net')
+        die('usage: orphera-neutron-api catalog | agents | agents-up | net-list | net-create | net-delete <id> | tenant-cycle | provider-net | provider-net-ok')
 """
 
   private val helper =
@@ -891,6 +913,15 @@ if __name__ == '__main__':
       timeout = 240
     ).after((answering :: running)*)
 
+    // Magnum, Trove and the compute boot test need this network and find it by name, so the description makes it
+    // (the helper's provider-net is idempotent; provider-net-ok is its read-only check).
+    val providerNet = command(
+      "make the flat provider network with its subnet",
+      s"$helperPath provider-net",
+      unless = s"$helperPath provider-net-ok >/dev/null 2>&1",
+      timeout = 120
+    ).after(reporting)
+
     tools ++ List(
       ovsService,
       noAddress,
@@ -904,4 +935,4 @@ if __name__ == '__main__':
       logDirectory,
       stateDirectory
     ) ++ units.flatMap(_._2) ++ List(dbSync, helperFile, keystoneHelper, registered) ++
-      running ++ List(answering, reporting)
+      running ++ List(answering, reporting, providerNet)
