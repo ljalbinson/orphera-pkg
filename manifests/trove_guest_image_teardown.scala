@@ -6,7 +6,7 @@ import orphera.orchestrator.*
 // docs/APPLY-DESIGN.md): on tst25 deletes the test database instance if one is left and removes the database
 // helper; on tst3 removes the mysql datastore, its versions and their configuration parameters from the trove
 // database on Galera; on tst21 deletes the guest image from Glance and the flavor orphera.trove and removes the
-// image helper.
+// image and flavor helpers.
 //
 // Instances you made yourself are NOT removed: delete them first (`openstack database instance delete`), or
 // they keep running with no datastore behind them.
@@ -59,12 +59,10 @@ object trove_guest_image_teardown extends OrpheraApply:
        |[ -n "$$OUT" ]""".stripMargin
 
   // ---- tst21 ----
-  private val imageHelper = "/usr/local/sbin/orphera-trove-image"
-  private val removeImage =
-    s"$imageHelper remove || echo \"Glance cleanup failed (continuing)\""
-  // True when Glance has a guest image or the flavor is there.
-  private val imageExists =
-    s"[ -x $imageHelper ] && $imageHelper exists >/dev/null 2>&1"
+  private val imageName = "trove-guest-ubuntu-noble"
+  private val flavorId = "orphera-trove"
+  // The helper that older descriptions kept here, removed too.
+  private val legacyHelper = "/usr/local/sbin/orphera-trove-image"
   private val buildDirectories =
     List(
       "/var/lib/orphera/trove-image",
@@ -93,19 +91,18 @@ object trove_guest_image_teardown extends OrpheraApply:
         .map(_.after(instance))
       instance :: files
     else
-      val glance = command(
-        "delete the guest image and the flavor",
-        removeImage,
-        onlyIf = imageExists,
-        timeout = 300
-      )
+      val image = absentOpenstackImage("delete the guest image from Glance", imageName)
+      val flavor = absentOpenstackFlavor("delete the flavor orphera.trove", flavorId).after(image)
+      val glance = List(image, flavor)
       val helper = List(
-        absentFile(imageHelper),
+        absentFile(openstackFlavorHelperPath(flavorId)),
+        absentFile(openstackImageHelperPath(imageName)),
+        absentFile(legacyHelper),
         absentFile("/var/lib/orphera/trove-image/ca.crt")
-      ).map(_.after(glance))
+      ).map(_.after(glance*))
       if removeBuild then
         // The built image, the build environment and the Trove source (TROVE_REMOVE_BUILD=1).
-        glance :: helper ++ buildDirectories.map(d =>
+        glance ++ helper ++ buildDirectories.map(d =>
           absentDirectory(d, recursive = true).after(helper*)
         )
-      else glance :: helper
+      else glance ++ helper

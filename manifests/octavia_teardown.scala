@@ -108,5 +108,9 @@ object octavia_teardown extends OrpheraApply:
       // The helper goes with the files: the first step above needed it, and runs before them.
       val cleaned =
         (directories.map(absentDirectory(_, recursive = true)) ++
-          List(absentFile(helper), absentFile(keystoneHelperPath("octavia")))).map(_.after(unplugged))
+          List(
+            absentFile(helper),
+            absentFile(keystoneHelperPath("octavia")),
+            absentFile(openstackImageHelperPath("amphora-x64-haproxy-test"))
+          )).map(_.after(unplugged))
       List(openstack, unregistered, stopped, unplugged) ++ cleaned

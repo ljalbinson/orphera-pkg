@@ -25,8 +25,9 @@ import orphera.orchestrator.*
 //     builds it again and replaces the Glance image (and does so on every run for as long as it is set);
 //   - uploads it to Glance (public, tags `trove` and `mysql`, hw_rng_model virtio), skipped while an active
 //     image with those tags is there, and makes the Nova flavor orphera.trove (id orphera-trove; 1 vCPU,
-//     2048 MB, 10 GB), skipped while it exists. Both go through the helper `orphera-trove-image`, whose
-//     `image-ok` and `flavor-ok` are the read-only checks.
+//     2048 MB, 10 GB), skipped while it exists. They are openstackImage and openstackFlavor: the helpers
+//     `orphera-image-trove-guest-ubuntu-noble` and `orphera-flavor-orphera-trove` hold the description, and their
+//     `check` is the read-only test.
 //
 // Prerequisites, not checked here: trove_single_node.scala has run; tst21 reaches GitHub, opendev.org,
 // download.docker.com and the Ubuntu mirrors (the build downloads them).
@@ -43,6 +44,7 @@ object trove_guest_image extends OrpheraApply:
   override def nodes: List[String] = List(buildNode)
 
   private val ksFqdn = "tst6.ljalbinson.com"
+  private val ksUrl = s"https://$ksFqdn:5000"
 
   private val adminPassword = Secrets.secret("keystone/admin")
 
@@ -60,7 +62,6 @@ object trove_guest_image extends OrpheraApply:
   private val rebuild = sys.env.get("TROVE_REBUILD_IMAGE").contains("1")
   // Shell text, not an s-string: `$OUT` is the shell variable of buildScript.
   private val removeOldImage = if rebuild then "rm -f \"$OUT\"" else ":"
-  private val uploadFlags = if rebuild then " --replace" else ""
 
   private val buildPackages = List(
     "qemu-utils",
@@ -129,218 +130,6 @@ object trove_guest_image extends OrpheraApply:
        |qemu-img info "$$OUT" | sed -n '1,6p'
        |echo "guest image built: $$OUT"""".stripMargin
 
-  // Standard-library Python, as in the other service descriptions. Plain string filled in with replace().
-  // Subcommands: upload [--replace] | flavor | present | image-ok | flavor-ok | exists | remove
-  private val imageHelperPython =
-    """#!/usr/bin/python3
-import json, os, ssl, sys, time, urllib.request, urllib.error
-
-KS = 'https://@@KS@@:5000/v3'
-ADMIN_PW = '@@ADMINPW@@'
-NAME = '@@NAME@@'
-PATH = '@@PATH@@'
-FLAVOR_ID = '@@FLAVORID@@'
-FLAVOR_NAME = '@@FLAVORNAME@@'
-CTX = ssl.create_default_context(cafile='@@CA@@')
-
-
-def call(method, url, body=None, token=None, timeout=60):
-    data = json.dumps(body).encode() if body is not None else None
-    req = urllib.request.Request(url, data=data, method=method)
-    req.add_header('Content-Type', 'application/json')
-    if token:
-        req.add_header('X-Auth-Token', token)
-    ctx = CTX if url.startswith('https') else None
-    try:
-        r = urllib.request.urlopen(req, context=ctx, timeout=timeout)
-        status, text, headers = r.status, r.read().decode(), r.headers
-    except urllib.error.HTTPError as e:
-        status, text, headers = e.code, e.read().decode(), e.headers
-    try:
-        parsed = json.loads(text) if text else {}
-    except ValueError:
-        parsed = {}
-    return status, parsed, headers
-
-
-def die(msg):
-    sys.stderr.write(msg + '\n')
-    sys.exit(1)
-
-
-def get_token(user, password, project):
-    body = {'auth': {'identity': {'methods': ['password'], 'password': {'user': {'name': user, 'domain': {'name': 'Default'}, 'password': password}}}, 'scope': {'project': {'name': project, 'domain': {'name': 'Default'}}}}}
-    status, parsed, headers = call('POST', KS + '/auth/tokens', body)
-    if status != 201:
-        die('token request for %s failed: HTTP %s %s' % (user, status, parsed))
-    return headers['X-Subject-Token'], parsed
-
-
-def endpoint(parsed, svc_type):
-    for c in parsed['token']['catalog']:
-        if c['type'] == svc_type:
-            for e in c['endpoints']:
-                if e['interface'] == 'public':
-                    return e['url'].rstrip('/')
-    die('no %s service in the catalog' % svc_type)
-
-
-def versioned(url, suffix):
-    return url if url.endswith(suffix) else url + suffix
-
-
-class Clients(object):
-    def __init__(self):
-        self.token, parsed = get_token('admin', ADMIN_PW, 'admin')
-        self.nova = versioned(endpoint(parsed, 'compute'), '/v2.1')
-        self.glance = versioned(endpoint(parsed, 'image'), '/v2')
-
-    def c(self, method, path, body=None):
-        return call(method, self.nova + path, body, self.token)
-
-    def g(self, method, path, body=None):
-        return call(method, self.glance + path, body, self.token)
-
-
-def trove_images(cl):
-    s, p, _ = cl.g('GET', '/images?name=' + NAME)
-    if s != 200:
-        die('image list failed: HTTP %s %s' % (s, p))
-    return [i for i in p.get('images', []) if 'trove' in i.get('tags', [])]
-
-
-def upload(replace):
-    cl = Clients()
-    existing = trove_images(cl)
-    active = [i for i in existing if i.get('status') == 'active']
-    if active and not replace:
-        print('guest image %s (%s) is already active in Glance' % (NAME, active[0]['id']))
-        return
-    for i in existing:
-        cl.g('DELETE', '/images/' + i['id'])
-    if not os.path.isfile(PATH):
-        die('the image file %s does not exist' % PATH)
-    body = {'name': NAME, 'disk_format': 'qcow2', 'container_format': 'bare', 'visibility': 'public', 'tags': ['trove', 'mysql'], 'hw_rng_model': 'virtio'}
-    s, p, _ = cl.g('POST', '/images', body)
-    if s != 201:
-        die('image create failed: HTTP %s %s' % (s, p))
-    iid = p['id']
-    size = os.path.getsize(PATH)
-    with open(PATH, 'rb') as fh:
-        req = urllib.request.Request(cl.glance + '/images/%s/file' % iid, data=fh, method='PUT')
-        req.add_header('Content-Type', 'application/octet-stream')
-        req.add_header('Content-Length', str(size))
-        req.add_header('X-Auth-Token', cl.token)
-        ctx = CTX if req.full_url.startswith('https') else None
-        try:
-            urllib.request.urlopen(req, context=ctx, timeout=3600).read()
-        except urllib.error.HTTPError as e:
-            die('image upload failed: HTTP %s %s' % (e.code, e.read().decode()[:300]))
-    end = time.time() + 600
-    status = None
-    while time.time() < end:
-        s, p, _ = cl.g('GET', '/images/' + iid)
-        status = p.get('status')
-        if status == 'active':
-            print('guest image uploaded: %s (%s), %d bytes, tags %s' % (NAME, iid, size, ','.join(p.get('tags', []))))
-            return
-        if status in ('killed', 'deleted'):
-            break
-        time.sleep(3)
-    die('image %s did not become active (status %s)' % (iid, status))
-
-
-def flavor():
-    cl = Clients()
-    s, p, _ = cl.c('GET', '/flavors/' + FLAVOR_ID)
-    if s == 200:
-        print('flavor %s exists' % FLAVOR_ID)
-        return
-    if s != 404:
-        die('flavor lookup failed: HTTP %s %s' % (s, p))
-    s, p, _ = cl.c('POST', '/flavors', {'flavor': {'id': FLAVOR_ID, 'name': FLAVOR_NAME, 'ram': 2048, 'vcpus': 1, 'disk': 10, 'os-flavor-access:is_public': True}})
-    if s not in (200, 201):
-        die('creating flavor %s failed: HTTP %s %s' % (FLAVOR_ID, s, p))
-    print('flavor %s created (1 vCPU, 2048 MB, 10 GB)' % FLAVOR_ID)
-
-
-def image_ok(cl):
-    active = [i for i in trove_images(cl) if i.get('status') == 'active']
-    if not active:
-        die('no active Glance image %s with the tag trove' % NAME)
-    tags = active[0].get('tags', [])
-    if 'mysql' not in tags:
-        die('image %s has the tags %s, not mysql' % (NAME, ','.join(tags)))
-    return active[0]
-
-
-def flavor_ok(cl):
-    s, p, _ = cl.c('GET', '/flavors/' + FLAVOR_ID)
-    if s != 200:
-        die('flavor %s: HTTP %s' % (FLAVOR_ID, s))
-
-
-def present():
-    cl = Clients()
-    image = image_ok(cl)
-    flavor_ok(cl)
-    print('guest image %s (%s, tags %s) is active and flavor %s exists' % (NAME, image['id'], ','.join(image.get('tags', [])), FLAVOR_ID))
-
-
-def exists():
-    # Exit 0 when the image or the flavor is there in any state. Makes no change.
-    cl = Clients()
-    if trove_images(cl):
-        print('a guest image exists')
-        return
-    s, _, _ = cl.c('GET', '/flavors/' + FLAVOR_ID)
-    if s == 200:
-        print('the flavor exists')
-        return
-    die('no guest image and no flavor')
-
-
-def remove():
-    cl = Clients()
-    for i in trove_images(cl):
-        cl.g('DELETE', '/images/' + i['id'])
-        print('deleted image %s' % i['id'])
-    s, _, _ = cl.c('DELETE', '/flavors/' + FLAVOR_ID)
-    print('flavor %s: HTTP %s' % (FLAVOR_ID, s))
-
-
-if __name__ == '__main__':
-    cmd = sys.argv[1] if len(sys.argv) > 1 else ''
-    if cmd == 'upload':
-        upload('--replace' in sys.argv[2:])
-    elif cmd == 'flavor':
-        flavor()
-    elif cmd == 'present':
-        present()
-    elif cmd == 'image-ok':
-        image_ok(Clients())
-    elif cmd == 'flavor-ok':
-        flavor_ok(Clients())
-    elif cmd == 'exists':
-        exists()
-    elif cmd == 'remove':
-        remove()
-    else:
-        die('usage: orphera-trove-image upload [--replace] | flavor | present | image-ok | flavor-ok | exists | remove')
-"""
-
-  private val imageHelperPath = "/usr/local/sbin/orphera-trove-image"
-
-  private val helper =
-    imageHelperPython
-      .replace("@@KS@@", ksFqdn)
-      .replace("@@ADMINPW@@", adminPassword.reveal)
-      .replace("@@NAME@@", imageName)
-      .replace("@@PATH@@", imageFile)
-      .replace("@@FLAVORID@@", flavorId)
-      .replace("@@FLAVORNAME@@", flavorName)
-      .replace("@@CA@@", caFile)
-
   def describe(target: Node): List[ApplyResource] =
     val tools = buildPackages.map(p => pkg(p, updateCache = true))
 
@@ -367,26 +156,31 @@ if __name__ == '__main__':
       timeout = 3600
     ).after((prepare :: imageDirectory :: cacheDirectory :: Nil)*)
 
-    val helperFile = secretFile(
-      imageHelperPath,
-      Secret(helper), // it holds the admin password
-      mode = "0700",
-      owner = "root",
-      group = "root"
-    )
-    val uploaded = command(
+    val (imageHelper, ensuredImage) = openstackImage(
       "upload the image to Glance",
-      s"$imageHelperPath upload$uploadFlags",
-      unless =
-        if rebuild then "" else s"$imageHelperPath image-ok >/dev/null 2>&1",
+      imageName,
+      imageFile,
+      ksUrl,
+      adminPassword,
+      caFile,
+      tags = List("trove", "mysql"),
+      properties = Map("hw_rng_model" -> "virtio"),
+      replace = rebuild,
       timeout = 3600
-    ).after(build, helperFile, ca)
-    val flavor = command(
+    )
+    val uploaded = ensuredImage.after(build, ca)
+    val (flavorHelper, ensuredFlavor) = openstackFlavor(
       "make the flavor orphera.trove",
-      s"$imageHelperPath flavor",
-      unless = s"$imageHelperPath flavor-ok >/dev/null 2>&1",
-      timeout = 120
-    ).after(helperFile, ca)
+      flavorId,
+      flavorName,
+      2048, // MB
+      1, // vCPU
+      10, // GB
+      ksUrl,
+      adminPassword,
+      caFile
+    )
+    val flavor = ensuredFlavor.after(ca)
 
     tools ++ List(
       imageDirectory,
@@ -394,7 +188,8 @@ if __name__ == '__main__':
       prepare,
       ca,
       build,
-      helperFile,
+      imageHelper,
       uploaded,
+      flavorHelper,
       flavor
     )
