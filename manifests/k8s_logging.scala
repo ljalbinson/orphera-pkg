@@ -159,7 +159,7 @@ object k8s_logging extends OrpheraClusterPlaybook:
       "https://grafana.github.io/helm-charts",
       ns,
       values = Some(Secret(alloyValues)),
-      minutes = 15
+      minutes = 30
     )
     ApplyPlan.orFail(
       "logging",
