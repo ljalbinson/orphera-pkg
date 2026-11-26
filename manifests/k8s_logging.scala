@@ -163,7 +163,12 @@ object k8s_logging extends OrpheraClusterPlaybook:
     )
     ApplyPlan.orFail(
       "logging",
-      List(lokiHelper, lokiInstalled, alloyHelper, alloyInstalled.after(lokiInstalled))
+      List(
+        lokiHelper,
+        lokiInstalled,
+        alloyHelper,
+        alloyInstalled.after(lokiInstalled)
+      )
     )
 
   private val datasourceScript =
