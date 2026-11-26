@@ -199,6 +199,11 @@ print('client %s in realm %s ready: redirect %s/login/generic_oauth' % (CLIENT_I
        |  enabled: true
        |kubeProxy:
        |  enabled: false
+       |defaultRules:
+       |  disabled:
+       |    # metrics-server (two replicas) is briefly unavailable now and then, which fired this warning and its
+       |    # RESOLVED message every few hours. KubeAggregatedAPIErrors stays.
+       |    KubeAggregatedAPIDown: true
        |prometheus:
        |  prometheusSpec:
        |    nodeSelector:
