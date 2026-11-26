@@ -832,9 +832,10 @@ object Resources:
     command(label, run, unless = unless, timeout = timeout)
 
   /** One Keystone service of a registration: its name, its type and the URL of its public, internal and admin
-    * endpoints.
+    * endpoints. `adminUrl` is the URL of the admin endpoint when that differs from `url` (Swift's admin
+    * endpoint has no project in it).
     */
-  final case class KeystoneService(name: String, serviceType: String, url: String)
+  final case class KeystoneService(name: String, serviceType: String, url: String, adminUrl: Option[String] = None)
 
   /** A Keystone domain a service owns (Heat's stack domain, Magnum's trustee domain): its `name` and
     * `description`, and its admin user `adminUser`, who has `adminPassword` and the admin role on the domain.
@@ -853,6 +854,10 @@ ADMIN_PW = @@ADMINPW@@
 SPEC = @@SPEC@@
 CTX = ssl.create_default_context(cafile=@@CA@@) if KS.startswith('https') else None
 IFACES = ('public', 'internal', 'admin')
+
+
+def url_for(svc, iface):
+    return svc.get('admin_url', svc['url']) if iface == 'admin' else svc['url']
 
 
 def call(method, url, body=None, token=None):
@@ -939,12 +944,13 @@ def ensure(spec):
         service = ensure_one(token, 'services', '/services?type=' + svc['type'], 'services', {'service': {'name': svc['name'], 'type': svc['type']}}, 'service')
         for iface in IFACES:
             ep = find(token, '/endpoints?service_id=%s&interface=%s' % (service['id'], iface), 'endpoints')
+            want = url_for(svc, iface)
             if ep is None:
-                s, p, _ = call('POST', KS + '/endpoints', {'endpoint': {'interface': iface, 'url': svc['url'], 'service_id': service['id'], 'region_id': 'RegionOne'}}, token)
+                s, p, _ = call('POST', KS + '/endpoints', {'endpoint': {'interface': iface, 'url': want, 'service_id': service['id'], 'region_id': 'RegionOne'}}, token)
                 if s != 201:
                     die('creating %s endpoint of %s failed: HTTP %s %s' % (iface, svc['type'], s, p))
-            elif ep['url'] != svc['url']:
-                call('PATCH', KS + '/endpoints/' + ep['id'], {'endpoint': {'url': svc['url']}}, token)
+            elif ep['url'] != want:
+                call('PATCH', KS + '/endpoints/' + ep['id'], {'endpoint': {'url': want}}, token)
     print('registered %s in keystone (project %s, user %s, domain %s, services %s)' % (spec['name'], spec['project'], spec['name'], dom['name'] if dom else 'none', ' '.join(s['type'] for s in spec['services']) or 'none'))
 
 
@@ -977,7 +983,7 @@ def check(spec):
             die('no service of type %s' % svc['type'])
         for iface in IFACES:
             ep = find(token, '/endpoints?service_id=%s&interface=%s' % (service['id'], iface), 'endpoints')
-            if ep is None or ep['url'] != svc['url']:
+            if ep is None or ep['url'] != url_for(svc, iface):
                 die('endpoint %s of %s missing or wrong' % (iface, svc['type']))
     print('%s is registered in keystone' % spec['name'])
 
@@ -1075,16 +1081,18 @@ if __name__ == '__main__':
     services.foreach { sv =>
       keystoneName("a service name", sv.name)
       keystoneName("a service type", sv.serviceType)
-      require(sv.url.startsWith("http://") || sv.url.startsWith("https://"), s"not an endpoint URL: '${sv.url}'")
+      (sv.url :: sv.adminUrl.toList).foreach(u =>
+        require(u.startsWith("http://") || u.startsWith("https://"), s"not an endpoint URL: '$u'")
+      )
     }
     require(keystone.startsWith("https://") || keystone.startsWith("http://"), s"not a Keystone URL: '$keystone'")
     def field(key: String, value: String): String = pyString(key, key) + ": " + value
     val serviceSpecs = services.map { sv =>
-      "{" + List(
+      "{" + (List(
         field("name", pyString("a service name", sv.name)),
         field("type", pyString("a service type", sv.serviceType)),
         field("url", pyString("a URL", sv.url))
-      ).mkString(", ") + "}"
+      ) ::: sv.adminUrl.toList.map(u => field("admin_url", pyString("a URL", u)))).mkString(", ") + "}"
     }
     val domainSpec = domain.fold("") { d =>
       ", " + field(
