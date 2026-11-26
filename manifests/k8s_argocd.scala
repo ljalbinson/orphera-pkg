@@ -175,16 +175,10 @@ print('client %s in realm %s ready: redirect %s/auth/callback' % (CLIENT_ID, REA
 
   // ---- cluster side (tst30) ----------------------------------------------
 
-  // The values file is written in three pieces so the CA certificate can be
-  // inserted, indented, as the OIDC rootCA.
-  private val valuesScript =
-    s"""set -e
-       |[ -s $stateDir/ca.crt ] || { echo "$stateDir/ca.crt is missing; run k8s_cert_manager.scala first" >&2; exit 1; }
-       |$kc create namespace $ns --dry-run=client -o yaml | $kc apply -f -
-       |umask 077
-       |{
-       |cat <<'EOF'
-       |global:
+  // The CA certificate is put in at the line `@@CA@@` when the helper runs, indented
+  // like that line, because the file is on tst30 and not known here.
+  private val argoValues =
+    s"""global:
        |  domain: $argoHost
        |  nodeSelector:
        |    pool: infra
@@ -207,9 +201,7 @@ print('client %s in realm %s ready: redirect %s/auth/callback' % (CLIENT_ID, REA
        |      clientSecret: $$oidc.keycloak.clientSecret
        |      requestedScopes: ["openid", "profile", "email"]
        |      rootCA: |
-       |EOF
-       |sed 's/^/        /' $stateDir/ca.crt
-       |cat <<'EOF'
+       |        @@CA@@
        |  rbac:
        |    policy.default: ""
        |    scopes: "[groups]"
@@ -226,22 +218,21 @@ print('client %s in realm %s ready: redirect %s/auth/callback' % (CLIENT_ID, REA
        |  secret:
        |    extra:
        |      oidc.keycloak.clientSecret: "${clientSecret.reveal}"
-       |EOF
-       |} > $stateDir/argocd-values.yaml
-       |echo "namespace and Helm values written"
        |""".stripMargin
 
-  private val installScript =
-    s"""set -e
-       |export KUBECONFIG=/etc/kubernetes/admin.conf
-       |helm repo add argo https://argoproj.github.io/argo-helm --force-update >/dev/null
-       |helm repo update >/dev/null
-       |VER=$$(helm show chart argo/argo-cd | awk '/^version:/{print $$2}')
-       |[ -n "$$VER" ] || { echo "the chart argo/argo-cd was not found; its repository may have moved" >&2; exit 1; }
-       |echo "installing argo-cd chart $$VER"
-       |helm upgrade --install argocd argo/argo-cd --version "$$VER" --namespace $ns -f $stateDir/argocd-values.yaml --wait --timeout 15m
-       |$kc -n $ns get pods -o wide
-       |""".stripMargin
+  private val installPlan: ApplyPlan =
+    import Resources.*
+    val (helper, installed) = helmRelease(
+      "helm install argo-cd",
+      "argocd",
+      "argo/argo-cd",
+      "https://argoproj.github.io/argo-helm",
+      ns,
+      values = Some(Secret(argoValues)),
+      minutes = 15,
+      valuesFrom = List("CA" -> s"$stateDir/ca.crt")
+    )
+    ApplyPlan.orFail("argocd", List(helper, installed))
 
   private val routeScript =
     s"""set -e
@@ -346,15 +337,9 @@ print('client %s in realm %s ready: redirect %s/auth/callback' % (CLIENT_ID, REA
           Task.RunCommand(List("sh", "-c", clientScript), timeoutSeconds = 120)
         )
         .build,
-      stage("argocd-config", node)
-        .task("namespace and Helm values")(
-          Task.RunCommand(List("sh", "-c", valuesScript), timeoutSeconds = 120)
-        )
-        .build,
       stage("install-argocd", node)
         .task("helm install argo-cd")(
-          Task
-            .RunCommand(List("sh", "-c", installScript), timeoutSeconds = 1200)
+          Task.Apply(installPlan)
         )
         .build,
       stage("publish-argocd", node)

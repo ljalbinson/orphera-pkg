@@ -378,7 +378,7 @@ manifests/rgw_teardown.scala,56,apply command,remove the RGW options from the mo
 manifests/rgw_teardown.scala,62,apply command,"remove the helper, the state files and the CA copy",1,Existing kinds,directory/file,directory / file / authorizedKey / kernelModule / mount / pkg,done
 manifests/rgw_teardown.scala,66,apply command,delete the RGW pools and every object in them (RGW_PURGE_POOLS=yes),4,New product-specific kinds,Ceph pool/key/orch,cephPool / cephKey / Ceph config option / orchestrator spec,not started
 manifests/k8s_alertmanager.scala,242,RunCommand,set the Alertmanager receivers (helm upgrade --reuse-values),4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),not started
-manifests/k8s_argocd.scala,351,RunCommand,namespace and Helm values,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),not started
+manifests/k8s_argocd.scala,226,apply command,helm install argo-cd,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),done
 manifests/k8s_argocd.scala,362,RunCommand,HTTPRoute for $argoHost,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),not started
 manifests/k8s_ceph_csi.scala,187,RunCommand,helm install ceph-csi-rbd and the default StorageClass,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),not started
 manifests/k8s_cert_manager.scala,67,apply command,helm install cert-manager,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),done

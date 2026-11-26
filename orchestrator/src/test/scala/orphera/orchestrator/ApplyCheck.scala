@@ -4677,6 +4677,48 @@ save()
       ),
       dump
     )
+    val caFile = dir.resolve("ca.crt")
+    val (fromFile, _) = helmRelease(
+      "x",
+      "f",
+      "a/b",
+      "http://h/",
+      "ns",
+      values = Some(Secret("cm:\n  rootCA: |\n    @@CA@@\n  other: 1\n")),
+      stateDir = shaDir.toString,
+      valuesFrom = List("CA" -> caFile.toString)
+    )
+    val missingFile = run(fromFile, "ensure")
+    check(
+      "helmRelease: a values file that is missing stops the install",
+      missingFile._1 != 0 && missingFile._2.contains("is missing") && !dump
+        .contains("\"ns/f\""),
+      missingFile.toString
+    )
+    Files.writeString(caFile, "LINE1\nLINE2\n")
+    val fromFileMade = run(fromFile, "ensure")
+    check(
+      "helmRelease: the placeholder line is replaced by the file, indented like the placeholder",
+      fromFileMade._1 == 0 && dump.contains(
+        "cm:\\n  rootCA: |\\n    LINE1\\n    LINE2\\n  other: 1\\n"
+      ),
+      fromFileMade.toString + dump
+    )
+    check(
+      "helmRelease: a placeholder name in lower case is refused",
+      scala.util
+        .Try(
+          helmRelease(
+            "x",
+            "r",
+            "a/b",
+            "https://h",
+            "ns",
+            valuesFrom = List("ca" -> "/x")
+          )
+        )
+        .isFailure
+    )
     check(
       "helmRelease: a chart without a repository is refused",
       scala.util
