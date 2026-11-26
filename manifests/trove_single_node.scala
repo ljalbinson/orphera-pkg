@@ -27,9 +27,11 @@ import orphera.orchestrator.kolla.*
 //     tst10. So the guests must reach 10.10.5.22:5672 and Docker Hub: the provider network (flat, VLAN 106)
 //     routes to both on this lab.
 //   - The guests' management network is the provider network, found by name (`provider`, or
-//     TROVE_MGMT_NETWORK in the environment of the run). The helper also makes a security group `trove-mgmt`
-//     (ssh and ping in) and a keypair `trove-mgmt` in project `service`, where Trove makes its guests; the
-//     private key is kept in /var/lib/orphera/trove/trove-mgmt.pem on tst25 for troubleshooting.
+//     TROVE_MGMT_NETWORK in the environment of the run). The description makes a security group `trove-mgmt`
+//     (ssh and ping in; openstackSecurityGroup) and a keypair `trove-mgmt` of the trove user (openstackKeypair)
+//     in project `service`, where Trove makes its guests; the private key is kept in
+//     /var/lib/orphera/trove/trove-mgmt.pem on tst25 for troubleshooting. The helper only looks the network
+//     and the group up and writes their ids.
 //   - `default_neutron_networks` is the same network, so a database can be created without `--nic`.
 //
 // What it adds to Keystone (done by `keystoneEntries`, repeatable): the user `trove` in project `service`
@@ -47,11 +49,11 @@ import orphera.orchestrator.kolla.*
 //   - Keystone's CA is compared as a certificate with the installed copy each run; when it changes the
 //     three services are restarted (they mount the host's CA bundle).
 //   - trove.conf holds the ids of the guest network and security group, which only exist once the helper's
-//     `mgmt-resources` has run. The file with placeholders (trove.conf.tmpl, a secret file) is declared; a
+//     `mgmt-state` has run. The file with placeholders (trove.conf.tmpl, a secret file) is declared; a
 //     command fills the placeholders from /var/lib/orphera/trove/mgmt.json and writes the result to
 //     /etc/kolla/trove (which trove_guest_image.scala mounts) and to each service's directory. It is skipped
 //     while all of them are identical to what it would write.
-//   - `mgmt-resources` is skipped while the helper's `mgmt-ready` passes: mgmt.json names the network that
+//   - `mgmt-state` is skipped while the helper's `mgmt-ready` passes: mgmt.json names the network that
 //     the name resolves to now, and the security group and keypair it names exist.
 //   - `trove-manage db_sync` is skipped while its stamp matches and the `datastores` table exists (a query as
 //     the trove user, through the VIP).
@@ -163,7 +165,7 @@ object trove_single_node extends OrpheraApply:
   // ---- configuration ---------------------------------------------------
 
   // @@MGMTNET@@ and @@MGMTSG@@ are put in on the node from $stateDir/mgmt.json, which the helper's
-  // `mgmt-resources` writes (see `render` below).
+  // `mgmt-state` writes (see `render` below).
   private val troveConfTemplate: String =
     s"""# Managed by Orphera (trove_single_node.scala)
        |[DEFAULT]
@@ -307,11 +309,11 @@ object trove_single_node extends OrpheraApply:
 
   // Standard-library Python, as in the other service descriptions. Plain string filled in with replace().
   // Subcommands:
-  //   cleanup-mgmt | mgmt-resources | mgmt-ready | check | catalog
-  // mgmt-resources finds the management network by name and makes the security group and the keypair of the
-  // guests in project service; it writes the result to /var/lib/orphera/trove/mgmt.json.
+  //   mgmt-state | mgmt-ready | check | catalog
+  // mgmt-state finds the management network by name and the security group of the guests in project service
+  // (both made by typed steps of the description) and writes the ids to /var/lib/orphera/trove/mgmt.json.
   // mgmt-ready is the check for it (no change). check calls the Trove API with an admin token and looks at
-  // what mgmt-resources made.
+  // what the description made.
   private val apiHelperPython =
     """#!/usr/bin/python3
 import json, os, ssl, sys, urllib.parse, urllib.request, urllib.error
@@ -392,7 +394,9 @@ def mgmt_ready():
     print('guest management resources are in place')
 
 
-def mgmt_resources():
+def mgmt_state():
+    # Finds the management network by name and the guest security group, and writes their ids to mgmt.json.
+    # The group and the key pair are made by the description's typed steps before this runs.
     atoken, abody = get_token('admin', ADMIN_PW, 'admin')
     neutron = endpoint(abody, 'network')
     s, p, _ = call('GET', neutron + '/v2.0/networks?name=' + urllib.parse.quote(MGMT_NET), None, atoken)
@@ -404,55 +408,16 @@ def mgmt_resources():
     token, body = get_token('trove', TROVE_PW, 'service')
     project_id = body['token']['project']['id']
     neutron = endpoint(body, 'network')
-    nova = endpoint(body, 'compute')
-
     s, p, _ = call('GET', neutron + '/v2.0/security-groups?name=trove-mgmt&project_id=' + project_id, None, token)
     groups = p.get('security_groups', []) if s == 200 else []
-    if groups:
-        sg_id = groups[0]['id']
-    else:
-        s, p, _ = call('POST', neutron + '/v2.0/security-groups', {'security_group': {'name': 'trove-mgmt', 'description': 'Trove guest management port'}}, token)
-        if s != 201:
-            die('creating the security group trove-mgmt failed: HTTP %s %s' % (s, p))
-        sg_id = p['security_group']['id']
-        for rule in ({'protocol': 'tcp', 'port_range_min': 22, 'port_range_max': 22}, {'protocol': 'icmp'}):
-            r = {'security_group_id': sg_id, 'direction': 'ingress', 'ethertype': 'IPv4'}
-            r.update(rule)
-            s, p, _ = call('POST', neutron + '/v2.0/security-group-rules', {'security_group_rule': r}, token)
-            if s not in (201, 409):
-                die('adding a rule to trove-mgmt failed: HTTP %s %s' % (s, p))
-
-    s, p, _ = call('GET', nova + '/os-keypairs/trove-mgmt', None, token)
-    if s != 200:
-        s, p, _ = call('POST', nova + '/os-keypairs', {'keypair': {'name': 'trove-mgmt'}}, token)
-        if s != 200:
-            die('creating the keypair trove-mgmt failed: HTTP %s %s' % (s, p))
-        os.makedirs(STATE, exist_ok=True)
-        key = STATE + '/trove-mgmt.pem'
-        fd = os.open(key, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, 'w') as f:
-            f.write(p['keypair']['private_key'])
+    if not groups:
+        die('no security group trove-mgmt in project service (HTTP %s)' % s)
+    sg_id = groups[0]['id']
+    verify_guest({'security_group_id': sg_id, 'keypair': 'trove-mgmt'}, token, body)
     os.makedirs(STATE, exist_ok=True)
     with open(STATE + '/mgmt.json', 'w') as f:
         json.dump({'network_id': net_id, 'security_group_id': sg_id, 'keypair': 'trove-mgmt'}, f)
     print('guest management: network %s (%s), security group trove-mgmt %s, keypair trove-mgmt' % (MGMT_NET, net_id, sg_id))
-
-
-def cleanup_mgmt():
-    # Removes the guest security group and keypair (as the trove user). Nothing to do when that user is gone.
-    try:
-        token, body = get_token('trove', TROVE_PW, 'service')
-    except SystemExit:
-        print('trove cannot log in: no guest security group or keypair to remove')
-        return
-    project_id = body['token']['project']['id']
-    neutron = endpoint(body, 'network')
-    nova = endpoint(body, 'compute')
-    s, p, _ = call('GET', neutron + '/v2.0/security-groups?name=trove-mgmt&project_id=' + project_id, None, token)
-    for g in (p.get('security_groups', []) if s == 200 else []):
-        call('DELETE', neutron + '/v2.0/security-groups/' + g['id'], None, token)
-    call('DELETE', nova + '/os-keypairs/trove-mgmt', None, token)
-    print('removed the guest security group trove-mgmt and keypair trove-mgmt')
 
 
 def catalog():
@@ -481,16 +446,14 @@ if __name__ == '__main__':
     cmd = sys.argv[1] if len(sys.argv) > 1 else ''
     if cmd == 'mgmt-ready':
         mgmt_ready()
-    elif cmd == 'cleanup-mgmt':
-        cleanup_mgmt()
-    elif cmd == 'mgmt-resources':
-        mgmt_resources()
+    elif cmd == 'mgmt-state':
+        mgmt_state()
     elif cmd == 'check':
         check()
     elif cmd == 'catalog':
         catalog()
     else:
-        die('usage: orphera-trove-api cleanup-mgmt | mgmt-resources | mgmt-ready | check | catalog')
+        die('usage: orphera-trove-api mgmt-state | mgmt-ready | check | catalog')
 """
 
   private val helper =
@@ -566,12 +529,36 @@ if __name__ == '__main__':
       caCert
     )
     val registered = ensured.after(ca)
+    // The guest security group (ssh and ping in) in project service, and the key pair `trove-mgmt` of the trove
+    // user there, whose private half stays in $stateDir/trove-mgmt.pem for troubleshooting.
+    val (groupHelper, groupMade) = openstackSecurityGroup(
+      "make the guest security group",
+      "trove-mgmt",
+      "Trove guest management port",
+      List(("tcp", Some(22)), ("icmp", None)),
+      ksUrl,
+      adminPassword,
+      caCert,
+      project = "service"
+    )
+    val (pairHelper, pairMade) = openstackKeypair(
+      "make the guest key pair",
+      "trove-mgmt",
+      ksUrl,
+      adminPassword,
+      caCert,
+      owner = Some(("trove", trovePassword)),
+      project = "service",
+      privateKeyFile = Some(s"$stateDir/trove-mgmt.pem")
+    )
+    val groupReady = groupMade.after(registered)
+    val pairReady = pairMade.after(registered, stateDirectory)
     val mgmt = command(
-      "make the guest security group and keypair, find the management network",
-      s"$helperPath mgmt-resources",
+      "find the management network and write its ids",
+      s"$helperPath mgmt-state",
       unless = s"$helperPath mgmt-ready >/dev/null 2>&1",
       timeout = 120
-    ).after(helperFile, registered, stateDirectory)
+    ).after(helperFile, groupReady, pairReady, stateDirectory)
 
     val tmplFile = secretFile(
       template,
@@ -673,6 +660,10 @@ if __name__ == '__main__':
       helperFile,
       keystoneHelper,
       registered,
+      groupHelper,
+      groupReady,
+      pairHelper,
+      pairReady,
       mgmt,
       tmplFile
     ) ++ perService.flatMap(_._3) ++
