@@ -40,12 +40,10 @@ object k8s_logging extends OrpheraClusterPlaybook:
   private val grafanaAdminPassword = Secrets.secret("k8s/grafana-admin")
   private val lokiUrl = "http://loki.logging.svc.cluster.local:3100"
 
-  private val valuesScript =
-    s"""set -e
-       |$kc create namespace $ns --dry-run=client -o yaml | $kc apply -f -
-       |umask 077
-       |cat > $stateDir/loki-values.yaml <<'EOF'
-       |deploymentMode: SingleBinary
+  // The two charts as `helmRelease`s (see k8s_metrics_server.scala). The values are part of the description, so a
+  // change to them installs again, and the install makes the namespace.
+  private val lokiValues: String =
+    s"""|deploymentMode: SingleBinary
        |loki:
        |  auth_enabled: false
        |  commonConfig:
@@ -92,9 +90,10 @@ object k8s_logging extends OrpheraClusterPlaybook:
        |  enabled: false
        |minio:
        |  enabled: false
-       |EOF
-       |cat > $stateDir/alloy-values.yaml <<'EOF'
-       |controller:
+       |""".stripMargin
+
+  private val alloyValues: String =
+    s"""|controller:
        |  type: daemonset
        |  tolerations:
        |  - operator: Exists
@@ -140,25 +139,37 @@ object k8s_logging extends OrpheraClusterPlaybook:
        |          url = "$lokiUrl/loki/api/v1/push"
        |        }
        |      }
-       |EOF
-       |echo "namespace and Helm values written"
        |""".stripMargin
 
-  private val installScript =
-    s"""set -e
-       |export KUBECONFIG=/etc/kubernetes/admin.conf
-       |helm repo add grafana https://grafana.github.io/helm-charts --force-update >/dev/null
-       |helm repo update >/dev/null
-       |LV=$$(helm show chart grafana/loki | awk '/^version:/{print $$2}')
-       |[ -n "$$LV" ] || { echo "the chart grafana/loki was not found; its repository may have moved" >&2; exit 1; }
-       |echo "installing loki chart $$LV"
-       |helm upgrade --install loki grafana/loki --version "$$LV" --namespace $ns -f $stateDir/loki-values.yaml --wait --timeout 15m
-       |AV=$$(helm show chart grafana/alloy | awk '/^version:/{print $$2}')
-       |[ -n "$$AV" ] || { echo "the chart grafana/alloy was not found" >&2; exit 1; }
-       |echo "installing alloy chart $$AV"
-       |helm upgrade --install alloy grafana/alloy --version "$$AV" --namespace $ns -f $stateDir/alloy-values.yaml --wait --timeout 15m
-       |$kc -n $ns get pods -o wide
-       |""".stripMargin
+  private val installPlan: ApplyPlan =
+    import Resources.*
+    val (lokiHelper, lokiInstalled) = helmRelease(
+      "helm install Loki",
+      "loki",
+      "grafana/loki",
+      "https://grafana.github.io/helm-charts",
+      ns,
+      values = Some(Secret(lokiValues)),
+      minutes = 15
+    )
+    val (alloyHelper, alloyInstalled) = helmRelease(
+      "helm install Alloy",
+      "alloy",
+      "grafana/alloy",
+      "https://grafana.github.io/helm-charts",
+      ns,
+      values = Some(Secret(alloyValues)),
+      minutes = 15
+    )
+    ApplyPlan.orFail(
+      "logging",
+      List(
+        lokiHelper,
+        lokiInstalled,
+        alloyHelper,
+        alloyInstalled.after(lokiInstalled)
+      )
+    )
 
   private val datasourceScript =
     s"""set -e
@@ -208,15 +219,9 @@ object k8s_logging extends OrpheraClusterPlaybook:
 
   val playbook: ClusterPlaybook =
     clusterPlaybook("k8s-logging")(
-      stage("logging-config", node)
-        .task("namespace and Helm values")(
-          Task.RunCommand(List("sh", "-c", valuesScript), timeoutSeconds = 120)
-        )
-        .build,
       stage("install-loki-and-alloy", node)
         .task("helm install Loki and Alloy")(
-          Task
-            .RunCommand(List("sh", "-c", installScript), timeoutSeconds = 2000)
+          Task.Apply(installPlan)
         )
         .build,
       stage("grafana-datasource", node)
