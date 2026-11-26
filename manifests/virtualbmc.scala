@@ -74,12 +74,18 @@ object virtualbmc extends OrpheraClusterPlaybook:
     import Resources.*
     val conf = secretFile(
       "/etc/orphera-vbmc.conf",
-      Secret(s"VBMC_USER=$ipmiUser\nVBMC_PASSWORD='${password.reveal.take(16)}'\n"),
+      Secret(
+        s"VBMC_USER=$ipmiUser\nVBMC_PASSWORD='${password.reveal.take(16)}'\n"
+      ),
       mode = "0600",
       owner = "root",
       group = "root"
     )
-    val vbmcd = service("orphera-vbmcd.service", enabled = Some(true), running = Some(true))
+    val vbmcd = service(
+      "orphera-vbmcd.service",
+      enabled = Some(true),
+      running = Some(true)
+    )
     val unitFile = file(
       "/etc/systemd/system/orphera-vbmcd.service",
       unit,

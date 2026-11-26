@@ -557,7 +557,9 @@ if __name__ == '__main__':
       "register Barbican in Keystone",
       "barbican",
       barbicanPassword,
-      List(KeystoneService("barbican", "key-manager", s"http://$fqdn:$apiPort")),
+      List(
+        KeystoneService("barbican", "key-manager", s"http://$fqdn:$apiPort")
+      ),
       ksUrl,
       adminPassword,
       caCert,
@@ -592,5 +594,10 @@ if __name__ == '__main__':
       ca,
       logDirectory,
       stateDirectory
-    ) ++ svcs.flatMap(_.resources) ++ List(dbSync, helperFile, keystoneHelper, registered) ++
+    ) ++ svcs.flatMap(_.resources) ++ List(
+      dbSync,
+      helperFile,
+      keystoneHelper,
+      registered
+    ) ++
       running ++ List(answering, authenticating)

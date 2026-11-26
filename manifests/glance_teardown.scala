@@ -56,15 +56,20 @@ object glance_teardown extends OrpheraApply:
         )
       )
     else if target.name == cephNode then
-      val user = absentCephUser("remove the client.glance cephx user", "client.glance")
-      val pool = absentCephPool(s"delete the $imagesPool pool", imagesPool).after(user)
+      val user =
+        absentCephUser("remove the client.glance cephx user", "client.glance")
+      val pool =
+        absentCephPool(s"delete the $imagesPool pool", imagesPool).after(user)
       List(user, pool)
     else
-      val unregistered = absentKeystoneEntries("remove Glance from Keystone", "glance")
-      val stopped = absentContainerUnits(List(unit -> "glance-api")).map(_.after(unregistered))
+      val unregistered =
+        absentKeystoneEntries("remove Glance from Keystone", "glance")
+      val stopped = absentContainerUnits(List(unit -> "glance-api"))
+        .map(_.after(unregistered))
       // Typed removal, no script: each directory with its contents, then the helper.
       val cleaned = (dirs.map(absentDirectory(_, recursive = true)) :+
-        absentFile(helper) :+ absentFile(keystoneHelperPath("glance"))).map(_.after(stopped*))
+        absentFile(helper) :+ absentFile(keystoneHelperPath("glance")))
+        .map(_.after(stopped*))
       val removedImage = command(
         "remove the glance-api image",
         s"podman rmi -f $image",

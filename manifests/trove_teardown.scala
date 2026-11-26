@@ -63,10 +63,22 @@ object trove_teardown extends OrpheraApply:
         )
       )
     else
-      val groupGone = absentOpenstackSecurityGroup("delete the guest security group", "trove-mgmt", "service")
-      val pairGone = absentOpenstackKeypair("delete the guest key pair", "trove-mgmt", "trove")
-      val unregistered = absentKeystoneEntries("remove Trove from Keystone", "trove").after(groupGone, pairGone)
-      val stopped = absentContainerUnits(units.map(u => s"orphera-$u" -> u)).map(_.after(unregistered))
+      val groupGone = absentOpenstackSecurityGroup(
+        "delete the guest security group",
+        "trove-mgmt",
+        "service"
+      )
+      val pairGone = absentOpenstackKeypair(
+        "delete the guest key pair",
+        "trove-mgmt",
+        "trove"
+      )
+      val unregistered = absentKeystoneEntries(
+        "remove Trove from Keystone",
+        "trove"
+      ).after(groupGone, pairGone)
+      val stopped = absentContainerUnits(units.map(u => s"orphera-$u" -> u))
+        .map(_.after(unregistered))
       // Typed removal, no script: each directory with its contents, then the helper.
       val cleaned = (dirs.map(absentDirectory(_, recursive = true)) ++
         List(

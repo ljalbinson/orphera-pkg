@@ -26,7 +26,6 @@ object skyline_teardown extends OrpheraApply:
 
   override def nodes: List[String] = List(dbNode, node)
 
-
   private val anyUnit =
     """[ -f /etc/systemd/system/orphera-skyline.service ] || systemctl is-active --quiet orphera-skyline || systemctl is-enabled --quiet orphera-skyline || { command -v podman >/dev/null 2>&1 && { podman container exists skyline || podman container exists skyline_bootstrap; }; }"""
   private val stopScript =
@@ -54,7 +53,10 @@ object skyline_teardown extends OrpheraApply:
         )
       )
     else
-      val unregistered = absentKeystoneEntries("remove the Skyline user from Keystone", "skyline")
+      val unregistered = absentKeystoneEntries(
+        "remove the Skyline user from Keystone",
+        "skyline"
+      )
       val stopped = command(
         "stop and remove the skyline container and unit",
         stopScript,

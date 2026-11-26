@@ -202,7 +202,8 @@ object gen_set_dns extends OrpheraClusterPlaybook:
   // Every server is listed in resolv.conf (and the file is not the stub link),
   // and `options rotate` is there when round_robin asks for it.
   private val staticOk: String =
-    val servers = config.servers.map(s => s"grep -qxF 'nameserver $s' $resolvConf")
+    val servers =
+      config.servers.map(s => s"grep -qxF 'nameserver $s' $resolvConf")
     val rotate =
       if config.roundRobin then List(s"grep -qxF 'options rotate' $resolvConf")
       else Nil

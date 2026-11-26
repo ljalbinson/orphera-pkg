@@ -52,7 +52,8 @@ object iperf3_test extends OrpheraClusterPlaybook:
         s"systemctl stop $unitName 2>/dev/null || true; systemctl reset-failed $unitName 2>/dev/null || true",
         unless = s"[ ! -e /run/systemd/transient/$unitName.service ]"
       )
-      val running = service(s"$unitName.service", enabled = None, running = Some(true))
+      val running =
+        service(s"$unitName.service", enabled = None, running = Some(true))
       val unitFile = file(
         s"/etc/systemd/system/$unitName.service",
         s"""[Unit]

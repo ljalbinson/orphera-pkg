@@ -47,7 +47,10 @@ object etcd_cluster extends OrpheraClusterPlaybook:
     val binaries = archiveFiles(
       "the etcd binaries",
       s"https://github.com/etcd-io/etcd/releases/download/$etcdVersion/$dir.tar.gz",
-      List(s"$dir/etcd" -> "/usr/local/bin/etcd", s"$dir/etcdctl" -> "/usr/local/bin/etcdctl")
+      List(
+        s"$dir/etcd" -> "/usr/local/bin/etcd",
+        s"$dir/etcdctl" -> "/usr/local/bin/etcdctl"
+      )
     )
     val etcdUser = user("etcd", system = true, shell = "/usr/sbin/nologin")
     ApplyPlan.orFail(
@@ -55,7 +58,8 @@ object etcd_cluster extends OrpheraClusterPlaybook:
       List(
         binaries,
         etcdUser,
-        directory("/var/lib/etcd", owner = "etcd", group = "etcd").after(etcdUser),
+        directory("/var/lib/etcd", owner = "etcd", group = "etcd")
+          .after(etcdUser),
         directory("/etc/etcd")
       )
     )

@@ -77,11 +77,15 @@ object manila_teardown extends OrpheraApply:
         )
       )
     else if target.name == cephNode then
-      val client = absentCephUser("remove the cephx user client.manila", "client.manila")
+      val client =
+        absentCephUser("remove the cephx user client.manila", "client.manila")
       // CephFS and the NFS cluster are removed only when asked (MANILA_PURGE_CEPH=yes): shares live there.
       val purge: List[ApplyResource] =
         if purgeCeph then
-          val nfs = absentCephNfsCluster(s"remove the NFS cluster $nfsCluster (MANILA_PURGE_CEPH=yes)", nfsCluster)
+          val nfs = absentCephNfsCluster(
+            s"remove the NFS cluster $nfsCluster (MANILA_PURGE_CEPH=yes)",
+            nfsCluster
+          )
           val fs = absentCephFilesystem(
             s"remove the filesystem $cephFs and all its data (MANILA_PURGE_CEPH=yes)",
             cephFs
@@ -90,13 +94,16 @@ object manila_teardown extends OrpheraApply:
         else Nil
       client :: purge
     else
-      val unregistered = absentKeystoneEntries("remove Manila from Keystone", "manila")
+      val unregistered =
+        absentKeystoneEntries("remove Manila from Keystone", "manila")
       // A test mount or its directory left by a failed share round trip: unmounted if mounted, no fstab entry
       // (none is made), then the directory removed if it is empty.
       val unmounted = absentMount(mountDir)
       val testDir = absentDirectory(mountDir).after(unmounted)
-      val stopped = absentContainerUnits(units.map(u => s"orphera-$u" -> u)).map(_.after(unregistered, testDir))
+      val stopped = absentContainerUnits(units.map(u => s"orphera-$u" -> u))
+        .map(_.after(unregistered, testDir))
       // Typed removal, no script: each directory with its contents, then the helper.
       val cleaned = (dirs.map(absentDirectory(_, recursive = true)) :+
-        absentFile(helper) :+ absentFile(keystoneHelperPath("manila"))).map(_.after(stopped*))
+        absentFile(helper) :+ absentFile(keystoneHelperPath("manila")))
+        .map(_.after(stopped*))
       List(unregistered, unmounted, testDir) ++ stopped ++ cleaned

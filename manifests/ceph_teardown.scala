@@ -18,7 +18,8 @@ object ceph_teardown extends OrpheraClusterPlaybook:
       s"systemctl reset-failed ceph-mon@$id",
       onlyIf = s"systemctl is-failed --quiet ceph-mon@$id"
     )
-    val stopped = service(s"ceph-mon@$id", enabled = None, running = Some(false))
+    val stopped =
+      service(s"ceph-mon@$id", enabled = None, running = Some(false))
     val data = absentDirectory(s"/var/lib/ceph/mon/ceph-$id", recursive = true)
       .after(stopped)
     val files = List(

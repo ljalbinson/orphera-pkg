@@ -738,7 +738,8 @@ if __name__ == '__main__':
       "the exporter answers on its port",
       s"http://localhost:$exporterPort/metrics",
       timeout = 180,
-      hint = s"see 'journalctl -xeu orphera-ceilometer-central' and $ceilometerLogDir"
+      hint =
+        s"see 'journalctl -xeu orphera-ceilometer-central' and $ceilometerLogDir"
     ).after(running*)
     val series = command(
       "wait for the Ceilometer exporters to be up in Prometheus",

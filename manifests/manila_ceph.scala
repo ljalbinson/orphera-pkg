@@ -64,7 +64,10 @@ object manila_ceph extends OrpheraApply:
       derived
 
   def describe(target: Node): List[ApplyResource] =
-    val fs = cephFilesystem(s"create the CephFS filesystem $cephFs and wait for an active MDS", cephFs)
+    val fs = cephFilesystem(
+      s"create the CephFS filesystem $cephFs and wait for an active MDS",
+      cephFs
+    )
     val nfs = cephNfsCluster(
       s"create the NFS cluster $nfsCluster and wait for NFS-Ganesha on $nfsIp:2049",
       nfsCluster,

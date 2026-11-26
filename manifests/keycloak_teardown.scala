@@ -60,7 +60,8 @@ object keycloak_teardown extends OrpheraApply:
         onlyIf = hasHelper,
         timeout = 180
       )
-      val stopped = absentContainerUnits(List(unit -> "keycloak")).map(_.after(unfederated))
+      val stopped =
+        absentContainerUnits(List(unit -> "keycloak")).map(_.after(unfederated))
       // The configuration and TLS files, the readiness file and the helper (the helper stays until the last step).
       val cleaned = List(
         absentDirectory("/etc/keycloak", recursive = true),

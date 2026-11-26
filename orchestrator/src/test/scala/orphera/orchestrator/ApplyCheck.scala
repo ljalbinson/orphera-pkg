@@ -458,7 +458,10 @@ object ApplyCheck:
 
     // seedFile: written when missing, never replaced.
     val seedNew = new FakeNode(Map.empty)
-    applyTo(seedNew, List(seedFile("/etc/app/list.txt", "a\nb\n", mode = "0644")))
+    applyTo(
+      seedNew,
+      List(seedFile("/etc/app/list.txt", "a\nb\n", mode = "0644"))
+    )
     check(
       "seedFile: written when missing",
       seedNew.ran.contains("write /etc/app/list.txt"),
@@ -2412,7 +2415,8 @@ object ApplyCheck:
     val pb = new ProcessBuilder("sh", "-c", script)
     pb.redirectErrorStream(true)
     val proc = pb.start()
-    val out = new String(proc.getInputStream.readAllBytes(), StandardCharsets.UTF_8)
+    val out =
+      new String(proc.getInputStream.readAllBytes(), StandardCharsets.UTF_8)
     (proc.waitFor(), out.trim)
 
   private def rabbitChecks(): Unit =
@@ -2435,29 +2439,48 @@ object ApplyCheck:
          |esac
          |""".stripMargin
     )
-    check("rabbit: the fake podman is executable", fake.toFile.setExecutable(true))
-    def sh(script: String): (Int, String) = runShell(s"PATH=$bin:$$PATH\n$script")
-    def put(n: String, text: String): Unit = { val _ = Files.writeString(dir.resolve(n), text) }
+    check(
+      "rabbit: the fake podman is executable",
+      fake.toFile.setExecutable(true)
+    )
+    def sh(script: String): (Int, String) = runShell(
+      s"PATH=$bin:$$PATH\n$script"
+    )
+    def put(n: String, text: String): Unit = {
+      val _ = Files.writeString(dir.resolve(n), text)
+    }
     def gone(n: String): Unit = { val _ = Files.deleteIfExists(dir.resolve(n)) }
-    def part(r: ApplyResource, pick: ApplyResource.Command => String): String = r match
-      case c: ApplyResource.Command => pick(c)
-      case other                    => s"not a command: $other"
+    def part(r: ApplyResource, pick: ApplyResource.Command => String): String =
+      r match
+        case c: ApplyResource.Command => pick(c)
+        case other                    => s"not a command: $other"
     val acct = rabbitAccount("acct", "svc", "svcuser", Secret("pa'ss"))
     put("vhosts", "/\n")
     put("users", "guest\t[administrator]\n")
-    check("rabbitAccount: no vhost means it is needed", sh(part(acct, _.unless))._1 != 0)
+    check(
+      "rabbitAccount: no vhost means it is needed",
+      sh(part(acct, _.unless))._1 != 0
+    )
     put("vhosts", "/\nsvc\n")
     put("users", "guest\t[administrator]\nsvcuser\t[]\n")
     put("authok", "")
     put("perms", "svcuser\t.*\t.*\t.*\n")
-    check("rabbitAccount: vhost, login and permissions mean unchanged", sh(part(acct, _.unless))._1 == 0)
+    check(
+      "rabbitAccount: vhost, login and permissions mean unchanged",
+      sh(part(acct, _.unless))._1 == 0
+    )
     put("perms", "svcuser\t.*\t.*\t\n")
-    check("rabbitAccount: lesser permissions mean it is needed", sh(part(acct, _.unless))._1 != 0)
+    check(
+      "rabbitAccount: lesser permissions mean it is needed",
+      sh(part(acct, _.unless))._1 != 0
+    )
     gone("up")
     val down = sh(part(acct, _.run))
     check(
       "rabbitAccount: no running broker fails and says so",
-      down._1 != 0 && down._2.contains("apply rabbitmq_single_node.scala first"),
+      down._1 != 0 && down._2.contains(
+        "apply rabbitmq_single_node.scala first"
+      ),
       down.toString
     )
     put("up", "")
@@ -2467,30 +2490,68 @@ object ApplyCheck:
     put("calls", "")
     val made = sh(part(acct, _.run))
     val c1 = Files.readString(calls)
-    check("rabbitAccount: a new vhost and user are made", made._1 == 0 && c1.contains("add_vhost svc") && c1.contains("add_user svcuser pa'ss"), made.toString + c1)
-    check("rabbitAccount: and given full permissions", c1.contains("set_permissions -p svc svcuser .* .* .*"), c1)
+    check(
+      "rabbitAccount: a new vhost and user are made",
+      made._1 == 0 && c1.contains("add_vhost svc") && c1.contains(
+        "add_user svcuser pa'ss"
+      ),
+      made.toString + c1
+    )
+    check(
+      "rabbitAccount: and given full permissions",
+      c1.contains("set_permissions -p svc svcuser .* .* .*"),
+      c1
+    )
     put("vhosts", "/\nsvc\n")
     put("users", "svcuser\t[]\n")
     put("calls", "")
     sh(part(acct, _.run))
     val c2 = Files.readString(calls)
-    check("rabbitAccount: an existing user gets the password set, no vhost is added", c2.contains("change_password svcuser") && !c2.contains("add_vhost") && !c2.contains("add_user"), c2)
+    check(
+      "rabbitAccount: an existing user gets the password set, no vhost is added",
+      c2.contains("change_password svcuser") && !c2.contains("add_vhost") && !c2
+        .contains("add_user"),
+      c2
+    )
     val root = rabbitAccount("root", "/", "svcuser", Secret("x"))
-    check("rabbitAccount: the default vhost is not made", !part(root, _.run).contains("add_vhost") && !part(root, _.unless).contains("list_vhosts"))
-    check("rabbitAccount: a bad name is refused", scala.util.Try(rabbitAccount("x", "a b", "u", Secret("x"))).isFailure)
+    check(
+      "rabbitAccount: the default vhost is not made",
+      !part(root, _.run).contains("add_vhost") && !part(root, _.unless)
+        .contains("list_vhosts")
+    )
+    check(
+      "rabbitAccount: a bad name is refused",
+      scala.util.Try(rabbitAccount("x", "a b", "u", Secret("x"))).isFailure
+    )
     val drop = absentRabbitAccount("drop", "svc", "svcuser")
     put("vhosts", "/\n")
     put("users", "guest\t[administrator]\n")
-    check("absentRabbitAccount: nothing there means nothing to do", sh(part(drop, _.onlyIf))._1 != 0)
+    check(
+      "absentRabbitAccount: nothing there means nothing to do",
+      sh(part(drop, _.onlyIf))._1 != 0
+    )
     put("users", "guest\t[administrator]\nsvcuser\t[]\n")
-    check("absentRabbitAccount: the user there means it runs", sh(part(drop, _.onlyIf))._1 == 0)
+    check(
+      "absentRabbitAccount: the user there means it runs",
+      sh(part(drop, _.onlyIf))._1 == 0
+    )
     gone("up")
-    check("absentRabbitAccount: no running broker means nothing to do", sh(part(drop, _.onlyIf))._1 != 0)
+    check(
+      "absentRabbitAccount: no running broker means nothing to do",
+      sh(part(drop, _.onlyIf))._1 != 0
+    )
     put("calls", "")
     sh(part(drop, _.run))
     val c3 = Files.readString(calls)
-    check("absentRabbitAccount: the vhost and the user are deleted", c3.contains("delete_vhost svc") && c3.contains("delete_user svcuser"), c3)
-    check("absentRabbitAccount: the default vhost is refused", scala.util.Try(absentRabbitAccount("x", "/", "u")).isFailure)
+    check(
+      "absentRabbitAccount: the vhost and the user are deleted",
+      c3.contains("delete_vhost svc") && c3.contains("delete_user svcuser"),
+      c3
+    )
+    check(
+      "absentRabbitAccount: the default vhost is refused",
+      scala.util.Try(absentRabbitAccount("x", "/", "u")).isFailure
+    )
 
   private def serverCaChecks(): Unit =
     val dir = Files.createTempDirectory("serverca")
@@ -2498,7 +2559,11 @@ object ApplyCheck:
     Files.createDirectory(bin)
     val calls = dir.resolve("calls")
     val realOpenssl = runShell("command -v openssl")
-    check("serverCa: openssl is installed", realOpenssl._1 == 0, realOpenssl.toString)
+    check(
+      "serverCa: openssl is installed",
+      realOpenssl._1 == 0,
+      realOpenssl.toString
+    )
     if realOpenssl._1 == 0 then
       // A CA, a certificate it signed, and the chain a server would present.
       val made = runShell(s"""cd $dir
@@ -2506,7 +2571,11 @@ object ApplyCheck:
         |openssl req -newkey rsa:2048 -nodes -keyout leaf.key -out leaf.csr -subj /CN=leaf >/dev/null 2>&1
         |openssl x509 -req -in leaf.csr -CA ca.crt -CAkey ca.key -CAcreateserial -out leaf.crt -days 2 >/dev/null 2>&1
         |cat leaf.crt ca.crt > chain.pem""".stripMargin)
-      check("serverCa: the test certificates are made", made._1 == 0 && Files.exists(dir.resolve("chain.pem")), made.toString)
+      check(
+        "serverCa: the test certificates are made",
+        made._1 == 0 && Files.exists(dir.resolve("chain.pem")),
+        made.toString
+      )
       // A stand-in openssl answers s_client from a file (with text after the certificates that differs on each
       // call, as a real handshake's does) and passes everything else to the real one.
       val fakeOpenssl = bin.resolve("openssl")
@@ -2518,48 +2587,138 @@ object ApplyCheck:
            |""".stripMargin
       )
       val fakeUpdate = bin.resolve("update-ca-certificates")
-      Files.writeString(fakeUpdate, s"""#!/bin/sh
+      Files.writeString(
+        fakeUpdate,
+        s"""#!/bin/sh
           |echo update >> "$calls"
-          |""".stripMargin)
-      check("serverCa: the stand-ins are executable", fakeOpenssl.toFile.setExecutable(true) && fakeUpdate.toFile.setExecutable(true))
-      def sh(script: String): (Int, String) = runShell(s"PATH=$bin:$$PATH\n$script")
-      def serve(file: String): Unit = { val _ = Files.writeString(dir.resolve("served"), "Certificate chain\n" + Files.readString(dir.resolve(file))) }
-      def part(r: ApplyResource, pick: ApplyResource.Command => String): String = r match
+          |""".stripMargin
+      )
+      check(
+        "serverCa: the stand-ins are executable",
+        fakeOpenssl.toFile.setExecutable(true) && fakeUpdate.toFile
+          .setExecutable(true)
+      )
+      def sh(script: String): (Int, String) = runShell(
+        s"PATH=$bin:$$PATH\n$script"
+      )
+      def serve(file: String): Unit = {
+        val _ = Files.writeString(
+          dir.resolve("served"),
+          "Certificate chain\n" + Files.readString(dir.resolve(file))
+        )
+      }
+      def part(
+          r: ApplyResource,
+          pick: ApplyResource.Command => String
+      ): String = r match
         case c: ApplyResource.Command => pick(c)
         case other                    => s"not a command: $other"
       val caFile = s"$dir/out/ca.crt"
       val anchor = s"$dir/anchors/orphera-test-ca.crt"
-      val step = serverCa("ca", "ks.example.com", 5000, caFile, hint = "apply keystone_single_node.scala", anchorsDeb = s"$dir/anchors", anchorsRpm = s"$dir/rpm")
+      val step = serverCa(
+        "ca",
+        "ks.example.com",
+        5000,
+        caFile,
+        hint = "apply keystone_single_node.scala",
+        anchorsDeb = s"$dir/anchors",
+        anchorsRpm = s"$dir/rpm"
+      )
       serve("chain.pem")
       Files.createDirectory(dir.resolve("anchors"))
-      check("serverCa: nothing installed means it is needed", sh(part(step, _.unless))._1 != 0)
+      check(
+        "serverCa: nothing installed means it is needed",
+        sh(part(step, _.unless))._1 != 0
+      )
       val ran = sh(part(step, _.run))
-      check("serverCa: the run succeeds and says what it installed", ran._1 == 0 && ran._2.contains("installed: CN"), ran.toString)
-      check("serverCa: the CA is saved, in a directory the run made", sh(s"cmp $dir/ca.crt $caFile")._1 == 0)
-      check("serverCa: and put in the trust store, which is refreshed", sh(s"cmp $dir/ca.crt $anchor")._1 == 0 && Files.exists(calls))
-      check("serverCa: the installed CA means unchanged, whatever the handshake adds", sh(part(step, _.unless))._1 == 0 && sh(part(step, _.unless))._1 == 0)
+      check(
+        "serverCa: the run succeeds and says what it installed",
+        ran._1 == 0 && ran._2.contains("installed: CN"),
+        ran.toString
+      )
+      check(
+        "serverCa: the CA is saved, in a directory the run made",
+        sh(s"cmp $dir/ca.crt $caFile")._1 == 0
+      )
+      check(
+        "serverCa: and put in the trust store, which is refreshed",
+        sh(s"cmp $dir/ca.crt $anchor")._1 == 0 && Files.exists(calls)
+      )
+      check(
+        "serverCa: the installed CA means unchanged, whatever the handshake adds",
+        sh(part(step, _.unless))._1 == 0 && sh(part(step, _.unless))._1 == 0
+      )
       Files.delete(dir.resolve("anchors/orphera-test-ca.crt"))
-      check("serverCa: a CA missing from the trust store means it is needed", sh(part(step, _.unless))._1 != 0)
+      check(
+        "serverCa: a CA missing from the trust store means it is needed",
+        sh(part(step, _.unless))._1 != 0
+      )
       sh(part(step, _.run))
-      check("serverCa: and the run puts it back", sh(part(step, _.unless))._1 == 0)
+      check(
+        "serverCa: and the run puts it back",
+        sh(part(step, _.unless))._1 == 0
+      )
       val leafOnly = sh(s"cp $dir/leaf.crt $dir/leafonly.pem")
       check("serverCa: leaf copy made", leafOnly._1 == 0, leafOnly.toString)
       serve("leafonly.pem")
-      check("serverCa: a server presenting one certificate leaves it needed", sh(part(step, _.unless))._1 != 0)
+      check(
+        "serverCa: a server presenting one certificate leaves it needed",
+        sh(part(step, _.unless))._1 != 0
+      )
       val one = sh(part(step, _.run))
-      check("serverCa: and the run fails with the count and the hint", one._1 != 0 && one._2.contains("presented 1 certificate") && one._2.contains("apply keystone_single_node.scala"), one.toString)
+      check(
+        "serverCa: and the run fails with the count and the hint",
+        one._1 != 0 && one._2.contains("presented 1 certificate") && one._2
+          .contains("apply keystone_single_node.scala"),
+        one.toString
+      )
       sh(s"cat $dir/leaf.crt $dir/leaf.crt > $dir/twoleaves.pem")
       serve("twoleaves.pem")
-      check("serverCa: a last certificate that is not self-signed fails", sh(part(step, _.run))._1 != 0)
-      val noTrust = serverCa("ca", "ks.example.com", 5000, s"$dir/img/ca.crt", trust = false, anchorsDeb = s"$dir/anchors2")
+      check(
+        "serverCa: a last certificate that is not self-signed fails",
+        sh(part(step, _.run))._1 != 0
+      )
+      val noTrust = serverCa(
+        "ca",
+        "ks.example.com",
+        5000,
+        s"$dir/img/ca.crt",
+        trust = false,
+        anchorsDeb = s"$dir/anchors2"
+      )
       serve("chain.pem")
-      check("serverCa: trust = false: needed at first", sh(part(noTrust, _.unless))._1 != 0)
-      check("serverCa: trust = false: the run succeeds", sh(part(noTrust, _.run))._1 == 0)
-      check("serverCa: trust = false: then unchanged, with no trust store file made", sh(part(noTrust, _.unless))._1 == 0 && !Files.exists(dir.resolve("anchors2")))
-      check("serverCa: a bad host is refused", scala.util.Try(serverCa("x", "a b", 5000, "/x/ca.crt")).isFailure)
-      check("serverCa: a bad port is refused", scala.util.Try(serverCa("x", "h", 0, "/x/ca.crt")).isFailure)
-      check("serverCa: a relative file is refused", scala.util.Try(serverCa("x", "h", 5000, "ca.crt")).isFailure)
-      check("serverCa: a hint with a quote is refused", scala.util.Try(serverCa("x", "h", 5000, "/x/ca.crt", hint = "say \"no\"")).isFailure)
+      check(
+        "serverCa: trust = false: needed at first",
+        sh(part(noTrust, _.unless))._1 != 0
+      )
+      check(
+        "serverCa: trust = false: the run succeeds",
+        sh(part(noTrust, _.run))._1 == 0
+      )
+      check(
+        "serverCa: trust = false: then unchanged, with no trust store file made",
+        sh(part(noTrust, _.unless))._1 == 0 && !Files.exists(
+          dir.resolve("anchors2")
+        )
+      )
+      check(
+        "serverCa: a bad host is refused",
+        scala.util.Try(serverCa("x", "a b", 5000, "/x/ca.crt")).isFailure
+      )
+      check(
+        "serverCa: a bad port is refused",
+        scala.util.Try(serverCa("x", "h", 0, "/x/ca.crt")).isFailure
+      )
+      check(
+        "serverCa: a relative file is refused",
+        scala.util.Try(serverCa("x", "h", 5000, "ca.crt")).isFailure
+      )
+      check(
+        "serverCa: a hint with a quote is refused",
+        scala.util
+          .Try(serverCa("x", "h", 5000, "/x/ca.crt", hint = "say \"no\""))
+          .isFailure
+      )
 
   private def aptRepositoryChecks(): Unit =
     val dir = Files.createTempDirectory("aptrepo")
@@ -2569,48 +2728,154 @@ object ApplyCheck:
     def stand(name: String, body: String): Unit =
       val f = bin.resolve(name)
       Files.writeString(f, s"#!/bin/sh\n$body\n")
-      check(s"aptRepository: the stand-in $name is executable", f.toFile.setExecutable(true))
+      check(
+        s"aptRepository: the stand-in $name is executable",
+        f.toFile.setExecutable(true)
+      )
     // curl gives a key unless told otherwise, gpg --dearmor copies it to the -o file, apt-get records its
     // arguments, and apt-cache answers from a file.
-    stand("curl", s"""[ -e "$dir/nokey" ] && exit 22; echo "KEYDATA $$*"; exit 0""")
-    stand("gpg", """while [ $# -gt 0 ]; do [ "$1" = -o ] && OUT="$2"; shift; done; cat > "$OUT"; exit 0""")
+    stand(
+      "curl",
+      s"""[ -e "$dir/nokey" ] && exit 22; echo "KEYDATA $$*"; exit 0"""
+    )
+    stand(
+      "gpg",
+      """while [ $# -gt 0 ]; do [ "$1" = -o ] && OUT="$2"; shift; done; cat > "$OUT"; exit 0"""
+    )
     stand("apt-get", s"""echo "apt-get $$*" >> "$calls"; exit 0""")
     stand("apt-cache", s"""cat "$dir/policy" 2>/dev/null; exit 0""")
-    def sh(script: String): (Int, String) = runShell(s"PATH=$bin:$$PATH\n$script")
-    def part(r: ApplyResource, pick: ApplyResource.Command => String): String = r match
-      case c: ApplyResource.Command => pick(c)
-      case other                    => s"not a command: $other"
+    def sh(script: String): (Int, String) = runShell(
+      s"PATH=$bin:$$PATH\n$script"
+    )
+    def part(r: ApplyResource, pick: ApplyResource.Command => String): String =
+      r match
+        case c: ApplyResource.Command => pick(c)
+        case other                    => s"not a command: $other"
     val keyring = s"$dir/keys/repo.gpg"
     val list = s"$dir/lists/repo.list"
     val repo = "https://apt.example.com/deb stable main"
-    val step = aptRepository("repo", "https://apt.example.com/key.asc", keyring, list, repo, offers = "foo", update = true)
-    check("aptRepository: nothing configured means it is needed", sh(part(step, _.unless))._1 != 0)
-    Files.writeString(dir.resolve("policy"), "foo:\n  Candidate: 1\n     500 https://other.example.org stable/main Packages\n")
+    val step = aptRepository(
+      "repo",
+      "https://apt.example.com/key.asc",
+      keyring,
+      list,
+      repo,
+      offers = "foo",
+      update = true
+    )
+    check(
+      "aptRepository: nothing configured means it is needed",
+      sh(part(step, _.unless))._1 != 0
+    )
+    Files.writeString(
+      dir.resolve("policy"),
+      "foo:\n  Candidate: 1\n     500 https://other.example.org stable/main Packages\n"
+    )
     val bad = sh(part(step, _.run))
-    check("aptRepository: a package the repository does not offer fails the run, and says so", bad._1 != 0 && bad._2.contains("foo is not offered by apt.example.com"), bad.toString)
-    Files.writeString(dir.resolve("policy"), "foo:\n  Candidate: 1\n     500 https://apt.example.com/deb stable/main Packages\n")
+    check(
+      "aptRepository: a package the repository does not offer fails the run, and says so",
+      bad._1 != 0 && bad._2.contains("foo is not offered by apt.example.com"),
+      bad.toString
+    )
+    Files.writeString(
+      dir.resolve("policy"),
+      "foo:\n  Candidate: 1\n     500 https://apt.example.com/deb stable/main Packages\n"
+    )
     val ran = sh(part(step, _.run))
-    check("aptRepository: the run succeeds", ran._1 == 0 && ran._2.contains("apt repository apt.example.com configured"), ran.toString)
-    check("aptRepository: the key is in the keyring, in a directory the run made", Files.readString(Path.of(keyring)).startsWith("KEYDATA"))
-    check("aptRepository: the sources file holds the one line", Files.readString(Path.of(list)) == s"deb [signed-by=$keyring] $repo\n", Files.readString(Path.of(list)))
-    check("aptRepository: with update, only this source's lists are refreshed", Files.readString(calls).contains(s"update -o Dir::Etc::sourcelist=$list -o Dir::Etc::sourceparts=-"), Files.readString(calls))
-    check("aptRepository: configured and offered means unchanged", sh(part(step, _.unless))._1 == 0)
+    check(
+      "aptRepository: the run succeeds",
+      ran._1 == 0 && ran._2.contains(
+        "apt repository apt.example.com configured"
+      ),
+      ran.toString
+    )
+    check(
+      "aptRepository: the key is in the keyring, in a directory the run made",
+      Files.readString(Path.of(keyring)).startsWith("KEYDATA")
+    )
+    check(
+      "aptRepository: the sources file holds the one line",
+      Files.readString(Path.of(list)) == s"deb [signed-by=$keyring] $repo\n",
+      Files.readString(Path.of(list))
+    )
+    check(
+      "aptRepository: with update, only this source's lists are refreshed",
+      Files
+        .readString(calls)
+        .contains(
+          s"update -o Dir::Etc::sourcelist=$list -o Dir::Etc::sourceparts=-"
+        ),
+      Files.readString(calls)
+    )
+    check(
+      "aptRepository: configured and offered means unchanged",
+      sh(part(step, _.unless))._1 == 0
+    )
     Files.writeString(dir.resolve("policy"), "foo:\n  Candidate: (none)\n")
-    check("aptRepository: a package no longer offered means it is needed", sh(part(step, _.unless))._1 != 0)
-    val other = aptRepository("repo", "https://apt.example.com/key.asc", keyring, list, "https://apt.example.com/deb stable contrib")
-    check("aptRepository: a different line means it is needed", sh(part(other, _.unless))._1 != 0)
+    check(
+      "aptRepository: a package no longer offered means it is needed",
+      sh(part(step, _.unless))._1 != 0
+    )
+    val other = aptRepository(
+      "repo",
+      "https://apt.example.com/key.asc",
+      keyring,
+      list,
+      "https://apt.example.com/deb stable contrib"
+    )
+    check(
+      "aptRepository: a different line means it is needed",
+      sh(part(other, _.unless))._1 != 0
+    )
     sh(part(other, _.run))
-    check("aptRepository: and the run rewrites the line", Files.readString(Path.of(list)).contains("stable contrib") && sh(part(other, _.unless))._1 == 0)
-    check("aptRepository: without update there is no apt-get call", !part(other, _.run).contains("apt-get"))
+    check(
+      "aptRepository: and the run rewrites the line",
+      Files.readString(Path.of(list)).contains("stable contrib") && sh(
+        part(other, _.unless)
+      )._1 == 0
+    )
+    check(
+      "aptRepository: without update there is no apt-get call",
+      !part(other, _.run).contains("apt-get")
+    )
     Files.delete(Path.of(keyring))
     Files.writeString(dir.resolve("nokey"), "")
     val noKey = sh(part(other, _.run))
-    check("aptRepository: a key that cannot be fetched fails the run", noKey._1 != 0, noKey.toString)
-    check("aptRepository: and leaves it needed", sh(part(other, _.unless))._1 != 0)
-    check("aptRepository: a key URL that is not https is refused", scala.util.Try(aptRepository("x", "http://k/x", keyring, list, repo)).isFailure)
-    check("aptRepository: a relative keyring is refused", scala.util.Try(aptRepository("x", "https://k/x", "k.gpg", list, repo)).isFailure)
-    check("aptRepository: a repository with a quote is refused", scala.util.Try(aptRepository("x", "https://k/x", keyring, list, "https://r/ 'x'")).isFailure)
-    check("aptRepository: a bad package name is refused", scala.util.Try(aptRepository("x", "https://k/x", keyring, list, repo, offers = "a b")).isFailure)
+    check(
+      "aptRepository: a key that cannot be fetched fails the run",
+      noKey._1 != 0,
+      noKey.toString
+    )
+    check(
+      "aptRepository: and leaves it needed",
+      sh(part(other, _.unless))._1 != 0
+    )
+    check(
+      "aptRepository: a key URL that is not https is refused",
+      scala.util
+        .Try(aptRepository("x", "http://k/x", keyring, list, repo))
+        .isFailure
+    )
+    check(
+      "aptRepository: a relative keyring is refused",
+      scala.util
+        .Try(aptRepository("x", "https://k/x", "k.gpg", list, repo))
+        .isFailure
+    )
+    check(
+      "aptRepository: a repository with a quote is refused",
+      scala.util
+        .Try(aptRepository("x", "https://k/x", keyring, list, "https://r/ 'x'"))
+        .isFailure
+    )
+    check(
+      "aptRepository: a bad package name is refused",
+      scala.util
+        .Try(
+          aptRepository("x", "https://k/x", keyring, list, repo, offers = "a b")
+        )
+        .isFailure
+    )
 
   private def downloadChecks(): Unit =
     val dir = Files.createTempDirectory("download")
@@ -2626,46 +2891,123 @@ object ApplyCheck:
          |cat "$dir/served" > "$$OUT"
          |""".stripMargin
     )
-    check("download: the stand-in curl is executable", curl.toFile.setExecutable(true))
-    def sh(script: String): (Int, String) = runShell(s"PATH=$bin:$$PATH\n$script")
-    def serve(text: String): Unit = { val _ = Files.writeString(dir.resolve("served"), text) }
-    def part(r: ApplyResource, pick: ApplyResource.Command => String): String = r match
-      case c: ApplyResource.Command => pick(c)
-      case other                    => s"not a command: $other"
+    check(
+      "download: the stand-in curl is executable",
+      curl.toFile.setExecutable(true)
+    )
+    def sh(script: String): (Int, String) = runShell(
+      s"PATH=$bin:$$PATH\n$script"
+    )
+    def serve(text: String): Unit = {
+      val _ = Files.writeString(dir.resolve("served"), text)
+    }
+    def part(r: ApplyResource, pick: ApplyResource.Command => String): String =
+      r match
+        case c: ApplyResource.Command => pick(c)
+        case other                    => s"not a command: $other"
     val img = s"$dir/img/a.qcow2"
-    val step = download("img", "https://example.com/a.qcow2", img, magic = "QFI")
+    val step =
+      download("img", "https://example.com/a.qcow2", img, magic = "QFI")
     serve("QFIdata")
-    check("download: no file means it is needed", sh(part(step, _.unless))._1 != 0)
+    check(
+      "download: no file means it is needed",
+      sh(part(step, _.unless))._1 != 0
+    )
     val ran = sh(part(step, _.run))
-    check("download: the run succeeds and puts the file in place", ran._1 == 0 && Files.readString(Path.of(img)) == "QFIdata", ran.toString)
-    check("download: and leaves no .part file", !Files.exists(Path.of(img + ".part")))
-    check("download: a file that passes the checks means unchanged", sh(part(step, _.unless))._1 == 0)
+    check(
+      "download: the run succeeds and puts the file in place",
+      ran._1 == 0 && Files.readString(Path.of(img)) == "QFIdata",
+      ran.toString
+    )
+    check(
+      "download: and leaves no .part file",
+      !Files.exists(Path.of(img + ".part"))
+    )
+    check(
+      "download: a file that passes the checks means unchanged",
+      sh(part(step, _.unless))._1 == 0
+    )
     Files.writeString(Path.of(img), "XXXdata")
-    check("download: a file with the wrong magic means it is needed", sh(part(step, _.unless))._1 != 0)
+    check(
+      "download: a file with the wrong magic means it is needed",
+      sh(part(step, _.unless))._1 != 0
+    )
     sh(part(step, _.run))
-    check("download: and the run replaces it", Files.readString(Path.of(img)) == "QFIdata")
+    check(
+      "download: and the run replaces it",
+      Files.readString(Path.of(img)) == "QFIdata"
+    )
     Files.delete(Path.of(img))
     serve("XXXdata")
     val wrong = sh(part(step, _.run))
-    check("download: a download with the wrong magic fails, says so and leaves nothing", wrong._1 != 0 && wrong._2.contains("not what was expected") && !Files.exists(Path.of(img)) && !Files.exists(Path.of(img + ".part")), wrong.toString)
+    check(
+      "download: a download with the wrong magic fails, says so and leaves nothing",
+      wrong._1 != 0 && wrong._2.contains("not what was expected") && !Files
+        .exists(Path.of(img)) && !Files.exists(Path.of(img + ".part")),
+      wrong.toString
+    )
     Files.writeString(dir.resolve("fail"), "")
     val failed = sh(part(step, _.run))
-    check("download: a failing curl fails the run and names the file to put there", failed._1 != 0 && failed._2.contains(s"put the file at $img"), failed.toString)
+    check(
+      "download: a failing curl fails the run and names the file to put there",
+      failed._1 != 0 && failed._2.contains(s"put the file at $img"),
+      failed.toString
+    )
     Files.delete(dir.resolve("fail"))
-    val skipped = download("img", "https://example.com/a.qcow2", img, magic = "QFI", skipIf = "true")
-    check("download: skipIf true means unchanged without the file", sh(part(skipped, _.unless))._1 == 0)
-    val notSkipped = download("img", "https://example.com/a.qcow2", img, magic = "QFI", skipIf = "false")
-    check("download: skipIf false means the checks decide", sh(part(notSkipped, _.unless))._1 != 0)
+    val skipped = download(
+      "img",
+      "https://example.com/a.qcow2",
+      img,
+      magic = "QFI",
+      skipIf = "true"
+    )
+    check(
+      "download: skipIf true means unchanged without the file",
+      sh(part(skipped, _.unless))._1 == 0
+    )
+    val notSkipped = download(
+      "img",
+      "https://example.com/a.qcow2",
+      img,
+      magic = "QFI",
+      skipIf = "false"
+    )
+    check(
+      "download: skipIf false means the checks decide",
+      sh(part(notSkipped, _.unless))._1 != 0
+    )
     val sum = sh("printf QFIdata | sha256sum | cut -d' ' -f1")._2
-    val summed = download("img", "https://example.com/a.qcow2", img, sha256 = sum)
+    val summed =
+      download("img", "https://example.com/a.qcow2", img, sha256 = sum)
     serve("QFIdata")
-    check("download: a matching checksum is accepted", sh(part(summed, _.run))._1 == 0 && sh(part(summed, _.unless))._1 == 0)
-    val badSum = download("img", "https://example.com/a.qcow2", img, sha256 = "0" * 64)
-    check("download: a file with another checksum means it is needed", sh(part(badSum, _.unless))._1 != 0)
-    check("download: a bad checksum is refused", scala.util.Try(download("x", "https://e/x", img, sha256 = "abc")).isFailure)
-    check("download: a relative path is refused", scala.util.Try(download("x", "https://e/x", "a.qcow2")).isFailure)
-    check("download: a path with .. is refused", scala.util.Try(download("x", "https://e/x", "/a/../b")).isFailure)
-    check("download: a URL with a quote is refused", scala.util.Try(download("x", "https://e/'x", img)).isFailure)
+    check(
+      "download: a matching checksum is accepted",
+      sh(part(summed, _.run))._1 == 0 && sh(part(summed, _.unless))._1 == 0
+    )
+    val badSum =
+      download("img", "https://example.com/a.qcow2", img, sha256 = "0" * 64)
+    check(
+      "download: a file with another checksum means it is needed",
+      sh(part(badSum, _.unless))._1 != 0
+    )
+    check(
+      "download: a bad checksum is refused",
+      scala.util
+        .Try(download("x", "https://e/x", img, sha256 = "abc"))
+        .isFailure
+    )
+    check(
+      "download: a relative path is refused",
+      scala.util.Try(download("x", "https://e/x", "a.qcow2")).isFailure
+    )
+    check(
+      "download: a path with .. is refused",
+      scala.util.Try(download("x", "https://e/x", "/a/../b")).isFailure
+    )
+    check(
+      "download: a URL with a quote is refused",
+      scala.util.Try(download("x", "https://e/'x", img)).isFailure
+    )
 
   private def archiveFilesChecks(): Unit =
     val dir = Files.createTempDirectory("archive")
@@ -2679,34 +3021,99 @@ object ApplyCheck:
          |cat "$dir/served.tar.gz" > "$$OUT"
          |""".stripMargin
     )
-    check("archiveFiles: the stand-in curl is executable", curl.toFile.setExecutable(true))
-    def sh(script: String): (Int, String) = runShell(s"PATH=$bin:$$PATH\n$script")
-    def part(r: ApplyResource, pick: ApplyResource.Command => String): String = r match
-      case c: ApplyResource.Command => pick(c)
-      case other                    => s"not a command: $other"
-    val made = sh(s"""cd $dir && mkdir -p pkg-1/sub && printf 'one' > pkg-1/one && printf 'two' > pkg-1/sub/two && tar czf served.tar.gz pkg-1""")
+    check(
+      "archiveFiles: the stand-in curl is executable",
+      curl.toFile.setExecutable(true)
+    )
+    def sh(script: String): (Int, String) = runShell(
+      s"PATH=$bin:$$PATH\n$script"
+    )
+    def part(r: ApplyResource, pick: ApplyResource.Command => String): String =
+      r match
+        case c: ApplyResource.Command => pick(c)
+        case other                    => s"not a command: $other"
+    val made = sh(
+      s"""cd $dir && mkdir -p pkg-1/sub && printf 'one' > pkg-1/one && printf 'two' > pkg-1/sub/two && tar czf served.tar.gz pkg-1"""
+    )
     check("archiveFiles: the test archive is made", made._1 == 0, made.toString)
     val t1 = s"$dir/out/bin/one"
     val t2 = s"$dir/out/lib/two"
-    val step = archiveFiles("tools", "https://example.com/pkg.tar.gz", List("pkg-1/one" -> t1, "pkg-1/sub/two" -> t2))
-    check("archiveFiles: nothing installed means it is needed", sh(part(step, _.unless))._1 != 0)
+    val step = archiveFiles(
+      "tools",
+      "https://example.com/pkg.tar.gz",
+      List("pkg-1/one" -> t1, "pkg-1/sub/two" -> t2)
+    )
+    check(
+      "archiveFiles: nothing installed means it is needed",
+      sh(part(step, _.unless))._1 != 0
+    )
     val ran = sh(part(step, _.run))
     check("archiveFiles: the run succeeds", ran._1 == 0, ran.toString)
-    check("archiveFiles: both files are in place, with their directories made", Files.readString(Path.of(t1)) == "one" && Files.readString(Path.of(t2)) == "two")
-    check("archiveFiles: and executable", Files.isExecutable(Path.of(t1)) && Files.isExecutable(Path.of(t2)))
-    check("archiveFiles: everything there means unchanged", sh(part(step, _.unless))._1 == 0)
+    check(
+      "archiveFiles: both files are in place, with their directories made",
+      Files.readString(Path.of(t1)) == "one" && Files.readString(
+        Path.of(t2)
+      ) == "two"
+    )
+    check(
+      "archiveFiles: and executable",
+      Files.isExecutable(Path.of(t1)) && Files.isExecutable(Path.of(t2))
+    )
+    check(
+      "archiveFiles: everything there means unchanged",
+      sh(part(step, _.unless))._1 == 0
+    )
     Files.delete(Path.of(t2))
-    check("archiveFiles: one missing means it is needed", sh(part(step, _.unless))._1 != 0)
-    val missing = archiveFiles("tools", "https://example.com/pkg.tar.gz", List("pkg-1/nothing" -> s"$dir/out/x"))
+    check(
+      "archiveFiles: one missing means it is needed",
+      sh(part(step, _.unless))._1 != 0
+    )
+    val missing = archiveFiles(
+      "tools",
+      "https://example.com/pkg.tar.gz",
+      List("pkg-1/nothing" -> s"$dir/out/x")
+    )
     val bad = sh(part(missing, _.run))
-    check("archiveFiles: a file not in the archive fails the run and says so", bad._1 != 0 && bad._2.contains("pkg-1/nothing is not in the archive"), bad.toString)
-    val data = archiveFiles("data", "https://example.com/pkg.tar.gz", List("pkg-1/one" -> s"$dir/out/data"), mode = "0644")
+    check(
+      "archiveFiles: a file not in the archive fails the run and says so",
+      bad._1 != 0 && bad._2.contains("pkg-1/nothing is not in the archive"),
+      bad.toString
+    )
+    val data = archiveFiles(
+      "data",
+      "https://example.com/pkg.tar.gz",
+      List("pkg-1/one" -> s"$dir/out/data"),
+      mode = "0644"
+    )
     sh(part(data, _.run))
-    check("archiveFiles: mode 0644 gives a file that is not executable", Files.exists(Path.of(s"$dir/out/data")) && !Files.isExecutable(Path.of(s"$dir/out/data")) && sh(part(data, _.unless))._1 == 0)
-    check("archiveFiles: a path with .. inside is refused", scala.util.Try(archiveFiles("x", "https://e/x", List("../one" -> t1))).isFailure)
-    check("archiveFiles: a relative target is refused", scala.util.Try(archiveFiles("x", "https://e/x", List("one" -> "bin/one"))).isFailure)
-    check("archiveFiles: a bad mode is refused", scala.util.Try(archiveFiles("x", "https://e/x", List("one" -> t1), mode = "755")).isFailure)
-    check("archiveFiles: no files is refused", scala.util.Try(archiveFiles("x", "https://e/x", Nil)).isFailure)
+    check(
+      "archiveFiles: mode 0644 gives a file that is not executable",
+      Files.exists(Path.of(s"$dir/out/data")) && !Files.isExecutable(
+        Path.of(s"$dir/out/data")
+      ) && sh(part(data, _.unless))._1 == 0
+    )
+    check(
+      "archiveFiles: a path with .. inside is refused",
+      scala.util
+        .Try(archiveFiles("x", "https://e/x", List("../one" -> t1)))
+        .isFailure
+    )
+    check(
+      "archiveFiles: a relative target is refused",
+      scala.util
+        .Try(archiveFiles("x", "https://e/x", List("one" -> "bin/one")))
+        .isFailure
+    )
+    check(
+      "archiveFiles: a bad mode is refused",
+      scala.util
+        .Try(archiveFiles("x", "https://e/x", List("one" -> t1), mode = "755"))
+        .isFailure
+    )
+    check(
+      "archiveFiles: no files is refused",
+      scala.util.Try(archiveFiles("x", "https://e/x", Nil)).isFailure
+    )
 
   // A small Keystone in Python (projects, users, roles, services, endpoints and tokens in memory), for the helper
   // that keystoneEntries writes.
@@ -2770,9 +3177,12 @@ HTTPServer(('127.0.0.1',int(sys.argv[1])),H).serve_forever()
       val sock = new java.net.ServerSocket(0)
       try sock.getLocalPort
       finally sock.close()
-    val proc = new ProcessBuilder("python3", server.toString, port.toString).redirectErrorStream(true).start()
+    val proc = new ProcessBuilder("python3", server.toString, port.toString)
+      .redirectErrorStream(true)
+      .start()
     try
-      def up: Boolean = scala.util.Try(new java.net.Socket("127.0.0.1", port).close()).isSuccess
+      def up: Boolean =
+        scala.util.Try(new java.net.Socket("127.0.0.1", port).close()).isSuccess
       var tries = 0
       while !up && tries < 50 do
         Thread.sleep(100)
@@ -2783,12 +3193,19 @@ HTTPServer(('127.0.0.1',int(sys.argv[1])),H).serve_forever()
         case f: ApplyResource.File =>
           f.content match
             case Some(ApplyResource.Content.Hidden(secret)) => secret.reveal
-            case other                                      => s"not hidden text: $other"
+            case other => s"not hidden text: $other"
         case other => s"not a file: $other"
-      def part(r: ApplyResource, pick: ApplyResource.Command => String): String = r match
+      def part(
+          r: ApplyResource,
+          pick: ApplyResource.Command => String
+      ): String = r match
         case c: ApplyResource.Command => pick(c)
         case other                    => s"not a command: $other"
-      def helperRun(r: ApplyResource, text: String, args: String*): (Int, String) =
+      def helperRun(
+          r: ApplyResource,
+          text: String,
+          args: String*
+      ): (Int, String) =
         val script = dir.resolve(s"helper-${r.id.hashCode.abs}.py")
         Files.writeString(script, text)
         runShell(s"python3 -I ${script} ${args.mkString(" ")}")
@@ -2797,80 +3214,240 @@ HTTPServer(('127.0.0.1',int(sys.argv[1])),H).serve_forever()
           "register placement",
           "placement",
           Secret(password),
-          List(KeystoneService("placement", "placement", s"http://tst13:8780$urlPath")),
+          List(
+            KeystoneService(
+              "placement",
+              "placement",
+              s"http://tst13:8780$urlPath"
+            )
+          ),
           url,
           Secret("adminpw"),
           "/no/ca.crt",
           roles = List("creator")
         )
       val (helper, ensure) = entries("p\"w\\1", "")
-      check("keystone: the helper is a root-only secret file named for the service", helper.id == "file[/usr/local/sbin/orphera-keystone-placement]")
-      check("keystone: the command runs the helper and is guarded by its check", part(ensure, _.run).contains("orphera-keystone-placement' ensure") && part(ensure, _.unless).contains("check"), part(ensure, _.run))
+      check(
+        "keystone: the helper is a root-only secret file named for the service",
+        helper.id == "file[/usr/local/sbin/orphera-keystone-placement]"
+      )
+      check(
+        "keystone: the command runs the helper and is guarded by its check",
+        part(ensure, _.run).contains(
+          "orphera-keystone-placement' ensure"
+        ) && part(ensure, _.unless).contains("check"),
+        part(ensure, _.run)
+      )
       val text = fileText(helper)
       def run(arg: String): (Int, String) = helperRun(helper, text, arg)
-      check("keystone: nothing registered fails the check", run("check")._1 != 0)
+      check(
+        "keystone: nothing registered fails the check",
+        run("check")._1 != 0
+      )
       check("keystone: and exists finds nothing", run("exists")._1 != 0)
       val made = run("ensure")
-      check("keystone: ensure succeeds", made._1 == 0 && made._2.contains("registered placement"), made.toString)
-      check("keystone: then the check passes (a password with a quote and a backslash works)", run("check")._1 == 0, run("check").toString)
+      check(
+        "keystone: ensure succeeds",
+        made._1 == 0 && made._2.contains("registered placement"),
+        made.toString
+      )
+      check(
+        "keystone: then the check passes (a password with a quote and a backslash works)",
+        run("check")._1 == 0,
+        run("check").toString
+      )
       check("keystone: and exists finds the entries", run("exists")._1 == 0)
-      check("keystone: ensure again changes nothing and succeeds", run("ensure")._1 == 0 && run("check")._1 == 0)
+      check(
+        "keystone: ensure again changes nothing and succeeds",
+        run("ensure")._1 == 0 && run("check")._1 == 0
+      )
       val (urlHelper, _) = entries("p\"w\\1", "/v2")
       val urlText = fileText(urlHelper)
-      check("keystone: another endpoint URL fails the check", helperRun(urlHelper, urlText, "check")._1 != 0)
-      check("keystone: ensure puts the URL right", helperRun(urlHelper, urlText, "ensure")._1 == 0 && helperRun(urlHelper, urlText, "check")._1 == 0)
+      check(
+        "keystone: another endpoint URL fails the check",
+        helperRun(urlHelper, urlText, "check")._1 != 0
+      )
+      check(
+        "keystone: ensure puts the URL right",
+        helperRun(urlHelper, urlText, "ensure")._1 == 0 && helperRun(
+          urlHelper,
+          urlText,
+          "check"
+        )._1 == 0
+      )
       val (pwHelper, _) = entries("another", "/v2")
       val pwText = fileText(pwHelper)
-      check("keystone: another password fails the check", helperRun(pwHelper, pwText, "check")._1 != 0)
-      check("keystone: ensure sets the password", helperRun(pwHelper, pwText, "ensure")._1 == 0 && helperRun(pwHelper, pwText, "check")._1 == 0)
+      check(
+        "keystone: another password fails the check",
+        helperRun(pwHelper, pwText, "check")._1 != 0
+      )
+      check(
+        "keystone: ensure sets the password",
+        helperRun(pwHelper, pwText, "ensure")._1 == 0 && helperRun(
+          pwHelper,
+          pwText,
+          "check"
+        )._1 == 0
+      )
       val gone = absentKeystoneEntries("remove placement", "placement")
-      check("keystone: removal is guarded by the helper being there and an entry existing", part(gone, _.onlyIf).contains("orphera-keystone-placement' exists"), part(gone, _.onlyIf))
+      check(
+        "keystone: removal is guarded by the helper being there and an entry existing",
+        part(gone, _.onlyIf).contains("orphera-keystone-placement' exists"),
+        part(gone, _.onlyIf)
+      )
       val removed = helperRun(pwHelper, pwText, "remove")
-      check("keystone: remove succeeds", removed._1 == 0 && removed._2.contains("removed placement"), removed.toString)
-      check("keystone: and nothing is left", helperRun(pwHelper, pwText, "exists")._1 != 0 && helperRun(pwHelper, pwText, "check")._1 != 0)
-      check("keystone: removing again succeeds", helperRun(pwHelper, pwText, "remove")._1 == 0)
-      check("keystone: a name with a space is refused", scala.util.Try(keystoneEntries("x", "a b", Secret("x"), List(KeystoneService("a", "a", "http://h")), url, Secret("x"), "/ca")).isFailure)
-      val (userHelper, userEnsure) = keystoneEntries("register a user", "plain", Secret("pw"), Nil, url, Secret("adminpw"), "/no/ca.crt")
+      check(
+        "keystone: remove succeeds",
+        removed._1 == 0 && removed._2.contains("removed placement"),
+        removed.toString
+      )
+      check(
+        "keystone: and nothing is left",
+        helperRun(pwHelper, pwText, "exists")._1 != 0 && helperRun(
+          pwHelper,
+          pwText,
+          "check"
+        )._1 != 0
+      )
+      check(
+        "keystone: removing again succeeds",
+        helperRun(pwHelper, pwText, "remove")._1 == 0
+      )
+      check(
+        "keystone: a name with a space is refused",
+        scala.util
+          .Try(
+            keystoneEntries(
+              "x",
+              "a b",
+              Secret("x"),
+              List(KeystoneService("a", "a", "http://h")),
+              url,
+              Secret("x"),
+              "/ca"
+            )
+          )
+          .isFailure
+      )
+      val (userHelper, userEnsure) = keystoneEntries(
+        "register a user",
+        "plain",
+        Secret("pw"),
+        Nil,
+        url,
+        Secret("adminpw"),
+        "/no/ca.crt"
+      )
       val userText = fileText(userHelper)
-      def userRun(arg: String): (Int, String) = helperRun(userHelper, userText, arg)
-      check("keystone: a user without services is allowed and has the check guard", part(userEnsure, _.unless).contains("orphera-keystone-plain' check"))
-      check("keystone: a user without services fails the check before it exists", userRun("check")._1 != 0 && userRun("exists")._1 != 0)
-      check("keystone: ensure makes only the user, and the check then passes", userRun("ensure")._1 == 0 && userRun("check")._1 == 0 && userRun("exists")._1 == 0, userRun("check").toString)
+      def userRun(arg: String): (Int, String) =
+        helperRun(userHelper, userText, arg)
+      check(
+        "keystone: a user without services is allowed and has the check guard",
+        part(userEnsure, _.unless).contains("orphera-keystone-plain' check")
+      )
+      check(
+        "keystone: a user without services fails the check before it exists",
+        userRun("check")._1 != 0 && userRun("exists")._1 != 0
+      )
+      check(
+        "keystone: ensure makes only the user, and the check then passes",
+        userRun("ensure")._1 == 0 && userRun("check")._1 == 0 && userRun(
+          "exists"
+        )._1 == 0,
+        userRun("check").toString
+      )
       val userRemoved = userRun("remove")
-      check("keystone: remove takes the user away", userRemoved._1 == 0 && userRun("exists")._1 != 0, userRemoved.toString)
+      check(
+        "keystone: remove takes the user away",
+        userRemoved._1 == 0 && userRun("exists")._1 != 0,
+        userRemoved.toString
+      )
       // A domain with its admin (Heat's stack domain, Magnum's trustee domain), and a service on top.
       def dumpDb: String =
-        scala.util.Using.resource(java.net.URI.create(s"$url/dump").toURL.openStream())(in => new String(in.readAllBytes(), "UTF-8"))
+        scala.util.Using.resource(
+          java.net.URI.create(s"$url/dump").toURL.openStream()
+        )(in => new String(in.readAllBytes(), "UTF-8"))
       def domainEntries(password: String) =
         keystoneEntries(
           "register heat",
           "heat",
           Secret("heatpw"),
           List(
-            KeystoneService("heat", "orchestration", "http://tst20:8004/v1/%(tenant_id)s"),
-            KeystoneService("heat-cfn", "cloudformation", "http://tst20:8000/v1")
+            KeystoneService(
+              "heat",
+              "orchestration",
+              "http://tst20:8004/v1/%(tenant_id)s"
+            ),
+            KeystoneService(
+              "heat-cfn",
+              "cloudformation",
+              "http://tst20:8000/v1"
+            )
           ),
           url,
           Secret("adminpw"),
           "/no/ca.crt",
           roles = List("heat_stack_owner", "heat_stack_user"),
-          domain = Some(KeystoneDomain("heat", "Owns stack users", "heat_domain_admin", Secret(password)))
+          domain = Some(
+            KeystoneDomain(
+              "heat",
+              "Owns stack users",
+              "heat_domain_admin",
+              Secret(password)
+            )
+          )
         )
       val (domHelper, _) = domainEntries("dom\"pw")
       val domText = fileText(domHelper)
-      def domRun(arg: String): (Int, String) = helperRun(domHelper, domText, arg)
-      check("keystone: a domain registration fails the check before it exists", domRun("check")._1 != 0 && domRun("exists")._1 != 0)
+      def domRun(arg: String): (Int, String) =
+        helperRun(domHelper, domText, arg)
+      check(
+        "keystone: a domain registration fails the check before it exists",
+        domRun("check")._1 != 0 && domRun("exists")._1 != 0
+      )
       val domMade = domRun("ensure")
-      check("keystone: ensure makes the domain, its admin and the services", domMade._1 == 0 && domMade._2.contains("domain heat") && domMade._2.contains("orchestration cloudformation"), domMade.toString)
-      check("keystone: the domain registration then passes the check", domRun("check")._1 == 0, domRun("check").toString)
-      check("keystone: and ensure again changes nothing", domRun("ensure")._1 == 0 && domRun("check")._1 == 0 && dumpDb.split("\"name\": \"heat_domain_admin\"").length == 2)
+      check(
+        "keystone: ensure makes the domain, its admin and the services",
+        domMade._1 == 0 && domMade._2.contains("domain heat") && domMade._2
+          .contains("orchestration cloudformation"),
+        domMade.toString
+      )
+      check(
+        "keystone: the domain registration then passes the check",
+        domRun("check")._1 == 0,
+        domRun("check").toString
+      )
+      check(
+        "keystone: and ensure again changes nothing",
+        domRun("ensure")._1 == 0 && domRun("check")._1 == 0 && dumpDb
+          .split("\"name\": \"heat_domain_admin\"")
+          .length == 2
+      )
       val (domPwHelper, _) = domainEntries("another")
       val domPwText = fileText(domPwHelper)
-      check("keystone: another domain admin password fails the check", helperRun(domPwHelper, domPwText, "check")._1 != 0)
-      check("keystone: ensure sets it", helperRun(domPwHelper, domPwText, "ensure")._1 == 0 && helperRun(domPwHelper, domPwText, "check")._1 == 0)
+      check(
+        "keystone: another domain admin password fails the check",
+        helperRun(domPwHelper, domPwText, "check")._1 != 0
+      )
+      check(
+        "keystone: ensure sets it",
+        helperRun(domPwHelper, domPwText, "ensure")._1 == 0 && helperRun(
+          domPwHelper,
+          domPwText,
+          "check"
+        )._1 == 0
+      )
       // The service makes a user and a project of its own in the domain, as Heat does for stacks.
-      val domainId = "\"name\": \"heat\", \"description\": \"Owns stack users\", \"id\": \"([^\"]+)\"".r.findFirstMatchIn(dumpDb).map(_.group(1)).getOrElse("none")
-      check("keystone: the domain is in the database", domainId != "none", dumpDb)
+      val domainId =
+        "\"name\": \"heat\", \"description\": \"Owns stack users\", \"id\": \"([^\"]+)\"".r
+          .findFirstMatchIn(dumpDb)
+          .map(_.group(1))
+          .getOrElse("none")
+      check(
+        "keystone: the domain is in the database",
+        domainId != "none",
+        dumpDb
+      )
       val seeded = runShell(
         s"""python3 -I -c "
 import json, urllib.request
@@ -2881,14 +3458,78 @@ post('users', {'user': {'name': 'stack-user', 'domain_id': '$domainId', 'passwor
 post('projects', {'project': {'name': 'stack-project', 'domain_id': '$domainId'}})
 " """
       )
-      check("keystone: a stack user and project are made in the domain", seeded._1 == 0 && dumpDb.contains("stack-user") && dumpDb.contains("stack-project"), seeded.toString)
+      check(
+        "keystone: a stack user and project are made in the domain",
+        seeded._1 == 0 && dumpDb.contains("stack-user") && dumpDb.contains(
+          "stack-project"
+        ),
+        seeded.toString
+      )
       val domRemoved = helperRun(domPwHelper, domPwText, "remove")
-      check("keystone: remove succeeds and says what went", domRemoved._1 == 0 && domRemoved._2.contains("domain heat"), domRemoved.toString)
-      check("keystone: the domain, its users and projects, and the services are all gone", domRun("exists")._1 != 0 && !dumpDb.contains("stack-user") && !dumpDb.contains("stack-project") && !dumpDb.contains("heat_domain_admin"), dumpDb)
-      check("keystone: removing a domain registration again succeeds", domRun("remove")._1 == 0)
-      check("keystone: a domain name with a space is refused", scala.util.Try(keystoneEntries("x", "a", Secret("x"), Nil, url, Secret("x"), "/ca", domain = Some(KeystoneDomain("a b", "d", "adm", Secret("x"))))).isFailure)
-      check("keystone: an endpoint that is not a URL is refused", scala.util.Try(keystoneEntries("x", "a", Secret("x"), List(KeystoneService("a", "a", "tst13:80")), url, Secret("x"), "/ca")).isFailure)
-      check("keystone: a password with a non-ASCII character is refused", scala.util.Try(keystoneEntries("x", "a", Secret("pä"), List(KeystoneService("a", "a", "http://h")), url, Secret("x"), "/ca")).isFailure)
+      check(
+        "keystone: remove succeeds and says what went",
+        domRemoved._1 == 0 && domRemoved._2.contains("domain heat"),
+        domRemoved.toString
+      )
+      check(
+        "keystone: the domain, its users and projects, and the services are all gone",
+        domRun("exists")._1 != 0 && !dumpDb.contains("stack-user") && !dumpDb
+          .contains("stack-project") && !dumpDb.contains("heat_domain_admin"),
+        dumpDb
+      )
+      check(
+        "keystone: removing a domain registration again succeeds",
+        domRun("remove")._1 == 0
+      )
+      check(
+        "keystone: a domain name with a space is refused",
+        scala.util
+          .Try(
+            keystoneEntries(
+              "x",
+              "a",
+              Secret("x"),
+              Nil,
+              url,
+              Secret("x"),
+              "/ca",
+              domain = Some(KeystoneDomain("a b", "d", "adm", Secret("x")))
+            )
+          )
+          .isFailure
+      )
+      check(
+        "keystone: an endpoint that is not a URL is refused",
+        scala.util
+          .Try(
+            keystoneEntries(
+              "x",
+              "a",
+              Secret("x"),
+              List(KeystoneService("a", "a", "tst13:80")),
+              url,
+              Secret("x"),
+              "/ca"
+            )
+          )
+          .isFailure
+      )
+      check(
+        "keystone: a password with a non-ASCII character is refused",
+        scala.util
+          .Try(
+            keystoneEntries(
+              "x",
+              "a",
+              Secret("pä"),
+              List(KeystoneService("a", "a", "http://h")),
+              url,
+              Secret("x"),
+              "/ca"
+            )
+          )
+          .isFailure
+      )
       // Swift: the admin endpoint has no project in its URL, the other two have.
       val swiftPublic = "http://rgw:8080/swift/v1/AUTH_%(project_id)s"
       val swiftAdmin = "http://rgw:8080/swift/v1"
@@ -2898,7 +3539,12 @@ post('projects', {'project': {'name': 'stack-project', 'domain_id': '$domainId'}
           "rgw",
           Secret("rgwpw"),
           List(
-            KeystoneService("swift", "object-store", swiftPublic, Some(adminUrl)),
+            KeystoneService(
+              "swift",
+              "object-store",
+              swiftPublic,
+              Some(adminUrl)
+            ),
             KeystoneService("s3", "s3", "http://rgw:8080")
           ),
           url,
@@ -2908,22 +3554,66 @@ post('projects', {'project': {'name': 'stack-project', 'domain_id': '$domainId'}
         )
       val (swiftHelper, _) = swiftEntries(swiftAdmin)
       val swiftText = fileText(swiftHelper)
-      def swiftRun(arg: String): (Int, String) = helperRun(swiftHelper, swiftText, arg)
-      check("keystone: object storage fails the check before it exists", swiftRun("check")._1 != 0)
-      check("keystone: ensure makes both services", swiftRun("ensure")._1 == 0 && swiftRun("check")._1 == 0, swiftRun("check").toString)
+      def swiftRun(arg: String): (Int, String) =
+        helperRun(swiftHelper, swiftText, arg)
+      check(
+        "keystone: object storage fails the check before it exists",
+        swiftRun("check")._1 != 0
+      )
+      check(
+        "keystone: ensure makes both services",
+        swiftRun("ensure")._1 == 0 && swiftRun("check")._1 == 0,
+        swiftRun("check").toString
+      )
       val swiftDb = dumpDb
       check(
         "keystone: the admin endpoint has its own URL and the other two the project one",
-        swiftDb.split(java.util.regex.Pattern.quote("\"url\": \"" + swiftPublic + "\"")).length == 3 &&
-          swiftDb.split(java.util.regex.Pattern.quote("\"url\": \"" + swiftAdmin + "\"")).length == 2,
+        swiftDb
+          .split(
+            java.util.regex.Pattern.quote("\"url\": \"" + swiftPublic + "\"")
+          )
+          .length == 3 &&
+          swiftDb
+            .split(
+              java.util.regex.Pattern.quote("\"url\": \"" + swiftAdmin + "\"")
+            )
+            .length == 2,
         swiftDb
       )
       val (swiftOtherHelper, _) = swiftEntries("http://rgw:8080/swift/v2")
       val swiftOtherText = fileText(swiftOtherHelper)
-      check("keystone: another admin URL fails the check", helperRun(swiftOtherHelper, swiftOtherText, "check")._1 != 0)
-      check("keystone: ensure puts the admin URL right and leaves the others", helperRun(swiftOtherHelper, swiftOtherText, "ensure")._1 == 0 && helperRun(swiftOtherHelper, swiftOtherText, "check")._1 == 0 && swiftRun("check")._1 != 0)
-      check("keystone: an admin URL that is not a URL is refused", scala.util.Try(swiftEntries("rgw:8080")).isFailure)
-      check("keystone: object storage is removed with its user", helperRun(swiftOtherHelper, swiftOtherText, "remove")._1 == 0 && helperRun(swiftOtherHelper, swiftOtherText, "exists")._1 != 0)
+      check(
+        "keystone: another admin URL fails the check",
+        helperRun(swiftOtherHelper, swiftOtherText, "check")._1 != 0
+      )
+      check(
+        "keystone: ensure puts the admin URL right and leaves the others",
+        helperRun(
+          swiftOtherHelper,
+          swiftOtherText,
+          "ensure"
+        )._1 == 0 && helperRun(
+          swiftOtherHelper,
+          swiftOtherText,
+          "check"
+        )._1 == 0 && swiftRun("check")._1 != 0
+      )
+      check(
+        "keystone: an admin URL that is not a URL is refused",
+        scala.util.Try(swiftEntries("rgw:8080")).isFailure
+      )
+      check(
+        "keystone: object storage is removed with its user",
+        helperRun(
+          swiftOtherHelper,
+          swiftOtherText,
+          "remove"
+        )._1 == 0 && helperRun(
+          swiftOtherHelper,
+          swiftOtherText,
+          "exists"
+        )._1 != 0
+      )
     finally proc.destroy()
 
   // A small Keystone with Glance and Nova in Python (a token with a catalogue, images, flavors), for the
@@ -3038,9 +3728,12 @@ HTTPServer(('127.0.0.1', PORT), H).serve_forever()
       val sock = new java.net.ServerSocket(0)
       try sock.getLocalPort
       finally sock.close()
-    val proc = new ProcessBuilder("python3", server.toString, port.toString).redirectErrorStream(true).start()
+    val proc = new ProcessBuilder("python3", server.toString, port.toString)
+      .redirectErrorStream(true)
+      .start()
     try
-      def up: Boolean = scala.util.Try(new java.net.Socket("127.0.0.1", port).close()).isSuccess
+      def up: Boolean =
+        scala.util.Try(new java.net.Socket("127.0.0.1", port).close()).isSuccess
       var tries = 0
       while !up && tries < 50 do
         Thread.sleep(100)
@@ -3053,16 +3746,27 @@ HTTPServer(('127.0.0.1', PORT), H).serve_forever()
         case f: ApplyResource.File =>
           f.content match
             case Some(ApplyResource.Content.Hidden(secret)) => secret.reveal
-            case other                                      => s"not hidden text: $other"
+            case other => s"not hidden text: $other"
         case other => s"not a file: $other"
-      def part(r: ApplyResource, pick: ApplyResource.Command => String): String = r match
+      def part(
+          r: ApplyResource,
+          pick: ApplyResource.Command => String
+      ): String = r match
         case c: ApplyResource.Command => pick(c)
         case other                    => s"not a command: $other"
-      def helperRun(r: ApplyResource, text: String, args: String*): (Int, String) =
+      def helperRun(
+          r: ApplyResource,
+          text: String,
+          args: String*
+      ): (Int, String) =
         val script = dir.resolve(s"helper-${r.id.hashCode.abs}.py")
         Files.writeString(script, text)
         runShell(s"python3 -I ${script} ${args.mkString(" ")}")
-      def images(props: Map[String, String], replace: Boolean = false, file: String = imageFile.toString) =
+      def images(
+          props: Map[String, String],
+          replace: Boolean = false,
+          file: String = imageFile.toString
+      ) =
         openstackImage(
           "upload the guest image",
           "guest-image",
@@ -3075,129 +3779,561 @@ HTTPServer(('127.0.0.1', PORT), H).serve_forever()
           replace = replace
         )
       val (imageHelper, imageEnsure) = images(Map("hw_rng_model" -> "virtio"))
-      check("openstack: the image helper is a root-only secret file named for the image", imageHelper.id == "file[/usr/local/sbin/orphera-image-guest-image]", imageHelper.id)
+      check(
+        "openstack: the image helper is a root-only secret file named for the image",
+        imageHelper.id == "file[/usr/local/sbin/orphera-image-guest-image]",
+        imageHelper.id
+      )
       check(
         "openstack: the command runs the helper under a heartbeat and is guarded by its check",
-        part(imageEnsure, _.run).contains("heartbeat '/usr/local/sbin/orphera-image-guest-image' ensure") && part(imageEnsure, _.unless).contains("check"),
+        part(imageEnsure, _.run).contains(
+          "heartbeat '/usr/local/sbin/orphera-image-guest-image' ensure"
+        ) && part(imageEnsure, _.unless).contains("check"),
         part(imageEnsure, _.run)
       )
       val imageText = fileText(imageHelper)
-      def run(arg: String*): (Int, String) = helperRun(imageHelper, imageText, arg*)
-      check("openstack: no image fails the check and exists", run("check")._1 != 0 && run("exists")._1 != 0)
+      def run(arg: String*): (Int, String) =
+        helperRun(imageHelper, imageText, arg*)
+      check(
+        "openstack: no image fails the check and exists",
+        run("check")._1 != 0 && run("exists")._1 != 0
+      )
       val uploaded = run("ensure")
-      check("openstack: ensure uploads the file", uploaded._1 == 0 && uploaded._2.contains("image uploaded: guest-image") && uploaded._2.contains("1003 bytes"), uploaded.toString)
-      check("openstack: then the check passes and exists finds it", run("check")._1 == 0 && run("exists")._1 == 0, run("check").toString)
+      check(
+        "openstack: ensure uploads the file",
+        uploaded._1 == 0 && uploaded._2.contains(
+          "image uploaded: guest-image"
+        ) && uploaded._2.contains("1003 bytes"),
+        uploaded.toString
+      )
+      check(
+        "openstack: then the check passes and exists finds it",
+        run("check")._1 == 0 && run("exists")._1 == 0,
+        run("check").toString
+      )
       val again = run("ensure")
-      check("openstack: ensure again uploads nothing", again._1 == 0 && again._2.contains("already active"), again.toString)
+      check(
+        "openstack: ensure again uploads nothing",
+        again._1 == 0 && again._2.contains("already active"),
+        again.toString
+      )
       val replaced = run("ensure", "--replace")
-      check("openstack: ensure --replace uploads again and leaves one image", replaced._1 == 0 && replaced._2.contains("image uploaded") && run("remove")._2.contains("removed 1 image(s)"), replaced.toString)
-      check("openstack: after the removal nothing is left", run("exists")._1 != 0 && run("check")._1 != 0 && run("remove")._2.contains("removed 0 image(s)"))
+      check(
+        "openstack: ensure --replace uploads again and leaves one image",
+        replaced._1 == 0 && replaced._2.contains("image uploaded") && run(
+          "remove"
+        )._2.contains("removed 1 image(s)"),
+        replaced.toString
+      )
+      check(
+        "openstack: after the removal nothing is left",
+        run("exists")._1 != 0 && run("check")._1 != 0 && run("remove")._2
+          .contains("removed 0 image(s)")
+      )
       val (otherHelper, _) = images(Map("hw_rng_model" -> "none"))
       val otherText = fileText(otherHelper)
-      check("openstack: a new image is made for the properties", helperRun(otherHelper, otherText, "ensure")._1 == 0)
+      check(
+        "openstack: a new image is made for the properties",
+        helperRun(otherHelper, otherText, "ensure")._1 == 0
+      )
       val (changedHelper, _) = images(Map("hw_rng_model" -> "virtio"))
       val changedText = fileText(changedHelper)
-      check("openstack: another property value fails the check", helperRun(changedHelper, changedText, "check")._1 != 0)
-      check("openstack: ensure replaces the image and the check then passes", helperRun(changedHelper, changedText, "ensure")._1 == 0 && helperRun(changedHelper, changedText, "check")._1 == 0 && helperRun(changedHelper, changedText, "remove")._2.contains("removed 1 image(s)"))
-      val (missingHelper, _) = images(Map.empty, file = dir.resolve("none.qcow2").toString)
+      check(
+        "openstack: another property value fails the check",
+        helperRun(changedHelper, changedText, "check")._1 != 0
+      )
+      check(
+        "openstack: ensure replaces the image and the check then passes",
+        helperRun(changedHelper, changedText, "ensure")._1 == 0 && helperRun(
+          changedHelper,
+          changedText,
+          "check"
+        )._1 == 0 && helperRun(changedHelper, changedText, "remove")._2
+          .contains("removed 1 image(s)")
+      )
+      val (missingHelper, _) =
+        images(Map.empty, file = dir.resolve("none.qcow2").toString)
       val missing = helperRun(missingHelper, fileText(missingHelper), "ensure")
-      check("openstack: a missing image file fails with its name", missing._1 != 0 && missing._2.contains("none.qcow2"), missing.toString)
+      check(
+        "openstack: a missing image file fails with its name",
+        missing._1 != 0 && missing._2.contains("none.qcow2"),
+        missing.toString
+      )
       val (_, replaceEnsure) = images(Map.empty, replace = true)
-      check("openstack: with replace the command always runs and passes --replace", part(replaceEnsure, _.run).contains("ensure --replace") && part(replaceEnsure, _.unless) == "false", part(replaceEnsure, _.run))
+      check(
+        "openstack: with replace the command always runs and passes --replace",
+        part(replaceEnsure, _.run).contains("ensure --replace") && part(
+          replaceEnsure,
+          _.unless
+        ) == "false",
+        part(replaceEnsure, _.run)
+      )
       val gone = absentOpenstackImage("remove the guest image", "guest-image")
-      check("openstack: image removal is guarded by the helper and an image existing", part(gone, _.onlyIf).contains("orphera-image-guest-image' exists"), part(gone, _.onlyIf))
-      check("openstack: an image name with a space is refused", scala.util.Try(openstackImage("x", "a b", "/f", url, Secret("x"), "/ca")).isFailure)
-      check("openstack: a relative image file is refused", scala.util.Try(openstackImage("x", "a", "f", url, Secret("x"), "/ca")).isFailure)
-      check("openstack: a property value that is not ASCII is refused", scala.util.Try(openstackImage("x", "a", "/f", url, Secret("x"), "/ca", properties = Map("p" -> "pä"))).isFailure)
+      check(
+        "openstack: image removal is guarded by the helper and an image existing",
+        part(gone, _.onlyIf).contains("orphera-image-guest-image' exists"),
+        part(gone, _.onlyIf)
+      )
+      check(
+        "openstack: an image name with a space is refused",
+        scala.util
+          .Try(openstackImage("x", "a b", "/f", url, Secret("x"), "/ca"))
+          .isFailure
+      )
+      check(
+        "openstack: a relative image file is refused",
+        scala.util
+          .Try(openstackImage("x", "a", "f", url, Secret("x"), "/ca"))
+          .isFailure
+      )
+      check(
+        "openstack: a property value that is not ASCII is refused",
+        scala.util
+          .Try(
+            openstackImage(
+              "x",
+              "a",
+              "/f",
+              url,
+              Secret("x"),
+              "/ca",
+              properties = Map("p" -> "pä")
+            )
+          )
+          .isFailure
+      )
 
       def flavors(ram: Int) =
-        openstackFlavor("make the flavor", "guest-flavor", "guest.flavor", ram, 1, 10, url, Secret("adminpw"), "/no/ca.crt")
+        openstackFlavor(
+          "make the flavor",
+          "guest-flavor",
+          "guest.flavor",
+          ram,
+          1,
+          10,
+          url,
+          Secret("adminpw"),
+          "/no/ca.crt"
+        )
       val (flavorHelper, flavorEnsure) = flavors(2048)
-      check("openstack: the flavor helper is named for the id", flavorHelper.id == "file[/usr/local/sbin/orphera-flavor-guest-flavor]", flavorHelper.id)
-      check("openstack: the flavor command runs the helper and is guarded by its check", part(flavorEnsure, _.run).contains("orphera-flavor-guest-flavor' ensure") && part(flavorEnsure, _.unless).contains("check"))
+      check(
+        "openstack: the flavor helper is named for the id",
+        flavorHelper.id == "file[/usr/local/sbin/orphera-flavor-guest-flavor]",
+        flavorHelper.id
+      )
+      check(
+        "openstack: the flavor command runs the helper and is guarded by its check",
+        part(flavorEnsure, _.run).contains(
+          "orphera-flavor-guest-flavor' ensure"
+        ) && part(flavorEnsure, _.unless).contains("check")
+      )
       val flavorText = fileText(flavorHelper)
-      def flavorRun(arg: String): (Int, String) = helperRun(flavorHelper, flavorText, arg)
-      check("openstack: no flavor fails the check and exists", flavorRun("check")._1 != 0 && flavorRun("exists")._1 != 0)
+      def flavorRun(arg: String): (Int, String) =
+        helperRun(flavorHelper, flavorText, arg)
+      check(
+        "openstack: no flavor fails the check and exists",
+        flavorRun("check")._1 != 0 && flavorRun("exists")._1 != 0
+      )
       val made = flavorRun("ensure")
-      check("openstack: ensure makes the flavor", made._1 == 0 && made._2.contains("made (1 vCPU, 2048 MB, 10 GB)"), made.toString)
-      check("openstack: then the check passes and ensure again changes nothing", flavorRun("check")._1 == 0 && flavorRun("exists")._1 == 0 && flavorRun("ensure")._2.contains("exists"))
+      check(
+        "openstack: ensure makes the flavor",
+        made._1 == 0 && made._2.contains("made (1 vCPU, 2048 MB, 10 GB)"),
+        made.toString
+      )
+      check(
+        "openstack: then the check passes and ensure again changes nothing",
+        flavorRun("check")._1 == 0 && flavorRun("exists")._1 == 0 && flavorRun(
+          "ensure"
+        )._2.contains("exists")
+      )
       val (biggerHelper, _) = flavors(4096)
       val biggerText = fileText(biggerHelper)
-      check("openstack: other memory fails the check", helperRun(biggerHelper, biggerText, "check")._1 != 0)
+      check(
+        "openstack: other memory fails the check",
+        helperRun(biggerHelper, biggerText, "check")._1 != 0
+      )
       val bigger = helperRun(biggerHelper, biggerText, "ensure")
-      check("openstack: ensure replaces the flavor", bigger._1 == 0 && bigger._2.contains("4096 MB") && helperRun(biggerHelper, biggerText, "check")._1 == 0, bigger.toString)
-      val flavorGone = absentOpenstackFlavor("remove the flavor", "guest-flavor")
-      check("openstack: flavor removal is guarded by the helper and the flavor existing", part(flavorGone, _.onlyIf).contains("orphera-flavor-guest-flavor' exists"), part(flavorGone, _.onlyIf))
-      check("openstack: remove deletes the flavor and nothing is left", helperRun(biggerHelper, biggerText, "remove")._1 == 0 && helperRun(biggerHelper, biggerText, "exists")._1 != 0)
-      check("openstack: a flavor with no memory is refused", scala.util.Try(openstackFlavor("x", "a", "a", 0, 1, 1, url, Secret("x"), "/ca")).isFailure)
-      val (keypairHelper, keypairEnsure) = openstackKeypair("make the key pair", "guest-key", url, Secret("adminpw"), "/no/ca.crt")
-      check("openstack: the key pair helper is named for the pair", keypairHelper.id == "file[/usr/local/sbin/orphera-keypair-guest-key]", keypairHelper.id)
-      check("openstack: the key pair command runs the helper and is guarded by its check", part(keypairEnsure, _.run).contains("orphera-keypair-guest-key' ensure") && part(keypairEnsure, _.unless).contains("check"))
+      check(
+        "openstack: ensure replaces the flavor",
+        bigger._1 == 0 && bigger._2.contains("4096 MB") && helperRun(
+          biggerHelper,
+          biggerText,
+          "check"
+        )._1 == 0,
+        bigger.toString
+      )
+      val flavorGone =
+        absentOpenstackFlavor("remove the flavor", "guest-flavor")
+      check(
+        "openstack: flavor removal is guarded by the helper and the flavor existing",
+        part(flavorGone, _.onlyIf)
+          .contains("orphera-flavor-guest-flavor' exists"),
+        part(flavorGone, _.onlyIf)
+      )
+      check(
+        "openstack: remove deletes the flavor and nothing is left",
+        helperRun(biggerHelper, biggerText, "remove")._1 == 0 && helperRun(
+          biggerHelper,
+          biggerText,
+          "exists"
+        )._1 != 0
+      )
+      check(
+        "openstack: a flavor with no memory is refused",
+        scala.util
+          .Try(openstackFlavor("x", "a", "a", 0, 1, 1, url, Secret("x"), "/ca"))
+          .isFailure
+      )
+      val (keypairHelper, keypairEnsure) = openstackKeypair(
+        "make the key pair",
+        "guest-key",
+        url,
+        Secret("adminpw"),
+        "/no/ca.crt"
+      )
+      check(
+        "openstack: the key pair helper is named for the pair",
+        keypairHelper.id == "file[/usr/local/sbin/orphera-keypair-guest-key]",
+        keypairHelper.id
+      )
+      check(
+        "openstack: the key pair command runs the helper and is guarded by its check",
+        part(keypairEnsure, _.run).contains(
+          "orphera-keypair-guest-key' ensure"
+        ) && part(keypairEnsure, _.unless).contains("check")
+      )
       val keypairText = fileText(keypairHelper)
-      def keypairRun(arg: String): (Int, String) = helperRun(keypairHelper, keypairText, arg)
-      check("openstack: no key pair fails the check and exists", keypairRun("check")._1 != 0 && keypairRun("exists")._1 != 0)
+      def keypairRun(arg: String): (Int, String) =
+        helperRun(keypairHelper, keypairText, arg)
+      check(
+        "openstack: no key pair fails the check and exists",
+        keypairRun("check")._1 != 0 && keypairRun("exists")._1 != 0
+      )
       val pairMade = keypairRun("ensure")
-      check("openstack: ensure makes the key pair and prints no private key", pairMade._1 == 0 && pairMade._2.contains("key pair guest-key made") && !pairMade._2.contains("secret"), pairMade.toString)
-      check("openstack: then the check passes and ensure again changes nothing", keypairRun("check")._1 == 0 && keypairRun("ensure")._2.contains("exists"))
+      check(
+        "openstack: ensure makes the key pair and prints no private key",
+        pairMade._1 == 0 && pairMade._2.contains(
+          "key pair guest-key made"
+        ) && !pairMade._2.contains("secret"),
+        pairMade.toString
+      )
+      check(
+        "openstack: then the check passes and ensure again changes nothing",
+        keypairRun("check")._1 == 0 && keypairRun("ensure")._2.contains(
+          "exists"
+        )
+      )
       val pairGone = absentOpenstackKeypair("remove the key pair", "guest-key")
-      check("openstack: key pair removal is guarded by the helper and the pair existing", part(pairGone, _.onlyIf).contains("orphera-keypair-guest-key' exists"), part(pairGone, _.onlyIf))
-      check("openstack: remove deletes the key pair", keypairRun("remove")._1 == 0 && keypairRun("exists")._1 != 0)
-      check("openstack: a key pair name with a space is refused", scala.util.Try(openstackKeypair("x", "a b", url, Secret("x"), "/ca")).isFailure)
+      check(
+        "openstack: key pair removal is guarded by the helper and the pair existing",
+        part(pairGone, _.onlyIf).contains("orphera-keypair-guest-key' exists"),
+        part(pairGone, _.onlyIf)
+      )
+      check(
+        "openstack: remove deletes the key pair",
+        keypairRun("remove")._1 == 0 && keypairRun("exists")._1 != 0
+      )
+      check(
+        "openstack: a key pair name with a space is refused",
+        scala.util
+          .Try(openstackKeypair("x", "a b", url, Secret("x"), "/ca"))
+          .isFailure
+      )
       // a key pair of another user, with its private key kept
       val keyFile = dir.resolve("state/guest.pem")
-      val (ownedHelper, ownedEnsure) = openstackKeypair("make the user's key pair", "user-key", url, Secret("adminpw"), "/no/ca.crt", owner = Some(("trove", Secret("userpw"))), project = "service", privateKeyFile = Some(keyFile.toString))
-      check("openstack: an owned key pair has a helper named for the pair and the user", ownedHelper.id == "file[/usr/local/sbin/orphera-keypair-user-key-trove]", ownedHelper.id)
-      check("openstack: an owned key pair is guarded by its check", part(ownedEnsure, _.unless).contains("orphera-keypair-user-key-trove' check"))
+      val (ownedHelper, ownedEnsure) = openstackKeypair(
+        "make the user's key pair",
+        "user-key",
+        url,
+        Secret("adminpw"),
+        "/no/ca.crt",
+        owner = Some(("trove", Secret("userpw"))),
+        project = "service",
+        privateKeyFile = Some(keyFile.toString)
+      )
+      check(
+        "openstack: an owned key pair has a helper named for the pair and the user",
+        ownedHelper.id == "file[/usr/local/sbin/orphera-keypair-user-key-trove]",
+        ownedHelper.id
+      )
+      check(
+        "openstack: an owned key pair is guarded by its check",
+        part(ownedEnsure, _.unless)
+          .contains("orphera-keypair-user-key-trove' check")
+      )
       val ownedText = fileText(ownedHelper)
       val ownedMade = helperRun(ownedHelper, ownedText, "ensure")
-      check("openstack: the owned key pair is made as that user", ownedMade._1 == 0 && ownedMade._2.contains("key pair user-key made") && scala.io.Source.fromURL(s"$url/dump").mkString.contains("\"owner\": \"trove\""), ownedMade.toString)
-      check("openstack: the private key is written, for root only", Files.exists(keyFile) && Files.readString(keyFile) == "secret" && runShell(s"stat -c %a ${keyFile}")._2.trim == "600")
-      check("openstack: ensure again keeps the key file and changes nothing", { Files.writeString(keyFile, "kept"); val again = helperRun(ownedHelper, ownedText, "ensure"); again._2.contains("exists") && Files.readString(keyFile) == "kept" })
-      check("openstack: the owned key pair checks and is removed", helperRun(ownedHelper, ownedText, "check")._1 == 0 && helperRun(ownedHelper, ownedText, "remove")._1 == 0 && helperRun(ownedHelper, ownedText, "exists")._1 != 0)
-      check("openstack: removal of an owned key pair names the user's helper", part(absentOpenstackKeypair("remove it", "user-key", "trove"), _.onlyIf).contains("orphera-keypair-user-key-trove' exists"))
-      check("openstack: a relative private key path is refused", scala.util.Try(openstackKeypair("x", "k", url, Secret("x"), "/ca", privateKeyFile = Some("k.pem"))).isFailure)
+      check(
+        "openstack: the owned key pair is made as that user",
+        ownedMade._1 == 0 && ownedMade._2.contains(
+          "key pair user-key made"
+        ) && scala.io.Source
+          .fromURL(s"$url/dump")
+          .mkString
+          .contains("\"owner\": \"trove\""),
+        ownedMade.toString
+      )
+      check(
+        "openstack: the private key is written, for root only",
+        Files.exists(keyFile) && Files.readString(
+          keyFile
+        ) == "secret" && runShell(s"stat -c %a ${keyFile}")._2.trim == "600"
+      )
+      check(
+        "openstack: ensure again keeps the key file and changes nothing", {
+          Files.writeString(keyFile, "kept");
+          val again = helperRun(ownedHelper, ownedText, "ensure");
+          again._2.contains("exists") && Files.readString(keyFile) == "kept"
+        }
+      )
+      check(
+        "openstack: the owned key pair checks and is removed",
+        helperRun(ownedHelper, ownedText, "check")._1 == 0 && helperRun(
+          ownedHelper,
+          ownedText,
+          "remove"
+        )._1 == 0 && helperRun(ownedHelper, ownedText, "exists")._1 != 0
+      )
+      check(
+        "openstack: removal of an owned key pair names the user's helper",
+        part(absentOpenstackKeypair("remove it", "user-key", "trove"), _.onlyIf)
+          .contains("orphera-keypair-user-key-trove' exists")
+      )
+      check(
+        "openstack: a relative private key path is refused",
+        scala.util
+          .Try(
+            openstackKeypair(
+              "x",
+              "k",
+              url,
+              Secret("x"),
+              "/ca",
+              privateKeyFile = Some("k.pem")
+            )
+          )
+          .isFailure
+      )
       // networks and security groups
-      val sn = OpenstackSubnet("provider", "10.10.6.0/24", Some("10.10.6.1"), Some(("10.10.6.200", "10.10.6.220")))
+      val sn = OpenstackSubnet(
+        "provider",
+        "10.10.6.0/24",
+        Some("10.10.6.1"),
+        Some(("10.10.6.200", "10.10.6.220"))
+      )
       def nets(shared: Boolean = true, cidr: String = "10.10.6.0/24") =
-        openstackNetwork("make the network", "provider", url, Secret("adminpw"), "/no/ca.crt", flat = Some("provider"), shared = shared, external = true, subnet = Some(sn.copy(cidr = cidr)))
+        openstackNetwork(
+          "make the network",
+          "provider",
+          url,
+          Secret("adminpw"),
+          "/no/ca.crt",
+          flat = Some("provider"),
+          shared = shared,
+          external = true,
+          subnet = Some(sn.copy(cidr = cidr))
+        )
       val (netHelper, netEnsure) = nets()
-      check("openstack: the network helper is named for project and network", netHelper.id == "file[/usr/local/sbin/orphera-network-admin-provider]", netHelper.id)
-      check("openstack: the network command runs the helper and is guarded by its check", part(netEnsure, _.run).contains("orphera-network-admin-provider' ensure") && part(netEnsure, _.unless).contains("check"))
+      check(
+        "openstack: the network helper is named for project and network",
+        netHelper.id == "file[/usr/local/sbin/orphera-network-admin-provider]",
+        netHelper.id
+      )
+      check(
+        "openstack: the network command runs the helper and is guarded by its check",
+        part(netEnsure, _.run).contains(
+          "orphera-network-admin-provider' ensure"
+        ) && part(netEnsure, _.unless).contains("check")
+      )
       val netText = fileText(netHelper)
-      def netRun(arg: String): (Int, String) = helperRun(netHelper, netText, arg)
-      check("openstack: no network fails the check and exists", netRun("check")._1 != 0 && netRun("exists")._1 != 0)
+      def netRun(arg: String): (Int, String) =
+        helperRun(netHelper, netText, arg)
+      check(
+        "openstack: no network fails the check and exists",
+        netRun("check")._1 != 0 && netRun("exists")._1 != 0
+      )
       val netMade = netRun("ensure")
-      check("openstack: ensure makes the network and its subnet", netMade._1 == 0 && netMade._2.contains("network provider ready"), netMade.toString)
-      check("openstack: then the check passes and exists passes", netRun("check")._1 == 0 && netRun("exists")._1 == 0)
-      val netDump = scala.io.Source.fromURL(s"http://127.0.0.1:$port/dump").mkString
-      check("openstack: the network is flat on the physical network, shared, external and has the pool", (netDump.contains("\"provider:physical_network\": \"provider\"") && netDump.contains("\"shared\": true") && netDump.contains("10.10.6.200")), netDump)
-      check("openstack: a second ensure creates nothing new", netRun("ensure")._1 == 0 && scala.io.Source.fromURL(s"http://127.0.0.1:$port/dump").mkString.split("\"id\": \"net-").length == 2)
+      check(
+        "openstack: ensure makes the network and its subnet",
+        netMade._1 == 0 && netMade._2.contains("network provider ready"),
+        netMade.toString
+      )
+      check(
+        "openstack: then the check passes and exists passes",
+        netRun("check")._1 == 0 && netRun("exists")._1 == 0
+      )
+      val netDump =
+        scala.io.Source.fromURL(s"http://127.0.0.1:$port/dump").mkString
+      check(
+        "openstack: the network is flat on the physical network, shared, external and has the pool",
+        (netDump.contains(
+          "\"provider:physical_network\": \"provider\""
+        ) && netDump.contains("\"shared\": true") && netDump.contains(
+          "10.10.6.200"
+        )),
+        netDump
+      )
+      check(
+        "openstack: a second ensure creates nothing new",
+        netRun("ensure")._1 == 0 && scala.io.Source
+          .fromURL(s"http://127.0.0.1:$port/dump")
+          .mkString
+          .split("\"id\": \"net-")
+          .length == 2
+      )
       val (privHelper, _) = nets(shared = false)
-      check("openstack: another shared flag fails the check", helperRun(privHelper, fileText(privHelper), "check")._1 != 0)
-      check("openstack: ensure puts the flag right", helperRun(privHelper, fileText(privHelper), "ensure")._1 == 0 && helperRun(privHelper, fileText(privHelper), "check")._1 == 0 && netRun("check")._1 != 0)
+      check(
+        "openstack: another shared flag fails the check",
+        helperRun(privHelper, fileText(privHelper), "check")._1 != 0
+      )
+      check(
+        "openstack: ensure puts the flag right",
+        helperRun(
+          privHelper,
+          fileText(privHelper),
+          "ensure"
+        )._1 == 0 && helperRun(
+          privHelper,
+          fileText(privHelper),
+          "check"
+        )._1 == 0 && netRun("check")._1 != 0
+      )
       val (wrongHelper, _) = nets(cidr = "10.99.0.0/24")
-      check("openstack: another CIDR fails the check and ensure", helperRun(wrongHelper, fileText(wrongHelper), "check")._1 != 0 && helperRun(wrongHelper, fileText(wrongHelper), "ensure")._1 != 0)
+      check(
+        "openstack: another CIDR fails the check and ensure",
+        helperRun(
+          wrongHelper,
+          fileText(wrongHelper),
+          "check"
+        )._1 != 0 && helperRun(
+          wrongHelper,
+          fileText(wrongHelper),
+          "ensure"
+        )._1 != 0
+      )
       val netGone = absentOpenstackNetwork("remove the network", "provider")
-      check("openstack: network removal is guarded by the helper and the network existing", part(netGone, _.onlyIf).contains("orphera-network-admin-provider' exists"), part(netGone, _.onlyIf))
-      check("openstack: remove deletes the network", netRun("remove")._1 == 0 && netRun("exists")._1 != 0)
-      check("openstack: a network name with a space is refused", scala.util.Try(openstackNetwork("x", "a b", url, Secret("x"), "/ca")).isFailure)
-      check("openstack: a CIDR that is not an address is refused", scala.util.Try(openstackNetwork("x", "a", url, Secret("x"), "/ca", subnet = Some(OpenstackSubnet("s", "10.0.0.0/24; id")))).isFailure)
-      val (sgHelper, sgEnsure) = openstackSecurityGroup("make the group", "amp-mgmt", "Test", List(("tcp", Some(9443)), ("icmp", None)), url, Secret("adminpw"), "/no/ca.crt", project = "service")
-      check("openstack: the security group helper is named for project and group", sgHelper.id == "file[/usr/local/sbin/orphera-secgroup-service-amp-mgmt]", sgHelper.id)
-      check("openstack: the group command is guarded by its check", part(sgEnsure, _.unless).contains("check"))
+      check(
+        "openstack: network removal is guarded by the helper and the network existing",
+        part(netGone, _.onlyIf)
+          .contains("orphera-network-admin-provider' exists"),
+        part(netGone, _.onlyIf)
+      )
+      check(
+        "openstack: remove deletes the network",
+        netRun("remove")._1 == 0 && netRun("exists")._1 != 0
+      )
+      check(
+        "openstack: a network name with a space is refused",
+        scala.util
+          .Try(openstackNetwork("x", "a b", url, Secret("x"), "/ca"))
+          .isFailure
+      )
+      check(
+        "openstack: a CIDR that is not an address is refused",
+        scala.util
+          .Try(
+            openstackNetwork(
+              "x",
+              "a",
+              url,
+              Secret("x"),
+              "/ca",
+              subnet = Some(OpenstackSubnet("s", "10.0.0.0/24; id"))
+            )
+          )
+          .isFailure
+      )
+      val (sgHelper, sgEnsure) = openstackSecurityGroup(
+        "make the group",
+        "amp-mgmt",
+        "Test",
+        List(("tcp", Some(9443)), ("icmp", None)),
+        url,
+        Secret("adminpw"),
+        "/no/ca.crt",
+        project = "service"
+      )
+      check(
+        "openstack: the security group helper is named for project and group",
+        sgHelper.id == "file[/usr/local/sbin/orphera-secgroup-service-amp-mgmt]",
+        sgHelper.id
+      )
+      check(
+        "openstack: the group command is guarded by its check",
+        part(sgEnsure, _.unless).contains("check")
+      )
       val sgText = fileText(sgHelper)
       def sgRun(arg: String): (Int, String) = helperRun(sgHelper, sgText, arg)
-      check("openstack: no group fails the check and exists", sgRun("check")._1 != 0 && sgRun("exists")._1 != 0)
+      check(
+        "openstack: no group fails the check and exists",
+        sgRun("check")._1 != 0 && sgRun("exists")._1 != 0
+      )
       val sgMade = sgRun("ensure")
-      check("openstack: ensure makes the group with its rules", sgMade._1 == 0 && sgMade._2.contains("security group amp-mgmt ready") && sgRun("check")._1 == 0, sgMade.toString)
-      check("openstack: a second ensure adds no rule", sgRun("ensure")._1 == 0 && scala.io.Source.fromURL(s"http://127.0.0.1:$port/dump").mkString.split("\"protocol\": \"tcp\"").length == 2)
-      val (sgMore, _) = openstackSecurityGroup("more", "amp-mgmt", "Test", List(("tcp", Some(9443)), ("udp", Some(5555))), url, Secret("adminpw"), "/no/ca.crt", project = "service")
-      check("openstack: a missing rule fails the check", helperRun(sgMore, fileText(sgMore), "check")._1 != 0)
-      check("openstack: ensure adds the missing rule", helperRun(sgMore, fileText(sgMore), "ensure")._1 == 0 && helperRun(sgMore, fileText(sgMore), "check")._1 == 0)
-      val sgGone = absentOpenstackSecurityGroup("remove the group", "amp-mgmt", "service")
-      check("openstack: group removal is guarded by the helper and the group existing", part(sgGone, _.onlyIf).contains("orphera-secgroup-service-amp-mgmt' exists"), part(sgGone, _.onlyIf))
-      check("openstack: remove deletes the group", sgRun("remove")._1 == 0 && sgRun("exists")._1 != 0)
-      check("openstack: an unknown protocol is refused", scala.util.Try(openstackSecurityGroup("x", "a", "d", List(("gre", None)), url, Secret("x"), "/ca")).isFailure)
+      check(
+        "openstack: ensure makes the group with its rules",
+        sgMade._1 == 0 && sgMade._2.contains(
+          "security group amp-mgmt ready"
+        ) && sgRun("check")._1 == 0,
+        sgMade.toString
+      )
+      check(
+        "openstack: a second ensure adds no rule",
+        sgRun("ensure")._1 == 0 && scala.io.Source
+          .fromURL(s"http://127.0.0.1:$port/dump")
+          .mkString
+          .split("\"protocol\": \"tcp\"")
+          .length == 2
+      )
+      val (sgMore, _) = openstackSecurityGroup(
+        "more",
+        "amp-mgmt",
+        "Test",
+        List(("tcp", Some(9443)), ("udp", Some(5555))),
+        url,
+        Secret("adminpw"),
+        "/no/ca.crt",
+        project = "service"
+      )
+      check(
+        "openstack: a missing rule fails the check",
+        helperRun(sgMore, fileText(sgMore), "check")._1 != 0
+      )
+      check(
+        "openstack: ensure adds the missing rule",
+        helperRun(sgMore, fileText(sgMore), "ensure")._1 == 0 && helperRun(
+          sgMore,
+          fileText(sgMore),
+          "check"
+        )._1 == 0
+      )
+      val sgGone =
+        absentOpenstackSecurityGroup("remove the group", "amp-mgmt", "service")
+      check(
+        "openstack: group removal is guarded by the helper and the group existing",
+        part(sgGone, _.onlyIf)
+          .contains("orphera-secgroup-service-amp-mgmt' exists"),
+        part(sgGone, _.onlyIf)
+      )
+      check(
+        "openstack: remove deletes the group",
+        sgRun("remove")._1 == 0 && sgRun("exists")._1 != 0
+      )
+      check(
+        "openstack: an unknown protocol is refused",
+        scala.util
+          .Try(
+            openstackSecurityGroup(
+              "x",
+              "a",
+              "d",
+              List(("gre", None)),
+              url,
+              Secret("x"),
+              "/ca"
+            )
+          )
+          .isFailure
+      )
     finally proc.destroy()
 
   // A stand-in `cephadm shell` for the Ceph helpers: pools, cephx users and settings in a JSON file, and `dump` to
@@ -3338,8 +4474,12 @@ else:
 
   // A whole cephx key of the given type (1 = aes, 2 = aes256k) over 16 bytes of `seed`.
   private def cephKeyText(keyType: Int, seed: Int): String =
-    val b = java.nio.ByteBuffer.allocate(28).order(java.nio.ByteOrder.LITTLE_ENDIAN)
-    b.putShort(keyType.toShort).putInt(1700000000).putInt(0).putShort(16.toShort)
+    val b =
+      java.nio.ByteBuffer.allocate(28).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+    b.putShort(keyType.toShort)
+      .putInt(1700000000)
+      .putInt(0)
+      .putShort(16.toShort)
     (0 until 16).foreach(i => b.put((seed + i).toByte))
     java.util.Base64.getEncoder.encodeToString(b.array())
 
@@ -3385,58 +4525,195 @@ save()
     Files.createDirectory(bin)
     val fake = bin.resolve("helm")
     Files.writeString(fake, fakeHelm)
-    check("helmRelease: the fake helm is executable", fake.toFile.setExecutable(true))
+    check(
+      "helmRelease: the fake helm is executable",
+      fake.toFile.setExecutable(true)
+    )
     val state = dir.resolve("state.json")
     val shaDir = dir.resolve("sha")
     def fileText(r: ApplyResource): String = r match
       case f: ApplyResource.File =>
         f.content match
           case Some(ApplyResource.Content.Hidden(secret)) => secret.reveal
-          case other                                      => s"not hidden text: $other"
+          case other => s"not hidden text: $other"
       case other => s"not a file: $other"
-    def part(r: ApplyResource, pick: ApplyResource.Command => String): String = r match
-      case c: ApplyResource.Command => pick(c)
-      case other                    => s"not a command: $other"
+    def part(r: ApplyResource, pick: ApplyResource.Command => String): String =
+      r match
+        case c: ApplyResource.Command => pick(c)
+        case other                    => s"not a command: $other"
     var n = 0
     def run(helper: ApplyResource, arg: String): (Int, String) =
       n += 1
       val script = dir.resolve(s"helper-$n.sh")
       Files.writeString(script, fileText(helper))
-      runShell(s"PATH=$bin:$$PATH\nFAKE_HELM=$state\nexport FAKE_HELM\nsh $script $arg")
-    def dump: String = if Files.exists(state) then Files.readString(state) else "{}"
-    def make(version: Option[String] = None, values: Option[String] = Some("replicaCount: 2\nargs:\n  - |\n    keep\n"), set: List[(String, String)] = List("replicas" -> "2", "args" -> "{--kubelet-insecure-tls}")) =
-      helmRelease("helm install metrics-server", "metrics-server", "metrics-server/metrics-server", "https://example.org/charts/", "kube-system", version, values.map(Secret(_)), set, stateDir = shaDir.toString)
+      runShell(
+        s"PATH=$bin:$$PATH\nFAKE_HELM=$state\nexport FAKE_HELM\nsh $script $arg"
+      )
+    def dump: String =
+      if Files.exists(state) then Files.readString(state) else "{}"
+    def make(
+        version: Option[String] = None,
+        values: Option[String] = Some(
+          "replicaCount: 2\nargs:\n  - |\n    keep\n"
+        ),
+        set: List[(String, String)] =
+          List("replicas" -> "2", "args" -> "{--kubelet-insecure-tls}")
+    ) =
+      helmRelease(
+        "helm install metrics-server",
+        "metrics-server",
+        "metrics-server/metrics-server",
+        "https://example.org/charts/",
+        "kube-system",
+        version,
+        values.map(Secret(_)),
+        set,
+        stateDir = shaDir.toString
+      )
     val (helper, ensure) = make()
-    check("helmRelease: the helper is named for the namespace and the release", helper.id == "file[/usr/local/sbin/orphera-helm-kube-system-metrics-server]", helper.id)
-    check("helmRelease: the command runs the helper and is guarded by its check", part(ensure, _.run).contains("orphera-helm-kube-system-metrics-server' ensure") && part(ensure, _.unless).contains("check"))
-    check("helmRelease: nothing installed fails the check and exists", run(helper, "check")._1 != 0 && run(helper, "exists")._1 != 0)
+    check(
+      "helmRelease: the helper is named for the namespace and the release",
+      helper.id == "file[/usr/local/sbin/orphera-helm-kube-system-metrics-server]",
+      helper.id
+    )
+    check(
+      "helmRelease: the command runs the helper and is guarded by its check",
+      part(ensure, _.run).contains(
+        "orphera-helm-kube-system-metrics-server' ensure"
+      ) && part(ensure, _.unless).contains("check")
+    )
+    check(
+      "helmRelease: nothing installed fails the check and exists",
+      run(helper, "check")._1 != 0 && run(helper, "exists")._1 != 0
+    )
     val made = run(helper, "ensure")
-    check("helmRelease: ensure installs the newest chart when no version is given", made._1 == 0 && made._2.contains("metrics-server/metrics-server 9.9.9 as metrics-server in kube-system") && dump.contains("\"version\": \"9.9.9\""), made.toString + dump)
-    check("helmRelease: it adds the repository and makes the namespace", dump.contains("\"metrics-server\": \"https://example.org/charts/\"") && dump.contains("\"create_ns\": true"), dump)
-    check("helmRelease: the values reach helm as a file, including a line that starts with a pipe", dump.contains("replicaCount: 2\\nargs:\\n  - |\\n    keep\\n"), dump)
-    check("helmRelease: the set pairs are passed as they are", dump.contains("\"replicas=2\", \"args={--kubelet-insecure-tls}\""), dump)
-    check("helmRelease: it waits with the timeout", dump.contains("\"wait\": true") && dump.contains("\"timeout\": \"10m\""), dump)
-    check("helmRelease: then the check passes and exists finds the release", run(helper, "check")._1 == 0 && run(helper, "exists")._1 == 0)
+    check(
+      "helmRelease: ensure installs the newest chart when no version is given",
+      made._1 == 0 && made._2.contains(
+        "metrics-server/metrics-server 9.9.9 as metrics-server in kube-system"
+      ) && dump.contains("\"version\": \"9.9.9\""),
+      made.toString + dump
+    )
+    check(
+      "helmRelease: it adds the repository and makes the namespace",
+      dump.contains(
+        "\"metrics-server\": \"https://example.org/charts/\""
+      ) && dump.contains("\"create_ns\": true"),
+      dump
+    )
+    check(
+      "helmRelease: the values reach helm as a file, including a line that starts with a pipe",
+      dump.contains("replicaCount: 2\\nargs:\\n  - |\\n    keep\\n"),
+      dump
+    )
+    check(
+      "helmRelease: the set pairs are passed as they are",
+      dump.contains("\"replicas=2\", \"args={--kubelet-insecure-tls}\""),
+      dump
+    )
+    check(
+      "helmRelease: it waits with the timeout",
+      dump.contains("\"wait\": true") && dump.contains("\"timeout\": \"10m\""),
+      dump
+    )
+    check(
+      "helmRelease: then the check passes and exists finds the release",
+      run(helper, "check")._1 == 0 && run(helper, "exists")._1 == 0
+    )
     val (changed, _) = make(set = List("replicas" -> "3"))
-    check("helmRelease: a changed description fails the check", run(changed, "check")._1 != 0)
+    check(
+      "helmRelease: a changed description fails the check",
+      run(changed, "check")._1 != 0
+    )
     val (pinned, _) = make(version = Some("1.2.3"))
-    check("helmRelease: a pinned version is not the unpinned description", run(pinned, "check")._1 != 0)
+    check(
+      "helmRelease: a pinned version is not the unpinned description",
+      run(pinned, "check")._1 != 0
+    )
     val again = run(pinned, "ensure")
-    check("helmRelease: a pinned version is installed as given", again._1 == 0 && again._2.contains("metrics-server 1.2.3") && dump.contains("\"version\": \"1.2.3\"") && run(pinned, "check")._1 == 0, again.toString + dump)
+    check(
+      "helmRelease: a pinned version is installed as given",
+      again._1 == 0 && again._2.contains("metrics-server 1.2.3") && dump
+        .contains("\"version\": \"1.2.3\"") && run(pinned, "check")._1 == 0,
+      again.toString + dump
+    )
     val gone = absentHelmRelease("remove it", "metrics-server", "kube-system")
-    check("helmRelease: removal is guarded by the helper and the release being deployed", part(gone, _.onlyIf).contains("orphera-helm-kube-system-metrics-server' exists"), part(gone, _.onlyIf))
-    check("helmRelease: remove uninstalls it and forgets the hash", run(pinned, "remove")._1 == 0 && run(pinned, "exists")._1 != 0 && run(pinned, "check")._1 != 0)
+    check(
+      "helmRelease: removal is guarded by the helper and the release being deployed",
+      part(gone, _.onlyIf)
+        .contains("orphera-helm-kube-system-metrics-server' exists"),
+      part(gone, _.onlyIf)
+    )
+    check(
+      "helmRelease: remove uninstalls it and forgets the hash",
+      run(pinned, "remove")._1 == 0 && run(pinned, "exists")._1 != 0 && run(
+        pinned,
+        "check"
+      )._1 != 0
+    )
     val (plain, _) = make(values = None, set = Nil)
     val plainMade = run(plain, "ensure")
-    check("helmRelease: with no values there is no -f and no --set", plainMade._1 == 0 && !dump.contains("\"values\": \"") && dump.contains("\"sets\": []"), dump)
-    val (noWait, _) = helmRelease("x", "r", "a/b", "http://h/", "ns", wait = false, stateDir = shaDir.toString)
+    check(
+      "helmRelease: with no values there is no -f and no --set",
+      plainMade._1 == 0 && !dump.contains("\"values\": \"") && dump.contains(
+        "\"sets\": []"
+      ),
+      dump
+    )
+    val (noWait, _) = helmRelease(
+      "x",
+      "r",
+      "a/b",
+      "http://h/",
+      "ns",
+      wait = false,
+      stateDir = shaDir.toString
+    )
     val noWaitMade = run(noWait, "ensure")
-    check("helmRelease: without wait the release is installed with no --wait", noWaitMade._1 == 0 && dump.contains("\"ns/r\": {") && dump.contains("\"wait\": false"), dump)
-    check("helmRelease: a chart without a repository is refused", scala.util.Try(helmRelease("x", "r", "chart", "https://h", "ns")).isFailure)
-    check("helmRelease: a repository that is not a URL is refused", scala.util.Try(helmRelease("x", "r", "a/b", "h", "ns")).isFailure)
-    check("helmRelease: a namespace with a space is refused", scala.util.Try(helmRelease("x", "r", "a/b", "https://h", "a b")).isFailure)
-    check("helmRelease: values with the closing line are refused", scala.util.Try(helmRelease("x", "r", "a/b", "https://h", "ns", values = Some(Secret("a\nORPHERA_VALUES_END\nb")))).isFailure)
-    check("helmRelease: a version with a quote is refused", scala.util.Try(helmRelease("x", "r", "a/b", "https://h", "ns", version = Some("1'2"))).isFailure)
+    check(
+      "helmRelease: without wait the release is installed with no --wait",
+      noWaitMade._1 == 0 && dump.contains("\"ns/r\": {") && dump.contains(
+        "\"wait\": false"
+      ),
+      dump
+    )
+    check(
+      "helmRelease: a chart without a repository is refused",
+      scala.util
+        .Try(helmRelease("x", "r", "chart", "https://h", "ns"))
+        .isFailure
+    )
+    check(
+      "helmRelease: a repository that is not a URL is refused",
+      scala.util.Try(helmRelease("x", "r", "a/b", "h", "ns")).isFailure
+    )
+    check(
+      "helmRelease: a namespace with a space is refused",
+      scala.util.Try(helmRelease("x", "r", "a/b", "https://h", "a b")).isFailure
+    )
+    check(
+      "helmRelease: values with the closing line are refused",
+      scala.util
+        .Try(
+          helmRelease(
+            "x",
+            "r",
+            "a/b",
+            "https://h",
+            "ns",
+            values = Some(Secret("a\nORPHERA_VALUES_END\nb"))
+          )
+        )
+        .isFailure
+    )
+    check(
+      "helmRelease: a version with a quote is refused",
+      scala.util
+        .Try(
+          helmRelease("x", "r", "a/b", "https://h", "ns", version = Some("1'2"))
+        )
+        .isFailure
+    )
 
   private def cephChecks(): Unit =
     val dir = Files.createTempDirectory("ceph")
@@ -3444,142 +4721,536 @@ save()
     Files.createDirectory(bin)
     val fake = bin.resolve("cephadm")
     Files.writeString(fake, fakeCephadm)
-    check("ceph: the fake cephadm is executable", fake.toFile.setExecutable(true))
+    check(
+      "ceph: the fake cephadm is executable",
+      fake.toFile.setExecutable(true)
+    )
     val state = dir.resolve("state")
     def sh(script: String, down: Boolean = false): (Int, String) =
       val env = if down then "FAKE_CEPH_DOWN=1\nexport FAKE_CEPH_DOWN\n" else ""
-      runShell(s"PATH=$bin:$$PATH\nFAKE_CEPH=$state\nexport FAKE_CEPH\n$env$script")
+      runShell(
+        s"PATH=$bin:$$PATH\nFAKE_CEPH=$state\nexport FAKE_CEPH\n$env$script"
+      )
     def dump: String = sh("cephadm shell -- dump")._2
-    def part(r: ApplyResource, pick: ApplyResource.Command => String): String = r match
-      case c: ApplyResource.Command => pick(c)
-      case other                    => s"not a command: $other"
+    def part(r: ApplyResource, pick: ApplyResource.Command => String): String =
+      r match
+        case c: ApplyResource.Command => pick(c)
+        case other                    => s"not a command: $other"
     // pools
     val pool = cephPool("the volumes pool", "volumes")
-    check("cephPool: no pool means it is needed", sh(part(pool, _.unless))._1 != 0)
+    check(
+      "cephPool: no pool means it is needed",
+      sh(part(pool, _.unless))._1 != 0
+    )
     val made = sh(part(pool, _.run))
-    check("cephPool: it makes the pool and initialises it for rbd", made._1 == 0 && made._2.contains("pool volumes ready") && dump.contains("rbd pool init volumes"), made.toString + dump)
-    check("cephPool: the pool then means unchanged", sh(part(pool, _.unless))._1 == 0)
-    check("cephPool: a pool with a similar name does not count", sh(part(cephPool("x", "vol"), _.unless))._1 != 0)
+    check(
+      "cephPool: it makes the pool and initialises it for rbd",
+      made._1 == 0 && made._2.contains("pool volumes ready") && dump.contains(
+        "rbd pool init volumes"
+      ),
+      made.toString + dump
+    )
+    check(
+      "cephPool: the pool then means unchanged",
+      sh(part(pool, _.unless))._1 == 0
+    )
+    check(
+      "cephPool: a pool with a similar name does not count",
+      sh(part(cephPool("x", "vol"), _.unless))._1 != 0
+    )
     val fs = cephPool("the data pool", "cephfs_data", application = "cephfs")
     sh(part(fs, _.run))
-    check("cephPool: another application is enabled instead of rbd init", dump.contains("pool application enable cephfs_data cephfs") && !dump.contains("rbd pool init cephfs_data"), dump)
-    check("cephPool: a bad pool name is refused", scala.util.Try(cephPool("x", "a b")).isFailure)
+    check(
+      "cephPool: another application is enabled instead of rbd init",
+      dump.contains("pool application enable cephfs_data cephfs") && !dump
+        .contains("rbd pool init cephfs_data"),
+      dump
+    )
+    check(
+      "cephPool: a bad pool name is refused",
+      scala.util.Try(cephPool("x", "a b")).isFailure
+    )
     // users
     val aes = cephKeyText(1, 10)
-    val user = cephUser("client.cinder", "client.cinder", Secret(aes), List("mon" -> "profile rbd", "osd" -> "profile rbd pool=volumes"))
-    check("cephUser: no user means it is needed", sh(part(user, _.unless))._1 != 0)
+    val user = cephUser(
+      "client.cinder",
+      "client.cinder",
+      Secret(aes),
+      List("mon" -> "profile rbd", "osd" -> "profile rbd pool=volumes")
+    )
+    check(
+      "cephUser: no user means it is needed",
+      sh(part(user, _.unless))._1 != 0
+    )
     val imported = sh(part(user, _.run))
-    check("cephUser: it imports the user and says so", imported._1 == 0 && imported._2.contains("client.cinder ready"), imported.toString)
-    check("cephUser: an aes key first allows aes", dump.contains("auth_allowed_ciphers aes,aes256k"), dump)
-    check("cephUser: the key and both capabilities are in Ceph", dump.contains(aes) && dump.contains("profile rbd pool=volumes") && dump.contains("\"mon\": \"profile rbd\""), dump)
-    check("cephUser: the keyring file is gone afterwards", !Files.exists(Path.of("/tmp/orphera-client.cinder.keyring")))
+    check(
+      "cephUser: it imports the user and says so",
+      imported._1 == 0 && imported._2.contains("client.cinder ready"),
+      imported.toString
+    )
+    check(
+      "cephUser: an aes key first allows aes",
+      dump.contains("auth_allowed_ciphers aes,aes256k"),
+      dump
+    )
+    check(
+      "cephUser: the key and both capabilities are in Ceph",
+      dump.contains(aes) && dump.contains("profile rbd pool=volumes") && dump
+        .contains("\"mon\": \"profile rbd\""),
+      dump
+    )
+    check(
+      "cephUser: the keyring file is gone afterwards",
+      !Files.exists(Path.of("/tmp/orphera-client.cinder.keyring"))
+    )
     check("cephUser: it then means unchanged", sh(part(user, _.unless))._1 == 0)
-    val rotated = cephUser("rotated", "client.cinder", Secret(cephKeyText(1, 40)), List("mon" -> "profile rbd", "osd" -> "profile rbd pool=volumes"))
-    check("cephUser: another key means it is needed", sh(part(rotated, _.unless))._1 != 0)
+    val rotated = cephUser(
+      "rotated",
+      "client.cinder",
+      Secret(cephKeyText(1, 40)),
+      List("mon" -> "profile rbd", "osd" -> "profile rbd pool=volumes")
+    )
+    check(
+      "cephUser: another key means it is needed",
+      sh(part(rotated, _.unless))._1 != 0
+    )
     sh(part(rotated, _.run))
-    check("cephUser: running it puts the new key right", sh(part(rotated, _.unless))._1 == 0 && sh(part(user, _.unless))._1 != 0)
-    val widerCaps = cephUser("wider", "client.cinder", Secret(cephKeyText(1, 40)), List("mon" -> "profile rbd", "osd" -> "profile rbd pool=images"))
-    check("cephUser: a different capability means it is needed", sh(part(widerCaps, _.unless))._1 != 0)
+    check(
+      "cephUser: running it puts the new key right",
+      sh(part(rotated, _.unless))._1 == 0 && sh(part(user, _.unless))._1 != 0
+    )
+    val widerCaps = cephUser(
+      "wider",
+      "client.cinder",
+      Secret(cephKeyText(1, 40)),
+      List("mon" -> "profile rbd", "osd" -> "profile rbd pool=images")
+    )
+    check(
+      "cephUser: a different capability means it is needed",
+      sh(part(widerCaps, _.unless))._1 != 0
+    )
     val newer = cephKeyText(2, 70)
-    val modern = cephUser("modern", "client.glance", Secret(newer), List("mon" -> "allow r", "mgr" -> "allow rw"))
+    val modern = cephUser(
+      "modern",
+      "client.glance",
+      Secret(newer),
+      List("mon" -> "allow r", "mgr" -> "allow rw")
+    )
     val before = dump
     val m = sh(part(modern, _.run))
-    check("cephUser: an aes256k key leaves the cipher setting alone and says so", m._1 == 0 && m._2.contains("client.glance has an aes256k key") && dump.split("auth_allowed_ciphers").length == before.split("auth_allowed_ciphers").length, m.toString)
+    check(
+      "cephUser: an aes256k key leaves the cipher setting alone and says so",
+      m._1 == 0 && m._2.contains("client.glance has an aes256k key") && dump
+        .split("auth_allowed_ciphers")
+        .length == before.split("auth_allowed_ciphers").length,
+      m.toString
+    )
     check("cephUser: and the user is made", sh(part(modern, _.unless))._1 == 0)
-    check("cephUser: a name without a type is refused", scala.util.Try(cephUser("x", "cinder", Secret(aes), List("mon" -> "profile rbd"))).isFailure)
-    check("cephUser: text that is not a cephx key is refused", scala.util.Try(cephUser("x", "client.a", Secret("not a key"), List("mon" -> "profile rbd"))).isFailure)
-    check("cephUser: a capability with a quote is refused", scala.util.Try(cephUser("x", "client.a", Secret(aes), List("mon" -> "profile \"rbd\""))).isFailure)
-    check("cephUser: an unknown capability type is refused", scala.util.Try(cephUser("x", "client.a", Secret(aes), List("net" -> "allow"))).isFailure)
-    check("cephUser: no capabilities is refused", scala.util.Try(cephUser("x", "client.a", Secret(aes), Nil)).isFailure)
+    check(
+      "cephUser: a name without a type is refused",
+      scala.util
+        .Try(cephUser("x", "cinder", Secret(aes), List("mon" -> "profile rbd")))
+        .isFailure
+    )
+    check(
+      "cephUser: text that is not a cephx key is refused",
+      scala.util
+        .Try(
+          cephUser(
+            "x",
+            "client.a",
+            Secret("not a key"),
+            List("mon" -> "profile rbd")
+          )
+        )
+        .isFailure
+    )
+    check(
+      "cephUser: a capability with a quote is refused",
+      scala.util
+        .Try(
+          cephUser(
+            "x",
+            "client.a",
+            Secret(aes),
+            List("mon" -> "profile \"rbd\"")
+          )
+        )
+        .isFailure
+    )
+    check(
+      "cephUser: an unknown capability type is refused",
+      scala.util
+        .Try(cephUser("x", "client.a", Secret(aes), List("net" -> "allow")))
+        .isFailure
+    )
+    check(
+      "cephUser: no capabilities is refused",
+      scala.util.Try(cephUser("x", "client.a", Secret(aes), Nil)).isFailure
+    )
     // removal
     val noUser = absentCephUser("remove client.cinder", "client.cinder")
-    check("absentCephUser: it is wanted while the user is listed", sh(part(noUser, _.onlyIf))._1 == 0)
-    check("absentCephUser: and also when Ceph cannot be queried, so the failure is shown", sh(part(noUser, _.onlyIf), down = true)._1 == 0)
+    check(
+      "absentCephUser: it is wanted while the user is listed",
+      sh(part(noUser, _.onlyIf))._1 == 0
+    )
+    check(
+      "absentCephUser: and also when Ceph cannot be queried, so the failure is shown",
+      sh(part(noUser, _.onlyIf), down = true)._1 == 0
+    )
     val removedUser = sh(part(noUser, _.run))
-    check("absentCephUser: it removes the user", removedUser._1 == 0 && removedUser._2.contains("client.cinder removed") && !dump.contains("\"client.cinder\""), removedUser.toString + dump)
-    check("absentCephUser: nothing to do afterwards", sh(part(noUser, _.onlyIf))._1 != 0)
-    check("absentCephUser: a cluster that is down fails the removal", sh(part(noUser, _.run), down = true)._1 != 0)
+    check(
+      "absentCephUser: it removes the user",
+      removedUser._1 == 0 && removedUser._2.contains(
+        "client.cinder removed"
+      ) && !dump.contains("\"client.cinder\""),
+      removedUser.toString + dump
+    )
+    check(
+      "absentCephUser: nothing to do afterwards",
+      sh(part(noUser, _.onlyIf))._1 != 0
+    )
+    check(
+      "absentCephUser: a cluster that is down fails the removal",
+      sh(part(noUser, _.run), down = true)._1 != 0
+    )
     val noPool = absentCephPool("remove the volumes pool", "volumes")
-    check("absentCephPool: it is wanted while the pool is listed", sh(part(noPool, _.onlyIf))._1 == 0)
-    check("absentCephPool: and when Ceph cannot be queried", sh(part(noPool, _.onlyIf), down = true)._1 == 0)
+    check(
+      "absentCephPool: it is wanted while the pool is listed",
+      sh(part(noPool, _.onlyIf))._1 == 0
+    )
+    check(
+      "absentCephPool: and when Ceph cannot be queried",
+      sh(part(noPool, _.onlyIf), down = true)._1 == 0
+    )
     val removedPool = sh(part(noPool, _.run))
-    check("absentCephPool: it deletes the pool", removedPool._1 == 0 && removedPool._2.contains("pool volumes removed") && !dump.contains("\"volumes\""), removedPool.toString + dump)
-    check("absentCephPool: and sets pool deletion back to false", dump.contains("\"mon_allow_pool_delete\": \"false\""), dump)
-    check("absentCephPool: nothing to do afterwards", sh(part(noPool, _.onlyIf))._1 != 0)
-    check("absentCephPool: a pool that is not there fails the removal", sh(part(noPool, _.run))._1 != 0)
+    check(
+      "absentCephPool: it deletes the pool",
+      removedPool._1 == 0 && removedPool._2.contains(
+        "pool volumes removed"
+      ) && !dump.contains("\"volumes\""),
+      removedPool.toString + dump
+    )
+    check(
+      "absentCephPool: and sets pool deletion back to false",
+      dump.contains("\"mon_allow_pool_delete\": \"false\""),
+      dump
+    )
+    check(
+      "absentCephPool: nothing to do afterwards",
+      sh(part(noPool, _.onlyIf))._1 != 0
+    )
+    check(
+      "absentCephPool: a pool that is not there fails the removal",
+      sh(part(noPool, _.run))._1 != 0
+    )
     // configuration options
-    val optsRes = cephConfig("the RGW options", "client.rgw.x", List("rgw_a" -> "member,admin", "rgw_b" -> "true", "other" -> "keep"))
-    check("cephConfig: no options means it is needed", sh(part(optsRes, _.unless))._1 != 0)
+    val optsRes = cephConfig(
+      "the RGW options",
+      "client.rgw.x",
+      List("rgw_a" -> "member,admin", "rgw_b" -> "true", "other" -> "keep")
+    )
+    check(
+      "cephConfig: no options means it is needed",
+      sh(part(optsRes, _.unless))._1 != 0
+    )
     val optsMade = sh(part(optsRes, _.run))
-    check("cephConfig: it sets every option", optsMade._1 == 0 && optsMade._2.contains("3 option(s) set for client.rgw.x") && dump.contains("member,admin"), optsMade.toString + dump)
-    check("cephConfig: it then means unchanged", sh(part(optsRes, _.unless))._1 == 0)
-    check("cephConfig: another value means it is needed", sh(part(cephConfig("x", "client.rgw.x", List("rgw_b" -> "false")), _.unless))._1 != 0)
-    check("cephConfig: a value with a single quote is refused", scala.util.Try(cephConfig("x", "client.rgw.x", List("rgw_a" -> "it's"))).isFailure)
-    check("cephConfig: no options is refused", scala.util.Try(cephConfig("x", "client.rgw.x", Nil)).isFailure)
-    val optsGone = absentCephConfig("remove the options", "client.rgw.x", "rgw_")
-    check("absentCephConfig: it is wanted while an option with the prefix is set, and when Ceph is down", sh(part(optsGone, _.onlyIf))._1 == 0 && sh(part(optsGone, _.onlyIf), down = true)._1 == 0)
+    check(
+      "cephConfig: it sets every option",
+      optsMade._1 == 0 && optsMade._2.contains(
+        "3 option(s) set for client.rgw.x"
+      ) && dump.contains("member,admin"),
+      optsMade.toString + dump
+    )
+    check(
+      "cephConfig: it then means unchanged",
+      sh(part(optsRes, _.unless))._1 == 0
+    )
+    check(
+      "cephConfig: another value means it is needed",
+      sh(
+        part(
+          cephConfig("x", "client.rgw.x", List("rgw_b" -> "false")),
+          _.unless
+        )
+      )._1 != 0
+    )
+    check(
+      "cephConfig: a value with a single quote is refused",
+      scala.util
+        .Try(cephConfig("x", "client.rgw.x", List("rgw_a" -> "it's")))
+        .isFailure
+    )
+    check(
+      "cephConfig: no options is refused",
+      scala.util.Try(cephConfig("x", "client.rgw.x", Nil)).isFailure
+    )
+    val optsGone =
+      absentCephConfig("remove the options", "client.rgw.x", "rgw_")
+    check(
+      "absentCephConfig: it is wanted while an option with the prefix is set, and when Ceph is down",
+      sh(part(optsGone, _.onlyIf))._1 == 0 && sh(
+        part(optsGone, _.onlyIf),
+        down = true
+      )._1 == 0
+    )
     val optsRemoved = sh(part(optsGone, _.run))
-    check("absentCephConfig: it removes the options with the prefix only", optsRemoved._1 == 0 && sh("cephadm shell -- ceph config get client.rgw.x rgw_a")._1 != 0 && sh("cephadm shell -- ceph config get client.rgw.x other")._2.trim == "keep", optsRemoved.toString + dump)
-    check("absentCephConfig: nothing to do afterwards", sh(part(optsGone, _.onlyIf))._1 != 0)
+    check(
+      "absentCephConfig: it removes the options with the prefix only",
+      optsRemoved._1 == 0 && sh(
+        "cephadm shell -- ceph config get client.rgw.x rgw_a"
+      )._1 != 0 && sh(
+        "cephadm shell -- ceph config get client.rgw.x other"
+      )._2.trim == "keep",
+      optsRemoved.toString + dump
+    )
+    check(
+      "absentCephConfig: nothing to do afterwards",
+      sh(part(optsGone, _.onlyIf))._1 != 0
+    )
     // orchestrator service
     val stateDir = dir.resolve("sha").toString
-    val svcSpec = "service_type: rgw\nservice_id: x\nplacement:\n  hosts:\n    - @@HOST@@\nspec:\n  rgw_frontend_port: 8080"
-    val svc = cephOrchService("the RGW service", "rgw", "x", svcSpec, "10.10.5.12", "tst0", stateDir)
-    check("cephOrchService: no service means it is needed", sh(part(svc, _.unless))._1 != 0)
+    val svcSpec =
+      "service_type: rgw\nservice_id: x\nplacement:\n  hosts:\n    - @@HOST@@\nspec:\n  rgw_frontend_port: 8080"
+    val svc = cephOrchService(
+      "the RGW service",
+      "rgw",
+      "x",
+      svcSpec,
+      "10.10.5.12",
+      "tst0",
+      stateDir
+    )
+    check(
+      "cephOrchService: no service means it is needed",
+      sh(part(svc, _.unless))._1 != 0
+    )
     val svcMade = sh(part(svc, _.run))
-    check("cephOrchService: it applies the spec with the host's name in it", svcMade._1 == 0 && svcMade._2.contains("rgw.x applied") && dump.contains("- tst0.example"), svcMade.toString + dump)
-    check("cephOrchService: the spec file is gone afterwards", !Files.exists(Path.of("/tmp/orphera-rgw-x.yaml")))
-    check("cephOrchService: it then means unchanged", sh(part(svc, _.unless))._1 == 0)
-    val svcOther = cephOrchService("x", "rgw", "x", svcSpec.replace("8080", "8081"), "10.10.5.12", "tst0", stateDir)
-    check("cephOrchService: another spec means it is needed", sh(part(svcOther, _.unless))._1 != 0)
-    val svcNoHost = cephOrchService("x", "rgw", "y", svcSpec.replace("service_id: x", "service_id: y"), "10.9.9.9", "nowhere", stateDir)
+    check(
+      "cephOrchService: it applies the spec with the host's name in it",
+      svcMade._1 == 0 && svcMade._2.contains("rgw.x applied") && dump.contains(
+        "- tst0.example"
+      ),
+      svcMade.toString + dump
+    )
+    check(
+      "cephOrchService: the spec file is gone afterwards",
+      !Files.exists(Path.of("/tmp/orphera-rgw-x.yaml"))
+    )
+    check(
+      "cephOrchService: it then means unchanged",
+      sh(part(svc, _.unless))._1 == 0
+    )
+    val svcOther = cephOrchService(
+      "x",
+      "rgw",
+      "x",
+      svcSpec.replace("8080", "8081"),
+      "10.10.5.12",
+      "tst0",
+      stateDir
+    )
+    check(
+      "cephOrchService: another spec means it is needed",
+      sh(part(svcOther, _.unless))._1 != 0
+    )
+    val svcNoHost = cephOrchService(
+      "x",
+      "rgw",
+      "y",
+      svcSpec.replace("service_id: x", "service_id: y"),
+      "10.9.9.9",
+      "nowhere",
+      stateDir
+    )
     val svcNoHostRun = sh(part(svcNoHost, _.run))
-    check("cephOrchService: no matching host fails with a message", svcNoHostRun._1 != 0 && svcNoHostRun._2.contains("no Ceph orchestrator host"), svcNoHostRun.toString)
-    check("cephOrchService: a spec with a dollar sign is refused", scala.util.Try(cephOrchService("x", "rgw", "x", "a: $b", "10.10.5.12", "tst0")).isFailure)
-    check("cephOrchService: a spec with a SPEC_END line is refused", scala.util.Try(cephOrchService("x", "rgw", "x", "a: b\nSPEC_END", "10.10.5.12", "tst0")).isFailure)
-    val noSvc = absentCephOrchService("remove the RGW service", "rgw", "x", stateDir)
-    check("absentCephOrchService: it is wanted while the service is listed, and when Ceph is down", sh(part(noSvc, _.onlyIf))._1 == 0 && sh(part(noSvc, _.onlyIf), down = true)._1 == 0)
+    check(
+      "cephOrchService: no matching host fails with a message",
+      svcNoHostRun._1 != 0 && svcNoHostRun._2.contains(
+        "no Ceph orchestrator host"
+      ),
+      svcNoHostRun.toString
+    )
+    check(
+      "cephOrchService: a spec with a dollar sign is refused",
+      scala.util
+        .Try(cephOrchService("x", "rgw", "x", "a: $b", "10.10.5.12", "tst0"))
+        .isFailure
+    )
+    check(
+      "cephOrchService: a spec with a SPEC_END line is refused",
+      scala.util
+        .Try(
+          cephOrchService(
+            "x",
+            "rgw",
+            "x",
+            "a: b\nSPEC_END",
+            "10.10.5.12",
+            "tst0"
+          )
+        )
+        .isFailure
+    )
+    val noSvc =
+      absentCephOrchService("remove the RGW service", "rgw", "x", stateDir)
+    check(
+      "absentCephOrchService: it is wanted while the service is listed, and when Ceph is down",
+      sh(part(noSvc, _.onlyIf))._1 == 0 && sh(
+        part(noSvc, _.onlyIf),
+        down = true
+      )._1 == 0
+    )
     val svcGone = sh(part(noSvc, _.run))
-    check("absentCephOrchService: it removes the service and its state file", svcGone._1 == 0 && svcGone._2.contains("rgw.x removed") && !Files.exists(Path.of(cephOrchStatePath("rgw", "x", stateDir))), svcGone.toString)
-    check("absentCephOrchService: nothing to do afterwards", sh(part(noSvc, _.onlyIf))._1 != 0)
+    check(
+      "absentCephOrchService: it removes the service and its state file",
+      svcGone._1 == 0 && svcGone._2.contains("rgw.x removed") && !Files.exists(
+        Path.of(cephOrchStatePath("rgw", "x", stateDir))
+      ),
+      svcGone.toString
+    )
+    check(
+      "absentCephOrchService: nothing to do afterwards",
+      sh(part(noSvc, _.onlyIf))._1 != 0
+    )
     // filesystem and NFS cluster
     val fsRes = cephFilesystem("the filesystem", "cephfs")
-    check("cephFilesystem: no filesystem means it is needed", sh(part(fsRes, _.unless))._1 != 0)
+    check(
+      "cephFilesystem: no filesystem means it is needed",
+      sh(part(fsRes, _.unless))._1 != 0
+    )
     val fsMade = sh(part(fsRes, _.run))
-    check("cephFilesystem: it creates the filesystem and sees an active MDS", fsMade._1 == 0 && fsMade._2.contains("filesystem cephfs created") && fsMade._2.contains("an MDS is active"), fsMade.toString)
-    check("cephFilesystem: it then means unchanged", sh(part(fsRes, _.unless))._1 == 0)
+    check(
+      "cephFilesystem: it creates the filesystem and sees an active MDS",
+      fsMade._1 == 0 && fsMade._2.contains(
+        "filesystem cephfs created"
+      ) && fsMade._2.contains("an MDS is active"),
+      fsMade.toString
+    )
+    check(
+      "cephFilesystem: it then means unchanged",
+      sh(part(fsRes, _.unless))._1 == 0
+    )
     val fsAgain = sh(part(fsRes, _.run))
-    check("cephFilesystem: running it again does not create it twice", fsAgain._1 == 0 && dump.split("fs volume create").length == 2, fsAgain.toString + dump)
-    check("cephFilesystem: a filesystem with a similar name does not count", sh(part(cephFilesystem("x", "ceph"), _.unless))._1 != 0)
-    check("cephFilesystem: a bad name is refused", scala.util.Try(cephFilesystem("x", "a b")).isFailure)
+    check(
+      "cephFilesystem: running it again does not create it twice",
+      fsAgain._1 == 0 && dump.split("fs volume create").length == 2,
+      fsAgain.toString + dump
+    )
+    check(
+      "cephFilesystem: a filesystem with a similar name does not count",
+      sh(part(cephFilesystem("x", "ceph"), _.unless))._1 != 0
+    )
+    check(
+      "cephFilesystem: a bad name is refused",
+      scala.util.Try(cephFilesystem("x", "a b")).isFailure
+    )
     val noFs = absentCephFilesystem("remove the filesystem", "cephfs")
-    check("absentCephFilesystem: it is wanted while the filesystem is listed, and when Ceph is down", sh(part(noFs, _.onlyIf))._1 == 0 && sh(part(noFs, _.onlyIf), down = true)._1 == 0)
+    check(
+      "absentCephFilesystem: it is wanted while the filesystem is listed, and when Ceph is down",
+      sh(part(noFs, _.onlyIf))._1 == 0 && sh(
+        part(noFs, _.onlyIf),
+        down = true
+      )._1 == 0
+    )
     val fsGone = sh(part(noFs, _.run))
-    check("absentCephFilesystem: it removes it and puts pool deletion back to false", fsGone._1 == 0 && fsGone._2.contains("filesystem cephfs removed") && dump.contains("\"fs\": []") && dump.contains("\"mon_allow_pool_delete\": \"false\""), fsGone.toString + dump)
-    check("absentCephFilesystem: nothing to do afterwards", sh(part(noFs, _.onlyIf))._1 != 0)
-    check("absentCephFilesystem: a cluster that is down fails the removal", sh(part(noFs, _.run), down = true)._1 != 0)
-    val listener = new java.net.ServerSocket(0, 5, java.net.InetAddress.getByName("127.0.0.1"))
+    check(
+      "absentCephFilesystem: it removes it and puts pool deletion back to false",
+      fsGone._1 == 0 && fsGone._2.contains("filesystem cephfs removed") && dump
+        .contains("\"fs\": []") && dump.contains(
+        "\"mon_allow_pool_delete\": \"false\""
+      ),
+      fsGone.toString + dump
+    )
+    check(
+      "absentCephFilesystem: nothing to do afterwards",
+      sh(part(noFs, _.onlyIf))._1 != 0
+    )
+    check(
+      "absentCephFilesystem: a cluster that is down fails the removal",
+      sh(part(noFs, _.run), down = true)._1 != 0
+    )
+    val listener = new java.net.ServerSocket(
+      0,
+      5,
+      java.net.InetAddress.getByName("127.0.0.1")
+    )
     try
       val nfsPort = listener.getLocalPort
-      val nfsRes = cephNfsCluster("the NFS cluster", "manila", "10.10.5.12", "tst0", nfsPort)
-      val nfsLocal = cephNfsCluster("the NFS cluster", "manila", "127.0.0.1", "tst0", nfsPort)
-      check("cephNfsCluster: no cluster means it is needed", sh(part(nfsLocal, _.unless))._1 != 0)
+      val nfsRes = cephNfsCluster(
+        "the NFS cluster",
+        "manila",
+        "10.10.5.12",
+        "tst0",
+        nfsPort
+      )
+      val nfsLocal = cephNfsCluster(
+        "the NFS cluster",
+        "manila",
+        "127.0.0.1",
+        "tst0",
+        nfsPort
+      )
+      check(
+        "cephNfsCluster: no cluster means it is needed",
+        sh(part(nfsLocal, _.unless))._1 != 0
+      )
       val nfsMade = sh(part(nfsLocal, _.run))
-      check("cephNfsCluster: it creates the cluster on the matching host and waits for the port", nfsMade._1 == 0 && nfsMade._2.contains("NFS cluster manila created on tst0.example") && nfsMade._2.contains("answers on") , nfsMade.toString)
-      check("cephNfsCluster: it then means unchanged", sh(part(nfsLocal, _.unless))._1 == 0)
+      check(
+        "cephNfsCluster: it creates the cluster on the matching host and waits for the port",
+        nfsMade._1 == 0 && nfsMade._2.contains(
+          "NFS cluster manila created on tst0.example"
+        ) && nfsMade._2.contains("answers on"),
+        nfsMade.toString
+      )
+      check(
+        "cephNfsCluster: it then means unchanged",
+        sh(part(nfsLocal, _.unless))._1 == 0
+      )
       val byName = cephNfsCluster("x", "other", "10.9.9.9", "tst1", nfsPort)
       val viaName = sh(part(byName, _.run).replace("10.9.9.9", "127.0.0.1"))
-      check("cephNfsCluster: the host is found by its short name too", viaName._1 == 0 && viaName._2.contains("created on tst1.example"), viaName.toString)
+      check(
+        "cephNfsCluster: the host is found by its short name too",
+        viaName._1 == 0 && viaName._2.contains("created on tst1.example"),
+        viaName.toString
+      )
       val nobody = cephNfsCluster("x", "third", "10.9.9.9", "nowhere", nfsPort)
       val noHost = sh(part(nobody, _.run))
-      check("cephNfsCluster: an address and name that match no host fail with a message", noHost._1 != 0 && noHost._2.contains("no Ceph orchestrator host"), noHost.toString)
-      check("cephNfsCluster: a listed cluster whose port does not answer is still needed", sh(part(nfsRes, _.unless).replace("10.10.5.12", "127.0.0.1").replace(nfsPort.toString, "1"))._1 != 0)
-      check("cephNfsCluster: a bad address is refused", scala.util.Try(cephNfsCluster("x", "a", "1.2.3.4; id", "h")).isFailure)
+      check(
+        "cephNfsCluster: an address and name that match no host fail with a message",
+        noHost._1 != 0 && noHost._2.contains("no Ceph orchestrator host"),
+        noHost.toString
+      )
+      check(
+        "cephNfsCluster: a listed cluster whose port does not answer is still needed",
+        sh(
+          part(nfsRes, _.unless)
+            .replace("10.10.5.12", "127.0.0.1")
+            .replace(nfsPort.toString, "1")
+        )._1 != 0
+      )
+      check(
+        "cephNfsCluster: a bad address is refused",
+        scala.util.Try(cephNfsCluster("x", "a", "1.2.3.4; id", "h")).isFailure
+      )
       val noNfs = absentCephNfsCluster("remove the NFS cluster", "manila")
-      check("absentCephNfsCluster: it is wanted while the cluster is listed, and when Ceph is down", sh(part(noNfs, _.onlyIf))._1 == 0 && sh(part(noNfs, _.onlyIf), down = true)._1 == 0)
+      check(
+        "absentCephNfsCluster: it is wanted while the cluster is listed, and when Ceph is down",
+        sh(part(noNfs, _.onlyIf))._1 == 0 && sh(
+          part(noNfs, _.onlyIf),
+          down = true
+        )._1 == 0
+      )
       val nfsGone = sh(part(noNfs, _.run))
-      check("absentCephNfsCluster: it removes it", nfsGone._1 == 0 && nfsGone._2.contains("NFS cluster manila removed"), nfsGone.toString)
-      check("absentCephNfsCluster: nothing to do afterwards", sh(part(noNfs, _.onlyIf))._1 != 0)
+      check(
+        "absentCephNfsCluster: it removes it",
+        nfsGone._1 == 0 && nfsGone._2.contains("NFS cluster manila removed"),
+        nfsGone.toString
+      )
+      check(
+        "absentCephNfsCluster: nothing to do afterwards",
+        sh(part(noNfs, _.onlyIf))._1 != 0
+      )
     finally listener.close()
 
   // Stand-ins for `ovs-vsctl` and `ip` that keep Open vSwitch bridges, their ports and the manager in a JSON file;
@@ -3655,62 +5326,165 @@ else:
     Files.createDirectory(bin)
     val real = bin.resolve("ovs-vsctl")
     Files.writeString(real, fakeOvs)
-    check("ovs: the fake ovs-vsctl is executable", real.toFile.setExecutable(true))
+    check(
+      "ovs: the fake ovs-vsctl is executable",
+      real.toFile.setExecutable(true)
+    )
     Files.createSymbolicLink(bin.resolve("ip"), real)
     val state = dir.resolve("state.json")
     def sh(script: String, installed: Boolean = true): (Int, String) =
       val path = if installed then s"$bin:$$PATH" else "/nonexistent"
       runShell(s"PATH=$path\nFAKE_OVS=$state\nexport FAKE_OVS\n$script")
     def dump: String = sh("ovs-vsctl dump")._2
-    def part(r: ApplyResource, pick: ApplyResource.Command => String): String = r match
-      case c: ApplyResource.Command => pick(c)
-      case other                    => s"not a command: $other"
+    def part(r: ApplyResource, pick: ApplyResource.Command => String): String =
+      r match
+        case c: ApplyResource.Command => pick(c)
+        case other                    => s"not a command: $other"
     // bridge
-    val bridge = ovsBridge("br-provider with enp2s0", "br-provider", List("enp2s0"))
-    check("ovsBridge: no bridge means it is needed", sh(part(bridge, _.unless))._1 != 0)
+    val bridge =
+      ovsBridge("br-provider with enp2s0", "br-provider", List("enp2s0"))
+    check(
+      "ovsBridge: no bridge means it is needed",
+      sh(part(bridge, _.unless))._1 != 0
+    )
     val made = sh(part(bridge, _.run))
-    check("ovsBridge: it makes the bridge, its port and brings it up", made._1 == 0 && made._2.contains("br-provider has enp2s0") && dump.contains("\"ports\": [\"enp2s0\"]") && dump.contains("\"up\": true"), made.toString + dump)
-    check("ovsBridge: it then means unchanged", sh(part(bridge, _.unless))._1 == 0)
+    check(
+      "ovsBridge: it makes the bridge, its port and brings it up",
+      made._1 == 0 && made._2.contains("br-provider has enp2s0") && dump
+        .contains("\"ports\": [\"enp2s0\"]") && dump.contains("\"up\": true"),
+      made.toString + dump
+    )
+    check(
+      "ovsBridge: it then means unchanged",
+      sh(part(bridge, _.unless))._1 == 0
+    )
     sh("ovs-vsctl del-port br-provider enp2s0")
-    check("ovsBridge: a missing port means it is needed", sh(part(bridge, _.unless))._1 != 0)
+    check(
+      "ovsBridge: a missing port means it is needed",
+      sh(part(bridge, _.unless))._1 != 0
+    )
     sh(part(bridge, _.run))
-    check("ovsBridge: running it puts the port back", sh(part(bridge, _.unless))._1 == 0)
+    check(
+      "ovsBridge: running it puts the port back",
+      sh(part(bridge, _.unless))._1 == 0
+    )
     sh("ip link set br-provider down")
-    check("ovsBridge: a bridge whose link is down means it is needed", sh(part(bridge, _.unless))._1 != 0)
+    check(
+      "ovsBridge: a bridge whose link is down means it is needed",
+      sh(part(bridge, _.unless))._1 != 0
+    )
     sh(part(bridge, _.run))
-    check("ovsBridge: running it brings the link up", sh(part(bridge, _.unless))._1 == 0)
-    check("ovsBridge: a port whose name only starts the same does not count", sh(part(ovsBridge("x", "br-provider", List("enp2s")), _.unless))._1 != 0)
+    check(
+      "ovsBridge: running it brings the link up",
+      sh(part(bridge, _.unless))._1 == 0
+    )
+    check(
+      "ovsBridge: a port whose name only starts the same does not count",
+      sh(part(ovsBridge("x", "br-provider", List("enp2s")), _.unless))._1 != 0
+    )
     val bare = ovsBridge("a bridge with no ports", "br-int")
-    check("ovsBridge: a bridge with no ports is made and says so", sh(part(bare, _.run))._2.contains("br-int has no ports") && sh(part(bare, _.unless))._1 == 0)
-    check("ovsBridge: a name with a space is refused", scala.util.Try(ovsBridge("x", "br x")).isFailure)
-    check("ovsBridge: a port name that is too long is refused", scala.util.Try(ovsBridge("x", "br0", List("a" * 16))).isFailure)
+    check(
+      "ovsBridge: a bridge with no ports is made and says so",
+      sh(part(bare, _.run))._2.contains("br-int has no ports") && sh(
+        part(bare, _.unless)
+      )._1 == 0
+    )
+    check(
+      "ovsBridge: a name with a space is refused",
+      scala.util.Try(ovsBridge("x", "br x")).isFailure
+    )
+    check(
+      "ovsBridge: a port name that is too long is refused",
+      scala.util.Try(ovsBridge("x", "br0", List("a" * 16))).isFailure
+    )
     // manager
     val manager = ovsManager("loopback manager", "ptcp:6640:127.0.0.1")
-    check("ovsManager: no manager means it is needed", sh(part(manager, _.unless))._1 != 0)
+    check(
+      "ovsManager: no manager means it is needed",
+      sh(part(manager, _.unless))._1 != 0
+    )
     val set = sh(part(manager, _.run))
-    check("ovsManager: it sets the manager", set._1 == 0 && dump.contains("\"manager\": \"ptcp:6640:127.0.0.1\""), set.toString + dump)
-    check("ovsManager: it then means unchanged", sh(part(manager, _.unless))._1 == 0)
-    check("ovsManager: another manager means it is needed", sh(part(ovsManager("x", "ptcp:6640:127.0.0.2"), _.unless))._1 != 0)
-    check("ovsManager: a target with a quote is refused", scala.util.Try(ovsManager("x", "a'b")).isFailure)
+    check(
+      "ovsManager: it sets the manager",
+      set._1 == 0 && dump.contains("\"manager\": \"ptcp:6640:127.0.0.1\""),
+      set.toString + dump
+    )
+    check(
+      "ovsManager: it then means unchanged",
+      sh(part(manager, _.unless))._1 == 0
+    )
+    check(
+      "ovsManager: another manager means it is needed",
+      sh(part(ovsManager("x", "ptcp:6640:127.0.0.2"), _.unless))._1 != 0
+    )
+    check(
+      "ovsManager: a target with a quote is refused",
+      scala.util.Try(ovsManager("x", "a'b")).isFailure
+    )
     // port removal
     sh("ovs-vsctl add-port br-int o-hm0")
     val port = absentOvsPort("remove o-hm0", "br-int", "o-hm0")
-    check("absentOvsPort: it is wanted while the bridge has the port", sh(part(port, _.onlyIf))._1 == 0)
-    check("absentOvsPort: it is not wanted without Open vSwitch", sh(part(port, _.onlyIf), installed = false)._1 != 0)
+    check(
+      "absentOvsPort: it is wanted while the bridge has the port",
+      sh(part(port, _.onlyIf))._1 == 0
+    )
+    check(
+      "absentOvsPort: it is not wanted without Open vSwitch",
+      sh(part(port, _.onlyIf), installed = false)._1 != 0
+    )
     val unplugged = sh(part(port, _.run))
-    check("absentOvsPort: it removes the port and says so", unplugged._1 == 0 && unplugged._2.contains("o-hm0 removed from br-int") && !dump.contains("o-hm0"), unplugged.toString + dump)
-    check("absentOvsPort: nothing to do afterwards", sh(part(port, _.onlyIf))._1 != 0)
-    check("absentOvsPort: nor when the bridge is gone", sh(part(absentOvsPort("x", "br-gone", "o-hm0"), _.onlyIf))._1 != 0)
-    check("absentOvsPort: removing again still succeeds", sh(part(port, _.run))._1 == 0)
+    check(
+      "absentOvsPort: it removes the port and says so",
+      unplugged._1 == 0 && unplugged._2.contains(
+        "o-hm0 removed from br-int"
+      ) && !dump.contains("o-hm0"),
+      unplugged.toString + dump
+    )
+    check(
+      "absentOvsPort: nothing to do afterwards",
+      sh(part(port, _.onlyIf))._1 != 0
+    )
+    check(
+      "absentOvsPort: nor when the bridge is gone",
+      sh(part(absentOvsPort("x", "br-gone", "o-hm0"), _.onlyIf))._1 != 0
+    )
+    check(
+      "absentOvsPort: removing again still succeeds",
+      sh(part(port, _.run))._1 == 0
+    )
     // bridge removal
-    val gone = absentOvsBridge("delete the bridges", List("br-provider", "br-int"))
-    check("absentOvsBridge: it is wanted while either bridge exists", sh(part(gone, _.onlyIf))._1 == 0 && sh(part(absentOvsBridge("x", List("br-gone", "br-int")), _.onlyIf))._1 == 0)
-    check("absentOvsBridge: it is not wanted without Open vSwitch", sh(part(gone, _.onlyIf), installed = false)._1 != 0)
+    val gone =
+      absentOvsBridge("delete the bridges", List("br-provider", "br-int"))
+    check(
+      "absentOvsBridge: it is wanted while either bridge exists",
+      sh(part(gone, _.onlyIf))._1 == 0 && sh(
+        part(absentOvsBridge("x", List("br-gone", "br-int")), _.onlyIf)
+      )._1 == 0
+    )
+    check(
+      "absentOvsBridge: it is not wanted without Open vSwitch",
+      sh(part(gone, _.onlyIf), installed = false)._1 != 0
+    )
     val removed = sh(part(gone, _.run))
-    check("absentOvsBridge: it removes both and says so", removed._1 == 0 && removed._2.contains("br-provider br-int removed") && dump.contains("\"bridges\": {}"), removed.toString + dump)
-    check("absentOvsBridge: nothing to do afterwards", sh(part(gone, _.onlyIf))._1 != 0)
-    check("absentOvsBridge: removing bridges that are gone still succeeds", sh(part(gone, _.run))._1 == 0)
-    check("absentOvsBridge: no bridge is refused", scala.util.Try(absentOvsBridge("x", Nil)).isFailure)
+    check(
+      "absentOvsBridge: it removes both and says so",
+      removed._1 == 0 && removed._2.contains(
+        "br-provider br-int removed"
+      ) && dump.contains("\"bridges\": {}"),
+      removed.toString + dump
+    )
+    check(
+      "absentOvsBridge: nothing to do afterwards",
+      sh(part(gone, _.onlyIf))._1 != 0
+    )
+    check(
+      "absentOvsBridge: removing bridges that are gone still succeeds",
+      sh(part(gone, _.run))._1 == 0
+    )
+    check(
+      "absentOvsBridge: no bridge is refused",
+      scala.util.Try(absentOvsBridge("x", Nil)).isFailure
+    )
 
   private def sqlChecks(): Unit =
     val dir = Files.createTempDirectory("sqldb")
@@ -3730,35 +5504,62 @@ else:
          |esac
          |""".stripMargin
     )
-    check("sql: the fake mariadb is executable", fake.toFile.setExecutable(true))
+    check(
+      "sql: the fake mariadb is executable",
+      fake.toFile.setExecutable(true)
+    )
     def sh(script: String): Int = runShell(s"PATH=$bin:$$PATH\n$script")._1
-    def touch(n: String): Unit = { val _ = Files.writeString(dir.resolve(n), "") }
+    def touch(n: String): Unit = {
+      val _ = Files.writeString(dir.resolve(n), "")
+    }
     def gone(n: String): Unit = { val _ = Files.deleteIfExists(dir.resolve(n)) }
-    def part(r: ApplyResource, pick: ApplyResource.Command => String): String = r match
-      case c: ApplyResource.Command => pick(c)
-      case other                    => s"not a command: $other"
+    def part(r: ApplyResource, pick: ApplyResource.Command => String): String =
+      r match
+        case c: ApplyResource.Command => pick(c)
+        case other                    => s"not a command: $other"
     val pw = Secret("p'a\"s$s")
-    val db = sqlDatabase("db", List("alpha", "beta"), "owner", pw, "10.0.0.5", charset = "utf8mb4", collation = "utf8mb4_unicode_ci")
+    val db = sqlDatabase(
+      "db",
+      List("alpha", "beta"),
+      "owner",
+      pw,
+      "10.0.0.5",
+      charset = "utf8mb4",
+      collation = "utf8mb4_unicode_ci"
+    )
     val run = part(db, _.run)
     check(
       "sqlDatabase: each database is created with the character set",
-      run.contains("CREATE DATABASE IF NOT EXISTS alpha DEFAULT CHARACTER SET utf8mb4 DEFAULT COLLATE utf8mb4_unicode_ci; CREATE DATABASE IF NOT EXISTS beta"),
+      run.contains(
+        "CREATE DATABASE IF NOT EXISTS alpha DEFAULT CHARACTER SET utf8mb4 DEFAULT COLLATE utf8mb4_unicode_ci; CREATE DATABASE IF NOT EXISTS beta"
+      ),
       run
     )
     check(
       "sqlDatabase: the user is created, set and granted on each database",
-      run.contains("CREATE USER IF NOT EXISTS 'owner'@'%'") && run.contains("ALTER USER 'owner'@'%'") &&
+      run.contains("CREATE USER IF NOT EXISTS 'owner'@'%'") && run.contains(
+        "ALTER USER 'owner'@'%'"
+      ) &&
         run.contains("GRANT ALL PRIVILEGES ON alpha.* TO 'owner'@'%'") &&
-        run.contains("GRANT ALL PRIVILEGES ON beta.* TO 'owner'@'%'") && run.endsWith("FLUSH PRIVILEGES;\"")
+        run.contains("GRANT ALL PRIVILEGES ON beta.* TO 'owner'@'%'") && run
+          .endsWith("FLUSH PRIVILEGES;\"")
     )
     gone("login")
-    check("sqlDatabase: no login means it is needed", sh(part(db, _.unless)) != 0)
+    check(
+      "sqlDatabase: no login means it is needed",
+      sh(part(db, _.unless)) != 0
+    )
     touch("login")
-    check("sqlDatabase: a login on every database means unchanged", sh(part(db, _.unless)) == 0)
+    check(
+      "sqlDatabase: a login on every database means unchanged",
+      sh(part(db, _.unless)) == 0
+    )
     val seen = Files.readString(log)
     check(
       "sqlDatabase: it logs in as the user through the address, with the password",
-      seen.contains("pw=p'a\"s$s args=-N -h 10.0.0.5 -u owner alpha -e SELECT 1") && seen.contains("owner beta -e"),
+      seen.contains(
+        "pw=p'a\"s$s args=-N -h 10.0.0.5 -u owner alpha -e SELECT 1"
+      ) && seen.contains("owner beta -e"),
       seen
     )
     Files.writeString(log, "")
@@ -3769,28 +5570,60 @@ else:
       ran.contains("IDENTIFIED BY 'p\\'a\"s$s'"),
       ran
     )
-    check("sqlDatabase: a name with a quote is refused", scala.util.Try(sqlDatabase("x", List("a'b"), "u", pw, "h")).isFailure)
-    check("sqlDatabase: no databases is refused", scala.util.Try(sqlDatabase("x", Nil, "u", pw, "h")).isFailure)
-    check("sqlDatabase: a bad address is refused", scala.util.Try(sqlDatabase("x", List("a"), "u", pw, "a b")).isFailure)
+    check(
+      "sqlDatabase: a name with a quote is refused",
+      scala.util.Try(sqlDatabase("x", List("a'b"), "u", pw, "h")).isFailure
+    )
+    check(
+      "sqlDatabase: no databases is refused",
+      scala.util.Try(sqlDatabase("x", Nil, "u", pw, "h")).isFailure
+    )
+    check(
+      "sqlDatabase: a bad address is refused",
+      scala.util.Try(sqlDatabase("x", List("a"), "u", pw, "a b")).isFailure
+    )
     val drop = absentSqlDatabase("drop", List("alpha", "beta"), "owner")
     check(
       "absentSqlDatabase: both databases and the user are dropped",
-      part(drop, _.run) == "mariadb -N -e \"DROP DATABASE IF EXISTS alpha; DROP DATABASE IF EXISTS beta; DROP USER IF EXISTS 'owner'@'%'; FLUSH PRIVILEGES;\"",
+      part(
+        drop,
+        _.run
+      ) == "mariadb -N -e \"DROP DATABASE IF EXISTS alpha; DROP DATABASE IF EXISTS beta; DROP USER IF EXISTS 'owner'@'%'; FLUSH PRIVILEGES;\"",
       part(drop, _.run)
     )
     gone("exists")
-    check("absentSqlDatabase: nothing there means nothing to do", sh(part(drop, _.onlyIf)) != 0)
+    check(
+      "absentSqlDatabase: nothing there means nothing to do",
+      sh(part(drop, _.onlyIf)) != 0
+    )
     touch("exists")
-    check("absentSqlDatabase: something there means it runs", sh(part(drop, _.onlyIf)) == 0)
+    check(
+      "absentSqlDatabase: something there means it runs",
+      sh(part(drop, _.onlyIf)) == 0
+    )
     gone("exists")
     touch("down")
-    check("absentSqlDatabase: a server that cannot be queried means it runs", sh(part(drop, _.onlyIf)) == 0)
-    check("absentSqlDatabase: no databases is refused", scala.util.Try(absentSqlDatabase("x", Nil, "u")).isFailure)
+    check(
+      "absentSqlDatabase: a server that cannot be queried means it runs",
+      sh(part(drop, _.onlyIf)) == 0
+    )
+    check(
+      "absentSqlDatabase: no databases is refused",
+      scala.util.Try(absentSqlDatabase("x", Nil, "u")).isFailure
+    )
 
   private def absentContainerUnitsChecks(): Unit =
     val rs = absentContainerUnits(List("orphera-a" -> "a", "orphera-b" -> "b"))
-    check("absentContainerUnits: three resources a unit and a reload", rs.size == 7, rs.map(_.id).toString)
-    check("absentContainerUnits: the description is valid", ApplyPlan("gone", rs).isRight, ApplyPlan("gone", rs).toString)
+    check(
+      "absentContainerUnits: three resources a unit and a reload",
+      rs.size == 7,
+      rs.map(_.id).toString
+    )
+    check(
+      "absentContainerUnits: the description is valid",
+      ApplyPlan("gone", rs).isRight,
+      ApplyPlan("gone", rs).toString
+    )
     check(
       "absentContainerUnits: the units are stopped and disabled",
       rs.contains(service("orphera-a", Some(false), Some(false))) &&
@@ -3801,15 +5634,23 @@ else:
       rs.exists(_.id == "file[/etc/systemd/system/orphera-a.service]") &&
         rs.exists(_.id == "file[/etc/systemd/system/orphera-b.service]")
     )
-    val removal = rs.collectFirst { case c: ApplyResource.Command if c.label == "remove the a container" => c }
+    val removal = rs.collectFirst {
+      case c: ApplyResource.Command if c.label == "remove the a container" => c
+    }
     check(
       "absentContainerUnits: a container is removed only when podman has it",
-      removal.exists(c => c.run == "podman rm -f 'a'" && c.onlyIf.contains("podman container exists 'a'")),
+      removal.exists(c =>
+        c.run == "podman rm -f 'a'" && c.onlyIf.contains(
+          "podman container exists 'a'"
+        )
+      ),
       removal.toString
     )
     check(
       "absentContainerUnits: systemd reloads once, when notified",
-      rs.collect { case c: ApplyResource.Command if c.onChangeOnly => c }.size == 1
+      rs.collect {
+        case c: ApplyResource.Command if c.onChangeOnly => c
+      }.size == 1
     )
     check(
       "absentContainerUnits: no units is refused",
@@ -3836,34 +5677,64 @@ else:
          |esac
          |""".stripMargin
     )
-    check("pullImages: the fake podman is executable", fake.toFile.setExecutable(true))
-    def sh(script: String): (Int, String) = runShell(s"PATH=$bin:$$PATH\n$script")
-    def part(r: ApplyResource, pick: ApplyResource.Command => String): String = r match
-      case c: ApplyResource.Command => pick(c)
-      case other                    => s"not a command: $other"
-    val r = pullImages("images", List("quay.io/a/one:1", "quay.io/a/two:2"), hint = "the manifest")
-    check("pullImages: missing images are not present", sh(part(r, _.unless))._1 != 0)
+    check(
+      "pullImages: the fake podman is executable",
+      fake.toFile.setExecutable(true)
+    )
+    def sh(script: String): (Int, String) = runShell(
+      s"PATH=$bin:$$PATH\n$script"
+    )
+    def part(r: ApplyResource, pick: ApplyResource.Command => String): String =
+      r match
+        case c: ApplyResource.Command => pick(c)
+        case other                    => s"not a command: $other"
+    val r = pullImages(
+      "images",
+      List("quay.io/a/one:1", "quay.io/a/two:2"),
+      hint = "the manifest"
+    )
+    check(
+      "pullImages: missing images are not present",
+      sh(part(r, _.unless))._1 != 0
+    )
     val first = sh(part(r, _.run))
     check("pullImages: the run pulls them", first._1 == 0, first.toString)
     check(
       "pullImages: both were pulled once",
-      java.nio.file.Files.readAllLines(state.resolve("log")).toArray.toList == List("quay.io/a/one:1", "quay.io/a/two:2")
+      java.nio.file.Files
+        .readAllLines(state.resolve("log"))
+        .toArray
+        .toList == List("quay.io/a/one:1", "quay.io/a/two:2")
     )
-    check("pullImages: present images are not missing", sh(part(r, _.unless))._1 == 0)
+    check(
+      "pullImages: present images are not missing",
+      sh(part(r, _.unless))._1 == 0
+    )
     sh(part(r, _.run))
     check(
       "pullImages: a run with them present pulls nothing more",
       java.nio.file.Files.readAllLines(state.resolve("log")).size == 2
     )
-    val more = pullImages("images", List("quay.io/a/one:1", "quay.io/a/three:3"))
+    val more =
+      pullImages("images", List("quay.io/a/one:1", "quay.io/a/three:3"))
     sh(part(more, _.run))
     check(
       "pullImages: only the missing one is pulled",
-      java.nio.file.Files.readAllLines(state.resolve("log")).toArray.toList.last == "quay.io/a/three:3" &&
+      java.nio.file.Files
+        .readAllLines(state.resolve("log"))
+        .toArray
+        .toList
+        .last == "quay.io/a/three:3" &&
         java.nio.file.Files.readAllLines(state.resolve("log")).size == 3
     )
-    check("pullImages: no images is refused", scala.util.Try(pullImages("x", Nil)).isFailure)
-    check("pullImages: a space in a reference is refused", scala.util.Try(pullImages("x", List("a b"))).isFailure)
+    check(
+      "pullImages: no images is refused",
+      scala.util.Try(pullImages("x", Nil)).isFailure
+    )
+    check(
+      "pullImages: a space in a reference is refused",
+      scala.util.Try(pullImages("x", List("a b"))).isFailure
+    )
 
   private def waitForChecks(): Unit =
     val server = com.sun.net.httpserver.HttpServer
@@ -3900,7 +5771,9 @@ else:
       )
       check(
         "waitForHttp: a 300 counts when listed",
-        runShell(guard(waitForHttp("multi", s"$base/multi", status = List(200, 300))))._1 == 0
+        runShell(
+          guard(waitForHttp("multi", s"$base/multi", status = List(200, 300)))
+        )._1 == 0
       )
       check(
         "waitForHttp: a 503 is not an answer",
@@ -3908,24 +5781,48 @@ else:
       )
       check(
         "waitForHttp: the body text is found",
-        runShell(guard(waitForHttp("v", s"$base/ok", contains = "\"version\"")))._1 == 0
+        runShell(
+          guard(waitForHttp("v", s"$base/ok", contains = "\"version\""))
+        )._1 == 0
       )
       check(
         "waitForHttp: the body text is missing",
-        runShell(guard(waitForHttp("v", s"$base/ok", contains = "nothing like this")))._1 != 0
+        runShell(
+          guard(waitForHttp("v", s"$base/ok", contains = "nothing like this"))
+        )._1 != 0
       )
       check(
         "waitForHttp: a text with a quote is passed safely",
-        runShell(guard(waitForHttp("q", s"$base/ok", contains = "it's")))._1 != 0
+        runShell(
+          guard(waitForHttp("q", s"$base/ok", contains = "it's"))
+        )._1 != 0
       )
-      val waited = runShell(body(waitForHttp("the api", s"$base/down", timeout = 2, interval = 1, hint = "see the log")))
+      val waited = runShell(
+        body(
+          waitForHttp(
+            "the api",
+            s"$base/down",
+            timeout = 2,
+            interval = 1,
+            hint = "see the log"
+          )
+        )
+      )
       check(
         "waitForHttp: gives up with the URL and the hint",
-        waited._1 == 1 && waited._2.contains(s"the api: no answer from $base/down after 2 s - see the log"),
+        waited._1 == 1 && waited._2.contains(
+          s"the api: no answer from $base/down after 2 s - see the log"
+        ),
         waited.toString
       )
-      val soon = runShell(body(waitForHttp("the api", s"$base/ok", timeout = 5, interval = 1)))
-      check("waitForHttp: the script exits 0 at once when it answers", soon._1 == 0 && soon._2.isEmpty, soon.toString)
+      val soon = runShell(
+        body(waitForHttp("the api", s"$base/ok", timeout = 5, interval = 1))
+      )
+      check(
+        "waitForHttp: the script exits 0 at once when it answers",
+        soon._1 == 0 && soon._2.isEmpty,
+        soon.toString
+      )
       check(
         "waitForHttp: a name is resolved to this node",
         runShell(
@@ -3940,7 +5837,9 @@ else:
       )
       check(
         "waitForHttp: without the mapping the name does not resolve",
-        runShell(guard(waitForHttp("r", s"http://named.invalid:$port/ok")))._1 != 0
+        runShell(
+          guard(waitForHttp("r", s"http://named.invalid:$port/ok"))
+        )._1 != 0
       )
       check(
         "waitForPort: an open port answers",
@@ -3951,17 +5850,37 @@ else:
         "waitForPort: a closed port does not",
         runShell(guard(waitForPort("port", "127.0.0.1", port)))._1 != 0
       )
-      val closed = runShell(body(waitForPort("the port", "127.0.0.1", port, timeout = 2, interval = 1)))
+      val closed = runShell(
+        body(
+          waitForPort("the port", "127.0.0.1", port, timeout = 2, interval = 1)
+        )
+      )
       check(
         "waitForPort: gives up with the address",
-        closed._1 == 1 && closed._2.contains(s"the port: no answer from 127.0.0.1:$port after 2 s"),
+        closed._1 == 1 && closed._2.contains(
+          s"the port: no answer from 127.0.0.1:$port after 2 s"
+        ),
         closed.toString
       )
     finally server.stop(0)
-    check("waitForHttp: no status codes is refused", scala.util.Try(waitForHttp("x", "http://h/", status = Nil)).isFailure)
-    check("waitForHttp: a timeout below the interval is refused", scala.util.Try(waitForHttp("x", "http://h/", timeout = 1, interval = 5)).isFailure)
-    check("waitForPort: a host with a space is refused", scala.util.Try(waitForPort("x", "a b", 80)).isFailure)
-    check("waitForPort: port 0 is refused", scala.util.Try(waitForPort("x", "h", 0)).isFailure)
+    check(
+      "waitForHttp: no status codes is refused",
+      scala.util.Try(waitForHttp("x", "http://h/", status = Nil)).isFailure
+    )
+    check(
+      "waitForHttp: a timeout below the interval is refused",
+      scala.util
+        .Try(waitForHttp("x", "http://h/", timeout = 1, interval = 5))
+        .isFailure
+    )
+    check(
+      "waitForPort: a host with a space is refused",
+      scala.util.Try(waitForPort("x", "a b", 80)).isFailure
+    )
+    check(
+      "waitForPort: port 0 is refused",
+      scala.util.Try(waitForPort("x", "h", 0)).isFailure
+    )
     val http = waitForHttp("l", "http://h/", ca = "/etc/ca.crt")
     check(
       "waitForHttp: the CA is passed to curl",

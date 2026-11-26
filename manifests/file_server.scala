@@ -123,7 +123,9 @@ object file_server extends OrpheraPlaybook:
       )
       ApplyPlan.orFail(
         "file-server-accounts",
-        fileUsers :: perUser ::: List(shareDirectory) ::: timeMachineDirectory ::: List(keepOriginal)
+        fileUsers :: perUser ::: List(
+          shareDirectory
+        ) ::: timeMachineDirectory ::: List(keepOriginal)
       )
 
   // The macOS settings are the ones the Samba project documents for vfs_fruit. `multicast dns register = no`
@@ -255,7 +257,8 @@ object file_server extends OrpheraPlaybook:
       "smbd and avahi-daemon are running",
       """systemctl is-active --quiet smbd || { echo "smbd is not running: journalctl -xeu smbd" >&2; exit 1; }
         |systemctl is-active --quiet avahi-daemon || { echo "avahi-daemon is not running: journalctl -xeu avahi-daemon" >&2; exit 1; }""".stripMargin,
-      unless = "systemctl is-active --quiet smbd && systemctl is-active --quiet avahi-daemon"
+      unless =
+        "systemctl is-active --quiet smbd && systemctl is-active --quiet avahi-daemon"
     ).after(smbdRunning, avahiRunning)
     ApplyPlan.orFail(
       "file-server-services",
@@ -301,7 +304,9 @@ object file_server extends OrpheraPlaybook:
       .task("make the accounts, the group and the share directories")(
         Task.Apply(accountsPlan)
       )
-      .task("write smb.conf and the Avahi announcement; run smbd and avahi-daemon")(
+      .task(
+        "write smb.conf and the Avahi announcement; run smbd and avahi-daemon"
+      )(
         Task.Apply(servicesPlan)
       )
       .task("check the share by using it")(

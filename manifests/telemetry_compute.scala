@@ -219,7 +219,8 @@ object telemetry_compute extends OrpheraApply:
       "the exporter answers on its port",
       s"http://localhost:$exporterPort/metrics",
       timeout = 180,
-      hint = s"see 'journalctl -xeu orphera-ceilometer-compute' and $ceilometerLogDir"
+      hint =
+        s"see 'journalctl -xeu orphera-ceilometer-compute' and $ceilometerLogDir"
     ).after(running)
 
     tools ++ List(

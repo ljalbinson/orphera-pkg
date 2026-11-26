@@ -588,7 +588,13 @@ if __name__ == '__main__':
       "register Cinder in Keystone",
       "cinder",
       cinderPassword,
-      List(KeystoneService("cinderv3", "volumev3", s"http://$fqdn:$apiPort/v3/%(project_id)s")),
+      List(
+        KeystoneService(
+          "cinderv3",
+          "volumev3",
+          s"http://$fqdn:$apiPort/v3/%(project_id)s"
+        )
+      ),
       s"https://$ksFqdn:5000",
       adminPassword,
       caCert
@@ -622,5 +628,10 @@ if __name__ == '__main__':
       ca,
       logDirectory,
       stateDirectory
-    ) ++ svcs.flatMap(_.resources) ++ List(dbSync, helperFile, keystoneHelper, registered) ++
+    ) ++ svcs.flatMap(_.resources) ++ List(
+      dbSync,
+      helperFile,
+      keystoneHelper,
+      registered
+    ) ++
       running ++ List(answering, reporting)

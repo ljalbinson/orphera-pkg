@@ -485,7 +485,8 @@ object keystone_single_node extends OrpheraApply:
     val pulled = pullImages(
       "pull the Kolla keystone image",
       List(image),
-      hint = "the registry path and tag, the Image(...) in keystoneContainer in keystone_single_node.scala",
+      hint =
+        "the registry path and tag, the Image(...) in keystoneContainer in keystone_single_node.scala",
       timeout = 1200
     ).after(podman, mirror)
 

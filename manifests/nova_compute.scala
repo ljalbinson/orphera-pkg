@@ -874,7 +874,10 @@ if __name__ == '__main__':
     // the root-only unix socket; it talks to ovsdb over loopback TCP instead (os-vif's default), stored in the OVS
     // database.
     val ovsHost = service("openvswitch-switch.service").after(tools*)
-    val ovsLoopback = ovsManager("let nova-compute reach Open vSwitch over loopback TCP", "ptcp:6640:127.0.0.1")
+    val ovsLoopback = ovsManager(
+      "let nova-compute reach Open vSwitch over loopback TCP",
+      "ptcp:6640:127.0.0.1"
+    )
       .after(ovsHost)
     val bridge = ovsBridge(
       s"create $providerBridge with $providerNic as its port",
@@ -891,7 +894,8 @@ if __name__ == '__main__':
     val pulled = pullImages(
       "pull the Nova compute and Neutron OVS agent images",
       images,
-      hint = "the Image(...) values in novaCompute and ovsAgent in nova_compute.scala",
+      hint =
+        "the Image(...) values in novaCompute and ovsAgent in nova_compute.scala",
       timeout = 2400
     ).after(podman, mirror)
 

@@ -831,5 +831,10 @@ if __name__ == '__main__':
       logDirectory,
       stateDirectory,
       tmpDirectory
-    ) ++ svcs.flatMap(_.resources) ++ List(dbSync, helperFile, keystoneHelper, registered) ++
+    ) ++ svcs.flatMap(_.resources) ++ List(
+      dbSync,
+      helperFile,
+      keystoneHelper,
+      registered
+    ) ++
       running ++ List(answering, reporting, shareType, shareCycle)

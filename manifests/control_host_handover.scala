@@ -126,14 +126,24 @@ object control_host_handover extends OrpheraClusterPlaybook:
           owner = user,
           group = user
         ),
-        directory(s"$remoteHome/.config", mode = "0700", owner = user, group = user),
+        directory(
+          s"$remoteHome/.config",
+          mode = "0700",
+          owner = user,
+          group = user
+        ),
         directory(
           s"$remoteHome/.config/orphera",
           mode = "0700",
           owner = user,
           group = user
         ),
-        directory(s"$remoteHome/.ssh", mode = "0700", owner = user, group = user)
+        directory(
+          s"$remoteHome/.ssh",
+          mode = "0700",
+          owner = user,
+          group = user
+        )
       )
     )
 

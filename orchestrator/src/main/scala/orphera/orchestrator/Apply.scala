@@ -61,8 +61,8 @@ object ApplyResource:
     /** Text with `{{...}}` in it, rendered on this node with its facts and vars
       * (and `vars`) when the file is compared: `{{cluster_ip}}`,
       * `{{nodes.tst4.cluster_ip}}`, `{{node_name}}` (the node's inventory
-      * name), `{{default_interface}}` (the interface of
-      * the node's default route).
+      * name), `{{default_interface}}` (the interface of the node's default
+      * route).
       */
     case Template(text: String, vars: Map[String, String])
 
@@ -308,8 +308,8 @@ object Resources:
   ): ApplyResource =
     File(path, Some(Content.Text(content)), mode, owner, group, present = true)
 
-  /** A file that is written when it is not there and never again: what it
-    * holds afterwards is the user's. Its mode, owner and group are still kept.
+  /** A file that is written when it is not there and never again: what it holds
+    * afterwards is the user's. Its mode, owner and group are still kept.
     */
   def seedFile(
       path: String,
@@ -538,29 +538,40 @@ object Resources:
 
   private def rabbitName(what: String, text: String): Unit =
     require(
-      text.nonEmpty && text.forall(c => c.isLetterOrDigit || c == '_' || c == '-' || c == '.'),
+      text.nonEmpty && text.forall(c =>
+        c.isLetterOrDigit || c == '_' || c == '-' || c == '.'
+      ),
       s"$what must be letters, digits, underscores, hyphens and dots, not '$text'"
     )
 
-  private val RabbitUp = "podman ps -q --filter 'name=^rabbitmq$' 2>/dev/null | grep -q ."
+  private val RabbitUp =
+    "podman ps -q --filter 'name=^rabbitmq$' 2>/dev/null | grep -q ."
 
-  /** A vhost and its user on a RabbitMQ broker that runs as the container `rabbitmq` on the node, as a
-    * description. The user has the password and full permissions on the vhost, so a rotated password is
-    * applied by running it again. It is `unchanged` while the vhost exists, the user can authenticate with
-    * the password and has full permissions on it. With the vhost `/` (always there) only the user is made.
-    * The broker is not touched otherwise; with no running `rabbitmq` container the step fails and says so.
+  /** A vhost and its user on a RabbitMQ broker that runs as the container
+    * `rabbitmq` on the node, as a description. The user has the password and
+    * full permissions on the vhost, so a rotated password is applied by running
+    * it again. It is `unchanged` while the vhost exists, the user can
+    * authenticate with the password and has full permissions on it. With the
+    * vhost `/` (always there) only the user is made. The broker is not touched
+    * otherwise; with no running `rabbitmq` container the step fails and says
+    * so.
     */
-  def rabbitAccount(label: String, vhost: String, user: String, password: Secret): ApplyResource =
+  def rabbitAccount(
+      label: String,
+      vhost: String,
+      user: String,
+      password: Secret
+  ): ApplyResource =
     rabbitName("a vhost", if vhost == "/" then "default" else vhost)
     rabbitName("a user", user)
     val vh = Apply.quote(vhost)
     val u = Apply.quote(user)
     val pw = Apply.quote(password.reveal)
-    val vhostCheck = s"podman exec rabbitmq rabbitmqctl list_vhosts -q | grep -qx $vh"
+    val vhostCheck =
+      s"podman exec rabbitmq rabbitmqctl list_vhosts -q | grep -qx $vh"
     val makeVhost =
       if vhost == "/" then ""
-      else
-        s"""if ! $vhostCheck; then
+      else s"""if ! $vhostCheck; then
            |  podman exec rabbitmq rabbitmqctl add_vhost $vh
            |fi
            |""".stripMargin
@@ -582,14 +593,25 @@ object Resources:
     val hasFullPermissions =
       s"""podman exec rabbitmq rabbitmqctl list_permissions -p $vh -q | awk -F'\t' '$$1=="$user" && $$2==".*" && $$3==".*" && $$4==".*" {found=1} END {exit !found}'"""
     val inPlace =
-      (if vhost == "/" then Nil else List(vhostCheck)) ::: List(canAuthenticate, hasFullPermissions)
+      (if vhost == "/" then Nil else List(vhostCheck)) ::: List(
+        canAuthenticate,
+        hasFullPermissions
+      )
     command(label, run, unless = inPlace.mkString(" && "), timeout = 120)
 
-  /** The vhost and the user gone from the broker, as a description: removed when either exists in a running
-    * broker. With no running broker there is nothing to remove.
+  /** The vhost and the user gone from the broker, as a description: removed
+    * when either exists in a running broker. With no running broker there is
+    * nothing to remove.
     */
-  def absentRabbitAccount(label: String, vhost: String, user: String): ApplyResource =
-    require(vhost != "/", "absentRabbitAccount does not remove the default vhost")
+  def absentRabbitAccount(
+      label: String,
+      vhost: String,
+      user: String
+  ): ApplyResource =
+    require(
+      vhost != "/",
+      "absentRabbitAccount does not remove the default vhost"
+    )
     rabbitName("a vhost", vhost)
     rabbitName("a user", user)
     val vh = Apply.quote(vhost)
@@ -604,13 +626,15 @@ object Resources:
       timeout = 60
     )
 
-  /** The CA behind a TLS server, as a description: the last certificate the server presents (trust on first
-    * use), which must be self-signed and must verify the server's own certificate. It is written to `caFile`
-    * (its directory is made) and, unless `trust` is false, added to the system trust store (a file in
-    * `anchorsDeb` where `update-ca-certificates` exists, otherwise in `anchorsRpm`, followed by the matching
-    * refresh). It is `unchanged` while `caFile` equals the CA the server presents now (and the trust store
-    * holds it). The server must present at least the leaf and the CA; `hint` is appended to the message when
-    * it does not.
+  /** The CA behind a TLS server, as a description: the last certificate the
+    * server presents (trust on first use), which must be self-signed and must
+    * verify the server's own certificate. It is written to `caFile` (its
+    * directory is made) and, unless `trust` is false, added to the system trust
+    * store (a file in `anchorsDeb` where `update-ca-certificates` exists,
+    * otherwise in `anchorsRpm`, followed by the matching refresh). It is
+    * `unchanged` while `caFile` equals the CA the server presents now (and the
+    * trust store holds it). The server must present at least the leaf and the
+    * CA; `hint` is appended to the message when it does not.
     */
   def serverCa(
       label: String,
@@ -622,17 +646,31 @@ object Resources:
       anchorsDeb: String = "/usr/local/share/ca-certificates",
       anchorsRpm: String = "/etc/pki/ca-trust/source/anchors"
   ): ApplyResource =
-    require(host.nonEmpty && host.forall(c => c.isLetterOrDigit || c == '.' || c == '-'), s"not a host name: '$host'")
+    require(
+      host.nonEmpty && host.forall(c =>
+        c.isLetterOrDigit || c == '.' || c == '-'
+      ),
+      s"not a host name: '$host'"
+    )
     require(port >= 1 && port <= 65535, s"not a port: $port")
-    require(caFile.startsWith("/") && !caFile.endsWith("/"), s"caFile must be an absolute file path: '$caFile'")
-    require(!hint.exists(c => c == '"' || c == '$' || c == '`' || c == '\\'), "hint must not hold \" $ ` or \\")
+    require(
+      caFile.startsWith("/") && !caFile.endsWith("/"),
+      s"caFile must be an absolute file path: '$caFile'"
+    )
+    require(
+      !hint.exists(c => c == '"' || c == '$' || c == '`' || c == '\\'),
+      "hint must not hold \" $ ` or \\"
+    )
     val cf = Apply.quote(caFile)
     val parent = caFile.substring(0, caFile.lastIndexOf('/'))
     val dir = Apply.quote(if parent.isEmpty then "/" else parent)
     val chainTo =
       s"""chainTo() { openssl s_client -connect $host:$port -servername $host -showcerts </dev/null 2>/dev/null | awk -v d="$$1" '/-----BEGIN CERTIFICATE-----/{n++; p=1} p{print > (d "/c" n ".pem")} /-----END CERTIFICATE-----/{p=0}'; }"""
     val trustTarget =
-      s"""if command -v update-ca-certificates >/dev/null 2>&1; then t=${Apply.quote(s"$anchorsDeb/orphera-test-ca.crt")}; else t=${Apply.quote(s"$anchorsRpm/orphera-test-ca.crt")}; fi"""
+      s"""if command -v update-ca-certificates >/dev/null 2>&1; then t=${Apply
+          .quote(s"$anchorsDeb/orphera-test-ca.crt")}; else t=${Apply.quote(
+          s"$anchorsRpm/orphera-test-ca.crt"
+        )}; fi"""
     val current =
       if trust then s"""  $trustTarget
          |  cmp -s "$$D/c$$N.pem" $cf && cmp -s $cf "$$t" && R=0""".stripMargin
@@ -676,13 +714,15 @@ object Resources:
          |${install}echo "CA of $host:$port installed: $$SUBJ"""".stripMargin
     command(label, run, unless = unless, timeout = 60)
 
-  /** An apt repository with its signing key, as a description: the key fetched from `keyUrl` and dearmored
-    * into `keyring`, and `sourcesFile` holding the one line `deb [signed-by=<keyring>] <repository>`
-    * (`repository` is what follows, such as `https://apt.example.com stable main`). It is `unchanged` while the
-    * keyring is there and the sources file holds exactly that line (and, when `offers` names a package, apt
-    * offers that package from the repository's host). With `update` the run also refreshes the package lists
-    * of this source alone (with up to three tries), so a package installed right after sees it. The node needs
-    * `curl` and `gpg`.
+  /** An apt repository with its signing key, as a description: the key fetched
+    * from `keyUrl` and dearmored into `keyring`, and `sourcesFile` holding the
+    * one line `deb [signed-by=<keyring>] <repository>` (`repository` is what
+    * follows, such as `https://apt.example.com stable main`). It is `unchanged`
+    * while the keyring is there and the sources file holds exactly that line
+    * (and, when `offers` names a package, apt offers that package from the
+    * repository's host). With `update` the run also refreshes the package lists
+    * of this source alone (with up to three tries), so a package installed
+    * right after sees it. The node needs `curl` and `gpg`.
     */
   def aptRepository(
       label: String,
@@ -696,37 +736,66 @@ object Resources:
   ): ApplyResource =
     def absolute(what: String, path: String): Unit =
       require(
-        path.startsWith("/") && !path.endsWith("/") && path.forall(c => c.isLetterOrDigit || "/._-".contains(c)),
+        path.startsWith("/") && !path.endsWith("/") && path.forall(c =>
+          c.isLetterOrDigit || "/._-".contains(c)
+        ),
         s"$what must be an absolute file path of letters, digits and / . _ -: '$path'"
       )
     absolute("keyring", keyring)
     absolute("sourcesFile", sourcesFile)
-    require(keyUrl.startsWith("https://") && !keyUrl.exists(c => c.isWhitespace || c == '\''), s"keyUrl must be an https URL: '$keyUrl'")
     require(
-      repository.startsWith("https://") && repository.forall(c => c.isLetterOrDigit || ":/._+~- ".contains(c)),
+      keyUrl.startsWith("https://") && !keyUrl.exists(c =>
+        c.isWhitespace || c == '\''
+      ),
+      s"keyUrl must be an https URL: '$keyUrl'"
+    )
+    require(
+      repository.startsWith("https://") && repository.forall(c =>
+        c.isLetterOrDigit || ":/._+~- ".contains(c)
+      ),
       s"repository must start with https:// and hold letters, digits and : / . _ + ~ - and spaces: '$repository'"
     )
-    require(offers.forall(c => c.isLetterOrDigit || "._+-".contains(c)), s"not a package name: '$offers'")
+    require(
+      offers.forall(c => c.isLetterOrDigit || "._+-".contains(c)),
+      s"not a package name: '$offers'"
+    )
     val line = s"deb [signed-by=$keyring] $repository"
-    val host = repository.stripPrefix("https://").takeWhile(c => c != '/' && c != ' ')
-    val offered = if offers.isEmpty then "" else s" && apt-cache policy ${Apply.quote(offers)} 2>/dev/null | grep -qF ${Apply.quote(host)}"
+    val host =
+      repository.stripPrefix("https://").takeWhile(c => c != '/' && c != ' ')
+    val offered = if offers.isEmpty then ""
+    else
+      s" && apt-cache policy ${Apply.quote(offers)} 2>/dev/null | grep -qF ${Apply.quote(host)}"
     val unless =
-      s"""[ -s ${Apply.quote(keyring)} ] && [ "$$(cat ${Apply.quote(sourcesFile)} 2>/dev/null)" = ${Apply.quote(line)} ]$offered"""
-    def parent(path: String): String = Apply.quote(if path.lastIndexOf('/') == 0 then "/" else path.substring(0, path.lastIndexOf('/')))
+      s"""[ -s ${Apply.quote(keyring)} ] && [ "$$(cat ${Apply.quote(
+          sourcesFile
+        )} 2>/dev/null)" = ${Apply.quote(line)} ]$offered"""
+    def parent(path: String): String =
+      Apply.quote(if path.lastIndexOf('/') == 0 then "/"
+      else path.substring(0, path.lastIndexOf('/')))
     val refresh =
       if update then
-        s"""for try in 1 2 3; do timeout -k 10 180 apt-get update -o Dir::Etc::sourcelist=${Apply.quote(sourcesFile)} -o Dir::Etc::sourceparts=- -o APT::Get::List-Cleanup=0 && break; done
+        s"""for try in 1 2 3; do timeout -k 10 180 apt-get update -o Dir::Etc::sourcelist=${Apply
+            .quote(
+              sourcesFile
+            )} -o Dir::Etc::sourceparts=- -o APT::Get::List-Cleanup=0 && break; done
            |""".stripMargin
       else ""
     val check =
       if offers.isEmpty then ""
-      else s"""apt-cache policy ${Apply.quote(offers)} | grep -qF ${Apply.quote(host)} || { echo "$offers is not offered by $host" >&2; exit 1; }
+      else
+        s"""apt-cache policy ${Apply.quote(offers)} | grep -qF ${Apply.quote(
+            host
+          )} || { echo "$offers is not offered by $host" >&2; exit 1; }
               |""".stripMargin
     val run =
       s"""set -e
          |install -d -m 755 ${parent(keyring)} ${parent(sourcesFile)}
-         |curl -fsSL --retry 3 ${Apply.quote(keyUrl)} | gpg --dearmor --yes -o ${Apply.quote(keyring)}
-         |[ -s ${Apply.quote(keyring)} ] || { echo "no key came from $keyUrl" >&2; exit 1; }
+         |curl -fsSL --retry 3 ${Apply.quote(
+          keyUrl
+        )} | gpg --dearmor --yes -o ${Apply.quote(keyring)}
+         |[ -s ${Apply.quote(
+          keyring
+        )} ] || { echo "no key came from $keyUrl" >&2; exit 1; }
          |chmod 644 ${Apply.quote(keyring)}
          |printf '%s\\n' ${Apply.quote(line)} > ${Apply.quote(sourcesFile)}
          |$refresh$check""".stripMargin + s"""echo "apt repository $host configured""""
@@ -734,23 +803,30 @@ object Resources:
 
   private def absoluteClean(what: String, path: String): Unit =
     require(
-      path.startsWith("/") && !path.endsWith("/") && !path.contains("//") && !path.split('/').contains("..") &&
+      path.startsWith("/") && !path.endsWith("/") && !path.contains(
+        "//"
+      ) && !path.split('/').contains("..") &&
         path.forall(c => c.isLetterOrDigit || "/._+-".contains(c)),
       s"$what must be a clean absolute file path of letters, digits and / . _ + -: '$path'"
     )
 
   private def plainUrl(url: String): Unit =
     require(
-      (url.startsWith("https://") || url.startsWith("http://")) && !url.exists(c => c.isWhitespace || "'\"`$\\".contains(c)),
+      (url.startsWith("https://") || url.startsWith("http://")) && !url.exists(
+        c => c.isWhitespace || "'\"`$\\".contains(c)
+      ),
       s"not a plain http(s) URL: '$url'"
     )
 
-  /** A file downloaded to `path`, as a description. It is fetched to `path.part` (with a line printed every 20
-    * seconds, so that a long download does not lose its connection to the agent), checked, and only then moved
-    * into place; a failed download leaves nothing at `path`. `magic` is what the file must start with (such as
-    * `QFI` for qcow2) and `sha256` its checksum, each checked when given. It is `unchanged` while `path` is not
-    * empty and passes the checks, or while `skipIf` (a shell test, such as "the image is already in Glance")
-    * succeeds. A file that fails the checks is fetched again.
+  /** A file downloaded to `path`, as a description. It is fetched to
+    * `path.part` (with a line printed every 20 seconds, so that a long download
+    * does not lose its connection to the agent), checked, and only then moved
+    * into place; a failed download leaves nothing at `path`. `magic` is what
+    * the file must start with (such as `QFI` for qcow2) and `sha256` its
+    * checksum, each checked when given. It is `unchanged` while `path` is not
+    * empty and passes the checks, or while `skipIf` (a shell test, such as "the
+    * image is already in Glance") succeeds. A file that fails the checks is
+    * fetched again.
     */
   def download(
       label: String,
@@ -763,23 +839,41 @@ object Resources:
   ): ApplyResource =
     plainUrl(url)
     absoluteClean("path", path)
-    require(magic.length <= 8 && magic.forall(c => c.isLetterOrDigit), s"magic must be up to 8 letters or digits: '$magic'")
-    require(sha256.isEmpty || (sha256.length == 64 && sha256.forall(c => "0123456789abcdef".contains(c))), "sha256 must be 64 lower-case hex digits")
+    require(
+      magic.length <= 8 && magic.forall(c => c.isLetterOrDigit),
+      s"magic must be up to 8 letters or digits: '$magic'"
+    )
+    require(
+      sha256.isEmpty || (sha256.length == 64 && sha256
+        .forall(c => "0123456789abcdef".contains(c))),
+      "sha256 must be 64 lower-case hex digits"
+    )
     def ok(file: String): String =
       val f = Apply.quote(file)
       val tests =
         List(s"[ -s $f ]") :::
-          (if magic.isEmpty then Nil else List(s"""[ "$$(head -c ${magic.length} $f 2>/dev/null)" = ${Apply.quote(magic)} ]""")) :::
-          (if sha256.isEmpty then Nil else List(s"""[ "$$(sha256sum $f 2>/dev/null | cut -d' ' -f1)" = "$sha256" ]"""))
+          (if magic.isEmpty then Nil
+           else
+             List(s"""[ "$$(head -c ${magic.length} $f 2>/dev/null)" = ${Apply
+                 .quote(magic)} ]""")
+          ) :::
+          (if sha256.isEmpty then Nil
+           else
+             List(
+               s"""[ "$$(sha256sum $f 2>/dev/null | cut -d' ' -f1)" = "$sha256" ]"""
+             ))
       tests.mkString(" && ")
-    val unless = if skipIf.isEmpty then ok(path) else s"$skipIf || { ${ok(path)}; }"
-    val dir = Apply.quote(if path.lastIndexOf('/') == 0 then "/" else path.substring(0, path.lastIndexOf('/')))
+    val unless =
+      if skipIf.isEmpty then ok(path) else s"$skipIf || { ${ok(path)}; }"
+    val dir = Apply.quote(if path.lastIndexOf('/') == 0 then "/"
+    else path.substring(0, path.lastIndexOf('/')))
     val run =
       s"""set -e
          |heartbeat() { "$$@" & P=$$!; N=0; while kill -0 $$P 2>/dev/null; do sleep 1; N=$$((N+1)); if [ $$((N % 20)) -eq 0 ]; then echo "still working ($$(date +%H:%M:%S))"; fi; done; wait $$P; }
          |mkdir -p $dir
          |rm -f ${Apply.quote(path + ".part")}
-         |if ! heartbeat curl -fsSL --retry 3 --connect-timeout 30 -o ${Apply.quote(path + ".part")} ${Apply.quote(url)}; then
+         |if ! heartbeat curl -fsSL --retry 3 --connect-timeout 30 -o ${Apply
+          .quote(path + ".part")} ${Apply.quote(url)}; then
          |  rm -f ${Apply.quote(path + ".part")}
          |  echo "cannot download $url - put the file at $path and run again" >&2
          |  exit 1
@@ -793,9 +887,11 @@ object Resources:
          |ls -l ${Apply.quote(path)}""".stripMargin
     command(label, run, unless = unless, timeout = timeout)
 
-  /** Files taken out of a `.tar.gz` archive from `url` and installed with `mode`, as a description: each pair is
-    * the path inside the archive and the file to make (its directory is made). It is `unchanged` while every
-    * target exists (and is executable when `mode` makes it so for its owner). The node needs `curl` and `tar`.
+  /** Files taken out of a `.tar.gz` archive from `url` and installed with
+    * `mode`, as a description: each pair is the path inside the archive and the
+    * file to make (its directory is made). It is `unchanged` while every target
+    * exists (and is executable when `mode` makes it so for its owner). The node
+    * needs `curl` and `tar`.
     */
   def archiveFiles(
       label: String,
@@ -806,41 +902,66 @@ object Resources:
   ): ApplyResource =
     plainUrl(url)
     require(files.nonEmpty, "archiveFiles needs at least one file")
-    require(mode.length == 4 && mode.forall(c => c >= '0' && c <= '7'), s"mode must be four octal digits: '$mode'")
+    require(
+      mode.length == 4 && mode.forall(c => c >= '0' && c <= '7'),
+      s"mode must be four octal digits: '$mode'"
+    )
     files.foreach { (inside, target) =>
       require(
-        inside.nonEmpty && !inside.startsWith("/") && !inside.split('/').contains("..") &&
+        inside.nonEmpty && !inside
+          .startsWith("/") && !inside.split('/').contains("..") &&
           inside.forall(c => c.isLetterOrDigit || "/._+-".contains(c)),
         s"not a path inside an archive: '$inside'"
       )
       absoluteClean("target", target)
     }
     val executable = ((mode(1) - '0') & 1) == 1
-    val unless = files.map((_, target) => s"[ ${if executable then "-x" else "-f"} ${Apply.quote(target)} ]").mkString(" && ")
-    val installs = files.map { (inside, target) =>
-      s"""[ -f "$$T/$inside" ] || { echo "${inside} is not in the archive from $url" >&2; exit 1; }
-         |install -m $mode -D "$$T/$inside" ${Apply.quote(target)}""".stripMargin
-    }.mkString("\n")
+    val unless = files
+      .map((_, target) =>
+        s"[ ${if executable then "-x" else "-f"} ${Apply.quote(target)} ]"
+      )
+      .mkString(" && ")
+    val installs = files
+      .map { (inside, target) =>
+        s"""[ -f "$$T/$inside" ] || { echo "${inside} is not in the archive from $url" >&2; exit 1; }
+         |install -m $mode -D "$$T/$inside" ${Apply.quote(
+            target
+          )}""".stripMargin
+      }
+      .mkString("\n")
     val run =
       s"""set -e
          |T=$$(mktemp -d)
          |trap 'rm -rf "$$T"' EXIT
-         |curl -fsSL --retry 3 --connect-timeout 30 -o "$$T/archive.tar.gz" ${Apply.quote(url)}
+         |curl -fsSL --retry 3 --connect-timeout 30 -o "$$T/archive.tar.gz" ${Apply
+          .quote(url)}
          |tar xzf "$$T/archive.tar.gz" -C "$$T"
          |$installs
          |echo "installed ${files.map(_._2).mkString(", ")}"""".stripMargin
     command(label, run, unless = unless, timeout = timeout)
 
-  /** One Keystone service of a registration: its name, its type and the URL of its public, internal and admin
-    * endpoints. `adminUrl` is the URL of the admin endpoint when that differs from `url` (Swift's admin
-    * endpoint has no project in it).
+  /** One Keystone service of a registration: its name, its type and the URL of
+    * its public, internal and admin endpoints. `adminUrl` is the URL of the
+    * admin endpoint when that differs from `url` (Swift's admin endpoint has no
+    * project in it).
     */
-  final case class KeystoneService(name: String, serviceType: String, url: String, adminUrl: Option[String] = None)
+  final case class KeystoneService(
+      name: String,
+      serviceType: String,
+      url: String,
+      adminUrl: Option[String] = None
+  )
 
-  /** A Keystone domain a service owns (Heat's stack domain, Magnum's trustee domain): its `name` and
-    * `description`, and its admin user `adminUser`, who has `adminPassword` and the admin role on the domain.
+  /** A Keystone domain a service owns (Heat's stack domain, Magnum's trustee
+    * domain): its `name` and `description`, and its admin user `adminUser`, who
+    * has `adminPassword` and the admin role on the domain.
     */
-  final case class KeystoneDomain(name: String, description: String, adminUser: String, adminPassword: Secret)
+  final case class KeystoneDomain(
+      name: String,
+      description: String,
+      adminUser: String,
+      adminPassword: Secret
+  )
 
   private val keystoneHelperPython: String =
     """#!/usr/bin/python3
@@ -1033,7 +1154,10 @@ if __name__ == '__main__':
 
   /** A string as a Python (and JSON) literal; printable ASCII only. */
   private def pyString(what: String, text: String): String =
-    require(text.forall(c => c >= ' ' && c <= '~'), s"$what must be printable ASCII")
+    require(
+      text.forall(c => c >= ' ' && c <= '~'),
+      s"$what must be printable ASCII"
+    )
     "\"" + text.flatMap {
       case '"'  => "\\\""
       case '\\' => "\\\\"
@@ -1046,17 +1170,24 @@ if __name__ == '__main__':
       s"$what must be letters, digits and _ - . , not '$text'"
     )
 
-  /** The path of the helper `keystoneEntries` writes for the entries of `name`. */
-  def keystoneHelperPath(name: String): String = s"/usr/local/sbin/orphera-keystone-$name"
+  /** The path of the helper `keystoneEntries` writes for the entries of `name`.
+    */
+  def keystoneHelperPath(name: String): String =
+    s"/usr/local/sbin/orphera-keystone-$name"
 
-  /** The Keystone entries a service needs, as a description: a user `name` with `password` and the admin role in
-    * `project`, the extra `roles` made if missing, and each service of `services` (found by its type) with its
-    * public, internal and admin endpoints at the given URL (`services` may be empty: a user only; `domain` adds a domain with its admin, who holds the admin role on it). The result is the helper (a root-only script that
-    * holds the admin password, `keystone` being the base URL such as `https://tst6.example.com:5000`, and `ca`
-    * the CA file that verifies it) and the command that runs it. The command is `unchanged` while the user can
-    * get a token in the project, the roles exist, the domain admin can get a token and holds admin on the domain, and
-    * every service has its three endpoints at the URL, so a changed password, role or URL is put right by running
-    * it again.
+  /** The Keystone entries a service needs, as a description: a user `name` with
+    * `password` and the admin role in `project`, the extra `roles` made if
+    * missing, and each service of `services` (found by its type) with its
+    * public, internal and admin endpoints at the given URL (`services` may be
+    * empty: a user only; `domain` adds a domain with its admin, who holds the
+    * admin role on it). The result is the helper (a root-only script that holds
+    * the admin password, `keystone` being the base URL such as
+    * `https://tst6.example.com:5000`, and `ca` the CA file that verifies it)
+    * and the command that runs it. The command is `unchanged` while the user
+    * can get a token in the project, the roles exist, the domain admin can get
+    * a token and holds admin on the domain, and every service has its three
+    * endpoints at the URL, so a changed password, role or URL is put right by
+    * running it again.
     */
   def keystoneEntries(
       label: String,
@@ -1082,26 +1213,41 @@ if __name__ == '__main__':
       keystoneName("a service name", sv.name)
       keystoneName("a service type", sv.serviceType)
       (sv.url :: sv.adminUrl.toList).foreach(u =>
-        require(u.startsWith("http://") || u.startsWith("https://"), s"not an endpoint URL: '$u'")
+        require(
+          u.startsWith("http://") || u.startsWith("https://"),
+          s"not an endpoint URL: '$u'"
+        )
       )
     }
-    require(keystone.startsWith("https://") || keystone.startsWith("http://"), s"not a Keystone URL: '$keystone'")
-    def field(key: String, value: String): String = pyString(key, key) + ": " + value
+    require(
+      keystone.startsWith("https://") || keystone.startsWith("http://"),
+      s"not a Keystone URL: '$keystone'"
+    )
+    def field(key: String, value: String): String =
+      pyString(key, key) + ": " + value
     val serviceSpecs = services.map { sv =>
       "{" + (List(
         field("name", pyString("a service name", sv.name)),
         field("type", pyString("a service type", sv.serviceType)),
         field("url", pyString("a URL", sv.url))
-      ) ::: sv.adminUrl.toList.map(u => field("admin_url", pyString("a URL", u)))).mkString(", ") + "}"
+      ) ::: sv.adminUrl.toList.map(u =>
+        field("admin_url", pyString("a URL", u))
+      )).mkString(", ") + "}"
     }
     val domainSpec = domain.fold("") { d =>
       ", " + field(
         "domain",
         "{" + List(
           field("name", pyString("the domain name", d.name)),
-          field("description", pyString("the domain description", d.description)),
+          field(
+            "description",
+            pyString("the domain description", d.description)
+          ),
           field("admin", pyString("the domain admin", d.adminUser)),
-          field("password", pyString("the domain admin password", d.adminPassword.reveal))
+          field(
+            "password",
+            pyString("the domain admin password", d.adminPassword.reveal)
+          )
         ).mkString(", ") + "}"
       )
     }
@@ -1113,12 +1259,24 @@ if __name__ == '__main__':
       field("services", serviceSpecs.mkString("[", ", ", "]"))
     ).mkString(", ") + domainSpec + "}"
     val script = keystoneHelperPython
-      .replace("@@KS@@", pyString("keystone", keystone.stripSuffix("/") + "/v3"))
-      .replace("@@ADMINPW@@", pyString("the admin password", adminPassword.reveal))
+      .replace(
+        "@@KS@@",
+        pyString("keystone", keystone.stripSuffix("/") + "/v3")
+      )
+      .replace(
+        "@@ADMINPW@@",
+        pyString("the admin password", adminPassword.reveal)
+      )
       .replace("@@CA@@", pyString("ca", ca))
       .replace("@@SPEC@@", spec)
     val path = keystoneHelperPath(name)
-    val helper = secretFile(path, Secret(script), mode = "0700", owner = "root", group = "root")
+    val helper = secretFile(
+      path,
+      Secret(script),
+      mode = "0700",
+      owner = "root",
+      group = "root"
+    )
     val ensure = command(
       label,
       s"${Apply.quote(path)} ensure",
@@ -1127,11 +1285,18 @@ if __name__ == '__main__':
     ).after(helper)
     (helper, ensure)
 
-  /** What `keystoneEntries` made, removed again: the services of the registration with their endpoints, the
-    * user, and the domain with every user and project in it. It does nothing without the helper on the node or while nothing is there, and a failure is reported
-    * but does not stop the run (the node is being torn down). The helper is left for the caller to remove.
+  /** What `keystoneEntries` made, removed again: the services of the
+    * registration with their endpoints, the user, and the domain with every
+    * user and project in it. It does nothing without the helper on the node or
+    * while nothing is there, and a failure is reported but does not stop the
+    * run (the node is being torn down). The helper is left for the caller to
+    * remove.
     */
-  def absentKeystoneEntries(label: String, name: String, timeout: Int = 120): ApplyResource =
+  def absentKeystoneEntries(
+      label: String,
+      name: String,
+      timeout: Int = 120
+  ): ApplyResource =
     keystoneName("name", name)
     val path = Apply.quote(keystoneHelperPath(name))
     command(
@@ -1439,9 +1604,11 @@ if __name__ == '__main__':
         die('usage: ensure | check | exists | remove')
 """
 
-  /** The path of the helper `openstackKeypair` writes for the key pair `name`. */
+  /** The path of the helper `openstackKeypair` writes for the key pair `name`.
+    */
   def openstackKeypairHelperPath(name: String, user: String = "admin"): String =
-    if user == "admin" then s"/usr/local/sbin/orphera-keypair-$name" else s"/usr/local/sbin/orphera-keypair-$name-$user"
+    if user == "admin" then s"/usr/local/sbin/orphera-keypair-$name"
+    else s"/usr/local/sbin/orphera-keypair-$name-$user"
 
   // The helpers of `openstackNetwork` and `openstackSecurityGroup`: the base plus Neutron and the project lookup.
   private val openstackNeutronClientPython: String = openstackClientPython +
@@ -1582,8 +1749,9 @@ if __name__ == '__main__':
         die('usage: ensure | check | exists | remove')
 """
 
-  private val openstackSecurityGroupPython: String = openstackNeutronClientPython +
-    """
+  private val openstackSecurityGroupPython: String =
+    openstackNeutronClientPython +
+      """
 
 def find_sg(cl):
     pid = cl.project_id(SPEC['project'])
@@ -1654,36 +1822,66 @@ if __name__ == '__main__':
         die('usage: ensure | check | exists | remove')
 """
 
-  /** The path of the helper `openstackNetwork` writes for the network `name` in `project`. */
-  def openstackNetworkHelperPath(name: String, project: String = "admin"): String =
+  /** The path of the helper `openstackNetwork` writes for the network `name` in
+    * `project`.
+    */
+  def openstackNetworkHelperPath(
+      name: String,
+      project: String = "admin"
+  ): String =
     s"/usr/local/sbin/orphera-network-$project-$name"
 
-  /** The path of the helper `openstackSecurityGroup` writes for the group `name` in `project`. */
-  def openstackSecurityGroupHelperPath(name: String, project: String = "admin"): String =
+  /** The path of the helper `openstackSecurityGroup` writes for the group
+    * `name` in `project`.
+    */
+  def openstackSecurityGroupHelperPath(
+      name: String,
+      project: String = "admin"
+  ): String =
     s"/usr/local/sbin/orphera-secgroup-$project-$name"
 
   /** The path of the helper `openstackImage` writes for the image `name`. */
-  def openstackImageHelperPath(name: String): String = s"/usr/local/sbin/orphera-image-$name"
+  def openstackImageHelperPath(name: String): String =
+    s"/usr/local/sbin/orphera-image-$name"
 
   /** The path of the helper `openstackFlavor` writes for the flavor `id`. */
-  def openstackFlavorHelperPath(id: String): String = s"/usr/local/sbin/orphera-flavor-$id"
+  def openstackFlavorHelperPath(id: String): String =
+    s"/usr/local/sbin/orphera-flavor-$id"
 
-  private def openstackScript(template: String, keystone: String, adminPassword: Secret, ca: String, spec: String): String =
-    require(keystone.startsWith("https://") || keystone.startsWith("http://"), s"not a Keystone URL: '$keystone'")
+  private def openstackScript(
+      template: String,
+      keystone: String,
+      adminPassword: Secret,
+      ca: String,
+      spec: String
+  ): String =
+    require(
+      keystone.startsWith("https://") || keystone.startsWith("http://"),
+      s"not a Keystone URL: '$keystone'"
+    )
     template
-      .replace("@@KS@@", pyString("keystone", keystone.stripSuffix("/") + "/v3"))
-      .replace("@@ADMINPW@@", pyString("the admin password", adminPassword.reveal))
+      .replace(
+        "@@KS@@",
+        pyString("keystone", keystone.stripSuffix("/") + "/v3")
+      )
+      .replace(
+        "@@ADMINPW@@",
+        pyString("the admin password", adminPassword.reveal)
+      )
       .replace("@@CA@@", pyString("ca", ca))
       .replace("@@SPEC@@", spec)
 
-  /** A Glance image as a description: the image `name` made from the file `imageFile` on the node, public (or as
-    * `visibility` says), in `diskFormat`, with `tags` and the extra `properties`. The result is the helper (a
-    * root-only script holding the admin password; `keystone` is the base URL such as
-    * `https://tst6.example.com:5000` and `ca` the file that verifies it) and the command that runs it. The command
-    * is `unchanged` while an active image of that name with the tags, the visibility, the format and the
-    * properties is in Glance; otherwise the images of that name are deleted and the file is uploaded. With
-    * `replace` it runs every time and uploads again (for a rebuilt image). The file must exist when it runs, so
-    * the caller orders it after whatever makes the file.
+  /** A Glance image as a description: the image `name` made from the file
+    * `imageFile` on the node, public (or as `visibility` says), in
+    * `diskFormat`, with `tags` and the extra `properties`. The result is the
+    * helper (a root-only script holding the admin password; `keystone` is the
+    * base URL such as `https://tst6.example.com:5000` and `ca` the file that
+    * verifies it) and the command that runs it. The command is `unchanged`
+    * while an active image of that name with the tags, the visibility, the
+    * format and the properties is in Glance; otherwise the images of that name
+    * are deleted and the file is uploaded. With `replace` it runs every time
+    * and uploads again (for a rebuilt image). The file must exist when it runs,
+    * so the caller orders it after whatever makes the file.
     */
   def openstackImage(
       label: String,
@@ -1704,8 +1902,15 @@ if __name__ == '__main__':
     keystoneName("visibility", visibility)
     tags.foreach(keystoneName("an image tag", _))
     properties.keys.foreach(keystoneName("an image property", _))
-    require(imageFile.startsWith("/"), s"the image file must be an absolute path: '$imageFile'")
-    val props = properties.toList.sortBy(_._1).map((k, v) => pyString("property", k) + ": " + pyString("a property value", v))
+    require(
+      imageFile.startsWith("/"),
+      s"the image file must be an absolute path: '$imageFile'"
+    )
+    val props = properties.toList
+      .sortBy(_._1)
+      .map((k, v) =>
+        pyString("property", k) + ": " + pyString("a property value", v)
+      )
     val spec = "{" + List(
       "'name': " + pyString("name", name),
       "'file': " + pyString("file", imageFile),
@@ -1715,7 +1920,15 @@ if __name__ == '__main__':
       "'properties': " + props.mkString("{", ", ", "}")
     ).mkString(", ") + "}"
     val path = openstackImageHelperPath(name)
-    val helper = secretFile(path, Secret(openstackScript(openstackImagePython, keystone, adminPassword, ca, spec)), mode = "0700", owner = "root", group = "root")
+    val helper = secretFile(
+      path,
+      Secret(
+        openstackScript(openstackImagePython, keystone, adminPassword, ca, spec)
+      ),
+      mode = "0700",
+      owner = "root",
+      group = "root"
+    )
     // An upload that runs for minutes with no output can lose its connection to the agent, so the helper runs
     // under a function that prints a line every 20 seconds while it works.
     val heartbeat =
@@ -1732,11 +1945,16 @@ if __name__ == '__main__':
     ).after(helper)
     (helper, ensure)
 
-  /** What `openstackImage` made, removed again: the images of that name with the tags. It does nothing without the
-    * helper on the node or while no such image is there, and a failure is reported but does not stop the run. The
+  /** What `openstackImage` made, removed again: the images of that name with
+    * the tags. It does nothing without the helper on the node or while no such
+    * image is there, and a failure is reported but does not stop the run. The
     * helper is left for the caller to remove.
     */
-  def absentOpenstackImage(label: String, name: String, timeout: Int = 300): ApplyResource =
+  def absentOpenstackImage(
+      label: String,
+      name: String,
+      timeout: Int = 300
+  ): ApplyResource =
     keystoneName("image name", name)
     val path = Apply.quote(openstackImageHelperPath(name))
     command(
@@ -1746,9 +1964,11 @@ if __name__ == '__main__':
       timeout = timeout
     )
 
-  /** A Nova flavor as a description: the flavor `id` with the `name`, `ram` (MB), `vcpus` and `disk` (GB), public.
-    * The result is the helper and the command that runs it, which is `unchanged` while the flavor is as wanted; a
-    * flavor with other values is deleted and made again (servers keep their own copy).
+  /** A Nova flavor as a description: the flavor `id` with the `name`, `ram`
+    * (MB), `vcpus` and `disk` (GB), public. The result is the helper and the
+    * command that runs it, which is `unchanged` while the flavor is as wanted;
+    * a flavor with other values is deleted and made again (servers keep their
+    * own copy).
     */
   def openstackFlavor(
       label: String,
@@ -1764,7 +1984,10 @@ if __name__ == '__main__':
   ): (ApplyResource, ApplyResource) =
     keystoneName("flavor id", id)
     keystoneName("flavor name", name)
-    require(ram > 0 && vcpus > 0 && disk >= 0, "a flavor needs positive memory and vCPUs, and a disk of 0 or more")
+    require(
+      ram > 0 && vcpus > 0 && disk >= 0,
+      "a flavor needs positive memory and vCPUs, and a disk of 0 or more"
+    )
     val spec = "{" + List(
       "'id': " + pyString("id", id),
       "'name': " + pyString("name", name),
@@ -1773,7 +1996,21 @@ if __name__ == '__main__':
       s"'disk': $disk"
     ).mkString(", ") + "}"
     val path = openstackFlavorHelperPath(id)
-    val helper = secretFile(path, Secret(openstackScript(openstackFlavorPython, keystone, adminPassword, ca, spec)), mode = "0700", owner = "root", group = "root")
+    val helper = secretFile(
+      path,
+      Secret(
+        openstackScript(
+          openstackFlavorPython,
+          keystone,
+          adminPassword,
+          ca,
+          spec
+        )
+      ),
+      mode = "0700",
+      owner = "root",
+      group = "root"
+    )
     val ensure = command(
       label,
       s"${Apply.quote(path)} ensure",
@@ -1782,10 +2019,14 @@ if __name__ == '__main__':
     ).after(helper)
     (helper, ensure)
 
-  /** What `openstackFlavor` made, removed again. It does nothing without the helper or while the flavor is not
-    * there.
+  /** What `openstackFlavor` made, removed again. It does nothing without the
+    * helper or while the flavor is not there.
     */
-  def absentOpenstackFlavor(label: String, id: String, timeout: Int = 120): ApplyResource =
+  def absentOpenstackFlavor(
+      label: String,
+      id: String,
+      timeout: Int = 120
+  ): ApplyResource =
     keystoneName("flavor id", id)
     val path = Apply.quote(openstackFlavorHelperPath(id))
     command(
@@ -1795,11 +2036,13 @@ if __name__ == '__main__':
       timeout = timeout
     )
 
-  /** A Nova key pair as a description: the pair `name`, made by Nova with no public key given. By default it
-    * belongs to the admin user; with `owner` (a user name and its password) it belongs to that user and is made
-    * in `project`, which is where a service looks it up as itself. The private half is written to `privateKeyFile`
-    * (root only, when the pair is made) if one is named, and is otherwise not kept. The result is the helper and
-    * the command that runs it, which is `unchanged` while the key pair exists.
+  /** A Nova key pair as a description: the pair `name`, made by Nova with no
+    * public key given. By default it belongs to the admin user; with `owner` (a
+    * user name and its password) it belongs to that user and is made in
+    * `project`, which is where a service looks it up as itself. The private
+    * half is written to `privateKeyFile` (root only, when the pair is made) if
+    * one is named, and is otherwise not kept. The result is the helper and the
+    * command that runs it, which is `unchanged` while the key pair exists.
     */
   def openstackKeypair(
       label: String,
@@ -1815,17 +2058,40 @@ if __name__ == '__main__':
     keystoneName("key pair name", name)
     keystoneName("project", project)
     owner.foreach((user, _) => keystoneName("key pair owner", user))
-    privateKeyFile.foreach(f => require(f.startsWith("/"), s"the private key file must be an absolute path: '$f'"))
+    privateKeyFile.foreach(f =>
+      require(
+        f.startsWith("/"),
+        s"the private key file must be an absolute path: '$f'"
+      )
+    )
     val user = owner.map(_._1).getOrElse("admin")
     val spec = "{" + List(
       "'name': " + pyString("name", name),
       "'user': " + pyString("user", user),
-      "'password': " + owner.map((_, pw) => pyString("the owner's password", pw.reveal)).getOrElse("ADMIN_PW"),
+      "'password': " + owner
+        .map((_, pw) => pyString("the owner's password", pw.reveal))
+        .getOrElse("ADMIN_PW"),
       "'project': " + pyString("project", project),
-      "'keyfile': " + privateKeyFile.map(pyString("private key file", _)).getOrElse("None")
+      "'keyfile': " + privateKeyFile
+        .map(pyString("private key file", _))
+        .getOrElse("None")
     ).mkString(", ") + "}"
     val path = openstackKeypairHelperPath(name, user)
-    val helper = secretFile(path, Secret(openstackScript(openstackKeypairPython, keystone, adminPassword, ca, spec)), mode = "0700", owner = "root", group = "root")
+    val helper = secretFile(
+      path,
+      Secret(
+        openstackScript(
+          openstackKeypairPython,
+          keystone,
+          adminPassword,
+          ca,
+          spec
+        )
+      ),
+      mode = "0700",
+      owner = "root",
+      group = "root"
+    )
     val ensure = command(
       label,
       s"${Apply.quote(path)} ensure",
@@ -1834,10 +2100,16 @@ if __name__ == '__main__':
     ).after(helper)
     (helper, ensure)
 
-  /** What `openstackKeypair` made, removed again (`user` is the owner it was made for). It does nothing without
-    * the helper or while the key pair is not there.
+  /** What `openstackKeypair` made, removed again (`user` is the owner it was
+    * made for). It does nothing without the helper or while the key pair is not
+    * there.
     */
-  def absentOpenstackKeypair(label: String, name: String, user: String = "admin", timeout: Int = 120): ApplyResource =
+  def absentOpenstackKeypair(
+      label: String,
+      name: String,
+      user: String = "admin",
+      timeout: Int = 120
+  ): ApplyResource =
     keystoneName("key pair name", name)
     keystoneName("key pair owner", user)
     val path = Apply.quote(openstackKeypairHelperPath(name, user))
@@ -1848,8 +2120,9 @@ if __name__ == '__main__':
       timeout = timeout
     )
 
-  /** The subnet of an `openstackNetwork`: IPv4 `cidr`, the `gateway` (None for none), an optional allocation
-    * `pool` (first, last address) and whether DHCP is on.
+  /** The subnet of an `openstackNetwork`: IPv4 `cidr`, the `gateway` (None for
+    * none), an optional allocation `pool` (first, last address) and whether
+    * DHCP is on.
     */
   final case class OpenstackSubnet(
       name: String,
@@ -1860,14 +2133,20 @@ if __name__ == '__main__':
   )
 
   private def requireAddress(what: String, text: String): Unit =
-    require(text.nonEmpty && text.forall(c => c.isDigit || "./".contains(c)), s"$what is not an IPv4 address or network: '$text'")
+    require(
+      text.nonEmpty && text.forall(c => c.isDigit || "./".contains(c)),
+      s"$what is not an IPv4 address or network: '$text'"
+    )
 
-  /** A Neutron network (with at most one IPv4 subnet) of `project` as a description. `flat = Some(physnet)` makes
-    * a flat provider network on that physical network; without it the network is a tenant network of whatever
-    * type Neutron chooses. `shared` and `external` are set as given. The result is the helper (a root-only script
-    * holding the admin password) and the command that runs it, which is `unchanged` while the network, its flags
-    * and its subnet's CIDR are as described. An existing network of that name in the project has its flags put
-    * right; one that is not flat on `flat` is an error, and so is a subnet with another CIDR.
+  /** A Neutron network (with at most one IPv4 subnet) of `project` as a
+    * description. `flat = Some(physnet)` makes a flat provider network on that
+    * physical network; without it the network is a tenant network of whatever
+    * type Neutron chooses. `shared` and `external` are set as given. The result
+    * is the helper (a root-only script holding the admin password) and the
+    * command that runs it, which is `unchanged` while the network, its flags
+    * and its subnet's CIDR are as described. An existing network of that name
+    * in the project has its flags put right; one that is not flat on `flat` is
+    * an error, and so is a subnet with another CIDR.
     */
   def openstackNetwork(
       label: String,
@@ -1889,17 +2168,23 @@ if __name__ == '__main__':
       keystoneName("subnet name", sn.name)
       requireAddress("a CIDR", sn.cidr)
       sn.gateway.foreach(requireAddress("a gateway", _))
-      sn.pool.foreach((a, b) => { requireAddress("a pool address", a); requireAddress("a pool address", b) })
+      sn.pool.foreach((a, b) => {
+        requireAddress("a pool address", a); requireAddress("a pool address", b)
+      })
     }
     def py(b: Boolean) = if b then "True" else "False"
     val subnetSpec = subnet match
-      case None => "None"
+      case None     => "None"
       case Some(sn) =>
         "{" + List(
           "'name': " + pyString("subnet name", sn.name),
           "'cidr': " + pyString("cidr", sn.cidr),
-          "'gateway': " + sn.gateway.map(pyString("gateway", _)).getOrElse("None"),
-          "'pool': " + sn.pool.map((a, b) => s"(${pyString("pool", a)}, ${pyString("pool", b)})").getOrElse("None"),
+          "'gateway': " + sn.gateway
+            .map(pyString("gateway", _))
+            .getOrElse("None"),
+          "'pool': " + sn.pool
+            .map((a, b) => s"(${pyString("pool", a)}, ${pyString("pool", b)})")
+            .getOrElse("None"),
           "'dhcp': " + py(sn.dhcp)
         ).mkString(", ") + "}"
     val spec = "{" + List(
@@ -1911,7 +2196,21 @@ if __name__ == '__main__':
       "'subnet': " + subnetSpec
     ).mkString(", ") + "}"
     val path = openstackNetworkHelperPath(name, project)
-    val helper = secretFile(path, Secret(openstackScript(openstackNetworkPython, keystone, adminPassword, ca, spec)), mode = "0700", owner = "root", group = "root")
+    val helper = secretFile(
+      path,
+      Secret(
+        openstackScript(
+          openstackNetworkPython,
+          keystone,
+          adminPassword,
+          ca,
+          spec
+        )
+      ),
+      mode = "0700",
+      owner = "root",
+      group = "root"
+    )
     val ensure = command(
       label,
       s"${Apply.quote(path)} ensure",
@@ -1920,11 +2219,17 @@ if __name__ == '__main__':
     ).after(helper)
     (helper, ensure)
 
-  /** What `openstackNetwork` made, removed again: the network's ports (except the DHCP ones) and the network. It
-    * does nothing without the helper or while the network is not there. A failure is reported and the run goes
-    * on. The helper is left for the caller to remove.
+  /** What `openstackNetwork` made, removed again: the network's ports (except
+    * the DHCP ones) and the network. It does nothing without the helper or
+    * while the network is not there. A failure is reported and the run goes on.
+    * The helper is left for the caller to remove.
     */
-  def absentOpenstackNetwork(label: String, name: String, project: String = "admin", timeout: Int = 300): ApplyResource =
+  def absentOpenstackNetwork(
+      label: String,
+      name: String,
+      project: String = "admin",
+      timeout: Int = 300
+  ): ApplyResource =
     keystoneName("network name", name)
     keystoneName("project", project)
     val path = Apply.quote(openstackNetworkHelperPath(name, project))
@@ -1935,9 +2240,11 @@ if __name__ == '__main__':
       timeout = timeout
     )
 
-  /** A Neutron security group of `project` with ingress rules from anywhere (IPv4) as a description. `rules` are
-    * pairs of protocol and port, `("tcp", Some(9443))` or `("icmp", None)`. It is `unchanged` while the group
-    * exists with every rule; missing rules are added and other rules are left alone.
+  /** A Neutron security group of `project` with ingress rules from anywhere
+    * (IPv4) as a description. `rules` are pairs of protocol and port,
+    * `("tcp", Some(9443))` or `("icmp", None)`. It is `unchanged` while the
+    * group exists with every rule; missing rules are added and other rules are
+    * left alone.
     */
   def openstackSecurityGroup(
       label: String,
@@ -1953,10 +2260,17 @@ if __name__ == '__main__':
     keystoneName("security group name", name)
     keystoneName("project", project)
     rules.foreach { (proto, port) =>
-      require(Set("tcp", "udp", "icmp").contains(proto), s"not a protocol: '$proto'")
+      require(
+        Set("tcp", "udp", "icmp").contains(proto),
+        s"not a protocol: '$proto'"
+      )
       require(port.forall(p => p > 0 && p < 65536), s"not a port: $port")
     }
-    val ruleText = rules.map((proto, port) => s"(${pyString("protocol", proto)}, ${port.map(_.toString).getOrElse("None")})").mkString("[", ", ", "]")
+    val ruleText = rules
+      .map((proto, port) =>
+        s"(${pyString("protocol", proto)}, ${port.map(_.toString).getOrElse("None")})"
+      )
+      .mkString("[", ", ", "]")
     val spec = "{" + List(
       "'name': " + pyString("name", name),
       "'project': " + pyString("project", project),
@@ -1964,7 +2278,21 @@ if __name__ == '__main__':
       "'rules': " + ruleText
     ).mkString(", ") + "}"
     val path = openstackSecurityGroupHelperPath(name, project)
-    val helper = secretFile(path, Secret(openstackScript(openstackSecurityGroupPython, keystone, adminPassword, ca, spec)), mode = "0700", owner = "root", group = "root")
+    val helper = secretFile(
+      path,
+      Secret(
+        openstackScript(
+          openstackSecurityGroupPython,
+          keystone,
+          adminPassword,
+          ca,
+          spec
+        )
+      ),
+      mode = "0700",
+      owner = "root",
+      group = "root"
+    )
     val ensure = command(
       label,
       s"${Apply.quote(path)} ensure",
@@ -1973,10 +2301,16 @@ if __name__ == '__main__':
     ).after(helper)
     (helper, ensure)
 
-  /** What `openstackSecurityGroup` made, removed again. It does nothing without the helper or while the group is
-    * not there; a group that is still in use is reported and the run goes on.
+  /** What `openstackSecurityGroup` made, removed again. It does nothing without
+    * the helper or while the group is not there; a group that is still in use
+    * is reported and the run goes on.
     */
-  def absentOpenstackSecurityGroup(label: String, name: String, project: String = "admin", timeout: Int = 120): ApplyResource =
+  def absentOpenstackSecurityGroup(
+      label: String,
+      name: String,
+      project: String = "admin",
+      timeout: Int = 120
+  ): ApplyResource =
     keystoneName("security group name", name)
     keystoneName("project", project)
     val path = Apply.quote(openstackSecurityGroupHelperPath(name, project))
@@ -2038,11 +2372,19 @@ case "$1" in
 esac
 """
 
-  /** The helper `helmRelease` writes for the release `release` in `namespace`. */
-  def helmReleaseHelperPath(namespace: String, release: String): String = s"/usr/local/sbin/orphera-helm-$namespace-$release"
+  /** The helper `helmRelease` writes for the release `release` in `namespace`.
+    */
+  def helmReleaseHelperPath(namespace: String, release: String): String =
+    s"/usr/local/sbin/orphera-helm-$namespace-$release"
 
-  /** The state file of a release made by `helmRelease` (the hash of the description last installed). */
-  def helmReleaseStatePath(namespace: String, release: String, stateDir: String = "/var/lib/orphera/helm"): String =
+  /** The state file of a release made by `helmRelease` (the hash of the
+    * description last installed).
+    */
+  def helmReleaseStatePath(
+      namespace: String,
+      release: String,
+      stateDir: String = "/var/lib/orphera/helm"
+  ): String =
     s"$stateDir/$namespace-$release.sha"
 
   private def helmName(what: String, text: String): Unit =
@@ -2051,15 +2393,19 @@ esac
       s"$what must be letters, digits and _ - . , not '$text'"
     )
 
-  /** A Helm release as a description: `chart` (`repo/name`) from the repository at `repoUrl`, installed as
-    * `release` in `namespace` (made if missing) with the YAML `values` and the `set` pairs, on the cluster the
-    * `kubeconfig` names. The result is the helper (a root-only script that holds the values, which may be secret)
-    * and the command that runs it. The command is `unchanged` while the hash of the chart, version, values and
-    * set pairs last installed (kept in `helmReleaseStatePath`) is the description given and Helm lists the
-    * release as deployed; otherwise it runs `helm upgrade --install --wait`. With a `version` that chart version
-    * is installed; without one the newest is installed the first time and again whenever the description
-    * changes, and a run that changes nothing never upgrades. A change made to the release outside this
-    * description is not noticed unless the release stops being deployed.
+  /** A Helm release as a description: `chart` (`repo/name`) from the repository
+    * at `repoUrl`, installed as `release` in `namespace` (made if missing) with
+    * the YAML `values` and the `set` pairs, on the cluster the `kubeconfig`
+    * names. The result is the helper (a root-only script that holds the values,
+    * which may be secret) and the command that runs it. The command is
+    * `unchanged` while the hash of the chart, version, values and set pairs
+    * last installed (kept in `helmReleaseStatePath`) is the description given
+    * and Helm lists the release as deployed; otherwise it runs
+    * `helm upgrade --install --wait`. With a `version` that chart version is
+    * installed; without one the newest is installed the first time and again
+    * whenever the description changes, and a run that changes nothing never
+    * upgrades. A change made to the release outside this description is not
+    * noticed unless the release stops being deployed.
     */
   def helmRelease(
       label: String,
@@ -2080,18 +2426,45 @@ esac
     val parts = chart.split("/", -1)
     require(parts.length == 2, s"the chart must be repo/name, not '$chart'")
     parts.foreach(helmName("a chart or repository name", _))
-    require(repoUrl.startsWith("https://") || repoUrl.startsWith("http://"), s"not a repository URL: '$repoUrl'")
-    version.foreach(v => require(v.nonEmpty && v.forall(c => c.isLetterOrDigit || "._-+".contains(c)), s"not a chart version: '$v'"))
-    require(kubeconfig.startsWith("/"), s"the kubeconfig must be an absolute path: '$kubeconfig'")
+    require(
+      repoUrl.startsWith("https://") || repoUrl.startsWith("http://"),
+      s"not a repository URL: '$repoUrl'"
+    )
+    version.foreach(v =>
+      require(
+        v.nonEmpty && v.forall(c => c.isLetterOrDigit || "._-+".contains(c)),
+        s"not a chart version: '$v'"
+      )
+    )
+    require(
+      kubeconfig.startsWith("/"),
+      s"the kubeconfig must be an absolute path: '$kubeconfig'"
+    )
     require(minutes > 0, "minutes must be positive")
     set.foreach { (k, v) =>
-      require(k.nonEmpty && k.forall(c => c >= ' ' && c <= '~'), s"not a value name: '$k'")
-      require(v.forall(c => c >= ' ' && c <= '~'), s"a set value must be printable ASCII: '$v'")
+      require(
+        k.nonEmpty && k.forall(c => c >= ' ' && c <= '~'),
+        s"not a value name: '$k'"
+      )
+      require(
+        v.forall(c => c >= ' ' && c <= '~'),
+        s"a set value must be printable ASCII: '$v'"
+      )
     }
     val text = values.map(_.reveal)
-    text.foreach(t => require(!t.linesIterator.exists(_ == "ORPHERA_VALUES_END"), "the values must not contain a line ORPHERA_VALUES_END"))
+    text.foreach(t =>
+      require(
+        !t.linesIterator.exists(_ == "ORPHERA_VALUES_END"),
+        "the values must not contain a line ORPHERA_VALUES_END"
+      )
+    )
     val want = cephSpecSha(
-      List(chart, version.getOrElse(""), text.getOrElse(""), set.map((k, v) => s"$k=$v").mkString("\n")).mkString("\u0000")
+      List(
+        chart,
+        version.getOrElse(""),
+        text.getOrElse(""),
+        set.map((k, v) => s"$k=$v").mkString("\n")
+      ).mkString("\u0000")
     )
     // Built without stripMargin: a line of the values may itself start with `|` (a YAML block scalar).
     val valuesBlock = text match
@@ -2112,14 +2485,26 @@ esac
       .replace("@@REPO@@", Apply.quote(parts(0)))
       .replace("@@URL@@", Apply.quote(repoUrl))
       .replace("@@VERSION@@", Apply.quote(version.getOrElse("")))
-      .replace("@@STATE@@", Apply.quote(helmReleaseStatePath(namespace, release, stateDir)))
+      .replace(
+        "@@STATE@@",
+        Apply.quote(helmReleaseStatePath(namespace, release, stateDir))
+      )
       .replace("@@WANT@@", Apply.quote(want))
       .replace("@@VALUES@@", valuesBlock)
       .replace("@@VALUESARG@@", if text.isDefined then "-f \"$VALS\" " else "")
-      .replace("@@SETS@@", set.map((k, v) => s"--set ${Apply.quote(s"$k=$v")} ").mkString)
+      .replace(
+        "@@SETS@@",
+        set.map((k, v) => s"--set ${Apply.quote(s"$k=$v")} ").mkString
+      )
       .replace("@@WAIT@@", if wait then s"--wait --timeout ${minutes}m" else "")
     val path = helmReleaseHelperPath(namespace, release)
-    val helper = secretFile(path, Secret(script), mode = "0700", owner = "root", group = "root")
+    val helper = secretFile(
+      path,
+      Secret(script),
+      mode = "0700",
+      owner = "root",
+      group = "root"
+    )
     val ensure = command(
       label,
       s"${Apply.quote(path)} ensure",
@@ -2128,10 +2513,15 @@ esac
     ).after(helper)
     (helper, ensure)
 
-  /** What `helmRelease` made, removed again. It does nothing without the helper or while the release is not
-    * deployed.
+  /** What `helmRelease` made, removed again. It does nothing without the helper
+    * or while the release is not deployed.
     */
-  def absentHelmRelease(label: String, release: String, namespace: String, timeout: Int = 300): ApplyResource =
+  def absentHelmRelease(
+      label: String,
+      release: String,
+      namespace: String,
+      timeout: Int = 300
+  ): ApplyResource =
     helmName("a release name", release)
     helmName("a namespace", namespace)
     val path = Apply.quote(helmReleaseHelperPath(namespace, release))
@@ -2151,37 +2541,53 @@ esac
   private def cephEntity(entity: String): Unit =
     val parts = entity.split("\\.", 2)
     require(
-      parts.length == 2 && parts(0).nonEmpty && parts(0).forall(_.isLower) && parts(1).nonEmpty &&
+      parts.length == 2 && parts(0).nonEmpty && parts(0).forall(
+        _.isLower
+      ) && parts(1).nonEmpty &&
         parts(1).forall(c => c.isLetterOrDigit || "_-.".contains(c)),
       s"a cephx user is TYPE.NAME such as client.cinder, not '$entity'"
     )
 
-  /** A pool on a Ceph cluster, as a description, for a node that has `cephadm` (the commands run in
-    * `cephadm shell`). It is `unchanged` while the pool is listed; otherwise it is created (an existing pool is
-    * never touched) and initialised for `application`: `rbd pool init` for `rbd`, and
+  /** A pool on a Ceph cluster, as a description, for a node that has `cephadm`
+    * (the commands run in `cephadm shell`). It is `unchanged` while the pool is
+    * listed; otherwise it is created (an existing pool is never touched) and
+    * initialised for `application`: `rbd pool init` for `rbd`, and
     * `ceph osd pool application enable` for any other.
     */
-  def cephPool(label: String, pool: String, application: String = "rbd", timeout: Int = 180): ApplyResource =
+  def cephPool(
+      label: String,
+      pool: String,
+      application: String = "rbd",
+      timeout: Int = 180
+  ): ApplyResource =
     cephName("a pool name", pool)
     cephName("an application", application)
     val init =
       if application == "rbd" then s"cephadm shell -- rbd pool init $pool"
-      else s"cephadm shell -- ceph osd pool application enable $pool $application"
+      else
+        s"cephadm shell -- ceph osd pool application enable $pool $application"
     command(
       label,
       s"""set -e
          |cephadm shell -- ceph osd pool create $pool
          |$init
          |echo "pool $pool ready"""".stripMargin,
-      unless = s"cephadm shell -- ceph osd pool ls 2>/dev/null | grep -qx $pool",
+      unless =
+        s"cephadm shell -- ceph osd pool ls 2>/dev/null | grep -qx $pool",
       timeout = timeout
     )
 
-  /** The pool gone, with every object in it: the monitors are allowed to delete pools for the removal only. It
-    * does nothing while the pool is not listed. When Ceph cannot be queried the guard says yes, so the removal
-    * runs and fails with Ceph's own message: a cluster that is down is not "nothing to remove".
+  /** The pool gone, with every object in it: the monitors are allowed to delete
+    * pools for the removal only. It does nothing while the pool is not listed.
+    * When Ceph cannot be queried the guard says yes, so the removal runs and
+    * fails with Ceph's own message: a cluster that is down is not "nothing to
+    * remove".
     */
-  def absentCephPool(label: String, pool: String, timeout: Int = 180): ApplyResource =
+  def absentCephPool(
+      label: String,
+      pool: String,
+      timeout: Int = 180
+  ): ApplyResource =
     cephName("a pool name", pool)
     command(
       label,
@@ -2197,13 +2603,16 @@ esac
       timeout = timeout
     )
 
-  /** A cephx user (`client.cinder`) with a fixed key and capabilities, as a description, for a node with
-    * `cephadm`. `caps` are pairs such as `"mon" -> "profile rbd"` and `"osd" -> "profile rbd pool=volumes"`.
-    * It is `unchanged` while the key in Ceph is the one given and every capability is there, so a rotated key
-    * is applied by running it again; otherwise the user is imported from a keyring file that exists only for
-    * the import. The key must be a whole cephx key. For an old `aes` key the monitors are first allowed to
-    * accept `aes` (CVE-2025-30156), and for an `aes256k` key their setting is left as it is. Other
-    * capabilities the user has are not looked at: an import sets exactly the ones given.
+  /** A cephx user (`client.cinder`) with a fixed key and capabilities, as a
+    * description, for a node with `cephadm`. `caps` are pairs such as
+    * `"mon" -> "profile rbd"` and `"osd" -> "profile rbd pool=volumes"`. It is
+    * `unchanged` while the key in Ceph is the one given and every capability is
+    * there, so a rotated key is applied by running it again; otherwise the user
+    * is imported from a keyring file that exists only for the import. The key
+    * must be a whole cephx key. For an old `aes` key the monitors are first
+    * allowed to accept `aes` (CVE-2025-30156), and for an `aes256k` key their
+    * setting is left as it is. Other capabilities the user has are not looked
+    * at: an import sets exactly the ones given.
     */
   def cephUser(
       label: String,
@@ -2215,17 +2624,25 @@ esac
     cephEntity(entity)
     require(caps.nonEmpty, "cephUser needs at least one capability")
     caps.foreach { (kind, value) =>
-      require(Set("mon", "osd", "mgr", "mds").contains(kind), s"not a capability type: '$kind'")
       require(
-        value.nonEmpty && value.forall(c => c >= ' ' && c <= '~' && !"\"'\\$`".contains(c)),
+        Set("mon", "osd", "mgr", "mds").contains(kind),
+        s"not a capability type: '$kind'"
+      )
+      require(
+        value.nonEmpty && value.forall(c =>
+          c >= ' ' && c <= '~' && !"\"'\\$`".contains(c)
+        ),
         s"a capability must be printable ASCII without quotes, backslashes, $$ or backticks: '$value'"
       )
     }
     require(CephKeys.isKey(key.reveal), "cephUser: not a cephx key")
-    val capLines = caps.map((kind, value) => s"    caps $kind = \"$value\"").mkString("\n")
+    val capLines =
+      caps.map((kind, value) => s"    caps $kind = \"$value\"").mkString("\n")
     val file = s"orphera-$entity.keyring"
     val matches = caps
-      .map((kind, value) => s"""echo "$$CAPS" | grep -qF 'caps $kind = "$value"'""")
+      .map((kind, value) =>
+        s"""echo "$$CAPS" | grep -qF 'caps $kind = "$value"'"""
+      )
       .mkString(" && ")
     command(
       label,
@@ -2247,31 +2664,42 @@ esac
       timeout = timeout
     )
 
-  /** The cephx user gone, as a description; nothing happens while it is not listed. When Ceph cannot be queried
-    * the guard says yes, so the removal runs and fails with Ceph's own message.
+  /** The cephx user gone, as a description; nothing happens while it is not
+    * listed. When Ceph cannot be queried the guard says yes, so the removal
+    * runs and fails with Ceph's own message.
     */
-  def absentCephUser(label: String, entity: String, timeout: Int = 180): ApplyResource =
+  def absentCephUser(
+      label: String,
+      entity: String,
+      timeout: Int = 180
+  ): ApplyResource =
     cephEntity(entity)
     command(
       label,
       s"""set -e
          |cephadm shell -- ceph auth del $entity
          |echo "$entity removed"""".stripMargin,
-      onlyIf =
-        s"""OUT=$$(cephadm shell -- ceph auth ls 2>/dev/null) || exit 0
+      onlyIf = s"""OUT=$$(cephadm shell -- ceph auth ls 2>/dev/null) || exit 0
            |echo "$$OUT" | tr -d '\\r' | grep -qx '$entity'""".stripMargin,
       timeout = timeout
     )
 
-  /** A CephFS filesystem, as a description, for a node with `cephadm`. It is `unchanged` while `ceph fs ls`
-    * lists it and an MDS is active; otherwise it is created if missing (`ceph fs volume create`, which also
-    * starts the MDS daemons) and the run waits up to five minutes for an active MDS, failing with a message if
-    * none comes.
+  /** A CephFS filesystem, as a description, for a node with `cephadm`. It is
+    * `unchanged` while `ceph fs ls` lists it and an MDS is active; otherwise it
+    * is created if missing (`ceph fs volume create`, which also starts the MDS
+    * daemons) and the run waits up to five minutes for an active MDS, failing
+    * with a message if none comes.
     */
-  def cephFilesystem(label: String, name: String, timeout: Int = 660): ApplyResource =
+  def cephFilesystem(
+      label: String,
+      name: String,
+      timeout: Int = 660
+  ): ApplyResource =
     cephName("a filesystem name", name)
-    val listed = s"""cephadm shell -- ceph fs ls 2>/dev/null | tr -d '\\r' | grep -q '^name: $name,'"""
-    val active = """cephadm shell -- ceph mds stat 2>/dev/null | grep -q 'up:active'"""
+    val listed =
+      s"""cephadm shell -- ceph fs ls 2>/dev/null | tr -d '\\r' | grep -q '^name: $name,'"""
+    val active =
+      """cephadm shell -- ceph mds stat 2>/dev/null | grep -q 'up:active'"""
     command(
       label,
       s"""set -e
@@ -2289,11 +2717,16 @@ esac
       timeout = timeout
     )
 
-  /** The filesystem gone with ALL its data (and its pools): the monitors are allowed to delete pools for the
-    * removal only. It does nothing while `ceph fs ls` does not list it; when Ceph cannot be queried the guard
-    * says yes, so the removal fails with Ceph's own message.
+  /** The filesystem gone with ALL its data (and its pools): the monitors are
+    * allowed to delete pools for the removal only. It does nothing while
+    * `ceph fs ls` does not list it; when Ceph cannot be queried the guard says
+    * yes, so the removal fails with Ceph's own message.
     */
-  def absentCephFilesystem(label: String, name: String, timeout: Int = 600): ApplyResource =
+  def absentCephFilesystem(
+      label: String,
+      name: String,
+      timeout: Int = 600
+  ): ApplyResource =
     cephName("a filesystem name", name)
     command(
       label,
@@ -2303,15 +2736,16 @@ esac
          |cephadm shell -- ceph config set mon mon_allow_pool_delete false || R=1
          |[ "$$R" = 0 ] || exit 1
          |echo "filesystem $name removed"""".stripMargin,
-      onlyIf =
-        s"""OUT=$$(cephadm shell -- ceph fs ls 2>/dev/null) || exit 0
+      onlyIf = s"""OUT=$$(cephadm shell -- ceph fs ls 2>/dev/null) || exit 0
            |echo "$$OUT" | tr -d '\\r' | grep -q '^name: $name,'""".stripMargin,
       timeout = timeout
     )
 
-  /** An NFS-Ganesha cluster, as a description, with one daemon on the Ceph orchestrator host that has the
-    * address `ip` (or the short name `hostName`). It is `unchanged` while `ceph nfs cluster ls` lists it and
-    * `ip`:`port` answers; otherwise it is created if missing and the run waits up to five minutes for the port.
+  /** An NFS-Ganesha cluster, as a description, with one daemon on the Ceph
+    * orchestrator host that has the address `ip` (or the short name
+    * `hostName`). It is `unchanged` while `ceph nfs cluster ls` lists it and
+    * `ip`:`port` answers; otherwise it is created if missing and the run waits
+    * up to five minutes for the port.
     */
   def cephNfsCluster(
       label: String,
@@ -2323,10 +2757,15 @@ esac
   ): ApplyResource =
     cephName("an NFS cluster name", cluster)
     cephName("a host name", hostName)
-    require(ip.nonEmpty && ip.forall(c => c.isDigit || ".:".contains(c) || c.isLower), s"not an address: '$ip'")
+    require(
+      ip.nonEmpty && ip.forall(c => c.isDigit || ".:".contains(c) || c.isLower),
+      s"not an address: '$ip'"
+    )
     require(port > 0 && port < 65536, s"not a port: $port")
-    val listed = s"""cephadm shell -- ceph nfs cluster ls 2>/dev/null | tr -d '\\r' | grep -qw '$cluster'"""
-    val up = s"""python3 -c "import socket; socket.create_connection(('$ip', $port), 3).close()" 2>/dev/null"""
+    val listed =
+      s"""cephadm shell -- ceph nfs cluster ls 2>/dev/null | tr -d '\\r' | grep -qw '$cluster'"""
+    val up =
+      s"""python3 -c "import socket; socket.create_connection(('$ip', $port), 3).close()" 2>/dev/null"""
     command(
       label,
       s"""set -e
@@ -2353,10 +2792,15 @@ esac
       timeout = timeout
     )
 
-  /** The NFS cluster gone; nothing happens while it is not listed, and a cluster that cannot be queried is not
-    * "nothing to remove" (the guard says yes and the removal fails with Ceph's message).
+  /** The NFS cluster gone; nothing happens while it is not listed, and a
+    * cluster that cannot be queried is not "nothing to remove" (the guard says
+    * yes and the removal fails with Ceph's message).
     */
-  def absentCephNfsCluster(label: String, cluster: String, timeout: Int = 300): ApplyResource =
+  def absentCephNfsCluster(
+      label: String,
+      cluster: String,
+      timeout: Int = 300
+  ): ApplyResource =
     cephName("an NFS cluster name", cluster)
     command(
       label,
@@ -2375,22 +2819,34 @@ esac
       s"$what must be printable ASCII without a single quote"
     )
 
-  /** Ceph configuration options for one section (`who`, such as `client.rgw.orphera` or `mon`), as a
-    * description, for a node with `cephadm`. It is `unchanged` while `ceph config get` returns every value
-    * given; otherwise each option is set (setting an option to its value is harmless). Other options of the
-    * section are not looked at. A step that depends on a changed option (restarting a daemon) can be notified.
+  /** Ceph configuration options for one section (`who`, such as
+    * `client.rgw.orphera` or `mon`), as a description, for a node with
+    * `cephadm`. It is `unchanged` while `ceph config get` returns every value
+    * given; otherwise each option is set (setting an option to its value is
+    * harmless). Other options of the section are not looked at. A step that
+    * depends on a changed option (restarting a daemon) can be notified.
     */
-  def cephConfig(label: String, who: String, options: List[(String, String)], timeout: Int = 180): ApplyResource =
+  def cephConfig(
+      label: String,
+      who: String,
+      options: List[(String, String)],
+      timeout: Int = 180
+  ): ApplyResource =
     cephName("a configuration section", who)
     require(options.nonEmpty, "cephConfig needs at least one option")
     options.foreach { (k, v) =>
       cephName("an option name", k)
       cephOptionValue(s"the value of $k", v)
     }
-    val sets = options.map((k, v) => s"cephadm shell -- ceph config set $who $k ${Apply.quote(v)}").mkString("\n")
+    val sets = options
+      .map((k, v) =>
+        s"cephadm shell -- ceph config set $who $k ${Apply.quote(v)}"
+      )
+      .mkString("\n")
     val checks = options
       .map((k, v) =>
-        s"""[ "$$(cephadm shell -- ceph config get $who $k 2>/dev/null | tr -d '\\r')" = ${Apply.quote(v)} ]"""
+        s"""[ "$$(cephadm shell -- ceph config get $who $k 2>/dev/null | tr -d '\\r')" = ${Apply
+            .quote(v)} ]"""
       )
       .mkString(" && ")
     command(
@@ -2402,12 +2858,18 @@ esac
       timeout = timeout
     )
 
-  /** Options of one section gone, as a description: every option of `who` whose name starts with `prefix`
-    * (found in `ceph config dump`, where with no mask the option is the first word that starts with the
-    * prefix) is removed. Nothing happens while there is none; when Ceph cannot be queried the guard says yes,
-    * so the removal fails with Ceph's own message.
+  /** Options of one section gone, as a description: every option of `who` whose
+    * name starts with `prefix` (found in `ceph config dump`, where with no mask
+    * the option is the first word that starts with the prefix) is removed.
+    * Nothing happens while there is none; when Ceph cannot be queried the guard
+    * says yes, so the removal fails with Ceph's own message.
     */
-  def absentCephConfig(label: String, who: String, prefix: String, timeout: Int = 180): ApplyResource =
+  def absentCephConfig(
+      label: String,
+      who: String,
+      prefix: String,
+      timeout: Int = 180
+  ): ApplyResource =
     cephName("a configuration section", who)
     cephName("an option prefix", prefix)
     val listOptions =
@@ -2432,15 +2894,24 @@ esac
       .map(b => f"${b & 0xff}%02x")
       .mkString
 
-  /** The state file of a cephadm service made by `cephOrchService` (the hash of the spec last applied). */
-  def cephOrchStatePath(serviceType: String, serviceId: String, stateDir: String = "/var/lib/orphera"): String =
+  /** The state file of a cephadm service made by `cephOrchService` (the hash of
+    * the spec last applied).
+    */
+  def cephOrchStatePath(
+      serviceType: String,
+      serviceId: String,
+      stateDir: String = "/var/lib/orphera"
+  ): String =
     s"$stateDir/ceph-orch-$serviceType.$serviceId.sha"
 
-  /** A cephadm service from a spec file (`ceph orch apply -i`), as a description. It is `unchanged` while the
-    * hash of the spec last applied (kept in `cephOrchStatePath`) is the spec given and `ceph orch ls` lists the
-    * service; otherwise the spec is applied (cephadm itself redeploys the daemons whose spec changed). `@@HOST@@`
-    * in the spec stands for the hostname of the orchestrator host that has the address `hostIp` or the short
-    * name `hostName`; a run with no such host fails with a message. The spec must not contain a line `SPEC_END`.
+  /** A cephadm service from a spec file (`ceph orch apply -i`), as a
+    * description. It is `unchanged` while the hash of the spec last applied
+    * (kept in `cephOrchStatePath`) is the spec given and `ceph orch ls` lists
+    * the service; otherwise the spec is applied (cephadm itself redeploys the
+    * daemons whose spec changed). `@@HOST@@` in the spec stands for the
+    * hostname of the orchestrator host that has the address `hostIp` or the
+    * short name `hostName`; a run with no such host fails with a message. The
+    * spec must not contain a line `SPEC_END`.
     */
   def cephOrchService(
       label: String,
@@ -2455,15 +2926,32 @@ esac
     cephName("a service type", serviceType)
     cephName("a service id", serviceId)
     cephName("a host name", hostName)
-    require(hostIp.nonEmpty && hostIp.forall(c => c.isDigit || ".:".contains(c) || c.isLower), s"not an address: '$hostIp'")
-    require(!spec.linesIterator.exists(_.trim == "SPEC_END"), "the spec must not contain a line SPEC_END")
+    require(
+      hostIp.nonEmpty && hostIp.forall(c =>
+        c.isDigit || ".:".contains(c) || c.isLower
+      ),
+      s"not an address: '$hostIp'"
+    )
+    require(
+      !spec.linesIterator.exists(_.trim == "SPEC_END"),
+      "the spec must not contain a line SPEC_END"
+    )
     require(!spec.contains("$"), "the spec must not contain $")
-    require(stateDir.startsWith("/") && !stateDir.exists(c => c.isWhitespace || "'\"$`\\".contains(c)), s"not a directory: '$stateDir'")
-    require(!spec.linesIterator.exists(_.trim.startsWith("|")), "a line of the spec must not start with |")
+    require(
+      stateDir.startsWith("/") && !stateDir.exists(c =>
+        c.isWhitespace || "'\"$`\\".contains(c)
+      ),
+      s"not a directory: '$stateDir'"
+    )
+    require(
+      !spec.linesIterator.exists(_.trim.startsWith("|")),
+      "a line of the spec must not start with |"
+    )
     val state = cephOrchStatePath(serviceType, serviceId, stateDir)
     val sha = cephSpecSha(spec)
     val file = s"orphera-$serviceType-$serviceId.yaml"
-    val listed = s"""cephadm shell -- ceph orch ls --service-type $serviceType 2>/dev/null | tr -d '\\r' | grep -q '^$serviceType.$serviceId '"""
+    val listed =
+      s"""cephadm shell -- ceph orch ls --service-type $serviceType 2>/dev/null | tr -d '\\r' | grep -q '^$serviceType.$serviceId '"""
     command(
       label,
       s"""set -e
@@ -2490,8 +2978,9 @@ esac
       timeout = timeout
     )
 
-  /** The cephadm service gone (its daemons stop) and its state file removed, as a description. Nothing happens
-    * while the service is not listed and the state file is not there.
+  /** The cephadm service gone (its daemons stop) and its state file removed, as
+    * a description. Nothing happens while the service is not listed and the
+    * state file is not there.
     */
   def absentCephOrchService(
       label: String,
@@ -2503,7 +2992,8 @@ esac
     cephName("a service type", serviceType)
     cephName("a service id", serviceId)
     val state = cephOrchStatePath(serviceType, serviceId, stateDir)
-    val listed = s"""cephadm shell -- ceph orch ls --service-type $serviceType 2>/dev/null | tr -d '\\r' | grep -q '^$serviceType.$serviceId '"""
+    val listed =
+      s"""cephadm shell -- ceph orch ls --service-type $serviceType 2>/dev/null | tr -d '\\r' | grep -q '^$serviceType.$serviceId '"""
     command(
       label,
       s"""set -e
@@ -2519,38 +3009,60 @@ esac
 
   private def ovsName(what: String, text: String): Unit =
     require(
-      text.nonEmpty && text.length <= 15 && text.forall(c => c.isLetterOrDigit || "_-.".contains(c)),
+      text.nonEmpty && text.length <= 15 && text.forall(c =>
+        c.isLetterOrDigit || "_-.".contains(c)
+      ),
       s"$what must be 1 to 15 letters, digits and _ - . , not '$text'"
     )
 
-  /** An Open vSwitch bridge with the given physical (or other) ports, up. Nothing happens while the bridge exists,
-    * has every port and its link is up; a missing bridge or port is added, and a port the bridge already has is
-    * left alone. Needs Open vSwitch on the node (declare the `openvswitch-switch` package and service before it).
+  /** An Open vSwitch bridge with the given physical (or other) ports, up.
+    * Nothing happens while the bridge exists, has every port and its link is
+    * up; a missing bridge or port is added, and a port the bridge already has
+    * is left alone. Needs Open vSwitch on the node (declare the
+    * `openvswitch-switch` package and service before it).
     */
-  def ovsBridge(label: String, bridge: String, ports: List[String] = Nil, timeout: Int = 60): ApplyResource =
+  def ovsBridge(
+      label: String,
+      bridge: String,
+      ports: List[String] = Nil,
+      timeout: Int = 60
+  ): ApplyResource =
     ovsName("the bridge", bridge)
     ports.foreach(ovsName("a port", _))
-    val portCommands = ports.map(p => s"ovs-vsctl --may-exist add-port $bridge $p")
-    val portChecks = ports.map(p => s"ovs-vsctl list-ports $bridge | grep -qx $p")
+    val portCommands =
+      ports.map(p => s"ovs-vsctl --may-exist add-port $bridge $p")
+    val portChecks =
+      ports.map(p => s"ovs-vsctl list-ports $bridge | grep -qx $p")
     val portText = if ports.isEmpty then "no ports" else ports.mkString(" ")
     command(
       label,
-      (List("set -e", s"ovs-vsctl --may-exist add-br $bridge") ++ portCommands ++
+      (List(
+        "set -e",
+        s"ovs-vsctl --may-exist add-br $bridge"
+      ) ++ portCommands ++
         List(
           s"ip link set $bridge up",
           s"""echo "$bridge has $portText""""
         )).mkString("\n"),
       unless = (List(s"ovs-vsctl br-exists $bridge") ++ portChecks ++
-        List(s"""ip -o link show $bridge | grep -q '<[^>]*UP'""")).mkString(" && "),
+        List(s"""ip -o link show $bridge | grep -q '<[^>]*UP'"""))
+        .mkString(" && "),
       timeout = timeout
     )
 
-  /** Open vSwitch's database manager set to `target` (such as `ptcp:6640:127.0.0.1`, which lets a container reach
-    * ovsdb over loopback TCP). Nothing happens while it already is that.
+  /** Open vSwitch's database manager set to `target` (such as
+    * `ptcp:6640:127.0.0.1`, which lets a container reach ovsdb over loopback
+    * TCP). Nothing happens while it already is that.
     */
-  def ovsManager(label: String, target: String, timeout: Int = 60): ApplyResource =
+  def ovsManager(
+      label: String,
+      target: String,
+      timeout: Int = 60
+  ): ApplyResource =
     require(
-      target.nonEmpty && target.forall(c => c.isLetterOrDigit || ":._-".contains(c)),
+      target.nonEmpty && target.forall(c =>
+        c.isLetterOrDigit || ":._-".contains(c)
+      ),
       s"the manager target must be letters, digits and : . _ - , not '$target'"
     )
     command(
@@ -2562,10 +3074,14 @@ esac
       timeout = timeout
     )
 
-  /** The Open vSwitch bridges gone, with their ports. Nothing happens while none of them exists, or while Open
-    * vSwitch is not installed.
+  /** The Open vSwitch bridges gone, with their ports. Nothing happens while
+    * none of them exists, or while Open vSwitch is not installed.
     */
-  def absentOvsBridge(label: String, bridges: List[String], timeout: Int = 60): ApplyResource =
+  def absentOvsBridge(
+      label: String,
+      bridges: List[String],
+      timeout: Int = 60
+  ): ApplyResource =
     require(bridges.nonEmpty, "absentOvsBridge needs a bridge")
     bridges.foreach(ovsName("a bridge", _))
     val bridgeText = bridges.mkString(" ")
@@ -2578,10 +3094,15 @@ esac
       timeout = timeout
     )
 
-  /** One port gone from a bridge. Nothing happens while the bridge does not have it, or while Open vSwitch is not
-    * installed.
+  /** One port gone from a bridge. Nothing happens while the bridge does not
+    * have it, or while Open vSwitch is not installed.
     */
-  def absentOvsPort(label: String, bridge: String, port: String, timeout: Int = 60): ApplyResource =
+  def absentOvsPort(
+      label: String,
+      bridge: String,
+      port: String,
+      timeout: Int = 60
+  ): ApplyResource =
     ovsName("the bridge", bridge)
     ovsName("the port", port)
     command(
@@ -2589,7 +3110,8 @@ esac
       s"""set -e
          |ovs-vsctl --if-exists del-port $bridge $port
          |echo "$port removed from $bridge"""".stripMargin,
-      onlyIf = s"command -v ovs-vsctl >/dev/null 2>&1 && ovs-vsctl list-ports $bridge 2>/dev/null | grep -qx $port",
+      onlyIf =
+        s"command -v ovs-vsctl >/dev/null 2>&1 && ovs-vsctl list-ports $bridge 2>/dev/null | grep -qx $port",
       timeout = timeout
     )
 
@@ -2599,7 +3121,9 @@ esac
       s"$what must be letters, digits and underscores, not '$text'"
     )
 
-  /** The password as SQL text between single quotes, inside a shell string between double quotes. */
+  /** The password as SQL text between single quotes, inside a shell string
+    * between double quotes.
+    */
   private def sqlPassword(password: Secret): String =
     password.reveal
       .replace("\\", "\\\\")
@@ -2609,11 +3133,13 @@ esac
         case c                            => c.toString
       }
 
-  /** Databases and the user who owns them on a MariaDB server, as a description, for a node where the
-    * `mariadb` client logs in as root (the unix socket, as on a Galera node). The user (`'user'@'%'`, since a
-    * proxy hides the client's address) gets all privileges on each database and the given password, so a
-    * rotated password is applied by running it again. It is `unchanged` while a real login as the user
-    * through `via` (the address clients use, such as the VIP) reaches every database with that password.
+  /** Databases and the user who owns them on a MariaDB server, as a
+    * description, for a node where the `mariadb` client logs in as root (the
+    * unix socket, as on a Galera node). The user (`'user'@'%'`, since a proxy
+    * hides the client's address) gets all privileges on each database and the
+    * given password, so a rotated password is applied by running it again. It
+    * is `unchanged` while a real login as the user through `via` (the address
+    * clients use, such as the VIP) reaches every database with that password.
     * `charset` and `collation` apply to databases the run creates.
     */
   def sqlDatabase(
@@ -2629,21 +3155,30 @@ esac
     databases.foreach(sqlName("a database name", _))
     sqlName("a user name", user)
     require(
-      via.nonEmpty && via.forall(c => c.isLetterOrDigit || c == '.' || c == '-'),
+      via.nonEmpty && via.forall(c =>
+        c.isLetterOrDigit || c == '.' || c == '-'
+      ),
       s"sqlDatabase: not an address: '$via'"
     )
     List(charset, collation).foreach(w =>
-      require(w.forall(c => c.isLetterOrDigit || c == '_'), s"sqlDatabase: not a character set or collation: '$w'")
+      require(
+        w.forall(c => c.isLetterOrDigit || c == '_'),
+        s"sqlDatabase: not a character set or collation: '$w'"
+      )
     )
     val settings =
       (if charset.isEmpty then "" else s" DEFAULT CHARACTER SET $charset") +
         (if collation.isEmpty then "" else s" DEFAULT COLLATE $collation")
     val pw = sqlPassword(password)
     val statements =
-      databases.map(d => s"CREATE DATABASE IF NOT EXISTS $d$settings; ").mkString +
+      databases
+        .map(d => s"CREATE DATABASE IF NOT EXISTS $d$settings; ")
+        .mkString +
         s"CREATE USER IF NOT EXISTS '$user'@'%' IDENTIFIED BY '$pw'; " +
         s"ALTER USER '$user'@'%' IDENTIFIED BY '$pw'; " +
-        databases.map(d => s"GRANT ALL PRIVILEGES ON $d.* TO '$user'@'%'; ").mkString +
+        databases
+          .map(d => s"GRANT ALL PRIVILEGES ON $d.* TO '$user'@'%'; ")
+          .mkString +
         "FLUSH PRIVILEGES;"
     val login = databases
       .map(d =>
@@ -2652,11 +3187,16 @@ esac
       .mkString(" && ")
     command(label, s"""mariadb -N -e "$statements"""", unless = login)
 
-  /** The same databases and user gone, as a description: dropped when either exists. When MariaDB cannot be
-    * queried the guard says yes, so the drop runs and fails with MariaDB's own message: a database that is
-    * down is not "nothing to remove".
+  /** The same databases and user gone, as a description: dropped when either
+    * exists. When MariaDB cannot be queried the guard says yes, so the drop
+    * runs and fails with MariaDB's own message: a database that is down is not
+    * "nothing to remove".
     */
-  def absentSqlDatabase(label: String, databases: List[String], user: String): ApplyResource =
+  def absentSqlDatabase(
+      label: String,
+      databases: List[String],
+      user: String
+  ): ApplyResource =
     require(databases.nonEmpty, "absentSqlDatabase needs at least one database")
     databases.foreach(sqlName("a database name", _))
     sqlName("a user name", user)
@@ -2664,19 +3204,27 @@ esac
     val names = databases.map(d => s"'$d'").mkString(",")
     val exists =
       s"""OUT=$$(mariadb -N -e "SELECT 1 FROM information_schema.SCHEMATA WHERE SCHEMA_NAME IN ($names) UNION SELECT 1 FROM mysql.user WHERE User='$user'" 2>/dev/null) || exit 0; [ -n "$$OUT" ]"""
-    command(label, s"""mariadb -N -e "${drops}DROP USER IF EXISTS '$user'@'%'; FLUSH PRIVILEGES;"""", onlyIf = exists)
+    command(
+      label,
+      s"""mariadb -N -e "${drops}DROP USER IF EXISTS '$user'@'%'; FLUSH PRIVILEGES;"""",
+      onlyIf = exists
+    )
 
-  /** Services gone from the node, as a description. Each pair is a systemd unit (its name without `.service`)
-    * and the container it runs. The unit is stopped and disabled (nothing happens when it does not exist),
-    * its file under /etc/systemd/system is removed, and the container is removed with `podman rm -f` when
-    * podman has it; systemd reloads its units once, when a file went. The resources are returned in the order
-    * they run, and what must follow the removal is made `.after` all of them.
+  /** Services gone from the node, as a description. Each pair is a systemd unit
+    * (its name without `.service`) and the container it runs. The unit is
+    * stopped and disabled (nothing happens when it does not exist), its file
+    * under /etc/systemd/system is removed, and the container is removed with
+    * `podman rm -f` when podman has it; systemd reloads its units once, when a
+    * file went. The resources are returned in the order they run, and what must
+    * follow the removal is made `.after` all of them.
     */
   def absentContainerUnits(units: List[(String, String)]): List[ApplyResource] =
     require(units.nonEmpty, "absentContainerUnits needs at least one unit")
     require(
       units.forall((u, c) =>
-        u.nonEmpty && c.nonEmpty && !u.exists(ch => ch.isWhitespace || ch == '/') && !c.exists(_.isWhitespace)
+        u.nonEmpty && c.nonEmpty && !u.exists(ch =>
+          ch.isWhitespace || ch == '/'
+        ) && !c.exists(_.isWhitespace)
       ),
       s"absentContainerUnits: a unit or container name with a space or a slash in $units"
     )
@@ -2694,16 +3242,19 @@ esac
       val gone = command(
         s"remove the $container container",
         s"podman rm -f $name",
-        onlyIf = s"command -v podman >/dev/null 2>&1 && podman container exists $name"
+        onlyIf =
+          s"command -v podman >/dev/null 2>&1 && podman container exists $name"
       ).after(stopped)
       List(stopped, file, gone)
     }
     each :+ reload
 
-  /** Has the container images on the node, as a description: every reference in `images` is pulled with
-    * `podman pull` (three tries, with a pause, through `kolla.Pull`) unless the node already has it, so a run
-    * with all of them present changes nothing. `hint` says where to look if a reference is wrong, and appears
-    * in the message of a failed pull. The images the node already has are left as they are.
+  /** Has the container images on the node, as a description: every reference in
+    * `images` is pulled with `podman pull` (three tries, with a pause, through
+    * `kolla.Pull`) unless the node already has it, so a run with all of them
+    * present changes nothing. `hint` says where to look if a reference is
+    * wrong, and appears in the message of a failed pull. The images the node
+    * already has are left as they are.
     */
   def pullImages(
       label: String,
@@ -2713,12 +3264,15 @@ esac
   ): ApplyResource =
     require(images.nonEmpty, "pullImages needs at least one image")
     require(
-      images.forall(i => i.nonEmpty && !i.exists(c => c.isWhitespace || c == '\'')),
+      images.forall(i =>
+        i.nonEmpty && !i.exists(c => c.isWhitespace || c == '\'')
+      ),
       s"pullImages: an image reference with a space or a quote in $images"
     )
     val refs = images.map(Apply.quote).mkString(" ")
     val where = if hint.isEmpty then "the image names in the manifest" else hint
-    val present = s"""for img in $refs; do podman image exists "$$img" || exit 1; done"""
+    val present =
+      s"""for img in $refs; do podman image exists "$$img" || exit 1; done"""
     val run =
       s"""${kolla.Pull.shellFunction(where)}
          |for img in $refs; do
@@ -2726,12 +3280,14 @@ esac
          |done""".stripMargin
     command(label, run, unless = present, timeout = timeout)
 
-  /** Waits until an HTTP(S) endpoint answers, as a description: the URL, the status codes that count as an
-    * answer, the CA that signs it, and text the body must hold. It changes nothing: when the endpoint already
-    * answers it reports `unchanged`, otherwise it waits (every `interval` seconds, for up to `timeout`) and fails
-    * with a message that names the URL and carries `hint` (where to look). `resolve` is curl's
-    * `host:port:address`, to reach a name on the certificate at an address of this node whatever DNS says. The
-    * check runs on the node, with curl.
+  /** Waits until an HTTP(S) endpoint answers, as a description: the URL, the
+    * status codes that count as an answer, the CA that signs it, and text the
+    * body must hold. It changes nothing: when the endpoint already answers it
+    * reports `unchanged`, otherwise it waits (every `interval` seconds, for up
+    * to `timeout`) and fails with a message that names the URL and carries
+    * `hint` (where to look). `resolve` is curl's `host:port:address`, to reach
+    * a name on the certificate at an address of this node whatever DNS says.
+    * The check runs on the node, with curl.
     */
   def waitForHttp(
       label: String,
@@ -2761,10 +3317,14 @@ esac
       else s"""printf '%s' "$$OUT" | grep -qF -- ${Apply.quote(contains)} && """
     val codes = status.mkString("|")
     val check =
-      s"""OUT=$$(curl -s --max-time 10 ${caOption}-w '\\n%{http_code}' ${Apply.quote(url)}); CODE=$$(printf '%s' "$$OUT" | tail -n 1); ${body}case "$$CODE" in $codes) true;; *) false;; esac"""
+      s"""OUT=$$(curl -s --max-time 10 ${caOption}-w '\\n%{http_code}' ${Apply.quote(
+          url
+        )}); CODE=$$(printf '%s' "$$OUT" | tail -n 1); ${body}case "$$CODE" in $codes) true;; *) false;; esac"""
     waiting(label, check, url, timeout, interval, hint)
 
-  /** Waits until a TCP port accepts a connection, as a description (see `waitForHttp`). */
+  /** Waits until a TCP port accepts a connection, as a description (see
+    * `waitForHttp`).
+    */
   def waitForPort(
       label: String,
       host: String,
@@ -2774,7 +3334,9 @@ esac
       hint: String = ""
   ): ApplyResource =
     require(
-      host.nonEmpty && host.forall(c => c.isLetterOrDigit || ".-_:".contains(c)),
+      host.nonEmpty && host.forall(c =>
+        c.isLetterOrDigit || ".-_:".contains(c)
+      ),
       s"waitForPort needs a plain host name or address, not '$host'"
     )
     require(port >= 1 && port <= 65535, s"waitForPort needs a port, not $port")
@@ -2814,11 +3376,11 @@ esac
     )
 
   /** A question about the node, for resources that apply on some nodes only:
-    * give one of `onlyIf` (a shell test that exits 0 when the resources
-    * apply), `unless` (exits non-zero when they apply) or `creates` (a path
-    * that does not exist). Resources made `after` the gate are skipped on a
-    * node where the answer is no, and applied where it is yes. The gate itself
-    * changes nothing.
+    * give one of `onlyIf` (a shell test that exits 0 when the resources apply),
+    * `unless` (exits non-zero when they apply) or `creates` (a path that does
+    * not exist). Resources made `after` the gate are skipped on a node where
+    * the answer is no, and applied where it is yes. The gate itself changes
+    * nothing.
     */
   def gate(
       label: String,
@@ -3264,8 +3826,8 @@ trait ApplyTarget:
   ): IO[Unit] = shell(label, fallback, timeout)
 
   /** The resources (by id) that an earlier run of this description owed a
-    * notification and did not deliver, because what they depend on failed.
-    * A target that keeps nothing says none.
+    * notification and did not deliver, because what they depend on failed. A
+    * target that keeps nothing says none.
     */
   def pendingNotices(
       @scala.annotation.unused plan: String
@@ -3566,7 +4128,8 @@ object Apply:
                 )
               case Observed.RegularFile(m, o, g, sum) =>
                 val fix = attrs(f.path, f.mode, f.owner, f.group, m, o, g)
-                if f.content.nonEmpty && !f.onlyIfMissing && sum != sha256(text) then
+                if f.content.nonEmpty && !f.onlyIfMissing && sum != sha256(text)
+                then
                   val diff =
                     if secret then IO.pure(List("(secret: not shown)"))
                     else
@@ -4426,7 +4989,10 @@ object Apply:
       // Notifications an earlier run owed and did not deliver (a file changed, but the unit it
       // restarts was skipped because something before it failed): delivered now, so a change
       // that is already on the node is not left without its restart.
-      before <- target.pendingNotices(plan.name).attempt.map(_.getOrElse(Set.empty[String]))
+      before <- target
+        .pendingNotices(plan.name)
+        .attempt
+        .map(_.getOrElse(Set.empty[String]))
       owedEarlier = (i: Int) =>
         plan.notifiers(i).nonEmpty && before.contains(rs(i).id)
       outcomes <- Ref.of[IO, Map[Int, ApplyOutcome]](Map.empty)
@@ -4441,10 +5007,16 @@ object Apply:
               )
             case ApplyOutcome.NotNotified          => line(r.id, "not notified")
             case ApplyOutcome.WouldChange(ch, det) =>
-              line(r.id, describe(r, ch, would = true, plan, i, owedEarlier(i))) >> det
+              line(
+                r.id,
+                describe(r, ch, would = true, plan, i, owedEarlier(i))
+              ) >> det
                 .traverse_(d => say(s"  $d"))
             case ApplyOutcome.Changed(ch, det) =>
-              line(r.id, describe(r, ch, would = false, plan, i, owedEarlier(i))) >> det
+              line(
+                r.id,
+                describe(r, ch, would = false, plan, i, owedEarlier(i))
+              ) >> det
                 .traverse_(d => say(s"  $d"))
             case ApplyOutcome.Skipped(reason) => line(r.id, s"skipped: $reason")
             case ApplyOutcome.Failed(error)   => line(r.id, s"FAILED: $error"))
@@ -4621,12 +5193,14 @@ object Apply:
             case _                                                => false
           skippedOrFailed && plan.notifiers(i).nonEmpty && (
             before.contains(rs(i).id) ||
-              plan.notifiers(i).exists(j =>
-                done.get(j).exists {
-                  case _: ApplyOutcome.Changed => true
-                  case _                       => false
-                }
-              )
+              plan
+                .notifiers(i)
+                .exists(j =>
+                  done.get(j).exists {
+                    case _: ApplyOutcome.Changed => true
+                    case _                       => false
+                  }
+                )
           )
         }
         .map(rs(_).id)

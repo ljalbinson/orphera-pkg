@@ -91,8 +91,11 @@ object trove_guest_image_teardown extends OrpheraApply:
         .map(_.after(instance))
       instance :: files
     else
-      val image = absentOpenstackImage("delete the guest image from Glance", imageName)
-      val flavor = absentOpenstackFlavor("delete the flavor orphera.trove", flavorId).after(image)
+      val image =
+        absentOpenstackImage("delete the guest image from Glance", imageName)
+      val flavor =
+        absentOpenstackFlavor("delete the flavor orphera.trove", flavorId)
+          .after(image)
       val glance = List(image, flavor)
       val helper = List(
         absentFile(openstackFlavorHelperPath(flavorId)),

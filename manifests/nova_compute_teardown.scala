@@ -69,7 +69,8 @@ object nova_compute_teardown extends OrpheraApply:
       warnScript,
       onlyIf = s"$domainsLeft && { $anyRunning; }"
     )
-    val stopped = absentContainerUnits(units.map(u => s"orphera-$u" -> u)).map(_.after(warned))
+    val stopped = absentContainerUnits(units.map(u => s"orphera-$u" -> u))
+      .map(_.after(warned))
     val bridges = absentOvsBridge(
       "delete the Open vSwitch bridges br-provider and br-int",
       List("br-provider", "br-int")

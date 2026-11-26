@@ -365,7 +365,9 @@ sys.exit(1 if bad else 0)
         .task("give kubelet a resolver file with each server once")(
           Task.Apply(resolverFilePlan)
         )
-        .task("point kubelet's config at it and restart it")(Task.Apply(kubeletResolvPlan))
+        .task("point kubelet's config at it and restart it")(
+          Task.Apply(kubeletResolvPlan)
+        )
         .build,
       stage("kubelet-config-and-dns-test", "tst30")
         .task("record it in kubelet-config, restart CoreDNS")(

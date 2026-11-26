@@ -38,7 +38,11 @@ object rgw_teardown extends OrpheraApply:
   // Files and directories of this and earlier descriptions: the hash of the old step, the state file the
   // cluster playbook kept, the helper and the CA copy.
   private val oldPaths =
-    List("/var/lib/orphera/rgw-applied-sha", "/var/lib/orphera/rgw-keystone-state", helper)
+    List(
+      "/var/lib/orphera/rgw-applied-sha",
+      "/var/lib/orphera/rgw-keystone-state",
+      helper
+    )
 
   private val poolsExist =
     """cephadm shell -- ceph osd pool ls 2>/dev/null | grep -qE '^(\.rgw\.root|default\.rgw\.)'"""
@@ -51,17 +55,23 @@ object rgw_teardown extends OrpheraApply:
       |echo "RGW pools removed (RGW_PURGE_POOLS=yes)"""".stripMargin
 
   def describe(target: Node): List[ApplyResource] =
-    val unregistered = absentKeystoneEntries("remove object storage from Keystone", "rgw")
-    val service = absentCephOrchService("remove the RGW service", "rgw", serviceId).after(unregistered)
+    val unregistered =
+      absentKeystoneEntries("remove object storage from Keystone", "rgw")
+    val service =
+      absentCephOrchService("remove the RGW service", "rgw", serviceId).after(
+        unregistered
+      )
     val options = absentCephConfig(
       "remove the RGW options from the monitors' configuration",
       s"client.rgw.$serviceId",
       "rgw_"
     ).after(service)
     val files = oldPaths.map(absentFile(_).after(service))
-    val caCopy = absentDirectory("/etc/orphera/rgw-ca", recursive = true).after(service)
+    val caCopy =
+      absentDirectory("/etc/orphera/rgw-ca", recursive = true).after(service)
     val removed = options :: caCopy :: files
-    val keystoneHelperGone = absentFile(keystoneHelperPath("rgw")).after(unregistered)
+    val keystoneHelperGone =
+      absentFile(keystoneHelperPath("rgw")).after(unregistered)
     if purgePools then
       val purged = command(
         "delete the RGW pools and every object in them (RGW_PURGE_POOLS=yes)",

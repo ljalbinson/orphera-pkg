@@ -582,15 +582,28 @@ if __name__ == '__main__':
       "heat",
       heatPassword,
       List(
-        KeystoneService("heat", "orchestration", s"http://$fqdn:$apiPort/v1/%(tenant_id)s"),
-        KeystoneService("heat-cfn", "cloudformation", s"http://$fqdn:$cfnPort/v1")
+        KeystoneService(
+          "heat",
+          "orchestration",
+          s"http://$fqdn:$apiPort/v1/%(tenant_id)s"
+        ),
+        KeystoneService(
+          "heat-cfn",
+          "cloudformation",
+          s"http://$fqdn:$cfnPort/v1"
+        )
       ),
       ksUrl,
       adminPassword,
       caCert,
       roles = List("heat_stack_owner", "heat_stack_user"),
       domain = Some(
-        KeystoneDomain("heat", "Owns the users and projects that Heat makes for stacks", "heat_domain_admin", domainAdminPassword)
+        KeystoneDomain(
+          "heat",
+          "Owns the users and projects that Heat makes for stacks",
+          "heat_domain_admin",
+          domainAdminPassword
+        )
       )
     )
     val registered = ensured.after(ca)
@@ -629,5 +642,10 @@ if __name__ == '__main__':
       ca,
       logDirectory,
       stateDirectory
-    ) ++ svcs.flatMap(_.resources) ++ List(dbSync, helperFile, keystoneHelper, registered) ++
+    ) ++ svcs.flatMap(_.resources) ++ List(
+      dbSync,
+      helperFile,
+      keystoneHelper,
+      registered
+    ) ++
       running ++ List(apiAnswers, cfnAnswers, reporting)

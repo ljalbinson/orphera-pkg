@@ -319,7 +319,9 @@ object observability_extended extends OrpheraClusterPlaybook:
         .build,
 
       stage("update-prometheus-scrape-config", monitoringNode)
-        .task("write the haproxy and mysqld scrape jobs and restart prometheus")(
+        .task(
+          "write the haproxy and mysqld scrape jobs and restart prometheus"
+        )(
           Task.Apply(prometheusPlan)
         )
         .build,

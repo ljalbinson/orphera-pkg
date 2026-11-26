@@ -856,7 +856,12 @@ if __name__ == '__main__':
       shared = true,
       external = true,
       subnet = Some(
-        OpenstackSubnet("provider", "10.10.6.0/24", Some("10.10.6.1"), Some(("10.10.6.200", "10.10.6.220")))
+        OpenstackSubnet(
+          "provider",
+          "10.10.6.0/24",
+          Some("10.10.6.1"),
+          Some(("10.10.6.200", "10.10.6.220"))
+        )
       )
     )
     val providerNet = providerMade.after(reporting)
@@ -873,5 +878,6 @@ if __name__ == '__main__':
       ca,
       logDirectory,
       stateDirectory
-    ) ++ units.flatMap(_._2) ++ List(dbSync, helperFile, keystoneHelper, registered) ++
+    ) ++ units
+      .flatMap(_._2) ++ List(dbSync, helperFile, keystoneHelper, registered) ++
       running ++ List(answering, reporting, providerHelper, providerNet)

@@ -79,11 +79,20 @@ object magnum_teardown extends OrpheraApply:
         onlyIf = hasHelper,
         timeout = 3600
       )
-      val flavorGone = absentOpenstackFlavor("delete the Kubernetes node flavor", flavorId).after(openstack)
-      val keypairGone = absentOpenstackKeypair("delete the Kubernetes node key pair", keypair).after(openstack)
+      val flavorGone =
+        absentOpenstackFlavor("delete the Kubernetes node flavor", flavorId)
+          .after(openstack)
+      val keypairGone =
+        absentOpenstackKeypair("delete the Kubernetes node key pair", keypair)
+          .after(openstack)
       val unregistered =
-        absentKeystoneEntries("remove Magnum from Keystone", "magnum").after(openstack, flavorGone, keypairGone)
-      val stopped = absentContainerUnits(units.map(u => s"orphera-$u" -> u)).map(_.after(unregistered))
+        absentKeystoneEntries("remove Magnum from Keystone", "magnum").after(
+          openstack,
+          flavorGone,
+          keypairGone
+        )
+      val stopped = absentContainerUnits(units.map(u => s"orphera-$u" -> u))
+        .map(_.after(unregistered))
       // Typed removal, no script: each directory with its contents, then the helper.
       val cleaned = (dirs.map(absentDirectory(_, recursive = true)) ++
         List(
@@ -92,4 +101,9 @@ object magnum_teardown extends OrpheraApply:
           absentFile(openstackFlavorHelperPath(flavorId)),
           absentFile(openstackKeypairHelperPath(keypair))
         )).map(_.after(stopped*))
-      List(openstack, flavorGone, keypairGone, unregistered) ++ stopped ++ cleaned
+      List(
+        openstack,
+        flavorGone,
+        keypairGone,
+        unregistered
+      ) ++ stopped ++ cleaned

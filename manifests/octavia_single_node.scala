@@ -470,7 +470,9 @@ object octavia_single_node extends OrpheraApply:
     "client.cert-and-key.pem"
   )
   private def certMode(file: String): String =
-    if file.endsWith(".key.pem") || file.endsWith("cert-and-key.pem") then "0600" else "0644"
+    if file.endsWith(".key.pem") || file.endsWith("cert-and-key.pem") then
+      "0600"
+    else "0644"
 
   // octavia-db-manage runs in a one-off container with octavia.conf bind-mounted (entrypoint overridden, so
   // kolla_set_configs does not run).
@@ -1027,7 +1029,9 @@ if __name__ == '__main__':
       "register Octavia in Keystone",
       "octavia",
       octaviaPassword,
-      List(KeystoneService("octavia", "load-balancer", s"http://$fqdn:$apiPort")),
+      List(
+        KeystoneService("octavia", "load-balancer", s"http://$fqdn:$apiPort")
+      ),
       ksUrl,
       adminPassword,
       caCert,
@@ -1109,7 +1113,9 @@ if __name__ == '__main__':
       s"$helperPath plumbing",
       unless = s"$helperPath plumbing-ok >/dev/null 2>&1",
       timeout = 180
-    ).after((helperFile :: ca :: stateDirectory :: registered :: network :: flavor :: groups)*)
+    ).after(
+      (helperFile :: ca :: stateDirectory :: registered :: network :: flavor :: groups)*
+    )
 
     val hmScriptFile = file(
       "/usr/local/sbin/orphera-octavia-hm-port",
@@ -1196,7 +1202,10 @@ if __name__ == '__main__':
       ).notifies(unitService)
       Svc(
         unitService,
-        List(dirRes, conf, kollaCa) ::: certCopies ::: List(kollaJson, unitFile),
+        List(dirRes, conf, kollaCa) ::: certCopies ::: List(
+          kollaJson,
+          unitFile
+        ),
         List(conf, kollaCa) ::: certCopies ::: List(kollaJson, unitFile)
       )
     }
