@@ -3089,7 +3089,7 @@ esac
       label,
       (List("set -e") ++ bridges.map(b => s"ovs-vsctl --if-exists del-br $b") ++
         List(s"""echo "$bridgeText removed"""")).mkString("\n"),
-      onlyIf = s"command -v ovs-vsctl >/dev/null 2>&1 && { " +
+      onlyIf = "command -v ovs-vsctl >/dev/null 2>&1 && { " +
         bridges.map(b => s"ovs-vsctl br-exists $b").mkString(" || ") + "; }",
       timeout = timeout
     )
