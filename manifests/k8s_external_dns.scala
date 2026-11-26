@@ -35,7 +35,6 @@ object k8s_external_dns extends OrpheraClusterPlaybook:
 
   private val node = "tst30"
   private val ns = "external-dns"
-  private val stateDir = "/etc/kubernetes/orphera"
   private val kc = "kubectl --kubeconfig /etc/kubernetes/admin.conf"
   private val zone = "k8s.ljalbinson.com"
   private val primaryIp = "10.10.3.40"
@@ -53,13 +52,18 @@ object k8s_external_dns extends OrpheraClusterPlaybook:
     Secrets.register(k)
     k
 
-  private val valuesScript =
+  // The namespace and the TSIG secret the chart's env refers to, and the annotation that keeps the redirect
+  // route's wildcard hostname under the hand-made record.
+  private val configScript =
     s"""set -e
        |$kc create namespace $ns --dry-run=client -o yaml | $kc apply -f -
        |$kc -n $ns create secret generic external-dns-tsig --from-literal=secret='$tsigSecret' --dry-run=client -o yaml | $kc apply -f -
-       |umask 077
-       |cat > $stateDir/external-dns-values.yaml <<'EOF'
-       |provider:
+       |$kc -n gateway annotate httproute http-to-https external-dns.alpha.kubernetes.io/controller=ignore --overwrite
+       |echo "namespace and TSIG secret written"
+       |""".stripMargin
+
+  private val chartValues: String =
+    s"""provider:
        |  name: rfc2136
        |sources:
        |- gateway-httproute
@@ -85,23 +89,21 @@ object k8s_external_dns extends OrpheraClusterPlaybook:
        |- --rfc2136-tsig-axfr
        |nodeSelector:
        |  pool: infra
-       |EOF
-       |# the redirect route's wildcard hostname must stay under the hand-made record
-       |$kc -n gateway annotate httproute http-to-https external-dns.alpha.kubernetes.io/controller=ignore --overwrite
-       |echo "namespace, TSIG secret and Helm values written"
        |""".stripMargin
 
-  private val installScript =
-    s"""set -e
-       |export KUBECONFIG=/etc/kubernetes/admin.conf
-       |helm repo add external-dns https://kubernetes-sigs.github.io/external-dns/ --force-update >/dev/null
-       |helm repo update >/dev/null
-       |VER=$$(helm show chart external-dns/external-dns | awk '/^version:/{print $$2}')
-       |[ -n "$$VER" ] || { echo "the chart external-dns/external-dns was not found; its repository may have moved" >&2; exit 1; }
-       |echo "installing external-dns chart $$VER"
-       |helm upgrade --install external-dns external-dns/external-dns --version "$$VER" --namespace $ns -f $stateDir/external-dns-values.yaml --wait --timeout 10m
-       |$kc -n $ns get pods -o wide
-       |""".stripMargin
+  // The chart as a `helmRelease` (see k8s_metrics_server.scala); the values are part of the description, so a
+  // change to them installs again.
+  private val installPlan: ApplyPlan =
+    import Resources.*
+    val (helper, installed) = helmRelease(
+      "helm install external-dns",
+      "external-dns",
+      "external-dns/external-dns",
+      "https://kubernetes-sigs.github.io/external-dns/",
+      ns,
+      values = Some(Secret(chartValues))
+    )
+    ApplyPlan.orFail("external-dns", List(helper, installed))
 
   private val testScript =
     s"""set -e
@@ -171,13 +173,13 @@ object k8s_external_dns extends OrpheraClusterPlaybook:
   val playbook: ClusterPlaybook =
     clusterPlaybook("k8s-external-dns")(
       stage("external-dns-config", node)
-        .task("namespace, TSIG secret, Helm values")(
-          Task.RunCommand(List("sh", "-c", valuesScript), timeoutSeconds = 120)
+        .task("namespace and TSIG secret")(
+          Task.RunCommand(List("sh", "-c", configScript), timeoutSeconds = 120)
         )
         .build,
       stage("install-external-dns", node)
         .task("helm install external-dns")(
-          Task.RunCommand(List("sh", "-c", installScript), timeoutSeconds = 800)
+          Task.Apply(installPlan)
         )
         .build,
       stage("test-external-dns", node)

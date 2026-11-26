@@ -59,17 +59,19 @@ object k8s_cert_manager extends OrpheraClusterPlaybook:
        |openssl verify -CAfile ca.crt k8s-subca.crt
        |""".stripMargin
 
-  private val installScript =
-    s"""set -e
-       |export KUBECONFIG=/etc/kubernetes/admin.conf
-       |helm repo add jetstack https://charts.jetstack.io --force-update >/dev/null
-       |helm repo update >/dev/null
-       |VER=$$(helm show chart jetstack/cert-manager | awk '/^version:/{print $$2}')
-       |echo "installing cert-manager chart $$VER"
-       |helm upgrade --install cert-manager jetstack/cert-manager --version "$$VER" \\
-       |  --namespace cert-manager --create-namespace --set crds.enabled=true --wait --timeout 10m
-       |echo "cert-manager $$VER installed"
-       |""".stripMargin
+  // The chart as a `helmRelease` (see k8s_metrics_server.scala): installed with `helm upgrade --install --wait`,
+  // skipped while the description last installed is the one below and the release is deployed.
+  private val installPlan: ApplyPlan =
+    import Resources.*
+    val (helper, installed) = helmRelease(
+      "helm install cert-manager",
+      "cert-manager",
+      "jetstack/cert-manager",
+      "https://charts.jetstack.io",
+      "cert-manager",
+      set = List("crds.enabled" -> "true")
+    )
+    ApplyPlan.orFail("cert-manager", List(helper, installed))
 
   private val issuerScript =
     s"""set -e
@@ -167,7 +169,7 @@ object k8s_cert_manager extends OrpheraClusterPlaybook:
         .build,
       stage("install-cert-manager", node)
         .task("helm install cert-manager")(
-          Task.RunCommand(List("sh", "-c", installScript), timeoutSeconds = 900)
+          Task.Apply(installPlan)
         )
         .build,
       stage("create-issuer", node)
