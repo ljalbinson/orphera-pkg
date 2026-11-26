@@ -4,9 +4,9 @@ import orphera.orchestrator.*
 
 // Undoes magnum_database.scala, magnum_rabbitmq.scala and magnum_single_node.scala, as a declarative description
 // (OrpheraApply, docs/APPLY-DESIGN.md): on tst23, through the helper if it is still there, deletes every Magnum
-// cluster (and waits for them to go), the cluster template, the flavor orphera.k8s, the key pair, the Kubernetes
-// node image, then removes Magnum from Keystone (service type container-infra, its endpoints, user magnum, domain
-// magnum); then the two containers, their units, the config, state (with the downloaded image file and the
+// cluster (and waits for them to go), the cluster template and the Kubernetes node image through it, the flavor
+// orphera.k8s and the key pair through their own helpers, then removes Magnum from Keystone (service type
+// container-infra, its endpoints, user magnum, domain magnum); then the two containers, their units, the config, state (with the downloaded image file and the
 // installed driver) and the helper. On tst10 it removes the `magnum` vhost and user from RabbitMQ (the broker
 // itself and the other services' use of it are untouched); on tst3 it drops the magnum database and user.
 // The management cluster (capi_management_cluster.scala) is left alone; run capi_management_cluster_teardown
@@ -30,13 +30,16 @@ object magnum_teardown extends OrpheraApply:
   private val rabbitVhost = "magnum"
   private val rabbitUser = "magnum"
   private val helper = "/usr/local/sbin/orphera-magnum-api"
+  private val flavorId = "orphera-k8s"
+  private val keypair = "orphera-magnum"
   private val units = List("magnum-api", "magnum-conductor")
 
   override def nodes: List[String] = List(dbNode, rabbitNode, node)
 
   // ---- tst23 ----
-  // The helper deletes the clusters, template, flavor, key pair and image; it is there until the last step
-  // removes it. The Keystone entries are removed by their own helper after it.
+  // The helper deletes the clusters, template and image; it is there until the last step removes it. The flavor
+  // and the key pair have helpers of their own (openstackFlavor, openstackKeypair). The Keystone entries are
+  // removed by their own helper after them.
   private val hasHelper = s"[ -x $helper ]"
   private val openstackScript =
     s"""$helper teardown || echo "openstack cleanup failed (continuing)""""
@@ -71,14 +74,22 @@ object magnum_teardown extends OrpheraApply:
       )
     else
       val openstack = command(
-        "delete the clusters, template, flavor, key pair and image",
+        "delete the clusters, template and image",
         openstackScript,
         onlyIf = hasHelper,
         timeout = 3600
       )
-      val unregistered = absentKeystoneEntries("remove Magnum from Keystone", "magnum").after(openstack)
+      val flavorGone = absentOpenstackFlavor("delete the Kubernetes node flavor", flavorId).after(openstack)
+      val keypairGone = absentOpenstackKeypair("delete the Kubernetes node key pair", keypair).after(openstack)
+      val unregistered =
+        absentKeystoneEntries("remove Magnum from Keystone", "magnum").after(openstack, flavorGone, keypairGone)
       val stopped = absentContainerUnits(units.map(u => s"orphera-$u" -> u)).map(_.after(unregistered))
       // Typed removal, no script: each directory with its contents, then the helper.
       val cleaned = (dirs.map(absentDirectory(_, recursive = true)) ++
-        List(absentFile(helper), absentFile(keystoneHelperPath("magnum")))).map(_.after(stopped*))
-      List(openstack, unregistered) ++ stopped ++ cleaned
+        List(
+          absentFile(helper),
+          absentFile(keystoneHelperPath("magnum")),
+          absentFile(openstackFlavorHelperPath(flavorId)),
+          absentFile(openstackKeypairHelperPath(keypair))
+        )).map(_.after(stopped*))
+      List(openstack, flavorGone, keypairGone, unregistered) ++ stopped ++ cleaned
