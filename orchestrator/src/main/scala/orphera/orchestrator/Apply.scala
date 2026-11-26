@@ -2491,14 +2491,18 @@ esac
           "    cat > \"$VALS\" <<'ORPHERA_VALUES_END'",
           t,
           "ORPHERA_VALUES_END"
-        ).mkString("\n") + valuesFrom.map((tag, file) =>
-          List(
-            s"    [ -s ${Apply.quote(file)} ] || { echo ${Apply.quote(file + " is missing")} >&2; exit 1; }",
-            "    awk -v tag=" + Apply.quote("@@" + tag + "@@") + " -v file=" + Apply.quote(file) +
-              " '{ t = $0; sub(/^ +/, \"\", t); if (t == tag) { ind = substr($0, 1, length($0) - length(t)); while ((getline l < file) > 0) print ind l; close(file) } else print }' \"$VALS\" > \"$VALS.new\"",
-            "    mv \"$VALS.new\" \"$VALS\""
-          ).mkString("\n", "\n", "")
-        ).mkString
+        ).mkString("\n") + valuesFrom
+          .map((tag, file) =>
+            List(
+              s"    [ -s ${Apply.quote(file)} ] || { echo ${Apply.quote(file + " is missing")} >&2; exit 1; }",
+              "    awk -v tag=" + Apply.quote(
+                "@@" + tag + "@@"
+              ) + " -v file=" + Apply.quote(file) +
+                " '{ t = $0; sub(/^ +/, \"\", t); if (t == tag) { ind = substr($0, 1, length($0) - length(t)); while ((getline l < file) > 0) print ind l; close(file) } else print }' \"$VALS\" > \"$VALS.new\"",
+              "    mv \"$VALS.new\" \"$VALS\""
+            ).mkString("\n", "\n", "")
+          )
+          .mkString
       case None => ""
     val script = helmReleaseScript
       .replace("@@KUBECONFIG@@", Apply.quote(kubeconfig))
