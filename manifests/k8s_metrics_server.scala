@@ -30,7 +30,7 @@ object k8s_metrics_server extends OrpheraClusterPlaybook:
       "metrics-server/metrics-server",
       "https://kubernetes-sigs.github.io/metrics-server/",
       "kube-system",
-      set = List("replicas" -> "2", "args={--kubelet-insecure-tls}")
+      set = List("replicas" -> "2", "args" -> "{--kubelet-insecure-tls}")
     )
     ApplyPlan.orFail("metrics-server", List(helper, installed))
 

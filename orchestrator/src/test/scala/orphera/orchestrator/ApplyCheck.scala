@@ -3404,7 +3404,7 @@ save()
       Files.writeString(script, fileText(helper))
       runShell(s"PATH=$bin:$$PATH\nFAKE_HELM=$state\nexport FAKE_HELM\nsh $script $arg")
     def dump: String = if Files.exists(state) then Files.readString(state) else "{}"
-    def make(version: Option[String] = None, values: Option[String] = Some("replicaCount: 2\nargs:\n  - |\n    keep\n"), set: List[(String, String)] = List("replicas" -> "2", "args={--kubelet-insecure-tls}")) =
+    def make(version: Option[String] = None, values: Option[String] = Some("replicaCount: 2\nargs:\n  - |\n    keep\n"), set: List[(String, String)] = List("replicas" -> "2", "args" -> "{--kubelet-insecure-tls}")) =
       helmRelease("helm install metrics-server", "metrics-server", "metrics-server/metrics-server", "https://example.org/charts/", "kube-system", version, values.map(Secret(_)), set, stateDir = shaDir.toString)
     val (helper, ensure) = make()
     check("helmRelease: the helper is named for the namespace and the release", helper.id == "file[/usr/local/sbin/orphera-helm-kube-system-metrics-server]", helper.id)
