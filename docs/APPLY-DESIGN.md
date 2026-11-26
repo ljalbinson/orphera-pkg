@@ -152,6 +152,8 @@ time is up. Nothing is changed on the node. The generated shell is run against a
 
 `cephFilesystem(...)` and `cephNfsCluster(...)` (and `absentCephFilesystem`, `absentCephNfsCluster`) cover the CephFS filesystem and the NFS-Ganesha cluster. Each create step includes its wait (an active MDS; the NFS port answering on the given address), and its check needs both the listing and the wait to hold, so a filesystem that exists without an MDS, or a cluster whose daemon is down, is waited for again rather than treated as done. The NFS host is found in `ceph orch host ls` by address, then by short name. The filesystem removal allows pool deletion on the monitors for the removal only and sets it back afterwards.
 
+`cephConfig(...)` and `absentCephConfig(...)` describe options of one configuration section (`client.rgw.orphera`, `mon`): unchanged while `ceph config get` returns every value given, and the removal takes every option of the section whose name starts with a prefix. `cephOrchService(...)` and `absentCephOrchService(...)` apply and remove a cephadm service from a spec; the unchanged test is the hash of the last applied spec, kept in a state file, together with the service being listed, because `ceph orch ls` output is normalised by cephadm and cannot be compared to the spec. A daemon that must restart when an option changes is a separate `onChangeOnly` command notified by the `cephConfig` resource (resources are immutable, so the notifying copy is the one in the returned list).
+
 Files with secret content (`Secret` values) never show their content: the diff line says
 `content (secret: not shown)`.
 

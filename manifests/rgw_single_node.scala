@@ -19,11 +19,13 @@ import orphera.orchestrator.*
 //   - the RGW options, set with `ceph config set client.rgw.orphera ...`: Keystone as the identity service
 //     (v3, user `rgw` in project `service`), the accepted roles `member` and `admin`, one namespace per
 //     project (implicit tenants), the account in the Swift URL, and S3 requests checked against Keystone's
-//     EC2 credentials. The daemon is restarted only when this configuration changes (a hash of it is kept in
-//     /var/lib/orphera/rgw-applied-sha), so a repeated run does not interrupt service. It is also restarted when
-//     the Keystone entries below were made or put right in this run (the step "restart RGW so it takes its new
-//     Keystone token", which a change of those entries triggers): RGW keeps the admin token it got at start-up,
-//     and a new `rgw` user (Keystone was rebuilt) or a changed password makes that token useless.
+//     EC2 credentials. cephConfig sets them only when `ceph config get` differs, and cephOrchService applies
+//     the spec only when its hash (kept in /var/lib/orphera/ceph-orch-rgw.orphera.sha) changed or the service
+//     is not listed (cephadm redeploys the daemon itself when the spec changed). The daemon is restarted only
+//     when an option changed or the Keystone entries below were made or put right in this run (the step
+//     "restart RGW so it takes its new Keystone token and options", which a change of either triggers): RGW
+//     keeps the admin token it got at start-up, and a new `rgw` user (Keystone was rebuilt) or a changed
+//     password makes that token useless. A repeated run interrupts nothing.
 //   The pools (.rgw.root, default.rgw.*) are made by RGW itself when it first runs.
 //
 // What it adds to Keystone (keystoneEntries, skipped while its check passes): user `rgw` in project `service`
@@ -45,9 +47,9 @@ import orphera.orchestrator.*
 // How it stays idempotent (as for the other services):
 //   - Each step that changes the node is a command with a guard that tests what it makes: Keystone's CA
 //     compared as a certificate with the installed copy and the trust store, the Keystone registration (the
-//     helper's `registered`), and the RGW configuration (the hash above equals the one last applied, and the
-//     orchestrator lists the daemon as running). The step that applies the spec and options ends by waiting
-//     for the Swift capabilities document to answer three times in a row.
+//     helper's `registered`), the RGW options (`ceph config get`), the service (spec hash and listing) and the
+//     Swift capabilities document answering. The restart step and the wait step end by waiting for it to
+//     answer three times in a row.
 //   - The last two steps make a container and an object through Swift with a Keystone token, and a bucket and
 //     an object through S3 with EC2 credentials made for the run and removed again; each is skipped while its
 //     round trip works.
@@ -80,7 +82,6 @@ object rgw_single_node extends OrpheraApply:
 
   private val caDir = "/etc/orphera/rgw-ca"
   private val caCert = s"$caDir/ca.crt"
-  private val stateDir = "/var/lib/orphera"
 
   private val hostPackages =
     List("openssl", "curl", "ca-certificates", "python3")
@@ -280,39 +281,20 @@ if __name__ == '__main__':
     "rgw_s3_auth_use_keystone" -> "true"
   )
 
-  // The Ceph host that has the address rgwIp.
-  private val hostSnippet =
-    s"""HOST=$$(cephadm shell -- ceph orch host ls --format json 2>/dev/null | python3 -c "import sys, json
-       |for h in json.load(sys.stdin):
-       |    if h.get('addr') == '$rgwIp':
-       |        print(h['hostname'])
-       |        break")""".stripMargin
-
-  private val hashInput = rgwOptions.map((k, v) => s"$k=$v").mkString("\n")
-  // `spec` prints the service spec, `newhash` the hash of spec + options: the value
-  // kept in rgw-applied-sha. The same text is used by the guard and by the step, so they agree.
-  private val hashFns =
-    s"""spec() {
-       |cat <<SPEC
-       |service_type: rgw
+  // The cephadm service spec; @@HOST@@ becomes the orchestrator host that has the address rgwIp (or the name
+  // `node`). The daemon gets the host's CA bundle where its libcurl looks for one.
+  private val rgwSpec =
+    s"""service_type: rgw
        |service_id: $serviceId
        |placement:
        |  hosts:
-       |    - $$HOST
+       |    - @@HOST@@
        |  count_per_host: 1
        |spec:
        |  rgw_frontend_port: $rgwPort
        |extra_container_args:
        |  - "-v"
-       |  - "/etc/ssl/certs/ca-certificates.crt:/etc/pki/tls/certs/ca-bundle.crt:ro"
-       |SPEC
-       |}
-       |newhash() {
-       |  { spec; cat <<'OPTS'
-       |$hashInput
-       |OPTS
-       |} | sha256sum | cut -d' ' -f1
-       |}""".stripMargin
+       |  - "/etc/ssl/certs/ca-certificates.crt:/etc/pki/tls/certs/ca-bundle.crt:ro"""".stripMargin
 
   // Waits for the Swift capabilities document: RGW answers on its port while it starts or stops, so the wait is for
   // HTTP 200 on /info or /swift/info three times in a row, three seconds apart. Ends the script (0 or 1).
@@ -330,46 +312,6 @@ if __name__ == '__main__':
        |echo "RGW is not serving Swift on $rgwIp:$rgwPort after 5 minutes - check 'ceph orch ps --daemon-type rgw' and 'cephadm logs --name rgw.$serviceId...'" >&2
        |exit 1""".stripMargin
 
-  // The spec and the options go in through `cephadm shell`; --mount makes a file visible at /mnt/<name>.
-  // `orch apply` of an unchanged spec is a no-op, `config set` is a set, and the daemon is restarted only
-  // when the hash of spec + options differs from the last applied one.
-  private val rgwScript: String =
-    val sets = rgwOptions
-      .map((k, v) =>
-        s"cephadm shell -- ceph config set client.rgw.$serviceId $k '$v'"
-      )
-      .mkString("\n       |")
-    s"""set -e
-       |$hostSnippet
-       |if [ -z "$$HOST" ]; then
-       |  echo "no Ceph orchestrator host with address $rgwIp (ceph orch host ls)" >&2
-       |  exit 1
-       |fi
-       |$hashFns
-       |# Ceph 20 (Tentacle) has no rgw_keystone_api_version (Keystone v3 is the only one it speaks) and refuses to
-       |# set it; a node set up with an older Ceph may still hold it, so it is cleared.
-       |cephadm shell -- ceph config rm client.rgw.$serviceId rgw_keystone_api_version 2>/dev/null || true
-       |$sets
-       |spec > /tmp/rgw-spec.yaml
-       |cephadm shell --mount /tmp/rgw-spec.yaml -- ceph orch apply -i /mnt/rgw-spec.yaml
-       |NEW=$$(newhash)
-       |rm -f /tmp/rgw-spec.yaml
-       |mkdir -p $stateDir
-       |OLD=$$(cat $stateDir/rgw-applied-sha 2>/dev/null || true)
-       |STATE=unchanged
-       |if [ "$$NEW" != "$$OLD" ]; then
-       |  # cephadm makes the daemon later; one that is not there yet starts with the options already set
-       |  if cephadm shell -- ceph orch ps --daemon-type rgw 2>/dev/null | grep -q 'rgw.$serviceId'; then
-       |    STATE="changed, daemon restarted"
-       |    cephadm shell -- ceph orch restart rgw.$serviceId
-       |  else
-       |    STATE="changed, daemon starting"
-       |  fi
-       |  echo "$$NEW" > $stateDir/rgw-applied-sha
-       |fi
-       |echo "RGW configuration $$STATE"
-       |$waitForSwift""".stripMargin
-
   // Restarts the daemon, when the orchestrator lists one, and waits for it to serve Swift again. It runs when the
   // Keystone entries were made or put right: RGW keeps the admin token it got for user rgw until it restarts, and
   // setting a user's password makes Keystone revoke the tokens it holds (after a Keystone rebuild the user is new).
@@ -384,14 +326,9 @@ if __name__ == '__main__':
   private val daemonListed =
     s"cephadm shell -- ceph orch ps --daemon-type rgw 2>/dev/null | grep -q 'rgw.$serviceId'"
 
-  // True when the configuration last applied is the one wanted now, and the orchestrator lists the daemon as
-  // running.
-  private val rgwCurrent =
-    s"""$hostSnippet
-       |[ -n "$$HOST" ] && [ -f $stateDir/rgw-applied-sha ] || exit 1
-       |$hashFns
-       |[ "$$(newhash)" = "$$(cat $stateDir/rgw-applied-sha)" ] || exit 1
-       |cephadm shell -- ceph orch ps --daemon-type rgw 2>/dev/null | grep -q 'rgw.$serviceId.*running'""".stripMargin
+  // One answer from the Swift capabilities document (the step that follows waits for three in a row).
+  private val swiftAnswers =
+    s"""[ "$$(curl -s -o /dev/null -w '%{http_code}' http://$rgwIp:$rgwPort/info || true)" = "200" ] || [ "$$(curl -s -o /dev/null -w '%{http_code}' http://$rgwIp:$rgwPort/swift/info || true)" = "200" ]"""
 
   def describe(target: Node): List[ApplyResource] =
     val tools = hostPackages.map(p => pkg(p, updateCache = true))
@@ -427,32 +364,56 @@ if __name__ == '__main__':
     )
     val registered = ensured.after(ca)
 
-    val rgw = command(
-      "apply the RGW service and its Keystone options",
-      rgwScript,
-      unless = rgwCurrent,
-      timeout = 900
-    ).after(registered, ca)
+    // The old option that Ceph 20 refuses (a node set up with an older Ceph may still hold it) is cleared first.
+    val oldOption = absentCephConfig(
+      "clear the Keystone API version option (Ceph 20 has none)",
+      s"client.rgw.$serviceId",
+      "rgw_keystone_api_version"
+    ).after(registered)
+    val config = cephConfig("set the RGW Keystone options", s"client.rgw.$serviceId", rgwOptions)
+      .after(oldOption, ca)
+    // The options go in before the service, so a daemon that is new starts with them.
+    val service = cephOrchService("apply the RGW service", "rgw", serviceId, rgwSpec, rgwIp, node).after(config)
     val restarted = command(
-      "restart RGW so it takes its new Keystone token",
+      "restart RGW so it takes its new Keystone token and options",
       restartScript,
       onlyIf = daemonListed,
       onChangeOnly = true,
       timeout = 600
-    ).after(rgw)
+    ).after(service)
+    val waited = command(
+      s"wait for RGW to serve Swift on $rgwIp:$rgwPort",
+      waitForSwift,
+      unless = swiftAnswers,
+      timeout = 360
+    ).after(restarted)
     val registeredAndNotifying = registered.notifies(restarted)
+    val configAndNotifying = config.notifies(restarted)
 
     val swift = command(
       "a container and an object through the Swift API with a Keystone token",
       s"$helperPath swift-cycle",
       unless = s"$helperPath swift-cycle >/dev/null 2>&1",
       timeout = 180
-    ).after(restarted)
+    ).after(waited)
     val s3 = command(
       "a bucket and an object through the S3 API with EC2 credentials",
       s"$helperPath s3-cycle",
       unless = s"$helperPath s3-cycle >/dev/null 2>&1",
       timeout = 180
-    ).after(restarted)
+    ).after(waited)
 
-    tools ++ List(caDirectory, ca, helperFile, keystoneHelper, registeredAndNotifying, rgw, restarted, swift, s3)
+    tools ++ List(
+      caDirectory,
+      ca,
+      helperFile,
+      keystoneHelper,
+      registeredAndNotifying,
+      oldOption,
+      configAndNotifying,
+      service,
+      restarted,
+      waited,
+      swift,
+      s3
+    )

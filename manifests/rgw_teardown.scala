@@ -23,7 +23,7 @@ import orphera.orchestrator.*
 // second column is the level (advanced, basic), not the option, so taking column 2 removed nothing and every
 // run found the options still there.
 //
-// Each step is a command that runs only while there is something to remove (`onlyIf`), so a second run
+// Each step runs only while there is something to remove, so a second run
 // changes nothing.
 object rgw_teardown extends OrpheraApply:
   import Resources.*
@@ -35,29 +35,10 @@ object rgw_teardown extends OrpheraApply:
 
   override def nodes: List[String] = List(node)
 
-  private val serviceListed =
-    s"cephadm shell -- ceph orch ls rgw 2>/dev/null | grep -q 'rgw.$serviceId'"
-  private val optionsSet =
-    s"""cephadm shell -- ceph config dump 2>/dev/null | awk '$$1 == "client.rgw.$serviceId"' | grep -q ."""
-  private val paths =
-    s"/var/lib/orphera/rgw-applied-sha /var/lib/orphera/rgw-keystone-state $helper /etc/orphera/rgw-ca"
-  private val filesExist =
-    s"for p in $paths; do [ -e \"$$p\" ] && exit 0; done; exit 1"
-  // True when the service, any of its options or any of its files is still there.
-  private val somethingToRemove =
-    s"""$serviceListed && exit 0
-       |$optionsSet && exit 0
-       |$filesExist""".stripMargin
-  private val removeScript =
-    s"""set -e
-       |if $serviceListed; then
-       |  cephadm shell -- ceph orch rm rgw.$serviceId
-       |fi
-       |for o in $$(cephadm shell -- ceph config dump 2>/dev/null | awk '$$1 == "client.rgw.$serviceId" {for (i = 2; i <= NF; i++) if ($$i ~ /^rgw_/) { print $$i; break }}'); do
-       |  cephadm shell -- ceph config rm client.rgw.$serviceId $$o
-       |done
-       |rm -rf $paths
-       |echo "rgw service, options, helper and CA copy removed"""".stripMargin
+  // Files and directories of this and earlier descriptions: the hash of the old step, the state file the
+  // cluster playbook kept, the helper and the CA copy.
+  private val oldPaths =
+    List("/var/lib/orphera/rgw-applied-sha", "/var/lib/orphera/rgw-keystone-state", helper)
 
   private val poolsExist =
     """cephadm shell -- ceph osd pool ls 2>/dev/null | grep -qE '^(\.rgw\.root|default\.rgw\.)'"""
@@ -71,12 +52,15 @@ object rgw_teardown extends OrpheraApply:
 
   def describe(target: Node): List[ApplyResource] =
     val unregistered = absentKeystoneEntries("remove object storage from Keystone", "rgw")
-    val removed = command(
-      "remove the RGW service, its options, the helpers and the CA copy",
-      removeScript,
-      onlyIf = somethingToRemove,
-      timeout = 600
-    ).after(unregistered)
+    val service = absentCephOrchService("remove the RGW service", "rgw", serviceId).after(unregistered)
+    val options = absentCephConfig(
+      "remove the RGW options from the monitors' configuration",
+      s"client.rgw.$serviceId",
+      "rgw_"
+    ).after(service)
+    val files = oldPaths.map(absentFile(_).after(service))
+    val caCopy = absentDirectory("/etc/orphera/rgw-ca", recursive = true).after(service)
+    val removed = options :: caCopy :: files
     val keystoneHelperGone = absentFile(keystoneHelperPath("rgw")).after(unregistered)
     if purgePools then
       val purged = command(
@@ -84,6 +68,6 @@ object rgw_teardown extends OrpheraApply:
         purgeScript,
         onlyIf = poolsExist,
         timeout = 600
-      ).after(removed)
-      List(unregistered, keystoneHelperGone, removed, purged)
-    else List(unregistered, keystoneHelperGone, removed)
+      ).after(options)
+      List(unregistered, keystoneHelperGone, service) ++ removed ++ List(purged)
+    else List(unregistered, keystoneHelperGone, service) ++ removed
