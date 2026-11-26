@@ -1619,6 +1619,112 @@ if __name__ == '__main__':
       timeout = timeout
     )
 
+  /** A CephFS filesystem, as a description, for a node with `cephadm`. It is `unchanged` while `ceph fs ls`
+    * lists it and an MDS is active; otherwise it is created if missing (`ceph fs volume create`, which also
+    * starts the MDS daemons) and the run waits up to five minutes for an active MDS, failing with a message if
+    * none comes.
+    */
+  def cephFilesystem(label: String, name: String, timeout: Int = 660): ApplyResource =
+    cephName("a filesystem name", name)
+    val listed = s"""cephadm shell -- ceph fs ls 2>/dev/null | tr -d '\\r' | grep -q '^name: $name,'"""
+    val active = """cephadm shell -- ceph mds stat 2>/dev/null | grep -q 'up:active'"""
+    command(
+      label,
+      s"""set -e
+         |if ! $listed; then
+         |  cephadm shell -- ceph fs volume create $name
+         |  echo "filesystem $name created"
+         |fi
+         |for i in $$(seq 1 60); do
+         |  if $active; then echo "an MDS is active for $name"; exit 0; fi
+         |  sleep 5
+         |done
+         |echo "no active MDS for $name after 5 minutes - check 'ceph fs status'" >&2
+         |exit 1""".stripMargin,
+      unless = s"$listed && $active",
+      timeout = timeout
+    )
+
+  /** The filesystem gone with ALL its data (and its pools): the monitors are allowed to delete pools for the
+    * removal only. It does nothing while `ceph fs ls` does not list it; when Ceph cannot be queried the guard
+    * says yes, so the removal fails with Ceph's own message.
+    */
+  def absentCephFilesystem(label: String, name: String, timeout: Int = 600): ApplyResource =
+    cephName("a filesystem name", name)
+    command(
+      label,
+      s"""R=0
+         |cephadm shell -- ceph config set mon mon_allow_pool_delete true || R=1
+         |cephadm shell -- ceph fs volume rm $name --yes-i-really-mean-it || R=1
+         |cephadm shell -- ceph config set mon mon_allow_pool_delete false || R=1
+         |[ "$$R" = 0 ] || exit 1
+         |echo "filesystem $name removed"""".stripMargin,
+      onlyIf =
+        s"""OUT=$$(cephadm shell -- ceph fs ls 2>/dev/null) || exit 0
+           |echo "$$OUT" | tr -d '\\r' | grep -q '^name: $name,'""".stripMargin,
+      timeout = timeout
+    )
+
+  /** An NFS-Ganesha cluster, as a description, with one daemon on the Ceph orchestrator host that has the
+    * address `ip` (or the short name `hostName`). It is `unchanged` while `ceph nfs cluster ls` lists it and
+    * `ip`:`port` answers; otherwise it is created if missing and the run waits up to five minutes for the port.
+    */
+  def cephNfsCluster(
+      label: String,
+      cluster: String,
+      ip: String,
+      hostName: String,
+      port: Int = 2049,
+      timeout: Int = 660
+  ): ApplyResource =
+    cephName("an NFS cluster name", cluster)
+    cephName("a host name", hostName)
+    require(ip.nonEmpty && ip.forall(c => c.isDigit || ".:".contains(c) || c.isLower), s"not an address: '$ip'")
+    require(port > 0 && port < 65536, s"not a port: $port")
+    val listed = s"""cephadm shell -- ceph nfs cluster ls 2>/dev/null | tr -d '\\r' | grep -qw '$cluster'"""
+    val up = s"""python3 -c "import socket; socket.create_connection(('$ip', $port), 3).close()" 2>/dev/null"""
+    command(
+      label,
+      s"""set -e
+         |if ! $listed; then
+         |  HOST=$$(cephadm shell -- ceph orch host ls --format json 2>/dev/null | python3 -c "import sys, json
+         |for h in json.load(sys.stdin):
+         |    if h.get('addr') == '$ip' or h.get('hostname', '').split('.')[0] == '$hostName':
+         |        print(h['hostname'])
+         |        break")
+         |  if [ -z "$$HOST" ]; then
+         |    echo "no Ceph orchestrator host with address $ip or name $hostName (ceph orch host ls)" >&2
+         |    exit 1
+         |  fi
+         |  cephadm shell -- ceph nfs cluster create $cluster "$$HOST"
+         |  echo "NFS cluster $cluster created on $$HOST"
+         |fi
+         |for i in $$(seq 1 60); do
+         |  if $up; then echo "NFS-Ganesha answers on $ip:$port"; exit 0; fi
+         |  sleep 5
+         |done
+         |echo "NFS-Ganesha does not answer on $ip:$port after 5 minutes - check 'ceph nfs cluster info $cluster'" >&2
+         |exit 1""".stripMargin,
+      unless = s"$listed && $up",
+      timeout = timeout
+    )
+
+  /** The NFS cluster gone; nothing happens while it is not listed, and a cluster that cannot be queried is not
+    * "nothing to remove" (the guard says yes and the removal fails with Ceph's message).
+    */
+  def absentCephNfsCluster(label: String, cluster: String, timeout: Int = 300): ApplyResource =
+    cephName("an NFS cluster name", cluster)
+    command(
+      label,
+      s"""set -e
+         |cephadm shell -- ceph nfs cluster rm $cluster
+         |echo "NFS cluster $cluster removed"""".stripMargin,
+      onlyIf =
+        s"""OUT=$$(cephadm shell -- ceph nfs cluster ls 2>/dev/null) || exit 0
+           |echo "$$OUT" | tr -d '\\r' | grep -qw '$cluster'""".stripMargin,
+      timeout = timeout
+    )
+
   private def ovsName(what: String, text: String): Unit =
     require(
       text.nonEmpty && text.length <= 15 && text.forall(c => c.isLetterOrDigit || "_-.".contains(c)),

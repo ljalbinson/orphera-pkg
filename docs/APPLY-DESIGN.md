@@ -150,6 +150,8 @@ time is up. Nothing is changed on the node. The generated shell is run against a
 
 `cephPool(...)` and `cephUser(...)` (and `absentCephPool`, `absentCephUser`) describe a Ceph pool and a cephx user for a node that has `cephadm`, through `cephadm shell`. The pool is initialised for RBD (or another application) when it is made, and left alone when it exists. The user has a fixed whole cephx key and its capabilities; the check compares the key in Ceph and each capability line, so a rotated key or a changed capability is put right by running it again. An old `aes` key makes the step allow `aes` on the monitors first (CVE-2025-30156), as `CephKeys.allowCiphersFor` always did. The removal steps run when the pool or user is listed or when Ceph cannot be queried, so a cluster that is down fails with its own message.
 
+`cephFilesystem(...)` and `cephNfsCluster(...)` (and `absentCephFilesystem`, `absentCephNfsCluster`) cover the CephFS filesystem and the NFS-Ganesha cluster. Each create step includes its wait (an active MDS; the NFS port answering on the given address), and its check needs both the listing and the wait to hold, so a filesystem that exists without an MDS, or a cluster whose daemon is down, is waited for again rather than treated as done. The NFS host is found in `ceph orch host ls` by address, then by short name. The filesystem removal allows pool deletion on the monitors for the removal only and sets it back afterwards.
+
 Files with secret content (`Secret` values) never show their content: the diff line says
 `content (secret: not shown)`.
 
