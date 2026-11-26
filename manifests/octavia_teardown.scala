@@ -4,8 +4,9 @@ import orphera.orchestrator.*
 
 // Undoes octavia_database.scala, octavia_rabbitmq.scala and octavia_single_node.scala, as a declarative
 // description (OrpheraApply, docs/APPLY-DESIGN.md): on tst19, through the helper if it is still there, deletes
-// the amphora VMs (Nova servers named amphora-*), the health manager port, the network lb-mgmt-net, the two
-// security groups, the flavor orphera.amphora and the amphora image, then removes Octavia from Keystone (service
+// the amphora VMs (Nova servers named amphora-*) and the amphora image, then (through the helpers of
+// openstackNetwork, openstackSecurityGroup and openstackFlavor) the network lb-mgmt-net with the health manager
+// port, the two security groups and the flavor orphera.amphora, then removes Octavia from Keystone (service
 // type load-balancer, its endpoints, user octavia). Then it stops and removes the four containers, their units
 // and the o-hm0 unit, deletes the o-hm0 port from br-int, and removes the config (with the certificates), the
 // state (with the downloaded image file) and the helper. On tst10 it removes the `octavia` vhost and user from
@@ -42,7 +43,8 @@ object octavia_teardown extends OrpheraApply:
   override def nodes: List[String] = List(dbNode, rabbitNode, node)
 
   // ---- tst19 ----
-  // The helper removes the OpenStack side; it is there until the last step removes it.
+  // The helper deletes the amphorae and the image; it is there until the last step removes it. The network, the
+  // groups and the flavor have helpers of their own.
   private val hasHelper = s"[ -x $helper ]"
   private val openstackScript =
     s"""$helper teardown || echo "openstack cleanup failed (continuing)""""
@@ -91,12 +93,19 @@ object octavia_teardown extends OrpheraApply:
       )
     else
       val openstack = command(
-        "delete the amphorae, network, security groups, flavor and image",
+        "delete the amphorae and the image",
         openstackScript,
         onlyIf = hasHelper,
         timeout = 900
       )
-      val unregistered = absentKeystoneEntries("remove Octavia from Keystone", "octavia").after(openstack)
+      // The network goes first (with its ports); the groups can only be deleted once no port uses them.
+      val networkGone = absentOpenstackNetwork("delete the amphora network", "lb-mgmt-net", "service").after(openstack)
+      val groupsGone = List("lb-mgmt-sec-grp", "lb-health-mgr-sec-grp").map(g =>
+        absentOpenstackSecurityGroup(s"delete the security group $g", g, "service").after(networkGone)
+      )
+      val flavorGone = absentOpenstackFlavor("delete the amphora flavor", "orphera-amphora").after(openstack)
+      val gone = networkGone :: flavorGone :: groupsGone
+      val unregistered = absentKeystoneEntries("remove Octavia from Keystone", "octavia").after(gone*)
       val stopped = command(
         "stop and remove the octavia containers and units",
         stopScript,
@@ -111,6 +120,10 @@ object octavia_teardown extends OrpheraApply:
           List(
             absentFile(helper),
             absentFile(keystoneHelperPath("octavia")),
-            absentFile(openstackImageHelperPath("amphora-x64-haproxy-test"))
+            absentFile(openstackImageHelperPath("amphora-x64-haproxy-test")),
+            absentFile(openstackNetworkHelperPath("lb-mgmt-net", "service")),
+            absentFile(openstackSecurityGroupHelperPath("lb-mgmt-sec-grp", "service")),
+            absentFile(openstackSecurityGroupHelperPath("lb-health-mgr-sec-grp", "service")),
+            absentFile(openstackFlavorHelperPath("orphera-amphora"))
           )).map(_.after(unplugged))
-      List(openstack, unregistered, stopped, unplugged) ++ cleaned
+      List(openstack) ++ gone ++ List(unregistered, stopped, unplugged) ++ cleaned
