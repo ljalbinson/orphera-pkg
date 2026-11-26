@@ -1725,6 +1725,154 @@ if __name__ == '__main__':
       timeout = timeout
     )
 
+  private def cephOptionValue(what: String, text: String): Unit =
+    require(
+      text.forall(c => c >= ' ' && c <= '~' && c != '\''),
+      s"$what must be printable ASCII without a single quote"
+    )
+
+  /** Ceph configuration options for one section (`who`, such as `client.rgw.orphera` or `mon`), as a
+    * description, for a node with `cephadm`. It is `unchanged` while `ceph config get` returns every value
+    * given; otherwise each option is set (setting an option to its value is harmless). Other options of the
+    * section are not looked at. A step that depends on a changed option (restarting a daemon) can be notified.
+    */
+  def cephConfig(label: String, who: String, options: List[(String, String)], timeout: Int = 180): ApplyResource =
+    cephName("a configuration section", who)
+    require(options.nonEmpty, "cephConfig needs at least one option")
+    options.foreach { (k, v) =>
+      cephName("an option name", k)
+      cephOptionValue(s"the value of $k", v)
+    }
+    val sets = options.map((k, v) => s"cephadm shell -- ceph config set $who $k ${Apply.quote(v)}").mkString("\n")
+    val checks = options
+      .map((k, v) =>
+        s"""[ "$$(cephadm shell -- ceph config get $who $k 2>/dev/null | tr -d '\\r')" = ${Apply.quote(v)} ]"""
+      )
+      .mkString(" && ")
+    command(
+      label,
+      s"""set -e
+         |$sets
+         |echo "${options.size} option(s) set for $who"""".stripMargin,
+      unless = checks,
+      timeout = timeout
+    )
+
+  /** Options of one section gone, as a description: every option of `who` whose name starts with `prefix`
+    * (found in `ceph config dump`, where with no mask the option is the first word that starts with the
+    * prefix) is removed. Nothing happens while there is none; when Ceph cannot be queried the guard says yes,
+    * so the removal fails with Ceph's own message.
+    */
+  def absentCephConfig(label: String, who: String, prefix: String, timeout: Int = 180): ApplyResource =
+    cephName("a configuration section", who)
+    cephName("an option prefix", prefix)
+    val listOptions =
+      s"""cephadm shell -- ceph config dump 2>/dev/null | tr -d '\\r' | awk '$$1 == "$who" {for (i = 2; i <= NF; i++) if ($$i ~ /^$prefix/) { print $$i; break }}'"""
+    command(
+      label,
+      s"""set -e
+         |for o in $$($listOptions); do
+         |  cephadm shell -- ceph config rm $who $$o
+         |done
+         |echo "options of $who starting with $prefix removed"""".stripMargin,
+      onlyIf =
+        s"""OUT=$$(cephadm shell -- ceph config dump 2>/dev/null) || exit 0
+           |[ -n "$$(echo "$$OUT" | tr -d '\\r' | awk '$$1 == "$who" {for (i = 2; i <= NF; i++) if ($$i ~ /^$prefix/) { print $$i; break }}')" ]""".stripMargin,
+      timeout = timeout
+    )
+
+  private def cephSpecSha(spec: String): String =
+    MessageDigest
+      .getInstance("SHA-256")
+      .digest(spec.getBytes(StandardCharsets.UTF_8))
+      .map(b => f"${b & 0xff}%02x")
+      .mkString
+
+  /** The state file of a cephadm service made by `cephOrchService` (the hash of the spec last applied). */
+  def cephOrchStatePath(serviceType: String, serviceId: String, stateDir: String = "/var/lib/orphera"): String =
+    s"$stateDir/ceph-orch-$serviceType.$serviceId.sha"
+
+  /** A cephadm service from a spec file (`ceph orch apply -i`), as a description. It is `unchanged` while the
+    * hash of the spec last applied (kept in `cephOrchStatePath`) is the spec given and `ceph orch ls` lists the
+    * service; otherwise the spec is applied (cephadm itself redeploys the daemons whose spec changed). `@@HOST@@`
+    * in the spec stands for the hostname of the orchestrator host that has the address `hostIp` or the short
+    * name `hostName`; a run with no such host fails with a message. The spec must not contain a line `SPEC_END`.
+    */
+  def cephOrchService(
+      label: String,
+      serviceType: String,
+      serviceId: String,
+      spec: String,
+      hostIp: String,
+      hostName: String,
+      stateDir: String = "/var/lib/orphera",
+      timeout: Int = 300
+  ): ApplyResource =
+    cephName("a service type", serviceType)
+    cephName("a service id", serviceId)
+    cephName("a host name", hostName)
+    require(hostIp.nonEmpty && hostIp.forall(c => c.isDigit || ".:".contains(c) || c.isLower), s"not an address: '$hostIp'")
+    require(!spec.linesIterator.exists(_.trim == "SPEC_END"), "the spec must not contain a line SPEC_END")
+    require(!spec.contains("$"), "the spec must not contain $")
+    require(stateDir.startsWith("/") && !stateDir.exists(c => c.isWhitespace || "'\"$`\\".contains(c)), s"not a directory: '$stateDir'")
+    require(!spec.linesIterator.exists(_.trim.startsWith("|")), "a line of the spec must not start with |")
+    val state = cephOrchStatePath(serviceType, serviceId, stateDir)
+    val sha = cephSpecSha(spec)
+    val file = s"orphera-$serviceType-$serviceId.yaml"
+    val listed = s"""cephadm shell -- ceph orch ls --service-type $serviceType 2>/dev/null | tr -d '\\r' | grep -q '^$serviceType.$serviceId '"""
+    command(
+      label,
+      s"""set -e
+         |HOST=$$(cephadm shell -- ceph orch host ls --format json 2>/dev/null | python3 -c "import sys, json
+         |for h in json.load(sys.stdin):
+         |    if h.get('addr') == '$hostIp' or h.get('hostname', '').split('.')[0] == '$hostName':
+         |        print(h['hostname'])
+         |        break")
+         |if [ -z "$$HOST" ]; then
+         |  echo "no Ceph orchestrator host with address $hostIp or name $hostName (ceph orch host ls)" >&2
+         |  exit 1
+         |fi
+         |umask 077
+         |SPECFILE=/tmp/$file
+         |trap 'rm -f "$$SPECFILE"' EXIT
+         |cat <<'SPEC_END' | sed "s/@@HOST@@/$$HOST/g" > "$$SPECFILE"
+         |$spec
+         |SPEC_END
+         |cephadm shell --mount "$$SPECFILE" -- ceph orch apply -i /mnt/$file
+         |mkdir -p $stateDir
+         |echo "$sha" > $state
+         |echo "$serviceType.$serviceId applied"""".stripMargin,
+      unless = s"""[ -f $state ] && [ "$$(cat $state)" = "$sha" ] && $listed""",
+      timeout = timeout
+    )
+
+  /** The cephadm service gone (its daemons stop) and its state file removed, as a description. Nothing happens
+    * while the service is not listed and the state file is not there.
+    */
+  def absentCephOrchService(
+      label: String,
+      serviceType: String,
+      serviceId: String,
+      stateDir: String = "/var/lib/orphera",
+      timeout: Int = 300
+  ): ApplyResource =
+    cephName("a service type", serviceType)
+    cephName("a service id", serviceId)
+    val state = cephOrchStatePath(serviceType, serviceId, stateDir)
+    val listed = s"""cephadm shell -- ceph orch ls --service-type $serviceType 2>/dev/null | tr -d '\\r' | grep -q '^$serviceType.$serviceId '"""
+    command(
+      label,
+      s"""set -e
+         |if $listed; then
+         |  cephadm shell -- ceph orch rm $serviceType.$serviceId
+         |fi
+         |rm -f $state
+         |echo "$serviceType.$serviceId removed"""".stripMargin,
+      onlyIf = s"""$listed && exit 0
+                  |[ -e $state ]""".stripMargin,
+      timeout = timeout
+    )
+
   private def ovsName(what: String, text: String): Unit =
     require(
       text.nonEmpty && text.length <= 15 && text.forall(c => c.isLetterOrDigit || "_-.".contains(c)),

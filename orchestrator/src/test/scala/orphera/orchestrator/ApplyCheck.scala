@@ -3107,8 +3107,10 @@ if a[0] == '--mount':
 assert a[0] == '--'
 a = a[1:]
 st = json.load(open(S)) if os.path.exists(S) else {'pools': [], 'users': {}, 'conf': {}, 'log': []}
-for k in ('fs', 'nfs'):
+for k in ('fs', 'nfs', 'svc'):
     st.setdefault(k, [])
+st.setdefault('cfg', {})
+st.setdefault('specs', {})
 def save():
     json.dump(st, open(S, 'w'))
 c = ' '.join(a)
@@ -3128,6 +3130,38 @@ elif c.startswith('ceph osd pool delete '):
     if st['conf'].get('mon_allow_pool_delete') != 'true' or a[4] != a[5] or a[4] not in st['pools']:
         sys.exit(1)
     st['pools'].remove(a[4]); st['log'].append(c); save()
+elif a[:3] == ['ceph', 'config', 'set'] and a[3] != 'mon':
+    st['cfg'].setdefault(a[3], {})[a[4]] = a[5]; st['log'].append(c); save()
+elif a[:3] == ['ceph', 'config', 'get']:
+    v = st['cfg'].get(a[3], {}).get(a[4])
+    if v is None:
+        sys.exit(2)
+    print(v)
+elif a[:3] == ['ceph', 'config', 'rm']:
+    st['cfg'].get(a[3], {}).pop(a[4], None); st['log'].append(c); save()
+elif c == 'ceph config dump':
+    print('WHO MASK LEVEL OPTION VALUE RO')
+    print('mon  advanced  mon_x  1')
+    for who, o in st['cfg'].items():
+        for k, v in o.items():
+            print('%s  advanced  %s  %s' % (who, k, v))
+elif c.startswith('ceph orch ls --service-type '):
+    print('NAME  PORTS  RUNNING  REFRESHED  AGE  PLACEMENT')
+    for n in st['svc']:
+        if n.startswith(a[4] + '.'):
+            print('%s  ?:8080  1/1  1s  1m  tst0' % n)
+elif a[:3] == ['ceph', 'orch', 'apply']:
+    assert mount is not None and a[4] == '/mnt/' + os.path.basename(mount), (mount, a)
+    text = open(mount).read()
+    f = dict(l.split(': ', 1) for l in text.splitlines() if l and not l.startswith(' ') and ': ' in l)
+    n = f['service_type'] + '.' + f['service_id']
+    if n not in st['svc']:
+        st['svc'].append(n)
+    st['specs'][n] = text; st['log'].append(c); save()
+elif a[:3] == ['ceph', 'orch', 'rm']:
+    if a[3] not in st['svc']:
+        sys.exit(2)
+    st['svc'].remove(a[3]); st['specs'].pop(a[3], None); save()
 elif c.startswith('ceph config set mon '):
     st['conf'][a[4]] = a[5]; save()
 elif c.startswith('ceph mon set auth_allowed_ciphers '):
@@ -3267,6 +3301,41 @@ else:
     check("absentCephPool: and sets pool deletion back to false", dump.contains("\"mon_allow_pool_delete\": \"false\""), dump)
     check("absentCephPool: nothing to do afterwards", sh(part(noPool, _.onlyIf))._1 != 0)
     check("absentCephPool: a pool that is not there fails the removal", sh(part(noPool, _.run))._1 != 0)
+    // configuration options
+    val optsRes = cephConfig("the RGW options", "client.rgw.x", List("rgw_a" -> "member,admin", "rgw_b" -> "true", "other" -> "keep"))
+    check("cephConfig: no options means it is needed", sh(part(optsRes, _.unless))._1 != 0)
+    val optsMade = sh(part(optsRes, _.run))
+    check("cephConfig: it sets every option", optsMade._1 == 0 && optsMade._2.contains("3 option(s) set for client.rgw.x") && dump.contains("member,admin"), optsMade.toString + dump)
+    check("cephConfig: it then means unchanged", sh(part(optsRes, _.unless))._1 == 0)
+    check("cephConfig: another value means it is needed", sh(part(cephConfig("x", "client.rgw.x", List("rgw_b" -> "false")), _.unless))._1 != 0)
+    check("cephConfig: a value with a single quote is refused", scala.util.Try(cephConfig("x", "client.rgw.x", List("rgw_a" -> "it's"))).isFailure)
+    check("cephConfig: no options is refused", scala.util.Try(cephConfig("x", "client.rgw.x", Nil)).isFailure)
+    val optsGone = absentCephConfig("remove the options", "client.rgw.x", "rgw_")
+    check("absentCephConfig: it is wanted while an option with the prefix is set, and when Ceph is down", sh(part(optsGone, _.onlyIf))._1 == 0 && sh(part(optsGone, _.onlyIf), down = true)._1 == 0)
+    val optsRemoved = sh(part(optsGone, _.run))
+    check("absentCephConfig: it removes the options with the prefix only", optsRemoved._1 == 0 && sh("cephadm shell -- ceph config get client.rgw.x rgw_a")._1 != 0 && sh("cephadm shell -- ceph config get client.rgw.x other")._2.trim == "keep", optsRemoved.toString + dump)
+    check("absentCephConfig: nothing to do afterwards", sh(part(optsGone, _.onlyIf))._1 != 0)
+    // orchestrator service
+    val stateDir = dir.resolve("sha").toString
+    val svcSpec = "service_type: rgw\nservice_id: x\nplacement:\n  hosts:\n    - @@HOST@@\nspec:\n  rgw_frontend_port: 8080"
+    val svc = cephOrchService("the RGW service", "rgw", "x", svcSpec, "10.10.5.12", "tst0", stateDir)
+    check("cephOrchService: no service means it is needed", sh(part(svc, _.unless))._1 != 0)
+    val svcMade = sh(part(svc, _.run))
+    check("cephOrchService: it applies the spec with the host's name in it", svcMade._1 == 0 && svcMade._2.contains("rgw.x applied") && dump.contains("- tst0.example"), svcMade.toString + dump)
+    check("cephOrchService: the spec file is gone afterwards", !Files.exists(Path.of("/tmp/orphera-rgw-x.yaml")))
+    check("cephOrchService: it then means unchanged", sh(part(svc, _.unless))._1 == 0)
+    val svcOther = cephOrchService("x", "rgw", "x", svcSpec.replace("8080", "8081"), "10.10.5.12", "tst0", stateDir)
+    check("cephOrchService: another spec means it is needed", sh(part(svcOther, _.unless))._1 != 0)
+    val svcNoHost = cephOrchService("x", "rgw", "y", svcSpec.replace("service_id: x", "service_id: y"), "10.9.9.9", "nowhere", stateDir)
+    val svcNoHostRun = sh(part(svcNoHost, _.run))
+    check("cephOrchService: no matching host fails with a message", svcNoHostRun._1 != 0 && svcNoHostRun._2.contains("no Ceph orchestrator host"), svcNoHostRun.toString)
+    check("cephOrchService: a spec with a dollar sign is refused", scala.util.Try(cephOrchService("x", "rgw", "x", "a: $b", "10.10.5.12", "tst0")).isFailure)
+    check("cephOrchService: a spec with a SPEC_END line is refused", scala.util.Try(cephOrchService("x", "rgw", "x", "a: b\nSPEC_END", "10.10.5.12", "tst0")).isFailure)
+    val noSvc = absentCephOrchService("remove the RGW service", "rgw", "x", stateDir)
+    check("absentCephOrchService: it is wanted while the service is listed, and when Ceph is down", sh(part(noSvc, _.onlyIf))._1 == 0 && sh(part(noSvc, _.onlyIf), down = true)._1 == 0)
+    val svcGone = sh(part(noSvc, _.run))
+    check("absentCephOrchService: it removes the service and its state file", svcGone._1 == 0 && svcGone._2.contains("rgw.x removed") && !Files.exists(Path.of(cephOrchStatePath("rgw", "x", stateDir))), svcGone.toString)
+    check("absentCephOrchService: nothing to do afterwards", sh(part(noSvc, _.onlyIf))._1 != 0)
     // filesystem and NFS cluster
     val fsRes = cephFilesystem("the filesystem", "cephfs")
     check("cephFilesystem: no filesystem means it is needed", sh(part(fsRes, _.unless))._1 != 0)
