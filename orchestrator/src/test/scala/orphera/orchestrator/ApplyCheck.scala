@@ -2933,7 +2933,7 @@ post('projects', {'project': {'name': 'stack-project', 'domain_id': '$domainId'}
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import urlparse, parse_qs
 PORT = int(sys.argv[1])
-DB = {'images': {}, 'flavors': {}, 'uploads': {}, 'keypairs': {}}
+DB = {'images': {}, 'flavors': {}, 'uploads': {}, 'keypairs': {}, 'nets': {}, 'subnets': {}, 'sgs': {}, 'ports': {}}
 class H(BaseHTTPRequestHandler):
     def log_message(self, *a): pass
     def send(self, code, obj=None, headers=None):
@@ -2952,10 +2952,10 @@ class H(BaseHTTPRequestHandler):
             b = json.loads(raw)
             if b['auth']['identity']['password']['user']['password'] != 'adminpw': return self.send(401, {})
             base = 'http://127.0.0.1:%d' % PORT
-            cat = [{'type': 'image', 'endpoints': [{'interface': 'public', 'url': base}]}, {'type': 'compute', 'endpoints': [{'interface': 'public', 'url': base + '/v2.1'}]}]
+            cat = [{'type': 'image', 'endpoints': [{'interface': 'public', 'url': base}]}, {'type': 'compute', 'endpoints': [{'interface': 'public', 'url': base + '/v2.1'}]}, {'type': 'network', 'endpoints': [{'interface': 'public', 'url': base}]}]
             return self.send(201, {'token': {'catalog': cat}}, {'X-Subject-Token': 'tok'})
-        if self.headers.get('X-Auth-Token') != 'tok': return self.send(401, {})
         if path == '/dump': return self.send(200, DB)
+        if self.headers.get('X-Auth-Token') != 'tok': return self.send(401, {})
         if path == '/v2/images' and method == 'GET':
             imgs = [i for i in DB['images'].values() if 'name' not in q or i['name'] == q['name'][0]]
             return self.send(200, {'images': imgs})
@@ -2977,6 +2977,39 @@ class H(BaseHTTPRequestHandler):
             if method == 'DELETE':
                 if f: del DB['flavors'][m.group(1)]; return self.send(202)
                 return self.send(404, {})
+        if path == '/v3/projects' and method == 'GET':
+            return self.send(200, {'projects': [{'id': 'pid-' + q['name'][0], 'name': q['name'][0]}]})
+        def match(items):
+            return [i for i in items if all(k not in q or str(i.get(k)) == q[k][0] for k in ('name', 'project_id', 'network_id'))]
+        if path == '/v2.0/networks' and method == 'GET': return self.send(200, {'networks': match(DB['nets'].values())})
+        if path == '/v2.0/networks' and method == 'POST':
+            n = json.loads(raw)['network']; n['id'] = 'net-' + str(len(DB['nets']) + 1)
+            n.setdefault('shared', False); n.setdefault('router:external', False)
+            DB['nets'][n['id']] = n; return self.send(201, {'network': n})
+        m = re.match(r'/v2\.0/networks/([^/]+)$', path)
+        if m and m.group(1) in DB['nets']:
+            n = DB['nets'][m.group(1)]
+            if method == 'PUT': n.update(json.loads(raw)['network']); return self.send(200, {'network': n})
+            if method == 'DELETE':
+                if any(x['network_id'] == n['id'] and x.get('device_owner') != 'network:dhcp' for x in DB['ports'].values()): return self.send(409, {})
+                del DB['nets'][n['id']]; return self.send(204)
+        if path == '/v2.0/subnets' and method == 'GET': return self.send(200, {'subnets': match(DB['subnets'].values())})
+        if path == '/v2.0/subnets' and method == 'POST':
+            n = json.loads(raw)['subnet']; n['id'] = 'sub-' + str(len(DB['subnets']) + 1); DB['subnets'][n['id']] = n; return self.send(201, {'subnet': n})
+        if path == '/v2.0/ports' and method == 'GET': return self.send(200, {'ports': match(DB['ports'].values())})
+        if path == '/v2.0/ports' and method == 'POST':
+            n = json.loads(raw)['port']; n['id'] = 'port-' + str(len(DB['ports']) + 1); DB['ports'][n['id']] = n; return self.send(201, {'port': n})
+        m = re.match(r'/v2\.0/ports/([^/]+)$', path)
+        if m and method == 'DELETE': DB['ports'].pop(m.group(1), None); return self.send(204)
+        if path == '/v2.0/security-groups' and method == 'GET': return self.send(200, {'security_groups': match(DB['sgs'].values())})
+        if path == '/v2.0/security-groups' and method == 'POST':
+            n = json.loads(raw)['security_group']; n['id'] = 'sg-' + str(len(DB['sgs']) + 1); n['security_group_rules'] = []; DB['sgs'][n['id']] = n; return self.send(201, {'security_group': n})
+        if path == '/v2.0/security-group-rules' and method == 'POST':
+            r = json.loads(raw)['security_group_rule']; DB['sgs'][r['security_group_id']]['security_group_rules'].append(r); return self.send(201, {'security_group_rule': r})
+        m = re.match(r'/v2\.0/security-groups/([^/]+)$', path)
+        if m and method == 'DELETE':
+            if m.group(1) in DB['sgs']: del DB['sgs'][m.group(1)]; return self.send(204)
+            return self.send(404, {})
         m = re.match(r'/v2\.1/os-keypairs/([^/]+)$', path)
         if m:
             k = DB['keypairs'].get(m.group(1))
@@ -3109,6 +3142,48 @@ HTTPServer(('127.0.0.1', PORT), H).serve_forever()
       check("openstack: key pair removal is guarded by the helper and the pair existing", part(pairGone, _.onlyIf).contains("orphera-keypair-guest-key' exists"), part(pairGone, _.onlyIf))
       check("openstack: remove deletes the key pair", keypairRun("remove")._1 == 0 && keypairRun("exists")._1 != 0)
       check("openstack: a key pair name with a space is refused", scala.util.Try(openstackKeypair("x", "a b", url, Secret("x"), "/ca")).isFailure)
+      // networks and security groups
+      val sn = OpenstackSubnet("provider", "10.10.6.0/24", Some("10.10.6.1"), Some(("10.10.6.200", "10.10.6.220")))
+      def nets(shared: Boolean = true, cidr: String = "10.10.6.0/24") =
+        openstackNetwork("make the network", "provider", url, Secret("adminpw"), "/no/ca.crt", flat = Some("provider"), shared = shared, external = true, subnet = Some(sn.copy(cidr = cidr)))
+      val (netHelper, netEnsure) = nets()
+      check("openstack: the network helper is named for project and network", netHelper.id == "file[/usr/local/sbin/orphera-network-admin-provider]", netHelper.id)
+      check("openstack: the network command runs the helper and is guarded by its check", part(netEnsure, _.run).contains("orphera-network-admin-provider' ensure") && part(netEnsure, _.unless).contains("check"))
+      val netText = fileText(netHelper)
+      def netRun(arg: String): (Int, String) = helperRun(netHelper, netText, arg)
+      check("openstack: no network fails the check and exists", netRun("check")._1 != 0 && netRun("exists")._1 != 0)
+      val netMade = netRun("ensure")
+      check("openstack: ensure makes the network and its subnet", netMade._1 == 0 && netMade._2.contains("network provider ready"), netMade.toString)
+      check("openstack: then the check passes and exists passes", netRun("check")._1 == 0 && netRun("exists")._1 == 0)
+      val netDump = scala.io.Source.fromURL(s"http://127.0.0.1:$port/dump").mkString
+      check("openstack: the network is flat on the physical network, shared, external and has the pool", (netDump.contains("\"provider:physical_network\": \"provider\"") && netDump.contains("\"shared\": true") && netDump.contains("10.10.6.200")), netDump)
+      check("openstack: a second ensure creates nothing new", netRun("ensure")._1 == 0 && scala.io.Source.fromURL(s"http://127.0.0.1:$port/dump").mkString.split("\"id\": \"net-").length == 2)
+      val (privHelper, _) = nets(shared = false)
+      check("openstack: another shared flag fails the check", helperRun(privHelper, fileText(privHelper), "check")._1 != 0)
+      check("openstack: ensure puts the flag right", helperRun(privHelper, fileText(privHelper), "ensure")._1 == 0 && helperRun(privHelper, fileText(privHelper), "check")._1 == 0 && netRun("check")._1 != 0)
+      val (wrongHelper, _) = nets(cidr = "10.99.0.0/24")
+      check("openstack: another CIDR fails the check and ensure", helperRun(wrongHelper, fileText(wrongHelper), "check")._1 != 0 && helperRun(wrongHelper, fileText(wrongHelper), "ensure")._1 != 0)
+      val netGone = absentOpenstackNetwork("remove the network", "provider")
+      check("openstack: network removal is guarded by the helper and the network existing", part(netGone, _.onlyIf).contains("orphera-network-admin-provider' exists"), part(netGone, _.onlyIf))
+      check("openstack: remove deletes the network", netRun("remove")._1 == 0 && netRun("exists")._1 != 0)
+      check("openstack: a network name with a space is refused", scala.util.Try(openstackNetwork("x", "a b", url, Secret("x"), "/ca")).isFailure)
+      check("openstack: a CIDR that is not an address is refused", scala.util.Try(openstackNetwork("x", "a", url, Secret("x"), "/ca", subnet = Some(OpenstackSubnet("s", "10.0.0.0/24; id")))).isFailure)
+      val (sgHelper, sgEnsure) = openstackSecurityGroup("make the group", "amp-mgmt", "Test", List(("tcp", Some(9443)), ("icmp", None)), url, Secret("adminpw"), "/no/ca.crt", project = "service")
+      check("openstack: the security group helper is named for project and group", sgHelper.id == "file[/usr/local/sbin/orphera-secgroup-service-amp-mgmt]", sgHelper.id)
+      check("openstack: the group command is guarded by its check", part(sgEnsure, _.unless).contains("check"))
+      val sgText = fileText(sgHelper)
+      def sgRun(arg: String): (Int, String) = helperRun(sgHelper, sgText, arg)
+      check("openstack: no group fails the check and exists", sgRun("check")._1 != 0 && sgRun("exists")._1 != 0)
+      val sgMade = sgRun("ensure")
+      check("openstack: ensure makes the group with its rules", sgMade._1 == 0 && sgMade._2.contains("security group amp-mgmt ready") && sgRun("check")._1 == 0, sgMade.toString)
+      check("openstack: a second ensure adds no rule", sgRun("ensure")._1 == 0 && scala.io.Source.fromURL(s"http://127.0.0.1:$port/dump").mkString.split("\"protocol\": \"tcp\"").length == 2)
+      val (sgMore, _) = openstackSecurityGroup("more", "amp-mgmt", "Test", List(("tcp", Some(9443)), ("udp", Some(5555))), url, Secret("adminpw"), "/no/ca.crt", project = "service")
+      check("openstack: a missing rule fails the check", helperRun(sgMore, fileText(sgMore), "check")._1 != 0)
+      check("openstack: ensure adds the missing rule", helperRun(sgMore, fileText(sgMore), "ensure")._1 == 0 && helperRun(sgMore, fileText(sgMore), "check")._1 == 0)
+      val sgGone = absentOpenstackSecurityGroup("remove the group", "amp-mgmt", "service")
+      check("openstack: group removal is guarded by the helper and the group existing", part(sgGone, _.onlyIf).contains("orphera-secgroup-service-amp-mgmt' exists"), part(sgGone, _.onlyIf))
+      check("openstack: remove deletes the group", sgRun("remove")._1 == 0 && sgRun("exists")._1 != 0)
+      check("openstack: an unknown protocol is refused", scala.util.Try(openstackSecurityGroup("x", "a", "d", List(("gre", None)), url, Secret("x"), "/ca")).isFailure)
     finally proc.destroy()
 
   // A stand-in `cephadm shell` for the Ceph helpers: pools, cephx users and settings in a JSON file, and `dump` to

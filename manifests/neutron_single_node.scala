@@ -453,7 +453,7 @@ object neutron_single_node extends OrpheraApply:
   // Standard-library Python, as in the other service playbooks. Plain string filled
   // in with replace(). Subcommands:
   //   catalog | agents | agents-up |
-  //   net-list | net-create | net-delete <id> | tenant-cycle | provider-net | provider-net-ok
+  //   net-list | net-create | net-delete <id> | tenant-cycle
   // (net-create makes a flat network on the physical network `provider` and a
   // subnet with DHCP off, net-delete removes both: that exercises the API, the
   // database and the ML2 flat type driver. Only one flat network can exist per
@@ -463,9 +463,9 @@ object neutron_single_node extends OrpheraApply:
   // and its ports to go ACTIVE, and removes everything. It uses the existing external network,
   // or a temporary flat external one if there is none; it refuses to run if the only flat
   // network on the physical network is not marked external.
-  // provider-net makes the persistent flat network `provider` (shared, external, subnet
-  // 10.10.6.0/24 with DHCP, pool .200-.220) if it is missing, or marks the existing one shared
-  // and external; Magnum, Trove and nova_compute.scala's boot test use it. Idempotent.)
+  // The persistent flat network `provider` (shared, external, subnet 10.10.6.0/24 with DHCP, pool
+  // .200-.220), which Magnum, Trove and nova_compute.scala's boot test use, is made by the
+  // description with openstackNetwork, not by this helper.)
   private val apiHelperPython =
     """#!/usr/bin/python3
 import json, ssl, sys, time, urllib.request, urllib.error
@@ -581,71 +581,6 @@ def net_delete(nid):
     print('deleted ' + nid)
 
 
-PROVIDER_NAME = 'provider'
-PROVIDER_CIDR = '10.10.6.0/24'
-PROVIDER_GATEWAY = '10.10.6.1'
-PROVIDER_POOL = ('10.10.6.200', '10.10.6.220')
-
-
-def provider_net():
-    # The one flat network on PHYSNET, kept for good: shared and external. Magnum takes its
-    # external network from it and Trove its guests' management network (by the name
-    # `provider`); the compute boot test reuses it. Idempotent.
-    token, _ = get_token('admin', ADMIN_PW, 'admin')
-    flat = [n for n in get_json(token, '/networks').get('networks', [])
-            if n.get('provider:network_type') == 'flat' and n.get('provider:physical_network') == PHYSNET]
-    if flat:
-        n = flat[0]
-        if n.get('name') != PROVIDER_NAME:
-            die('a flat network %s (%s) already uses physical network %s; delete it (orphera-neutron-api net-delete %s) and run again' % (n.get('name'), n['id'], PHYSNET, n['id']))
-        change = {}
-        if not n.get('router:external'):
-            change['router:external'] = True
-        if not n.get('shared'):
-            change['shared'] = True
-        if change:
-            s, p, _ = call('PUT', NEUTRON + '/v2.0/networks/' + n['id'], {'network': change}, token)
-            if s != 200:
-                die('network update failed: HTTP %s %s' % (s, p))
-        nid = n['id']
-    else:
-        body = {'network': {'name': PROVIDER_NAME, 'shared': True, 'router:external': True,
-                            'provider:network_type': 'flat', 'provider:physical_network': PHYSNET}}
-        s, p, _ = call('POST', NEUTRON + '/v2.0/networks', body, token)
-        if s not in (200, 201):
-            die('network create failed: HTTP %s %s' % (s, p))
-        nid = p['network']['id']
-    subs = get_json(token, '/subnets?network_id=' + nid).get('subnets', [])
-    if not subs:
-        body = {'subnet': {'network_id': nid, 'ip_version': 4, 'name': PROVIDER_NAME, 'cidr': PROVIDER_CIDR,
-                           'gateway_ip': PROVIDER_GATEWAY, 'enable_dhcp': True,
-                           'allocation_pools': [{'start': PROVIDER_POOL[0], 'end': PROVIDER_POOL[1]}]}}
-        s, p, _ = call('POST', NEUTRON + '/v2.0/subnets', body, token)
-        if s not in (200, 201):
-            die('subnet create failed: HTTP %s %s' % (s, p))
-        subs = [p['subnet']]
-    print('provider network ready: %s (%s), flat on %s, shared, external, subnet %s' % (PROVIDER_NAME, nid, PHYSNET, subs[0].get('cidr')))
-
-
-def provider_net_ok():
-    # Exit 0 only when provider_net() would change nothing: the flat network named PROVIDER_NAME is on PHYSNET, shared
-    # and external, with a subnet of PROVIDER_CIDR. Makes no change.
-    token, _ = get_token('admin', ADMIN_PW, 'admin')
-    flat = [n for n in get_json(token, '/networks').get('networks', [])
-            if n.get('provider:network_type') == 'flat' and n.get('provider:physical_network') == PHYSNET]
-    if not flat:
-        die('no flat network on the physical network %s' % PHYSNET)
-    n = flat[0]
-    if n.get('name') != PROVIDER_NAME:
-        die('the flat network on %s is called %s, not %s' % (PHYSNET, n.get('name'), PROVIDER_NAME))
-    if not n.get('shared') or not n.get('router:external'):
-        die('network %s is not both shared and external' % PROVIDER_NAME)
-    subs = get_json(token, '/subnets?network_id=' + n['id']).get('subnets', [])
-    if PROVIDER_CIDR not in [x.get('cidr') for x in subs]:
-        die('network %s has no subnet %s' % (PROVIDER_NAME, PROVIDER_CIDR))
-    print('provider network %s (%s) is in place' % (PROVIDER_NAME, n['id']))
-
-
 def get_json(token, path):
     s, p, _ = call('GET', NEUTRON + '/v2.0' + path, None, token)
     if s != 200:
@@ -747,12 +682,8 @@ if __name__ == '__main__':
         net_delete(sys.argv[2])
     elif cmd == 'tenant-cycle':
         tenant_cycle()
-    elif cmd == 'provider-net':
-        provider_net()
-    elif cmd == 'provider-net-ok':
-        provider_net_ok()
     else:
-        die('usage: orphera-neutron-api catalog | agents | agents-up | net-list | net-create | net-delete <id> | tenant-cycle | provider-net | provider-net-ok')
+        die('usage: orphera-neutron-api catalog | agents | agents-up | net-list | net-create | net-delete <id> | tenant-cycle')
 """
 
   private val helper =
@@ -914,13 +845,21 @@ if __name__ == '__main__':
     ).after((answering :: running)*)
 
     // Magnum, Trove and the compute boot test need this network and find it by name, so the description makes it
-    // (the helper's provider-net is idempotent; provider-net-ok is its read-only check).
-    val providerNet = command(
+    // (openstackNetwork: a helper of its own, `check` is its read-only test).
+    val (providerHelper, providerMade) = openstackNetwork(
       "make the flat provider network with its subnet",
-      s"$helperPath provider-net",
-      unless = s"$helperPath provider-net-ok >/dev/null 2>&1",
-      timeout = 120
-    ).after(reporting)
+      "provider",
+      ksUrl,
+      adminPassword,
+      caCert,
+      flat = Some(physnet),
+      shared = true,
+      external = true,
+      subnet = Some(
+        OpenstackSubnet("provider", "10.10.6.0/24", Some("10.10.6.1"), Some(("10.10.6.200", "10.10.6.220")))
+      )
+    )
+    val providerNet = providerMade.after(reporting)
 
     tools ++ List(
       ovsService,
@@ -935,4 +874,4 @@ if __name__ == '__main__':
       logDirectory,
       stateDirectory
     ) ++ units.flatMap(_._2) ++ List(dbSync, helperFile, keystoneHelper, registered) ++
-      running ++ List(answering, reporting, providerNet)
+      running ++ List(answering, reporting, providerHelper, providerNet)

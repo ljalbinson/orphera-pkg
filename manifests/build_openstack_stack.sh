@@ -345,8 +345,8 @@ step_neutron() {
   check "the Neutron API answers its version document" contains "http=" "$out"
   out=$(run_on tst19 "sudo /usr/local/sbin/orphera-neutron-api agents-up")
   check "the Open vSwitch and DHCP agents are alive" contains "are alive" "$out"
-  out=$(run_on tst19 "sudo /usr/local/sbin/orphera-neutron-api provider-net")
-  check "the flat provider network exists, shared and external" contains "provider network ready" "$out"
+  out=$(run_on tst19 "sudo /usr/local/sbin/orphera-network-admin-provider ensure")
+  check "the flat provider network exists, shared and external" contains "network provider ready" "$out"
 }
 
 step_compute() {

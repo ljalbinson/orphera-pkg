@@ -1196,6 +1196,7 @@ class Clients(object):
         if status != 201:
             die('token request for admin failed: HTTP %s %s' % (status, parsed))
         self.token = headers['X-Subject-Token']
+        self.doc = parsed
         self.nova = versioned(endpoint(parsed, 'compute'), '/v2.1')
         self.glance = versioned(endpoint(parsed, 'image'), '/v2')
 
@@ -1422,6 +1423,225 @@ if __name__ == '__main__':
   /** The path of the helper `openstackKeypair` writes for the key pair `name`. */
   def openstackKeypairHelperPath(name: String): String = s"/usr/local/sbin/orphera-keypair-$name"
 
+  // The helpers of `openstackNetwork` and `openstackSecurityGroup`: the base plus Neutron and the project lookup.
+  private val openstackNeutronClientPython: String = openstackClientPython +
+    """
+
+class NClients(Clients):
+    def n(self, method, path, body=None):
+        return call(method, versioned(endpoint(self.doc, 'network'), '/v2.0') + path, body, self.token)
+
+    def project_id(self, name):
+        s, p, _ = call('GET', KS + '/projects?name=' + name, None, self.token)
+        if s != 200 or not p.get('projects'):
+            die('project %s not found (HTTP %s)' % (name, s))
+        return p['projects'][0]['id']
+
+    def one(self, path, key, what):
+        s, p, _ = self.n('GET', path)
+        if s != 200:
+            die('%s lookup failed: HTTP %s %s' % (what, s, p))
+        items = p.get(key, [])
+        return items[0] if items else None
+"""
+
+  private val openstackNetworkPython: String = openstackNeutronClientPython +
+    """
+
+def find_net(cl):
+    pid = cl.project_id(SPEC['project'])
+    return pid, cl.one('/networks?name=%s&project_id=%s' % (SPEC['name'], pid), 'networks', 'network')
+
+
+def problems(cl, net):
+    # What differs from the description; an empty list means nothing to do.
+    if net is None:
+        return ['network %s is missing' % SPEC['name']]
+    out = []
+    if SPEC['flat'] and (net.get('provider:network_type') != 'flat' or net.get('provider:physical_network') != SPEC['flat']):
+        out.append('network %s is not flat on %s' % (SPEC['name'], SPEC['flat']))
+    if bool(net.get('shared')) != SPEC['shared']:
+        out.append('network %s: shared is %s' % (SPEC['name'], net.get('shared')))
+    if bool(net.get('router:external')) != SPEC['external']:
+        out.append('network %s: external is %s' % (SPEC['name'], net.get('router:external')))
+    sub = SPEC['subnet']
+    if sub:
+        subs = cl.one('/subnets?network_id=' + net['id'], 'subnets', 'subnet')
+        if subs is None:
+            out.append('network %s has no subnet' % SPEC['name'])
+        elif subs.get('cidr') != sub['cidr']:
+            out.append('subnet of %s is %s, not %s' % (SPEC['name'], subs.get('cidr'), sub['cidr']))
+    return out
+
+
+def ensure():
+    cl = NClients()
+    pid, net = find_net(cl)
+    if net is None:
+        body = {'name': SPEC['name'], 'project_id': pid, 'shared': SPEC['shared'], 'router:external': SPEC['external']}
+        if SPEC['flat']:
+            body['provider:network_type'] = 'flat'
+            body['provider:physical_network'] = SPEC['flat']
+        s, p, _ = cl.n('POST', '/networks', {'network': body})
+        if s not in (200, 201):
+            die('creating network %s failed: HTTP %s %s' % (SPEC['name'], s, p))
+        net = p['network']
+    elif SPEC['flat'] and (net.get('provider:network_type') != 'flat' or net.get('provider:physical_network') != SPEC['flat']):
+        die('network %s exists but is %s on %s, not flat on %s' % (SPEC['name'], net.get('provider:network_type'), net.get('provider:physical_network'), SPEC['flat']))
+    else:
+        change = {}
+        if bool(net.get('shared')) != SPEC['shared']:
+            change['shared'] = SPEC['shared']
+        if bool(net.get('router:external')) != SPEC['external']:
+            change['router:external'] = SPEC['external']
+        if change:
+            s, p, _ = cl.n('PUT', '/networks/' + net['id'], {'network': change})
+            if s != 200:
+                die('updating network %s failed: HTTP %s %s' % (SPEC['name'], s, p))
+    sub = SPEC['subnet']
+    if sub:
+        have = cl.one('/subnets?network_id=' + net['id'], 'subnets', 'subnet')
+        if have is None:
+            body = {'network_id': net['id'], 'ip_version': 4, 'name': sub['name'], 'cidr': sub['cidr'], 'project_id': pid, 'enable_dhcp': sub['dhcp'], 'gateway_ip': sub['gateway']}
+            if sub['pool']:
+                body['allocation_pools'] = [{'start': sub['pool'][0], 'end': sub['pool'][1]}]
+            s, p, _ = cl.n('POST', '/subnets', {'subnet': body})
+            if s not in (200, 201):
+                die('creating subnet %s failed: HTTP %s %s' % (sub['name'], s, p))
+        elif have.get('cidr') != sub['cidr']:
+            die('network %s has the subnet %s, not %s; delete the network and run again' % (SPEC['name'], have.get('cidr'), sub['cidr']))
+    print('network %s ready (%s)' % (SPEC['name'], net['id']))
+
+
+def check():
+    cl = NClients()
+    pid, net = find_net(cl)
+    bad = problems(cl, net)
+    if bad:
+        die('; '.join(bad))
+    print('network %s is as wanted (%s)' % (SPEC['name'], net['id']))
+
+
+def exists():
+    if find_net(NClients())[1] is None:
+        die('no network %s' % SPEC['name'])
+
+
+def remove():
+    cl = NClients()
+    pid, net = find_net(cl)
+    if net is None:
+        print('network %s: not there' % SPEC['name'])
+        return
+    s, p, _ = cl.n('GET', '/ports?network_id=' + net['id'])
+    for port in p.get('ports', []) if s == 200 else []:
+        if port.get('device_owner') != 'network:dhcp':
+            cl.n('DELETE', '/ports/' + port['id'])
+    end = time.time() + 120
+    while True:
+        s, _, _ = cl.n('DELETE', '/networks/' + net['id'])
+        if s in (204, 404):
+            print('network %s removed' % SPEC['name'])
+            return
+        if time.time() > end:
+            die('network %s could not be deleted: HTTP %s' % (SPEC['name'], s))
+        time.sleep(5)
+
+
+if __name__ == '__main__':
+    cmd = sys.argv[1] if len(sys.argv) > 1 else ''
+    if cmd == 'ensure':
+        ensure()
+    elif cmd == 'check':
+        check()
+    elif cmd == 'exists':
+        exists()
+    elif cmd == 'remove':
+        remove()
+    else:
+        die('usage: ensure | check | exists | remove')
+"""
+
+  private val openstackSecurityGroupPython: String = openstackNeutronClientPython +
+    """
+
+def find_sg(cl):
+    pid = cl.project_id(SPEC['project'])
+    return pid, cl.one('/security-groups?name=%s&project_id=%s' % (SPEC['name'], pid), 'security_groups', 'security group')
+
+
+def missing_rules(sg):
+    have = set((r.get('direction'), r.get('protocol'), r.get('port_range_min')) for r in sg.get('security_group_rules', []))
+    return [r for r in SPEC['rules'] if ('ingress', r[0], r[1]) not in have]
+
+
+def ensure():
+    cl = NClients()
+    pid, sg = find_sg(cl)
+    if sg is None:
+        s, p, _ = cl.n('POST', '/security-groups', {'security_group': {'name': SPEC['name'], 'description': SPEC['description'], 'project_id': pid}})
+        if s not in (200, 201):
+            die('creating security group %s failed: HTTP %s %s' % (SPEC['name'], s, p))
+        sg = p['security_group']
+    for proto, port in missing_rules(sg):
+        rule = {'security_group_id': sg['id'], 'direction': 'ingress', 'ethertype': 'IPv4', 'protocol': proto, 'remote_ip_prefix': '0.0.0.0/0'}
+        if port is not None:
+            rule['port_range_min'] = port
+            rule['port_range_max'] = port
+        s, p, _ = cl.n('POST', '/security-group-rules', {'security_group_rule': rule})
+        if s not in (200, 201):
+            die('creating a rule in %s failed: HTTP %s %s' % (SPEC['name'], s, p))
+    print('security group %s ready (%s)' % (SPEC['name'], sg['id']))
+
+
+def check():
+    cl = NClients()
+    sg = find_sg(cl)[1]
+    if sg is None:
+        die('security group %s does not exist' % SPEC['name'])
+    bad = missing_rules(sg)
+    if bad:
+        die('security group %s lacks the rules %s' % (SPEC['name'], bad))
+    print('security group %s is as wanted (%s)' % (SPEC['name'], sg['id']))
+
+
+def exists():
+    if find_sg(NClients())[1] is None:
+        die('no security group %s' % SPEC['name'])
+
+
+def remove():
+    cl = NClients()
+    sg = find_sg(cl)[1]
+    if sg is None:
+        print('security group %s: not there' % SPEC['name'])
+        return
+    s, _, _ = cl.n('DELETE', '/security-groups/' + sg['id'])
+    print('security group %s: HTTP %s' % (SPEC['name'], s))
+
+
+if __name__ == '__main__':
+    cmd = sys.argv[1] if len(sys.argv) > 1 else ''
+    if cmd == 'ensure':
+        ensure()
+    elif cmd == 'check':
+        check()
+    elif cmd == 'exists':
+        exists()
+    elif cmd == 'remove':
+        remove()
+    else:
+        die('usage: ensure | check | exists | remove')
+"""
+
+  /** The path of the helper `openstackNetwork` writes for the network `name` in `project`. */
+  def openstackNetworkHelperPath(name: String, project: String = "admin"): String =
+    s"/usr/local/sbin/orphera-network-$project-$name"
+
+  /** The path of the helper `openstackSecurityGroup` writes for the group `name` in `project`. */
+  def openstackSecurityGroupHelperPath(name: String, project: String = "admin"): String =
+    s"/usr/local/sbin/orphera-secgroup-$project-$name"
+
   /** The path of the helper `openstackImage` writes for the image `name`. */
   def openstackImageHelperPath(name: String): String = s"/usr/local/sbin/orphera-image-$name"
 
@@ -1588,6 +1808,145 @@ if __name__ == '__main__':
     command(
       label,
       s"""$path remove || echo "Nova cleanup failed (continuing)"""",
+      onlyIf = s"[ -x $path ] && $path exists >/dev/null 2>&1",
+      timeout = timeout
+    )
+
+  /** The subnet of an `openstackNetwork`: IPv4 `cidr`, the `gateway` (None for none), an optional allocation
+    * `pool` (first, last address) and whether DHCP is on.
+    */
+  final case class OpenstackSubnet(
+      name: String,
+      cidr: String,
+      gateway: Option[String] = None,
+      pool: Option[(String, String)] = None,
+      dhcp: Boolean = true
+  )
+
+  private def requireAddress(what: String, text: String): Unit =
+    require(text.nonEmpty && text.forall(c => c.isDigit || "./".contains(c)), s"$what is not an IPv4 address or network: '$text'")
+
+  /** A Neutron network (with at most one IPv4 subnet) of `project` as a description. `flat = Some(physnet)` makes
+    * a flat provider network on that physical network; without it the network is a tenant network of whatever
+    * type Neutron chooses. `shared` and `external` are set as given. The result is the helper (a root-only script
+    * holding the admin password) and the command that runs it, which is `unchanged` while the network, its flags
+    * and its subnet's CIDR are as described. An existing network of that name in the project has its flags put
+    * right; one that is not flat on `flat` is an error, and so is a subnet with another CIDR.
+    */
+  def openstackNetwork(
+      label: String,
+      name: String,
+      keystone: String,
+      adminPassword: Secret,
+      ca: String,
+      project: String = "admin",
+      flat: Option[String] = None,
+      shared: Boolean = false,
+      external: Boolean = false,
+      subnet: Option[OpenstackSubnet] = None,
+      timeout: Int = 180
+  ): (ApplyResource, ApplyResource) =
+    keystoneName("network name", name)
+    keystoneName("project", project)
+    flat.foreach(keystoneName("physical network", _))
+    subnet.foreach { sn =>
+      keystoneName("subnet name", sn.name)
+      requireAddress("a CIDR", sn.cidr)
+      sn.gateway.foreach(requireAddress("a gateway", _))
+      sn.pool.foreach((a, b) => { requireAddress("a pool address", a); requireAddress("a pool address", b) })
+    }
+    def py(b: Boolean) = if b then "True" else "False"
+    val subnetSpec = subnet match
+      case None => "None"
+      case Some(sn) =>
+        "{" + List(
+          "'name': " + pyString("subnet name", sn.name),
+          "'cidr': " + pyString("cidr", sn.cidr),
+          "'gateway': " + sn.gateway.map(pyString("gateway", _)).getOrElse("None"),
+          "'pool': " + sn.pool.map((a, b) => s"(${pyString("pool", a)}, ${pyString("pool", b)})").getOrElse("None"),
+          "'dhcp': " + py(sn.dhcp)
+        ).mkString(", ") + "}"
+    val spec = "{" + List(
+      "'name': " + pyString("name", name),
+      "'project': " + pyString("project", project),
+      "'flat': " + flat.map(pyString("physical network", _)).getOrElse("None"),
+      "'shared': " + py(shared),
+      "'external': " + py(external),
+      "'subnet': " + subnetSpec
+    ).mkString(", ") + "}"
+    val path = openstackNetworkHelperPath(name, project)
+    val helper = secretFile(path, Secret(openstackScript(openstackNetworkPython, keystone, adminPassword, ca, spec)), mode = "0700", owner = "root", group = "root")
+    val ensure = command(
+      label,
+      s"${Apply.quote(path)} ensure",
+      unless = s"${Apply.quote(path)} check >/dev/null 2>&1",
+      timeout = timeout
+    ).after(helper)
+    (helper, ensure)
+
+  /** What `openstackNetwork` made, removed again: the network's ports (except the DHCP ones) and the network. It
+    * does nothing without the helper or while the network is not there. A failure is reported and the run goes
+    * on. The helper is left for the caller to remove.
+    */
+  def absentOpenstackNetwork(label: String, name: String, project: String = "admin", timeout: Int = 300): ApplyResource =
+    keystoneName("network name", name)
+    keystoneName("project", project)
+    val path = Apply.quote(openstackNetworkHelperPath(name, project))
+    command(
+      label,
+      s"""$path remove || echo "Neutron cleanup failed (continuing)"""",
+      onlyIf = s"[ -x $path ] && $path exists >/dev/null 2>&1",
+      timeout = timeout
+    )
+
+  /** A Neutron security group of `project` with ingress rules from anywhere (IPv4) as a description. `rules` are
+    * pairs of protocol and port, `("tcp", Some(9443))` or `("icmp", None)`. It is `unchanged` while the group
+    * exists with every rule; missing rules are added and other rules are left alone.
+    */
+  def openstackSecurityGroup(
+      label: String,
+      name: String,
+      description: String,
+      rules: List[(String, Option[Int])],
+      keystone: String,
+      adminPassword: Secret,
+      ca: String,
+      project: String = "admin",
+      timeout: Int = 120
+  ): (ApplyResource, ApplyResource) =
+    keystoneName("security group name", name)
+    keystoneName("project", project)
+    rules.foreach { (proto, port) =>
+      require(Set("tcp", "udp", "icmp").contains(proto), s"not a protocol: '$proto'")
+      require(port.forall(p => p > 0 && p < 65536), s"not a port: $port")
+    }
+    val ruleText = rules.map((proto, port) => s"(${pyString("protocol", proto)}, ${port.map(_.toString).getOrElse("None")})").mkString("[", ", ", "]")
+    val spec = "{" + List(
+      "'name': " + pyString("name", name),
+      "'project': " + pyString("project", project),
+      "'description': " + pyString("description", description),
+      "'rules': " + ruleText
+    ).mkString(", ") + "}"
+    val path = openstackSecurityGroupHelperPath(name, project)
+    val helper = secretFile(path, Secret(openstackScript(openstackSecurityGroupPython, keystone, adminPassword, ca, spec)), mode = "0700", owner = "root", group = "root")
+    val ensure = command(
+      label,
+      s"${Apply.quote(path)} ensure",
+      unless = s"${Apply.quote(path)} check >/dev/null 2>&1",
+      timeout = timeout
+    ).after(helper)
+    (helper, ensure)
+
+  /** What `openstackSecurityGroup` made, removed again. It does nothing without the helper or while the group is
+    * not there; a group that is still in use is reported and the run goes on.
+    */
+  def absentOpenstackSecurityGroup(label: String, name: String, project: String = "admin", timeout: Int = 120): ApplyResource =
+    keystoneName("security group name", name)
+    keystoneName("project", project)
+    val path = Apply.quote(openstackSecurityGroupHelperPath(name, project))
+    command(
+      label,
+      s"""$path remove || echo "Neutron cleanup failed (continuing)"""",
       onlyIf = s"[ -x $path ] && $path exists >/dev/null 2>&1",
       timeout = timeout
     )
