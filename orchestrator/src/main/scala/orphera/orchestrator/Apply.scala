@@ -2405,7 +2405,11 @@ esac
     * installed; without one the newest is installed the first time and again
     * whenever the description changes, and a run that changes nothing never
     * upgrades. A change made to the release outside this description is not
-    * noticed unless the release stops being deployed.
+    * noticed unless the release stops being deployed. `valuesFrom` pairs a
+    * placeholder name with a file on the node: a line of the values that holds
+    * only `@@NAME@@` is replaced, when the helper runs, by the lines of that
+    * file with the placeholder's indentation (for a certificate inside a YAML
+    * block). A change to such a file is not noticed by the check.
     */
   def helmRelease(
       label: String,
@@ -2419,7 +2423,8 @@ esac
       kubeconfig: String = "/etc/kubernetes/admin.conf",
       wait: Boolean = true,
       minutes: Int = 10,
-      stateDir: String = "/var/lib/orphera/helm"
+      stateDir: String = "/var/lib/orphera/helm",
+      valuesFrom: List[(String, String)] = Nil
   ): (ApplyResource, ApplyResource) =
     helmName("a release name", release)
     helmName("a namespace", namespace)
@@ -2441,6 +2446,16 @@ esac
       s"the kubeconfig must be an absolute path: '$kubeconfig'"
     )
     require(minutes > 0, "minutes must be positive")
+    valuesFrom.foreach { (tag, file) =>
+      require(
+        tag.nonEmpty && tag.forall(c => c.isUpper || c.isDigit || c == '_'),
+        s"a placeholder name must be capitals, digits and _, not '$tag'"
+      )
+      require(
+        file.startsWith("/"),
+        s"a values file must be an absolute path: '$file'"
+      )
+    }
     set.foreach { (k, v) =>
       require(
         k.nonEmpty && k.forall(c => c >= ' ' && c <= '~'),
@@ -2463,7 +2478,8 @@ esac
         chart,
         version.getOrElse(""),
         text.getOrElse(""),
-        set.map((k, v) => s"$k=$v").mkString("\n")
+        set.map((k, v) => s"$k=$v").mkString("\n"),
+        valuesFrom.map((t, f) => s"$t=$f").mkString("\n")
       ).mkString("\u0000")
     )
     // Built without stripMargin: a line of the values may itself start with `|` (a YAML block scalar).
@@ -2475,7 +2491,18 @@ esac
           "    cat > \"$VALS\" <<'ORPHERA_VALUES_END'",
           t,
           "ORPHERA_VALUES_END"
-        ).mkString("\n")
+        ).mkString("\n") + valuesFrom
+          .map((tag, file) =>
+            List(
+              s"    [ -s ${Apply.quote(file)} ] || { echo ${Apply.quote(file + " is missing")} >&2; exit 1; }",
+              "    awk -v tag=" + Apply.quote(
+                "@@" + tag + "@@"
+              ) + " -v file=" + Apply.quote(file) +
+                " '{ t = $0; sub(/^ +/, \"\", t); if (t == tag) { ind = substr($0, 1, length($0) - length(t)); while ((getline l < file) > 0) print ind l; close(file) } else print }' \"$VALS\" > \"$VALS.new\"",
+              "    mv \"$VALS.new\" \"$VALS\""
+            ).mkString("\n", "\n", "")
+          )
+          .mkString
       case None => ""
     val script = helmReleaseScript
       .replace("@@KUBECONFIG@@", Apply.quote(kubeconfig))
