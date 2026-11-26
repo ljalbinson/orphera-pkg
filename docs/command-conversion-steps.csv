@@ -381,14 +381,14 @@ manifests/k8s_alertmanager.scala,242,RunCommand,set the Alertmanager receivers (
 manifests/k8s_argocd.scala,351,RunCommand,namespace and Helm values,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),not started
 manifests/k8s_argocd.scala,362,RunCommand,HTTPRoute for $argoHost,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),not started
 manifests/k8s_ceph_csi.scala,187,RunCommand,helm install ceph-csi-rbd and the default StorageClass,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),not started
-manifests/k8s_cert_manager.scala,170,RunCommand,helm install cert-manager,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),not started
+manifests/k8s_cert_manager.scala,67,apply command,helm install cert-manager,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),done
 manifests/k8s_cert_manager.scala,175,RunCommand,create the sub-CA secret and the ClusterIssuer,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),not started
 manifests/k8s_cilium.scala,212,RunCommand,install the Gateway API CRDs,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),not started
 manifests/k8s_cilium.scala,220,RunCommand,helm install Cilium,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),not started
 manifests/k8s_cilium_metrics.scala,115,RunCommand,switch on Cilium and Hubble metrics (helm upgrade --reuse-values),4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),not started
 manifests/k8s_cluster.scala,308,RunCommand,label the worker pools,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),not started
-manifests/k8s_external_dns.scala,175,RunCommand,"namespace, TSIG secret, Helm values",4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),not started
-manifests/k8s_external_dns.scala,180,RunCommand,helm install external-dns,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),not started
+manifests/k8s_external_dns.scala,176,RunCommand,namespace and TSIG secret,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),not started
+manifests/k8s_external_dns.scala,99,apply command,helm install external-dns,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),done
 manifests/k8s_gateway.scala,213,RunCommand,make sure Cilium's Gateway controller is running,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),not started
 manifests/k8s_gateway.scala,221,RunCommand,"wildcard certificate, Gateway and HTTP redirect",4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),not started
 manifests/k8s_kubeadm_config.scala,360,RunCommand,turn on the three scrape jobs,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),not started
