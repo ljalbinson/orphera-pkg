@@ -26,7 +26,8 @@ import orphera.orchestrator.kolla.*
 //   - octavia-health-manager receives the heartbeats of the amphorae (UDP 5555) and fails over
 //   - octavia-housekeeping   removes spare and deleted amphorae, rotates certificates
 //
-// What it makes outside the containers (the helper's `plumbing`, all in project `service`):
+// What it makes outside the containers, all in project `service` (the network, the groups and the flavor are
+// typed resources: openstackNetwork, openstackSecurityGroup, openstackFlavor; the port is the helper's `plumbing`):
 //   - the network lb-mgmt-net (VXLAN) with the subnet 192.168.200.0/24 (DHCP on, no gateway): every amphora has
 //     one port on it, and the controller reaches the amphora agent (TCP 9443) there
 //   - the security groups lb-mgmt-sec-grp (TCP 9443, ICMP in) for the amphorae and lb-health-mgr-sec-grp
@@ -61,8 +62,9 @@ import orphera.orchestrator.kolla.*
 // How it stays idempotent (as for Manila, Trove and Magnum):
 //   - Keystone's CA is compared as a certificate with the installed copy each run; the copies in the four
 //     Kolla directories are compared with it, and a service restarts when its copy changes.
-//   - The helper's `plumbing` is skipped while its read-only check `plumbing-ok` passes: the network, the
-//     groups, the flavor and the port exist, and ids.env says what Neutron has.
+//   - The network, the groups and the flavor are skipped while their helpers' checks pass. The helper's
+//     `plumbing` (the port and ids.env) is skipped while its read-only check `plumbing-ok` passes: the network,
+//     the groups, the flavor and the port exist, and ids.env says what Neutron has.
 //   - octavia.conf needs the ids of the amphora network and security group and the address of the health
 //     manager's port, which exist only after the plumbing. The template `octavia.conf.in` (a secret file) is
 //     declared; a command fills it in from ids.env, skipped while the result is the installed file. The
@@ -536,7 +538,6 @@ MGMT_SG = 'lb-mgmt-sec-grp'
 HM_SG = 'lb-health-mgr-sec-grp'
 HM_PORT = 'octavia-hm-' + NODE
 FLAVOR_ID = '@@FLAVORID@@'
-FLAVOR_NAME = 'orphera.amphora'
 IMAGE_TAG = 'amphora'
 
 
@@ -636,27 +637,6 @@ def first(cl, path, key, what):
     return items[0] if items else None
 
 
-def ensure_sg(cl, pid, name, rules):
-    sg = first(cl, '/security-groups?name=%s&project_id=%s' % (name, pid), 'security_groups', 'security group')
-    if sg is None:
-        s, p, _ = cl.n('POST', '/security-groups', {'security_group': {'name': name, 'description': 'Octavia, managed by Orphera', 'project_id': pid}})
-        if s != 201:
-            die('creating security group %s failed: HTTP %s %s' % (name, s, p))
-        sg = p['security_group']
-    have = set((r.get('direction'), r.get('protocol'), r.get('port_range_min')) for r in sg.get('security_group_rules', []))
-    for proto, port in rules:
-        if ('ingress', proto, port) in have:
-            continue
-        rule = {'security_group_id': sg['id'], 'direction': 'ingress', 'ethertype': 'IPv4', 'protocol': proto, 'remote_ip_prefix': '0.0.0.0/0'}
-        if port is not None:
-            rule['port_range_min'] = port
-            rule['port_range_max'] = port
-        s, p, _ = cl.n('POST', '/security-group-rules', {'security_group_rule': rule})
-        if s != 201:
-            die('creating a rule in %s failed: HTTP %s %s' % (name, s, p))
-    return sg['id']
-
-
 def ovs_host(cl):
     s, p, _ = cl.n('GET', '/agents?binary=neutron-openvswitch-agent')
     if s != 200:
@@ -672,29 +652,23 @@ def ovs_host(cl):
 def plumbing():
     cl = Clients()
     pid = service_project(cl)
+    # The network, its subnet, the two security groups and the flavor are made by the description
+    # (openstackNetwork, openstackSecurityGroup, openstackFlavor) before this runs; here they are looked up.
     net = first(cl, '/networks?name=%s&project_id=%s' % (MGMT_NET, pid), 'networks', 'network')
     if net is None:
-        s, p, _ = cl.n('POST', '/networks', {'network': {'name': MGMT_NET, 'project_id': pid}})
-        if s != 201:
-            die('creating %s failed: HTTP %s %s' % (MGMT_NET, s, p))
-        net = p['network']
+        die('network %s not found: the description makes it before the plumbing' % MGMT_NET)
     if net.get('provider:network_type') != 'vxlan':
         die('%s is %s, expected vxlan' % (MGMT_NET, net.get('provider:network_type')))
     sub = first(cl, '/subnets?network_id=' + net['id'], 'subnets', 'subnet')
     if sub is None:
-        s, p, _ = cl.n('POST', '/subnets', {'subnet': {'network_id': net['id'], 'ip_version': 4, 'cidr': MGMT_CIDR, 'name': MGMT_SUBNET, 'project_id': pid, 'enable_dhcp': True, 'gateway_ip': None}})
-        if s != 201:
-            die('creating %s failed: HTTP %s %s' % (MGMT_SUBNET, s, p))
-        sub = p['subnet']
-    mgmt_sg = ensure_sg(cl, pid, MGMT_SG, [('tcp', 9443), ('icmp', None)])
-    hm_sg = ensure_sg(cl, pid, HM_SG, [('udp', 5555), ('icmp', None)])
-    s, p, _ = cl.c('GET', '/flavors/' + FLAVOR_ID)
-    if s == 404:
-        s, p, _ = cl.c('POST', '/flavors', {'flavor': {'id': FLAVOR_ID, 'name': FLAVOR_NAME, 'ram': 1024, 'vcpus': 1, 'disk': 5, 'os-flavor-access:is_public': True}})
-        if s not in (200, 201):
-            die('creating flavor %s failed: HTTP %s %s' % (FLAVOR_ID, s, p))
-    elif s != 200:
-        die('flavor lookup failed: HTTP %s %s' % (s, p))
+        die('the subnet of %s is missing' % MGMT_NET)
+    mgmt_sg = sg_ok(cl, pid, MGMT_SG, [('tcp', 9443), ('icmp', None)])
+    hm_sg = sg_ok(cl, pid, HM_SG, [('udp', 5555), ('icmp', None)])
+    if mgmt_sg is None or hm_sg is None:
+        die('a security group or one of its rules is missing: the description makes them before the plumbing')
+    s, _, _ = cl.c('GET', '/flavors/' + FLAVOR_ID)
+    if s != 200:
+        die('flavor %s is missing (HTTP %s): the description makes it before the plumbing' % (FLAVOR_ID, s))
     host = ovs_host(cl)
     port = first(cl, '/ports?name=%s&network_id=%s' % (HM_PORT, net['id']), 'ports', 'port')
     if port is None:
@@ -871,27 +845,9 @@ def teardown():
     for srv in p.get('servers', []) if s == 200 else []:
         if srv.get('tenant_id') == pid or srv.get('name', '').startswith('amphora-'):
             cl.c('DELETE', '/servers/' + srv['id'])
-    time.sleep(5)
-    net = first(cl, '/networks?name=%s&project_id=%s' % (MGMT_NET, pid), 'networks', 'network')
-    if net is not None:
-        s, p, _ = cl.n('GET', '/ports?network_id=' + net['id'])
-        for port in p.get('ports', []) if s == 200 else []:
-            if port.get('device_owner') != 'network:dhcp':
-                cl.n('DELETE', '/ports/' + port['id'])
-        end = time.time() + 120
-        while time.time() < end:
-            s, _, _ = cl.n('DELETE', '/networks/' + net['id'])
-            if s in (204, 404):
-                break
-            time.sleep(5)
-    for name in (MGMT_SG, HM_SG):
-        sg = first(cl, '/security-groups?name=%s&project_id=%s' % (name, pid), 'security_groups', 'security group')
-        if sg is not None:
-            cl.n('DELETE', '/security-groups/' + sg['id'])
-    cl.c('DELETE', '/flavors/' + FLAVOR_ID)
     for i in amphora_images(cl):
         cl.g('DELETE', '/images/' + i['id'])
-    print('removed the Octavia network, security groups, flavor and image')
+    print('removed the Octavia amphorae and image')
 
 
 def sg_ok(cl, pid, name, rules):
@@ -1104,12 +1060,56 @@ if __name__ == '__main__':
     )
     val uploadedImage = ensuredImage.after(fetchedImage, ca, registered)
 
+    val (netHelper, netMade) = openstackNetwork(
+      "make the amphora network and its subnet",
+      "lb-mgmt-net",
+      ksUrl,
+      adminPassword,
+      caCert,
+      project = "service",
+      subnet = Some(OpenstackSubnet("lb-mgmt-subnet", "192.168.200.0/24"))
+    )
+    val (mgmtSgHelper, mgmtSgMade) = openstackSecurityGroup(
+      "make the amphora management security group",
+      "lb-mgmt-sec-grp",
+      "Octavia, managed by Orphera",
+      List(("tcp", Some(9443)), ("icmp", None)),
+      ksUrl,
+      adminPassword,
+      caCert,
+      project = "service"
+    )
+    val (hmSgHelper, hmSgMade) = openstackSecurityGroup(
+      "make the health manager security group",
+      "lb-health-mgr-sec-grp",
+      "Octavia, managed by Orphera",
+      List(("udp", Some(5555)), ("icmp", None)),
+      ksUrl,
+      adminPassword,
+      caCert,
+      project = "service"
+    )
+    val (flavorHelper, flavorMade) = openstackFlavor(
+      "make the amphora flavor",
+      amphoraFlavorId,
+      "orphera.amphora",
+      1024, // MB
+      1, // vCPU
+      5, // GB
+      ksUrl,
+      adminPassword,
+      caCert
+    )
+    val network = netMade.after(ca, registered)
+    val groups = List(mgmtSgMade, hmSgMade).map(_.after(ca, registered))
+    val flavor = flavorMade.after(ca, registered)
+
     val plumbing = command(
-      "make the amphora network, security groups, flavor and the health manager port",
+      "make the health manager port",
       s"$helperPath plumbing",
       unless = s"$helperPath plumbing-ok >/dev/null 2>&1",
       timeout = 180
-    ).after(helperFile, ca, stateDirectory, registered)
+    ).after((helperFile :: ca :: stateDirectory :: registered :: network :: flavor :: groups)*)
 
     val hmScriptFile = file(
       "/usr/local/sbin/orphera-octavia-hm-port",
@@ -1258,6 +1258,12 @@ if __name__ == '__main__':
       fetchedImage,
       imageHelper,
       uploadedImage,
+      netHelper,
+      mgmtSgHelper,
+      hmSgHelper,
+      flavorHelper,
+      network,
+      flavor,
       plumbing,
       hmScriptFile,
       hmUnitFile,
@@ -1266,5 +1272,5 @@ if __name__ == '__main__':
       certs,
       confTemplate,
       rendered
-    ) ++ svcs.flatMap(_.resources) ++ List(dbSync) ++ running ++
+    ) ++ groups ++ svcs.flatMap(_.resources) ++ List(dbSync) ++ running ++
       List(answering, providerListed, cycle)
