@@ -3343,6 +3343,101 @@ else:
     (0 until 16).foreach(i => b.put((seed + i).toByte))
     java.util.Base64.getEncoder.encodeToString(b.array())
 
+  // A stand-in for the helm command: it keeps the releases in $FAKE_HELM (a JSON file) and records every call.
+  private val fakeHelm: String =
+    """#!/usr/bin/python3
+import json, os, sys
+P = os.environ['FAKE_HELM']
+try:
+    S = json.load(open(P))
+except OSError:
+    S = {'repos': {}, 'releases': {}, 'calls': []}
+a = sys.argv[1:]
+S['calls'].append(' '.join(a))
+def save():
+    json.dump(S, open(P, 'w'))
+def opt(name):
+    return a[a.index(name) + 1] if name in a else None
+if a[:2] == ['repo', 'add']:
+    S['repos'][a[2]] = a[3]
+elif a[:2] == ['repo', 'update']:
+    pass
+elif a[:2] == ['show', 'chart']:
+    print('apiVersion: v2\nname: ' + a[2].split('/')[1] + '\nversion: 9.9.9')
+elif a[0] == 'status':
+    r = S['releases'].get(opt('-n') + '/' + a[1])
+    if r is None:
+        save(); sys.stderr.write('Error: release: not found\n'); sys.exit(1)
+    print(json.dumps({'name': a[1], 'info': {'status': r.get('status', 'deployed')}}))
+elif a[:2] == ['upgrade', '--install']:
+    vals = open(opt('-f')).read() if '-f' in a else None
+    S['releases'][opt('--namespace') + '/' + a[2]] = {'chart': a[3], 'version': opt('--version'), 'values': vals, 'sets': [a[i + 1] for i, x in enumerate(a) if x == '--set'], 'wait': '--wait' in a, 'timeout': opt('--timeout'), 'create_ns': '--create-namespace' in a, 'status': 'deployed'}
+elif a[0] == 'uninstall':
+    S['releases'].pop(opt('-n') + '/' + a[1], None)
+else:
+    sys.stderr.write('fake helm: unknown ' + ' '.join(a) + '\n'); sys.exit(2)
+save()
+"""
+
+  private def helmChecks(): Unit =
+    val dir = Files.createTempDirectory("helm")
+    val bin = dir.resolve("bin")
+    Files.createDirectory(bin)
+    val fake = bin.resolve("helm")
+    Files.writeString(fake, fakeHelm)
+    check("helmRelease: the fake helm is executable", fake.toFile.setExecutable(true))
+    val state = dir.resolve("state.json")
+    val shaDir = dir.resolve("sha")
+    def fileText(r: ApplyResource): String = r match
+      case f: ApplyResource.File =>
+        f.content match
+          case Some(ApplyResource.Content.Hidden(secret)) => secret.reveal
+          case other                                      => s"not hidden text: $other"
+      case other => s"not a file: $other"
+    def part(r: ApplyResource, pick: ApplyResource.Command => String): String = r match
+      case c: ApplyResource.Command => pick(c)
+      case other                    => s"not a command: $other"
+    var n = 0
+    def run(helper: ApplyResource, arg: String): (Int, String) =
+      n += 1
+      val script = dir.resolve(s"helper-$n.sh")
+      Files.writeString(script, fileText(helper))
+      runShell(s"PATH=$bin:$$PATH\nFAKE_HELM=$state\nexport FAKE_HELM\nsh $script $arg")
+    def dump: String = if Files.exists(state) then Files.readString(state) else "{}"
+    def make(version: Option[String] = None, values: Option[String] = Some("replicaCount: 2\nargs:\n  - |\n    keep\n"), set: List[(String, String)] = List("replicas" -> "2", "args={--kubelet-insecure-tls}")) =
+      helmRelease("helm install metrics-server", "metrics-server", "metrics-server/metrics-server", "https://example.org/charts/", "kube-system", version, values.map(Secret(_)), set, stateDir = shaDir.toString)
+    val (helper, ensure) = make()
+    check("helmRelease: the helper is named for the namespace and the release", helper.id == "file[/usr/local/sbin/orphera-helm-kube-system-metrics-server]", helper.id)
+    check("helmRelease: the command runs the helper and is guarded by its check", part(ensure, _.run).contains("orphera-helm-kube-system-metrics-server' ensure") && part(ensure, _.unless).contains("check"))
+    check("helmRelease: nothing installed fails the check and exists", run(helper, "check")._1 != 0 && run(helper, "exists")._1 != 0)
+    val made = run(helper, "ensure")
+    check("helmRelease: ensure installs the newest chart when no version is given", made._1 == 0 && made._2.contains("metrics-server/metrics-server 9.9.9 as metrics-server in kube-system") && dump.contains("\"version\": \"9.9.9\""), made.toString + dump)
+    check("helmRelease: it adds the repository and makes the namespace", dump.contains("\"metrics-server\": \"https://example.org/charts/\"") && dump.contains("\"create_ns\": true"), dump)
+    check("helmRelease: the values reach helm as a file, including a line that starts with a pipe", dump.contains("replicaCount: 2\\nargs:\\n  - |\\n    keep\\n"), dump)
+    check("helmRelease: the set pairs are passed as they are", dump.contains("\"replicas=2\", \"args={--kubelet-insecure-tls}\""), dump)
+    check("helmRelease: it waits with the timeout", dump.contains("\"wait\": true") && dump.contains("\"timeout\": \"10m\""), dump)
+    check("helmRelease: then the check passes and exists finds the release", run(helper, "check")._1 == 0 && run(helper, "exists")._1 == 0)
+    val (changed, _) = make(set = List("replicas" -> "3"))
+    check("helmRelease: a changed description fails the check", run(changed, "check")._1 != 0)
+    val (pinned, _) = make(version = Some("1.2.3"))
+    check("helmRelease: a pinned version is not the unpinned description", run(pinned, "check")._1 != 0)
+    val again = run(pinned, "ensure")
+    check("helmRelease: a pinned version is installed as given", again._1 == 0 && again._2.contains("metrics-server 1.2.3") && dump.contains("\"version\": \"1.2.3\"") && run(pinned, "check")._1 == 0, again.toString + dump)
+    val gone = absentHelmRelease("remove it", "metrics-server", "kube-system")
+    check("helmRelease: removal is guarded by the helper and the release being deployed", part(gone, _.onlyIf).contains("orphera-helm-kube-system-metrics-server' exists"), part(gone, _.onlyIf))
+    check("helmRelease: remove uninstalls it and forgets the hash", run(pinned, "remove")._1 == 0 && run(pinned, "exists")._1 != 0 && run(pinned, "check")._1 != 0)
+    val (plain, _) = make(values = None, set = Nil)
+    val plainMade = run(plain, "ensure")
+    check("helmRelease: with no values there is no -f and no --set", plainMade._1 == 0 && !dump.contains("\"values\": \"") && dump.contains("\"sets\": []"), dump)
+    val (noWait, _) = helmRelease("x", "r", "a/b", "http://h/", "ns", wait = false, stateDir = shaDir.toString)
+    val noWaitMade = run(noWait, "ensure")
+    check("helmRelease: without wait the release is installed with no --wait", noWaitMade._1 == 0 && dump.contains("\"ns/r\": {") && dump.contains("\"wait\": false"), dump)
+    check("helmRelease: a chart without a repository is refused", scala.util.Try(helmRelease("x", "r", "chart", "https://h", "ns")).isFailure)
+    check("helmRelease: a repository that is not a URL is refused", scala.util.Try(helmRelease("x", "r", "a/b", "h", "ns")).isFailure)
+    check("helmRelease: a namespace with a space is refused", scala.util.Try(helmRelease("x", "r", "a/b", "https://h", "a b")).isFailure)
+    check("helmRelease: values with the closing line are refused", scala.util.Try(helmRelease("x", "r", "a/b", "https://h", "ns", values = Some(Secret("a\nORPHERA_VALUES_END\nb")))).isFailure)
+    check("helmRelease: a version with a quote is refused", scala.util.Try(helmRelease("x", "r", "a/b", "https://h", "ns", version = Some("1'2"))).isFailure)
+
   private def cephChecks(): Unit =
     val dir = Files.createTempDirectory("ceph")
     val bin = dir.resolve("bin")
@@ -3894,6 +3989,7 @@ else:
     keystoneChecks()
     openstackChecks()
     cephChecks()
+    helmChecks()
     ovsChecks()
     kindChecks()
     yamlChecks()

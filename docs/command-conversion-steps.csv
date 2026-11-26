@@ -393,7 +393,7 @@ manifests/k8s_gateway.scala,213,RunCommand,make sure Cilium's Gateway controller
 manifests/k8s_gateway.scala,221,RunCommand,"wildcard certificate, Gateway and HTTP redirect",4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),not started
 manifests/k8s_kubeadm_config.scala,360,RunCommand,turn on the three scrape jobs,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),not started
 manifests/k8s_logging.scala,213,RunCommand,namespace and Helm values,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),not started
-manifests/k8s_metrics_server.scala,47,RunCommand,helm install metrics-server,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),not started
+manifests/k8s_metrics_server.scala,28,apply command,helm install metrics-server,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),done
 manifests/k8s_monitoring.scala,351,RunCommand,"namespace, CA ConfigMap, OAuth Secret, Helm values",4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),not started
 manifests/k8s_monitoring.scala,362,RunCommand,HTTPRoute for $grafanaHost,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),not started
 manifests/k8s_network_lockdown.scala,176,RunCommand,"default deny for external-dns, then test it",4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),not started

@@ -1987,6 +1987,161 @@ if __name__ == '__main__':
       timeout = timeout
     )
 
+  // The helper of `helmRelease`: a root-only shell script (it may hold secret values) with the whole description
+  // in it. check = the hash of the description last installed is the one given and Helm lists the release as
+  // deployed; ensure = (re)install with `helm upgrade --install`; exists/remove for the absent kind.
+  private val helmReleaseScript: String =
+    """#!/bin/sh
+set -e
+export KUBECONFIG=@@KUBECONFIG@@
+REL=@@REL@@
+NS=@@NS@@
+CHART=@@CHART@@
+REPO=@@REPO@@
+URL=@@URL@@
+VERSION=@@VERSION@@
+STATE=@@STATE@@
+WANT=@@WANT@@
+
+deployed() {
+  helm status "$REL" -n "$NS" -o json 2>/dev/null | grep -Eq '"status": ?"deployed"'
+}
+
+case "$1" in
+  check)
+    [ "$(cat "$STATE" 2>/dev/null)" = "$WANT" ] && deployed
+    ;;
+  exists)
+    deployed
+    ;;
+  ensure)
+    helm repo add "$REPO" "$URL" --force-update >/dev/null
+    helm repo update >/dev/null
+    V="$VERSION"
+    if [ -z "$V" ]; then V=$(helm show chart "$CHART" | awk '/^version:/{print $2}'); fi
+    if [ -z "$V" ]; then echo "cannot find a version of $CHART" >&2; exit 1; fi
+    echo "installing $CHART $V as $REL in $NS"
+@@VALUES@@
+    helm upgrade --install "$REL" "$CHART" --version "$V" --namespace "$NS" --create-namespace @@VALUESARG@@@@SETS@@@@WAIT@@
+    mkdir -p "$(dirname "$STATE")"
+    echo "$WANT" > "$STATE"
+    echo "$REL $V installed"
+    ;;
+  remove)
+    helm uninstall "$REL" -n "$NS" || true
+    rm -f "$STATE"
+    ;;
+  *)
+    echo "usage: ensure | check | exists | remove" >&2
+    exit 1
+    ;;
+esac
+"""
+
+  /** The helper `helmRelease` writes for the release `release` in `namespace`. */
+  def helmReleaseHelperPath(namespace: String, release: String): String = s"/usr/local/sbin/orphera-helm-$namespace-$release"
+
+  /** The state file of a release made by `helmRelease` (the hash of the description last installed). */
+  def helmReleaseStatePath(namespace: String, release: String, stateDir: String = "/var/lib/orphera/helm"): String =
+    s"$stateDir/$namespace-$release.sha"
+
+  private def helmName(what: String, text: String): Unit =
+    require(
+      text.nonEmpty && text.forall(c => c.isLetterOrDigit || "_-.".contains(c)),
+      s"$what must be letters, digits and _ - . , not '$text'"
+    )
+
+  /** A Helm release as a description: `chart` (`repo/name`) from the repository at `repoUrl`, installed as
+    * `release` in `namespace` (made if missing) with the YAML `values` and the `set` pairs, on the cluster the
+    * `kubeconfig` names. The result is the helper (a root-only script that holds the values, which may be secret)
+    * and the command that runs it. The command is `unchanged` while the hash of the chart, version, values and
+    * set pairs last installed (kept in `helmReleaseStatePath`) is the description given and Helm lists the
+    * release as deployed; otherwise it runs `helm upgrade --install --wait`. With a `version` that chart version
+    * is installed; without one the newest is installed the first time and again whenever the description
+    * changes, and a run that changes nothing never upgrades. A change made to the release outside this
+    * description is not noticed unless the release stops being deployed.
+    */
+  def helmRelease(
+      label: String,
+      release: String,
+      chart: String,
+      repoUrl: String,
+      namespace: String,
+      version: Option[String] = None,
+      values: Option[Secret] = None,
+      set: List[(String, String)] = Nil,
+      kubeconfig: String = "/etc/kubernetes/admin.conf",
+      wait: Boolean = true,
+      minutes: Int = 10,
+      stateDir: String = "/var/lib/orphera/helm"
+  ): (ApplyResource, ApplyResource) =
+    helmName("a release name", release)
+    helmName("a namespace", namespace)
+    val parts = chart.split("/", -1)
+    require(parts.length == 2, s"the chart must be repo/name, not '$chart'")
+    parts.foreach(helmName("a chart or repository name", _))
+    require(repoUrl.startsWith("https://") || repoUrl.startsWith("http://"), s"not a repository URL: '$repoUrl'")
+    version.foreach(v => require(v.nonEmpty && v.forall(c => c.isLetterOrDigit || "._-+".contains(c)), s"not a chart version: '$v'"))
+    require(kubeconfig.startsWith("/"), s"the kubeconfig must be an absolute path: '$kubeconfig'")
+    require(minutes > 0, "minutes must be positive")
+    set.foreach { (k, v) =>
+      require(k.nonEmpty && k.forall(c => c >= ' ' && c <= '~'), s"not a value name: '$k'")
+      require(v.forall(c => c >= ' ' && c <= '~'), s"a set value must be printable ASCII: '$v'")
+    }
+    val text = values.map(_.reveal)
+    text.foreach(t => require(!t.linesIterator.exists(_ == "ORPHERA_VALUES_END"), "the values must not contain a line ORPHERA_VALUES_END"))
+    val want = cephSpecSha(
+      List(chart, version.getOrElse(""), text.getOrElse(""), set.map((k, v) => s"$k=$v").mkString("\n")).mkString("\u0000")
+    )
+    // Built without stripMargin: a line of the values may itself start with `|` (a YAML block scalar).
+    val valuesBlock = text match
+      case Some(t) =>
+        List(
+          "    VALS=$(mktemp)",
+          "    trap 'rm -f \"$VALS\"' EXIT",
+          "    cat > \"$VALS\" <<'ORPHERA_VALUES_END'",
+          t,
+          "ORPHERA_VALUES_END"
+        ).mkString("\n")
+      case None => ""
+    val script = helmReleaseScript
+      .replace("@@KUBECONFIG@@", Apply.quote(kubeconfig))
+      .replace("@@REL@@", Apply.quote(release))
+      .replace("@@NS@@", Apply.quote(namespace))
+      .replace("@@CHART@@", Apply.quote(chart))
+      .replace("@@REPO@@", Apply.quote(parts(0)))
+      .replace("@@URL@@", Apply.quote(repoUrl))
+      .replace("@@VERSION@@", Apply.quote(version.getOrElse("")))
+      .replace("@@STATE@@", Apply.quote(helmReleaseStatePath(namespace, release, stateDir)))
+      .replace("@@WANT@@", Apply.quote(want))
+      .replace("@@VALUES@@", valuesBlock)
+      .replace("@@VALUESARG@@", if text.isDefined then "-f \"$VALS\" " else "")
+      .replace("@@SETS@@", set.map((k, v) => s"--set ${Apply.quote(s"$k=$v")} ").mkString)
+      .replace("@@WAIT@@", if wait then s"--wait --timeout ${minutes}m" else "")
+    val path = helmReleaseHelperPath(namespace, release)
+    val helper = secretFile(path, Secret(script), mode = "0700", owner = "root", group = "root")
+    val ensure = command(
+      label,
+      s"${Apply.quote(path)} ensure",
+      unless = s"${Apply.quote(path)} check >/dev/null 2>&1",
+      timeout = minutes * 60 + 120
+    ).after(helper)
+    (helper, ensure)
+
+  /** What `helmRelease` made, removed again. It does nothing without the helper or while the release is not
+    * deployed.
+    */
+  def absentHelmRelease(label: String, release: String, namespace: String, timeout: Int = 300): ApplyResource =
+    helmName("a release name", release)
+    helmName("a namespace", namespace)
+    val path = Apply.quote(helmReleaseHelperPath(namespace, release))
+    command(
+      label,
+      s"""$path remove || echo "helm uninstall failed (continuing)"""",
+      onlyIf = s"[ -x $path ] && $path exists >/dev/null 2>&1",
+      timeout = timeout
+    )
+
   private def cephName(what: String, text: String): Unit =
     require(
       text.nonEmpty && text.forall(c => c.isLetterOrDigit || "_-.".contains(c)),
