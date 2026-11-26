@@ -1365,6 +1365,63 @@ if __name__ == '__main__':
         die('usage: ensure | check | exists | remove')
 """
 
+  private val openstackKeypairPython: String = openstackClientPython +
+    """
+
+def exists_now(cl):
+    s, p, _ = cl.c('GET', '/os-keypairs/' + SPEC['name'])
+    if s == 200:
+        return True
+    if s == 404:
+        return False
+    die('key pair lookup failed: HTTP %s %s' % (s, p))
+
+
+def ensure():
+    cl = Clients()
+    if exists_now(cl):
+        print('key pair %s exists' % SPEC['name'])
+        return
+    # No public key is given, so Nova makes a pair and keeps the public half; the private half is not kept.
+    s, p, _ = cl.c('POST', '/os-keypairs', {'keypair': {'name': SPEC['name']}})
+    if s not in (200, 201):
+        die('creating key pair %s failed: HTTP %s %s' % (SPEC['name'], s, p))
+    print('key pair %s made' % SPEC['name'])
+
+
+def check():
+    if not exists_now(Clients()):
+        die('key pair %s does not exist' % SPEC['name'])
+    print('key pair %s exists' % SPEC['name'])
+
+
+def exists():
+    if not exists_now(Clients()):
+        die('no key pair %s' % SPEC['name'])
+
+
+def remove():
+    s, _, _ = Clients().c('DELETE', '/os-keypairs/' + SPEC['name'])
+    print('key pair %s: HTTP %s' % (SPEC['name'], s))
+
+
+if __name__ == '__main__':
+    cmd = sys.argv[1] if len(sys.argv) > 1 else ''
+    if cmd == 'ensure':
+        ensure()
+    elif cmd == 'check':
+        check()
+    elif cmd == 'exists':
+        exists()
+    elif cmd == 'remove':
+        remove()
+    else:
+        die('usage: ensure | check | exists | remove')
+"""
+
+  /** The path of the helper `openstackKeypair` writes for the key pair `name`. */
+  def openstackKeypairHelperPath(name: String): String = s"/usr/local/sbin/orphera-keypair-$name"
+
   /** The path of the helper `openstackImage` writes for the image `name`. */
   def openstackImageHelperPath(name: String): String = s"/usr/local/sbin/orphera-image-$name"
 
@@ -1491,6 +1548,43 @@ if __name__ == '__main__':
   def absentOpenstackFlavor(label: String, id: String, timeout: Int = 120): ApplyResource =
     keystoneName("flavor id", id)
     val path = Apply.quote(openstackFlavorHelperPath(id))
+    command(
+      label,
+      s"""$path remove || echo "Nova cleanup failed (continuing)"""",
+      onlyIf = s"[ -x $path ] && $path exists >/dev/null 2>&1",
+      timeout = timeout
+    )
+
+  /** A Nova key pair of the admin user as a description: the pair `name`, made by Nova with no public key given
+    * (the private half is not kept; clusters only need the name to exist). The result is the helper and the
+    * command that runs it, which is `unchanged` while the key pair exists.
+    */
+  def openstackKeypair(
+      label: String,
+      name: String,
+      keystone: String,
+      adminPassword: Secret,
+      ca: String,
+      timeout: Int = 120
+  ): (ApplyResource, ApplyResource) =
+    keystoneName("key pair name", name)
+    val spec = "{" + "'name': " + pyString("name", name) + "}"
+    val path = openstackKeypairHelperPath(name)
+    val helper = secretFile(path, Secret(openstackScript(openstackKeypairPython, keystone, adminPassword, ca, spec)), mode = "0700", owner = "root", group = "root")
+    val ensure = command(
+      label,
+      s"${Apply.quote(path)} ensure",
+      unless = s"${Apply.quote(path)} check >/dev/null 2>&1",
+      timeout = timeout
+    ).after(helper)
+    (helper, ensure)
+
+  /** What `openstackKeypair` made, removed again. It does nothing without the helper or while the key pair is not
+    * there.
+    */
+  def absentOpenstackKeypair(label: String, name: String, timeout: Int = 120): ApplyResource =
+    keystoneName("key pair name", name)
+    val path = Apply.quote(openstackKeypairHelperPath(name))
     command(
       label,
       s"""$path remove || echo "Nova cleanup failed (continuing)"""",

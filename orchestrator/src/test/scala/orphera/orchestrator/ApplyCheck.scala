@@ -2933,7 +2933,7 @@ post('projects', {'project': {'name': 'stack-project', 'domain_id': '$domainId'}
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import urlparse, parse_qs
 PORT = int(sys.argv[1])
-DB = {'images': {}, 'flavors': {}, 'uploads': {}}
+DB = {'images': {}, 'flavors': {}, 'uploads': {}, 'keypairs': {}}
 class H(BaseHTTPRequestHandler):
     def log_message(self, *a): pass
     def send(self, code, obj=None, headers=None):
@@ -2977,6 +2977,15 @@ class H(BaseHTTPRequestHandler):
             if method == 'DELETE':
                 if f: del DB['flavors'][m.group(1)]; return self.send(202)
                 return self.send(404, {})
+        m = re.match(r'/v2\.1/os-keypairs/([^/]+)$', path)
+        if m:
+            k = DB['keypairs'].get(m.group(1))
+            if method == 'GET': return self.send(200, {'keypair': k}) if k else self.send(404, {})
+            if method == 'DELETE':
+                if k: del DB['keypairs'][m.group(1)]; return self.send(202)
+                return self.send(404, {})
+        if path == '/v2.1/os-keypairs' and method == 'POST':
+            k = json.loads(raw)['keypair']; DB['keypairs'][k['name']] = k; return self.send(200, {'keypair': dict(k, private_key='secret')})
         if path == '/v2.1/flavors' and method == 'POST':
             f = json.loads(raw)['flavor']; DB['flavors'][f['id']] = f; return self.send(200, {'flavor': f})
         self.send(404, {})
@@ -3087,6 +3096,19 @@ HTTPServer(('127.0.0.1', PORT), H).serve_forever()
       check("openstack: flavor removal is guarded by the helper and the flavor existing", part(flavorGone, _.onlyIf).contains("orphera-flavor-guest-flavor' exists"), part(flavorGone, _.onlyIf))
       check("openstack: remove deletes the flavor and nothing is left", helperRun(biggerHelper, biggerText, "remove")._1 == 0 && helperRun(biggerHelper, biggerText, "exists")._1 != 0)
       check("openstack: a flavor with no memory is refused", scala.util.Try(openstackFlavor("x", "a", "a", 0, 1, 1, url, Secret("x"), "/ca")).isFailure)
+      val (keypairHelper, keypairEnsure) = openstackKeypair("make the key pair", "guest-key", url, Secret("adminpw"), "/no/ca.crt")
+      check("openstack: the key pair helper is named for the pair", keypairHelper.id == "file[/usr/local/sbin/orphera-keypair-guest-key]", keypairHelper.id)
+      check("openstack: the key pair command runs the helper and is guarded by its check", part(keypairEnsure, _.run).contains("orphera-keypair-guest-key' ensure") && part(keypairEnsure, _.unless).contains("check"))
+      val keypairText = fileText(keypairHelper)
+      def keypairRun(arg: String): (Int, String) = helperRun(keypairHelper, keypairText, arg)
+      check("openstack: no key pair fails the check and exists", keypairRun("check")._1 != 0 && keypairRun("exists")._1 != 0)
+      val pairMade = keypairRun("ensure")
+      check("openstack: ensure makes the key pair and prints no private key", pairMade._1 == 0 && pairMade._2.contains("key pair guest-key made") && !pairMade._2.contains("secret"), pairMade.toString)
+      check("openstack: then the check passes and ensure again changes nothing", keypairRun("check")._1 == 0 && keypairRun("ensure")._2.contains("exists"))
+      val pairGone = absentOpenstackKeypair("remove the key pair", "guest-key")
+      check("openstack: key pair removal is guarded by the helper and the pair existing", part(pairGone, _.onlyIf).contains("orphera-keypair-guest-key' exists"), part(pairGone, _.onlyIf))
+      check("openstack: remove deletes the key pair", keypairRun("remove")._1 == 0 && keypairRun("exists")._1 != 0)
+      check("openstack: a key pair name with a space is refused", scala.util.Try(openstackKeypair("x", "a b", url, Secret("x"), "/ca")).isFailure)
     finally proc.destroy()
 
   // A stand-in `cephadm shell` for the Ceph helpers: pools, cephx users and settings in a JSON file, and `dump` to

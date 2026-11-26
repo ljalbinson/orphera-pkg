@@ -80,8 +80,9 @@ import orphera.orchestrator.kolla.*
 //   - `magnum-db-manage upgrade` is skipped while its stamp matches and the `cluster_template` table exists (a
 //     query as the magnum user, through the VIP).
 //   - Magnum is registered in Keystone before the units start, skipped while its check passes.
-//   - The flavor and key pair, the node image and the cluster template each run only while their read-only
-//     checks (`resources-ok`, `image-present`, `template-ok`) fail.
+//   - The flavor and key pair are typed (openstackFlavor, openstackKeypair, each with a small helper of its own);
+//     the node image and the cluster template run only while their read-only checks (`image-present`,
+//     `template-ok`) fail.
 //   - The test cluster (a control-plane node and a worker are made, the API answers /version, the cluster is
 //     deleted: 15 to 40 minutes) is made again only when its stamp changes (a hash of magnum.conf, the driver
 //     stamp, the DNS server and the Kubernetes image choice), so a repeated run does not build a cluster.
@@ -265,7 +266,6 @@ KS = 'https://@@KS@@:5000/v3'
 MAGNUM = '@@MAGNUM@@'
 ADMIN_PW = '@@ADMINPW@@'
 CTX = ssl.create_default_context(cafile='@@CAFILE@@')
-FLAVOR_ID = '@@FLAVORID@@'
 FLAVOR_NAME = 'orphera.k8s'
 TEMPLATE = 'orphera-k8s'
 KEYPAIR = 'orphera-magnum'
@@ -356,23 +356,6 @@ def mservices():
     print('mservices: %d' % len(svcs))
     if not any(x.get('binary') == 'magnum-conductor' and x.get('state') == 'up' for x in svcs):
         die('magnum-conductor is not up')
-
-
-def resources():
-    cl = Clients()
-    s, p, _ = cl.c('GET', '/flavors/' + FLAVOR_ID)
-    if s == 404:
-        s, p, _ = cl.c('POST', '/flavors', {'flavor': {'id': FLAVOR_ID, 'name': FLAVOR_NAME, 'ram': 3072, 'vcpus': 2, 'disk': 30, 'os-flavor-access:is_public': True}})
-        if s not in (200, 201):
-            die('creating flavor %s failed: HTTP %s %s' % (FLAVOR_ID, s, p))
-    elif s != 200:
-        die('flavor lookup failed: HTTP %s %s' % (s, p))
-    s, p, _ = cl.c('GET', '/os-keypairs/' + KEYPAIR)
-    if s == 404:
-        s, p, _ = cl.c('POST', '/os-keypairs', {'keypair': {'name': KEYPAIR}})
-        if s not in (200, 201):
-            die('creating key pair failed: HTTP %s %s' % (s, p))
-    print('resources ready: flavor %s, key pair %s' % (FLAVOR_ID, KEYPAIR))
 
 
 def k8s_images(cl):
@@ -552,23 +535,9 @@ def teardown():
     for t in p.get('clustertemplates', []) if s == 200 else []:
         if t.get('name') == TEMPLATE:
             cl.m('DELETE', '/clustertemplates/' + t['uuid'])
-    cl.c('DELETE', '/flavors/' + FLAVOR_ID)
-    cl.c('DELETE', '/os-keypairs/' + KEYPAIR)
     for i in k8s_images(cl):
         cl.g('DELETE', '/images/' + i['id'])
-    print('removed the Magnum clusters, template, flavor, key pair and image')
-
-
-def resources_ok():
-    # Exit 0 when the flavor and the key pair that resources() makes exist. Makes no change.
-    cl = Clients()
-    s, _, _ = cl.c('GET', '/flavors/' + FLAVOR_ID)
-    if s != 200:
-        die('flavor %s is missing (HTTP %s)' % (FLAVOR_ID, s))
-    s, _, _ = cl.c('GET', '/os-keypairs/' + KEYPAIR)
-    if s != 200:
-        die('key pair %s is missing (HTTP %s)' % (KEYPAIR, s))
-    print('flavor %s and key pair %s exist' % (FLAVOR_ID, KEYPAIR))
+    print('removed the Magnum clusters, template and image')
 
 
 def template_ok():
@@ -594,10 +563,6 @@ if __name__ == '__main__':
         catalog()
     elif cmd == 'mservices':
         mservices()
-    elif cmd == 'resources':
-        resources()
-    elif cmd == 'resources-ok':
-        resources_ok()
     elif cmd == 'image-present':
         image_present()
     elif cmd == 'image-upload' and len(sys.argv) > 4:
@@ -613,7 +578,7 @@ if __name__ == '__main__':
     elif cmd == 'teardown':
         teardown()
     else:
-        die('usage: orphera-magnum-api catalog | mservices | resources | resources-ok | image-present | image-upload FILE KUBE_VERSION OS_VERSION | template | template-ok | cluster-cycle | delete-clusters | teardown')
+        die('usage: orphera-magnum-api catalog | mservices | image-present | image-upload FILE KUBE_VERSION OS_VERSION | template | template-ok | cluster-cycle | delete-clusters | teardown')
 """
 
   private val helper =
@@ -622,7 +587,6 @@ if __name__ == '__main__':
       .replace("@@MAGNUM@@", s"http://$fqdn:$apiPort")
       .replace("@@ADMINPW@@", adminPassword.reveal)
       .replace("@@CAFILE@@", caCert)
-      .replace("@@FLAVORID@@", k8sFlavorId)
       .replace("@@DNS@@", dnsServer)
 
   // ---- magnum.conf ---------------------------------------------------------
@@ -1051,18 +1015,32 @@ if __name__ == '__main__':
       unless = conductorUp,
       timeout = 240
     ).after((answering :: running)*)
-    val flavor = command(
-      "make the Kubernetes node flavor and key pair",
-      s"$helperPath resources",
-      unless = s"$helperPath resources-ok >/dev/null 2>&1",
-      timeout = 120
-    ).after(reporting)
+    val (flavorHelper, flavorMade) = openstackFlavor(
+      "make the Kubernetes node flavor",
+      k8sFlavorId,
+      "orphera.k8s",
+      3072, // MB
+      2, // vCPUs
+      30, // GB
+      ksUrl,
+      adminPassword,
+      caCert
+    )
+    val (keypairHelper, keypairMade) = openstackKeypair(
+      "make the Kubernetes node key pair",
+      "orphera-magnum",
+      ksUrl,
+      adminPassword,
+      caCert
+    )
+    val flavor = flavorMade.after(reporting)
+    val keypair = keypairMade.after(reporting)
     val fetchedImage = command(
       "download the Kubernetes node image",
       fetchImageScript,
       unless = imageFetched,
       timeout = 3600
-    ).after(flavor, stateDirectory)
+    ).after(flavor, keypair, stateDirectory)
     val nodeImage = command(
       "upload the Kubernetes node image to Glance",
       uploadImageScript,
@@ -1105,7 +1083,10 @@ if __name__ == '__main__':
       running ++ List(
         answering,
         reporting,
+        flavorHelper,
         flavor,
+        keypairHelper,
+        keypair,
         fetchedImage,
         nodeImage,
         clusterTemplate,
