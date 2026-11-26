@@ -13,8 +13,8 @@
 #  - an unauthenticated request to a protected path is refused (401),
 #  - the Open vSwitch, DHCP and L3 agents are alive according to the API (RabbitMQ and
 #    the database both work),
-#  - a flat provider network and a subnet can be created, read back and deleted
-#    (database round trip and the ML2 flat type driver),
+#  - the flat provider network `provider` and its subnet were made by the description (skipped: a second
+#    test network, which cannot exist beside it),
 #  - a VXLAN tenant network, a router with its gateway on the external network and a
 #    floating IP can be made; the router and its ports go ACTIVE (the L3 agent works);
 #    everything is removed again,
@@ -98,11 +98,14 @@ assert_contains "the API lists neutron-l3-agent" "agent neutron-l3-agent" "$OUT"
 OUT=$(run_on "sudo $HELPER agents-up")
 assert_contains "the three agents are alive (RabbitMQ and database work)" "neutron-l3-agent are alive" "$OUT"
 
+OUT=$(run_on "sudo $HELPER provider-net-ok")
+assert_contains "the description made the flat provider network, shared and external, with its subnet" "is in place" "$OUT"
+
 OUT=$(run_on "sudo $HELPER net-create")
 NID=$(printf '%s\n' "$OUT" | grep -Eo '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | tail -1)
 if [ -z "$NID" ] && printf '%s' "$OUT" | grep -qF 'already exists (only one is allowed)'; then
-  # The flat network of the demo environment (utils/openstack-minimal-env.sh) is on the physical network.
-  log "SKIP: a flat network already exists on the provider physical network, so a second cannot be made"
+  # The description made the persistent flat network `provider`, which already shows the flat driver and the database work.
+  log "SKIP: the flat network named provider already exists on the physical network, so a second cannot be made"
 elif [ -z "$NID" ]; then
   log "FAIL: network create returned no id"; printf '%s\n' "$OUT" | sed 's/^/    /'; FAIL=$((FAIL + 1))
 else
