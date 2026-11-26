@@ -88,8 +88,8 @@ assert_contains "the catalog lists service type load-balancer" "load-balancer" "
 OUT=$(run_on "sudo $HELPER providers")
 assert_contains "the amphora provider is listed" "providers: amphora" "$OUT"
 
-OUT=$(run_on "sudo $HELPER image-present")
-assert_contains "Glance has an active amphora image" "is active in Glance" "$OUT"
+OUT=$(run_on "sudo /usr/local/sbin/orphera-image-amphora-x64-haproxy-test check")
+assert_contains "Glance has an active amphora image" "is active" "$OUT"
 
 OUT=$(RUN_TIMEOUT=1800 run_on "sudo $HELPER lb-cycle")
 assert_contains "a load balancer answers an HTTP request through its amphora and is deleted" "lb cycle ok" "$OUT"

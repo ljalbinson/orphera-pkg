@@ -73,7 +73,7 @@ import orphera.orchestrator.kolla.*
 //     exists (a query as the octavia user, through the VIP).
 //   - Octavia is registered in Keystone before the units start, skipped while its check passes.
 //   - The amphora image is downloaded and uploaded in two steps (each prints a line every 20 seconds while it
-//     works), skipped while Glance has an active image with the tag `amphora`.
+//     works), skipped while Glance has an active image of that name with the tag `amphora` (openstackImage).
 //   - The load balancer test (an amphora is booted: several minutes) is made again only when its stamp changes
 //     (the configuration, the plug-in script, the image address, the server CA), so a repeated run does not
 //     boot one. manifests/test_octavia.sh makes one more by hand. Delete /var/lib/orphera/octavia/cycle.stamp to
@@ -512,11 +512,10 @@ object octavia_single_node extends OrpheraApply:
     """heartbeat() { "$@" & P=$!; while kill -0 $P 2>/dev/null; do sleep 20; echo "still working ($(date +%H:%M:%S))"; done; wait $P; }"""
 
   private val amphoraFile = s"$stateDir/amphora.qcow2"
-  private val imagePresent = s"$helperPath image-present >/dev/null 2>&1"
-  private val uploadImageScript =
-    s"""set -e
-       |$heartbeat
-       |heartbeat $helperPath image-upload $amphoraFile""".stripMargin
+  private val amphoraImageName = "amphora-x64-haproxy-test"
+  // The check of the helper that openstackImage writes: true while an active image of that name has the tag.
+  private val imagePresent =
+    s"${openstackImageHelperPath(amphoraImageName)} check >/dev/null 2>&1"
 
   // ---- the helper ----------------------------------------------------------
 
@@ -538,7 +537,6 @@ HM_SG = 'lb-health-mgr-sec-grp'
 HM_PORT = 'octavia-hm-' + NODE
 FLAVOR_ID = '@@FLAVORID@@'
 FLAVOR_NAME = 'orphera.amphora'
-IMAGE_NAME = 'amphora-x64-haproxy-test'
 IMAGE_TAG = 'amphora'
 
 
@@ -742,49 +740,6 @@ def amphora_images(cl):
     if s != 200:
         die('image list failed: HTTP %s %s' % (s, p))
     return p.get('images', [])
-
-
-def image_present():
-    cl = Clients()
-    ok = [i for i in amphora_images(cl) if i.get('status') == 'active']
-    if ok:
-        print('amphora image %s (%s) is active in Glance' % (ok[0].get('name'), ok[0]['id']))
-        return
-    sys.exit(1)
-
-
-def image_upload(path):
-    cl = Clients()
-    for i in amphora_images(cl):
-        if i.get('status') != 'active':
-            cl.g('DELETE', '/images/' + i['id'])
-    body = {'name': IMAGE_NAME, 'disk_format': 'qcow2', 'container_format': 'bare', 'visibility': 'public', 'tags': [IMAGE_TAG]}
-    s, p, _ = cl.g('POST', '/images', body)
-    if s != 201:
-        die('image create failed: HTTP %s %s' % (s, p))
-    iid = p['id']
-    size = os.path.getsize(path)
-    with open(path, 'rb') as fh:
-        req = urllib.request.Request(cl.glance + '/images/%s/file' % iid, data=fh, method='PUT')
-        req.add_header('Content-Type', 'application/octet-stream')
-        req.add_header('Content-Length', str(size))
-        req.add_header('X-Auth-Token', cl.token)
-        try:
-            urllib.request.urlopen(req, timeout=1800).read()
-        except urllib.error.HTTPError as e:
-            die('image upload failed: HTTP %s %s' % (e.code, e.read().decode()[:300]))
-    end = time.time() + 300
-    status = None
-    while time.time() < end:
-        s, p, _ = cl.g('GET', '/images/' + iid)
-        status = p.get('status')
-        if status == 'active':
-            print('amphora image uploaded: %s (%s), %d bytes' % (IMAGE_NAME, iid, size))
-            return
-        if status in ('killed', 'deleted'):
-            break
-        time.sleep(3)
-    die('image %s did not become active (status %s)' % (iid, status))
 
 
 def providers():
@@ -1002,10 +957,6 @@ if __name__ == '__main__':
     cmd = sys.argv[1] if len(sys.argv) > 1 else ''
     if cmd == 'catalog':
         catalog()
-    elif cmd == 'image-present':
-        image_present()
-    elif cmd == 'image-upload' and len(sys.argv) > 2:
-        image_upload(sys.argv[2])
     elif cmd == 'plumbing':
         plumbing()
     elif cmd == 'plumbing-ok':
@@ -1021,7 +972,7 @@ if __name__ == '__main__':
     elif cmd == 'teardown':
         teardown()
     else:
-        die('usage: orphera-octavia-api catalog | image-present | image-upload FILE | plumbing | plumbing-ok | wait-hm | hm-active | providers | lb-cycle | teardown')
+        die('usage: orphera-octavia-api catalog | plumbing | plumbing-ok | wait-hm | hm-active | providers | lb-cycle | teardown')
 """
 
   private val helper =
@@ -1142,12 +1093,16 @@ if __name__ == '__main__':
       skipIf = imagePresent,
       timeout = 1800
     ).after(stateDirectory, tools(2))
-    val uploadedImage = command(
+    val (imageHelper, ensuredImage) = openstackImage(
       "upload the amphora image to Glance",
-      uploadImageScript,
-      unless = imagePresent,
-      timeout = 1800
-    ).after(fetchedImage, helperFile, ca, registered)
+      amphoraImageName,
+      amphoraFile,
+      ksUrl,
+      adminPassword,
+      caCert,
+      tags = List("amphora")
+    )
+    val uploadedImage = ensuredImage.after(fetchedImage, ca, registered)
 
     val plumbing = command(
       "make the amphora network, security groups, flavor and the health manager port",
@@ -1301,6 +1256,7 @@ if __name__ == '__main__':
       keystoneHelper,
       registered,
       fetchedImage,
+      imageHelper,
       uploadedImage,
       plumbing,
       hmScriptFile,

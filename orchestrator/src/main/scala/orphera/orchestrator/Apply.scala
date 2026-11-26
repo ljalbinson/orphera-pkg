@@ -1141,6 +1141,363 @@ if __name__ == '__main__':
       timeout = timeout
     )
 
+  // The start of the helpers of `openstackImage` and `openstackFlavor`: a token for the admin user and the public
+  // endpoints of Glance and Nova from the catalogue.
+  private val openstackClientPython: String =
+    """#!/usr/bin/python3
+import json, os, ssl, sys, time, urllib.request, urllib.error
+
+KS = @@KS@@
+ADMIN_PW = @@ADMINPW@@
+SPEC = @@SPEC@@
+CTX = ssl.create_default_context(cafile=@@CA@@) if KS.startswith('https') else None
+
+
+def call(method, url, body=None, token=None):
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(url, data=data, method=method)
+    req.add_header('Content-Type', 'application/json')
+    if token:
+        req.add_header('X-Auth-Token', token)
+    try:
+        r = urllib.request.urlopen(req, context=CTX if url.startswith('https') else None, timeout=60)
+        status, text, headers = r.status, r.read().decode(), r.headers
+    except urllib.error.HTTPError as e:
+        status, text, headers = e.code, e.read().decode(), e.headers
+    try:
+        parsed = json.loads(text) if text else {}
+    except ValueError:
+        parsed = {}
+    return status, parsed, headers
+
+
+def die(msg):
+    sys.stderr.write(msg + '\n')
+    sys.exit(1)
+
+
+def endpoint(parsed, svc_type):
+    for c in parsed['token']['catalog']:
+        if c['type'] == svc_type:
+            for e in c['endpoints']:
+                if e['interface'] == 'public':
+                    return e['url'].rstrip('/')
+    die('no %s service in the catalog' % svc_type)
+
+
+def versioned(url, suffix):
+    return url if url.endswith(suffix) else url + suffix
+
+
+class Clients(object):
+    def __init__(self):
+        body = {'auth': {'identity': {'methods': ['password'], 'password': {'user': {'name': 'admin', 'domain': {'name': 'Default'}, 'password': ADMIN_PW}}}, 'scope': {'project': {'name': 'admin', 'domain': {'name': 'Default'}}}}}
+        status, parsed, headers = call('POST', KS + '/auth/tokens', body)
+        if status != 201:
+            die('token request for admin failed: HTTP %s %s' % (status, parsed))
+        self.token = headers['X-Subject-Token']
+        self.nova = versioned(endpoint(parsed, 'compute'), '/v2.1')
+        self.glance = versioned(endpoint(parsed, 'image'), '/v2')
+
+    def c(self, method, path, body=None):
+        return call(method, self.nova + path, body, self.token)
+
+    def g(self, method, path, body=None):
+        return call(method, self.glance + path, body, self.token)
+"""
+
+  private val openstackImagePython: String = openstackClientPython +
+    """
+
+def images(cl):
+    # The images of this name that carry every wanted tag.
+    s, p, _ = cl.g('GET', '/images?name=' + SPEC['name'])
+    if s != 200:
+        die('image list failed: HTTP %s %s' % (s, p))
+    return [i for i in p.get('images', []) if i.get('name') == SPEC['name'] and all(t in i.get('tags', []) for t in SPEC['tags'])]
+
+
+def good(i):
+    if i.get('status') != 'active' or i.get('visibility') != SPEC['visibility'] or i.get('disk_format') != SPEC['disk_format']:
+        return False
+    return all(str(i.get(k)) == v for k, v in SPEC['properties'].items())
+
+
+def ensure(replace):
+    cl = Clients()
+    existing = images(cl)
+    ok = [i for i in existing if good(i)]
+    if ok and not replace:
+        print('image %s (%s) is already active in Glance' % (SPEC['name'], ok[0]['id']))
+        return
+    path = SPEC['file']
+    if not os.path.isfile(path):
+        die('the image file %s does not exist' % path)
+    for i in existing:
+        cl.g('DELETE', '/images/' + i['id'])
+    body = {'name': SPEC['name'], 'disk_format': SPEC['disk_format'], 'container_format': 'bare', 'visibility': SPEC['visibility'], 'tags': SPEC['tags']}
+    body.update(SPEC['properties'])
+    s, p, _ = cl.g('POST', '/images', body)
+    if s != 201:
+        die('image create failed: HTTP %s %s' % (s, p))
+    iid = p['id']
+    size = os.path.getsize(path)
+    with open(path, 'rb') as fh:
+        req = urllib.request.Request(cl.glance + '/images/%s/file' % iid, data=fh, method='PUT')
+        req.add_header('Content-Type', 'application/octet-stream')
+        req.add_header('Content-Length', str(size))
+        req.add_header('X-Auth-Token', cl.token)
+        try:
+            urllib.request.urlopen(req, context=CTX if req.full_url.startswith('https') else None, timeout=3600).read()
+        except urllib.error.HTTPError as e:
+            die('image upload failed: HTTP %s %s' % (e.code, e.read().decode()[:300]))
+    end = time.time() + 600
+    status = None
+    while time.time() < end:
+        s, p, _ = cl.g('GET', '/images/' + iid)
+        status = p.get('status')
+        if status == 'active':
+            print('image uploaded: %s (%s), %d bytes' % (SPEC['name'], iid, size))
+            return
+        if status in ('killed', 'deleted'):
+            break
+        time.sleep(3)
+    die('image %s did not become active (status %s)' % (iid, status))
+
+
+def check():
+    # Exit 0 only when an active image of this name has the tags, the visibility, the format and the properties.
+    ok = [i for i in images(Clients()) if good(i)]
+    if not ok:
+        die('no active Glance image %s with the wanted tags and properties' % SPEC['name'])
+    print('image %s (%s) is active' % (SPEC['name'], ok[0]['id']))
+
+
+def exists():
+    # Exit 0 when an image of this name with the tags is there in any state.
+    if not images(Clients()):
+        die('no image %s' % SPEC['name'])
+
+
+def remove():
+    cl = Clients()
+    found = images(cl)
+    for i in found:
+        cl.g('DELETE', '/images/' + i['id'])
+    print('removed %d image(s) %s' % (len(found), SPEC['name']))
+
+
+if __name__ == '__main__':
+    cmd = sys.argv[1] if len(sys.argv) > 1 else ''
+    if cmd == 'ensure':
+        ensure('--replace' in sys.argv[2:])
+    elif cmd == 'check':
+        check()
+    elif cmd == 'exists':
+        exists()
+    elif cmd == 'remove':
+        remove()
+    else:
+        die('usage: ensure [--replace] | check | exists | remove')
+"""
+
+  private val openstackFlavorPython: String = openstackClientPython +
+    """
+
+def current(cl):
+    s, p, _ = cl.c('GET', '/flavors/' + SPEC['id'])
+    if s == 200:
+        return p['flavor']
+    if s == 404:
+        return None
+    die('flavor lookup failed: HTTP %s %s' % (s, p))
+
+
+def same(f):
+    return f.get('name') == SPEC['name'] and f.get('ram') == SPEC['ram'] and f.get('vcpus') == SPEC['vcpus'] and f.get('disk') == SPEC['disk']
+
+
+def ensure():
+    cl = Clients()
+    f = current(cl)
+    if f is not None and same(f):
+        print('flavor %s exists' % SPEC['id'])
+        return
+    if f is not None:
+        # A flavor cannot be changed. Servers keep their own copy, so replacing it is safe.
+        cl.c('DELETE', '/flavors/' + SPEC['id'])
+    s, p, _ = cl.c('POST', '/flavors', {'flavor': {'id': SPEC['id'], 'name': SPEC['name'], 'ram': SPEC['ram'], 'vcpus': SPEC['vcpus'], 'disk': SPEC['disk'], 'os-flavor-access:is_public': True}})
+    if s not in (200, 201):
+        die('creating flavor %s failed: HTTP %s %s' % (SPEC['id'], s, p))
+    print('flavor %s made (%d vCPU, %d MB, %d GB)' % (SPEC['id'], SPEC['vcpus'], SPEC['ram'], SPEC['disk']))
+
+
+def check():
+    f = current(Clients())
+    if f is None:
+        die('flavor %s does not exist' % SPEC['id'])
+    if not same(f):
+        die('flavor %s differs: %s' % (SPEC['id'], f))
+    print('flavor %s is as wanted' % SPEC['id'])
+
+
+def exists():
+    if current(Clients()) is None:
+        die('no flavor %s' % SPEC['id'])
+
+
+def remove():
+    s, _, _ = Clients().c('DELETE', '/flavors/' + SPEC['id'])
+    print('flavor %s: HTTP %s' % (SPEC['id'], s))
+
+
+if __name__ == '__main__':
+    cmd = sys.argv[1] if len(sys.argv) > 1 else ''
+    if cmd == 'ensure':
+        ensure()
+    elif cmd == 'check':
+        check()
+    elif cmd == 'exists':
+        exists()
+    elif cmd == 'remove':
+        remove()
+    else:
+        die('usage: ensure | check | exists | remove')
+"""
+
+  /** The path of the helper `openstackImage` writes for the image `name`. */
+  def openstackImageHelperPath(name: String): String = s"/usr/local/sbin/orphera-image-$name"
+
+  /** The path of the helper `openstackFlavor` writes for the flavor `id`. */
+  def openstackFlavorHelperPath(id: String): String = s"/usr/local/sbin/orphera-flavor-$id"
+
+  private def openstackScript(template: String, keystone: String, adminPassword: Secret, ca: String, spec: String): String =
+    require(keystone.startsWith("https://") || keystone.startsWith("http://"), s"not a Keystone URL: '$keystone'")
+    template
+      .replace("@@KS@@", pyString("keystone", keystone.stripSuffix("/") + "/v3"))
+      .replace("@@ADMINPW@@", pyString("the admin password", adminPassword.reveal))
+      .replace("@@CA@@", pyString("ca", ca))
+      .replace("@@SPEC@@", spec)
+
+  /** A Glance image as a description: the image `name` made from the file `imageFile` on the node, public (or as
+    * `visibility` says), in `diskFormat`, with `tags` and the extra `properties`. The result is the helper (a
+    * root-only script holding the admin password; `keystone` is the base URL such as
+    * `https://tst6.example.com:5000` and `ca` the file that verifies it) and the command that runs it. The command
+    * is `unchanged` while an active image of that name with the tags, the visibility, the format and the
+    * properties is in Glance; otherwise the images of that name are deleted and the file is uploaded. With
+    * `replace` it runs every time and uploads again (for a rebuilt image). The file must exist when it runs, so
+    * the caller orders it after whatever makes the file.
+    */
+  def openstackImage(
+      label: String,
+      name: String,
+      imageFile: String,
+      keystone: String,
+      adminPassword: Secret,
+      ca: String,
+      tags: List[String] = Nil,
+      properties: Map[String, String] = Map.empty,
+      diskFormat: String = "qcow2",
+      visibility: String = "public",
+      replace: Boolean = false,
+      timeout: Int = 1800
+  ): (ApplyResource, ApplyResource) =
+    keystoneName("image name", name)
+    keystoneName("disk format", diskFormat)
+    keystoneName("visibility", visibility)
+    tags.foreach(keystoneName("an image tag", _))
+    properties.keys.foreach(keystoneName("an image property", _))
+    require(imageFile.startsWith("/"), s"the image file must be an absolute path: '$imageFile'")
+    val props = properties.toList.sortBy(_._1).map((k, v) => pyString("property", k) + ": " + pyString("a property value", v))
+    val spec = "{" + List(
+      "'name': " + pyString("name", name),
+      "'file': " + pyString("file", imageFile),
+      "'disk_format': " + pyString("disk format", diskFormat),
+      "'visibility': " + pyString("visibility", visibility),
+      "'tags': " + tags.map(pyString("a tag", _)).mkString("[", ", ", "]"),
+      "'properties': " + props.mkString("{", ", ", "}")
+    ).mkString(", ") + "}"
+    val path = openstackImageHelperPath(name)
+    val helper = secretFile(path, Secret(openstackScript(openstackImagePython, keystone, adminPassword, ca, spec)), mode = "0700", owner = "root", group = "root")
+    // An upload that runs for minutes with no output can lose its connection to the agent, so the helper runs
+    // under a function that prints a line every 20 seconds while it works.
+    val heartbeat =
+      """heartbeat() { "$@" & P=$!; while kill -0 $P 2>/dev/null; do sleep 20; echo "still working ($(date +%H:%M:%S))"; done; wait $P; }"""
+    val quoted = Apply.quote(path)
+    val flags = if replace then " --replace" else ""
+    val ensure = command(
+      label,
+      s"""set -e
+         |$heartbeat
+         |heartbeat $quoted ensure$flags""".stripMargin,
+      unless = if replace then "false" else s"$quoted check >/dev/null 2>&1",
+      timeout = timeout
+    ).after(helper)
+    (helper, ensure)
+
+  /** What `openstackImage` made, removed again: the images of that name with the tags. It does nothing without the
+    * helper on the node or while no such image is there, and a failure is reported but does not stop the run. The
+    * helper is left for the caller to remove.
+    */
+  def absentOpenstackImage(label: String, name: String, timeout: Int = 300): ApplyResource =
+    keystoneName("image name", name)
+    val path = Apply.quote(openstackImageHelperPath(name))
+    command(
+      label,
+      s"""$path remove || echo "Glance cleanup failed (continuing)"""",
+      onlyIf = s"[ -x $path ] && $path exists >/dev/null 2>&1",
+      timeout = timeout
+    )
+
+  /** A Nova flavor as a description: the flavor `id` with the `name`, `ram` (MB), `vcpus` and `disk` (GB), public.
+    * The result is the helper and the command that runs it, which is `unchanged` while the flavor is as wanted; a
+    * flavor with other values is deleted and made again (servers keep their own copy).
+    */
+  def openstackFlavor(
+      label: String,
+      id: String,
+      name: String,
+      ram: Int,
+      vcpus: Int,
+      disk: Int,
+      keystone: String,
+      adminPassword: Secret,
+      ca: String,
+      timeout: Int = 120
+  ): (ApplyResource, ApplyResource) =
+    keystoneName("flavor id", id)
+    keystoneName("flavor name", name)
+    require(ram > 0 && vcpus > 0 && disk >= 0, "a flavor needs positive memory and vCPUs, and a disk of 0 or more")
+    val spec = "{" + List(
+      "'id': " + pyString("id", id),
+      "'name': " + pyString("name", name),
+      s"'ram': $ram",
+      s"'vcpus': $vcpus",
+      s"'disk': $disk"
+    ).mkString(", ") + "}"
+    val path = openstackFlavorHelperPath(id)
+    val helper = secretFile(path, Secret(openstackScript(openstackFlavorPython, keystone, adminPassword, ca, spec)), mode = "0700", owner = "root", group = "root")
+    val ensure = command(
+      label,
+      s"${Apply.quote(path)} ensure",
+      unless = s"${Apply.quote(path)} check >/dev/null 2>&1",
+      timeout = timeout
+    ).after(helper)
+    (helper, ensure)
+
+  /** What `openstackFlavor` made, removed again. It does nothing without the helper or while the flavor is not
+    * there.
+    */
+  def absentOpenstackFlavor(label: String, id: String, timeout: Int = 120): ApplyResource =
+    keystoneName("flavor id", id)
+    val path = Apply.quote(openstackFlavorHelperPath(id))
+    command(
+      label,
+      s"""$path remove || echo "Nova cleanup failed (continuing)"""",
+      onlyIf = s"[ -x $path ] && $path exists >/dev/null 2>&1",
+      timeout = timeout
+    )
+
   private def cephName(what: String, text: String): Unit =
     require(
       text.nonEmpty && text.forall(c => c.isLetterOrDigit || "_-.".contains(c)),

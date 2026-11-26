@@ -2926,6 +2926,169 @@ post('projects', {'project': {'name': 'stack-project', 'domain_id': '$domainId'}
       check("keystone: object storage is removed with its user", helperRun(swiftOtherHelper, swiftOtherText, "remove")._1 == 0 && helperRun(swiftOtherHelper, swiftOtherText, "exists")._1 != 0)
     finally proc.destroy()
 
+  // A small Keystone with Glance and Nova in Python (a token with a catalogue, images, flavors), for the
+  // openstackImage and openstackFlavor helpers.
+  private val fakeOpenstack: String =
+    """import json, sys, re, uuid
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from urllib.parse import urlparse, parse_qs
+PORT = int(sys.argv[1])
+DB = {'images': {}, 'flavors': {}, 'uploads': {}}
+class H(BaseHTTPRequestHandler):
+    def log_message(self, *a): pass
+    def send(self, code, obj=None, headers=None):
+        b = json.dumps(obj).encode() if obj is not None else b''
+        self.send_response(code)
+        self.send_header('Content-Length', str(len(b)))
+        for k, v in (headers or {}).items(): self.send_header(k, v)
+        self.end_headers(); self.wfile.write(b)
+    def body(self):
+        n = int(self.headers.get('Content-Length') or 0)
+        return self.rfile.read(n)
+    def route(self, method):
+        u = urlparse(self.path); path = u.path; q = parse_qs(u.query)
+        raw = self.body()
+        if path == '/v3/auth/tokens' and method == 'POST':
+            b = json.loads(raw)
+            if b['auth']['identity']['password']['user']['password'] != 'adminpw': return self.send(401, {})
+            base = 'http://127.0.0.1:%d' % PORT
+            cat = [{'type': 'image', 'endpoints': [{'interface': 'public', 'url': base}]}, {'type': 'compute', 'endpoints': [{'interface': 'public', 'url': base + '/v2.1'}]}]
+            return self.send(201, {'token': {'catalog': cat}}, {'X-Subject-Token': 'tok'})
+        if self.headers.get('X-Auth-Token') != 'tok': return self.send(401, {})
+        if path == '/dump': return self.send(200, DB)
+        if path == '/v2/images' and method == 'GET':
+            imgs = [i for i in DB['images'].values() if 'name' not in q or i['name'] == q['name'][0]]
+            return self.send(200, {'images': imgs})
+        if path == '/v2/images' and method == 'POST':
+            b = json.loads(raw); i = dict(b); i['id'] = str(uuid.uuid4()); i['status'] = 'queued'
+            DB['images'][i['id']] = i; return self.send(201, i)
+        m = re.match(r'/v2/images/([^/]+)(/file)?$', path)
+        if m:
+            i = DB['images'].get(m.group(1))
+            if i is None: return self.send(404, {})
+            if m.group(2) and method == 'PUT':
+                DB['uploads'][i['id']] = len(raw); i['status'] = 'active'; return self.send(204)
+            if method == 'GET': return self.send(200, i)
+            if method == 'DELETE': del DB['images'][i['id']]; return self.send(204)
+        m = re.match(r'/v2\.1/flavors/([^/]+)$', path)
+        if m:
+            f = DB['flavors'].get(m.group(1))
+            if method == 'GET': return self.send(200, {'flavor': f}) if f else self.send(404, {})
+            if method == 'DELETE':
+                if f: del DB['flavors'][m.group(1)]; return self.send(202)
+                return self.send(404, {})
+        if path == '/v2.1/flavors' and method == 'POST':
+            f = json.loads(raw)['flavor']; DB['flavors'][f['id']] = f; return self.send(200, {'flavor': f})
+        self.send(404, {})
+    def do_GET(self): self.route('GET')
+    def do_POST(self): self.route('POST')
+    def do_PUT(self): self.route('PUT')
+    def do_DELETE(self): self.route('DELETE')
+HTTPServer(('127.0.0.1', PORT), H).serve_forever()
+"""
+
+  private def openstackChecks(): Unit =
+    val dir = Files.createTempDirectory("openstack")
+    val server = dir.resolve("fake_os.py")
+    Files.writeString(server, fakeOpenstack)
+    val port =
+      val sock = new java.net.ServerSocket(0)
+      try sock.getLocalPort
+      finally sock.close()
+    val proc = new ProcessBuilder("python3", server.toString, port.toString).redirectErrorStream(true).start()
+    try
+      def up: Boolean = scala.util.Try(new java.net.Socket("127.0.0.1", port).close()).isSuccess
+      var tries = 0
+      while !up && tries < 50 do
+        Thread.sleep(100)
+        tries += 1
+      check("openstack: the fake Keystone, Glance and Nova are up", up)
+      val url = s"http://127.0.0.1:$port"
+      val imageFile = dir.resolve("disk.qcow2")
+      Files.write(imageFile, ("QFI" + "0" * 1000).getBytes("UTF-8"))
+      def fileText(r: ApplyResource): String = r match
+        case f: ApplyResource.File =>
+          f.content match
+            case Some(ApplyResource.Content.Hidden(secret)) => secret.reveal
+            case other                                      => s"not hidden text: $other"
+        case other => s"not a file: $other"
+      def part(r: ApplyResource, pick: ApplyResource.Command => String): String = r match
+        case c: ApplyResource.Command => pick(c)
+        case other                    => s"not a command: $other"
+      def helperRun(r: ApplyResource, text: String, args: String*): (Int, String) =
+        val script = dir.resolve(s"helper-${r.id.hashCode.abs}.py")
+        Files.writeString(script, text)
+        runShell(s"python3 -I ${script} ${args.mkString(" ")}")
+      def images(props: Map[String, String], replace: Boolean = false, file: String = imageFile.toString) =
+        openstackImage(
+          "upload the guest image",
+          "guest-image",
+          file,
+          url,
+          Secret("adminpw"),
+          "/no/ca.crt",
+          tags = List("guest", "mysql"),
+          properties = props,
+          replace = replace
+        )
+      val (imageHelper, imageEnsure) = images(Map("hw_rng_model" -> "virtio"))
+      check("openstack: the image helper is a root-only secret file named for the image", imageHelper.id == "file[/usr/local/sbin/orphera-image-guest-image]", imageHelper.id)
+      check(
+        "openstack: the command runs the helper under a heartbeat and is guarded by its check",
+        part(imageEnsure, _.run).contains("heartbeat '/usr/local/sbin/orphera-image-guest-image' ensure") && part(imageEnsure, _.unless).contains("check"),
+        part(imageEnsure, _.run)
+      )
+      val imageText = fileText(imageHelper)
+      def run(arg: String*): (Int, String) = helperRun(imageHelper, imageText, arg*)
+      check("openstack: no image fails the check and exists", run("check")._1 != 0 && run("exists")._1 != 0)
+      val uploaded = run("ensure")
+      check("openstack: ensure uploads the file", uploaded._1 == 0 && uploaded._2.contains("image uploaded: guest-image") && uploaded._2.contains("1003 bytes"), uploaded.toString)
+      check("openstack: then the check passes and exists finds it", run("check")._1 == 0 && run("exists")._1 == 0, run("check").toString)
+      val again = run("ensure")
+      check("openstack: ensure again uploads nothing", again._1 == 0 && again._2.contains("already active"), again.toString)
+      val replaced = run("ensure", "--replace")
+      check("openstack: ensure --replace uploads again and leaves one image", replaced._1 == 0 && replaced._2.contains("image uploaded") && run("remove")._2.contains("removed 1 image(s)"), replaced.toString)
+      check("openstack: after the removal nothing is left", run("exists")._1 != 0 && run("check")._1 != 0 && run("remove")._2.contains("removed 0 image(s)"))
+      val (otherHelper, _) = images(Map("hw_rng_model" -> "none"))
+      val otherText = fileText(otherHelper)
+      check("openstack: a new image is made for the properties", helperRun(otherHelper, otherText, "ensure")._1 == 0)
+      val (changedHelper, _) = images(Map("hw_rng_model" -> "virtio"))
+      val changedText = fileText(changedHelper)
+      check("openstack: another property value fails the check", helperRun(changedHelper, changedText, "check")._1 != 0)
+      check("openstack: ensure replaces the image and the check then passes", helperRun(changedHelper, changedText, "ensure")._1 == 0 && helperRun(changedHelper, changedText, "check")._1 == 0 && helperRun(changedHelper, changedText, "remove")._2.contains("removed 1 image(s)"))
+      val (missingHelper, _) = images(Map.empty, file = dir.resolve("none.qcow2").toString)
+      val missing = helperRun(missingHelper, fileText(missingHelper), "ensure")
+      check("openstack: a missing image file fails with its name", missing._1 != 0 && missing._2.contains("none.qcow2"), missing.toString)
+      val (_, replaceEnsure) = images(Map.empty, replace = true)
+      check("openstack: with replace the command always runs and passes --replace", part(replaceEnsure, _.run).contains("ensure --replace") && part(replaceEnsure, _.unless) == "false", part(replaceEnsure, _.run))
+      val gone = absentOpenstackImage("remove the guest image", "guest-image")
+      check("openstack: image removal is guarded by the helper and an image existing", part(gone, _.onlyIf).contains("orphera-image-guest-image' exists"), part(gone, _.onlyIf))
+      check("openstack: an image name with a space is refused", scala.util.Try(openstackImage("x", "a b", "/f", url, Secret("x"), "/ca")).isFailure)
+      check("openstack: a relative image file is refused", scala.util.Try(openstackImage("x", "a", "f", url, Secret("x"), "/ca")).isFailure)
+      check("openstack: a property value that is not ASCII is refused", scala.util.Try(openstackImage("x", "a", "/f", url, Secret("x"), "/ca", properties = Map("p" -> "pä"))).isFailure)
+
+      def flavors(ram: Int) =
+        openstackFlavor("make the flavor", "guest-flavor", "guest.flavor", ram, 1, 10, url, Secret("adminpw"), "/no/ca.crt")
+      val (flavorHelper, flavorEnsure) = flavors(2048)
+      check("openstack: the flavor helper is named for the id", flavorHelper.id == "file[/usr/local/sbin/orphera-flavor-guest-flavor]", flavorHelper.id)
+      check("openstack: the flavor command runs the helper and is guarded by its check", part(flavorEnsure, _.run).contains("orphera-flavor-guest-flavor' ensure") && part(flavorEnsure, _.unless).contains("check"))
+      val flavorText = fileText(flavorHelper)
+      def flavorRun(arg: String): (Int, String) = helperRun(flavorHelper, flavorText, arg)
+      check("openstack: no flavor fails the check and exists", flavorRun("check")._1 != 0 && flavorRun("exists")._1 != 0)
+      val made = flavorRun("ensure")
+      check("openstack: ensure makes the flavor", made._1 == 0 && made._2.contains("made (1 vCPU, 2048 MB, 10 GB)"), made.toString)
+      check("openstack: then the check passes and ensure again changes nothing", flavorRun("check")._1 == 0 && flavorRun("exists")._1 == 0 && flavorRun("ensure")._2.contains("exists"))
+      val (biggerHelper, _) = flavors(4096)
+      val biggerText = fileText(biggerHelper)
+      check("openstack: other memory fails the check", helperRun(biggerHelper, biggerText, "check")._1 != 0)
+      val bigger = helperRun(biggerHelper, biggerText, "ensure")
+      check("openstack: ensure replaces the flavor", bigger._1 == 0 && bigger._2.contains("4096 MB") && helperRun(biggerHelper, biggerText, "check")._1 == 0, bigger.toString)
+      val flavorGone = absentOpenstackFlavor("remove the flavor", "guest-flavor")
+      check("openstack: flavor removal is guarded by the helper and the flavor existing", part(flavorGone, _.onlyIf).contains("orphera-flavor-guest-flavor' exists"), part(flavorGone, _.onlyIf))
+      check("openstack: remove deletes the flavor and nothing is left", helperRun(biggerHelper, biggerText, "remove")._1 == 0 && helperRun(biggerHelper, biggerText, "exists")._1 != 0)
+      check("openstack: a flavor with no memory is refused", scala.util.Try(openstackFlavor("x", "a", "a", 0, 1, 1, url, Secret("x"), "/ca")).isFailure)
+    finally proc.destroy()
+
   // A stand-in `cephadm shell` for the Ceph helpers: pools, cephx users and settings in a JSON file, and `dump` to
   // read it back. FAKE_CEPH_DOWN makes every command fail, as a cluster that cannot be reached does.
   private val fakeCephadm: String =
@@ -3485,6 +3648,7 @@ else:
     downloadChecks()
     archiveFilesChecks()
     keystoneChecks()
+    openstackChecks()
     cephChecks()
     ovsChecks()
     kindChecks()

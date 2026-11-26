@@ -492,8 +492,8 @@ step_trove() {
   check "Trove answers an authenticated request and the guest network, group and keypair exist" contains "trove check ok" "$out"
   apply_desc trove_guest_image.scala
   apply_desc trove_datastore.scala
-  out=$(orphera run sh -c "sudo /usr/local/sbin/orphera-trove-image present" --nodes tst21 --timeout 120 2>&1)
-  check "the Trove guest image is in Glance and the flavor exists" contains "is active and flavor orphera-trove exists" "$out"
+  out=$(orphera run sh -c "sudo /usr/local/sbin/orphera-image-trove-guest-ubuntu-noble check && sudo /usr/local/sbin/orphera-flavor-orphera-trove check" --nodes tst21 --timeout 120 2>&1)
+  check "the Trove guest image is in Glance and the flavor exists" contains "flavor orphera-trove is as wanted" "$out"
   out=$(orphera run sh -c "sudo /usr/local/sbin/orphera-trove-db datastores" --nodes tst25 --timeout 120 2>&1)
   check "the Trove API lists the mysql datastore with a default version" contains "datastore mysql: versions" "$out"
 }
