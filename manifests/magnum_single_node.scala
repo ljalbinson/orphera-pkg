@@ -358,6 +358,168 @@ def mservices():
         die('magnum-conductor is not up')
 
 
+def k8s_images(cl):
+    s, p, _ = cl.g('GET', '/images?os_distro=ubuntu&status=active')
+    if s != 200:
+        die('image list failed: HTTP %s %s' % (s, p))
+    return [i for i in p.get('images', []) if i.get('name', '').startswith(IMAGE_PREFIX) and i.get('kube_version')]
+
+
+def image_present():
+    cl = Clients()
+    imgs = k8s_images(cl)
+    if imgs:
+        print('kubernetes image %s (%s, kube_version %s) is active in Glance' % (imgs[0]['name'], imgs[0]['id'], imgs[0]['kube_version']))
+        return
+    sys.exit(1)
+
+
+def image_upload(path, kube_version, os_version):
+    cl = Clients()
+    for i in cl.g('GET', '/images?os_distro=ubuntu')[1].get('images', []):
+        if i.get('name', '').startswith(IMAGE_PREFIX) and i.get('status') != 'active':
+            cl.g('DELETE', '/images/' + i['id'])
+    name = IMAGE_PREFIX + kube_version
+    body = {'name': name, 'disk_format': 'qcow2', 'container_format': 'bare', 'visibility': 'public', 'os_distro': 'ubuntu', 'os_version': os_version, 'kube_version': kube_version}
+    s, p, _ = cl.g('POST', '/images', body)
+    if s != 201:
+        die('image create failed: HTTP %s %s' % (s, p))
+    iid = p['id']
+    size = os.path.getsize(path)
+    with open(path, 'rb') as fh:
+        req = urllib.request.Request(cl.glance + '/images/%s/file' % iid, data=fh, method='PUT')
+        req.add_header('Content-Type', 'application/octet-stream')
+        req.add_header('Content-Length', str(size))
+        req.add_header('X-Auth-Token', cl.token)
+        try:
+            urllib.request.urlopen(req, timeout=3600).read()
+        except urllib.error.HTTPError as e:
+            die('image upload failed: HTTP %s %s' % (e.code, e.read().decode()[:300]))
+    end = time.time() + 600
+    status = None
+    while time.time() < end:
+        s, p, _ = cl.g('GET', '/images/' + iid)
+        status = p.get('status')
+        if status == 'active':
+            print('kubernetes image uploaded: %s (%s), %d bytes' % (name, iid, size))
+            return
+        if status in ('killed', 'deleted'):
+            break
+        time.sleep(3)
+    die('image %s did not become active (status %s)' % (iid, status))
+
+
+def external_network(cl):
+    s, p, _ = cl.n('GET', '/networks?router:external=True')
+    nets = p.get('networks', []) if s == 200 else []
+    for n in nets:
+        if n.get('provider:network_type') == 'flat':
+            return n
+    if nets:
+        return nets[0]
+    die('no external network: mark the flat provider network external (openstack network set --external <name>)')
+
+
+def ensure_template(cl):
+    imgs = k8s_images(cl)
+    if not imgs:
+        die('no Kubernetes image in Glance (os_distro ubuntu, name %s*, kube_version set)' % IMAGE_PREFIX)
+    img = imgs[0]
+    s, p, _ = cl.m('GET', '/clustertemplates')
+    if s != 200:
+        die('template list failed: HTTP %s %s' % (s, p))
+    for t in p.get('clustertemplates', []):
+        if t.get('name') == TEMPLATE:
+            if t.get('image_id') == img['id'] and t.get('dns_nameserver') == DNS:
+                return t['uuid']
+            s, _, _ = cl.m('DELETE', '/clustertemplates/' + t['uuid'])
+            if s not in (204, 202):
+                die('the template %s uses another image or DNS server and cannot be replaced (clusters use it): HTTP %s' % (TEMPLATE, s))
+    ext = external_network(cl)
+    body = {'name': TEMPLATE, 'image_id': img['id'], 'coe': 'kubernetes', 'external_network_id': ext['id'], 'flavor_id': FLAVOR_NAME, 'master_flavor_id': FLAVOR_NAME, 'dns_nameserver': DNS, 'network_driver': 'calico', 'public': True, 'master_lb_enabled': True, 'floating_ip_enabled': True, 'labels': {}}
+    s, p, _ = cl.m('POST', '/clustertemplates', body)
+    if s not in (200, 201):
+        die('template create failed: HTTP %s %s' % (s, p))
+    return p['uuid']
+
+
+def template():
+    cl = Clients()
+    uuid = ensure_template(cl)
+    print('cluster template %s ready (%s)' % (TEMPLATE, uuid))
+
+
+def cluster_cycle():
+    cl = Clients()
+    tpl = ensure_template(cl)
+    stamp = int(time.time())
+    name = 'orphera-test-%d' % stamp
+    s, p, _ = cl.m('POST', '/clusters', {'name': name, 'cluster_template_id': tpl, 'master_count': 1, 'node_count': 1, 'keypair': KEYPAIR, 'create_timeout': 60})
+    if s not in (200, 201, 202):
+        die('cluster create failed: HTTP %s %s' % (s, p))
+    cid = p['uuid']
+    try:
+        end = time.time() + 3000
+        last = None
+        cluster = {}
+        while time.time() < end:
+            s, cluster, _ = cl.m('GET', '/clusters/' + cid)
+            if s == 200:
+                st = cluster.get('status')
+                if st != last:
+                    sys.stderr.write('[%s] cluster %s: %s\n' % (time.strftime('%H:%M:%S'), name, st))
+                    last = st
+                if st == 'CREATE_COMPLETE':
+                    break
+                if st and st.endswith('FAILED'):
+                    die('cluster %s went to %s: %s' % (name, st, cluster.get('status_reason')))
+            time.sleep(15)
+        if cluster.get('status') != 'CREATE_COMPLETE':
+            die('cluster %s is %s after 50 minutes: %s' % (name, cluster.get('status'), cluster.get('status_reason')))
+        api = cluster.get('api_address')
+        if not api:
+            die('cluster %s has no api_address' % name)
+        end = time.time() + 300
+        body = ''
+        while time.time() < end:
+            r = subprocess.run(['curl', '-sk', '-m', '10', api.rstrip('/') + '/version'], capture_output=True, text=True)
+            body = r.stdout
+            if 'gitVersion' in body:
+                break
+            time.sleep(10)
+        if 'gitVersion' not in body:
+            die('the Kubernetes API at %s did not answer /version from this node within 300 s (last answer: %r)' % (api, body[:80]))
+        version = json.loads(body).get('gitVersion')
+        print('cluster cycle ok: cluster %s CREATE_COMPLETE, %s answers with Kubernetes %s, then deleted' % (name, api, version))
+    finally:
+        cl.m('DELETE', '/clusters/' + cid)
+        end = time.time() + 1800
+        while time.time() < end:
+            s, c, _ = cl.m('GET', '/clusters/' + cid)
+            if s == 404:
+                break
+            if c.get('status') == 'DELETE_FAILED':
+                sys.stderr.write('cluster %s is DELETE_FAILED: %s\n' % (name, c.get('status_reason')))
+                break
+            time.sleep(15)
+
+
+def delete_clusters():
+    cl = Clients()
+    s, p, _ = cl.m('GET', '/clusters')
+    for c in p.get('clusters', []) if s == 200 else []:
+        cl.m('DELETE', '/clusters/' + c['uuid'])
+        print('deleting cluster %s' % c['name'])
+    end = time.time() + 1800
+    while time.time() < end:
+        s, p, _ = cl.m('GET', '/clusters')
+        if s != 200 or not p.get('clusters'):
+            print('no clusters left')
+            return
+        time.sleep(15)
+    die('clusters are still there after 30 minutes')
+
+
 def teardown():
     cl = Clients()
     s, p, _ = cl.m('GET', '/clusters')
