@@ -2356,7 +2356,9 @@ case "$1" in
     if [ -z "$V" ]; then echo "cannot find a version of $CHART" >&2; exit 1; fi
     echo "installing $CHART $V as $REL in $NS"
 @@VALUES@@
-    helm upgrade --install "$REL" "$CHART" --version "$V" --namespace "$NS" --create-namespace @@VALUESARG@@@@SETS@@@@WAIT@@
+    EXTRA=""
+@@EXTRA@@
+    helm upgrade --install "$REL" "$CHART" --version "$V" --namespace "$NS" --create-namespace @@VALUESARG@@@@SETS@@$EXTRA @@WAIT@@
     mkdir -p "$(dirname "$STATE")"
     echo "$WANT" > "$STATE"
     echo "$REL $V installed"
@@ -2410,6 +2412,10 @@ esac
     * only `@@NAME@@` is replaced, when the helper runs, by the lines of that
     * file with the placeholder's indentation (for a certificate inside a YAML
     * block). A change to such a file is not noticed by the check.
+    * `valuesFiles` are further values files on the node that are passed with
+    * `-f` after the values, in the order given, when they exist and are not
+    * empty (settings another playbook keeps there); the check does not see them
+    * either.
     */
   def helmRelease(
       label: String,
@@ -2424,7 +2430,8 @@ esac
       wait: Boolean = true,
       minutes: Int = 10,
       stateDir: String = "/var/lib/orphera/helm",
-      valuesFrom: List[(String, String)] = Nil
+      valuesFrom: List[(String, String)] = Nil,
+      valuesFiles: List[String] = Nil
   ): (ApplyResource, ApplyResource) =
     helmName("a release name", release)
     helmName("a namespace", namespace)
@@ -2456,6 +2463,14 @@ esac
         s"a values file must be an absolute path: '$file'"
       )
     }
+    valuesFiles.foreach(f =>
+      require(
+        f.startsWith("/") && f.forall(c =>
+          c.isLetterOrDigit || "/_-.".contains(c)
+        ),
+        s"a values file must be an absolute path of letters, digits and / _ - . , not '$f'"
+      )
+    )
     set.foreach { (k, v) =>
       require(
         k.nonEmpty && k.forall(c => c >= ' ' && c <= '~'),
@@ -2518,6 +2533,12 @@ esac
       )
       .replace("@@WANT@@", Apply.quote(want))
       .replace("@@VALUES@@", valuesBlock)
+      .replace(
+        "@@EXTRA@@",
+        valuesFiles
+          .map(f => s"    if [ -s $f ]; then EXTRA=\"$$EXTRA -f $f\"; fi")
+          .mkString("\n")
+      )
       .replace("@@VALUESARG@@", if text.isDefined then "-f \"$VALS\" " else "")
       .replace(
         "@@SETS@@",

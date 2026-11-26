@@ -4511,7 +4511,7 @@ elif a[0] == 'status':
     print(json.dumps({'name': a[1], 'info': {'status': r.get('status', 'deployed')}}))
 elif a[:2] == ['upgrade', '--install']:
     vals = open(opt('-f')).read() if '-f' in a else None
-    S['releases'][opt('--namespace') + '/' + a[2]] = {'chart': a[3], 'version': opt('--version'), 'values': vals, 'sets': [a[i + 1] for i, x in enumerate(a) if x == '--set'], 'wait': '--wait' in a, 'timeout': opt('--timeout'), 'create_ns': '--create-namespace' in a, 'status': 'deployed'}
+    S['releases'][opt('--namespace') + '/' + a[2]] = {'chart': a[3], 'version': opt('--version'), 'values': vals, 'files': [open(a[i + 1]).read() for i, x in enumerate(a) if x == '-f'], 'sets': [a[i + 1] for i, x in enumerate(a) if x == '--set'], 'wait': '--wait' in a, 'timeout': opt('--timeout'), 'create_ns': '--create-namespace' in a, 'status': 'deployed'}
 elif a[0] == 'uninstall':
     S['releases'].pop(opt('-n') + '/' + a[1], None)
 else:
@@ -4703,6 +4703,49 @@ save()
         "cm:\\n  rootCA: |\\n    LINE1\\n    LINE2\\n  other: 1\\n"
       ),
       fromFileMade.toString + dump
+    )
+    val extraFile = dir.resolve("extra.yaml")
+    val (withExtra, _) = helmRelease(
+      "x",
+      "e",
+      "a/b",
+      "http://h/",
+      "ns",
+      values = Some(Secret("a: 1\n")),
+      stateDir = shaDir.toString,
+      valuesFiles = List(extraFile.toString)
+    )
+    val noExtra = run(withExtra, "ensure")
+    check(
+      "helmRelease: a values file that is not there is not passed",
+      noExtra._1 == 0 && dump.contains("\"ns/e\": {") && dump.contains(
+        "\"files\": [\"a: 1\\n\"]"
+      ),
+      noExtra.toString + dump
+    )
+    Files.writeString(extraFile, "b: 2\n")
+    val withExtraMade = run(withExtra, "ensure")
+    check(
+      "helmRelease: a values file that is there is passed after the values",
+      withExtraMade._1 == 0 && dump.contains(
+        "\"files\": [\"a: 1\\n\", \"b: 2\\n\"]"
+      ),
+      withExtraMade.toString + dump
+    )
+    check(
+      "helmRelease: a values file path with a space is refused",
+      scala.util
+        .Try(
+          helmRelease(
+            "x",
+            "r",
+            "a/b",
+            "https://h",
+            "ns",
+            valuesFiles = List("/a b")
+          )
+        )
+        .isFailure
     )
     check(
       "helmRelease: a placeholder name in lower case is refused",
