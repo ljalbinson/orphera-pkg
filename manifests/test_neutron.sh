@@ -98,8 +98,8 @@ assert_contains "the API lists neutron-l3-agent" "agent neutron-l3-agent" "$OUT"
 OUT=$(run_on "sudo $HELPER agents-up")
 assert_contains "the three agents are alive (RabbitMQ and database work)" "neutron-l3-agent are alive" "$OUT"
 
-OUT=$(run_on "sudo $HELPER provider-net-ok")
-assert_contains "the description made the flat provider network, shared and external, with its subnet" "is in place" "$OUT"
+OUT=$(run_on "sudo /usr/local/sbin/orphera-network-admin-provider check")
+assert_contains "the description made the flat provider network, shared and external, with its subnet" "is as wanted" "$OUT"
 
 OUT=$(run_on "sudo $HELPER net-create")
 NID=$(printf '%s\n' "$OUT" | grep -Eo '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | tail -1)
