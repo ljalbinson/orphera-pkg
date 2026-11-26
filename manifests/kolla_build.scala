@@ -378,7 +378,8 @@ esac
     val pulled = pullImages(
       "pull the registry image",
       List(registryImage),
-      hint = "the registry image name in kolla_build.scala; the pull is from Docker Hub",
+      hint =
+        "the registry image name in kolla_build.scala; the pull is from Docker Hub",
       timeout = 600
     ).after(podman)
     val registriesDir =

@@ -113,9 +113,8 @@ object disable_unattended_upgrades extends OrpheraClusterPlaybook:
       owner = "root",
       group = "root"
     )
-    val stopped = timers.map(t =>
-      service(t, enabled = Some(false), running = Some(false))
-    )
+    val stopped =
+      timers.map(t => service(t, enabled = Some(false), running = Some(false)))
     val masks = (timers :+ "unattended-upgrades.service").map(u =>
       symlink(s"/etc/systemd/system/$u", "/dev/null")
         .after(stopped*)

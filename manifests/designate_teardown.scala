@@ -75,9 +75,12 @@ object designate_teardown extends OrpheraApply:
         )
       )
     else
-      val unregistered = absentKeystoneEntries("remove Designate from Keystone", "designate")
-      val stopped = absentContainerUnits(units.map(u => s"orphera-$u" -> u)).map(_.after(unregistered))
+      val unregistered =
+        absentKeystoneEntries("remove Designate from Keystone", "designate")
+      val stopped = absentContainerUnits(units.map(u => s"orphera-$u" -> u))
+        .map(_.after(unregistered))
       // Typed removal, no script: each directory with its contents, then the helper.
       val cleaned = (dirs.map(absentDirectory(_, recursive = true)) :+
-        absentFile(helper) :+ absentFile(keystoneHelperPath("designate"))).map(_.after(stopped*))
+        absentFile(helper) :+ absentFile(keystoneHelperPath("designate")))
+        .map(_.after(stopped*))
       List(unregistered) ++ stopped ++ cleaned

@@ -36,7 +36,9 @@ object nova_database extends OrpheraApply:
   def describe(node: Node): List[ApplyResource] =
     List(
       sqlDatabase(
-        "the " + dbs.mkString(", ") + " databases and the " + dbUser + " user on the Galera cluster",
+        "the " + dbs.mkString(
+          ", "
+        ) + " databases and the " + dbUser + " user on the Galera cluster",
         dbs,
         dbUser,
         dbPassword,

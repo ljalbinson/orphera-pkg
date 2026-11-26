@@ -351,7 +351,8 @@ object observability_stack extends OrpheraClusterPlaybook:
           Task.Apply(installGrafanaPlan)
         )
         .task("set Grafana's admin credentials in grafana.ini")(
-          Task.RunCommand(List("sh", "-c", grafanaIniScript), timeoutSeconds = 60)
+          Task
+            .RunCommand(List("sh", "-c", grafanaIniScript), timeoutSeconds = 60)
         )
         .task("provision the Prometheus datasource and run grafana-server")(
           Task.Apply(grafanaPlan)

@@ -20,7 +20,9 @@ object kolla_cache_teardown extends OrpheraApply:
   override def nodes: List[String] = List(node)
 
   def describe(target: Node): List[ApplyResource] =
-    val stopped = absentContainerUnits(List("orphera-kolla-cache" -> "kolla-cache"))
+    val stopped = absentContainerUnits(
+      List("orphera-kolla-cache" -> "kolla-cache")
+    )
     val cleaned =
       absentDirectory("/var/lib/orphera/kolla-cache", recursive = true)
         .after(stopped*)

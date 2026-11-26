@@ -29,7 +29,6 @@ object placement_teardown extends OrpheraApply:
 
   override def nodes: List[String] = List(dbNode, node)
 
-
   private val dirs = List(
     "/etc/kolla/placement",
     "/etc/kolla/placement-api",
@@ -48,9 +47,12 @@ object placement_teardown extends OrpheraApply:
         )
       )
     else
-      val unregistered = absentKeystoneEntries("remove Placement from Keystone", "placement")
-      val stopped = absentContainerUnits(List(unit -> "placement-api")).map(_.after(unregistered))
+      val unregistered =
+        absentKeystoneEntries("remove Placement from Keystone", "placement")
+      val stopped = absentContainerUnits(List(unit -> "placement-api"))
+        .map(_.after(unregistered))
       // Typed removal, no script: each directory with its contents, then the helper.
       val cleaned = (dirs.map(absentDirectory(_, recursive = true)) :+
-        absentFile(helper) :+ absentFile(keystoneHelperPath("placement"))).map(_.after(stopped*))
+        absentFile(helper) :+ absentFile(keystoneHelperPath("placement")))
+        .map(_.after(stopped*))
       List(unregistered) ++ stopped ++ cleaned

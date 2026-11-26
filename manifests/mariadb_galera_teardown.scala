@@ -75,7 +75,8 @@ object mariadb_galera_teardown extends OrpheraClusterPlaybook:
     val nonLocalBind = command(
       "turn net.ipv4.ip_nonlocal_bind off again",
       "sysctl -w net.ipv4.ip_nonlocal_bind=0",
-      unless = """[ "$(sysctl -n net.ipv4.ip_nonlocal_bind 2>/dev/null)" = 0 ]"""
+      unless =
+        """[ "$(sysctl -n net.ipv4.ip_nonlocal_bind 2>/dev/null)" = 0 ]"""
     ).after(others*)
     val vip = command(
       "remove a lingering VIP from the interface",

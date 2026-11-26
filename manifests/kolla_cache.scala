@@ -92,7 +92,8 @@ object kolla_cache extends OrpheraApply:
     val pulled = pullImages(
       "pull the registry image",
       List(registryImage),
-      hint = "the registry image name in kolla_cache.scala; the pull is from Docker Hub",
+      hint =
+        "the registry image name in kolla_cache.scala; the pull is from Docker Hub",
       timeout = 600
     ).after(podman)
     val data = directory(dataDir)

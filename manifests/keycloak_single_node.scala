@@ -898,7 +898,8 @@ if __name__ == '__main__':
     val pulled = pullImages(
       "pull the Keycloak image",
       List(imageRef),
-      hint = "KEYCLOAK_IMAGE or the ExternalImage in keycloak_single_node.scala",
+      hint =
+        "KEYCLOAK_IMAGE or the ExternalImage in keycloak_single_node.scala",
       timeout = 1800
     ).after(podman, mirror)
 

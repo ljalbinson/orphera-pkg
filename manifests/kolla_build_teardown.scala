@@ -52,7 +52,9 @@ object kolla_build_teardown extends OrpheraApply:
     val cleaned = List(
       absentFile("/etc/nginx/conf.d/orphera-kolla-sources.conf")
         .notifies(reloadNginx),
-      absentFile("/etc/containers/registries.conf.d/orphera-kolla-registry.conf"),
+      absentFile(
+        "/etc/containers/registries.conf.d/orphera-kolla-registry.conf"
+      ),
       absentFile("/usr/local/sbin/orphera-kolla-build"),
       absentDirectory("/opt/kolla-build", recursive = true),
       absentDirectory("/opt/devpi", recursive = true),

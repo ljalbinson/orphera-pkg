@@ -71,13 +71,16 @@ object neutron_teardown extends OrpheraApply:
         )
       )
     else
-      val unregistered = absentKeystoneEntries("remove Neutron from Keystone", "neutron")
-      val stopped = absentContainerUnits(units.map(u => s"orphera-$u" -> u)).map(_.after(unregistered))
+      val unregistered =
+        absentKeystoneEntries("remove Neutron from Keystone", "neutron")
+      val stopped = absentContainerUnits(units.map(u => s"orphera-$u" -> u))
+        .map(_.after(unregistered))
       val bridges = absentOvsBridge(
         "delete the Open vSwitch bridges br-provider and br-int",
         List("br-provider", "br-int")
       ).after(stopped*)
       // Typed removal, no script: each directory with its contents, then the helper.
       val cleaned = (dirs.map(absentDirectory(_, recursive = true)) :+
-        absentFile(helper) :+ absentFile(keystoneHelperPath("neutron"))).map(_.after(stopped*))
+        absentFile(helper) :+ absentFile(keystoneHelperPath("neutron")))
+        .map(_.after(stopped*))
       List(unregistered) ++ stopped ++ List(bridges) ++ cleaned

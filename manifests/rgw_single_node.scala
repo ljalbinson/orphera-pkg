@@ -354,7 +354,12 @@ if __name__ == '__main__':
       "rgw",
       rgwPassword,
       List(
-        KeystoneService("swift", "object-store", s"$rgwUrl/swift/v1/AUTH_%(project_id)s", Some(s"$rgwUrl/swift/v1")),
+        KeystoneService(
+          "swift",
+          "object-store",
+          s"$rgwUrl/swift/v1/AUTH_%(project_id)s",
+          Some(s"$rgwUrl/swift/v1")
+        ),
         KeystoneService("s3", "s3", rgwUrl)
       ),
       ksUrl,
@@ -370,10 +375,21 @@ if __name__ == '__main__':
       s"client.rgw.$serviceId",
       "rgw_keystone_api_version"
     ).after(registered)
-    val config = cephConfig("set the RGW Keystone options", s"client.rgw.$serviceId", rgwOptions)
+    val config = cephConfig(
+      "set the RGW Keystone options",
+      s"client.rgw.$serviceId",
+      rgwOptions
+    )
       .after(oldOption, ca)
     // The options go in before the service, so a daemon that is new starts with them.
-    val service = cephOrchService("apply the RGW service", "rgw", serviceId, rgwSpec, rgwIp, node).after(config)
+    val service = cephOrchService(
+      "apply the RGW service",
+      "rgw",
+      serviceId,
+      rgwSpec,
+      rgwIp,
+      node
+    ).after(config)
     val restarted = command(
       "restart RGW so it takes its new Keystone token and options",
       restartScript,

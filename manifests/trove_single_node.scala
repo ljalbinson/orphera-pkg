@@ -523,7 +523,9 @@ if __name__ == '__main__':
       "register Trove in Keystone",
       "trove",
       trovePassword,
-      List(KeystoneService("trove", "database", s"$troveUrl/v1.0/$$(tenant_id)s")),
+      List(
+        KeystoneService("trove", "database", s"$troveUrl/v1.0/$$(tenant_id)s")
+      ),
       ksUrl,
       adminPassword,
       caCert

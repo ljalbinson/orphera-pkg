@@ -609,5 +609,6 @@ if __name__ == '__main__':
       ca,
       logDirectory,
       stateDirectory
-    ) ++ units.flatMap(_._3) ++ List(dbSync, helperFile, keystoneHelper, registered) ++
+    ) ++ units
+      .flatMap(_._3) ++ List(dbSync, helperFile, keystoneHelper, registered) ++
       running ++ List(answering, reporting)

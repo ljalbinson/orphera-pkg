@@ -99,20 +99,37 @@ object octavia_teardown extends OrpheraApply:
         timeout = 900
       )
       // The network goes first (with its ports); the groups can only be deleted once no port uses them.
-      val networkGone = absentOpenstackNetwork("delete the amphora network", "lb-mgmt-net", "service").after(openstack)
+      val networkGone = absentOpenstackNetwork(
+        "delete the amphora network",
+        "lb-mgmt-net",
+        "service"
+      ).after(openstack)
       val groupsGone = List("lb-mgmt-sec-grp", "lb-health-mgr-sec-grp").map(g =>
-        absentOpenstackSecurityGroup(s"delete the security group $g", g, "service").after(networkGone)
+        absentOpenstackSecurityGroup(
+          s"delete the security group $g",
+          g,
+          "service"
+        ).after(networkGone)
       )
-      val flavorGone = absentOpenstackFlavor("delete the amphora flavor", "orphera-amphora").after(openstack)
+      val flavorGone =
+        absentOpenstackFlavor("delete the amphora flavor", "orphera-amphora")
+          .after(openstack)
       val gone = networkGone :: flavorGone :: groupsGone
-      val unregistered = absentKeystoneEntries("remove Octavia from Keystone", "octavia").after(gone*)
+      val unregistered =
+        absentKeystoneEntries("remove Octavia from Keystone", "octavia").after(
+          gone*
+        )
       val stopped = command(
         "stop and remove the octavia containers and units",
         stopScript,
         onlyIf = anyUnit,
         timeout = 240
       ).after(unregistered)
-      val unplugged = absentOvsPort("remove the health manager port o-hm0 from br-int", "br-int", "o-hm0")
+      val unplugged = absentOvsPort(
+        "remove the health manager port o-hm0 from br-int",
+        "br-int",
+        "o-hm0"
+      )
         .after(stopped)
       // The helper goes with the files: the first step above needed it, and runs before them.
       val cleaned =
@@ -122,8 +139,19 @@ object octavia_teardown extends OrpheraApply:
             absentFile(keystoneHelperPath("octavia")),
             absentFile(openstackImageHelperPath("amphora-x64-haproxy-test")),
             absentFile(openstackNetworkHelperPath("lb-mgmt-net", "service")),
-            absentFile(openstackSecurityGroupHelperPath("lb-mgmt-sec-grp", "service")),
-            absentFile(openstackSecurityGroupHelperPath("lb-health-mgr-sec-grp", "service")),
+            absentFile(
+              openstackSecurityGroupHelperPath("lb-mgmt-sec-grp", "service")
+            ),
+            absentFile(
+              openstackSecurityGroupHelperPath(
+                "lb-health-mgr-sec-grp",
+                "service"
+              )
+            ),
             absentFile(openstackFlavorHelperPath("orphera-amphora"))
           )).map(_.after(unplugged))
-      List(openstack) ++ gone ++ List(unregistered, stopped, unplugged) ++ cleaned
+      List(openstack) ++ gone ++ List(
+        unregistered,
+        stopped,
+        unplugged
+      ) ++ cleaned

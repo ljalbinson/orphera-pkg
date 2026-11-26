@@ -49,7 +49,6 @@ object telemetry_teardown extends OrpheraApply:
     List("aodh-api", "aodh-evaluator", "aodh-notifier", "ceilometer-central")
   private val computeUnits = List("ceilometer-compute")
 
-
   // ---- tst7 ----
   private val scrapeFile = "/etc/prometheus/scrape.d/openstack-telemetry.yml"
   private val prometheusScript =
@@ -96,8 +95,12 @@ object telemetry_teardown extends OrpheraApply:
         )
       stopped ++ cleaned
     else
-      val unregisteredAodh = absentKeystoneEntries("remove Aodh and the Prometheus entry from Keystone", "aodh")
-      val unregisteredCeilometer = absentKeystoneEntries("remove Ceilometer from Keystone", "ceilometer")
+      val unregisteredAodh = absentKeystoneEntries(
+        "remove Aodh and the Prometheus entry from Keystone",
+        "aodh"
+      )
+      val unregisteredCeilometer =
+        absentKeystoneEntries("remove Ceilometer from Keystone", "ceilometer")
       val unregistered = List(unregisteredAodh, unregisteredCeilometer)
       val stopped =
         absentContainerUnits(nodeUnits.map(u => s"orphera-$u" -> u))

@@ -75,7 +75,8 @@ object rabbitmq_single_node extends OrpheraApply:
     val pulled = pullImages(
       "pull the RabbitMQ image",
       List(rabbitImage),
-      hint = "the ExternalImage in rabbitContainer in rabbitmq_single_node.scala",
+      hint =
+        "the ExternalImage in rabbitContainer in rabbitmq_single_node.scala",
       timeout = 1200
     ).after(podman)
     val data = directory(dataDir).after(podman)

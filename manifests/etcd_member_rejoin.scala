@@ -80,8 +80,10 @@ object etcd_member_rejoin extends OrpheraClusterPlaybook:
   private val stopAndWipePlan: ApplyPlan =
     import Resources.*
     val stopped = service("etcd", enabled = None, running = Some(false))
-    val wiped = absentDirectory("/var/lib/etcd", recursive = true).after(stopped)
-    val fresh = directory("/var/lib/etcd", owner = "etcd", group = "etcd").after(wiped)
+    val wiped =
+      absentDirectory("/var/lib/etcd", recursive = true).after(stopped)
+    val fresh =
+      directory("/var/lib/etcd", owner = "etcd", group = "etcd").after(wiped)
     ApplyPlan.orFail("etcd-stop-and-wipe", List(stopped, wiped, fresh))
 
   // Guarded the same way as removeMemberScript: safe to re-run this

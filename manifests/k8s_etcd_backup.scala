@@ -276,8 +276,18 @@ else:
     ApplyPlan.orFail(
       "etcd-backup-directories",
       List(
-        directory("/etc/etcd-backup", mode = "0700", owner = "root", group = "root"),
-        directory("/var/backups/etcd", mode = "0700", owner = "root", group = "root")
+        directory(
+          "/etc/etcd-backup",
+          mode = "0700",
+          owner = "root",
+          group = "root"
+        ),
+        directory(
+          "/var/backups/etcd",
+          mode = "0700",
+          owner = "root",
+          group = "root"
+        )
       )
     )
 

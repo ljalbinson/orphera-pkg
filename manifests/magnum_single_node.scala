@@ -985,12 +985,23 @@ if __name__ == '__main__':
       "register Magnum and its trustee domain in Keystone",
       "magnum",
       magnumPassword,
-      List(KeystoneService("magnum", "container-infra", s"http://$fqdn:$apiPort/v1")),
+      List(
+        KeystoneService(
+          "magnum",
+          "container-infra",
+          s"http://$fqdn:$apiPort/v1"
+        )
+      ),
       ksUrl,
       adminPassword,
       caCert,
       domain = Some(
-        KeystoneDomain("magnum", "Owns users and projects created by magnum", "magnum_domain_admin", domainAdminPassword)
+        KeystoneDomain(
+          "magnum",
+          "Owns users and projects created by magnum",
+          "magnum_domain_admin",
+          domainAdminPassword
+        )
       )
     )
     val registered = ensured.after(ca)
@@ -1079,7 +1090,12 @@ if __name__ == '__main__':
       buildDirectory,
       pylibDirectory,
       driver
-    ) ++ svcs.flatMap(_.resources) ++ List(dbSync, helperFile, keystoneHelper, registered) ++
+    ) ++ svcs.flatMap(_.resources) ++ List(
+      dbSync,
+      helperFile,
+      keystoneHelper,
+      registered
+    ) ++
       running ++ List(
         answering,
         reporting,
