@@ -78,7 +78,11 @@ object k8s_ceph_csi extends OrpheraClusterPlaybook:
       s"the client.$cephUserName cephx user and its key",
       s"client.$cephUserName",
       Secret(cephKey),
-      List("mon" -> "profile rbd", "mgr" -> "allow rw", "osd" -> s"profile rbd pool=$pool")
+      List(
+        "mon" -> "profile rbd",
+        "mgr" -> "allow rw",
+        "osd" -> s"profile rbd pool=$pool"
+      )
     ).after(rbdPool)
     ApplyPlan.orFail("ceph-pool-and-user", List(rbdPool, user))
 
@@ -86,7 +90,15 @@ object k8s_ceph_csi extends OrpheraClusterPlaybook:
     import Resources.*
     ApplyPlan.orFail(
       "ceph-key-file",
-      List(secretFile(keyFile, Secret(cephKey), mode = "0600", owner = "root", group = "root"))
+      List(
+        secretFile(
+          keyFile,
+          Secret(cephKey),
+          mode = "0600",
+          owner = "root",
+          group = "root"
+        )
+      )
     )
 
   // The kernel RBD client, loaded now and at boot (a `kernelModule`, which keeps
