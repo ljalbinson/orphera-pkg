@@ -2336,6 +2336,8 @@ URL=@@URL@@
 VERSION=@@VERSION@@
 STATE=@@STATE@@
 WANT=@@WANT@@
+REUSE=@@REUSE@@
+CHARTNAME=@@CHARTNAME@@
 
 deployed() {
   helm status "$REL" -n "$NS" -o json 2>/dev/null | grep -Eq '"status": ?"deployed"'
@@ -2351,7 +2353,11 @@ case "$1" in
   ensure)
     helm repo add "$REPO" "$URL" --force-update >/dev/null
     helm repo update >/dev/null
-    if [ -n "$VERSION" ]; then
+    if [ "$REUSE" = 1 ]; then
+      CUR=$(helm list -n "$NS" --filter "^${REL}\$" -o json | python3 -c 'import sys,json; r=json.load(sys.stdin); print(r[0]["chart"] if r else "")')
+      if [ -z "$CUR" ]; then echo "the release $REL is not installed in $NS" >&2; exit 1; fi
+      V="${CUR#"$CHARTNAME"-}"
+    elif [ -n "$VERSION" ]; then
       V=$(helm show chart "$CHART" --version "$VERSION" | awk '/^version:/{print $2}')
     else
       V=$(helm show chart "$CHART" | awk '/^version:/{print $2}')
@@ -2361,7 +2367,7 @@ case "$1" in
 @@VALUES@@
     EXTRA=""
 @@EXTRA@@
-    helm upgrade --install "$REL" "$CHART" --version "$V" --namespace "$NS" --create-namespace @@VALUESARG@@@@SETS@@$EXTRA @@WAIT@@
+    helm upgrade --install "$REL" "$CHART" --version "$V" --namespace "$NS" @@NSARG@@@@VALUESARG@@@@SETS@@$EXTRA @@WAIT@@
     mkdir -p "$(dirname "$STATE")"
     echo "$WANT" > "$STATE"
     echo "$REL $V installed"
@@ -2379,8 +2385,13 @@ esac
 
   /** The helper `helmRelease` writes for the release `release` in `namespace`.
     */
-  def helmReleaseHelperPath(namespace: String, release: String): String =
-    s"/usr/local/sbin/orphera-helm-$namespace-$release"
+  def helmReleaseHelperPath(
+      namespace: String,
+      release: String,
+      variant: String = ""
+  ): String =
+    s"/usr/local/sbin/orphera-helm-$namespace-$release" +
+      (if variant.isEmpty then "" else s"-$variant")
 
   /** The state file of a release made by `helmRelease` (the hash of the
     * description last installed).
@@ -2388,9 +2399,11 @@ esac
   def helmReleaseStatePath(
       namespace: String,
       release: String,
-      stateDir: String = "/var/lib/orphera/helm"
+      stateDir: String = "/var/lib/orphera/helm",
+      variant: String = ""
   ): String =
-    s"$stateDir/$namespace-$release.sha"
+    s"$stateDir/$namespace-$release" +
+      (if variant.isEmpty then "" else s"-$variant") + ".sha"
 
   private def helmName(what: String, text: String): Unit =
     require(
@@ -2420,7 +2433,13 @@ esac
     * by the check. `valuesFiles` are further values files on the node that are
     * passed with `-f` after the values, in the order given, when they exist and
     * are not empty (settings another playbook keeps there); the check does not
-    * see them either.
+    * see them either. With `reuseValues` the release must already be installed:
+    * the helper runs `helm upgrade --reuse-values` with the chart version the
+    * release has now (the values given are laid over the release's own, which
+    * is how a playbook adds settings to a release another one installed), and
+    * stops with a message when the release is not there. A `variant` is added
+    * to the helper's and the state file's names, for a second description of
+    * the same release (the one that installs it and the one that adds to it).
     */
   def helmRelease(
       label: String,
@@ -2436,10 +2455,13 @@ esac
       minutes: Int = 10,
       stateDir: String = "/var/lib/orphera/helm",
       valuesFrom: List[(String, String)] = Nil,
-      valuesFiles: List[String] = Nil
+      valuesFiles: List[String] = Nil,
+      reuseValues: Boolean = false,
+      variant: String = ""
   ): (ApplyResource, ApplyResource) =
     helmName("a release name", release)
     helmName("a namespace", namespace)
+    if variant.nonEmpty then helmName("a variant", variant)
     val parts = chart.split("/", -1)
     require(parts.length == 2, s"the chart must be repo/name, not '$chart'")
     parts.foreach(helmName("a chart or repository name", _))
@@ -2502,7 +2524,7 @@ esac
         text.getOrElse(""),
         set.map((k, v) => s"$k=$v").mkString("\n"),
         valuesFrom.map((t, f) => s"$t=$f").mkString("\n")
-      ).mkString("\u0000")
+      ).++(if reuseValues then List("reuse") else Nil).mkString("\u0000")
     )
     // Built without stripMargin: a line of the values may itself start with `|` (a YAML block scalar).
     val valuesBlock = text match
@@ -2536,9 +2558,17 @@ esac
       .replace("@@VERSION@@", Apply.quote(version.getOrElse("")))
       .replace(
         "@@STATE@@",
-        Apply.quote(helmReleaseStatePath(namespace, release, stateDir))
+        Apply.quote(
+          helmReleaseStatePath(namespace, release, stateDir, variant)
+        )
       )
       .replace("@@WANT@@", Apply.quote(want))
+      .replace("@@REUSE@@", if reuseValues then "1" else "0")
+      .replace("@@CHARTNAME@@", Apply.quote(parts(1)))
+      .replace(
+        "@@NSARG@@",
+        if reuseValues then "--reuse-values " else "--create-namespace "
+      )
       .replace("@@VALUES@@", valuesBlock)
       .replace(
         "@@EXTRA@@",
@@ -2552,7 +2582,7 @@ esac
         set.map((k, v) => s"--set ${Apply.quote(s"$k=$v")} ").mkString
       )
       .replace("@@WAIT@@", if wait then s"--wait --timeout ${minutes}m" else "")
-    val path = helmReleaseHelperPath(namespace, release)
+    val path = helmReleaseHelperPath(namespace, release, variant)
     val helper = secretFile(
       path,
       Secret(script),
