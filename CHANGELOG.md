@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- Group 4, `k8s_ceph_csi.scala` makes ceph-rbd the default StorageClass through the chart's `storageClass.annotations` value instead of a `kubectl patch` step, so it is part of the Helm release description (it is set again if the release is changed). The test step now checks that ceph-rbd is the default. The release is upgraded once on the next run because its values changed.
 - Group 4, `k8s_cluster.scala` labels the worker pools with an apply command whose check compares each pool's label selector with the nodes it should hold, so a node rebuilt without its labels is labelled again (the old step ran `kubectl label` on every run). The other steps of the file stay as they were.
 - Group 4, `k8s_gateway.scala` makes the gateway namespace, the wildcard Certificate, the Gateway and the HTTP redirect route with `kubeObjects`. The waits (certificate Ready, Gateway Programmed, the address check) are their own task and stay commands. The step that restarts Cilium's operator when its Gateway controller gave up is moved to Group 6, like the same step in `k8s_network_policy.scala`: it checks and repairs, it does not describe a state.
 - Group 4, `kubeObjects` makes the three OIDC ClusterRoleBindings (`k8s_oidc.scala`; the wait for the API server behind the VIP to be stable is its own task and stays a command) and the Cilium address pool and L2 announcement policy (`k8s_cilium.scala`).

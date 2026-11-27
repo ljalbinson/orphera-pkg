@@ -382,7 +382,7 @@ manifests/k8s_alertmanager.scala,162,apply command,make the SMTP password Secret
 manifests/k8s_argocd.scala,226,apply command,helm install argo-cd,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),done
 manifests/k8s_argocd.scala,240,apply command,HTTPRoute for $argoHost,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),done
 manifests/k8s_ceph_csi.scala,124,apply command,helm install ceph-csi-rbd,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),done
-manifests/k8s_ceph_csi.scala,215,RunCommand,make ceph-rbd the default StorageClass,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),not started
+manifests/k8s_ceph_csi.scala,211,helmRelease,make ceph-rbd the default StorageClass,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),done
 manifests/k8s_cert_manager.scala,66,apply command,helm install cert-manager,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),done
 manifests/k8s_cert_manager.scala,92,apply command,create the sub-CA secret and the ClusterIssuer,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),done
 manifests/k8s_cilium.scala,215,RunCommand,install the Gateway API CRDs,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),not started
