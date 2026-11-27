@@ -68,9 +68,8 @@ object k8s_cilium extends OrpheraClusterPlaybook:
        |$kc get crd gateways.gateway.networking.k8s.io httproutes.gateway.networking.k8s.io gatewayclasses.gateway.networking.k8s.io
        |echo "Gateway API $gatewayApiVersion CRDs installed"""".stripMargin
 
-  private val valuesYaml =
-    s"""cat > $stateDir/cilium-values.yaml <<EOF
-       |kubeProxyReplacement: true
+  private val ciliumValues =
+    s"""kubeProxyReplacement: true
        |k8sServiceHost: $apiHost
        |k8sServicePort: $apiPort
        |routingMode: tunnel
@@ -97,19 +96,24 @@ object k8s_cilium extends OrpheraClusterPlaybook:
        |    enabled: true
        |  ui:
        |    enabled: true
-       |EOF""".stripMargin
+       |""".stripMargin
 
-  private val installScript =
-    s"""set -e
-       |$valuesYaml
-       |helm repo add cilium https://helm.cilium.io/ --force-update >/dev/null
-       |helm repo update >/dev/null
-       |VER=$$(helm show chart cilium/cilium --version '~$ciliumMinor.0' | awk '/^version:/{print $$2}')
-       |[ -n "$$VER" ] || { echo "no Cilium chart of minor $ciliumMinor found" >&2; exit 1; }
-       |echo "installing Cilium chart $$VER"
-       |helm upgrade --install cilium cilium/cilium --version "$$VER" --namespace kube-system \\
-       |  -f $stateDir/cilium-values.yaml --kubeconfig /etc/kubernetes/admin.conf --wait --timeout 10m
-       |echo "Cilium $$VER installed"""".stripMargin
+  // The newest patch of `ciliumMinor`, found by Helm when the install runs. The values of the metrics playbook
+  // (k8s_cilium_metrics.scala) are passed after these when that file exists, so a new install keeps them.
+  private val installPlan: ApplyPlan =
+    import Resources.*
+    val (helper, installed) = helmRelease(
+      "helm install Cilium",
+      "cilium",
+      "cilium/cilium",
+      "https://helm.cilium.io/",
+      "kube-system",
+      version = Some(s"~$ciliumMinor.0"),
+      values = Some(Secret(ciliumValues)),
+      minutes = 10,
+      valuesFiles = List(s"$stateDir/cilium-metrics-values.yaml")
+    )
+    ApplyPlan.orFail("cilium", List(helper, installed))
 
   private val poolScript =
     s"""set -e
@@ -144,6 +148,8 @@ object k8s_cilium extends OrpheraClusterPlaybook:
   // an address in the pool and answer on it.
   private val testScript =
     s"""set -e
+       |# a run right after another may find the last test namespace still being deleted
+       |$kc wait --for=delete namespace/orphera-test --timeout=180s >/dev/null 2>&1 || true
        |$kc create namespace orphera-test --dry-run=client -o yaml | $kc apply -f -
        |cat <<EOF | $kc apply -f -
        |apiVersion: apps/v1
@@ -217,7 +223,7 @@ object k8s_cilium extends OrpheraClusterPlaybook:
         .build,
       stage("install-cilium", node)
         .task("helm install Cilium")(
-          Task.RunCommand(List("sh", "-c", installScript), timeoutSeconds = 900)
+          Task.Apply(installPlan)
         )
         .build,
       stage("confirm-nodes-ready", node)

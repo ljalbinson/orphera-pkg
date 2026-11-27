@@ -210,7 +210,7 @@ manifests/wordpress_teardown.scala,54,RunCommand,drop $dbName database and $dbUs
 manifests/control_host.scala,160,RunCommand,add the scala-sbt apt repository and its key,3,New general kinds,apt repository / download,"aptRepository (key + source), or archive (URL, checksum, unpack)",done
 manifests/etcd_cluster.scala,125,RunCommand,download and install etcd binaries,3,New general kinds,apt repository / download,"aptRepository (key + source), or archive (URL, checksum, unpack)",done
 manifests/etcd_grow_cluster.scala,180,RunCommand,download and install etcd binaries,3,New general kinds,apt repository / download,"aptRepository (key + source), or archive (URL, checksum, unpack)",done
-manifests/k8s_cilium.scala,207,RunCommand,install helm,3,New general kinds,apt repository / download,"aptRepository (key + source), or archive (URL, checksum, unpack)",not started
+manifests/k8s_cilium.scala,210,RunCommand,install helm,3,New general kinds,apt repository / download,"aptRepository (key + source), or archive (URL, checksum, unpack)",not started
 manifests/k8s_node_prep.scala,199,RunCommand,add the pkgs.k8s.io repository,3,New general kinds,apt repository / download,"aptRepository (key + source), or archive (URL, checksum, unpack)",done
 manifests/k8s_node_prep.scala,202,RunCommand,"install kubeadm, kubelet, kubectl, crictl",3,New general kinds,apt repository / download,"aptRepository (key + source), or archive (URL, checksum, unpack)",not started
 manifests/kolla_build.scala,465,apply command,install devpi,3,New general kinds,apt repository / download,"aptRepository (key + source), or archive (URL, checksum, unpack)",not started
@@ -360,7 +360,7 @@ manifests/cinder_teardown.scala,105,apply command,delete the $cephPool pool and 
 manifests/glance_ceph.scala,54,apply command,the $cephPool pool and the client.glance cephx user,4,New product-specific kinds,Ceph pool/key/orch,cephPool / cephKey / Ceph config option / orchestrator spec,done
 manifests/glance_teardown.scala,90,apply command,delete the $cephPool pool and client.glance,4,New product-specific kinds,Ceph pool/key/orch,cephPool / cephKey / Ceph config option / orchestrator spec,done
 manifests/k8s_ceph_csi.scala,190,RunCommand,create the pool and the client.k8s user,4,New product-specific kinds,Ceph pool/key/orch,cephPool / cephKey / Ceph config option / orchestrator spec,not started
-manifests/k8s_cilium.scala,238,RunCommand,create the address pool and the L2 announcement policy,4,New product-specific kinds,Ceph pool/key/orch,cephPool / cephKey / Ceph config option / orchestrator spec,not started
+manifests/k8s_cilium.scala,241,RunCommand,create the address pool and the L2 announcement policy,4,New product-specific kinds,Ceph pool/key/orch,cephPool / cephKey / Ceph config option / orchestrator spec,not started
 manifests/k8s_etcd_backup.scala,329,RunCommand,create the RGW user and read its S3 keys,4,New product-specific kinds,Ceph pool/key/orch,cephPool / cephKey / Ceph config option / orchestrator spec,not started
 manifests/manila_ceph.scala,67,apply command,create the CephFS filesystem $cephFs and wait for an active MDS,4,New product-specific kinds,Ceph pool/key/orch,cephPool / cephKey / Ceph config option / orchestrator spec,done
 manifests/manila_ceph.scala,68,apply command,create the NFS cluster $nfsCluster and wait for NFS-Ganesha on $nfsIp:2049,4,New product-specific kinds,Ceph pool/key/orch,cephPool / cephKey / Ceph config option / orchestrator spec,done
@@ -384,8 +384,8 @@ manifests/k8s_ceph_csi.scala,124,apply command,helm install ceph-csi-rbd,4,New p
 manifests/k8s_ceph_csi.scala,215,RunCommand,make ceph-rbd the default StorageClass,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),not started
 manifests/k8s_cert_manager.scala,67,apply command,helm install cert-manager,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),done
 manifests/k8s_cert_manager.scala,175,RunCommand,create the sub-CA secret and the ClusterIssuer,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),not started
-manifests/k8s_cilium.scala,212,RunCommand,install the Gateway API CRDs,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),not started
-manifests/k8s_cilium.scala,220,RunCommand,helm install Cilium,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),not started
+manifests/k8s_cilium.scala,215,RunCommand,install the Gateway API CRDs,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),not started
+manifests/k8s_cilium.scala,106,apply command,helm install Cilium,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),done
 manifests/k8s_cilium_metrics.scala,115,RunCommand,switch on Cilium and Hubble metrics (helm upgrade --reuse-values),4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),not started
 manifests/k8s_cluster.scala,308,RunCommand,label the worker pools,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),not started
 manifests/k8s_external_dns.scala,176,RunCommand,namespace and TSIG secret,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),not started
@@ -633,8 +633,8 @@ manifests/k8s_api_vip.scala,224,RunCommand,print which node holds the VIP,6,Stay
 manifests/k8s_argocd.scala,367,RunCommand,check the server and sync a test Application,6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
 manifests/k8s_ceph_csi.scala,223,RunCommand,write to and read from a volume,6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
 manifests/k8s_cert_manager.scala,180,RunCommand,issue and verify a certificate,6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
-manifests/k8s_cilium.scala,233,RunCommand,"show Cilium pods, nodes, GatewayClass",6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
-manifests/k8s_cilium.scala,243,RunCommand,nginx behind a LoadBalancer Service,6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
+manifests/k8s_cilium.scala,236,RunCommand,"show Cilium pods, nodes, GatewayClass",6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
+manifests/k8s_cilium.scala,246,RunCommand,nginx behind a LoadBalancer Service,6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
 manifests/k8s_cilium_metrics.scala,120,RunCommand,check the Prometheus targets,6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
 manifests/k8s_cluster.scala,259,RunCommand,"kubeadm init, CA hash, kubeconfig for localadmin",6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
 manifests/k8s_cluster.scala,276,RunCommand,kubeadm join --control-plane,6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
