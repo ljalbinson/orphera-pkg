@@ -282,7 +282,10 @@ echo "network policies for $NS: base $*"
           Task.Apply(helperPlan)
         )
         .task("check the helper and the Cilium policy CRD")(
-          Task.RunCommand(List("sh", "-c", helperCheckScript), timeoutSeconds = 60)
+          Task.RunCommand(
+            List("sh", "-c", helperCheckScript),
+            timeoutSeconds = 60
+          )
         )
         .build,
       stage("check-cilium-operator", node)
