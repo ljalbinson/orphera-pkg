@@ -391,8 +391,7 @@ manifests/k8s_cilium_metrics.scala,83,apply command,switch on Cilium and Hubble 
 manifests/k8s_cluster.scala,308,RunCommand,label the worker pools,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),not started
 manifests/k8s_external_dns.scala,59,apply command,namespace and TSIG secret,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),done
 manifests/k8s_external_dns.scala,119,apply command,helm install external-dns,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),done
-manifests/k8s_gateway.scala,213,RunCommand,make sure Cilium's Gateway controller is running,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),not started
-manifests/k8s_gateway.scala,221,RunCommand,"wildcard certificate, Gateway and HTTP redirect",4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),not started
+manifests/k8s_gateway.scala,64,apply command,"wildcard certificate, Gateway and HTTP redirect",4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),done
 manifests/k8s_kubeadm_config.scala,360,RunCommand,turn on the three scrape jobs,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),not started
 manifests/k8s_logging.scala,147,apply command,helm install Loki,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),done
 manifests/k8s_logging.scala,156,apply command,helm install Alloy,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),done
@@ -543,6 +542,8 @@ manifests/telemetry_prometheus.scala,89,apply command,promtool accepts the confi
 manifests/telemetry_single_node.scala,893,apply command,wait for the Ceilometer exporters to be up in Prometheus,5,Checks that stay scripts,wait/check,a check against a service API or image; could share a generic check-with-retry,not started
 manifests/trove_datastore.scala,362,apply command,the Trove API lists the mysql datastore and its default version,5,Checks that stay scripts,wait/check,a check against a service API or image; could share a generic check-with-retry,not started
 manifests/trove_single_node.scala,814,apply command,the API accepts an admin token and the guest resources exist,5,Checks that stay scripts,wait/check,a check against a service API or image; could share a generic check-with-retry,not started
+manifests/k8s_gateway.scala,225,RunCommand,make sure Cilium's Gateway controller is running,6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
+manifests/k8s_gateway.scala,236,RunCommand,wait for the certificate and the Gateway,6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
 manifests/k8s_network_lockdown.scala,176,RunCommand,"default deny for external-dns, then test it",6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
 manifests/k8s_network_lockdown.scala,184,RunCommand,"default deny for argocd, then test it",6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
 manifests/k8s_network_lockdown.scala,189,RunCommand,"default deny for logging, then test it",6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
