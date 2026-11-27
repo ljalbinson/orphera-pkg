@@ -109,6 +109,8 @@ object k8s_ceph_csi extends OrpheraClusterPlaybook:
        |storageClass:
        |  create: true
        |  name: ceph-rbd
+       |  annotations:
+       |    storageclass.kubernetes.io/is-default-class: "true"
        |  clusterID: "$clusterId"
        |  pool: $pool
        |  imageFeatures: layering
@@ -137,14 +139,11 @@ object k8s_ceph_csi extends OrpheraClusterPlaybook:
       List(monitors, helper, installed.after(monitors))
     )
 
-  private val defaultClassScript =
-    s"""set -e
-       |$kc patch storageclass ceph-rbd -p '{"metadata":{"annotations":{"storageclass.kubernetes.io/is-default-class":"true"}}}'
-       |$kc get storageclass
-       |""".stripMargin
-
   private val testScript =
     s"""set -e
+       |DEFAULT=$$($kc get storageclass -o jsonpath='{.items[?(@.metadata.annotations.storageclass\\.kubernetes\\.io/is-default-class=="true")].metadata.name}')
+       |echo "default StorageClass: $${DEFAULT:-none}"
+       |[ "$$DEFAULT" = "ceph-rbd" ] || { echo "ceph-rbd is not the default StorageClass" >&2; exit 1; }
        |$kc create namespace csi-test --dry-run=client -o yaml | $kc apply -f -
        |cat <<EOF | $kc apply -f -
        |apiVersion: v1
@@ -209,14 +208,8 @@ object k8s_ceph_csi extends OrpheraClusterPlaybook:
         )
         .build,
       stage("install-ceph-csi", node)
-        .task("helm install ceph-csi-rbd")(
+        .task("helm install ceph-csi-rbd, with ceph-rbd as the default StorageClass")(
           Task.Apply(installPlan)
-        )
-        .task("make ceph-rbd the default StorageClass")(
-          Task.RunCommand(
-            List("sh", "-c", defaultClassScript),
-            timeoutSeconds = 60
-          )
         )
         .build,
       stage("test-volume", node)
