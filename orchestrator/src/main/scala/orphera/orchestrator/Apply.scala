@@ -3271,6 +3271,65 @@ esac
       timeout = timeout
     )
 
+  /** A libvirt secret (`virsh secret-define` and `secret-set-value`), as a
+    * description, for a node with libvirtd running, such as the secret that
+    * holds a cephx key for the Ceph volumes (`usageType` `ceph`, a name for
+    * `usageName`). It is `unchanged` while `virsh secret-get-value` returns
+    * `value`; otherwise the secret is defined (not ephemeral, not private) and
+    * given the value, a base64 text. The usage and the uuid of a secret that
+    * already exists are not looked at, only its value. The value is in the
+    * command line, so it is visible in the process list while the step runs.
+    */
+  def libvirtSecret(
+      label: String,
+      uuid: String,
+      usageType: String,
+      usageName: String,
+      value: Secret,
+      timeout: Int = 60
+  ): ApplyResource =
+    require(
+      uuid.length == 36 && uuid.forall(c =>
+        c == '-' || (c.isDigit || ('a' to 'f').contains(c))
+      ),
+      s"not a lower-case uuid: '$uuid'"
+    )
+    require(
+      Set("ceph", "volume", "iscsi", "tls", "vtpm").contains(usageType),
+      s"not a libvirt secret usage type: '$usageType'"
+    )
+    require(
+      usageName.nonEmpty && usageName.forall(c =>
+        c.isLetterOrDigit || " ._-".contains(c)
+      ),
+      s"the usage name must be letters, digits, spaces and . _ - , not '$usageName'"
+    )
+    val v = value.reveal
+    require(
+      v.nonEmpty && v.forall(c =>
+        c.isLetterOrDigit || "+/=".contains(c)
+      ),
+      "the value of a libvirt secret must be base64 text"
+    )
+    command(
+      label,
+      s"""set -e
+         |XML=$$(mktemp)
+         |trap 'rm -f "$$XML"' EXIT
+         |cat > "$$XML" <<'XML_END'
+         |<secret ephemeral='no' private='no'>
+         |  <uuid>$uuid</uuid>
+         |  <usage type='$usageType'><name>$usageName</name></usage>
+         |</secret>
+         |XML_END
+         |virsh -c qemu:///system secret-define --file "$$XML"
+         |virsh -c qemu:///system secret-set-value --secret $uuid --base64 '$v'
+         |echo "libvirt secret $uuid set"""".stripMargin,
+      unless =
+        s"""virsh -c qemu:///system secret-get-value $uuid 2>/dev/null | grep -qx '$v'""",
+      timeout = timeout
+    )
+
   private def cephSpecSha(spec: String): String =
     MessageDigest
       .getInstance("SHA-256")

@@ -367,7 +367,7 @@ manifests/manila_ceph.scala,68,apply command,create the NFS cluster $nfsCluster 
 manifests/manila_ceph.scala,160,apply command,the client.manila cephx user and its key,4,New product-specific kinds,Ceph pool/key/orch,cephPool / cephKey / Ceph config option / orchestrator spec,done
 manifests/manila_teardown.scala,145,apply command,remove the cephx user client.manila,4,New product-specific kinds,Ceph pool/key/orch,cephPool / cephKey / Ceph config option / orchestrator spec,done
 manifests/manila_teardown.scala,84,apply command,remove the NFS cluster $nfsCluster (MANILA_PURGE_CEPH=yes),4,New product-specific kinds,Ceph pool/key/orch,cephPool / cephKey / Ceph config option / orchestrator spec,done
-manifests/nova_compute.scala,927,apply command,define the libvirt secret for the Ceph volumes,4,New product-specific kinds,Ceph pool/key/orch,cephPool / cephKey / Ceph config option / orchestrator spec,not started
+manifests/nova_compute.scala,927,apply command,define the libvirt secret for the Ceph volumes,4,New product-specific kinds,Ceph pool/key/orch,cephPool / cephKey / Ceph config option / orchestrator spec,done
 manifests/rgw_single_node.scala,368,apply command,clear the Keystone API version option (Ceph 20 has none),4,New product-specific kinds,Ceph pool/key/orch,cephPool / cephKey / Ceph config option / orchestrator spec,done
 manifests/rgw_single_node.scala,373,apply command,set the RGW Keystone options,4,New product-specific kinds,Ceph pool/key/orch,cephPool / cephKey / Ceph config option / orchestrator spec,done
 manifests/rgw_single_node.scala,376,apply command,apply the RGW service,4,New product-specific kinds,Ceph pool/key/orch,cephPool / cephKey / Ceph config option / orchestrator spec,done
