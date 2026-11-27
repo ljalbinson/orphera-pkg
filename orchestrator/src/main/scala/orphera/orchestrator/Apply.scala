@@ -2617,6 +2617,122 @@ esac
       timeout = timeout
     )
 
+  // The helper of `kubeObjects`: a root-only shell script (the YAML may hold secrets) with the objects in it.
+  // check = the hash of the YAML last applied is the one given and every object is still there;
+  // ensure = `kubectl apply`; exists/remove for the absent kind.
+  private val kubeObjectsScript: String =
+    """#!/bin/sh
+set -e
+export KUBECONFIG=@@KUBECONFIG@@
+STATE=@@STATE@@
+WANT=@@WANT@@
+TMP=$(mktemp)
+trap 'rm -f "$TMP"' EXIT
+cat > "$TMP" <<'ORPHERA_KUBE_EOF'
+@@YAML@@
+ORPHERA_KUBE_EOF
+
+present() {
+  kubectl get -f "$TMP" -o name >/dev/null 2>&1
+}
+
+case "$1" in
+  check)
+    [ "$(cat "$STATE" 2>/dev/null)" = "$WANT" ] && present
+    ;;
+  exists)
+    present
+    ;;
+  ensure)
+    kubectl apply -f "$TMP"
+    mkdir -p "$(dirname "$STATE")"
+    echo "$WANT" > "$STATE"
+    ;;
+  remove)
+    kubectl delete -f "$TMP" --ignore-not-found
+    rm -f "$STATE"
+    ;;
+  *)
+    echo "usage: ensure | check | exists | remove" >&2
+    exit 1
+    ;;
+esac
+"""
+
+  /** The helper `kubeObjects` writes under the name `name`. */
+  def kubeObjectsHelperPath(name: String): String =
+    s"/usr/local/sbin/orphera-kube-$name"
+
+  /** The state file of `kubeObjects` (the hash of the YAML last applied). */
+  def kubeObjectsStatePath(
+      name: String,
+      stateDir: String = "/var/lib/orphera/kube"
+  ): String =
+    s"$stateDir/$name.sha"
+
+  /** Kubernetes objects as a description: the YAML in `yaml` (one or more
+    * documents, each with its namespace where it has one) applied to the
+    * cluster the `kubeconfig` names. The result is the helper (a root-only
+    * script that holds the YAML, which may hold secrets) and the command that
+    * runs it. The command is `unchanged` while the hash of the YAML last
+    * applied (kept in `kubeObjectsStatePath`) is the description given and
+    * `kubectl get` finds every object, so an object deleted by hand is made
+    * again; otherwise it runs `kubectl apply`. A change made to an object's
+    * fields by hand is not noticed. `name` names the helper and the state file.
+    */
+  def kubeObjects(
+      label: String,
+      name: String,
+      yaml: Secret,
+      kubeconfig: String = "/etc/kubernetes/admin.conf",
+      stateDir: String = "/var/lib/orphera/kube",
+      timeout: Int = 180
+  ): (ApplyResource, ApplyResource) =
+    helmName("a name", name)
+    val text = yaml.reveal.replaceAll("\\n+$", "")
+    require(text.nonEmpty, "the YAML is empty")
+    require(
+      !text.linesIterator.exists(_ == "ORPHERA_KUBE_EOF"),
+      "the YAML holds the line ORPHERA_KUBE_EOF"
+    )
+    val script = kubeObjectsScript
+      .replace("@@KUBECONFIG@@", Apply.quote(kubeconfig))
+      .replace("@@STATE@@", Apply.quote(kubeObjectsStatePath(name, stateDir)))
+      .replace("@@WANT@@", Apply.quote(cephSpecSha(text)))
+      .replace("@@YAML@@", text)
+    val path = kubeObjectsHelperPath(name)
+    val helper = secretFile(
+      path,
+      Secret(script),
+      mode = "0700",
+      owner = "root",
+      group = "root"
+    )
+    val ensure = command(
+      label,
+      s"${Apply.quote(path)} ensure",
+      unless = s"${Apply.quote(path)} check >/dev/null 2>&1",
+      timeout = timeout
+    ).after(helper)
+    (helper, ensure)
+
+  /** What `kubeObjects` made, deleted again. It does nothing without the helper
+    * or while the objects are not there.
+    */
+  def absentKubeObjects(
+      label: String,
+      name: String,
+      timeout: Int = 180
+  ): ApplyResource =
+    helmName("a name", name)
+    val path = Apply.quote(kubeObjectsHelperPath(name))
+    command(
+      label,
+      s"""$path remove || echo "kubectl delete failed (continuing)"""",
+      onlyIf = s"[ -x $path ] && $path exists >/dev/null 2>&1",
+      timeout = timeout
+    )
+
   private def cephName(what: String, text: String): Unit =
     require(
       text.nonEmpty && text.forall(c => c.isLetterOrDigit || "_-.".contains(c)),

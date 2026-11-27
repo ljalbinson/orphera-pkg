@@ -52,14 +52,35 @@ object k8s_external_dns extends OrpheraClusterPlaybook:
     Secrets.register(k)
     k
 
-  // The namespace and the TSIG secret the chart's env refers to, and the annotation that keeps the redirect
-  // route's wildcard hostname under the hand-made record.
-  private val configScript =
+  // The namespace and the TSIG secret the chart's env refers to, as `kubeObjects` (a description: made again
+  // if either is deleted, applied again if the key changes).
+  private val configPlan: ApplyPlan =
+    import Resources.*
+    val (helper, made) = kubeObjects(
+      "namespace and TSIG secret",
+      "external-dns",
+      Secret(s"""apiVersion: v1
+                |kind: Namespace
+                |metadata:
+                |  name: $ns
+                |---
+                |apiVersion: v1
+                |kind: Secret
+                |metadata:
+                |  name: external-dns-tsig
+                |  namespace: $ns
+                |type: Opaque
+                |stringData:
+                |  secret: "$tsigSecret"
+                |""".stripMargin)
+    )
+    ApplyPlan.orFail("external-dns-config", List(helper, made))
+
+  // The annotation that keeps the redirect route's wildcard hostname under the hand-made record.
+  private val annotateScript =
     s"""set -e
-       |$kc create namespace $ns --dry-run=client -o yaml | $kc apply -f -
-       |$kc -n $ns create secret generic external-dns-tsig --from-literal=secret='$tsigSecret' --dry-run=client -o yaml | $kc apply -f -
        |$kc -n gateway annotate httproute http-to-https external-dns.alpha.kubernetes.io/controller=ignore --overwrite
-       |echo "namespace and TSIG secret written"
+       |echo "the redirect route is ignored by external-dns"
        |""".stripMargin
 
   private val chartValues: String =
@@ -174,7 +195,10 @@ object k8s_external_dns extends OrpheraClusterPlaybook:
     clusterPlaybook("k8s-external-dns")(
       stage("external-dns-config", node)
         .task("namespace and TSIG secret")(
-          Task.RunCommand(List("sh", "-c", configScript), timeoutSeconds = 120)
+          Task.Apply(configPlan)
+        )
+        .task("keep the redirect route out of external-dns")(
+          Task.RunCommand(List("sh", "-c", annotateScript), timeoutSeconds = 60)
         )
         .build,
       stage("install-external-dns", node)
