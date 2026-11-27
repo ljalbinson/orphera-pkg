@@ -2929,10 +2929,10 @@ esac
     )
 
   /** An S3 user of the Ceph object gateway (`radosgw-admin`) with a fixed
-    * access key and secret key, as a description, for a node with `cephadm`.
-    * It is `unchanged` while the user exists and holds that key pair; the user
-    * is made when it is missing, and a user that exists without that key pair
-    * gets it added (its other keys are left alone). The keys are arguments of
+    * access key and secret key, as a description, for a node with `cephadm`. It
+    * is `unchanged` while the user exists and holds that key pair; the user is
+    * made when it is missing, and a user that exists without that key pair gets
+    * it added (its other keys are left alone). The keys are arguments of
     * `radosgw-admin` while the command runs, since it takes no file: on the
     * Ceph node, in the process list, for that moment.
     */
