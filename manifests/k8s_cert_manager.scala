@@ -204,13 +204,17 @@ object k8s_cert_manager extends OrpheraClusterPlaybook:
         .build,
       stage("create-issuer", node)
         .task("check the sub-CA certificate and key")(
-          Task.RunCommand(List("sh", "-c", subCaCheckScript), timeoutSeconds = 60)
+          Task
+            .RunCommand(List("sh", "-c", subCaCheckScript), timeoutSeconds = 60)
         )
         .task("create the sub-CA secret and the ClusterIssuer")(
           Task.Apply(issuerPlan)
         )
         .task("wait for the ClusterIssuer to be ready")(
-          Task.RunCommand(List("sh", "-c", issuerReadyScript), timeoutSeconds = 180)
+          Task.RunCommand(
+            List("sh", "-c", issuerReadyScript),
+            timeoutSeconds = 180
+          )
         )
         .build,
       stage("test-certificate", node)
