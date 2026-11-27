@@ -343,8 +343,8 @@ manifests/telemetry_compute.scala,236,apply command,fetch Keystone's CA from its
 manifests/telemetry_single_node.scala,754,apply command,fetch Keystone's CA from its TLS handshake,3,New general kinds,x509 cert/CA,"certificate kinds: CA, key and signed certificate, chain, trusted CA, CA fetched from a TLS endpoint",done
 manifests/trove_guest_image.scala,408,apply command,fetch Keystone's CA from its TLS handshake,3,New general kinds,x509 cert/CA,"certificate kinds: CA, key and signed certificate, chain, trusted CA, CA fetched from a TLS endpoint",done
 manifests/trove_single_node.scala,706,apply command,fetch Keystone's CA from its TLS handshake,3,New general kinds,x509 cert/CA,"certificate kinds: CA, key and signed certificate, chain, trusted CA, CA fetched from a TLS endpoint",done
-manifests/ceph-health-fixes.scala,12,RunCommand,disable insecure global_id reclaim,4,New product-specific kinds,Ceph pool/key/orch,cephPool / cephKey / Ceph config option / orchestrator spec,not started
-manifests/ceph-health-fixes.scala,21,RunCommand,enable msgr2,4,New product-specific kinds,Ceph pool/key/orch,cephPool / cephKey / Ceph config option / orchestrator spec,not started
+manifests/ceph_health_fixes.scala,12,apply command,disable insecure global_id reclaim,4,New product-specific kinds,Ceph pool/key/orch,cephPool / cephKey / Ceph config option / orchestrator spec,done
+manifests/ceph_health_fixes.scala,21,apply command,enable msgr2,4,New product-specific kinds,Ceph pool/key/orch,cephPool / cephKey / Ceph config option / orchestrator spec,done
 manifests/ceph-health-fixes.yaml,10,yaml command,disable insecure global_id reclaim,4,New product-specific kinds,Ceph pool/key/orch,cephPool / cephKey / Ceph config option / orchestrator spec,not started
 manifests/ceph-health-fixes.yaml,14,yaml command,enable msgr2,4,New product-specific kinds,Ceph pool/key/orch,cephPool / cephKey / Ceph config option / orchestrator spec,not started
 manifests/cephadm_add_mons.scala,40,RunCommand,add tst1 to cephadm-managed hosts,4,New product-specific kinds,Ceph pool/key/orch,cephPool / cephKey / Ceph config option / orchestrator spec,not started
@@ -494,7 +494,7 @@ manifests/octavia_teardown.scala,134,apply command,remove the health manager por
 manifests/CommandHealthCheck.yaml,16,yaml command,secondaries,5,Checks that stay scripts,wait/check,a check against a service API or image; could share a generic check-with-retry,not started
 manifests/apt_cache.scala,85,apply command,tunnelling through the cache is allowed,5,Checks that stay scripts,wait/check,a check against a service API or image; could share a generic check-with-retry,not started
 manifests/barbican_single_node.scala,747,apply command,the API accepts an admin token and reaches its database,5,Checks that stay scripts,wait/check,a check against a service API or image; could share a generic check-with-retry,not started
-manifests/ceph-health-fixes.scala,24,RunCommand,confirm clean health,5,Checks that stay scripts,wait/check,a check against a service API or image; could share a generic check-with-retry,not started
+manifests/ceph_health_fixes.scala,24,RunCommand,confirm clean health,5,Checks that stay scripts,wait/check,a check against a service API or image; could share a generic check-with-retry,not started
 manifests/ceph-health-fixes.yaml,18,yaml command,confirm clean health,5,Checks that stay scripts,wait/check,a check against a service API or image; could share a generic check-with-retry,not started
 manifests/ceph-mgr.yaml,38,yaml command,confirm-mgr,5,Checks that stay scripts,wait/check,a check against a service API or image; could share a generic check-with-retry,not started
 manifests/ceph-mon-quorum.yaml,95,yaml command,confirm-quorum,5,Checks that stay scripts,wait/check,a check against a service API or image; could share a generic check-with-retry,not started

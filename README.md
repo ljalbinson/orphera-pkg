@@ -3465,7 +3465,7 @@ playbooks marked DRAFT there have been written but not all run on the lab.
 | `wordpress_site.scala`, `wordpress_teardown.scala` | A WordPress site (nginx, php-fpm) on tst7 with its database on the Galera cluster, and its removal |
 | `ceph_observability.scala` | Adds Ceph's own metrics to the Prometheus and Grafana stack on tst6 (see `manifests/Ceph-Observability-Lifecycle-Howto.md`) |
 | `ceph_performance_test.scala` | A `rados bench` run as a playbook, with pass or fail checks and cleanup |
-| `ceph_mon_keyring.scala`, `ceph_mon_quorum.scala`, `ceph_mgr.scala`, `ceph_admin_keyring.scala`, `ceph-osd.scala`, `ceph-health-fixes.scala`, `ceph_teardown.scala` | The steps of the manual Ceph path, in the order in `manifests/Ceph-Playbook-Usage.md`, and its teardown |
+| `ceph_mon_keyring.scala`, `ceph_mon_quorum.scala`, `ceph_mgr.scala`, `ceph_admin_keyring.scala`, `ceph-osd.scala`, `ceph_health_fixes.scala`, `ceph_teardown.scala` | The steps of the manual Ceph path, in the order in `manifests/Ceph-Playbook-Usage.md`, and its teardown |
 | `cephadm_add_mons.scala`, `cephadm_mon_rolling_upgrade.scala` | The cephadm path: adding monitors on tst1 and tst2, and a package-based rolling monitor upgrade with tst0 first (for a cephadm cluster, use `ceph_upgrade.scala`) |
 | `ceph_upgrade.scala` | Staged cephadm upgrade of the whole cluster to a new release, health-checked between stages (see [upgrading the Ceph cluster](#example-upgrading-the-ceph-cluster-cephadm)) |
 | `ceph_client_upgrade.scala`, `ceph_key_rotation.scala` | Ceph's own client for the OpenStack services and compute hosts, then their keys rotated to `aes256k` and the monitors set to `aes256k` only |
