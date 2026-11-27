@@ -135,15 +135,28 @@ policy cluster '  egress:
 echo "network policies for $NS: base $*"
 """
 
-  private val installScript =
+  // The helper as a typed file (written again if it changes or is edited by hand).
+  private val helperPlan: ApplyPlan =
+    import Resources.*
+    ApplyPlan.orFail(
+      "netpol-helper",
+      List(
+        file(
+          helper,
+          helperText,
+          mode = "0755",
+          owner = "root",
+          group = "root"
+        )
+      )
+    )
+
+  // The helper has to be valid shell, and Cilium has to have the policy CRD.
+  private val helperCheckScript =
     s"""set -e
-       |cat > $helper <<'HELPEREOF'
-       |$helperText
-       |HELPEREOF
-       |chmod 755 $helper
        |bash -n $helper
        |$kc get crd ciliumnetworkpolicies.cilium.io >/dev/null
-       |echo "$helper installed"
+       |echo "$helper is valid and the Cilium policy CRD is there"
        |""".stripMargin
 
   // After the API servers restart (Pod Security, Keycloak login) the Cilium operator's
@@ -266,7 +279,10 @@ echo "network policies for $NS: base $*"
     clusterPlaybook("k8s-network-policy")(
       stage("install-netpol-helper", node)
         .task("install orphera-netpol")(
-          Task.RunCommand(List("sh", "-c", installScript), timeoutSeconds = 60)
+          Task.Apply(helperPlan)
+        )
+        .task("check the helper and the Cilium policy CRD")(
+          Task.RunCommand(List("sh", "-c", helperCheckScript), timeoutSeconds = 60)
         )
         .build,
       stage("check-cilium-operator", node)
