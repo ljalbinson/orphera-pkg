@@ -401,35 +401,44 @@ yaml.safe_dump(d, open('/etc/kubernetes/manifests/.kube-apiserver.yaml.new', 'w'
        |[ "$$OKS" -eq 5 ] || { echo "the API server behind the VIP is not stable" >&2; exit 1; }
        |""".stripMargin
 
-  private val rbacScript =
+  private val rbacWaitScript =
     s"""set -e
        |$waitApiScript
-       |cat <<EOF | $kc apply -f -
-       |apiVersion: rbac.authorization.k8s.io/v1
-       |kind: ClusterRoleBinding
-       |metadata:
-       |  name: oidc-k8s-admins
-       |roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: cluster-admin}
-       |subjects:
-       |- {apiGroup: rbac.authorization.k8s.io, kind: Group, name: "oidc:k8s-admins"}
-       |---
-       |apiVersion: rbac.authorization.k8s.io/v1
-       |kind: ClusterRoleBinding
-       |metadata:
-       |  name: oidc-k8s-developers
-       |roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: edit}
-       |subjects:
-       |- {apiGroup: rbac.authorization.k8s.io, kind: Group, name: "oidc:k8s-developers"}
-       |---
-       |apiVersion: rbac.authorization.k8s.io/v1
-       |kind: ClusterRoleBinding
-       |metadata:
-       |  name: oidc-k8s-viewers
-       |roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: view}
-       |subjects:
-       |- {apiGroup: rbac.authorization.k8s.io, kind: Group, name: "oidc:k8s-viewers"}
-       |EOF
+       |echo "the API server behind the VIP is stable"
        |""".stripMargin
+
+  // The three ClusterRoleBindings as `kubeObjects` (made again if one is deleted).
+  private val rbacPlan: ApplyPlan =
+    import Resources.*
+    val (helper, made) = kubeObjects(
+      "bind the Keycloak groups to cluster roles",
+      "oidc-rbac",
+      Secret("""apiVersion: rbac.authorization.k8s.io/v1
+               |kind: ClusterRoleBinding
+               |metadata:
+               |  name: oidc-k8s-admins
+               |roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: cluster-admin}
+               |subjects:
+               |- {apiGroup: rbac.authorization.k8s.io, kind: Group, name: "oidc:k8s-admins"}
+               |---
+               |apiVersion: rbac.authorization.k8s.io/v1
+               |kind: ClusterRoleBinding
+               |metadata:
+               |  name: oidc-k8s-developers
+               |roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: edit}
+               |subjects:
+               |- {apiGroup: rbac.authorization.k8s.io, kind: Group, name: "oidc:k8s-developers"}
+               |---
+               |apiVersion: rbac.authorization.k8s.io/v1
+               |kind: ClusterRoleBinding
+               |metadata:
+               |  name: oidc-k8s-viewers
+               |roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: view}
+               |subjects:
+               |- {apiGroup: rbac.authorization.k8s.io, kind: Group, name: "oidc:k8s-viewers"}
+               |""".stripMargin)
+    )
+    ApplyPlan.orFail("oidc-rbac", List(helper, made))
 
   // Rewrites every Secret so it is stored encrypted, then reads one from etcd.
   private val encryptScript =
@@ -533,8 +542,12 @@ yaml.safe_dump(d, open('/etc/kubernetes/manifests/.kube-apiserver.yaml.new', 'w'
         )
         .build,
       stage("rbac", "tst30")
+        .task("wait for the API server behind the VIP to be stable")(
+          Task
+            .RunCommand(List("sh", "-c", rbacWaitScript), timeoutSeconds = 180)
+        )
         .task("bind the Keycloak groups to cluster roles")(
-          Task.RunCommand(List("sh", "-c", rbacScript), timeoutSeconds = 60)
+          Task.Apply(rbacPlan)
         )
         .task("encrypt the existing Secrets and check etcd")(
           Task.RunCommand(List("sh", "-c", encryptScript), timeoutSeconds = 180)

@@ -115,31 +115,35 @@ object k8s_cilium extends OrpheraClusterPlaybook:
     )
     ApplyPlan.orFail("cilium", List(helper, installed))
 
-  private val poolScript =
-    s"""set -e
-       |cat <<EOF | $kc apply -f -
-       |apiVersion: cilium.io/v2alpha1
-       |kind: CiliumLoadBalancerIPPool
-       |metadata:
-       |  name: lan-pool
-       |spec:
-       |  blocks:
-       |  - start: "$poolStart"
-       |    stop: "$poolStop"
-       |---
-       |apiVersion: cilium.io/v2alpha1
-       |kind: CiliumL2AnnouncementPolicy
-       |metadata:
-       |  name: lan-l2
-       |spec:
-       |  nodeSelector:
-       |    matchLabels:
-       |      pool: infra
-       |  interfaces:
-       |  - ^enp1s0$$
-       |  loadBalancerIPs: true
-       |EOF
-       |$kc get ciliumloadbalancerippools,ciliuml2announcementpolicies""".stripMargin
+  // The address pool and the L2 announcement policy as `kubeObjects` (made again if either is deleted).
+  private val poolPlan: ApplyPlan =
+    import Resources.*
+    val (helper, made) = kubeObjects(
+      "create the address pool and the L2 announcement policy",
+      "cilium-lb-pool",
+      Secret(s"""apiVersion: cilium.io/v2alpha1
+                |kind: CiliumLoadBalancerIPPool
+                |metadata:
+                |  name: lan-pool
+                |spec:
+                |  blocks:
+                |  - start: "$poolStart"
+                |    stop: "$poolStop"
+                |---
+                |apiVersion: cilium.io/v2alpha1
+                |kind: CiliumL2AnnouncementPolicy
+                |metadata:
+                |  name: lan-l2
+                |spec:
+                |  nodeSelector:
+                |    matchLabels:
+                |      pool: infra
+                |  interfaces:
+                |  - ^enp1s0$$
+                |  loadBalancerIPs: true
+                |""".stripMargin)
+    )
+    ApplyPlan.orFail("cilium-lb-pool", List(helper, made))
 
   private val allReadyScript =
     s"""[ "$$($kc get nodes --no-headers | awk '$$2=="Ready"' | wc -l)" -eq 10 ]"""
@@ -241,7 +245,7 @@ object k8s_cilium extends OrpheraClusterPlaybook:
         .build,
       stage("load-balancer-pool", node)
         .task("create the address pool and the L2 announcement policy")(
-          Task.RunCommand(List("sh", "-c", poolScript), timeoutSeconds = 60)
+          Task.Apply(poolPlan)
         )
         .build,
       stage("test-load-balancer", node)
