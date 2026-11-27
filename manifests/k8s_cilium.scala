@@ -62,11 +62,40 @@ object k8s_cilium extends OrpheraClusterPlaybook:
       |rm -f /tmp/get-helm-3
       |echo "helm installed: $(helm version --short)"""".stripMargin
 
-  private val gatewayCrdsScript =
-    s"""set -e
-       |$kc apply --server-side -f https://github.com/kubernetes-sigs/gateway-api/releases/download/$gatewayApiVersion/standard-install.yaml
-       |$kc get crd gateways.gateway.networking.k8s.io httproutes.gateway.networking.k8s.io gatewayclasses.gateway.networking.k8s.io
-       |echo "Gateway API $gatewayApiVersion CRDs installed"""".stripMargin
+  // The standard channel of the Gateway API release, kept on the node so the apply does not
+  // depend on a second download. Every CRD of the release carries the bundle version in an
+  // annotation; the description is met when the five CRDs have the version wanted.
+  private val gatewayCrdsFile = s"$stateDir/gateway-api-$gatewayApiVersion.yaml"
+
+  private val gatewayCrdsCurrent: String =
+    List(
+      "gatewayclasses",
+      "gateways",
+      "httproutes",
+      "referencegrants",
+      "grpcroutes"
+    )
+      .map(c =>
+        s"""[ "$$($kc get crd $c.gateway.networking.k8s.io -o jsonpath='{.metadata.annotations.gateway\\.networking\\.k8s\\.io/bundle-version}' 2>/dev/null)" = "$gatewayApiVersion" ]"""
+      )
+      .mkString(" && ")
+
+  private val gatewayCrdsPlan: ApplyPlan =
+    import Resources.*
+    val fetched = download(
+      "download the Gateway API CRDs",
+      s"https://github.com/kubernetes-sigs/gateway-api/releases/download/$gatewayApiVersion/standard-install.yaml",
+      gatewayCrdsFile,
+      skipIf = gatewayCrdsCurrent,
+      timeout = 300
+    )
+    val applied = command(
+      "install the Gateway API CRDs",
+      s"$kc apply --server-side -f $gatewayCrdsFile",
+      unless = gatewayCrdsCurrent,
+      timeout = 120
+    )
+    ApplyPlan.orFail("gateway-api-crds", List(fetched, applied.after(fetched)))
 
   private val ciliumValues =
     s"""kubeProxyReplacement: true
@@ -219,10 +248,7 @@ object k8s_cilium extends OrpheraClusterPlaybook:
         .build,
       stage("gateway-api-crds", node)
         .task("install the Gateway API CRDs")(
-          Task.RunCommand(
-            List("sh", "-c", gatewayCrdsScript),
-            timeoutSeconds = 120
-          )
+          Task.Apply(gatewayCrdsPlan)
         )
         .build,
       stage("install-cilium", node)
