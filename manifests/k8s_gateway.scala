@@ -57,72 +57,85 @@ object k8s_gateway extends OrpheraClusterPlaybook:
        |fi
        |""".stripMargin
 
-  private val gatewayScript =
+  // The namespace, the wildcard certificate, the Gateway and the HTTP redirect as `kubeObjects` (made again if
+  // one is deleted). The waits and the address check below are the proof that the Gateway took them.
+  private val gatewayPlan: ApplyPlan =
+    import Resources.*
+    val (helper, made) = kubeObjects(
+      "wildcard certificate, Gateway and HTTP redirect",
+      "gateway",
+      Secret(s"""apiVersion: v1
+                |kind: Namespace
+                |metadata:
+                |  name: gateway
+                |---
+                |apiVersion: cert-manager.io/v1
+                |kind: Certificate
+                |metadata:
+                |  name: wildcard-k8s
+                |  namespace: gateway
+                |spec:
+                |  secretName: wildcard-k8s-tls
+                |  dnsNames:
+                |  - "*.$domain"
+                |  - "$domain"
+                |  issuerRef:
+                |    name: orphera-ca
+                |    kind: ClusterIssuer
+                |---
+                |apiVersion: gateway.networking.k8s.io/v1
+                |kind: Gateway
+                |metadata:
+                |  name: public
+                |  namespace: gateway
+                |spec:
+                |  gatewayClassName: cilium
+                |  infrastructure:
+                |    annotations:
+                |      lbipam.cilium.io/ips: "$lbIp"
+                |  listeners:
+                |  - name: http
+                |    protocol: HTTP
+                |    port: 80
+                |    hostname: "*.$domain"
+                |    allowedRoutes:
+                |      namespaces:
+                |        from: All
+                |  - name: https
+                |    protocol: HTTPS
+                |    port: 443
+                |    hostname: "*.$domain"
+                |    tls:
+                |      mode: Terminate
+                |      certificateRefs:
+                |      - name: wildcard-k8s-tls
+                |    allowedRoutes:
+                |      namespaces:
+                |        from: All
+                |---
+                |apiVersion: gateway.networking.k8s.io/v1
+                |kind: HTTPRoute
+                |metadata:
+                |  name: http-to-https
+                |  namespace: gateway
+                |spec:
+                |  parentRefs:
+                |  - name: public
+                |    sectionName: http
+                |  hostnames:
+                |  - "*.$domain"
+                |  rules:
+                |  - filters:
+                |    - type: RequestRedirect
+                |      requestRedirect:
+                |        scheme: https
+                |        statusCode: 301
+                |""".stripMargin)
+    )
+    ApplyPlan.orFail("gateway", List(helper, made))
+
+  private val gatewayReadyScript =
     s"""set -e
-       |$kc create namespace gateway --dry-run=client -o yaml | $kc apply -f -
-       |cat <<EOF | $kc apply -f -
-       |apiVersion: cert-manager.io/v1
-       |kind: Certificate
-       |metadata:
-       |  name: wildcard-k8s
-       |  namespace: gateway
-       |spec:
-       |  secretName: wildcard-k8s-tls
-       |  dnsNames:
-       |  - "*.$domain"
-       |  - "$domain"
-       |  issuerRef:
-       |    name: orphera-ca
-       |    kind: ClusterIssuer
-       |---
-       |apiVersion: gateway.networking.k8s.io/v1
-       |kind: Gateway
-       |metadata:
-       |  name: public
-       |  namespace: gateway
-       |spec:
-       |  gatewayClassName: cilium
-       |  infrastructure:
-       |    annotations:
-       |      lbipam.cilium.io/ips: "$lbIp"
-       |  listeners:
-       |  - name: http
-       |    protocol: HTTP
-       |    port: 80
-       |    hostname: "*.$domain"
-       |    allowedRoutes:
-       |      namespaces:
-       |        from: All
-       |  - name: https
-       |    protocol: HTTPS
-       |    port: 443
-       |    hostname: "*.$domain"
-       |    tls:
-       |      mode: Terminate
-       |      certificateRefs:
-       |      - name: wildcard-k8s-tls
-       |    allowedRoutes:
-       |      namespaces:
-       |        from: All
-       |---
-       |apiVersion: gateway.networking.k8s.io/v1
-       |kind: HTTPRoute
-       |metadata:
-       |  name: http-to-https
-       |  namespace: gateway
-       |spec:
-       |  parentRefs:
-       |  - name: public
-       |    sectionName: http
-       |  hostnames:
-       |  - "*.$domain"
-       |  rules:
-       |  - filters:
-       |    - type: RequestRedirect
-       |      requestRedirect:
-       |        scheme: https
-       |        statusCode: 301
-       |EOF
        |$kc -n gateway wait --for=condition=Ready certificate/wildcard-k8s --timeout=180s
        |$kc -n gateway wait --for=condition=Programmed gateway/public --timeout=180s
        |IP=""
@@ -218,7 +231,13 @@ object k8s_gateway extends OrpheraClusterPlaybook:
         .build,
       stage("create-gateway", node)
         .task("wildcard certificate, Gateway and HTTP redirect")(
-          Task.RunCommand(List("sh", "-c", gatewayScript), timeoutSeconds = 600)
+          Task.Apply(gatewayPlan)
+        )
+        .task("wait for the certificate and the Gateway")(
+          Task.RunCommand(
+            List("sh", "-c", gatewayReadyScript),
+            timeoutSeconds = 600
+          )
         )
         .build,
       stage("test-gateway", node)
