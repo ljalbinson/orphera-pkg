@@ -90,7 +90,10 @@ object k8s_cilium_metrics extends OrpheraClusterPlaybook:
       reuseValues = true,
       variant = "metrics"
     )
-    ApplyPlan.orFail("cilium-metrics", List(values, helper, applied.after(values)))
+    ApplyPlan.orFail(
+      "cilium-metrics",
+      List(values, helper, applied.after(values))
+    )
 
   private val rolloutScript =
     s"""set -e
@@ -135,7 +138,8 @@ object k8s_cilium_metrics extends OrpheraClusterPlaybook:
           Task.Apply(applyPlan)
         )
         .task("wait for the Cilium DaemonSet to roll out")(
-          Task.RunCommand(List("sh", "-c", rolloutScript), timeoutSeconds = 1000)
+          Task
+            .RunCommand(List("sh", "-c", rolloutScript), timeoutSeconds = 1000)
         )
         .build,
       stage("cilium-metrics-test", node)
