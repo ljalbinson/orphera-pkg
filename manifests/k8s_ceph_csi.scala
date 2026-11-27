@@ -7,8 +7,8 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 // (tst0-tst2) with ceph-csi (RBD). Needs k8s_cilium.scala.
 //
 // On tst0: the pool `k8s-rbd` and the Ceph user `client.k8s` (a pool-scoped
-// RBD user; the key is made on tst0 and copied to tst30 as a root-only file,
-// never written in this repository). On all ten nodes: the `rbd` kernel
+// RBD user; the key is the secret `k8s/ceph-key` and is written on tst30 as a
+// root-only file, never written in this repository). On all ten nodes: the `rbd` kernel
 // module (ceph-csi maps volumes with it). On tst30: the Helm chart
 // ceph-csi-rbd in the namespace ceph-csi-rbd with the three monitors, the
 // Secret for the user and a StorageClass `ceph-rbd`, which is made the
@@ -31,7 +31,7 @@ object k8s_ceph_csi extends OrpheraClusterPlaybook:
   private val cephNode = "tst0"
   private val allNodes = (30 to 39).map(n => s"tst$n").toList
   private val pool = "k8s-rbd"
-  private val cephUser = "k8s"
+  private val cephUserName = "k8s"
   private val clusterId = "orphera-ceph"
   private val stateDir = "/etc/kubernetes/orphera"
   private val keyFile = s"$stateDir/ceph-k8s.key"
@@ -40,37 +40,66 @@ object k8s_ceph_csi extends OrpheraClusterPlaybook:
   // The kernel RBD client (`rbd map`, which ceph-csi uses on the nodes) cannot
   // load an `aes256k` key, the default since Ceph 19.2.6 ("failed to add secret
   // to kernel", error 524). So, as for Cinder and Glance, the user gets a
-  // legacy `aes` key: base64 of a header (type 1, timestamp, length 16) plus 16
-  // random bytes, made here on tst0 and imported with `ceph auth import`. The
-  // monitors accept it while `auth_allowed_ciphers` still lists `aes`, which
-  // the Cinder playbook already arranges (set again here). An existing user
-  // whose key is already of type 1 is kept, so a re-run changes nothing.
-  // TEST CLUSTER COMPROMISE, as noted in cinder_single_node.scala.
-  private val cephScript =
-    s"""set -e
-       |cephadm shell -- ceph mon set auth_allowed_ciphers aes,aes256k
-       |cephadm shell -- ceph osd pool create $pool
-       |cephadm shell -- rbd pool init $pool
-       |KEY=$$(cephadm shell -- ceph auth get-key client.$cephUser 2>/dev/null | tail -n 1 || true)
-       |TYPE=$$(printf '%s' "$$KEY" | base64 -d 2>/dev/null | head -c 1 | od -An -tu1 | tr -d ' ')
-       |if [ "$$TYPE" != "1" ]; then
-       |  KEY=$$(python3 -c "import os,struct,base64,time;print(base64.b64encode(struct.pack('<HIIH',1,int(time.time()),0,16)+os.urandom(16)).decode())")
-       |  umask 077
-       |  cat > /tmp/$cephUser.keyring <<KEYRING
-       |[client.$cephUser]
-       |    key = $$KEY
-       |    caps mon = "profile rbd"
-       |    caps mgr = "allow rw"
-       |    caps osd = "profile rbd pool=$pool"
-       |KEYRING
-       |  cephadm shell --mount /tmp/$cephUser.keyring -- ceph auth import -i /mnt/$cephUser.keyring
-       |  rm -f /tmp/$cephUser.keyring
-       |  echo "client.$cephUser given a new key of the legacy aes type"
-       |fi
-       |umask 077
-       |printf '%s' "$$KEY" > /etc/ceph/ceph.client.$cephUser.key
-       |echo "pool $pool and client.$cephUser ready"
-       |""".stripMargin
+  // legacy `aes` key. The key comes from the secret `k8s/ceph-key`: a whole
+  // cephx key (as ceph_key_rotation.scala would store) is used as it is,
+  // anything else (a name with no value is made at random on first use) is the
+  // text an old `aes` key is derived from: base64 of a 12 byte header (type 1,
+  // a creation time, the key length 16) and 16 key bytes from a SHA-256 of the
+  // text, the same on every run. The monitors accept it while
+  // `auth_allowed_ciphers` still lists `aes`, which cephUser arranges for an
+  // `aes` key. TEST CLUSTER COMPROMISE, as noted in cinder_single_node.scala.
+  private val cephKey: String =
+    val stored = Secrets.secret("k8s/ceph-key").reveal
+    if CephKeys.isKey(stored) then stored
+    else
+      val keyBytes = java.security.MessageDigest
+        .getInstance("SHA-256")
+        .digest(stored.getBytes(java.nio.charset.StandardCharsets.UTF_8))
+        .take(16)
+      val header = java.nio.ByteBuffer
+        .allocate(12)
+        .order(java.nio.ByteOrder.LITTLE_ENDIAN)
+        .putShort(1.toShort)
+        .putInt(1700000000)
+        .putInt(0)
+        .putShort(16.toShort)
+        .array()
+      val derived =
+        java.util.Base64.getEncoder.encodeToString(header ++ keyBytes)
+      // Not a stored secret itself, so it is registered to be masked in output.
+      Secrets.register(derived)
+      derived
+
+  // The pool and the user on the Ceph node; the key file for the Helm values on tst30.
+  private val cephPlan: ApplyPlan =
+    import Resources.*
+    val rbdPool = cephPool(s"the $pool pool", pool)
+    val user = cephUser(
+      s"the client.$cephUserName cephx user and its key",
+      s"client.$cephUserName",
+      Secret(cephKey),
+      List(
+        "mon" -> "profile rbd",
+        "mgr" -> "allow rw",
+        "osd" -> s"profile rbd pool=$pool"
+      )
+    ).after(rbdPool)
+    ApplyPlan.orFail("ceph-pool-and-user", List(rbdPool, user))
+
+  private val keyFilePlan: ApplyPlan =
+    import Resources.*
+    ApplyPlan.orFail(
+      "ceph-key-file",
+      List(
+        secretFile(
+          keyFile,
+          Secret(cephKey),
+          mode = "0600",
+          owner = "root",
+          group = "root"
+        )
+      )
+    )
 
   // The kernel RBD client, loaded now and at boot (a `kernelModule`, which keeps
   // /etc/modules-load.d/orphera-rbd.conf). The earlier version wrote rbd.conf there by hand; that file
@@ -98,12 +127,21 @@ object k8s_ceph_csi extends OrpheraClusterPlaybook:
        |  - "{{nodes.tst2.cluster_ip}}:6789"
        |""".stripMargin
 
+  private val keyFingerprint: String =
+    java.security.MessageDigest
+      .getInstance("SHA-256")
+      .digest(cephKey.getBytes(java.nio.charset.StandardCharsets.UTF_8))
+      .take(6)
+      .map(b => f"${b & 0xff}%02x")
+      .mkString
+
   // The key is put in at the line `@@KEY@@` when the helper runs; `|-` keeps the value free of a newline.
   private val cephCsiValues =
-    s"""secret:
+    s"""# key fingerprint: $keyFingerprint (a changed key changes the description, so the release is upgraded)
+       |secret:
        |  create: true
        |  name: csi-rbd-secret
-       |  userID: $cephUser
+       |  userID: $cephUserName
        |  userKey: |-
        |    @@KEY@@
        |storageClass:
@@ -187,19 +225,12 @@ object k8s_ceph_csi extends OrpheraClusterPlaybook:
     clusterPlaybook("k8s-ceph-csi")(
       stage("ceph-pool-and-user", cephNode)
         .task("create the pool and the client.k8s user")(
-          Task.RunCommand(List("sh", "-c", cephScript), timeoutSeconds = 180)
+          Task.Apply(cephPlan)
         )
         .build,
       stage("send-key", node)
-        .task("copy the key to tst30")(
-          Task.DistributeFile(
-            cephNode,
-            s"/etc/ceph/ceph.client.$cephUser.key",
-            keyFile,
-            "root",
-            "root",
-            384
-          )
+        .task("write the key on tst30")(
+          Task.Apply(keyFilePlan)
         )
         .build,
       stage("rbd-module", allNodes*)
