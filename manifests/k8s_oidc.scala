@@ -543,7 +543,8 @@ yaml.safe_dump(d, open('/etc/kubernetes/manifests/.kube-apiserver.yaml.new', 'w'
         .build,
       stage("rbac", "tst30")
         .task("wait for the API server behind the VIP to be stable")(
-          Task.RunCommand(List("sh", "-c", rbacWaitScript), timeoutSeconds = 180)
+          Task
+            .RunCommand(List("sh", "-c", rbacWaitScript), timeoutSeconds = 180)
         )
         .task("bind the Keycloak groups to cluster roles")(
           Task.Apply(rbacPlan)
