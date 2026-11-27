@@ -387,7 +387,7 @@ manifests/k8s_cert_manager.scala,67,apply command,helm install cert-manager,4,Ne
 manifests/k8s_cert_manager.scala,175,RunCommand,create the sub-CA secret and the ClusterIssuer,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),not started
 manifests/k8s_cilium.scala,215,RunCommand,install the Gateway API CRDs,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),not started
 manifests/k8s_cilium.scala,106,apply command,helm install Cilium,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),done
-manifests/k8s_cilium_metrics.scala,115,RunCommand,switch on Cilium and Hubble metrics (helm upgrade --reuse-values),4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),not started
+manifests/k8s_cilium_metrics.scala,83,apply command,switch on Cilium and Hubble metrics,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),done
 manifests/k8s_cluster.scala,308,RunCommand,label the worker pools,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),not started
 manifests/k8s_external_dns.scala,176,RunCommand,namespace and TSIG secret,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),not started
 manifests/k8s_external_dns.scala,99,apply command,helm install external-dns,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),done
@@ -637,7 +637,9 @@ manifests/k8s_ceph_csi.scala,223,RunCommand,write to and read from a volume,6,St
 manifests/k8s_cert_manager.scala,180,RunCommand,issue and verify a certificate,6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
 manifests/k8s_cilium.scala,236,RunCommand,"show Cilium pods, nodes, GatewayClass",6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
 manifests/k8s_cilium.scala,246,RunCommand,nginx behind a LoadBalancer Service,6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
-manifests/k8s_cilium_metrics.scala,120,RunCommand,check the Prometheus targets,6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
+manifests/k8s_cilium_metrics.scala,131,RunCommand,check the ServiceMonitor CRD,6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
+manifests/k8s_cilium_metrics.scala,137,RunCommand,wait for the Cilium DaemonSet to roll out,6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
+manifests/k8s_cilium_metrics.scala,142,RunCommand,check the Prometheus targets,6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
 manifests/k8s_cluster.scala,259,RunCommand,"kubeadm init, CA hash, kubeconfig for localadmin",6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
 manifests/k8s_cluster.scala,276,RunCommand,kubeadm join --control-plane,6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
 manifests/k8s_cluster.scala,284,RunCommand,kubeadm join --control-plane,6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
