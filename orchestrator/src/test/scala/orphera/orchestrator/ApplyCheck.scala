@@ -4719,7 +4719,7 @@ save()
     check(
       "helmRelease: a values file that is not there is not passed",
       noExtra._1 == 0 && dump.contains("\"ns/e\": {") && dump.contains(
-        "\"files\": [\"a: 1\\n\"]"
+        "\"files\": [\"a: 1\\n\\n\"]"
       ),
       noExtra.toString + dump
     )
@@ -4728,7 +4728,7 @@ save()
     check(
       "helmRelease: a values file that is there is passed after the values",
       withExtraMade._1 == 0 && dump.contains(
-        "\"files\": [\"a: 1\\n\", \"b: 2\\n\"]"
+        "\"files\": [\"a: 1\\n\\n\", \"b: 2\\n\"]"
       ),
       withExtraMade.toString + dump
     )
