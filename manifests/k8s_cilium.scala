@@ -148,6 +148,8 @@ object k8s_cilium extends OrpheraClusterPlaybook:
   // an address in the pool and answer on it.
   private val testScript =
     s"""set -e
+       |# a run right after another may find the last test namespace still being deleted
+       |$kc wait --for=delete namespace/orphera-test --timeout=180s >/dev/null 2>&1 || true
        |$kc create namespace orphera-test --dry-run=client -o yaml | $kc apply -f -
        |cat <<EOF | $kc apply -f -
        |apiVersion: apps/v1
