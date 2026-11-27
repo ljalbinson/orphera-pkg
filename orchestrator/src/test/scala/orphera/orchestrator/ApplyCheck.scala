@@ -4503,7 +4503,8 @@ if a[:2] == ['repo', 'add']:
 elif a[:2] == ['repo', 'update']:
     pass
 elif a[:2] == ['show', 'chart']:
-    print('apiVersion: v2\nname: ' + a[2].split('/')[1] + '\nversion: 9.9.9')
+    v = opt('--version')
+    print('apiVersion: v2\nname: ' + a[2].split('/')[1] + '\nversion: ' + ('1.18.9' if v == '~1.18.0' else v or '9.9.9'))
 elif a[0] == 'status':
     r = S['releases'].get(opt('-n') + '/' + a[1])
     if r is None:
@@ -4636,6 +4637,14 @@ save()
       again._1 == 0 && again._2.contains("metrics-server 1.2.3") && dump
         .contains("\"version\": \"1.2.3\"") && run(pinned, "check")._1 == 0,
       again.toString + dump
+    )
+    val (ranged, _) = make(version = Some("~1.18.0"))
+    val rangedMade = run(ranged, "ensure")
+    check(
+      "helmRelease: a version range is resolved by helm to the newest match",
+      rangedMade._1 == 0 && rangedMade._2.contains("metrics-server 1.18.9") && dump
+        .contains("\"version\": \"1.18.9\"") && run(ranged, "check")._1 == 0,
+      rangedMade.toString + dump
     )
     val gone = absentHelmRelease("remove it", "metrics-server", "kube-system")
     check(

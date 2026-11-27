@@ -20,8 +20,8 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 // egress allowed by k8s_network_lockdown_monitoring.scala; kube-system has no network
 // policies.
 //
-// Re-running k8s_cilium.scala installs Cilium from its own values file and drops these
-// settings: run this playbook again afterwards.
+// k8s_cilium.scala passes the values file written here after its own when it exists, so
+// installing Cilium again keeps these settings.
 //
 // The test waits for the Cilium DaemonSet and Prometheus, then needs: every Cilium
 // agent target and every Hubble target up (one per node), the operator up, flows
