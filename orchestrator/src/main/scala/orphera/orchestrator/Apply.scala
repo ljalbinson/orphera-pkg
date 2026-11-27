@@ -2433,14 +2433,13 @@ esac
     * by the check. `valuesFiles` are further values files on the node that are
     * passed with `-f` after the values, in the order given, when they exist and
     * are not empty (settings another playbook keeps there); the check does not
-    * see them either. With `reuseValues` the release must already be
-    * installed: the helper runs `helm upgrade --reuse-values` with the chart
-    * version the release has now (the values given are laid over the release's
-    * own, which is how a playbook adds settings to a release another one
-    * installed), and stops with a message when the release is not there. A
-    * `variant` is added to the helper's and the state file's names, for a
-    * second description of the same release (the one that installs it and the
-    * one that adds to it).
+    * see them either. With `reuseValues` the release must already be installed:
+    * the helper runs `helm upgrade --reuse-values` with the chart version the
+    * release has now (the values given are laid over the release's own, which
+    * is how a playbook adds settings to a release another one installed), and
+    * stops with a message when the release is not there. A `variant` is added
+    * to the helper's and the state file's names, for a second description of
+    * the same release (the one that installs it and the one that adds to it).
     */
   def helmRelease(
       label: String,
