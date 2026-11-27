@@ -4642,7 +4642,9 @@ save()
     val rangedMade = run(ranged, "ensure")
     check(
       "helmRelease: a version range is resolved by helm to the newest match",
-      rangedMade._1 == 0 && rangedMade._2.contains("metrics-server 1.18.9") && dump
+      rangedMade._1 == 0 && rangedMade._2.contains(
+        "metrics-server 1.18.9"
+      ) && dump
         .contains("\"version\": \"1.18.9\"") && run(ranged, "check")._1 == 0,
       rangedMade.toString + dump
     )

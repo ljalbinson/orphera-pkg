@@ -2409,17 +2409,18 @@ esac
     * `helm upgrade --install --wait`. With a `version` that chart version is
     * installed (a range such as `~1.18.0` is resolved by Helm to the newest
     * match when the helper installs, and the description, not the match, is
-    * what the check compares); without one the newest is installed the first time and again
-    * whenever the description changes, and a run that changes nothing never
-    * upgrades. A change made to the release outside this description is not
-    * noticed unless the release stops being deployed. `valuesFrom` pairs a
-    * placeholder name with a file on the node: a line of the values that holds
-    * only `@@NAME@@` is replaced, when the helper runs, by the lines of that
-    * file with the placeholder's indentation (for a certificate inside a YAML
-    * block). A change to such a file is not noticed by the check. `valuesFiles`
-    * are further values files on the node that are passed with `-f` after the
-    * values, in the order given, when they exist and are not empty (settings
-    * another playbook keeps there); the check does not see them either.
+    * what the check compares); without one the newest is installed the first
+    * time and again whenever the description changes, and a run that changes
+    * nothing never upgrades. A change made to the release outside this
+    * description is not noticed unless the release stops being deployed.
+    * `valuesFrom` pairs a placeholder name with a file on the node: a line of
+    * the values that holds only `@@NAME@@` is replaced, when the helper runs,
+    * by the lines of that file with the placeholder's indentation (for a
+    * certificate inside a YAML block). A change to such a file is not noticed
+    * by the check. `valuesFiles` are further values files on the node that are
+    * passed with `-f` after the values, in the order given, when they exist and
+    * are not empty (settings another playbook keeps there); the check does not
+    * see them either.
     */
   def helmRelease(
       label: String,
@@ -2448,7 +2449,9 @@ esac
     )
     version.foreach(v =>
       require(
-        v.nonEmpty && v.forall(c => c.isLetterOrDigit || "._-+~^<>=*,".contains(c)),
+        v.nonEmpty && v.forall(c =>
+          c.isLetterOrDigit || "._-+~^<>=*,".contains(c)
+        ),
         s"not a chart version or version range: '$v'"
       )
     )
