@@ -73,25 +73,55 @@ object k8s_cert_manager extends OrpheraClusterPlaybook:
     )
     ApplyPlan.orFail("cert-manager", List(helper, installed))
 
-  private val issuerScript =
+  // The certificate has to chain to the root and the key has to belong to it, before either goes into the cluster.
+  private val subCaCheckScript =
     s"""set -e
        |cd $stateDir
        |openssl verify -CAfile ca.crt subca.crt
        |# the key must belong to the certificate
        |[ "$$(openssl x509 -in subca.crt -noout -pubkey | openssl sha256)" = "$$(openssl pkey -in subca.key -pubout | openssl sha256)" ] \\
        |  || { echo "subca.key does not match subca.crt; remove $caDir/k8s-subca.crt on $caNode and re-run" >&2; exit 1; }
-       |cat subca.crt ca.crt > subca-chain.crt
-       |$kc -n cert-manager create secret tls orphera-sub-ca --cert=subca-chain.crt --key=subca.key \\
-       |  --dry-run=client -o yaml | $kc apply -f -
-       |cat <<EOF | $kc apply -f -
-       |apiVersion: cert-manager.io/v1
-       |kind: ClusterIssuer
-       |metadata:
-       |  name: orphera-ca
-       |spec:
-       |  ca:
-       |    secretName: orphera-sub-ca
-       |EOF
+       |echo "the sub-CA certificate chains to the root and the key belongs to it"
+       |""".stripMargin
+
+  // The sub-CA Secret (certificate, then the root, and the key; the files are read on the node when the helper
+  // runs, so a new sub-CA is applied again) and the ClusterIssuer, as `kubeObjects`.
+  private val issuerPlan: ApplyPlan =
+    import Resources.*
+    val (helper, made) = kubeObjects(
+      "create the sub-CA secret and the ClusterIssuer",
+      "cert-manager-issuer",
+      Secret("""apiVersion: v1
+               |kind: Secret
+               |metadata:
+               |  name: orphera-sub-ca
+               |  namespace: cert-manager
+               |type: kubernetes.io/tls
+               |stringData:
+               |  tls.crt: |
+               |    @@SUBCA@@
+               |    @@ROOTCA@@
+               |  tls.key: |
+               |    @@KEY@@
+               |---
+               |apiVersion: cert-manager.io/v1
+               |kind: ClusterIssuer
+               |metadata:
+               |  name: orphera-ca
+               |spec:
+               |  ca:
+               |    secretName: orphera-sub-ca
+               |""".stripMargin),
+      yamlFrom = List(
+        "SUBCA" -> s"$stateDir/subca.crt",
+        "ROOTCA" -> s"$stateDir/ca.crt",
+        "KEY" -> s"$stateDir/subca.key"
+      )
+    )
+    ApplyPlan.orFail("cert-manager-issuer", List(helper, made))
+
+  private val issuerReadyScript =
+    s"""set -e
        |$kc wait --for=condition=Ready clusterissuer/orphera-ca --timeout=120s
        |""".stripMargin
 
@@ -173,8 +203,14 @@ object k8s_cert_manager extends OrpheraClusterPlaybook:
         )
         .build,
       stage("create-issuer", node)
+        .task("check the sub-CA certificate and key")(
+          Task.RunCommand(List("sh", "-c", subCaCheckScript), timeoutSeconds = 60)
+        )
         .task("create the sub-CA secret and the ClusterIssuer")(
-          Task.RunCommand(List("sh", "-c", issuerScript), timeoutSeconds = 180)
+          Task.Apply(issuerPlan)
+        )
+        .task("wait for the ClusterIssuer to be ready")(
+          Task.RunCommand(List("sh", "-c", issuerReadyScript), timeoutSeconds = 180)
         )
         .build,
       stage("test-certificate", node)

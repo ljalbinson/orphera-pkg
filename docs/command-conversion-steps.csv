@@ -383,8 +383,8 @@ manifests/k8s_argocd.scala,226,apply command,helm install argo-cd,4,New product-
 manifests/k8s_argocd.scala,240,apply command,HTTPRoute for $argoHost,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),done
 manifests/k8s_ceph_csi.scala,124,apply command,helm install ceph-csi-rbd,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),done
 manifests/k8s_ceph_csi.scala,215,RunCommand,make ceph-rbd the default StorageClass,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),not started
-manifests/k8s_cert_manager.scala,67,apply command,helm install cert-manager,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),done
-manifests/k8s_cert_manager.scala,175,RunCommand,create the sub-CA secret and the ClusterIssuer,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),not started
+manifests/k8s_cert_manager.scala,66,apply command,helm install cert-manager,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),done
+manifests/k8s_cert_manager.scala,92,apply command,create the sub-CA secret and the ClusterIssuer,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),done
 manifests/k8s_cilium.scala,215,RunCommand,install the Gateway API CRDs,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),not started
 manifests/k8s_cilium.scala,106,apply command,helm install Cilium,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),done
 manifests/k8s_cilium_metrics.scala,83,apply command,switch on Cilium and Hubble metrics,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),done
@@ -636,6 +636,8 @@ manifests/k8s_api_vip.scala,224,RunCommand,print which node holds the VIP,6,Stay
 manifests/k8s_argocd.scala,357,RunCommand,wait for the Gateway to accept the route for $argoHost,6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
 manifests/k8s_argocd.scala,367,RunCommand,check the server and sync a test Application,6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
 manifests/k8s_ceph_csi.scala,223,RunCommand,write to and read from a volume,6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
+manifests/k8s_cert_manager.scala,206,RunCommand,check the sub-CA certificate and key,6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
+manifests/k8s_cert_manager.scala,212,RunCommand,wait for the ClusterIssuer to be ready,6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
 manifests/k8s_cert_manager.scala,180,RunCommand,issue and verify a certificate,6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
 manifests/k8s_cilium.scala,236,RunCommand,"show Cilium pods, nodes, GatewayClass",6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
 manifests/k8s_cilium.scala,246,RunCommand,nginx behind a LoadBalancer Service,6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
