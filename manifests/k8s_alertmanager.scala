@@ -88,7 +88,6 @@ object k8s_alertmanager extends OrpheraClusterPlaybook:
   private val smtpPassword: Option[Secret] =
     if useAuth then Some(Secrets.secret("alertmanager/smtp")) else None
 
-
   private val secretsPath =
     "/etc/alertmanager/secrets/alertmanager-smtp/password"
 
@@ -284,12 +283,18 @@ object k8s_alertmanager extends OrpheraClusterPlaybook:
         .fold(
           stage("alertmanager-config", node)
             .task("check that Alertmanager is installed")(
-              Task.RunCommand(List("sh", "-c", prepareScript), timeoutSeconds = 60)
+              Task.RunCommand(
+                List("sh", "-c", prepareScript),
+                timeoutSeconds = 60
+              )
             )
         )(plan =>
           stage("alertmanager-config", node)
             .task("check that Alertmanager is installed")(
-              Task.RunCommand(List("sh", "-c", prepareScript), timeoutSeconds = 60)
+              Task.RunCommand(
+                List("sh", "-c", prepareScript),
+                timeoutSeconds = 60
+              )
             )
             .task("make the SMTP password Secret")(Task.Apply(plan))
         )
