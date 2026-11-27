@@ -4721,7 +4721,7 @@ save()
     )
     val (reuse, _) = helmRelease(
       "x",
-      "e",
+      "f",
       "a/b",
       "http://h/",
       "ns",
@@ -4733,7 +4733,7 @@ save()
     val reuseMade = run(reuse, "ensure")
     check(
       "helmRelease: with reuseValues the installed chart version is kept and --reuse-values is passed",
-      reuseMade._1 == 0 && reuseMade._2.contains("a/b 9.9.9 as e in ns") && dump
+      reuseMade._1 == 0 && reuseMade._2.contains("a/b 9.9.9 as f in ns") && dump
         .contains("\"reuse\": true") && dump.contains("\"create_ns\": false"),
       reuseMade.toString + dump
     )
@@ -4750,10 +4750,10 @@ save()
     val reuseNone = run(reuseMissing, "ensure")
     check(
       "helmRelease: a variant has its own helper and state file",
-      reuse.id == "file[/usr/local/sbin/orphera-helm-ns-e-more]" && run(
+      reuse.id == "file[/usr/local/sbin/orphera-helm-ns-f-more]" && run(
         reuse,
         "check"
-      )._1 == 0 && Files.exists(shaDir.resolve("ns-e-more.sha")),
+      )._1 == 0 && Files.exists(shaDir.resolve("ns-f-more.sha")),
       reuse.id
     )
     check(
