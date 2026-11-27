@@ -151,6 +151,7 @@ object k8s_gateway extends OrpheraClusterPlaybook:
 
   private val testScript =
     s"""set -e
+       |$kc wait --for=delete namespace/gw-test --timeout=180s >/dev/null 2>&1 || true
        |$kc create namespace gw-test --dry-run=client -o yaml | $kc apply -f -
        |cat <<EOF | $kc apply -f -
        |apiVersion: apps/v1
