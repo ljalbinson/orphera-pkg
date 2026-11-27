@@ -375,7 +375,8 @@ print('client %s in realm %s ready: redirect %s/login/generic_oauth' % (CLIENT_I
           Task.Apply(routePlan)
         )
         .task(s"wait for the Gateway to accept the route for $grafanaHost")(
-          Task.RunCommand(List("sh", "-c", routeWaitScript), timeoutSeconds = 180)
+          Task
+            .RunCommand(List("sh", "-c", routeWaitScript), timeoutSeconds = 180)
         )
         .build,
       stage("test-monitoring", node)

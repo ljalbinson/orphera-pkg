@@ -355,7 +355,8 @@ print('client %s in realm %s ready: redirect %s/auth/callback' % (CLIENT_ID, REA
           Task.Apply(routePlan)
         )
         .task(s"wait for the Gateway to accept the route for $argoHost")(
-          Task.RunCommand(List("sh", "-c", routeWaitScript), timeoutSeconds = 180)
+          Task
+            .RunCommand(List("sh", "-c", routeWaitScript), timeoutSeconds = 180)
         )
         .build,
       stage("test-argocd", node)
