@@ -31,7 +31,7 @@ object k8s_ceph_csi extends OrpheraClusterPlaybook:
   private val cephNode = "tst0"
   private val allNodes = (30 to 39).map(n => s"tst$n").toList
   private val pool = "k8s-rbd"
-  private val cephUser = "k8s"
+  private val cephUserName = "k8s"
   private val clusterId = "orphera-ceph"
   private val stateDir = "/etc/kubernetes/orphera"
   private val keyFile = s"$stateDir/ceph-k8s.key"
@@ -75,8 +75,8 @@ object k8s_ceph_csi extends OrpheraClusterPlaybook:
     import Resources.*
     val rbdPool = cephPool(s"the $pool pool", pool)
     val user = cephUser(
-      s"the client.$cephUser cephx user and its key",
-      s"client.$cephUser",
+      s"the client.$cephUserName cephx user and its key",
+      s"client.$cephUserName",
       Secret(cephKey),
       List("mon" -> "profile rbd", "mgr" -> "allow rw", "osd" -> s"profile rbd pool=$pool")
     ).after(rbdPool)
@@ -129,7 +129,7 @@ object k8s_ceph_csi extends OrpheraClusterPlaybook:
        |secret:
        |  create: true
        |  name: csi-rbd-secret
-       |  userID: $cephUser
+       |  userID: $cephUserName
        |  userKey: |-
        |    @@KEY@@
        |storageClass:
