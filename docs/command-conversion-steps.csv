@@ -395,8 +395,9 @@ manifests/k8s_kubeadm_config.scala,360,RunCommand,turn on the three scrape jobs,
 manifests/k8s_logging.scala,147,apply command,helm install Loki,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),done
 manifests/k8s_logging.scala,156,apply command,helm install Alloy,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),done
 manifests/k8s_metrics_server.scala,28,apply command,helm install metrics-server,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),done
-manifests/k8s_monitoring.scala,351,RunCommand,"namespace, CA ConfigMap, OAuth Secret, Helm values",4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),not started
-manifests/k8s_monitoring.scala,362,RunCommand,HTTPRoute for $grafanaHost,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),not started
+manifests/k8s_monitoring.scala,356,RunCommand,"namespace, CA ConfigMap and OAuth Secret",4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),not started
+manifests/k8s_monitoring.scala,286,apply command,helm install kube-prometheus-stack,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),done
+manifests/k8s_monitoring.scala,366,RunCommand,HTTPRoute for $grafanaHost,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),not started
 manifests/k8s_network_lockdown.scala,176,RunCommand,"default deny for external-dns, then test it",4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),not started
 manifests/k8s_network_lockdown.scala,184,RunCommand,"default deny for argocd, then test it",4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),not started
 manifests/k8s_network_lockdown.scala,189,RunCommand,"default deny for logging, then test it",4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),not started
@@ -415,7 +416,7 @@ manifests/glance_teardown.scala,98,apply command,remove Glance from Keystone,4,N
 manifests/heat_single_node.scala,794,apply command,register Heat in Keystone (the stack domain and its admin),4,New product-specific kinds,Keystone/OpenStack entries,"Keystone service/endpoint/user/role, and other OpenStack entries",done
 manifests/heat_teardown.scala,106,apply command,remove Heat from Keystone,4,New product-specific kinds,Keystone/OpenStack entries,"Keystone service/endpoint/user/role, and other OpenStack entries",done
 manifests/k8s_argocd.scala,346,RunCommand,create the Keycloak client argocd,4,New product-specific kinds,Keystone/OpenStack entries,"Keystone service/endpoint/user/role, and other OpenStack entries",not started
-manifests/k8s_monitoring.scala,346,RunCommand,create the Keycloak client grafana,4,New product-specific kinds,Keystone/OpenStack entries,"Keystone service/endpoint/user/role, and other OpenStack entries",not started
+manifests/k8s_monitoring.scala,351,RunCommand,create the Keycloak client grafana,4,New product-specific kinds,Keystone/OpenStack entries,"Keystone service/endpoint/user/role, and other OpenStack entries",not started
 manifests/k8s_oidc.scala,464,RunCommand,"create the realm k8s, the client, groups and test users",4,New product-specific kinds,Keystone/OpenStack entries,"Keystone service/endpoint/user/role, and other OpenStack entries",not started
 manifests/keycloak_single_node.scala,990,apply command,"realm $realm, client keystone, groups and the test users",4,New product-specific kinds,Keystone/OpenStack entries,"Keystone service/endpoint/user/role, and other OpenStack entries",not started
 manifests/keycloak_single_node.scala,996,apply command,"identity provider, mapping and protocol in Keystone",4,New product-specific kinds,Keystone/OpenStack entries,"Keystone service/endpoint/user/role, and other OpenStack entries",not started
@@ -649,7 +650,7 @@ manifests/k8s_kubeadm_config.scala,329,RunCommand,kubeadm upgrade diff keeps the
 manifests/k8s_kubeadm_config.scala,355,RunCommand,a host-network pod sees two nameservers,6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
 manifests/k8s_kubeadm_config.scala,363,RunCommand,Prometheus sees them,6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
 manifests/k8s_logging.scala,230,RunCommand,query Loki and ask Grafana,6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
-manifests/k8s_monitoring.scala,367,RunCommand,query Prometheus and request Grafana,6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
+manifests/k8s_monitoring.scala,371,RunCommand,query Prometheus and request Grafana,6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
 manifests/k8s_network_policy.scala,280,RunCommand,lock down a test namespace step by step,6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
 manifests/k8s_oidc.scala,504,RunCommand,add the flags to kube-apiserver,6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
 manifests/k8s_oidc.scala,509,RunCommand,add the flags to kube-apiserver,6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
