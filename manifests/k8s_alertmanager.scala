@@ -6,7 +6,8 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 // Kubernetes cluster, step 12 (addition): Alertmanager receivers. Needs
 // k8s_monitoring.scala (the Helm release `kps` in the namespace monitoring). Safe to
 // repeat. This changes only the Alertmanager configuration of the existing release
-// (`helm upgrade --reuse-values` with the same chart version); nothing else moves.
+// (`helm upgrade --reuse-values` with the same chart version, done by a `helmRelease` with
+// `reuseValues`); nothing else moves.
 //
 // Alerts are sent by e-mail through the relay mail.ljalbinson.com, from
 // alert@ljalbinson.com to lawrence@ljalbinson.com. Settings, by environment variable
@@ -89,9 +90,9 @@ object k8s_alertmanager extends OrpheraClusterPlaybook:
   private val secretsPath =
     "/etc/alertmanager/secrets/alertmanager-smtp/password"
 
-  // The Helm values file (written to alertmanager-values.yaml on tst30). No password in it.
-  // @L@ and @R@ stand for two opening and two closing braces: Orphera renders Mustache in command text, so
-  // the script must not contain them (see alertmanagerScript).
+  // The Helm values (also written to alertmanager-values.yaml on tst30, which k8s_monitoring.scala passes when
+  // it installs the release again). No password in it. The braces of the mail body are written as they are:
+  // an apply description is not rendered as Mustache, which a command is.
   private val valuesYaml =
     val authLines =
       if useAuth then s"""      smtp_auth_username: '$smtpUser'
@@ -138,10 +139,10 @@ object k8s_alertmanager extends OrpheraClusterPlaybook:
        |      - to: '$to'
        |        send_resolved: true
        |        html: |
-       |          <h3>@L@ .Status | toUpper @R@: @L@ .CommonLabels.alertname @R@</h3>
-       |          @L@ range .Alerts @R@<p><b>@L@ .Labels.severity @R@</b> @L@ .Annotations.summary @R@ @L@ .Annotations.description @R@<br>
-       |          @L@ range .Labels.SortedPairs @R@@L@ .Name @R@=@L@ .Value @R@ @L@ end @R@</p>
-       |          @L@ end @R@<p><a href="$alertLink">Alerts in Grafana</a></p>
+       |          <h3>{{ .Status | toUpper }}: {{ .CommonLabels.alertname }}</h3>
+       |          {{ range .Alerts }}<p><b>{{ .Labels.severity }}</b> {{ .Annotations.summary }} {{ .Annotations.description }}<br>
+       |          {{ range .Labels.SortedPairs }}{{ .Name }}={{ .Value }} {{ end }}</p>
+       |          {{ end }}<p><a href="$alertLink">Alerts in Grafana</a></p>
        |$tlsLines""".stripMargin
 
   // The Kubernetes Secret with the password (a line of the script; empty without a login).
@@ -151,24 +152,38 @@ object k8s_alertmanager extends OrpheraClusterPlaybook:
         s"$kc -n $ns create secret generic alertmanager-smtp --from-literal=password=${shQuote(pw.reveal)} --dry-run=client -o yaml | $kc apply -f -"
       case None => "true"
 
-  private val applyScript =
+  private val prepareScript =
     s"""set -e
-       |export KUBECONFIG=/etc/kubernetes/admin.conf
        |$kc -n $ns get statefulset alertmanager-kps-alertmanager >/dev/null \\
        |  || { echo "Alertmanager of the release kps not found in $ns; run k8s_monitoring.scala first" >&2; exit 1; }
-       |CHART=$$(helm list -n $ns --filter '^kps$$' -o json | python3 -c 'import sys,json; print(json.load(sys.stdin)[0]["chart"])')
-       |VER=$${CHART#kube-prometheus-stack-}
-       |echo "release kps uses chart $$VER"
        |$passwordSecretCmd
-       |cat > $stateDir/alertmanager-values.yaml <<'EOF'
-       |$valuesYaml
-       |EOF
-       |# Orphera renders Mustache in any command that contains two opening braces, so the mail body is written
-       |# with @L@ and @R@ and the braces are put in here, at run time
-       |OB=$$(printf '\\173\\173'); CB=$$(printf '\\175\\175')
-       |sed -i -e "s/@L@/$$OB/g" -e "s/@R@/$$CB/g" $stateDir/alertmanager-values.yaml
-       |helm upgrade kps prometheus-community/kube-prometheus-stack --version "$$VER" \\
-       |  --namespace $ns --reuse-values -f $stateDir/alertmanager-values.yaml --wait --timeout 10m
+       |echo "the SMTP password Secret is in place"
+       |""".stripMargin
+
+  private val valuesFile = s"$stateDir/alertmanager-values.yaml"
+
+  // Laid over the values the release has (`--reuse-values`, the chart version it has); nothing else moves.
+  private val applyPlan: ApplyPlan =
+    import Resources.*
+    val values = file(valuesFile, valuesYaml, mode = "0644")
+    val (helper, applied) = helmRelease(
+      "set the Alertmanager receivers",
+      "kps",
+      "prometheus-community/kube-prometheus-stack",
+      "https://prometheus-community.github.io/helm-charts",
+      ns,
+      values = Some(Secret(valuesYaml)),
+      minutes = 10,
+      reuseValues = true,
+      variant = "alertmanager"
+    )
+    ApplyPlan.orFail(
+      "alertmanager",
+      List(values, helper, applied.after(values))
+    )
+
+  private val rolloutScript =
+    s"""set -e
        |$kc -n $ns rollout status statefulset/alertmanager-kps-alertmanager --timeout=300s
        |echo "Alertmanager configured: e-mail to $to through $smtpHost:$smtpPort"
        |""".stripMargin
@@ -238,8 +253,14 @@ object k8s_alertmanager extends OrpheraClusterPlaybook:
   val playbook: ClusterPlaybook =
     clusterPlaybook("k8s-alertmanager")(
       stage("alertmanager-config", node)
-        .task("set the Alertmanager receivers (helm upgrade --reuse-values)")(
-          Task.RunCommand(List("sh", "-c", applyScript), timeoutSeconds = 1000)
+        .task("make the SMTP password Secret")(
+          Task.RunCommand(List("sh", "-c", prepareScript), timeoutSeconds = 60)
+        )
+        .task("set the Alertmanager receivers")(
+          Task.Apply(applyPlan)
+        )
+        .task("wait for Alertmanager to roll out")(
+          Task.RunCommand(List("sh", "-c", rolloutScript), timeoutSeconds = 400)
         )
         .build,
       stage("alertmanager-test", node)

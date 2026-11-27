@@ -4505,6 +4505,10 @@ elif a[:2] == ['repo', 'update']:
 elif a[:2] == ['show', 'chart']:
     v = opt('--version')
     print('apiVersion: v2\nname: ' + a[2].split('/')[1] + '\nversion: ' + ('1.18.9' if v == '~1.18.0' else v or '9.9.9'))
+elif a[0] == 'list':
+    n = opt('--filter').strip('^$')
+    r = S['releases'].get(opt('-n') + '/' + n)
+    print(json.dumps([] if r is None else [{'name': n, 'chart': r['chart'].split('/')[1] + '-' + r['version']}]))
 elif a[0] == 'status':
     r = S['releases'].get(opt('-n') + '/' + a[1])
     if r is None:
@@ -4512,7 +4516,7 @@ elif a[0] == 'status':
     print(json.dumps({'name': a[1], 'info': {'status': r.get('status', 'deployed')}}))
 elif a[:2] == ['upgrade', '--install']:
     vals = open(opt('-f')).read() if '-f' in a else None
-    S['releases'][opt('--namespace') + '/' + a[2]] = {'chart': a[3], 'version': opt('--version'), 'values': vals, 'files': [open(a[i + 1]).read() for i, x in enumerate(a) if x == '-f'], 'sets': [a[i + 1] for i, x in enumerate(a) if x == '--set'], 'wait': '--wait' in a, 'timeout': opt('--timeout'), 'create_ns': '--create-namespace' in a, 'status': 'deployed'}
+    S['releases'][opt('--namespace') + '/' + a[2]] = {'chart': a[3], 'version': opt('--version'), 'values': vals, 'files': [open(a[i + 1]).read() for i, x in enumerate(a) if x == '-f'], 'sets': [a[i + 1] for i, x in enumerate(a) if x == '--set'], 'wait': '--wait' in a, 'timeout': opt('--timeout'), 'create_ns': '--create-namespace' in a, 'reuse': '--reuse-values' in a, 'status': 'deployed'}
 elif a[0] == 'uninstall':
     S['releases'].pop(opt('-n') + '/' + a[1], None)
 else:
@@ -4714,6 +4718,49 @@ save()
         "cm:\\n  rootCA: |\\n    LINE1\\n    LINE2\\n  other: 1\\n"
       ),
       fromFileMade.toString + dump
+    )
+    val (reuse, _) = helmRelease(
+      "x",
+      "e",
+      "a/b",
+      "http://h/",
+      "ns",
+      values = Some(Secret("x: 1\n")),
+      stateDir = shaDir.toString,
+      reuseValues = true,
+      variant = "more"
+    )
+    val reuseMade = run(reuse, "ensure")
+    check(
+      "helmRelease: with reuseValues the installed chart version is kept and --reuse-values is passed",
+      reuseMade._1 == 0 && reuseMade._2.contains("a/b 9.9.9 as e in ns") && dump
+        .contains("\"reuse\": true") && dump.contains("\"create_ns\": false"),
+      reuseMade.toString + dump
+    )
+    val (reuseMissing, _) = helmRelease(
+      "x",
+      "nothere",
+      "a/b",
+      "http://h/",
+      "ns",
+      values = Some(Secret("x: 1\n")),
+      stateDir = shaDir.toString,
+      reuseValues = true
+    )
+    val reuseNone = run(reuseMissing, "ensure")
+    check(
+      "helmRelease: a variant has its own helper and state file",
+      reuse.id == "file[/usr/local/sbin/orphera-helm-ns-e-more]" && run(
+        reuse,
+        "check"
+      )._1 == 0 && Files.exists(shaDir.resolve("ns-e-more.sha")),
+      reuse.id
+    )
+    check(
+      "helmRelease: with reuseValues a release that is not installed stops the helper",
+      reuseNone._1 != 0 && reuseNone._2.contains("is not installed") && !dump
+        .contains("\"ns/nothere\""),
+      reuseNone.toString
     )
     val extraFile = dir.resolve("extra.yaml")
     val (withExtra, _) = helmRelease(
