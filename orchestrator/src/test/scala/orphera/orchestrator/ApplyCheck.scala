@@ -4524,6 +4524,160 @@ else:
 save()
 """
 
+  // A stand-in for kubectl: the YAML texts applied are kept in $FAKE_KUBE (a JSON file); `get -f` succeeds while the file's text is among them.
+  private val fakeKubectl: String =
+    """#!/usr/bin/python3
+import json, os, sys
+P = os.environ['FAKE_KUBE']
+try:
+    S = json.load(open(P))
+except OSError:
+    S = {'objects': [], 'calls': []}
+a = sys.argv[1:]
+S['calls'].append(' '.join(a))
+def text():
+    return open(a[a.index('-f') + 1]).read()
+code = 0
+if a[0] == 'apply':
+    t = text()
+    if t not in S['objects']:
+        S['objects'].append(t)
+    print('applied')
+elif a[0] == 'get':
+    if text() not in S['objects']:
+        code = 1
+        sys.stderr.write('Error from server (NotFound)\n')
+elif a[0] == 'delete':
+    t = text()
+    if t in S['objects']:
+        S['objects'].remove(t)
+else:
+    sys.stderr.write('fake kubectl: unknown ' + ' '.join(a) + '\n')
+    code = 2
+json.dump(S, open(P, 'w'))
+sys.exit(code)
+"""
+
+  private def kubeObjectsChecks(): Unit =
+    val dir = Files.createTempDirectory("kube")
+    val bin = dir.resolve("bin")
+    Files.createDirectory(bin)
+    val fake = bin.resolve("kubectl")
+    Files.writeString(fake, fakeKubectl)
+    check(
+      "kubeObjects: the fake kubectl is executable",
+      fake.toFile.setExecutable(true)
+    )
+    val state = dir.resolve("state.json")
+    val shaDir = dir.resolve("sha")
+    def fileText(r: ApplyResource): String = r match
+      case f: ApplyResource.File =>
+        f.content match
+          case Some(ApplyResource.Content.Hidden(secret)) => secret.reveal
+          case other => s"not hidden text: $other"
+      case other => s"not a file: $other"
+    def part(r: ApplyResource, pick: ApplyResource.Command => String): String =
+      r match
+        case c: ApplyResource.Command => pick(c)
+        case other                    => s"not a command: $other"
+    var n = 0
+    def run(helper: ApplyResource, arg: String): (Int, String) =
+      n += 1
+      val script = dir.resolve(s"helper-$n.sh")
+      Files.writeString(script, fileText(helper))
+      runShell(
+        s"PATH=$bin:$$PATH\nFAKE_KUBE=$state\nexport FAKE_KUBE\nsh $script $arg"
+      )
+    def dump: String =
+      if Files.exists(state) then Files.readString(state) else "{}"
+    val yaml =
+      "apiVersion: v1\nkind: Namespace\nmetadata:\n  name: demo\n---\napiVersion: v1\nkind: Secret\nmetadata:\n  name: s\n  namespace: demo\nstringData:\n  secret: \"a$b`c\"\n"
+    def make(text: String = yaml) =
+      kubeObjects(
+        "make the demo objects",
+        "demo",
+        Secret(text),
+        stateDir = shaDir.toString
+      )
+    val (helper, ensure) = make()
+    check(
+      "kubeObjects: the helper is named for the description",
+      helper.id == "file[/usr/local/sbin/orphera-kube-demo]",
+      helper.id
+    )
+    check(
+      "kubeObjects: the command runs the helper and is guarded by its check",
+      part(ensure, _.run).contains("orphera-kube-demo' ensure") &&
+        part(ensure, _.unless).contains("check")
+    )
+    check(
+      "kubeObjects: nothing applied fails the check and exists",
+      run(helper, "check")._1 != 0 && run(helper, "exists")._1 != 0
+    )
+    check(
+      "kubeObjects: ensure applies the YAML as it is, with $ and a backtick untouched",
+      run(helper, "ensure")._1 == 0 && dump.contains(
+        "secret: \\\"a$b`c\\\""
+      ),
+      dump
+    )
+    check(
+      "kubeObjects: applied, the check and exists pass",
+      run(helper, "check")._1 == 0 && run(helper, "exists")._1 == 0
+    )
+    check(
+      "kubeObjects: the state file holds the hash",
+      Files.exists(shaDir.resolve("demo.sha"))
+    )
+    val (changed, _) = make(yaml.replace("name: demo", "name: demo2"))
+    check(
+      "kubeObjects: a changed description fails the check",
+      run(changed, "check")._1 != 0
+    )
+    run(changed, "ensure")
+    val applied = dump
+    check(
+      "kubeObjects: a changed description is applied and the new check passes",
+      run(changed, "check")._1 == 0 && applied.contains("demo2"),
+      applied
+    )
+    Files.writeString(state, """{"objects": [], "calls": []}""")
+    check(
+      "kubeObjects: an object deleted by hand fails the check",
+      run(changed, "check")._1 != 0
+    )
+    check(
+      "kubeObjects: ensure makes it again",
+      run(changed, "ensure")._1 == 0 && run(changed, "check")._1 == 0
+    )
+    val gone = absentKubeObjects("delete the demo objects", "demo")
+    check(
+      "kubeObjects: the absent command runs remove only while the objects exist",
+      part(gone, _.run).contains("orphera-kube-demo' remove") &&
+        part(gone, _.onlyIf).contains("exists")
+    )
+    check(
+      "kubeObjects: remove deletes them and the state file",
+      run(changed, "remove")._1 == 0 && run(changed, "exists")._1 != 0 &&
+        !Files.exists(shaDir.resolve("demo.sha"))
+    )
+    check(
+      "kubeObjects: a name with a slash is refused",
+      scala.util
+        .Try(kubeObjects("x", "a/b", Secret("kind: Namespace")))
+        .isFailure
+    )
+    check(
+      "kubeObjects: an empty description is refused",
+      scala.util.Try(kubeObjects("x", "e", Secret("\n\n"))).isFailure
+    )
+    check(
+      "kubeObjects: a line that ends the heredoc is refused",
+      scala.util
+        .Try(kubeObjects("x", "h", Secret("a: 1\nORPHERA_KUBE_EOF\nb: 2")))
+        .isFailure
+    )
+
   private def helmChecks(): Unit =
     val dir = Files.createTempDirectory("helm")
     val bin = dir.resolve("bin")
@@ -6052,6 +6206,7 @@ else:
     openstackChecks()
     cephChecks()
     helmChecks()
+    kubeObjectsChecks()
     ovsChecks()
     kindChecks()
     yamlChecks()

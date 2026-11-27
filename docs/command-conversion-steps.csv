@@ -389,8 +389,8 @@ manifests/k8s_cilium.scala,215,RunCommand,install the Gateway API CRDs,4,New pro
 manifests/k8s_cilium.scala,106,apply command,helm install Cilium,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),done
 manifests/k8s_cilium_metrics.scala,83,apply command,switch on Cilium and Hubble metrics,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),done
 manifests/k8s_cluster.scala,308,RunCommand,label the worker pools,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),not started
-manifests/k8s_external_dns.scala,176,RunCommand,namespace and TSIG secret,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),not started
-manifests/k8s_external_dns.scala,99,apply command,helm install external-dns,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),done
+manifests/k8s_external_dns.scala,59,apply command,namespace and TSIG secret,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),done
+manifests/k8s_external_dns.scala,119,apply command,helm install external-dns,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),done
 manifests/k8s_gateway.scala,213,RunCommand,make sure Cilium's Gateway controller is running,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),not started
 manifests/k8s_gateway.scala,221,RunCommand,"wildcard certificate, Gateway and HTTP redirect",4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),not started
 manifests/k8s_kubeadm_config.scala,360,RunCommand,turn on the three scrape jobs,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),not started
@@ -648,7 +648,8 @@ manifests/k8s_cluster_teardown.scala,28,RunCommand,kubeadm reset and clean up,6,
 manifests/k8s_dns.scala,189,RunCommand,"zone, TSIG key, named",6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
 manifests/k8s_dns.scala,200,RunCommand,"query both servers, update the zone",6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
 manifests/k8s_etcd_backup.scala,356,RunCommand,list the bucket and test a restore,6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
-manifests/k8s_external_dns.scala,185,RunCommand,"create and delete a route, watch the zone",6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
+manifests/k8s_external_dns.scala,200,RunCommand,keep the redirect route out of external-dns,6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
+manifests/k8s_external_dns.scala,210,RunCommand,"create and delete a route, watch the zone",6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
 manifests/k8s_gateway.scala,226,RunCommand,publish a test application and request it,6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
 manifests/k8s_kubeadm_config.scala,312,RunCommand,"serve controller manager, scheduler and etcd metrics on the node address",6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
 manifests/k8s_kubeadm_config.scala,329,RunCommand,kubeadm upgrade diff keeps the settings,6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
