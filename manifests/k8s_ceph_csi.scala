@@ -85,24 +85,27 @@ object k8s_ceph_csi extends OrpheraClusterPlaybook:
       )
     )
 
-  private val installScript =
-    s"""set -e
-       |export KUBECONFIG=/etc/kubernetes/admin.conf
-       |[ -s $keyFile ] || { echo "$keyFile is missing or empty" >&2; exit 1; }
-       |KEY=$$(cat $keyFile)
-       |umask 077
-       |cat > $stateDir/ceph-csi-values.yaml <<EOF
-       |csiConfig:
+  // The monitor addresses come from the inventory (`{{nodes.<n>.cluster_ip}}`, rendered on the node), so
+  // they are a templated file that the install passes after its own values.
+  private val monitorsFile = s"$stateDir/ceph-csi-monitors.yaml"
+
+  private val monitorsText =
+    s"""csiConfig:
        |- clusterID: "$clusterId"
        |  monitors:
        |  - "{{nodes.tst0.cluster_ip}}:6789"
        |  - "{{nodes.tst1.cluster_ip}}:6789"
        |  - "{{nodes.tst2.cluster_ip}}:6789"
-       |secret:
+       |""".stripMargin
+
+  // The key is put in at the line `@@KEY@@` when the helper runs; `|-` keeps the value free of a newline.
+  private val cephCsiValues =
+    s"""secret:
        |  create: true
        |  name: csi-rbd-secret
        |  userID: $cephUser
-       |  userKey: $$KEY
+       |  userKey: |-
+       |    @@KEY@@
        |storageClass:
        |  create: true
        |  name: ceph-rbd
@@ -113,16 +116,31 @@ object k8s_ceph_csi extends OrpheraClusterPlaybook:
        |  allowVolumeExpansion: true
        |provisioner:
        |  replicaCount: 2
-       |EOF
-       |helm repo add ceph-csi https://ceph.github.io/csi-charts --force-update >/dev/null
-       |helm repo update >/dev/null
-       |VER=$$(helm show chart ceph-csi/ceph-csi-rbd | awk '/^version:/{print $$2}')
-       |echo "installing ceph-csi-rbd chart $$VER"
-       |helm upgrade --install ceph-csi-rbd ceph-csi/ceph-csi-rbd --version "$$VER" \\
-       |  --namespace ceph-csi-rbd --create-namespace -f $stateDir/ceph-csi-values.yaml --wait --timeout 10m
+       |""".stripMargin
+
+  private val installPlan: ApplyPlan =
+    import Resources.*
+    val (helper, installed) = helmRelease(
+      "helm install ceph-csi-rbd",
+      "ceph-csi-rbd",
+      "ceph-csi/ceph-csi-rbd",
+      "https://ceph.github.io/csi-charts",
+      "ceph-csi-rbd",
+      values = Some(Secret(cephCsiValues)),
+      minutes = 10,
+      valuesFrom = List("KEY" -> keyFile),
+      valuesFiles = List(monitorsFile)
+    )
+    val monitors = fileTemplate(monitorsFile, monitorsText, mode = "0644")
+    ApplyPlan.orFail(
+      "ceph-csi",
+      List(monitors, helper, installed.after(monitors))
+    )
+
+  private val defaultClassScript =
+    s"""set -e
        |$kc patch storageclass ceph-rbd -p '{"metadata":{"annotations":{"storageclass.kubernetes.io/is-default-class":"true"}}}'
        |$kc get storageclass
-       |echo "ceph-csi-rbd $$VER installed"
        |""".stripMargin
 
   private val testScript =
@@ -191,8 +209,14 @@ object k8s_ceph_csi extends OrpheraClusterPlaybook:
         )
         .build,
       stage("install-ceph-csi", node)
-        .task("helm install ceph-csi-rbd and the default StorageClass")(
-          Task.RunCommand(List("sh", "-c", installScript), timeoutSeconds = 900)
+        .task("helm install ceph-csi-rbd")(
+          Task.Apply(installPlan)
+        )
+        .task("make ceph-rbd the default StorageClass")(
+          Task.RunCommand(
+            List("sh", "-c", defaultClassScript),
+            timeoutSeconds = 60
+          )
         )
         .build,
       stage("test-volume", node)

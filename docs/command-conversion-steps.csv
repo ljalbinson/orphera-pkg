@@ -5,7 +5,7 @@ manifests/cephadm_add_mons.yaml,24,yaml command,append cephadm key to authorized
 manifests/control_host_handover.scala,150,RunCommand,create the destination directories,1,Existing kinds,directory/file,directory / file / authorizedKey / kernelModule / mount / pkg,done
 manifests/dashboard_tls.scala,103,RunCommand,prepare $signDir,1,Existing kinds,directory/file,directory / file / authorizedKey / kernelModule / mount / pkg,done
 manifests/file_server.scala,227,RunCommand,"make the accounts, the group and the share directories",1,Existing kinds,directory/file,directory / file / authorizedKey / kernelModule / mount / pkg,done
-manifests/k8s_ceph_csi.scala,182,RunCommand,load the rbd kernel module,1,Existing kinds,directory/file,directory / file / authorizedKey / kernelModule / mount / pkg,done
+manifests/k8s_ceph_csi.scala,207,RunCommand,load the rbd kernel module,1,Existing kinds,directory/file,directory / file / authorizedKey / kernelModule / mount / pkg,done
 manifests/k8s_cluster.scala,240,RunCommand,create the Orphera state directory,1,Existing kinds,directory/file,directory / file / authorizedKey / kernelModule / mount / pkg,done
 manifests/k8s_etcd_backup.scala,334,RunCommand,create the backup directories,1,Existing kinds,directory/file,directory / file / authorizedKey / kernelModule / mount / pkg,done
 manifests/k8s_node_prep.scala,179,RunCommand,swap off,1,Existing kinds,directory/file,directory / file / authorizedKey / kernelModule / mount / pkg,done
@@ -359,7 +359,7 @@ manifests/cinder_ceph.scala,57,apply command,the $cephPool pool and the client.c
 manifests/cinder_teardown.scala,105,apply command,delete the $cephPool pool and the client.cinder cephx user,4,New product-specific kinds,Ceph pool/key/orch,cephPool / cephKey / Ceph config option / orchestrator spec,done
 manifests/glance_ceph.scala,54,apply command,the $cephPool pool and the client.glance cephx user,4,New product-specific kinds,Ceph pool/key/orch,cephPool / cephKey / Ceph config option / orchestrator spec,done
 manifests/glance_teardown.scala,90,apply command,delete the $cephPool pool and client.glance,4,New product-specific kinds,Ceph pool/key/orch,cephPool / cephKey / Ceph config option / orchestrator spec,done
-manifests/k8s_ceph_csi.scala,165,RunCommand,create the pool and the client.k8s user,4,New product-specific kinds,Ceph pool/key/orch,cephPool / cephKey / Ceph config option / orchestrator spec,not started
+manifests/k8s_ceph_csi.scala,190,RunCommand,create the pool and the client.k8s user,4,New product-specific kinds,Ceph pool/key/orch,cephPool / cephKey / Ceph config option / orchestrator spec,not started
 manifests/k8s_cilium.scala,238,RunCommand,create the address pool and the L2 announcement policy,4,New product-specific kinds,Ceph pool/key/orch,cephPool / cephKey / Ceph config option / orchestrator spec,not started
 manifests/k8s_etcd_backup.scala,329,RunCommand,create the RGW user and read its S3 keys,4,New product-specific kinds,Ceph pool/key/orch,cephPool / cephKey / Ceph config option / orchestrator spec,not started
 manifests/manila_ceph.scala,67,apply command,create the CephFS filesystem $cephFs and wait for an active MDS,4,New product-specific kinds,Ceph pool/key/orch,cephPool / cephKey / Ceph config option / orchestrator spec,done
@@ -380,7 +380,8 @@ manifests/rgw_teardown.scala,66,apply command,delete the RGW pools and every obj
 manifests/k8s_alertmanager.scala,242,RunCommand,set the Alertmanager receivers (helm upgrade --reuse-values),4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),not started
 manifests/k8s_argocd.scala,226,apply command,helm install argo-cd,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),done
 manifests/k8s_argocd.scala,362,RunCommand,HTTPRoute for $argoHost,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),not started
-manifests/k8s_ceph_csi.scala,187,RunCommand,helm install ceph-csi-rbd and the default StorageClass,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),not started
+manifests/k8s_ceph_csi.scala,124,apply command,helm install ceph-csi-rbd,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),done
+manifests/k8s_ceph_csi.scala,215,RunCommand,make ceph-rbd the default StorageClass,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),not started
 manifests/k8s_cert_manager.scala,67,apply command,helm install cert-manager,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),done
 manifests/k8s_cert_manager.scala,175,RunCommand,create the sub-CA secret and the ClusterIssuer,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),not started
 manifests/k8s_cilium.scala,212,RunCommand,install the Gateway API CRDs,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),not started
@@ -630,7 +631,7 @@ manifests/iperf3_test.yaml,66,yaml command,run iperf3 client against tst0 (own d
 manifests/k8s_alertmanager.scala,247,RunCommand,send a test alert and check the e-mail counters,6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
 manifests/k8s_api_vip.scala,224,RunCommand,print which node holds the VIP,6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
 manifests/k8s_argocd.scala,367,RunCommand,check the server and sync a test Application,6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
-manifests/k8s_ceph_csi.scala,192,RunCommand,write to and read from a volume,6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
+manifests/k8s_ceph_csi.scala,223,RunCommand,write to and read from a volume,6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
 manifests/k8s_cert_manager.scala,180,RunCommand,issue and verify a certificate,6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
 manifests/k8s_cilium.scala,233,RunCommand,"show Cilium pods, nodes, GatewayClass",6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
 manifests/k8s_cilium.scala,243,RunCommand,nginx behind a LoadBalancer Service,6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
