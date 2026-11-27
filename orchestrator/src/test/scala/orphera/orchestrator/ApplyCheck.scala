@@ -5103,6 +5103,114 @@ sys.exit(code)
         .isFailure
     )
 
+  // A stand-in for virsh: the secrets are kept in $FAKE_VIRSH (a JSON file).
+  private val fakeVirsh: String =
+    """#!/usr/bin/python3
+import json, os, re, sys
+P = os.environ['FAKE_VIRSH']
+S = json.load(open(P)) if os.path.exists(P) else {}
+a = sys.argv[1:]
+assert a[:2] == ['-c', 'qemu:///system'], a
+a = a[2:]
+if a[0] == 'secret-define':
+    u = re.search('<uuid>(.*)</uuid>', open(a[2]).read()).group(1)
+    S.setdefault(u, None)
+elif a[0] == 'secret-set-value':
+    if a[2] not in S:
+        sys.exit(1)
+    S[a[2]] = a[4]
+elif a[0] == 'secret-get-value':
+    if S.get(a[1]) is None:
+        sys.exit(1)
+    print(S[a[1]])
+else:
+    sys.exit(3)
+json.dump(S, open(P, 'w'))
+"""
+
+  private def libvirtSecretChecks(): Unit =
+    val dir = Files.createTempDirectory("virsh")
+    val bin = dir.resolve("bin")
+    Files.createDirectory(bin)
+    val fake = bin.resolve("virsh")
+    Files.writeString(fake, fakeVirsh)
+    check(
+      "libvirtSecret: the fake virsh is executable",
+      fake.toFile.setExecutable(true)
+    )
+    val state = dir.resolve("state")
+    def sh(script: String): (Int, String) =
+      runShell(
+        s"PATH=$bin:$$PATH\nFAKE_VIRSH=$state\nexport FAKE_VIRSH\n$script"
+      )
+    def part(r: ApplyResource, pick: ApplyResource.Command => String): String =
+      r match
+        case c: ApplyResource.Command => pick(c)
+        case other                    => s"not a command: $other"
+    val uuid = "8c256f90-1c37-4fb6-b8be-cedcf0fffd3c"
+    val sec = libvirtSecret(
+      "the Ceph secret",
+      uuid,
+      "ceph",
+      "client.cinder secret",
+      Secret("QUJDREVGR0g=")
+    )
+    check(
+      "libvirtSecret: no secret means it is needed",
+      sh(part(sec, _.unless))._1 != 0
+    )
+    val made = sh(part(sec, _.run))
+    check(
+      "libvirtSecret: it defines the secret and sets the value",
+      made._1 == 0 && made._2.contains(s"libvirt secret $uuid set"),
+      made.toString
+    )
+    check(
+      "libvirtSecret: it then means unchanged",
+      sh(part(sec, _.unless))._1 == 0
+    )
+    val other = libvirtSecret(
+      "x",
+      uuid,
+      "ceph",
+      "client.cinder secret",
+      Secret("QUJDREVGR0g9")
+    )
+    check(
+      "libvirtSecret: another value means it is needed",
+      sh(part(other, _.unless))._1 != 0
+    )
+    check(
+      "libvirtSecret: the new value replaces the old one",
+      sh(part(other, _.run))._1 == 0 && sh(part(other, _.unless))._1 == 0 && sh(
+        part(sec, _.unless)
+      )._1 != 0
+    )
+    check(
+      "libvirtSecret: a uuid that is not one is refused",
+      scala.util
+        .Try(libvirtSecret("x", "not-a-uuid", "ceph", "n", Secret("QUJD")))
+        .isFailure
+    )
+    check(
+      "libvirtSecret: a value with a quote is refused",
+      scala.util
+        .Try(libvirtSecret("x", uuid, "ceph", "n", Secret("QU'JD")))
+        .isFailure
+    )
+    check(
+      "libvirtSecret: a usage name with a tag is refused",
+      scala.util
+        .Try(libvirtSecret("x", uuid, "ceph", "<a>", Secret("QUJD")))
+        .isFailure
+    )
+    check(
+      "libvirtSecret: an unknown usage type is refused",
+      scala.util
+        .Try(libvirtSecret("x", uuid, "nfs", "n", Secret("QUJD")))
+        .isFailure
+    )
+
   private def cephChecks(): Unit =
     val dir = Files.createTempDirectory("ceph")
     val bin = dir.resolve("bin")
@@ -6478,6 +6586,7 @@ else:
     keystoneChecks()
     openstackChecks()
     cephChecks()
+    libvirtSecretChecks()
     helmChecks()
     kubeObjectsChecks()
     ovsChecks()
