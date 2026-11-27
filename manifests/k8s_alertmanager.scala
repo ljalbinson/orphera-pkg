@@ -45,7 +45,8 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 // firing, by design) and InfoInhibitor go to the receiver `null`. A critical alert
 // silences the warning alert with the same name and namespace.
 //
-// The test sends a warning alert named OrpheraTestAlert to Alertmanager (through the
+// By default the test only checks that Alertmanager runs the new configuration. With
+// ORPHERA_ALERT_TEST=1 it also sends a warning alert named OrpheraTestAlert to Alertmanager (through the
 // API server's service proxy), then reads Alertmanager's own counters: the e-mail
 // notifications delivered (attempts minus failures) must go up. Expect one mail with the
 // subject "[FIRING:1] OrpheraTestAlert ..." and, about 5 minutes later when the alert
@@ -72,6 +73,8 @@ object k8s_alertmanager extends OrpheraClusterPlaybook:
     env("ORPHERA_ALERT_SMTP_HELO", "alertmanager.k8s.ljalbinson.com")
   private val from = env("ORPHERA_ALERT_FROM", "alert@ljalbinson.com")
   private val to = env("ORPHERA_ALERT_TO", "lawrence@ljalbinson.com")
+  // a test alert mails the receiver on every run, so it is sent only when asked for
+  private val sendTest = env("ORPHERA_ALERT_TEST", "0")
   private val alertLink = env(
     "ORPHERA_ALERT_LINK",
     "https://grafana.k8s.ljalbinson.com/alerting/list"
@@ -209,6 +212,11 @@ object k8s_alertmanager extends OrpheraClusterPlaybook:
        |  sleep 5
        |done
        |if [ "$$CFG" = "loaded" ]; then echo "ok    Alertmanager runs the new configuration"; else echo "FAIL  Alertmanager does not show the new configuration" >&2; FAIL=1; fi
+       |if [ "$sendTest" != "1" ]; then
+       |  [ "$$FAIL" -eq 0 ] || exit 1
+       |  echo "ok    no test alert sent (set ORPHERA_ALERT_TEST=1 to send one and check the e-mail counters)"
+       |  exit 0
+       |fi
        |read SENT0 FAILED0 <<EOF
        |$$(counts)
        |EOF
@@ -269,7 +277,7 @@ object k8s_alertmanager extends OrpheraClusterPlaybook:
         )
         .task("alertmanager ready")(
           Task.Debug(
-            s"Alertmanager sends alerts by e-mail to $to through $smtpHost:$smtpPort; a test alert was sent, so check the inbox."
+            s"Alertmanager sends alerts by e-mail to $to through $smtpHost:$smtpPort."
           )
         )
         .build
