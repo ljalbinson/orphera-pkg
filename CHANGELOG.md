@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- Group 4, the HTTPRoutes for Argo CD (`k8s_argocd.scala`) and Grafana (`k8s_monitoring.scala`) are made with `kubeObjects`. The wait for the Gateway to accept the route is its own task and stays a command.
 - Group 4, `k8s_alertmanager.scala` makes the SMTP password Secret with `kubeObjects` (the password is quoted for YAML and stays hidden in plans; the Secret is made again if deleted). The check that the Alertmanager release is installed stays a command, now its own task.
 - New kind `kubeObjects(label, name, yaml)`: Kubernetes objects as a description. The result is a root-only helper that holds the YAML (it may hold secrets) and the command that runs it; the command is `unchanged` while the hash of the YAML last applied is the description given and `kubectl get` finds every object (one deleted by hand is made again), otherwise it runs `kubectl apply`. `absentKubeObjects` deletes them again. Group 4, `k8s_external_dns.scala` makes its namespace and TSIG Secret with it; the annotation on the redirect route stays a command.
 - Group 4, `k8s_cilium_metrics.scala` switches on the Cilium and Hubble metrics with `helmRelease` (`reuseValues`, variant `metrics`) and writes the same values to `cilium-metrics-values.yaml` as a typed file, which `k8s_cilium.scala` passes when it installs Cilium again. The ServiceMonitor CRD check and the DaemonSet rollout wait stay commands.

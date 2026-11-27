@@ -380,7 +380,7 @@ manifests/rgw_teardown.scala,66,apply command,delete the RGW pools and every obj
 manifests/k8s_alertmanager.scala,192,apply command,set the Alertmanager receivers,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),done
 manifests/k8s_alertmanager.scala,162,apply command,make the SMTP password Secret,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),done
 manifests/k8s_argocd.scala,226,apply command,helm install argo-cd,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),done
-manifests/k8s_argocd.scala,362,RunCommand,HTTPRoute for $argoHost,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),not started
+manifests/k8s_argocd.scala,240,apply command,HTTPRoute for $argoHost,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),done
 manifests/k8s_ceph_csi.scala,124,apply command,helm install ceph-csi-rbd,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),done
 manifests/k8s_ceph_csi.scala,215,RunCommand,make ceph-rbd the default StorageClass,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),not started
 manifests/k8s_cert_manager.scala,67,apply command,helm install cert-manager,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),done
@@ -399,7 +399,7 @@ manifests/k8s_logging.scala,156,apply command,helm install Alloy,4,New product-s
 manifests/k8s_metrics_server.scala,28,apply command,helm install metrics-server,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),done
 manifests/k8s_monitoring.scala,356,RunCommand,"namespace, CA ConfigMap and OAuth Secret",4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),not started
 manifests/k8s_monitoring.scala,286,apply command,helm install kube-prometheus-stack,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),done
-manifests/k8s_monitoring.scala,366,RunCommand,HTTPRoute for $grafanaHost,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),not started
+manifests/k8s_monitoring.scala,300,apply command,HTTPRoute for $grafanaHost,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),done
 manifests/k8s_network_lockdown.scala,176,RunCommand,"default deny for external-dns, then test it",4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),not started
 manifests/k8s_network_lockdown.scala,184,RunCommand,"default deny for argocd, then test it",4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),not started
 manifests/k8s_network_lockdown.scala,189,RunCommand,"default deny for logging, then test it",4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),not started
@@ -633,6 +633,7 @@ manifests/k8s_alertmanager.scala,299,RunCommand,wait for Alertmanager to roll ou
 manifests/k8s_alertmanager.scala,286,RunCommand,check that Alertmanager is installed,6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
 manifests/k8s_alertmanager.scala,304,RunCommand,send a test alert and check the e-mail counters,6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
 manifests/k8s_api_vip.scala,224,RunCommand,print which node holds the VIP,6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
+manifests/k8s_argocd.scala,357,RunCommand,wait for the Gateway to accept the route for $argoHost,6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
 manifests/k8s_argocd.scala,367,RunCommand,check the server and sync a test Application,6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
 manifests/k8s_ceph_csi.scala,223,RunCommand,write to and read from a volume,6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
 manifests/k8s_cert_manager.scala,180,RunCommand,issue and verify a certificate,6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
@@ -657,6 +658,7 @@ manifests/k8s_kubeadm_config.scala,329,RunCommand,kubeadm upgrade diff keeps the
 manifests/k8s_kubeadm_config.scala,355,RunCommand,a host-network pod sees two nameservers,6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
 manifests/k8s_kubeadm_config.scala,363,RunCommand,Prometheus sees them,6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
 manifests/k8s_logging.scala,230,RunCommand,query Loki and ask Grafana,6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
+manifests/k8s_monitoring.scala,377,RunCommand,wait for the Gateway to accept the route for $grafanaHost,6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
 manifests/k8s_monitoring.scala,371,RunCommand,query Prometheus and request Grafana,6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
 manifests/k8s_network_policy.scala,280,RunCommand,lock down a test namespace step by step,6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
 manifests/k8s_oidc.scala,504,RunCommand,add the flags to kube-apiserver,6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
