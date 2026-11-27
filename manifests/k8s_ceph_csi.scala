@@ -208,7 +208,9 @@ object k8s_ceph_csi extends OrpheraClusterPlaybook:
         )
         .build,
       stage("install-ceph-csi", node)
-        .task("helm install ceph-csi-rbd, with ceph-rbd as the default StorageClass")(
+        .task(
+          "helm install ceph-csi-rbd, with ceph-rbd as the default StorageClass"
+        )(
           Task.Apply(installPlan)
         )
         .build,
