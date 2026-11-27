@@ -4398,7 +4398,7 @@ elif c.startswith('ceph orch apply ') and a[4].startswith('--placement='):
     st.setdefault('place', {})[a[3]] = {'hosts': a[4][len('--placement='):].split(',')}
     st['log'].append(c); save()
 elif c.startswith('ceph orch host add '):
-    st.setdefault('hosts', [{'hostname': 'tst0.example', 'addr': '10.10.5.12'}])
+    st.setdefault('hosts', [{'hostname': 'tst0.example', 'addr': '10.10.5.12'}, {'hostname': 'tst1.example', 'addr': '10.10.5.13'}])
     st['hosts'] = [h for h in st['hosts'] if h['hostname'].split('.')[0] != a[4]] + [{'hostname': a[4], 'addr': a[5]}]
     st['log'].append(c); save()
 elif c.startswith('ceph orch ls --service-type '):
