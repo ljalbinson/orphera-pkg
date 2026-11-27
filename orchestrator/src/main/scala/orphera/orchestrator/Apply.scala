@@ -3306,9 +3306,7 @@ esac
     )
     val v = value.reveal
     require(
-      v.nonEmpty && v.forall(c =>
-        c.isLetterOrDigit || "+/=".contains(c)
-      ),
+      v.nonEmpty && v.forall(c => c.isLetterOrDigit || "+/=".contains(c)),
       "the value of a libvirt secret must be base64 text"
     )
     command(

@@ -5134,10 +5134,15 @@ json.dump(S, open(P, 'w'))
     Files.createDirectory(bin)
     val fake = bin.resolve("virsh")
     Files.writeString(fake, fakeVirsh)
-    check("libvirtSecret: the fake virsh is executable", fake.toFile.setExecutable(true))
+    check(
+      "libvirtSecret: the fake virsh is executable",
+      fake.toFile.setExecutable(true)
+    )
     val state = dir.resolve("state")
     def sh(script: String): (Int, String) =
-      runShell(s"PATH=$bin:$$PATH\nFAKE_VIRSH=$state\nexport FAKE_VIRSH\n$script")
+      runShell(
+        s"PATH=$bin:$$PATH\nFAKE_VIRSH=$state\nexport FAKE_VIRSH\n$script"
+      )
     def part(r: ApplyResource, pick: ApplyResource.Command => String): String =
       r match
         case c: ApplyResource.Command => pick(c)
@@ -5164,30 +5169,46 @@ json.dump(S, open(P, 'w'))
       "libvirtSecret: it then means unchanged",
       sh(part(sec, _.unless))._1 == 0
     )
-    val other = libvirtSecret("x", uuid, "ceph", "client.cinder secret", Secret("QUJDREVGR0g9"))
+    val other = libvirtSecret(
+      "x",
+      uuid,
+      "ceph",
+      "client.cinder secret",
+      Secret("QUJDREVGR0g9")
+    )
     check(
       "libvirtSecret: another value means it is needed",
       sh(part(other, _.unless))._1 != 0
     )
     check(
       "libvirtSecret: the new value replaces the old one",
-      sh(part(other, _.run))._1 == 0 && sh(part(other, _.unless))._1 == 0 && sh(part(sec, _.unless))._1 != 0
+      sh(part(other, _.run))._1 == 0 && sh(part(other, _.unless))._1 == 0 && sh(
+        part(sec, _.unless)
+      )._1 != 0
     )
     check(
       "libvirtSecret: a uuid that is not one is refused",
-      scala.util.Try(libvirtSecret("x", "not-a-uuid", "ceph", "n", Secret("QUJD"))).isFailure
+      scala.util
+        .Try(libvirtSecret("x", "not-a-uuid", "ceph", "n", Secret("QUJD")))
+        .isFailure
     )
     check(
       "libvirtSecret: a value with a quote is refused",
-      scala.util.Try(libvirtSecret("x", uuid, "ceph", "n", Secret("QU'JD"))).isFailure
+      scala.util
+        .Try(libvirtSecret("x", uuid, "ceph", "n", Secret("QU'JD")))
+        .isFailure
     )
     check(
       "libvirtSecret: a usage name with a tag is refused",
-      scala.util.Try(libvirtSecret("x", uuid, "ceph", "<a>", Secret("QUJD"))).isFailure
+      scala.util
+        .Try(libvirtSecret("x", uuid, "ceph", "<a>", Secret("QUJD")))
+        .isFailure
     )
     check(
       "libvirtSecret: an unknown usage type is refused",
-      scala.util.Try(libvirtSecret("x", uuid, "nfs", "n", Secret("QUJD"))).isFailure
+      scala.util
+        .Try(libvirtSecret("x", uuid, "nfs", "n", Secret("QUJD")))
+        .isFailure
     )
 
   private def cephChecks(): Unit =
