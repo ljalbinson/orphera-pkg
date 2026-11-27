@@ -377,8 +377,8 @@ manifests/rgw_teardown.scala,55,apply command,remove the RGW service,4,New produ
 manifests/rgw_teardown.scala,56,apply command,remove the RGW options from the monitors' configuration,4,New product-specific kinds,Ceph pool/key/orch,cephPool / cephKey / Ceph config option / orchestrator spec,done
 manifests/rgw_teardown.scala,62,apply command,"remove the helper, the state files and the CA copy",1,Existing kinds,directory/file,directory / file / authorizedKey / kernelModule / mount / pkg,done
 manifests/rgw_teardown.scala,66,apply command,delete the RGW pools and every object in them (RGW_PURGE_POOLS=yes),4,New product-specific kinds,Ceph pool/key/orch,cephPool / cephKey / Ceph config option / orchestrator spec,not started
-manifests/k8s_alertmanager.scala,170,apply command,set the Alertmanager receivers,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),done
-manifests/k8s_alertmanager.scala,256,RunCommand,make the SMTP password Secret,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),not started
+manifests/k8s_alertmanager.scala,192,apply command,set the Alertmanager receivers,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),done
+manifests/k8s_alertmanager.scala,162,apply command,make the SMTP password Secret,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),done
 manifests/k8s_argocd.scala,226,apply command,helm install argo-cd,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),done
 manifests/k8s_argocd.scala,362,RunCommand,HTTPRoute for $argoHost,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),not started
 manifests/k8s_ceph_csi.scala,124,apply command,helm install ceph-csi-rbd,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),done
@@ -629,8 +629,9 @@ manifests/iperf3_test.scala,69,RunCommand,?,6,Stays a command,stays a command,"m
 manifests/iperf3_test.scala,96,RunCommand,?,6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
 manifests/iperf3_test.yaml,32,yaml command,install iperf3 if missing,6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
 manifests/iperf3_test.yaml,66,yaml command,run iperf3 client against tst0 (own dedicated port),6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
-manifests/k8s_alertmanager.scala,262,RunCommand,wait for Alertmanager to roll out,6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
-manifests/k8s_alertmanager.scala,267,RunCommand,send a test alert and check the e-mail counters,6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
+manifests/k8s_alertmanager.scala,299,RunCommand,wait for Alertmanager to roll out,6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
+manifests/k8s_alertmanager.scala,286,RunCommand,check that Alertmanager is installed,6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
+manifests/k8s_alertmanager.scala,304,RunCommand,send a test alert and check the e-mail counters,6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
 manifests/k8s_api_vip.scala,224,RunCommand,print which node holds the VIP,6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
 manifests/k8s_argocd.scala,367,RunCommand,check the server and sync a test Application,6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started
 manifests/k8s_ceph_csi.scala,223,RunCommand,write to and read from a volume,6,Stays a command,stays a command,"migration, image-derived config, join/bootstrap, test, report or demo",not started

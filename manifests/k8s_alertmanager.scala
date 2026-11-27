@@ -88,7 +88,6 @@ object k8s_alertmanager extends OrpheraClusterPlaybook:
   private val smtpPassword: Option[Secret] =
     if useAuth then Some(Secrets.secret("alertmanager/smtp")) else None
 
-  private def shQuote(v: String): String = "'" + v.replace("'", "'\\''") + "'"
 
   private val secretsPath =
     "/etc/alertmanager/secrets/alertmanager-smtp/password"
@@ -148,19 +147,40 @@ object k8s_alertmanager extends OrpheraClusterPlaybook:
        |          {{ end }}<p><a href="$alertLink">Alerts in Grafana</a></p>
        |$tlsLines""".stripMargin
 
-  // The Kubernetes Secret with the password (a line of the script; empty without a login).
-  private val passwordSecretCmd =
-    smtpPassword match
-      case Some(pw) =>
-        s"$kc -n $ns create secret generic alertmanager-smtp --from-literal=password=${shQuote(pw.reveal)} --dry-run=client -o yaml | $kc apply -f -"
-      case None => "true"
+  private def yamlQuote(text: String): String =
+    "\"" + text.flatMap {
+      case '\\' => "\\\\"
+      case '"'  => "\\\""
+      case '\n' => "\\n"
+      case c    => c.toString
+    } + "\""
 
+  // The Kubernetes Secret with the password, as `kubeObjects` (none without a login).
+  private val passwordPlan: Option[ApplyPlan] =
+    import Resources.*
+    smtpPassword.map { pw =>
+      val (helper, made) = kubeObjects(
+        "make the SMTP password Secret",
+        "alertmanager-smtp",
+        Secret(s"""apiVersion: v1
+                  |kind: Secret
+                  |metadata:
+                  |  name: alertmanager-smtp
+                  |  namespace: $ns
+                  |type: Opaque
+                  |stringData:
+                  |  password: ${yamlQuote(pw.reveal)}
+                  |""".stripMargin)
+      )
+      ApplyPlan.orFail("alertmanager-smtp", List(helper, made))
+    }
+
+  // The release has to be there (k8s_monitoring.scala installs it); a stop with a message otherwise.
   private val prepareScript =
     s"""set -e
        |$kc -n $ns get statefulset alertmanager-kps-alertmanager >/dev/null \\
        |  || { echo "Alertmanager of the release kps not found in $ns; run k8s_monitoring.scala first" >&2; exit 1; }
-       |$passwordSecretCmd
-       |echo "the SMTP password Secret is in place"
+       |echo "Alertmanager of the release kps is installed in $ns"
        |""".stripMargin
 
   private val valuesFile = s"$stateDir/alertmanager-values.yaml"
@@ -260,9 +280,18 @@ object k8s_alertmanager extends OrpheraClusterPlaybook:
 
   val playbook: ClusterPlaybook =
     clusterPlaybook("k8s-alertmanager")(
-      stage("alertmanager-config", node)
-        .task("make the SMTP password Secret")(
-          Task.RunCommand(List("sh", "-c", prepareScript), timeoutSeconds = 60)
+      passwordPlan
+        .fold(
+          stage("alertmanager-config", node)
+            .task("check that Alertmanager is installed")(
+              Task.RunCommand(List("sh", "-c", prepareScript), timeoutSeconds = 60)
+            )
+        )(plan =>
+          stage("alertmanager-config", node)
+            .task("check that Alertmanager is installed")(
+              Task.RunCommand(List("sh", "-c", prepareScript), timeoutSeconds = 60)
+            )
+            .task("make the SMTP password Secret")(Task.Apply(plan))
         )
         .task("set the Alertmanager receivers")(
           Task.Apply(applyPlan)
