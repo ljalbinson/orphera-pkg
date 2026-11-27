@@ -19,8 +19,9 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 //      newest 168 of each kind per node are kept there, a week of hourly runs).
 //
 // The upload uses a native RGW user `etcd-backup` with its own S3 keys, made by
-// `radosgw-admin` on tst0 and copied to the control-plane nodes as a root-only file
-// (/etc/etcd-backup/s3.cred); it does not depend on Keystone, so the backups can be
+// `radosgw-admin` on tst0 and written on the control-plane nodes as a root-only file
+// (/etc/etcd-backup/s3.cred); the keys are the secrets `k8s/etcd-s3-access` and
+// `k8s/etcd-s3-secret`; it does not depend on Keystone, so the backups can be
 // fetched when OpenStack is down. The object gateway speaks plain HTTP in this lab,
 // so the PKI archives cross the network unencrypted: acceptable here, not elsewhere.
 //
@@ -47,23 +48,45 @@ object k8s_etcd_backup extends OrpheraClusterPlaybook:
   private val cpNodes = List("tst30", "tst31", "tst32")
   private val rgw = s"{{nodes.$cephNode.cluster_ip}}:8080"
   private val bucket = "etcd-backups"
-  private val rgwUser = "etcd-backup"
-  private val credSource = s"/etc/ceph/$rgwUser.s3"
+  private val rgwUid = "etcd-backup"
   private val credDest = "/etc/etcd-backup/s3.cred"
   private val helper = "/usr/local/sbin/orphera-etcd-backup"
 
-  private val rgwUserScript =
-    s"""set -e
-       |if ! cephadm shell -- radosgw-admin user info --uid=$rgwUser >/dev/null 2>&1; then
-       |  cephadm shell -- radosgw-admin user create --uid=$rgwUser --display-name="etcd backups" >/dev/null
-       |  echo "RGW user $rgwUser created"
-       |fi
-       |JSON=$$(cephadm shell -- radosgw-admin user info --uid=$rgwUser 2>/dev/null)
-       |umask 077
-       |printf '%s' "$$JSON" | python3 -c 'import sys,json; k=json.load(sys.stdin)["keys"][0]; print(k["access_key"]); print(k["secret_key"])' > $credSource
-       |[ "$$(wc -l < $credSource)" -eq 2 ] || { echo "could not read the S3 keys of $rgwUser" >&2; exit 1; }
-       |echo "S3 keys of $rgwUser written to $credSource"
-       |""".stripMargin
+  // The S3 keys are fixed ones from the secret store (made at random on first use), so the
+  // gateway user and the credential file on each node are descriptions of the same two values.
+  private val s3Access = Secrets.secret("k8s/etcd-s3-access").reveal
+  private val s3Secret = Secrets.secret("k8s/etcd-s3-secret")
+
+  private val rgwUserPlan: ApplyPlan =
+    import Resources.*
+    ApplyPlan.orFail(
+      "etcd-backup-rgw-user",
+      List(
+        rgwUser(
+          s"the RGW user $rgwUid and its S3 keys",
+          rgwUid,
+          "etcd backups",
+          s3Access,
+          s3Secret
+        )
+      )
+    )
+
+  // Two lines, the access key and the secret key, as the helper reads them.
+  private val credentialsPlan: ApplyPlan =
+    import Resources.*
+    ApplyPlan.orFail(
+      "etcd-backup-credentials",
+      List(
+        secretFile(
+          credDest,
+          Secret(s"$s3Access\n${s3Secret.reveal}\n"),
+          mode = "0600",
+          owner = "root",
+          group = "root"
+        )
+      )
+    )
 
   private val helperPython =
     """#!/usr/bin/python3
@@ -368,8 +391,8 @@ else:
   val playbook: ClusterPlaybook =
     clusterPlaybook("k8s-etcd-backup")(
       stage("rgw-user", cephNode)
-        .task("create the RGW user and read its S3 keys")(
-          Task.RunCommand(List("sh", "-c", rgwUserScript), timeoutSeconds = 180)
+        .task("create the RGW user and its S3 keys")(
+          Task.Apply(rgwUserPlan)
         )
         .build,
       stage("prepare-nodes", cpNodes*)
@@ -378,9 +401,8 @@ else:
         )
         .build,
       stage("send-credentials", cpNodes*)
-        .task("copy the S3 keys from tst0")(
-          Task
-            .DistributeFile(cephNode, credSource, credDest, "root", "root", 384)
+        .task("write the S3 keys")(
+          Task.Apply(credentialsPlan)
         )
         .build,
       stage("install-backup-tst30", "tst30")

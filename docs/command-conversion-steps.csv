@@ -361,7 +361,7 @@ manifests/glance_ceph.scala,54,apply command,the $cephPool pool and the client.g
 manifests/glance_teardown.scala,90,apply command,delete the $cephPool pool and client.glance,4,New product-specific kinds,Ceph pool/key/orch,cephPool / cephKey / Ceph config option / orchestrator spec,done
 manifests/k8s_ceph_csi.scala,215,apply command,create the pool and the client.k8s user,4,New product-specific kinds,Ceph pool/key/orch,cephPool / cephKey / Ceph config option / orchestrator spec,done
 manifests/k8s_cilium.scala,122,apply command,create the address pool and the L2 announcement policy,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),done
-manifests/k8s_etcd_backup.scala,329,RunCommand,create the RGW user and read its S3 keys,4,New product-specific kinds,Ceph pool/key/orch,cephPool / cephKey / Ceph config option / orchestrator spec,not started
+manifests/k8s_etcd_backup.scala,394,apply command,create the RGW user and read its S3 keys,4,New product-specific kinds,Ceph pool/key/orch,cephPool / cephKey / Ceph config option / orchestrator spec,done
 manifests/manila_ceph.scala,67,apply command,create the CephFS filesystem $cephFs and wait for an active MDS,4,New product-specific kinds,Ceph pool/key/orch,cephPool / cephKey / Ceph config option / orchestrator spec,done
 manifests/manila_ceph.scala,68,apply command,create the NFS cluster $nfsCluster and wait for NFS-Ganesha on $nfsIp:2049,4,New product-specific kinds,Ceph pool/key/orch,cephPool / cephKey / Ceph config option / orchestrator spec,done
 manifests/manila_ceph.scala,160,apply command,the client.manila cephx user and its key,4,New product-specific kinds,Ceph pool/key/orch,cephPool / cephKey / Ceph config option / orchestrator spec,done
