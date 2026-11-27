@@ -294,26 +294,34 @@ print('client %s in realm %s ready: redirect %s/login/generic_oauth' % (CLIENT_I
     )
     ApplyPlan.orFail("monitoring", List(helper, installed))
 
-  private val routeScript =
+  // The route on the Gateway's https listener, as `kubeObjects`; the wait below is the check that the Gateway took it.
+  private val routePlan: ApplyPlan =
+    import Resources.*
+    val (helper, made) = kubeObjects(
+      s"HTTPRoute for $grafanaHost",
+      "grafana-route",
+      Secret(s"""apiVersion: gateway.networking.k8s.io/v1
+                |kind: HTTPRoute
+                |metadata:
+                |  name: grafana
+                |  namespace: $ns
+                |spec:
+                |  parentRefs:
+                |  - name: public
+                |    namespace: gateway
+                |    sectionName: https
+                |  hostnames:
+                |  - $grafanaHost
+                |  rules:
+                |  - backendRefs:
+                |    - name: grafana
+                |      port: 80
+                |""".stripMargin)
+    )
+    ApplyPlan.orFail("grafana-route", List(helper, made))
+
+  private val routeWaitScript =
     s"""set -e
-       |cat <<EOF | $kc apply -f -
-       |apiVersion: gateway.networking.k8s.io/v1
-       |kind: HTTPRoute
-       |metadata:
-       |  name: grafana
-       |  namespace: $ns
-       |spec:
-       |  parentRefs:
-       |  - name: public
-       |    namespace: gateway
-       |    sectionName: https
-       |  hostnames:
-       |  - $grafanaHost
-       |  rules:
-       |  - backendRefs:
-       |    - name: grafana
-       |      port: 80
-       |EOF
        |$kc -n $ns wait --for=jsonpath='{.status.parents[0].conditions[?(@.type=="Accepted")].status}'=True httproute/grafana --timeout=120s
        |""".stripMargin
 
@@ -364,7 +372,11 @@ print('client %s in realm %s ready: redirect %s/login/generic_oauth' % (CLIENT_I
         .build,
       stage("publish-grafana", node)
         .task(s"HTTPRoute for $grafanaHost")(
-          Task.RunCommand(List("sh", "-c", routeScript), timeoutSeconds = 180)
+          Task.Apply(routePlan)
+        )
+        .task(s"wait for the Gateway to accept the route for $grafanaHost")(
+          Task
+            .RunCommand(List("sh", "-c", routeWaitScript), timeoutSeconds = 180)
         )
         .build,
       stage("test-monitoring", node)
