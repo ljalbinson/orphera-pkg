@@ -207,6 +207,18 @@ object k8s_cluster extends OrpheraClusterPlaybook:
   private val allRegisteredScript =
     s"""[ "$$(kubectl --kubeconfig /etc/kubernetes/admin.conf get nodes --no-headers | wc -l)" -eq ${allNodes.size} ]"""
 
+  // The check passes when each pool's label selector finds exactly the nodes
+  // of that pool, so a node rebuilt without its labels is labelled again.
+  private def poolCheck(pool: String, nodes: List[String]): String =
+    s"""[ "$$($$K get nodes -l pool=$pool,node-role.kubernetes.io/$pool -o name | sed 's|^node/||' | sort | tr '\\n' ' ')" = "${nodes.sorted
+        .mkString(" ")} " ] || exit 1"""
+
+  private val labelCheckScript =
+    s"""K="kubectl --kubeconfig /etc/kubernetes/admin.conf"
+       |${poolCheck("infra", infraNodes)}
+       |${poolCheck("workload", workloadNodes)}
+       |""".stripMargin
+
   private val labelScript =
     s"""set -e
        |K="kubectl --kubeconfig /etc/kubernetes/admin.conf"
@@ -218,6 +230,20 @@ object k8s_cluster extends OrpheraClusterPlaybook:
        |done
        |$$K get nodes -o wide
        |""".stripMargin
+
+  private val labelPlan: ApplyPlan =
+    import Resources.*
+    ApplyPlan.orFail(
+      "worker-pool-labels",
+      List(
+        command(
+          "label the worker pools",
+          labelScript,
+          unless = labelCheckScript,
+          timeout = 120
+        )
+      )
+    )
 
   // The pods of the nodes that joined last appear a few seconds after
   // `kubeadm join` returns, so the counts are retried for two minutes.
@@ -309,7 +335,7 @@ object k8s_cluster extends OrpheraClusterPlaybook:
           )
         )
         .task("label the worker pools")(
-          Task.RunCommand(List("sh", "-c", labelScript), timeoutSeconds = 120)
+          Task.Apply(labelPlan)
         )
         .task("check etcd, the API servers and the VIP")(
           Task.RunCommand(List("sh", "-c", checkScript), timeoutSeconds = 180)
