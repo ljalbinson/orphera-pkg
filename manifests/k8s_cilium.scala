@@ -68,7 +68,13 @@ object k8s_cilium extends OrpheraClusterPlaybook:
   private val gatewayCrdsFile = s"$stateDir/gateway-api-$gatewayApiVersion.yaml"
 
   private val gatewayCrdsCurrent: String =
-    List("gatewayclasses", "gateways", "httproutes", "referencegrants", "grpcroutes")
+    List(
+      "gatewayclasses",
+      "gateways",
+      "httproutes",
+      "referencegrants",
+      "grpcroutes"
+    )
       .map(c =>
         s"""[ "$$($kc get crd $c.gateway.networking.k8s.io -o jsonpath='{.metadata.annotations.gateway\\.networking\\.k8s\\.io/bundle-version}' 2>/dev/null)" = "$gatewayApiVersion" ]"""
       )
