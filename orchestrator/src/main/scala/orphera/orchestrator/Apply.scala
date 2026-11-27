@@ -2625,20 +2625,24 @@ esac
 set -e
 export KUBECONFIG=@@KUBECONFIG@@
 STATE=@@STATE@@
-WANT=@@WANT@@
 TMP=$(mktemp)
-trap 'rm -f "$TMP"' EXIT
+trap 'rm -f "$TMP" "$TMP.new"' EXIT
 cat > "$TMP" <<'ORPHERA_KUBE_EOF'
 @@YAML@@
 ORPHERA_KUBE_EOF
+@@RENDER@@
 
 present() {
   kubectl get -f "$TMP" -o name >/dev/null 2>&1
 }
 
+want() {
+  sha256sum "$TMP" | cut -d' ' -f1
+}
+
 case "$1" in
   check)
-    [ "$(cat "$STATE" 2>/dev/null)" = "$WANT" ] && present
+    [ "$(cat "$STATE" 2>/dev/null)" = "$(want)" ] && present
     ;;
   exists)
     present
@@ -2646,7 +2650,7 @@ case "$1" in
   ensure)
     kubectl apply -f "$TMP"
     mkdir -p "$(dirname "$STATE")"
-    echo "$WANT" > "$STATE"
+    want > "$STATE"
     ;;
   remove)
     kubectl delete -f "$TMP" --ignore-not-found
@@ -2679,6 +2683,12 @@ esac
     * `kubectl get` finds every object, so an object deleted by hand is made
     * again; otherwise it runs `kubectl apply`. A change made to an object's
     * fields by hand is not noticed. `name` names the helper and the state file.
+    * `yamlFrom` pairs a placeholder name with a file on the node: a line of the
+    * YAML that holds only `@@NAME@@` is replaced, when the helper runs, by the
+    * lines of that file with the placeholder's indentation (a certificate in a
+    * ConfigMap's `|` block). The check looks at the YAML after that, so a
+    * change to the file is applied; a missing or empty file stops the helper
+    * with a message.
     */
   def kubeObjects(
       label: String,
@@ -2686,9 +2696,20 @@ esac
       yaml: Secret,
       kubeconfig: String = "/etc/kubernetes/admin.conf",
       stateDir: String = "/var/lib/orphera/kube",
-      timeout: Int = 180
+      timeout: Int = 180,
+      yamlFrom: List[(String, String)] = Nil
   ): (ApplyResource, ApplyResource) =
     helmName("a name", name)
+    yamlFrom.foreach { (tag, file) =>
+      require(
+        tag.nonEmpty && tag.forall(c => c.isUpper || c.isDigit || c == '_'),
+        s"a placeholder name must be capitals, digits and _, not '$tag'"
+      )
+      require(
+        file.startsWith("/"),
+        s"a file must be an absolute path: '$file'"
+      )
+    }
     val text = yaml.reveal.replaceAll("\\n+$", "")
     require(text.nonEmpty, "the YAML is empty")
     require(
@@ -2698,7 +2719,21 @@ esac
     val script = kubeObjectsScript
       .replace("@@KUBECONFIG@@", Apply.quote(kubeconfig))
       .replace("@@STATE@@", Apply.quote(kubeObjectsStatePath(name, stateDir)))
-      .replace("@@WANT@@", Apply.quote(cephSpecSha(text)))
+      .replace(
+        "@@RENDER@@",
+        yamlFrom
+          .map((tag, file) =>
+            List(
+              s"[ -s ${Apply.quote(file)} ] || { echo ${Apply.quote(file + " is missing")} >&2; exit 1; }",
+              "awk -v tag=" + Apply.quote(
+                "@@" + tag + "@@"
+              ) + " -v file=" + Apply.quote(file) +
+                " '{ t = $0; sub(/^ +/, \"\", t); if (t == tag) { ind = substr($0, 1, length($0) - length(t)); while ((getline l < file) > 0) print ind l; close(file) } else print }' \"$TMP\" > \"$TMP.new\"",
+              "mv \"$TMP.new\" \"$TMP\""
+            ).mkString("\n")
+          )
+          .mkString("\n")
+      )
       .replace("@@YAML@@", text)
     val path = kubeObjectsHelperPath(name)
     val helper = secretFile(
