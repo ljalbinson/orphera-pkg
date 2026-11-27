@@ -7,7 +7,7 @@
 # that change it accepted the built-in development token, which is in the source code.
 #
 #   orphera secrets generate orphera/agent-token     # once
-#   utils/set-agent-token.sh tst0 tst1 tst2 ...      # SSH_USER defaults to localadmin
+#   utils/set-agent-token.sh --nodes tst0,tst1,tst2  # SSH_USER defaults to localadmin
 #
 # The token travels on ssh's standard input, never on a command line, and ends up in
 # /etc/orphera-agent/agent.env (root only, mode 600). Other lines in that file stay.
@@ -15,7 +15,19 @@
 # the package keeps a changed agent.env.
 set -uo pipefail
 
-[ $# -gt 0 ] || { sed -n '2,/^set /p' "$0" | sed 's/^# \{0,1\}//' | head -n -1; exit 2; }
+. "$(dirname "${BASH_SOURCE[0]}")/orphera-sources.sh"
+
+usage() { sed -n '2,/^set /p' "$0" | sed 's/^# \{0,1\}//' | head -n -1; }
+nodes=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --nodes) nodes_option "${2:-}"; nodes+=("${NODE_ARGS[@]}"); shift 2 ;;
+    -h|--help) usage; exit 0 ;;
+    -*) echo "unknown option $1" >&2; exit 2 ;;
+    *) unexpected_arg "$1" ;;
+  esac
+done
+[ "${#nodes[@]}" -gt 0 ] || { usage; exit 2; }
 
 orphera secrets get orphera/agent-token >/dev/null 2>&1 || {
   echo "there is no agent token yet: run  orphera secrets generate orphera/agent-token" >&2
@@ -26,7 +38,7 @@ user=${SSH_USER:-localadmin}
 REMOTE='umask 077; IFS= read -r t; f=${AGENT_ENV:-/etc/orphera-agent/agent.env}; { grep -v "^#*ORPHERA_TOKEN=" "$f" 2>/dev/null || true; printf "ORPHERA_TOKEN=%s\n" "$t"; } > "$f.new" && mv "$f.new" "$f" && systemctl restart orphera-agent'
 
 failed=()
-for node in "$@"; do
+for node in "${nodes[@]}"; do
   if orphera secrets get orphera/agent-token | ssh "$user@$node" "sudo sh -c '$REMOTE'"; then
     echo "ok    $node"
   else

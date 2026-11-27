@@ -5,9 +5,9 @@
 # ACPI power-button press), then waits until libvirt reports it shut off. The
 # hypervisor and domain name come from each VM's config/<vm>.yaml.
 #
-#   utils/stop-vm.sh tst7                  # waits up to 120 s
-#   utils/stop-vm.sh --wait 300 tst7 tst8
-#   utils/stop-vm.sh --force tst7          # power it off if it has not shut down in time
+#   utils/stop-vm.sh --nodes tst7          # waits up to 120 s
+#   utils/stop-vm.sh --wait 300 --nodes tst7,tst8
+#   utils/stop-vm.sh --force --nodes tst7  # power it off if it has not shut down in time
 #   utils/stop-vm.sh --node-groups ceph --exclude-nodes tst2
 #   utils/stop-vm.sh --parallel 8 --node-groups k8s   # up to 8 at a time
 #
@@ -15,6 +15,7 @@
 #   --force          after that time, power the VM off at once (virsh destroy),
 #                    like pulling the plug; without it a VM that has not shut
 #                    down is reported as failed and left running
+#   --nodes N1,N2           these VMs (a name, or a bare number N for tstN; a comma-separated list)
 #   --node-groups G1,G2     every VM in those inventory groups
 #   --exclude-nodes V1,V2   leave those VMs out of the selection
 #   --parallel N            work on up to N VMs at a time (default 1, one after
@@ -23,8 +24,9 @@
 # The groups and VM names are taken in the order given, each group as its
 # members (`orphera nodes --groups` lists them), checked against the inventory
 # and without repeats (`orphera nodes`), less the VMs excluded; the VMs are
-# printed first. --exclude-nodes needs --node-groups or VM names as well.
-# Options may come anywhere among the VM names.
+# printed first. --exclude-nodes needs --node-groups or --nodes as well.
+# VM names (a name, a bare number or a config file each) are only taken after --nodes, a comma-separated
+# list; a bare argument is refused. Options may come in any order.
 #
 # A VM that is already shut off is left alone. Run from scala0, in orphera-pkg.
 # Exit code 1 if any VM is not shut off at the end. To start it again:
@@ -41,11 +43,12 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --parallel) vm_parallel_option "${2:-}"; par=$2; shift 2 ;;
     --node-groups|--exclude-nodes) vm_select_option "$1" "${2:-}"; shift 2 ;;
+    --nodes) nodes_option "${2:-}"; for n in "${NODE_ARGS[@]}"; do pos+=("$n"); vm_select_name "$n"; done; shift 2 ;;
     --wait) wait_s=${2:-}; shift 2 || { echo "--wait needs a number of seconds" >&2; exit 2; } ;;
     --force) force=1; shift ;;
     -h|--help) sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     -*) echo "unknown option $1" >&2; exit 2 ;;
-    *) pos+=("$1"); vm_select_name "$1"; shift ;;
+    *) unexpected_arg "$1" ;;
   esac
 done
 case "$wait_s" in ''|*[!0-9]*) echo "--wait needs a number of seconds" >&2; exit 2 ;; esac

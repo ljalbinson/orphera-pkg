@@ -570,16 +570,23 @@ _vmctl_completions() {
     --hypervisor) COMPREPLY=($(compgen -W "$(_vmctl_hypervisors)" -- "$cur")); return 0 ;;
     --except|--exclude-nodes) _vm_complete_list "$cur" $(_vmctl_vms); return 0 ;;
     --node-groups) _vm_complete_list "$cur" $(_orphera_groups); return 0 ;;
+    --nodes)
+      case "$action" in
+        shutdown-all|start-all|list) _vm_complete_list "$cur" $(_vmctl_hypervisors) ;;
+        *) _vm_complete_list "$cur" $(_vmctl_vms) ;;
+      esac
+      return 0 ;;
   esac
 
   local opts=""
   case "$action" in
-    start)        opts="--retries --parallel --node-groups --exclude-nodes" ;;
-    stop)         opts="--wait --force --parallel --node-groups --exclude-nodes" ;;
-    reboot)       opts="--hard --soft --wait --force --retries --parallel --node-groups --exclude-nodes" ;;
-    shutdown-all) opts="--yes --wait --force --except" ;;
-    start-all)    opts="--all --dry-run --retries --except" ;;
-    autostart)    opts="--all --hypervisor --node-groups --exclude-nodes" ;;
+    start)        opts="--nodes --retries --parallel --node-groups --exclude-nodes" ;;
+    stop)         opts="--nodes --wait --force --parallel --node-groups --exclude-nodes" ;;
+    reboot)       opts="--nodes --hard --soft --wait --force --retries --parallel --node-groups --exclude-nodes" ;;
+    shutdown-all) opts="--nodes --yes --wait --force --except" ;;
+    start-all)    opts="--nodes --all --dry-run --retries --except" ;;
+    list)         opts="--nodes" ;;
+    autostart)    opts="--nodes --all --hypervisor --node-groups --exclude-nodes" ;;
   esac
 
   if [[ "$cur" == -* ]]; then
@@ -587,12 +594,8 @@ _vmctl_completions() {
     return 0
   fi
 
-  # Positional arguments: hypervisors for these, VMs for the rest.
-  case "$action" in
-    shutdown-all|start-all|list) COMPREPLY=($(compgen -W "$(_vmctl_hypervisors)" -- "$cur")) ;;
-    start|stop|reboot|autostart) COMPREPLY=($(compgen -W "$(_vmctl_vms)" -- "$cur")) ;;
-    *) COMPREPLY=() ;;
-  esac
+  # Names are only accepted after --nodes: nothing to complete as a bare argument.
+  COMPREPLY=()
 }
 
 # _vm_names <script>  the names a script of utils/ may be typed as: with and without .sh (the native version),
@@ -612,10 +615,10 @@ _vm_script_completions() {
   cmd="${cmd%.sh}"
   case "$prev" in
     --wait|--parallel) COMPREPLY=(); return 0 ;;
-    --exclude-nodes) _vm_complete_list "$cur" $(_vmctl_vms); return 0 ;;
+    --nodes|--exclude-nodes) _vm_complete_list "$cur" $(_vmctl_vms); return 0 ;;
     --node-groups) _vm_complete_list "$cur" $(_orphera_groups); return 0 ;;
   esac
-  local opts="--parallel --node-groups --exclude-nodes --help"
+  local opts="--nodes --parallel --node-groups --exclude-nodes --help"
   case "$cmd" in
     stop-vm)   opts="--wait --force $opts" ;;
     reboot-vm) opts="--soft --hard --wait --force $opts" ;;
@@ -623,24 +626,32 @@ _vm_script_completions() {
   if [[ "$cur" == -* ]]; then
     COMPREPLY=($(compgen -W "$opts" -- "$cur"))
   else
-    COMPREPLY=($(compgen -W "$(_vmctl_vms)" -- "$cur"))
+    COMPREPLY=()
   fi
 }
 complete -F _vm_script_completions $(_vm_names start-vm) $(_vm_names stop-vm) $(_vm_names reboot-vm)
 
-# list-vms: hypervisor names.
+# list-vms --nodes <hypervisors>.
 _list_vms_completions() {
   local cur prev words cword
   _init_completion || return
-  COMPREPLY=($(compgen -W "$(_vmctl_hypervisors)" -- "$cur"))
+  if [[ "$prev" == --nodes ]]; then
+    _vm_complete_list "$cur" $(_vmctl_hypervisors)
+  else
+    COMPREPLY=($(compgen -W "--nodes --help" -- "$cur"))
+  fi
 }
 complete -F _list_vms_completions $(_vm_names list-vms)
 
-# scan-vm-sizes: VM names.
+# scan-vm-sizes --nodes <VMs>.
 _scan_vm_sizes_completions() {
   local cur prev words cword
   _init_completion || return
-  COMPREPLY=($(compgen -W "$(_vmctl_vms)" -- "$cur"))
+  if [[ "$prev" == --nodes ]]; then
+    _vm_complete_list "$cur" $(_vmctl_vms)
+  else
+    COMPREPLY=($(compgen -W "--nodes" -- "$cur"))
+  fi
 }
 complete -F _scan_vm_sizes_completions $(_vm_names scan-vm-sizes)
 

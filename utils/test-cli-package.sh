@@ -141,8 +141,8 @@ mkdir -p "$tmp/fakeutils"
 printf '#!/bin/bash\necho "RAN $0 $*"\n' >"$tmp/fakeutils/probe.sh"
 cp -a "$p" "$tmp/up"
 cp "$tmp/fakeutils/probe.sh" "$tmp/up/share/orphera/utils/vmctl.sh"
-out=$("$tmp/up/bin/vmctl" start tst5 2>&1)
-eq "vmctl runs utils/vmctl.sh with its arguments" "$out" "RAN $tmp/up/share/orphera/utils/vmctl.sh start tst5"
+out=$("$tmp/up/bin/vmctl" start --nodes tst5 2>&1)
+eq "vmctl runs utils/vmctl.sh with its arguments" "$out" "RAN $tmp/up/share/orphera/utils/vmctl.sh start --nodes tst5"
 ln -s "$tmp/up/bin/vmctl" "$tmp/usrbin/vmctl"
 out=$("$tmp/usrbin/vmctl" list 2>&1)
 eq "a utility found through a symlink" "$out" "RAN $tmp/up/share/orphera/utils/vmctl.sh list"

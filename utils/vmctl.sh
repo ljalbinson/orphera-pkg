@@ -5,27 +5,27 @@
 # kvm_vm_reboot.scala): no playbook path, no --config, and none of the echoed
 # script text in the output.
 #
-#   utils/vmctl.sh start <vm>                    # config/<vm>.yaml; a bare number N means tstN
-#   utils/vmctl.sh start <vm1> <vm2> <vm3>       # several, one after another
-#   utils/vmctl.sh start --retries 5 <vm>        # retry a failed start up to 5 times (default 3, 0 = never)
-#   utils/vmctl.sh stop --wait 300 <vm>          # wait up to 300 s for the shutdown (default 120)
-#   utils/vmctl.sh stop --force <vm>             # power it off if it has not shut down in time
-#   utils/vmctl.sh reboot <vm>                   # soft: ask the guest to reboot
-#   utils/vmctl.sh reboot --hard --force <vm>    # full power cycle
-#   utils/vmctl.sh start config/<vm>.yaml        # an explicit config file
+#   utils/vmctl.sh start --nodes <vm>             # config/<vm>.yaml; a bare number N means tstN
+#   utils/vmctl.sh start --nodes <vm1>,<vm2>,<vm3>   # several, one after another
+#   utils/vmctl.sh start --retries 5 --nodes <vm>   # retry a failed start up to 5 times (default 3, 0 = never)
+#   utils/vmctl.sh stop --wait 300 --nodes <vm>    # wait up to 300 s for the shutdown (default 120)
+#   utils/vmctl.sh stop --force --nodes <vm>       # power it off if it has not shut down in time
+#   utils/vmctl.sh reboot --nodes <vm>             # soft: ask the guest to reboot
+#   utils/vmctl.sh reboot --hard --force --nodes <vm>   # full power cycle
+#   utils/vmctl.sh start --nodes config/<vm>.yaml  # an explicit config file
 #   utils/vmctl.sh start --node-groups k8s       # every VM in that inventory group (orphera nodes --groups lists them)
 #   utils/vmctl.sh stop --node-groups k8s-workers,k8s-dns --exclude-nodes tst39   # groups, less some VMs
-#   utils/vmctl.sh start --node-groups lustre-servers 49 50   # groups and VM names together, started in that order
+#   utils/vmctl.sh start --node-groups lustre-servers --nodes 49,50   # groups and VM names together, started in that order
 #   utils/vmctl.sh stop --parallel 8 --node-groups k8s   # up to 8 VMs at a time (start, stop, reboot)
-#   utils/vmctl.sh shutdown-all <hypervisor>...  # list the running VMs on those hypervisors (nothing is shut down)
-#   utils/vmctl.sh shutdown-all --yes gs2 st0    # shut them all down, gracefully, and wait
-#   utils/vmctl.sh shutdown-all --yes --force --except <vm> gs2   # power off any that do not stop; leave <vm> running
-#   utils/vmctl.sh start-all gs2 st0             # start the VMs that shutdown-all shut down there (--dry-run to only list)
-#   utils/vmctl.sh start-all --all gs2           # start every shut-off VM on gs2, recorded or not
+#   utils/vmctl.sh shutdown-all --nodes <hypervisor>,...  # list the running VMs on those hypervisors (nothing is shut down)
+#   utils/vmctl.sh shutdown-all --yes --nodes gs2,st0   # shut them all down, gracefully, and wait
+#   utils/vmctl.sh shutdown-all --yes --force --except <vm> --nodes gs2   # power off any that do not stop; leave <vm> running
+#   utils/vmctl.sh start-all --nodes gs2,st0   # start the VMs that shutdown-all shut down there (--dry-run to only list)
+#   utils/vmctl.sh start-all --all --nodes gs2     # start every shut-off VM on gs2, recorded or not
 #   utils/vmctl.sh list                          # every VM on every hypervisor: state, vCPUs, memory, autostart
-#   utils/vmctl.sh list gs2 st0                  # just those hypervisors
-#   utils/vmctl.sh autostart add <vm>...         # libvirt starts these VMs when their hypervisor boots
-#   utils/vmctl.sh autostart remove <vm>...      # ... no longer does
+#   utils/vmctl.sh list --nodes gs2,st0          # just those hypervisors
+#   utils/vmctl.sh autostart add --nodes <vm>,...   # libvirt starts these VMs when their hypervisor boots
+#   utils/vmctl.sh autostart remove --nodes <vm>,... # ... no longer does
 #   utils/vmctl.sh autostart add --hypervisor gs2 [--hypervisor st0]   # every VM on those hypervisors
 #   utils/vmctl.sh autostart remove --all        # every VM on every hypervisor
 #   utils/vmctl.sh autostart add --node-groups ceph,galera   # every VM in those groups
@@ -44,6 +44,8 @@
 # autostart add|remove runs manifests/kvm_autostart.scala to turn libvirt's autostart on or off for the named VMs, for
 # every VM on the --hypervisor(s) given, or for every VM on every hypervisor with --all (the running state is not changed;
 # `list` shows the AUTOSTART column).
+# VM and hypervisor names are only taken after --nodes, a comma-separated list (as for the orphera commands); a bare
+# argument is refused.
 # --node-groups g1,g2 and --exclude-nodes a,b (start, stop, reboot, autostart) work as they do for the orphera commands:
 # the groups come from inventory.yaml (`orphera nodes --groups`), and they and any VM names are handled in the order they
 # were given on the command line (a VM named twice keeps its first place); --exclude-nodes takes VMs out of that, and
@@ -107,9 +109,10 @@ while [ $# -gt 0 ]; do
     --exclude-nodes)
       [ -n "${2:-}" ] || { echo "--exclude-nodes needs a VM name" >&2; exit 2; }
       nexclude="${nexclude:+$nexclude,}$2"; shift 2 ;;
+    --nodes) nodes_option "${2:-}"; for n in "${NODE_ARGS[@]}"; do pos+=("$n"); order+=("n:$n"); done; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     -*) echo "unknown option $1" >&2; exit 2 ;;
-    *) pos+=("$1"); order+=("n:$1"); shift ;;
+    *) unexpected_arg "$1" ;;
   esac
 done
 set -- ${pos[@]+"${pos[@]}"}
@@ -131,7 +134,7 @@ if [ -n "$ngroups$nexclude" ]; then
     *) echo "--node-groups and --exclude-nodes apply to start, stop, reboot and autostart only" >&2; exit 2 ;;
   esac
   [ -z "$all" ] && [ "${#hvs[@]}" -eq 0 ] || { echo "--node-groups and --exclude-nodes do not go with --all or --hypervisor" >&2; exit 2; }
-  [ -n "$ngroups" ] || [ $# -gt 0 ] || { echo "--exclude-nodes takes VMs out of a selection: give --node-groups or VM names as well" >&2; exit 2; }
+  [ -n "$ngroups" ] || [ $# -gt 0 ] || { echo "--exclude-nodes takes VMs out of a selection: give --node-groups or --nodes as well" >&2; exit 2; }
   # Groups and VM names in the order they were given, each group as its members (from `orphera nodes --groups`),
   # a bare number N as tstN and a config file as its hostname:. Duplicates keep their first place.
   declare -A members=()

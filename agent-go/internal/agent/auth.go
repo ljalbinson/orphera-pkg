@@ -30,7 +30,7 @@ const TokenKey = "orphera-token"
 const DevToken = "dev-only-insecure-token"
 
 const howToSet = "From the orchestrator run: orphera secrets generate orphera/agent-token (once), " +
-	"then utils/set-agent-token.sh <this node>."
+	"then utils/set-agent-token.sh --nodes <this node>."
 
 // RequireToken is the token the agent may run with, from ORPHERA_TOKEN. With
 // no token, or with the built-in one, it would accept calls from anyone who

@@ -90,7 +90,7 @@ object NodeError:
         "has in /etc/orphera-agent/tls/ca.crt (orphera issue-client-cert --force with that CA)"
     else if isUnauthenticated(e) then
       "unauthenticated: the node rejected this orchestrator's token " +
-        "(utils/set-agent-token.sh <node> sets it)"
+        "(utils/set-agent-token.sh --nodes <node> sets it)"
     else if isPermissionDenied(e) then
       "refused by the node's access policy: " +
         Option(Status.fromThrowable(e).getDescription)
