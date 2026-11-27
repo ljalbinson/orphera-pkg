@@ -343,8 +343,8 @@ manifests/telemetry_compute.scala,236,apply command,fetch Keystone's CA from its
 manifests/telemetry_single_node.scala,754,apply command,fetch Keystone's CA from its TLS handshake,3,New general kinds,x509 cert/CA,"certificate kinds: CA, key and signed certificate, chain, trusted CA, CA fetched from a TLS endpoint",done
 manifests/trove_guest_image.scala,408,apply command,fetch Keystone's CA from its TLS handshake,3,New general kinds,x509 cert/CA,"certificate kinds: CA, key and signed certificate, chain, trusted CA, CA fetched from a TLS endpoint",done
 manifests/trove_single_node.scala,706,apply command,fetch Keystone's CA from its TLS handshake,3,New general kinds,x509 cert/CA,"certificate kinds: CA, key and signed certificate, chain, trusted CA, CA fetched from a TLS endpoint",done
-manifests/ceph-health-fixes.scala,12,RunCommand,disable insecure global_id reclaim,4,New product-specific kinds,Ceph pool/key/orch,cephPool / cephKey / Ceph config option / orchestrator spec,not started
-manifests/ceph-health-fixes.scala,21,RunCommand,enable msgr2,4,New product-specific kinds,Ceph pool/key/orch,cephPool / cephKey / Ceph config option / orchestrator spec,not started
+manifests/ceph-health-fixes.scala,12,apply command,disable insecure global_id reclaim,4,New product-specific kinds,Ceph pool/key/orch,cephPool / cephKey / Ceph config option / orchestrator spec,done
+manifests/ceph-health-fixes.scala,21,apply command,enable msgr2,4,New product-specific kinds,Ceph pool/key/orch,cephPool / cephKey / Ceph config option / orchestrator spec,done
 manifests/ceph-health-fixes.yaml,10,yaml command,disable insecure global_id reclaim,4,New product-specific kinds,Ceph pool/key/orch,cephPool / cephKey / Ceph config option / orchestrator spec,not started
 manifests/ceph-health-fixes.yaml,14,yaml command,enable msgr2,4,New product-specific kinds,Ceph pool/key/orch,cephPool / cephKey / Ceph config option / orchestrator spec,not started
 manifests/cephadm_add_mons.scala,40,RunCommand,add tst1 to cephadm-managed hosts,4,New product-specific kinds,Ceph pool/key/orch,cephPool / cephKey / Ceph config option / orchestrator spec,not started
