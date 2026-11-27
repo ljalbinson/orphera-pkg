@@ -25,6 +25,39 @@ object cephadm_add_mons extends OrpheraClusterPlaybook:
       )
     )
 
+  // The hosts are added with their `cluster_ip` from the inventory (read here,
+  // on the machine that runs the playbook, because a plan is not rendered as a
+  // template).
+  private def clusterIp(host: String): String =
+    Inventory
+      .varsFor(host)
+      .getOrElse(
+        "cluster_ip",
+        throw new IllegalStateException(
+          s"$host has no cluster_ip in the inventory"
+        )
+      )
+
+  private def hostPlan(host: String): ApplyPlan =
+    import Resources.*
+    ApplyPlan.orFail(
+      s"cephadm-host-$host",
+      List(cephHost(s"add $host to the cephadm hosts", host, clusterIp(host)))
+    )
+
+  private val placementPlan: ApplyPlan =
+    import Resources.*
+    ApplyPlan.orFail(
+      "mon-placement",
+      List(
+        cephPlacement(
+          "place the monitors on tst0, tst1 and tst2",
+          "mon",
+          List("tst0", "tst1", "tst2")
+        )
+      )
+    )
+
   val playbook: ClusterPlaybook =
     clusterPlaybook("cephadm-add-mons")(
       stage("prep-additional-hosts", "tst1", "tst2")
@@ -51,33 +84,13 @@ object cephadm_add_mons extends OrpheraClusterPlaybook:
 
       stage("register-hosts", "tst0")
         .task("add tst1 to cephadm-managed hosts")(
-          Task.RunCommand(
-            List(
-              "sh",
-              "-c",
-              "cephadm shell -- ceph orch host add tst1 {{nodes.tst1.cluster_ip}}"
-            ),
-            timeoutSeconds = 120
-          )
+          Task.Apply(hostPlan("tst1"))
         )
         .task("add tst2 to cephadm-managed hosts")(
-          Task.RunCommand(
-            List(
-              "sh",
-              "-c",
-              "cephadm shell -- ceph orch host add tst2 {{nodes.tst2.cluster_ip}}"
-            ),
-            timeoutSeconds = 120
-          )
+          Task.Apply(hostPlan("tst2"))
         )
         .task("apply mon placement across all three hosts")(
-          Task.RunCommand(
-            List(
-              "sh",
-              "-c",
-              "cephadm shell -- ceph orch apply mon --placement='tst0,tst1,tst2'"
-            )
-          )
+          Task.Apply(placementPlan)
         )
         .build,
 

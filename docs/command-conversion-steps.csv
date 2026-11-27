@@ -347,9 +347,9 @@ manifests/ceph_health_fixes.scala,12,apply command,disable insecure global_id re
 manifests/ceph_health_fixes.scala,21,apply command,enable msgr2,4,New product-specific kinds,Ceph pool/key/orch,cephPool / cephKey / Ceph config option / orchestrator spec,done
 manifests/ceph-health-fixes.yaml,10,yaml command,disable insecure global_id reclaim,4,New product-specific kinds,Ceph pool/key/orch,cephPool / cephKey / Ceph config option / orchestrator spec,not started
 manifests/ceph-health-fixes.yaml,14,yaml command,enable msgr2,4,New product-specific kinds,Ceph pool/key/orch,cephPool / cephKey / Ceph config option / orchestrator spec,not started
-manifests/cephadm_add_mons.scala,40,RunCommand,add tst1 to cephadm-managed hosts,4,New product-specific kinds,Ceph pool/key/orch,cephPool / cephKey / Ceph config option / orchestrator spec,not started
-manifests/cephadm_add_mons.scala,50,RunCommand,add tst2 to cephadm-managed hosts,4,New product-specific kinds,Ceph pool/key/orch,cephPool / cephKey / Ceph config option / orchestrator spec,not started
-manifests/cephadm_add_mons.scala,60,RunCommand,apply mon placement across all three hosts,4,New product-specific kinds,Ceph pool/key/orch,cephPool / cephKey / Ceph config option / orchestrator spec,not started
+manifests/cephadm_add_mons.scala,40,apply command,add tst1 to cephadm-managed hosts,4,New product-specific kinds,Ceph pool/key/orch,cephPool / cephKey / Ceph config option / orchestrator spec,done
+manifests/cephadm_add_mons.scala,50,apply command,add tst2 to cephadm-managed hosts,4,New product-specific kinds,Ceph pool/key/orch,cephPool / cephKey / Ceph config option / orchestrator spec,done
+manifests/cephadm_add_mons.scala,60,apply command,apply mon placement across all three hosts,4,New product-specific kinds,Ceph pool/key/orch,cephPool / cephKey / Ceph config option / orchestrator spec,done
 manifests/cephadm_add_mons.yaml,31,yaml command,add tst1 to cephadm-managed hosts,4,New product-specific kinds,Ceph pool/key/orch,cephPool / cephKey / Ceph config option / orchestrator spec,not started
 manifests/cephadm_add_mons.yaml,36,yaml command,add tst2 to cephadm-managed hosts,4,New product-specific kinds,Ceph pool/key/orch,cephPool / cephKey / Ceph config option / orchestrator spec,not started
 manifests/cephadm_add_mons.yaml,41,yaml command,apply mon placement across all three hosts,4,New product-specific kinds,Ceph pool/key/orch,cephPool / cephKey / Ceph config option / orchestrator spec,not started

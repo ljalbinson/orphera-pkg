@@ -3195,6 +3195,82 @@ esac
       timeout = timeout
     )
 
+  private def cephAddress(address: String): Unit =
+    require(
+      address.nonEmpty && address.forall(c =>
+        c.isDigit || ".:".contains(c) || c.isLower
+      ),
+      s"not an address: '$address'"
+    )
+
+  /** A host known to the Ceph orchestrator (`ceph orch host add`), as a
+    * description, for a node with `cephadm` that is already in the cluster. It
+    * is `unchanged` while `ceph orch host ls` lists a host whose short name is
+    * `hostName` and whose address is `address`; otherwise the host is added
+    * (adding a host again with a new address changes its address). The host
+    * needs the cluster's key in root's authorized_keys first. A cluster that
+    * cannot be queried counts as "not done", so the step fails with Ceph's
+    * message.
+    */
+  def cephHost(
+      label: String,
+      hostName: String,
+      address: String,
+      timeout: Int = 180
+  ): ApplyResource =
+    cephName("a host name", hostName)
+    cephAddress(address)
+    command(
+      label,
+      s"""set -e
+         |cephadm shell -- ceph orch host add $hostName $address
+         |echo "host $hostName ($address) added"""".stripMargin,
+      unless =
+        s"""OUT=$$(cephadm shell -- ceph orch host ls --format json 2>/dev/null) || exit 1
+           |echo "$$OUT" | python3 -c "import sys, json
+           |for h in json.load(sys.stdin):
+           |    if h.get('hostname', '').split('.')[0] == '$hostName' and h.get('addr') == '$address':
+           |        sys.exit(0)
+           |sys.exit(1)"""".stripMargin,
+      timeout = timeout
+    )
+
+  /** The hosts a cephadm service of a type with no id (`mon`, `mgr`) runs on
+    * (`ceph orch apply <type> --placement=a,b,c`), as a description. It is
+    * `unchanged` while `ceph orch ls` shows that service placed on exactly
+    * these hosts, with no count; otherwise the placement is applied (cephadm
+    * itself starts and stops the daemons). The hosts must be known to the
+    * orchestrator first (`cephHost`).
+    */
+  def cephPlacement(
+      label: String,
+      serviceType: String,
+      hosts: List[String],
+      timeout: Int = 300
+  ): ApplyResource =
+    cephName("a service type", serviceType)
+    require(hosts.nonEmpty, "cephPlacement needs at least one host")
+    hosts.foreach(cephName("a host name", _))
+    val list = hosts.map(h => s"'$h'").mkString(", ")
+    val csv = hosts.mkString(",")
+    command(
+      label,
+      s"""set -e
+         |cephadm shell -- ceph orch apply $serviceType --placement='$csv'
+         |echo "$serviceType placed on $csv"""".stripMargin,
+      unless =
+        s"""OUT=$$(cephadm shell -- ceph orch ls --service-type $serviceType --format json 2>/dev/null) || exit 1
+           |echo "$$OUT" | python3 -c "import sys, json
+           |want = sorted([$list])
+           |for s in json.load(sys.stdin):
+           |    if s.get('service_type') == '$serviceType':
+           |        p = s.get('placement') or {}
+           |        got = sorted(h if isinstance(h, str) else h.get('hostname', '') for h in p.get('hosts', []))
+           |        sys.exit(0 if got == want and not p.get('count') else 1)
+           |sys.exit(1)"""".stripMargin,
+      timeout = timeout
+    )
+
   private def cephSpecSha(spec: String): String =
     MessageDigest
       .getInstance("SHA-256")
