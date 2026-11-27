@@ -5508,7 +5508,9 @@ sys.exit(code)
     val hostAdded = sh(part(newHost, _.run))
     check(
       "cephHost: it adds the host with its address",
-      hostAdded._1 == 0 && hostAdded._2.contains("host tst2 (10.10.5.14) added"),
+      hostAdded._1 == 0 && hostAdded._2.contains(
+        "host tst2 (10.10.5.14) added"
+      ),
       hostAdded.toString + dump
     )
     check(
@@ -5527,7 +5529,8 @@ sys.exit(code)
       "cephHost: a bad address is refused",
       scala.util.Try(cephHost("x", "tst2", "10.0.0.1; reboot")).isFailure
     )
-    val mons = cephPlacement("mons on three hosts", "mon", List("tst0", "tst1", "tst2"))
+    val mons =
+      cephPlacement("mons on three hosts", "mon", List("tst0", "tst1", "tst2"))
     check(
       "cephPlacement: no placement means it is needed",
       sh(part(mons, _.unless))._1 != 0
@@ -5544,15 +5547,24 @@ sys.exit(code)
     )
     check(
       "cephPlacement: the same hosts in another order are unchanged",
-      sh(part(cephPlacement("x", "mon", List("tst2", "tst0", "tst1")), _.unless))._1 == 0
+      sh(
+        part(cephPlacement("x", "mon", List("tst2", "tst0", "tst1")), _.unless)
+      )._1 == 0
     )
     check(
       "cephPlacement: another set of hosts means it is needed",
-      sh(part(cephPlacement("x", "mon", List("tst0", "tst1")), _.unless))._1 != 0
+      sh(
+        part(cephPlacement("x", "mon", List("tst0", "tst1")), _.unless)
+      )._1 != 0
     )
     check(
       "cephPlacement: another service type is not satisfied by it",
-      sh(part(cephPlacement("x", "mgr", List("tst0", "tst1", "tst2"), 60), _.unless))._1 != 0
+      sh(
+        part(
+          cephPlacement("x", "mgr", List("tst0", "tst1", "tst2"), 60),
+          _.unless
+        )
+      )._1 != 0
     )
     check(
       "cephPlacement: a cluster that is down means it is needed",
