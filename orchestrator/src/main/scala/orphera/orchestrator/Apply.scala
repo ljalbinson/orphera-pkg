@@ -2920,6 +2920,78 @@ esac
       timeout = timeout
     )
 
+  private def rgwKeyText(what: String, text: String): Unit =
+    require(
+      text.length >= 4 && text.length <= 128 && text.forall(c =>
+        c.isLetterOrDigit || "_-".contains(c)
+      ),
+      s"$what must be 4 to 128 letters, digits, _ or -"
+    )
+
+  /** An S3 user of the Ceph object gateway (`radosgw-admin`) with a fixed
+    * access key and secret key, as a description, for a node with `cephadm`. It
+    * is `unchanged` while the user exists and holds that key pair; the user is
+    * made when it is missing, and a user that exists without that key pair gets
+    * it added (its other keys are left alone). The keys are arguments of
+    * `radosgw-admin` while the command runs, since it takes no file: on the
+    * Ceph node, in the process list, for that moment.
+    */
+  def rgwUser(
+      label: String,
+      uid: String,
+      displayName: String,
+      accessKey: String,
+      secretKey: Secret,
+      timeout: Int = 180
+  ): ApplyResource =
+    cephName("a user id", uid)
+    require(
+      displayName.nonEmpty && displayName.forall(c =>
+        c.isLetterOrDigit || " _-.".contains(c)
+      ),
+      s"a display name is letters, digits, space and _ - . , not '$displayName'"
+    )
+    rgwKeyText("an access key", accessKey)
+    rgwKeyText("a secret key", secretKey.reveal)
+    val secret = secretKey.reveal
+    val info = s"cephadm shell -- radosgw-admin user info --uid=$uid"
+    command(
+      label,
+      s"""set -e
+         |if ! $info >/dev/null 2>&1; then
+         |  cephadm shell -- radosgw-admin user create --uid=$uid --display-name="$displayName" --access-key=$accessKey --secret-key=$secret >/dev/null
+         |  echo "RGW user $uid created"
+         |else
+         |  cephadm shell -- radosgw-admin key create --uid=$uid --key-type=s3 --access-key=$accessKey --secret-key=$secret >/dev/null
+         |  echo "RGW user $uid given the key $accessKey"
+         |fi
+         |$info >/dev/null""".stripMargin,
+      unless =
+        s"""$info 2>/dev/null | python3 -c 'import sys,json; k=json.load(sys.stdin)["keys"]; sys.exit(0 if any(x["access_key"]=="$accessKey" and x["secret_key"]=="$secret" for x in k) else 1)'""",
+      timeout = timeout
+    )
+
+  /** The S3 user gone, with its keys; nothing happens while it is not found.
+    * When the gateway cannot be queried the guard says yes, so the removal runs
+    * and fails with its own message.
+    */
+  def absentRgwUser(
+      label: String,
+      uid: String,
+      timeout: Int = 180
+  ): ApplyResource =
+    cephName("a user id", uid)
+    command(
+      label,
+      s"""set -e
+         |cephadm shell -- radosgw-admin user rm --uid=$uid
+         |echo "RGW user $uid removed"""".stripMargin,
+      onlyIf =
+        s"""OUT=$$(cephadm shell -- radosgw-admin user list 2>/dev/null) || exit 0
+           |echo "$$OUT" | tr -d '\\r' | grep -q '"$uid"'""".stripMargin,
+      timeout = timeout
+    )
+
   /** A CephFS filesystem, as a description, for a node with `cephadm`. It is
     * `unchanged` while `ceph fs ls` lists it and an MDS is active; otherwise it
     * is created if missing (`ceph fs volume create`, which also starts the MDS

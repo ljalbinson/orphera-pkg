@@ -4409,6 +4409,32 @@ elif a[:3] == ['ceph', 'orch', 'rm']:
     if a[3] not in st['svc']:
         sys.exit(2)
     st['svc'].remove(a[3]); st['specs'].pop(a[3], None); save()
+elif a[0] == 'radosgw-admin':
+    st.setdefault('rgw', {})
+    fl = dict(x[2:].split('=', 1) for x in a[3:] if x.startswith('--') and '=' in x)
+    verb = a[1] + ' ' + a[2]
+    if verb == 'user info':
+        if fl['uid'] not in st['rgw']:
+            sys.exit(22)
+        print(json.dumps({'user_id': fl['uid'], 'keys': st['rgw'][fl['uid']]}))
+    elif verb == 'user create':
+        if fl['uid'] in st['rgw']:
+            sys.exit(17)
+        st['rgw'][fl['uid']] = [{'user': fl['uid'], 'access_key': fl['access-key'], 'secret_key': fl['secret-key']}]
+        st['log'].append('rgw user create ' + fl['uid'] + ' ' + fl['display-name']); save()
+    elif verb == 'key create':
+        if fl['uid'] not in st['rgw']:
+            sys.exit(22)
+        st['rgw'][fl['uid']].append({'user': fl['uid'], 'access_key': fl['access-key'], 'secret_key': fl['secret-key']})
+        st['log'].append('rgw key create ' + fl['uid']); save()
+    elif verb == 'user rm':
+        if fl['uid'] not in st['rgw']:
+            sys.exit(22)
+        del st['rgw'][fl['uid']]; st['log'].append('rgw user rm ' + fl['uid']); save()
+    elif verb == 'user list':
+        print(json.dumps(sorted(st['rgw'])))
+    else:
+        sys.exit(1)
 elif c.startswith('ceph config set mon '):
     st['conf'][a[4]] = a[5]; save()
 elif c.startswith('ceph mon set auth_allowed_ciphers '):
@@ -5260,6 +5286,105 @@ sys.exit(code)
     check(
       "absentCephUser: nothing to do afterwards",
       sh(part(noUser, _.onlyIf))._1 != 0
+    )
+    // object gateway users
+    val s3 = rgwUser(
+      "the etcd-backup S3 user",
+      "etcd-backup",
+      "etcd backups",
+      "ACCESSKEY1",
+      Secret("SecretKeyOne24Chars")
+    )
+    check(
+      "rgwUser: no user means it is needed",
+      sh(part(s3, _.unless))._1 != 0
+    )
+    val s3made = sh(part(s3, _.run))
+    check(
+      "rgwUser: it makes the user with the display name and says so",
+      s3made._1 == 0 && s3made._2.contains(
+        "RGW user etcd-backup created"
+      ) && dump.contains("rgw user create etcd-backup etcd backups"),
+      s3made.toString + dump
+    )
+    check(
+      "rgwUser: the user with that key pair then means unchanged",
+      sh(part(s3, _.unless))._1 == 0
+    )
+    val s3again = sh(part(s3, _.run))
+    check(
+      "rgwUser: running it again adds a key to the existing user, not a second user",
+      s3again._1 == 0 && s3again._2.contains("given the key ACCESSKEY1"),
+      s3again.toString + dump
+    )
+    val s3other = rgwUser(
+      "x",
+      "etcd-backup",
+      "etcd backups",
+      "ACCESSKEY2",
+      Secret("SecretKeyTwo24Chars")
+    )
+    check(
+      "rgwUser: another key pair means it is needed",
+      sh(part(s3other, _.unless))._1 != 0
+    )
+    val s3second = sh(part(s3other, _.run))
+    check(
+      "rgwUser: it adds the key pair and leaves the first one",
+      s3second._1 == 0 && sh(part(s3other, _.unless))._1 == 0 && sh(
+        part(s3, _.unless)
+      )._1 == 0,
+      s3second.toString + dump
+    )
+    val s3wrongSecret = rgwUser(
+      "x",
+      "etcd-backup",
+      "etcd backups",
+      "ACCESSKEY1",
+      Secret("NotTheSecretAtAll123")
+    )
+    check(
+      "rgwUser: the access key with another secret does not count",
+      sh(part(s3wrongSecret, _.unless))._1 != 0
+    )
+    check(
+      "rgwUser: a key with a space is refused",
+      scala.util
+        .Try(rgwUser("x", "u", "n", "A B", Secret("SecretKeyOne24Chars")))
+        .isFailure
+    )
+    check(
+      "rgwUser: a secret with a quote is refused",
+      scala.util
+        .Try(rgwUser("x", "u", "n", "ACCESSKEY1", Secret("a'b'c'd'e")))
+        .isFailure
+    )
+    check(
+      "rgwUser: a display name with a quote is refused",
+      scala.util
+        .Try(
+          rgwUser("x", "u", "it's", "ACCESSKEY1", Secret("SecretKeyOne24Chars"))
+        )
+        .isFailure
+    )
+    val noS3 = absentRgwUser("remove the S3 user", "etcd-backup")
+    check(
+      "absentRgwUser: it is wanted while the user is listed",
+      sh(part(noS3, _.onlyIf))._1 == 0
+    )
+    check(
+      "absentRgwUser: and when the gateway cannot be queried",
+      sh(part(noS3, _.onlyIf), down = true)._1 == 0
+    )
+    val s3gone = sh(part(noS3, _.run))
+    check(
+      "absentRgwUser: it removes the user",
+      s3gone._1 == 0 && s3gone._2.contains("RGW user etcd-backup removed"),
+      s3gone.toString + dump
+    )
+    check(
+      "absentRgwUser: nothing to do afterwards",
+      sh(part(noS3, _.onlyIf))._1 != 0
     )
     check(
       "absentCephUser: a cluster that is down fails the removal",
