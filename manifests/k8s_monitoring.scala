@@ -180,17 +180,56 @@ print('client %s in realm %s ready: redirect %s/login/generic_oauth' % (CLIENT_I
 
   // ---- cluster side (tst30) ----------------------------------------------
 
-  // The namespace is made here too (the ConfigMap and the Secret must be there before the pods start).
-  private val prepareScript =
+  private def yamlQuote(text: String): String =
+    "\"" + text.flatMap {
+      case '\\' => "\\\\"
+      case '"'  => "\\\""
+      case '\n' => "\\n"
+      case c    => c.toString
+    } + "\""
+
+  // The CA file has to be there before the ConfigMap can be made (a message that says where it comes from).
+  private val caCheckScript =
     s"""set -e
        |[ -s $stateDir/ca.crt ] || { echo "$stateDir/ca.crt is missing; run k8s_cert_manager.scala first" >&2; exit 1; }
-       |$kc create namespace $ns --dry-run=client -o yaml | $kc apply -f -
-       |$kc -n $ns create configmap orphera-ca --from-file=ca.crt=$stateDir/ca.crt --dry-run=client -o yaml | $kc apply -f -
-       |$kc -n $ns create secret generic grafana-oauth \\
-       |  --from-literal=GF_AUTH_GENERIC_OAUTH_CLIENT_SECRET='${clientSecret.reveal}' \\
-       |  --dry-run=client -o yaml | $kc apply -f -
-       |echo "namespace, CA ConfigMap and OAuth Secret ready"
+       |echo "the CA file is there"
        |""".stripMargin
+
+  // The namespace, the CA ConfigMap and the OAuth Secret as `kubeObjects` (a description: made again if deleted,
+  // applied again if the CA file or the client secret changes). The namespace is made here too: the ConfigMap and
+  // the Secret must be there before the pods start.
+  private val configPlan: ApplyPlan =
+    import Resources.*
+    val oauthSecret = yamlQuote(clientSecret.reveal)
+    val (helper, made) = kubeObjects(
+      "namespace, CA ConfigMap and OAuth Secret",
+      "monitoring-config",
+      Secret(s"""apiVersion: v1
+                |kind: Namespace
+                |metadata:
+                |  name: $ns
+                |---
+                |apiVersion: v1
+                |kind: ConfigMap
+                |metadata:
+                |  name: orphera-ca
+                |  namespace: $ns
+                |data:
+                |  ca.crt: |
+                |    @@CA@@
+                |---
+                |apiVersion: v1
+                |kind: Secret
+                |metadata:
+                |  name: grafana-oauth
+                |  namespace: $ns
+                |type: Opaque
+                |stringData:
+                |  GF_AUTH_GENERIC_OAUTH_CLIENT_SECRET: $oauthSecret
+                |""".stripMargin),
+      yamlFrom = List("CA" -> s"$stateDir/ca.crt")
+    )
+    ApplyPlan.orFail("monitoring-config", List(helper, made))
 
   private val monitoringValues =
     s"""fullnameOverride: kps
@@ -361,8 +400,11 @@ print('client %s in realm %s ready: redirect %s/login/generic_oauth' % (CLIENT_I
         )
         .build,
       stage("monitoring-config", node)
+        .task("check that the CA file is there")(
+          Task.RunCommand(List("sh", "-c", caCheckScript), timeoutSeconds = 60)
+        )
         .task("namespace, CA ConfigMap and OAuth Secret")(
-          Task.RunCommand(List("sh", "-c", prepareScript), timeoutSeconds = 120)
+          Task.Apply(configPlan)
         )
         .build,
       stage("install-kube-prometheus-stack", node)

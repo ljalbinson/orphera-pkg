@@ -4650,6 +4650,60 @@ sys.exit(code)
       "kubeObjects: ensure makes it again",
       run(changed, "ensure")._1 == 0 && run(changed, "check")._1 == 0
     )
+    val caFile = dir.resolve("ca.crt")
+    val cmYaml =
+      "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: orphera-ca\n  namespace: demo\ndata:\n  ca.crt: |\n    @@CA@@\n"
+    val (fromHelper, _) = kubeObjects(
+      "make the CA ConfigMap",
+      "ca",
+      Secret(cmYaml),
+      stateDir = shaDir.toString,
+      yamlFrom = List("CA" -> caFile.toString)
+    )
+    val missing = run(fromHelper, "ensure")
+    check(
+      "kubeObjects: a missing file for yamlFrom stops the helper with a message",
+      missing._1 != 0 && missing._2.contains("is missing") &&
+        run(fromHelper, "check")._1 != 0,
+      missing.toString
+    )
+    Files.writeString(caFile, "")
+    check(
+      "kubeObjects: an empty file stops it too",
+      run(fromHelper, "ensure")._1 != 0
+    )
+    Files.writeString(caFile, "-----BEGIN-----\nabc\n-----END-----\n")
+    check(
+      "kubeObjects: the file's lines are put in with the placeholder's indentation",
+      run(fromHelper, "ensure")._1 == 0 && dump.contains(
+        "ca.crt: |\\n    -----BEGIN-----\\n    abc\\n    -----END-----\\n"
+      ),
+      dump
+    )
+    check(
+      "kubeObjects: applied, the check passes",
+      run(fromHelper, "check")._1 == 0
+    )
+    Files.writeString(caFile, "-----BEGIN-----\nxyz\n-----END-----\n")
+    check(
+      "kubeObjects: a changed file fails the check, and ensure applies the new text",
+      run(fromHelper, "check")._1 != 0 && run(fromHelper, "ensure")._1 == 0 &&
+        run(fromHelper, "check")._1 == 0 && dump.contains("xyz"),
+      dump
+    )
+    check(
+      "kubeObjects: a lower-case placeholder name is refused",
+      scala.util
+        .Try(
+          kubeObjects(
+            "x",
+            "y",
+            Secret("a: 1"),
+            yamlFrom = List("ca" -> "/etc/ca.crt")
+          )
+        )
+        .isFailure
+    )
     val gone = absentKubeObjects("delete the demo objects", "demo")
     check(
       "kubeObjects: the absent command runs remove only while the objects exist",
