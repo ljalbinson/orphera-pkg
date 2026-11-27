@@ -4392,6 +4392,15 @@ elif c == 'ceph config dump':
     for who, o in st['cfg'].items():
         for k, v in o.items():
             print('%s  advanced  %s  %s' % (who, k, v))
+elif c.startswith('ceph orch ls --service-type ') and c.endswith(' --format json'):
+    print(json.dumps([dict(service_type=k, placement=v) for k, v in st.setdefault('place', {}).items() if k == a[4]]))
+elif c.startswith('ceph orch apply ') and a[4].startswith('--placement='):
+    st.setdefault('place', {})[a[3]] = {'hosts': a[4][len('--placement='):].split(',')}
+    st['log'].append(c); save()
+elif c.startswith('ceph orch host add '):
+    st.setdefault('hosts', [{'hostname': 'tst0.example', 'addr': '10.10.5.12'}, {'hostname': 'tst1.example', 'addr': '10.10.5.13'}])
+    st['hosts'] = [h for h in st['hosts'] if h['hostname'].split('.')[0] != a[4]] + [{'hostname': a[4], 'addr': a[5]}]
+    st['log'].append(c); save()
 elif c.startswith('ceph orch ls --service-type '):
     print('NAME  PORTS  RUNNING  REFRESHED  AGE  PLACEMENT')
     for n in st['svc']:
@@ -4480,6 +4489,8 @@ elif c.startswith('ceph fs volume rm '):
     st['fs'].remove(a[4]); st['log'].append(c); save()
 elif c == 'ceph mds stat':
     print('%s:1 {0=a=up:active}' % st['fs'][0] if st['fs'] and not os.environ.get('FAKE_NO_MDS') else 'cephfs:0')
+elif c == 'ceph orch host ls --format json' and 'hosts' in st:
+    print(json.dumps(st['hosts']))
 elif c == 'ceph orch host ls --format json':
     print(json.dumps([{'hostname': 'tst0.example', 'addr': '10.10.5.12'}, {'hostname': 'tst1.example', 'addr': '10.10.5.13'}]))
 elif c == 'ceph nfs cluster ls':
@@ -5483,6 +5494,89 @@ sys.exit(code)
     check(
       "absentCephConfig: nothing to do afterwards",
       sh(part(optsGone, _.onlyIf))._1 != 0
+    )
+    // orchestrator hosts and placement
+    val newHost = cephHost("add tst2", "tst2", "10.10.5.14")
+    check(
+      "cephHost: an unknown host means it is needed",
+      sh(part(newHost, _.unless))._1 != 0
+    )
+    check(
+      "cephHost: and also when Ceph cannot be queried",
+      sh(part(newHost, _.unless), down = true)._1 != 0
+    )
+    val hostAdded = sh(part(newHost, _.run))
+    check(
+      "cephHost: it adds the host with its address",
+      hostAdded._1 == 0 && hostAdded._2.contains(
+        "host tst2 (10.10.5.14) added"
+      ),
+      hostAdded.toString + dump
+    )
+    check(
+      "cephHost: it then means unchanged",
+      sh(part(newHost, _.unless))._1 == 0
+    )
+    check(
+      "cephHost: another address means it is needed",
+      sh(part(cephHost("x", "tst2", "10.10.5.99"), _.unless))._1 != 0
+    )
+    check(
+      "cephHost: a host listed by its full name counts (tst0.example)",
+      sh(part(cephHost("x", "tst0", "10.10.5.12"), _.unless))._1 == 0
+    )
+    check(
+      "cephHost: a bad address is refused",
+      scala.util.Try(cephHost("x", "tst2", "10.0.0.1; reboot")).isFailure
+    )
+    val mons =
+      cephPlacement("mons on three hosts", "mon", List("tst0", "tst1", "tst2"))
+    check(
+      "cephPlacement: no placement means it is needed",
+      sh(part(mons, _.unless))._1 != 0
+    )
+    val placed = sh(part(mons, _.run))
+    check(
+      "cephPlacement: it applies the placement",
+      placed._1 == 0 && placed._2.contains("mon placed on tst0,tst1,tst2"),
+      placed.toString + dump
+    )
+    check(
+      "cephPlacement: it then means unchanged",
+      sh(part(mons, _.unless))._1 == 0
+    )
+    check(
+      "cephPlacement: the same hosts in another order are unchanged",
+      sh(
+        part(cephPlacement("x", "mon", List("tst2", "tst0", "tst1")), _.unless)
+      )._1 == 0
+    )
+    check(
+      "cephPlacement: another set of hosts means it is needed",
+      sh(
+        part(cephPlacement("x", "mon", List("tst0", "tst1")), _.unless)
+      )._1 != 0
+    )
+    check(
+      "cephPlacement: another service type is not satisfied by it",
+      sh(
+        part(
+          cephPlacement("x", "mgr", List("tst0", "tst1", "tst2"), 60),
+          _.unless
+        )
+      )._1 != 0
+    )
+    check(
+      "cephPlacement: a cluster that is down means it is needed",
+      sh(part(mons, _.unless), down = true)._1 != 0
+    )
+    check(
+      "cephPlacement: no hosts is refused",
+      scala.util.Try(cephPlacement("x", "mon", Nil)).isFailure
+    )
+    check(
+      "cephPlacement: a host name with a quote is refused",
+      scala.util.Try(cephPlacement("x", "mon", List("a'b"))).isFailure
     )
     // orchestrator service
     val stateDir = dir.resolve("sha").toString
