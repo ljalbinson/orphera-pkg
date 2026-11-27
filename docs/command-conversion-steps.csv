@@ -392,7 +392,7 @@ manifests/k8s_cluster.scala,337,apply command,label the worker pools,4,New produ
 manifests/k8s_external_dns.scala,59,apply command,namespace and TSIG secret,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),done
 manifests/k8s_external_dns.scala,119,apply command,helm install external-dns,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),done
 manifests/k8s_gateway.scala,64,apply command,"wildcard certificate, Gateway and HTTP redirect",4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),done
-manifests/k8s_kubeadm_config.scala,360,RunCommand,turn on the three scrape jobs,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),not started
+manifests/k8s_kubeadm_config.scala,383,helmRelease,turn on the three scrape jobs,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),done
 manifests/k8s_logging.scala,147,apply command,helm install Loki,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),done
 manifests/k8s_logging.scala,156,apply command,helm install Alloy,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),done
 manifests/k8s_metrics_server.scala,28,apply command,helm install metrics-server,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),done
