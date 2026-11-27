@@ -48,7 +48,7 @@ object ceph_health_fixes extends OrpheraClusterPlaybook:
         .task("disable insecure global_id reclaim")(Task.Apply(reclaimPlan))
         .task("enable msgr2")(Task.Apply(msgr2Plan))
         .task("confirm clean health")(
-          Task.RunCommand(List("sh", "-c", "ceph -s"))
+          Task.RunCommand(List("sh", "-c", "cephadm shell -- ceph -s"))
         )
         .build
     )
