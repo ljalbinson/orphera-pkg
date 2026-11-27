@@ -1,7 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 name: CI
 
-on: [push, pull_request]
+on:
+  push:
+    branches: [main]
+  pull_request:
 
 jobs:
   compile_and_test:
