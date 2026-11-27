@@ -36,7 +36,7 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 //    `resolvConf` in /var/lib/kubelet/config.yaml and in the kube-system/kubelet-config
 //    ConfigMap. CoreDNS is restarted to pick it up, and a test pod on the host
 //    network must show exactly the servers once.
-// 5. The Helm release kps is upgraded (same chart version, other values kept)
+// 5. The Helm release kps is upgraded (same chart version, other values kept; a helmRelease description)
 //    with the etcd, scheduler and controller-manager scrape jobs on; the last
 //    task asks Prometheus whether all three are up on all three nodes.
 //
@@ -302,25 +302,27 @@ sys.exit(1 if bad else 0)
        |echo "$$(hostname): an upgrade to $$VER would keep the Keycloak login, the encryption and the metrics settings"
        |""".stripMargin
 
-  private val helmScript =
-    s"""set -e
-       |export KUBECONFIG=/etc/kubernetes/admin.conf
-       |CHART=$$(helm list -n monitoring -f '^kps$$' -o json | python3 -c 'import sys,json; r=json.load(sys.stdin); print(r[0]["chart"] if r else "")')
-       |[ -n "$$CHART" ] || { echo "the Helm release kps is not installed; run k8s_monitoring.scala (it now has these jobs on)" >&2; exit 1; }
-       |VER=$${CHART#kube-prometheus-stack-}
-       |echo "upgrading kps ($$CHART) with the etcd, scheduler and controller-manager jobs on"
-       |helm upgrade kps prometheus-community/kube-prometheus-stack --version "$$VER" --namespace monitoring --reuse-values \\
-       |  --set kubeEtcd.enabled=true --set kubeScheduler.enabled=true --set kubeControllerManager.enabled=true --wait --timeout 10m
-       |if [ -f $stateDir/monitoring-values.yaml ]; then
-       |  python3 - <<'PYEOF'
-       |p = '$stateDir/monitoring-values.yaml'
-       |s = open(p).read()
-       |for k in ('kubeEtcd', 'kubeScheduler', 'kubeControllerManager'):
-       |    s = s.replace(k + ':\\n  enabled: false', k + ':\\n  enabled: true')
-       |open(p, 'w').write(s)
-       |PYEOF
-       |fi
-       |""".stripMargin
+  // Laid over the values the release has (`--reuse-values`, the chart version it has);
+  // nothing else moves. A cluster without the release stops with Helm's message: run
+  // k8s_monitoring.scala first (it has these jobs on).
+  private val scrapePlan: ApplyPlan =
+    import Resources.*
+    val (helper, applied) = helmRelease(
+      "turn on the three scrape jobs",
+      "kps",
+      "prometheus-community/kube-prometheus-stack",
+      "https://prometheus-community.github.io/helm-charts",
+      "monitoring",
+      set = List(
+        "kubeEtcd.enabled" -> "true",
+        "kubeScheduler.enabled" -> "true",
+        "kubeControllerManager.enabled" -> "true"
+      ),
+      minutes = 10,
+      reuseValues = true,
+      variant = "scrape-jobs"
+    )
+    ApplyPlan.orFail("scrape-jobs", List(helper, applied))
 
   private val testScript =
     s"""FAIL=0
@@ -379,7 +381,7 @@ sys.exit(1 if bad else 0)
         .build,
       stage("scrape-control-plane", "tst30")
         .task("turn on the three scrape jobs")(
-          Task.RunCommand(List("sh", "-c", helmScript), timeoutSeconds = 800)
+          Task.Apply(scrapePlan)
         )
         .task("Prometheus sees them")(
           Task.RunCommand(List("sh", "-c", testScript), timeoutSeconds = 600)
