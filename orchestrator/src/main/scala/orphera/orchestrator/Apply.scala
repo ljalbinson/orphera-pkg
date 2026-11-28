@@ -3553,6 +3553,94 @@ esac
       timeout = timeout
     )
 
+  /** A network interface with no address, as a description: plain layer 2, for
+    * a NIC that becomes a port of an Open vSwitch bridge (Neutron's provider
+    * network). A node provisioned by cloud-init has netplan give the NIC an
+    * address, a route and a routing-policy rule. The step stops cloud-init
+    * regenerating the network config (`cloudInitFile`), strips the address,
+    * routes, routing policy, nameservers and DHCP from the NIC's entry in
+    * `netplanFile` (the name and MAC match are kept), applies netplan, and
+    * clears what is left in the kernel (the address, the priority-100 rule and
+    * routing table 2). Other interfaces are not touched. It is wanted until
+    * cloud-init is told to leave the network alone, netplan has nothing left to
+    * strip and the kernel has no IPv4 address on the NIC. Needs PyYAML, which
+    * cloud-init depends on.
+    */
+  def addresslessNic(
+      label: String,
+      nic: String,
+      netplanFile: String = "/etc/netplan/50-cloud-init.yaml",
+      cloudInitFile: String =
+        "/etc/cloud/cloud.cfg.d/99-orphera-disable-network-config.cfg",
+      timeout: Int = 120
+  ): ApplyResource =
+    require(
+      nic.nonEmpty && nic.forall(c => c.isLetterOrDigit || "_-.".contains(c)),
+      s"an interface name must be letters, digits and _ - . , not '$nic'"
+    )
+    def plain(what: String, path: String): Unit =
+      require(
+        path.startsWith("/") && !path.endsWith("/") && path.forall(c =>
+          c.isLetterOrDigit || "/._-".contains(c)
+        ),
+        s"$what must be an absolute file path of letters, digits and / . _ - : '$path'"
+      )
+    plain("netplanFile", netplanFile)
+    plain("cloudInitFile", cloudInitFile)
+    val strip =
+      s"""import sys, yaml
+         |path = '$netplanFile'
+         |nic = '$nic'
+         |check = len(sys.argv) > 1 and sys.argv[1] == 'check'
+         |try:
+         |    doc = yaml.safe_load(open(path))
+         |except FileNotFoundError:
+         |    print('no %s - nothing to strip' % path); sys.exit(0)
+         |changed = False
+         |for name, cfg in (doc.get('network', {}).get('ethernets', {}) or {}).items():
+         |    if name == nic or cfg.get('set-name') == nic:
+         |        for key in ('addresses', 'routes', 'routing-policy', 'nameservers', 'gateway4', 'gateway6'):
+         |            if key in cfg:
+         |                if not check:
+         |                    del cfg[key]
+         |                changed = True
+         |        if cfg.get('dhcp4') is not False or cfg.get('dhcp6') is not False or cfg.get('link-local') != []:
+         |            if not check:
+         |                cfg['dhcp4'] = False
+         |                cfg['dhcp6'] = False
+         |                cfg['link-local'] = []
+         |            changed = True
+         |if check:
+         |    sys.exit(1 if changed else 0)
+         |if changed:
+         |    yaml.safe_dump(doc, open(path, 'w'), default_flow_style=False)
+         |    print('removed the address and policy routing of %s from %s' % (nic, path))
+         |else:
+         |    print('%s already has no address in %s' % (nic, path))""".stripMargin
+    val cloudInit = Apply.quote(cloudInitFile)
+    val netplan = Apply.quote(netplanFile)
+    command(
+      label,
+      s"""set -e
+         |mkdir -p "$$(dirname $cloudInit)"
+         |printf 'network: {config: disabled}\\n' > $cloudInit
+         |python3 - <<'PY'
+         |$strip
+         |PY
+         |chmod 600 $netplan
+         |netplan apply
+         |ip addr flush dev $nic || true
+         |while ip rule del priority 100 2>/dev/null; do :; done
+         |ip route flush table 2 2>/dev/null || true
+         |ip -4 -br addr show $nic
+         |echo "$nic is an address-less layer-2 port"""".stripMargin,
+      unless =
+        s"""[ -f $cloudInit ] && python3 - check <<'PY' && ! ip -4 -o addr show dev $nic | grep -q inet
+           |$strip
+           |PY""".stripMargin,
+      timeout = timeout
+    )
+
   private def ovsName(what: String, text: String): Unit =
     require(
       text.nonEmpty && text.length <= 15 && text.forall(c =>

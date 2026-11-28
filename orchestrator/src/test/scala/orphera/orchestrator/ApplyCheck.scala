@@ -6065,6 +6065,172 @@ else:
     sys.exit(2)
 """
 
+  private val nicNetplan: String =
+    """network:
+  version: 2
+  ethernets:
+    enp1s0:
+      dhcp4: true
+      addresses: [10.0.0.5/24]
+    enp2s0:
+      match:
+        macaddress: "52:54:00:aa:bb:cc"
+      set-name: enp2s0
+      addresses: [192.168.9.5/24]
+      routes:
+        - to: 0.0.0.0/0
+          via: 192.168.9.1
+          table: 2
+      routing-policy:
+        - from: 192.168.9.5
+          table: 2
+          priority: 100
+      nameservers:
+        addresses: [8.8.8.8]
+      dhcp4: false
+      mtu: 9000
+"""
+
+  private def addresslessNicChecks(): Unit =
+    if runShell("python3 -c 'import yaml'")._1 != 0 then
+      check("addresslessNic: skipped, python3 has no PyYAML here", true)
+    else
+      val dir = Files.createTempDirectory("nic")
+      val bin = dir.resolve("bin")
+      Files.createDirectory(bin)
+      def tool(name: String, body: String): Unit =
+        val f = bin.resolve(name)
+        Files.writeString(f, "#!/bin/sh\n" + body)
+        f.toFile.setExecutable(true)
+      tool("netplan", "echo \"netplan $*\" >> \"$FAKE_NIC/log\"\n")
+      tool(
+        "ip",
+        """D="$FAKE_NIC"
+case "$*" in
+  "-4 -o addr show dev "*) cat "$D/addr" 2>/dev/null; exit 0 ;;
+  "-4 -br addr show "*) cat "$D/addr" 2>/dev/null; exit 0 ;;
+  "addr flush dev "*) : > "$D/addr"; echo "flush $4" >> "$D/log"; exit 0 ;;
+  "rule del priority 100") [ -s "$D/rules" ] || exit 2; sed -i 1d "$D/rules"; echo "rule deleted" >> "$D/log"; exit 0 ;;
+  "route flush table 2") echo "table 2 flushed" >> "$D/log"; exit 0 ;;
+esac
+exit 3
+"""
+      )
+      val netplanFile = dir.resolve("50-cloud-init.yaml")
+      val cloudInit = dir.resolve("cloud.cfg.d").resolve("99-off.cfg")
+      def reset(): Unit =
+        Files.writeString(netplanFile, nicNetplan)
+        Files.writeString(
+          dir.resolve("addr"),
+          "2: enp2s0    inet 192.168.9.5/24 brd 192.168.9.255 scope global enp2s0\n"
+        )
+        Files.writeString(dir.resolve("rules"), "100: from 192.168.9.5 lookup 2\n")
+        Files.deleteIfExists(dir.resolve("log"))
+        Files.deleteIfExists(cloudInit)
+      reset()
+      def sh(script: String): (Int, String) =
+        runShell(s"PATH=$bin:$$PATH\nFAKE_NIC=$dir\nexport FAKE_NIC\n$script")
+      def read(f: String): String =
+        val p = dir.resolve(f)
+        if Files.exists(p) then Files.readString(p) else ""
+      val res = addresslessNic(
+        "make enp2s0 an address-less layer-2 port",
+        "enp2s0",
+        netplanFile.toString,
+        cloudInit.toString
+      )
+      def part(pick: ApplyResource.Command => String): String =
+        res match
+          case c: ApplyResource.Command => pick(c)
+          case other                    => s"not a command: $other"
+      check(
+        "addresslessNic: an interface with an address is needed",
+        sh(part(_.unless))._1 != 0
+      )
+      val ran = sh(part(_.run))
+      val yaml = read("50-cloud-init.yaml")
+      check(
+        "addresslessNic: it strips the address, routes, policy and nameservers of that interface only",
+        ran._1 == 0 && ran._2.contains("enp2s0 is an address-less layer-2 port") &&
+          !yaml.contains("192.168.9") && !yaml.contains("8.8.8.8") &&
+          !yaml.contains("routing-policy") && yaml.contains("10.0.0.5/24") &&
+          yaml.contains("set-name: enp2s0") && yaml.contains("mtu: 9000") &&
+          yaml.contains("52:54:00:aa:bb:cc"),
+        ran.toString + yaml
+      )
+      check(
+        "addresslessNic: it turns DHCP and link-local off for it",
+        yaml.contains("link-local: []") && yaml.contains("dhcp6: false"),
+        yaml
+      )
+      check(
+        "addresslessNic: it tells cloud-init to leave the network alone",
+        read("cloud.cfg.d/99-off.cfg").contains("network: {config: disabled}"),
+        read("cloud.cfg.d/99-off.cfg")
+      )
+      check(
+        "addresslessNic: it applies netplan and clears the kernel's address, rule and table",
+        read("log").contains("netplan apply") && read("log").contains(
+          "flush enp2s0"
+        ) && read("log").contains("rule deleted") && read("log").contains(
+          "table 2 flushed"
+        ) && read("addr").isEmpty && read("rules").isEmpty,
+        read("log")
+      )
+      check(
+        "addresslessNic: it then means unchanged",
+        sh(part(_.unless))._1 == 0
+      )
+      val again = sh(part(_.run))
+      check(
+        "addresslessNic: running it again changes nothing",
+        again._1 == 0 && again._2.contains("already has no address"),
+        again.toString
+      )
+      Files.writeString(
+        dir.resolve("addr"),
+        "2: enp2s0    inet 192.168.9.7/24 scope global enp2s0\n"
+      )
+      check(
+        "addresslessNic: an address in the kernel means it is needed",
+        sh(part(_.unless))._1 != 0
+      )
+      sh(part(_.run))
+      Files.writeString(
+        netplanFile,
+        yaml.replace(
+          "    enp2s0:\n",
+          "    enp2s0:\n      addresses:\n      - 192.168.9.5/24\n"
+        )
+      )
+      check(
+        "addresslessNic: an address in netplan means it is needed",
+        sh(part(_.unless))._1 != 0
+      )
+      sh(part(_.run))
+      Files.delete(cloudInit)
+      check(
+        "addresslessNic: cloud-init not told to leave the network means it is needed",
+        sh(part(_.unless))._1 != 0
+      )
+      sh(part(_.run))
+      Files.writeString(
+        netplanFile,
+        yaml.replace("dhcp4: false", "dhcp4: true")
+      )
+      check(
+        "addresslessNic: DHCP turned on means it is needed",
+        sh(part(_.unless))._1 != 0
+      )
+      check(
+        "addresslessNic: an interface name with a space is refused",
+        scala.util.Try(addresslessNic("x", "en p2")).isFailure
+      )
+      check(
+        "addresslessNic: a relative netplan path is refused",
+        scala.util.Try(addresslessNic("x", "enp2s0", "netplan.yaml")).isFailure
+      )
+
   private def ovsChecks(): Unit =
     val dir = Files.createTempDirectory("ovs")
     val bin = dir.resolve("bin")
@@ -6657,6 +6823,7 @@ else:
     helmChecks()
     kubeObjectsChecks()
     ovsChecks()
+    addresslessNicChecks()
     kindChecks()
     yamlChecks()
     newKindChecks()

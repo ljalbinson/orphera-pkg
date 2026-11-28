@@ -482,11 +482,11 @@ manifests/kvm_zfs_vm_provision.scala,403,RunCommand,destroy/undefine $vmName and
 manifests/kvm_zfs_vm_provision.scala,421,RunCommand,"copy pristine base image, resize, create swap image",4,New product-specific kinds,VM (libvirt),"libvirt VM (defined, running, autostart)",not started
 manifests/kvm_zfs_vm_provision.scala,477,RunCommand,build the cidata ISO from the three rendered files,4,New product-specific kinds,VM (libvirt),"libvirt VM (defined, running, autostart)",not started
 manifests/kvm_zfs_vm_provision.scala,486,RunCommand,virt-install $vmName and boot it,4,New product-specific kinds,VM (libvirt),"libvirt VM (defined, running, autostart)",not started
-manifests/neutron_single_node.scala,937,apply command,make $providerNic an address-less layer-2 port,4,New product-specific kinds,network (OVS bridge/port),OVS bridge / port,not started
+manifests/neutron_single_node.scala,937,apply command,make $providerNic an address-less layer-2 port,4,New product-specific kinds,network (OVS bridge/port),OVS bridge / port,done
 manifests/neutron_single_node.scala,849,apply command,make the flat provider network with its subnet,4,New product-specific kinds,Keystone/OpenStack entries,"Keystone service/endpoint/user/role, and other OpenStack entries",done
 manifests/neutron_single_node.scala,943,apply command,create $providerBridge with $providerNic as its port,4,New product-specific kinds,network (OVS bridge/port),OVS bridge / port,done
 manifests/neutron_teardown.scala,130,apply command,delete the Open vSwitch bridges br-provider and br-int,4,New product-specific kinds,network (OVS bridge/port),OVS bridge / port,done
-manifests/nova_compute.scala,933,apply command,make $providerNic an address-less layer-2 port,4,New product-specific kinds,network (OVS bridge/port),OVS bridge / port,not started
+manifests/nova_compute.scala,933,apply command,make $providerNic an address-less layer-2 port,4,New product-specific kinds,network (OVS bridge/port),OVS bridge / port,done
 manifests/nova_compute.scala,939,apply command,let nova-compute reach Open vSwitch over loopback TCP,4,New product-specific kinds,network (OVS bridge/port),OVS bridge / port,done
 manifests/nova_compute.scala,939,apply command,create $providerBridge with $providerNic as its port,4,New product-specific kinds,network (OVS bridge/port),OVS bridge / port,done
 manifests/octavia_single_node.scala,1367,apply command,plug the health manager port into br-int,4,New product-specific kinds,network (OVS bridge/port),OVS bridge / port,not started
