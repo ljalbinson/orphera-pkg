@@ -299,6 +299,22 @@ object ApplyResource:
 object Resources:
   import ApplyResource.*
 
+  /** A file with this text. It is written when it is missing or differs, with
+    * the `mode`, `owner` and `group` given. The agent replaces it in one step,
+    * guarded by the hash of what was read, so a change made meanwhile fails the
+    * resource instead of being overwritten.
+    *
+    * @param path
+    *   absolute path of the file
+    * @param content
+    *   the whole text it must hold
+    * @param mode
+    *   octal text such as "0644"; empty leaves the mode as it is
+    * @param owner
+    *   owning user; empty leaves it as it is
+    * @param group
+    *   owning group; empty leaves it as it is
+    */
   def file(
       path: String,
       content: String,
@@ -398,9 +414,13 @@ object Resources:
   ): ApplyResource =
     File(path, Some(Content.OnNode(from)), mode, owner, group, present = true)
 
+  /** The file gone. Nothing happens while it does not exist. */
   def absentFile(path: String): ApplyResource =
     File(path, None, "", "", "", present = false)
 
+  /** A directory that exists, with the `mode`, `owner` and `group` given (empty
+    * leaves them as they are).
+    */
   def directory(
       path: String,
       mode: String = "",
@@ -409,11 +429,11 @@ object Resources:
   ): ApplyResource =
     Directory(path, mode, owner, group, present = true)
 
-  /** Removed if empty; a directory with something in it fails. */
-  /** With `recursive`, the directory goes with everything in it (never across a
-    * link or a mount; the agent checks). The path must be absolute and clean
-    * and at least two components deep, so `/srv` or `/` cannot be written by
-    * mistake.
+  /** The directory gone. Without `recursive` it is removed if empty, and a
+    * directory with something in it fails. With `recursive`, the directory goes
+    * with everything in it (never across a link or a mount; the agent checks).
+    * The path must then be absolute and clean and at least two components deep,
+    * so `/srv` or `/` cannot be written by mistake.
     */
   def absentDirectory(path: String, recursive: Boolean = false): ApplyResource =
     if recursive then
@@ -425,13 +445,24 @@ object Resources:
       )
     Directory(path, "", "", "", present = false, recursive = recursive)
 
+  /** A symbolic link at `path` pointing to `target`; a link that points
+    * elsewhere is replaced.
+    */
   def symlink(path: String, target: String): ApplyResource =
     Symlink(path, target, present = true)
 
+  /** The symbolic link gone. Nothing happens while there is none. */
   def absentSymlink(path: String): ApplyResource =
     Symlink(path, "", present = false)
 
-  /** A package installed (`package` is a word Scala keeps for itself). */
+  /** A package installed (`package` is a word Scala keeps for itself), through
+    * apt or dnf, whichever the node has.
+    *
+    * @param version
+    *   the version wanted; empty accepts any installed version
+    * @param updateCache
+    *   refresh the package index before installing
+    */
   def pkg(
       name: String,
       version: String = "",
@@ -439,6 +470,9 @@ object Resources:
   ): ApplyResource =
     Package(name, version, updateCache, present = true)
 
+  /** The package removed (apt or dnf). Nothing happens while it is not
+    * installed.
+    */
   def absentPkg(name: String): ApplyResource =
     Package(name, "", updateCache = false, present = false)
 
@@ -452,6 +486,10 @@ object Resources:
   ): ApplyResource =
     Service(unit, enabled, running)
 
+  /** A local user. `uid` -1, and an empty `group`, `home` or `shell`, are left
+    * as they are (or the system's default for a new user). `groups` are the
+    * supplementary groups, `system` makes a system account.
+    */
   def user(
       name: String,
       uid: Int = -1,
@@ -463,9 +501,11 @@ object Resources:
   ): ApplyResource =
     User(name, uid, group, groups, home, shell, system, present = true)
 
+  /** The user gone. Nothing happens while there is none. */
   def absentUser(name: String): ApplyResource =
     User(name, -1, "", Nil, "", "", system = false, present = false)
 
+  /** A local group; `gid` -1 accepts any, `system` makes a system group. */
   def group(
       name: String,
       gid: Int = -1,
@@ -473,6 +513,7 @@ object Resources:
   ): ApplyResource =
     Group(name, gid, system, present = true)
 
+  /** The group gone. Nothing happens while there is none. */
   def absentGroup(name: String): ApplyResource =
     Group(name, -1, system = false, present = false)
 
@@ -506,9 +547,13 @@ object Resources:
   ): ApplyResource =
     LineInFile(path, line, matching, present = false)
 
+  /** A public key (`type key [comment]`) in the user's `~/.ssh/authorized_keys`.
+    * It is found by its type and key, so a changed comment is not a change.
+    */
   def authorizedKey(user: String, key: String): ApplyResource =
     AuthorizedKey(user, key, present = true)
 
+  /** The key gone from the user's `authorized_keys`. */
   def absentAuthorizedKey(user: String, key: String): ApplyResource =
     AuthorizedKey(user, key, present = false)
 
@@ -522,9 +567,26 @@ object Resources:
   ): ApplyResource =
     Mount(path, device, fstype, options, mounted, present = true)
 
+  /** The mount unmounted and its fstab entry removed. */
   def absentMount(path: String): ApplyResource =
     Mount(path, "", "", "", None, present = false)
 
+  /** A shell command (`sh -c`), made by `Command`. `label` names it in the plan
+    * and in `after`/`notifies`, so it must be unique within a description.
+    *
+    * @param run
+    *   the script
+    * @param onlyIf
+    *   a guard script: the command runs only when it exits 0
+    * @param unless
+    *   a guard script: the command runs only when it exits non-zero
+    * @param creates
+    *   a path: the command runs only when it does not exist
+    * @param onChangeOnly
+    *   run only when a resource that notifies this command changed
+    * @param timeout
+    *   seconds the command may take
+    */
   def command(
       label: String,
       run: String,
