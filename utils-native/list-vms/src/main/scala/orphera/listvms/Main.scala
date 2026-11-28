@@ -59,8 +59,8 @@ object Main:
       case n :: _ => NodesArg.unexpected(n)
 
   def run(args: List[String], src: Sources): Int =
-    val given = parse(args, Vector.empty, src)
-    val hvs = if given.nonEmpty then given.mkString(" ") else src.hypervisorList
+    val listed = parse(args, Vector.empty, src)
+    val hvs = if listed.nonEmpty then listed.mkString(" ") else src.hypervisorList
     val nodes = hvs.replaceAll(" +", ",")
     val (_, raw) = Proc.capture(
       List("orphera", "run", "--nodes", nodes, "--quiet", "--", "sh", "-c", Scripts.remote),
