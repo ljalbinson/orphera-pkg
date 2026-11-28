@@ -547,8 +547,9 @@ object Resources:
   ): ApplyResource =
     LineInFile(path, line, matching, present = false)
 
-  /** A public key (`type key [comment]`) in the user's `~/.ssh/authorized_keys`.
-    * It is found by its type and key, so a changed comment is not a change.
+  /** A public key (`type key [comment]`) in the user's
+    * `~/.ssh/authorized_keys`. It is found by its type and key, so a changed
+    * comment is not a change.
     */
   def authorizedKey(user: String, key: String): ApplyResource =
     AuthorizedKey(user, key, present = true)

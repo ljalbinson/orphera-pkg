@@ -4,11 +4,13 @@ package orphera.listvms
 
 import java.util.regex.Pattern
 
-import orphera.nativeutils.{ErrMode, Fmt, Out, Proc, Sources}
+import scala.annotation.tailrec
+
+import orphera.nativeutils.{ErrMode, Fmt, NodesArg, Out, Proc, Sources}
 
 /** utils/list-vms.sh in Scala, for Scala Native: every VM on each hypervisor
   * with its state, vCPUs, memory and autostart, and a total of the running
-  * ones per hypervisor. The same arguments (hypervisor names; none means the
+  * ones per hypervisor. The same arguments (--nodes with hypervisor names; none means the
   * inventory group `hypervisors`, else HYPERVISORS, else gs1 gs2 gs3 st0),
   * output and exit code (1 if a hypervisor did not answer).
   */
@@ -41,8 +43,24 @@ object Main:
       mem: Double = 0
   )
 
+  /** The hypervisors given with --nodes; a bare argument is refused. */
+  @tailrec
+  private def parse(args: List[String], acc: Vector[String], src: Sources): Vector[String] =
+    args match
+      case Nil => acc
+      case "--nodes" :: rest =>
+        parse(rest.drop(1), acc ++ NodesArg.parse(rest.headOption), src)
+      case ("-h" | "--help") :: _ =>
+        src.usage("list-vms.sh", "Usage: list-vms [--nodes H1,H2]")
+        sys.exit(0)
+      case opt :: _ if opt.startsWith("-") =>
+        Out.err(s"unknown option $opt")
+        sys.exit(2)
+      case n :: _ => NodesArg.unexpected(n)
+
   def run(args: List[String], src: Sources): Int =
-    val hvs = if args.nonEmpty then args.mkString(" ") else src.hypervisorList
+    val listed = parse(args, Vector.empty, src)
+    val hvs = if listed.nonEmpty then listed.mkString(" ") else src.hypervisorList
     val nodes = hvs.replaceAll(" +", ",")
     val (_, raw) = Proc.capture(
       List("orphera", "run", "--nodes", nodes, "--quiet", "--", "sh", "-c", Scripts.remote),

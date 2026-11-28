@@ -4,7 +4,7 @@ package orphera.startvm
 
 import scala.annotation.tailrec
 
-import orphera.nativeutils.{Out, Selection, Sources, VmCommon}
+import orphera.nativeutils.{NodesArg, Out, Selection, Sources, VmCommon}
 
 /** utils/start-vm.sh in Scala, for Scala Native: starts one or more VMs on
   * their hypervisors (a shut-off VM is started, a paused one resumed, a
@@ -20,7 +20,7 @@ object Main:
     sys.exit(run(args.toList, Sources.load(rootIsCheckout = false)))
 
   private def usage(src: Sources): Unit =
-    src.usage("start-vm.sh", "Usage: start-vm [--parallel N] [--retries N] [--node-groups G] [--exclude-nodes V] <vm | number | config.yaml>...")
+    src.usage("start-vm.sh", "Usage: start-vm [--parallel N] [--retries N] [--node-groups G] [--exclude-nodes V] --nodes <vm | number | config.yaml>,...")
 
   final case class Opts(sel: Selection = Selection(), par: String = "1", retries: String = "3")
 
@@ -32,6 +32,9 @@ object Main:
         o.sel.withOption(opt, rest.headOption) match
           case Some(s) => parse(rest.drop(1), o.copy(sel = s), src)
           case None    => sys.exit(2)
+      case "--nodes" :: rest =>
+        val sel = NodesArg.parse(rest.headOption).foldLeft(o.sel)(_.withName(_))
+        parse(rest.drop(1), o.copy(sel = sel), src)
       case "--retries" :: rest =>
         rest.headOption match
           case Some(v) if v.nonEmpty && Sources.allDigits(v) => parse(rest.drop(1), o.copy(retries = BigInt(v).toString), src)
@@ -48,7 +51,7 @@ object Main:
       case opt :: _ if opt.startsWith("-") =>
         Out.err(s"unknown option $opt")
         sys.exit(2)
-      case n :: t => parse(t, o.copy(sel = o.sel.withName(n)), src)
+      case n :: _ => NodesArg.unexpected(n)
 
   def run(args: List[String], src: Sources): Int =
     if args.isEmpty then

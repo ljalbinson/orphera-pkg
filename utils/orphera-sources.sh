@@ -79,3 +79,24 @@ hypervisor_list() {
     printf '%s\n' "gs1 gs2 gs3 st0"
   fi
 }
+
+# --nodes V1,V2: a comma-separated list (each item a name, a bare number or a config file, as the script says) goes
+# into NODE_ARGS, in order. Node and VM names are only taken after --nodes, never as bare arguments, as for the
+# orphera commands: a bare argument is refused by unexpected_arg.
+nodes_option() {
+  NODE_ARGS=()
+  local item IFS=,
+  case "${1:-}" in
+    -*) echo "--nodes needs a comma-separated list of names, for example --nodes tst7,tst8" >&2; exit 2 ;;
+  esac
+  for item in ${1:-}; do
+    [ -z "$item" ] || NODE_ARGS+=("$item")
+  done
+  [ "${#NODE_ARGS[@]}" -gt 0 ] || {
+    echo "--nodes needs a comma-separated list of names, for example --nodes tst7,tst8" >&2; exit 2; }
+}
+
+unexpected_arg() {
+  echo "unexpected argument '$1': names are given after --nodes (for example --nodes tst7,tst8)" >&2
+  exit 2
+}

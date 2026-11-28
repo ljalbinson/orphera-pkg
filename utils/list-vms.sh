@@ -6,7 +6,7 @@
 # per hypervisor for the running VMs.
 #
 #   utils/list-vms.sh                 # the hypervisors: the inventory group `hypervisors`, else $HYPERVISORS, else gs1 gs2 gs3 st0
-#   utils/list-vms.sh gs1 st0         # just those hypervisors
+#   utils/list-vms.sh --nodes gs1,st0 # just those hypervisors
 #   HYPERVISORS="gs1 gs2" utils/list-vms.sh   # used only while the inventory has no group `hypervisors`
 #
 # Run from scala0, in orphera-pkg (needs `orphera` and an agent on each
@@ -16,8 +16,18 @@ set -uo pipefail
 
 . "$(dirname "${BASH_SOURCE[0]}")/orphera-sources.sh"
 
-if [ $# -gt 0 ]; then
-  HV="$*"
+usage() { sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'; }
+HV_ARGS=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --nodes) nodes_option "${2:-}"; HV_ARGS+=("${NODE_ARGS[@]}"); shift 2 ;;
+    -h|--help) usage; exit 0 ;;
+    -*) echo "unknown option $1" >&2; exit 2 ;;
+    *) unexpected_arg "$1" ;;
+  esac
+done
+if [ "${#HV_ARGS[@]}" -gt 0 ]; then
+  HV="${HV_ARGS[*]}"
 else
   HV=$(hypervisor_list)
 fi

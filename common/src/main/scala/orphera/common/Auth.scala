@@ -19,7 +19,7 @@ object Auth:
 
   private val HowToSet =
     "From the orchestrator run: orphera secrets generate orphera/agent-token (once), " +
-      "then utils/set-agent-token.sh <this node>."
+      "then utils/set-agent-token.sh --nodes <this node>."
 
   /** The token an agent may run with, from its `ORPHERA_TOKEN`. An agent with
     * no token, or with the built-in one, would accept calls from anyone who has

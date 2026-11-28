@@ -94,11 +94,11 @@ t() {
 }
 
 # usage and argument errors
-t start --parallel 0 1
+t start --parallel 0 --nodes 1
 t start --parallel
-t start --parallel x 1
-t shutdown-all --parallel 2 gs1
-t autostart add --parallel 2 0
+t start --parallel x --nodes 1
+t shutdown-all --parallel 2 --nodes gs1
+t autostart add --parallel 2 --nodes 0
 t
 t --help
 t bogus
@@ -109,84 +109,96 @@ t start -h
 t start -x 1
 t start -
 t start --retries
-t start --retries x 0
-t start --wait 3 1
-t start --hard 1
-t start --yes 1
-t start --dry-run 1
-t start --all 1
-t start --hypervisor gs1 1
-t stop --retries 2 1
-t stop --except tst0 1
-t shutdown-all --retries 1 gs1
-t start-all --wait 5 gs1
+t start --retries x --nodes 0
+t start --wait 3 --nodes 1
+t start --hard --nodes 1
+t start --yes --nodes 1
+t start --dry-run --nodes 1
+t start --all --nodes 1
+t start --hypervisor gs1 --nodes 1
+t stop --retries 2 --nodes 1
+t stop --except tst0 --nodes 1
+t shutdown-all --retries 1 --nodes gs1
+t start-all --wait 5 --nodes gs1
 
-# start, stop, reboot
+# names without --nodes are refused
 t start 0
 t start tst1
-t start 0 1 2
-t start --retries 5 0
-t start 1 --retries 0
-t stop --wait 300 --force 1
-t reboot --hard --force 2
-t reboot --soft --retries 4 2
-t start "$cfg5"
-t start 5
-t start 7
-t start nosuch
-t start weird
-t start badvm 1 nosuch
+t stop 0 1
+t shutdown-all gs1
+t list gs1
+t start --nodes
+t start --nodes ''
+t start --nodes ,
+t start --nodes --retries 1
+
+# start, stop, reboot
+t start --nodes 0
+t start --nodes tst1
+t start --nodes 0,1,2
+t start --retries 5 --nodes 0
+t start --nodes 1 --retries 0
+t stop --wait 300 --force --nodes 1
+t reboot --hard --force --nodes 2
+t reboot --soft --retries 4 --nodes 2
+t start --nodes "$cfg5"
+t start --nodes 5
+t start --nodes 7
+t start --nodes nosuch
+t start --nodes weird
+t start --nodes badvm,1,nosuch
+t start --nodes badvm --nodes 1
 
 # --parallel
-t start --parallel 3 0 1 2
-t stop --parallel 2 --wait 60 --force 0 badvm nosuch 1
-t reboot --hard --parallel 010 0 1 badvm
-t start --parallel 1 0 nosuch
-t start 0 --parallel 2 --node-groups ceph
-t stop --parallel 4 7 weird 2
+t start --parallel 3 --nodes 0,1,2
+t stop --parallel 2 --wait 60 --force --nodes 0,badvm,nosuch,1
+t reboot --hard --parallel 010 --nodes 0,1,badvm
+t start --parallel 1 --nodes 0,nosuch
+t start --nodes 0 --parallel 2 --node-groups ceph
+t stop --parallel 4 --nodes 7,weird,2
 
 # node groups
 t start --node-groups ceph
 t stop --node-groups k8s-workers,k8s-dns --exclude-nodes tst39
-t start --node-groups ceph 49 0
-t start 49 --node-groups ceph --node-groups k8s-dns
-t start --node-groups ceph "$cfg5"
+t start --node-groups ceph --nodes 49,0
+t start --nodes 49 --node-groups ceph --node-groups k8s-dns
+t start --node-groups ceph --nodes "$cfg5"
 t start --node-groups nogroup
 t start --node-groups ceph,,k8s-dns
 t start --node-groups
 t start --exclude-nodes tst1
-t start --exclude-nodes tst1 0 1 2
+t start --exclude-nodes tst1 --nodes 0,1,2
 t start --node-groups ceph --exclude-nodes tst0,tst1,tst2
 t start --node-groups ceph --all
-t start --node-groups ceph unknownvm
-t shutdown-all --node-groups ceph gs1
+t start --node-groups ceph --nodes unknownvm
+t shutdown-all --node-groups ceph --nodes gs1
 
 # shutdown-all, start-all
-t shutdown-all gs1 gs2
-t shutdown-all --yes --force --wait 60 --except tst0,tst1 gs2
-t shutdown-all bad
-t start-all gs1 st0
-t start-all --dry-run --all --retries 2 --except tst0 gs1
+t shutdown-all --nodes gs1,gs2
+t shutdown-all --yes --force --wait 60 --except tst0,tst1 --nodes gs2
+t shutdown-all --nodes bad
+t start-all --nodes gs1,st0
+t start-all --dry-run --all --retries 2 --except tst0 --nodes gs1
 
 # autostart
-t autostart add 0 1 5
+t autostart add --nodes 0,1,5
 t autostart remove --hypervisor gs1 --hypervisor gs2
 t autostart add --all
-t autostart remove --all 1
-t autostart add --hypervisor gs1 1
+t autostart remove --all --nodes 1
+t autostart add --hypervisor gs1 --nodes 1
 t autostart add --node-groups ceph --exclude-nodes tst2
-t autostart add --retries 1 0
+t autostart add --retries 1 --nodes 0
 t autostart add
-t autostart add badvm 0
-t autostart add 5 0 badvm 1
-t autostart add nosuch 0
+t autostart add --nodes badvm,0
+t autostart add --nodes 5,0,badvm,1
+t autostart add --nodes nosuch,0
 
 # --parallel must overlap the playbooks: four VMs whose playbook takes 1 s each, 4 at a time, in well under 4 s.
 slow=0
 for prog in "$repo/utils/vmctl.sh" "$native"; do
   start=$(date +%s%N)
   (PATH="$tmp/bin:$PATH" ORPHERA_CONFIG_DIR="$tmp/config" HYPERVISORS="" STUB_SLEEP=1 \
-    "$prog" start --parallel 4 0 1 2 5 >/dev/null 2>&1 </dev/null)
+    "$prog" start --parallel 4 --nodes 0,1,2,5 >/dev/null 2>&1 </dev/null)
   ms=$(( ($(date +%s%N) - start) / 1000000 ))
   if [ "$ms" -lt 2500 ]; then
     printf '  ok    start --parallel 4, four playbooks of 1 s each: %s ms (%s)\n' "$ms" "$prog"

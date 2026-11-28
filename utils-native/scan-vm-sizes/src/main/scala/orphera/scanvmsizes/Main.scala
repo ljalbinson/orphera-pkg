@@ -4,13 +4,14 @@ package orphera.scanvmsizes
 
 import java.util.regex.Pattern
 
+import scala.annotation.tailrec
 import scala.util.Try
 
-import orphera.nativeutils.{Bash, ErrMode, Fmt, Out, Proc, Sources}
+import orphera.nativeutils.{Bash, ErrMode, Fmt, NodesArg, Out, Proc, Sources}
 
 /** utils/scan-vm-sizes.sh in Scala, for Scala Native: compares the CPU and
   * memory of every VM as its config file, libvirt and the running guest see
-  * them. The same arguments (VM names or numbers; none means every VM with a
+  * them. The same arguments (--nodes with VM names or numbers; none means every VM with a
   * config file), GUEST_MEM_MIN_PCT, remote commands, table and exit code (1 if
   * a size differs or a hypervisor did not answer). Read-only.
   */
@@ -74,7 +75,24 @@ object VersionOrder extends Ordering[String]:
         val whole = verrevcmp(a, b)
         if whole != 0 then whole else a.compareTo(b)
 
-final class Scan(src: Sources, args: List[String]):
+final class Scan(src: Sources, rawArgs: List[String]):
+
+  /** The VMs given with --nodes; a bare argument is refused (as the shell version does, before anything else). */
+  @tailrec
+  private def parseArgs(in: List[String], acc: List[String]): List[String] =
+    in match
+      case Nil => acc
+      case "--nodes" :: rest =>
+        parseArgs(rest.drop(1), acc ++ NodesArg.parse(rest.headOption))
+      case ("-h" | "--help") :: _ =>
+        src.usage("scan-vm-sizes.sh", "Usage: scan-vm-sizes [--nodes V1,V2]")
+        sys.exit(0)
+      case opt :: _ if opt.startsWith("-") =>
+        Out.err(s"unknown option $opt")
+        sys.exit(2)
+      case n :: _ => NodesArg.unexpected(n)
+
+  private val args: List[String] = parseArgs(rawArgs, Nil)
 
   private def die(msg: String): Nothing =
     Out.err(msg)
