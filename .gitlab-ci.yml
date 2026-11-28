@@ -96,6 +96,23 @@ go_agent_release:
       - agent-go/orphera-agent_*_amd64.deb
       - agent-go/orphera-agent-*.x86_64.rpm
 
+# The Scaladoc of the common, agent and orchestrator modules, published with GitLab
+# Pages from the default branch (the job must be called `pages` and leave `public/`).
+# `needs: []` starts it at once. The same docs go to GitHub Pages (.github/workflows/docs.yml).
+pages:
+  stage: build
+  needs: []
+  script:
+    - sbt common/doc agent/doc orchestrator/doc
+    - mkdir -p public
+    - for m in common agent orchestrator; do cp -r "$m"/target/scala-*/api "public/$m"; done
+    - echo '<!doctype html><meta charset="utf-8"><title>Orphera API documentation</title><h1>Orphera API documentation</h1><ul><li><a href="orchestrator/index.html">orchestrator</a> (the apply DSL is orphera.orchestrator.Resources)</li><li><a href="agent/index.html">agent</a></li><li><a href="common/index.html">common</a></li></ul>' > public/index.html
+  artifacts:
+    paths:
+      - public
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
 # Runs on runner0 (shell executor, tag orphera): see docs/GITLAB-RUNNER.md. The
 # global image, cache and before_script above are for the Docker runners, so this
 # job turns them off. `needs: []` starts it at once instead of after the build stage,
