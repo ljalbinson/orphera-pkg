@@ -755,8 +755,8 @@ directory proved nothing. Remaining by hand: delete `~/certs-old` and `~/certs-b
 labels). On tst7, `deploy-agent` upgraded the agent to 0.1.197 and confirmed it. With `ORPHERA_TOKEN` commented out of
 `agent.env` the unit failed with `exit-code` and was restarted by systemd (the `Refusing to start` line itself was not
 captured in the journal excerpt that was pasted). With a different valid token on the node, `orphera version --nodes tst7`
-printed `unauthenticated: the node rejected this orchestrator's token (utils/set-agent-token.sh <node> sets it)`;
-`utils/set-agent-token.sh tst7` restored it. The orchestrator pre-flight: with `ORPHERA_TOKEN` unset and an empty secret
+printed `unauthenticated: the node rejected this orchestrator's token (utils/set-agent-token.sh --nodes <node> sets it)`;
+`utils/set-agent-token.sh --nodes tst7` restored it. The orchestrator pre-flight: with `ORPHERA_TOKEN` unset and an empty secret
 store, `deploy-agent` first failed with a raw `UNAUTHENTICATED`, because `deployAgent` calls `gatherFacts` on every node
 before `deployDeb`, where the check was; fixed (9e8733f) by checking at the top of `deployAgent`. The rerun printed `no
 agent token is configured here, and an agent now refuses to start without one`, and sent nothing to tst7. Fleet: after

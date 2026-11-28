@@ -22,7 +22,7 @@ object AgentToken:
 
   val NotConfigured: String =
     "no agent token is configured here: run `orphera secrets generate " +
-      s"$StoreName` (or set ORPHERA_TOKEN), then `utils/set-agent-token.sh <node>...` " +
+      s"$StoreName` (or set ORPHERA_TOKEN), then `utils/set-agent-token.sh --nodes <node>,...` " +
       "for nodes that do not have it yet"
 
   /** The error a call to an agent fails with when there is no token. */

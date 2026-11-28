@@ -11,7 +11,7 @@
 # figures and are not counted as a difference.
 #
 #   utils/scan-vm-sizes.sh              # every VM that has a config file with hypervisor:, hostname:
-#   utils/scan-vm-sizes.sh tst17 23     # just those (a name or a number)
+#   utils/scan-vm-sizes.sh --nodes tst17,23   # just those (a name or a number)
 #   GUEST_MEM_MIN_PCT=90 utils/scan-vm-sizes.sh
 #
 # Run from scala0, in orphera-pkg (needs `orphera`, an agent on each hypervisor and on each running guest).
@@ -21,6 +21,16 @@
 set -uo pipefail
 
 . "$(dirname "${BASH_SOURCE[0]}")/orphera-sources.sh"
+
+ONLY=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --nodes) nodes_option "${2:-}"; ONLY+=("${NODE_ARGS[@]}"); shift 2 ;;
+    -h|--help) sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -*) echo "unknown option $1" >&2; exit 2 ;;
+    *) unexpected_arg "$1" ;;
+  esac
+done
 
 MIN_PCT="${GUEST_MEM_MIN_PCT:-88}"
 case "$MIN_PCT" in '' | *[!0-9]*) echo "GUEST_MEM_MIN_PCT must be a whole number" >&2; exit 1 ;; esac
@@ -51,7 +61,7 @@ for cfg in "$dir"/*.yaml; do
   vm=$(config_value "$cfg" hostname)
   [ -n "$hv" ] && [ -n "$vm" ] || continue
   case "$hv$vm" in *[!A-Za-z0-9._-]*) echo "$cfg: unusual characters in hypervisor or hostname; skipped" >&2; continue ;; esac
-  want "$vm" "$@" || continue
+  want "$vm" ${ONLY[@]+"${ONLY[@]}"} || continue
   C_HV[$vm]=$hv
   C_CPU[$vm]=$(config_value "$cfg" cpu)
   C_MEM[$vm]=$(config_value "$cfg" memory)
@@ -189,7 +199,7 @@ done
 printf '%-8s %-5s | %5s %7s | %5s %7s %-9s | %5s %7s |\n' "total" "" "$T_CC" "$T_CM" "$T_HC" "$T_HM" "(running)" "$T_GC" "$T_GM"
 
 # VMs libvirt knows that have no config file (only when the whole fleet was scanned).
-if [ $# -eq 0 ]; then
+if [ "${#ONLY[@]}" -eq 0 ]; then
   EXTRA=""
   for key in "${!SEEN[@]}"; do
     name=${key#*/}

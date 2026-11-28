@@ -106,8 +106,10 @@ t() {  # <label> <args...>
 }
 
 good; t "all agree"
-good; t "all agree, some" tst10 1 scala0
-good; t "none matches" nosuch
+good; t "all agree, some" --nodes tst10,1,scala0
+good; t "bare names are refused" tst10
+good; t "--nodes needs a list" --nodes
+good; t "none matches" --nodes nosuch
 good; GUEST_MEM_MIN_PCT=96 t "stricter guest memory"
 good; GUEST_MEM_MIN_PCT=9x t "bad GUEST_MEM_MIN_PCT"
 good; GUEST_MEM_MIN_PCT= t "empty GUEST_MEM_MIN_PCT"

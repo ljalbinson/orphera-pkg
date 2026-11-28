@@ -99,7 +99,7 @@ vm_select() {
   local -A members=()
   for item in "${SEL_ORDER[@]}"; do case "$item" in n:*) names=1 ;; esac; done
   [ -n "$SEL_GROUPS" ] || [ "$names" = 1 ] || {
-    echo "--exclude-nodes takes VMs out of a selection: give --node-groups or VM names as well" >&2; exit 2; }
+    echo "--exclude-nodes takes VMs out of a selection: give --node-groups or --nodes as well" >&2; exit 2; }
   if [ -n "$SEL_GROUPS" ]; then
     listing=$(orphera nodes --groups) || exit 2
     while IFS= read -r line; do
