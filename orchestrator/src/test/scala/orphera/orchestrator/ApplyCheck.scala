@@ -6124,7 +6124,10 @@ exit 3
           dir.resolve("addr"),
           "2: enp2s0    inet 192.168.9.5/24 brd 192.168.9.255 scope global enp2s0\n"
         )
-        Files.writeString(dir.resolve("rules"), "100: from 192.168.9.5 lookup 2\n")
+        Files.writeString(
+          dir.resolve("rules"),
+          "100: from 192.168.9.5 lookup 2\n"
+        )
         Files.deleteIfExists(dir.resolve("log"))
         Files.deleteIfExists(cloudInit)
       reset()
@@ -6151,7 +6154,9 @@ exit 3
       val yaml = read("50-cloud-init.yaml")
       check(
         "addresslessNic: it strips the address, routes, policy and nameservers of that interface only",
-        ran._1 == 0 && ran._2.contains("enp2s0 is an address-less layer-2 port") &&
+        ran._1 == 0 && ran._2.contains(
+          "enp2s0 is an address-less layer-2 port"
+        ) &&
           !yaml.contains("192.168.9") && !yaml.contains("8.8.8.8") &&
           !yaml.contains("routing-policy") && yaml.contains("10.0.0.5/24") &&
           yaml.contains("set-name: enp2s0") && yaml.contains("mtu: 9000") &&
