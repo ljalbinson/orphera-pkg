@@ -9,8 +9,9 @@
 #   utils/fping-nodes.sh --node-groups k8s --count 5        # packet loss and round-trip times
 #   utils/fping-nodes.sh --node-groups k8s --unreachable    # only the nodes that do not answer
 #   utils/fping-nodes.sh --cluster-ip --node-groups ceph    # the cluster_ip address instead of the host name
-#   utils/fping-nodes.sh tst0 tst1 12                       # VM names and numbers work as well
+#   utils/fping-nodes.sh --nodes tst0,tst1,12               # VM names and numbers work as well
 #
+#   --nodes N1,N2           these nodes (a name, or a bare number N for tstN; a comma-separated list)
 #   --node-groups G1,G2     every node in those inventory groups
 #   --exclude-nodes V1,V2   leave those nodes out of the selection
 #   --count N               send N pings to each node (default 1). With 1 each line says alive or unreachable;
@@ -22,7 +23,7 @@
 #
 # The groups and node names are selected as in stop-vm.sh (`orphera nodes --groups` lists the groups): in the
 # order given, each group as its members, without repeats, less the nodes excluded. --exclude-nodes needs
-# --node-groups or node names as well. The address of each node is the `host:` of its entry in inventory.yaml
+# --node-groups or --nodes as well. Names are only taken after --nodes: a bare argument is refused. The address of each node is the `host:` of its entry in inventory.yaml
 # (a node with no entry is pinged by its name).
 #
 # Needs fping (apt install fping). Run from scala0, in orphera-pkg. Read-only.
@@ -40,6 +41,7 @@ pos=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --node-groups|--exclude-nodes) vm_select_option "$1" "${2:-}"; shift 2 ;;
+    --nodes) nodes_option "${2:-}"; for n in "${NODE_ARGS[@]}"; do pos+=("$n"); vm_select_name "$n"; done; shift 2 ;;
     --count)
       case "${2:-}" in ''|*[!0-9]*|0) echo "--count needs a number of pings (1 or more)" >&2; exit 2 ;; esac
       count=$2; shift 2 ;;
@@ -51,7 +53,7 @@ while [ $# -gt 0 ]; do
     --cluster-ip) field=cluster_ip; shift ;;
     -h|--help) sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     -*) echo "unknown option $1" >&2; exit 2 ;;
-    *) pos+=("$1"); vm_select_name "$1"; shift ;;
+    *) unexpected_arg "$1" ;;
   esac
 done
 if [ "$show" != all ] && [ "$count" -gt 1 ]; then

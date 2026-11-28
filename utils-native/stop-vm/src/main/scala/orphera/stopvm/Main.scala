@@ -4,7 +4,7 @@ package orphera.stopvm
 
 import scala.annotation.tailrec
 
-import orphera.nativeutils.{Bash, Out, Selection, Sources, VmCommon}
+import orphera.nativeutils.{Bash, NodesArg, Out, Selection, Sources, VmCommon}
 
 /** utils/stop-vm.sh in Scala, for Scala Native: asks each VM's guest to shut
   * down and waits until libvirt reports it shut off (--force: then power it
@@ -28,7 +28,7 @@ object Main:
     sys.exit(code)
 
   private def usage(src: Sources): Unit =
-    src.usage("stop-vm.sh", "Usage: stop-vm [--wait SECONDS] [--force] [--parallel N] [--node-groups G] [--exclude-nodes V] <vm>...")
+    src.usage("stop-vm.sh", "Usage: stop-vm [--wait SECONDS] [--force] [--parallel N] [--node-groups G] [--exclude-nodes V] --nodes <vm>,...")
 
   @tailrec
   private def parse(args: List[String], o: Opts, src: Sources): Opts =
@@ -42,6 +42,9 @@ object Main:
         o.sel.withOption(opt, rest.headOption) match
           case Some(s) => parse(rest.drop(1), o.copy(sel = s), src)
           case None    => sys.exit(2)
+      case "--nodes" :: rest =>
+        val sel = NodesArg.parse(rest.headOption).foldLeft(o.sel)(_.withName(_))
+        parse(rest.drop(1), o.copy(sel = sel), src)
       case "--wait" :: rest =>
         rest match
           case v :: t => parse(t, o.copy(waitS = v), src)
@@ -51,7 +54,7 @@ object Main:
         usage(src)
         sys.exit(0)
       case opt :: _ if opt.startsWith("-") => die(2, s"unknown option $opt")
-      case n :: t                          => parse(t, o.copy(sel = o.sel.withName(n)), src)
+      case n :: _ => NodesArg.unexpected(n)
 
   def run(args: List[String], src: Sources): Int =
     val o = parse(args, Opts(), src)

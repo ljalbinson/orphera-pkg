@@ -29,20 +29,6 @@ object placement_teardown extends OrpheraApply:
 
   override def nodes: List[String] = List(dbNode, node)
 
-  private val registeredInKeystone =
-    s"[ -x $helper ] && $helper registered >/dev/null 2>&1"
-  private val unregisterScript =
-    s"""$helper unregister || echo "keystone cleanup failed (continuing)""""
-
-  private val unitExists =
-    s"[ -f /etc/systemd/system/$unit.service ] || systemctl is-active --quiet $unit || systemctl is-enabled --quiet $unit"
-  private val stopScript =
-    s"""systemctl disable --now $unit 2>/dev/null || true
-       |rm -f /etc/systemd/system/$unit.service
-       |systemctl daemon-reload
-       |if command -v podman >/dev/null 2>&1; then podman rm -f placement-api 2>/dev/null || true; fi
-       |echo "placement-api container and unit removed"""".stripMargin
-
   private val dirs = List(
     "/etc/kolla/placement",
     "/etc/kolla/placement-api",
@@ -51,36 +37,22 @@ object placement_teardown extends OrpheraApply:
     "/var/log/kolla/placement"
   )
 
-  private val dropDatabaseScript =
-    s"""mariadb -N -e "DROP DATABASE IF EXISTS $dbName; DROP USER IF EXISTS '$dbUser'@'%'; FLUSH PRIVILEGES;""""
-  // True when the database or user exists. When MariaDB cannot be queried this is
-  // also true, so that the drop runs and fails with MariaDB's own message: a
-  // database that is down is not "nothing to remove".
-  private val databaseExists =
-    s"""OUT=$$(mariadb -N -e "SELECT 1 FROM information_schema.SCHEMATA WHERE SCHEMA_NAME='$dbName' UNION SELECT 1 FROM mysql.user WHERE User='$dbUser'" 2>/dev/null) || exit 0; [ -n "$$OUT" ]"""
-
   def describe(target: Node): List[ApplyResource] =
     if target.name == dbNode then
       List(
-        command(
+        absentSqlDatabase(
           s"drop the $dbName database and the $dbUser user on the Galera cluster",
-          dropDatabaseScript,
-          onlyIf = databaseExists
+          List(dbName),
+          dbUser
         )
       )
     else
-      val unregistered = command(
-        "remove Placement from Keystone",
-        unregisterScript,
-        onlyIf = registeredInKeystone,
-        timeout = 120
-      )
-      val stopped = command(
-        "stop and remove the placement-api container and unit",
-        stopScript,
-        onlyIf = unitExists
-      ).after(unregistered)
+      val unregistered =
+        absentKeystoneEntries("remove Placement from Keystone", "placement")
+      val stopped = absentContainerUnits(List(unit -> "placement-api"))
+        .map(_.after(unregistered))
       // Typed removal, no script: each directory with its contents, then the helper.
       val cleaned = (dirs.map(absentDirectory(_, recursive = true)) :+
-        absentFile(helper)).map(_.after(stopped))
-      List(unregistered, stopped) ++ cleaned
+        absentFile(helper) :+ absentFile(keystoneHelperPath("placement")))
+        .map(_.after(stopped*))
+      List(unregistered) ++ stopped ++ cleaned

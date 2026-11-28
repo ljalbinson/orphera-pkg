@@ -37,7 +37,7 @@ object mariadb_galera_rolling_restart extends OrpheraClusterPlaybook:
   // healthCheckScript — deliberately duplicated rather than shared (these
   // per-file .scala manifests each compile and run standalone via
   // `orphera cluster-playbook <file>.scala`, the same reason
-  // installEtcdScript is duplicated between the etcd_*.scala files).
+  // etcdBinariesPlan is duplicated between the etcd_*.scala files).
   private val healthCheckScript =
     """SIZE=$(mariadb -N -e "SHOW STATUS LIKE 'wsrep_cluster_size'" 2>/dev/null | awk '{print $2}')
       |STATUS=$(mariadb -N -e "SHOW STATUS LIKE 'wsrep_cluster_status'" 2>/dev/null | awk '{print $2}')

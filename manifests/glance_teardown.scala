@@ -25,7 +25,7 @@ object glance_teardown extends OrpheraApply:
   private val cephNode = "tst0"
   private val dbName = "glance"
   private val dbUser = "glance"
-  private val cephPool = "images"
+  private val imagesPool = "images"
   private val unit = "orphera-glance-api"
   private val image = "quay.io/openstack.kolla/glance-api:2025.1-ubuntu-noble"
   private val helper = "/usr/local/sbin/orphera-glance-api"
@@ -33,19 +33,6 @@ object glance_teardown extends OrpheraApply:
   override def nodes: List[String] = List(cephNode, dbNode, node)
 
   // ---- tst13 ----
-  private val registeredInKeystone =
-    s"[ -x $helper ] && $helper registered >/dev/null 2>&1"
-  private val unregisterScript =
-    s"""$helper unregister || echo "keystone cleanup failed (continuing)""""
-
-  private val unitExists =
-    s"[ -f /etc/systemd/system/$unit.service ] || systemctl is-active --quiet $unit || systemctl is-enabled --quiet $unit"
-  private val stopScript =
-    s"""systemctl disable --now $unit 2>/dev/null || true
-       |rm -f /etc/systemd/system/$unit.service
-       |systemctl daemon-reload
-       |if command -v podman >/dev/null 2>&1; then podman rm -f glance-api 2>/dev/null || true; fi
-       |echo "glance-api container and unit removed"""".stripMargin
 
   private val dirs = List(
     "/etc/kolla/glance",
@@ -58,62 +45,35 @@ object glance_teardown extends OrpheraApply:
   private val imageExists =
     s"command -v podman >/dev/null 2>&1 && podman image exists $image"
 
-  // ---- tst3 ----
-  private val dropDatabaseScript =
-    s"""mariadb -N -e "DROP DATABASE IF EXISTS $dbName; DROP USER IF EXISTS '$dbUser'@'%'; FLUSH PRIVILEGES;""""
-  // True when the database or user exists. When MariaDB cannot be queried this is
-  // also true, so that the drop runs and fails with MariaDB's own message: a
-  // database that is down is not "nothing to remove".
-  private val databaseExists =
-    s"""OUT=$$(mariadb -N -e "SELECT 1 FROM information_schema.SCHEMATA WHERE SCHEMA_NAME='$dbName' UNION SELECT 1 FROM mysql.user WHERE User='$dbUser'" 2>/dev/null) || exit 0; [ -n "$$OUT" ]"""
-
   // ---- tst0 ----
-  private val cephScript =
-    s"""cephadm shell -- ceph config set mon mon_allow_pool_delete true
-       |cephadm shell -- ceph osd pool delete $cephPool $cephPool --yes-i-really-really-mean-it || true
-       |cephadm shell -- ceph config set mon mon_allow_pool_delete false
-       |cephadm shell -- ceph auth del client.glance || true
-       |echo "pool $cephPool and client.glance removed"""".stripMargin
-  private val cephExists =
-    s"""cephadm shell -- ceph osd pool ls 2>/dev/null | grep -qx $cephPool || cephadm shell -- ceph auth get client.glance >/dev/null 2>&1"""
-
   def describe(target: Node): List[ApplyResource] =
     if target.name == dbNode then
       List(
-        command(
+        absentSqlDatabase(
           s"drop the $dbName database and the $dbUser user on the Galera cluster",
-          dropDatabaseScript,
-          onlyIf = databaseExists
+          List(dbName),
+          dbUser
         )
       )
     else if target.name == cephNode then
-      List(
-        command(
-          s"delete the $cephPool pool and client.glance",
-          cephScript,
-          onlyIf = cephExists,
-          timeout = 180
-        )
-      )
+      val user =
+        absentCephUser("remove the client.glance cephx user", "client.glance")
+      val pool =
+        absentCephPool(s"delete the $imagesPool pool", imagesPool).after(user)
+      List(user, pool)
     else
-      val unregistered = command(
-        "remove Glance from Keystone",
-        unregisterScript,
-        onlyIf = registeredInKeystone,
-        timeout = 120
-      )
-      val stopped = command(
-        "stop and remove the glance-api container and unit",
-        stopScript,
-        onlyIf = unitExists
-      ).after(unregistered)
+      val unregistered =
+        absentKeystoneEntries("remove Glance from Keystone", "glance")
+      val stopped = absentContainerUnits(List(unit -> "glance-api"))
+        .map(_.after(unregistered))
       // Typed removal, no script: each directory with its contents, then the helper.
       val cleaned = (dirs.map(absentDirectory(_, recursive = true)) :+
-        absentFile(helper)).map(_.after(stopped))
+        absentFile(helper) :+ absentFile(keystoneHelperPath("glance")))
+        .map(_.after(stopped*))
       val removedImage = command(
         "remove the glance-api image",
         s"podman rmi -f $image",
         onlyIf = imageExists,
         timeout = 120
-      ).after(stopped)
-      List(unregistered, stopped) ++ cleaned ++ List(removedImage)
+      ).after(stopped*)
+      List(unregistered) ++ stopped ++ cleaned ++ List(removedImage)

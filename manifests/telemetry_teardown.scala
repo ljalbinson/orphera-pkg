@@ -33,19 +33,6 @@ object telemetry_teardown extends OrpheraApply:
     List(dbNode, rabbitNode, promNode) ++ computeNodes :+ node
 
   // ---- the containers (tst24, and the compute nodes) ----
-  private def anyUnit(units: List[String]): String =
-    s"""for u in ${units.mkString(
-        " "
-      )}; do if [ -f /etc/systemd/system/orphera-$$u.service ] || systemctl is-active --quiet orphera-$$u || systemctl is-enabled --quiet orphera-$$u; then exit 0; fi; done; exit 1"""
-  private def stopScript(units: List[String]): String =
-    s"""for u in ${units.mkString(" ")}; do
-       |  systemctl disable --now orphera-$$u 2>/dev/null || true
-       |  rm -f /etc/systemd/system/orphera-$$u.service
-       |  if command -v podman >/dev/null 2>&1; then podman rm -f $$u 2>/dev/null || true; fi
-       |done
-       |systemctl daemon-reload
-       |echo "telemetry containers and units removed"""".stripMargin
-
   // /etc/kolla/telemetry is where the cluster playbook kept its staging copies; it is listed so that a node set
   // up by the playbook is cleaned too.
   private def dirs(units: List[String]): List[String] =
@@ -62,11 +49,6 @@ object telemetry_teardown extends OrpheraApply:
     List("aodh-api", "aodh-evaluator", "aodh-notifier", "ceilometer-central")
   private val computeUnits = List("ceilometer-compute")
 
-  // The helper removes the Keystone entries; it is there until the last step removes it.
-  private val hasHelper = s"[ -x $helper ]"
-  private val unregisterScript =
-    s"""$helper unregister || echo "keystone cleanup failed (continuing)""""
-
   // ---- tst7 ----
   private val scrapeFile = "/etc/prometheus/scrape.d/openstack-telemetry.yml"
   private val prometheusScript =
@@ -77,43 +59,21 @@ object telemetry_teardown extends OrpheraApply:
        |fi
        |echo "ceilometer scrape job removed from prometheus"""".stripMargin
 
-  // ---- tst3 ----
-  private val dropDatabaseScript =
-    s"""mariadb -N -e "DROP DATABASE IF EXISTS $dbName; DROP USER IF EXISTS '$dbUser'@'%'; FLUSH PRIVILEGES;""""
-  // True when the database or the user exists. When MariaDB cannot be queried this is also true, so that the
-  // drop runs and fails with MariaDB's own message: a database that is down is not "nothing to remove".
-  private val databaseExists =
-    s"""OUT=$$(mariadb -N -e "SELECT 1 FROM information_schema.SCHEMATA WHERE SCHEMA_NAME='$dbName' UNION SELECT 1 FROM mysql.user WHERE User='$dbUser'" 2>/dev/null) || exit 0; [ -n "$$OUT" ]"""
-
-  // ---- tst10 ----
-  private val rabbitUp =
-    "podman ps -q --filter 'name=^rabbitmq$' 2>/dev/null | grep -q ."
-  // True when a vhost or user exists in a running broker; with no running broker there is nothing to remove.
-  private val rabbitHasTelemetry =
-    s"""$rabbitUp && { podman exec rabbitmq rabbitmqctl list_vhosts -q | grep -qxE 'aodh|ceilometer' || podman exec rabbitmq rabbitmqctl list_users -q | awk '{print $$1}' | grep -qxE 'aodh|ceilometer'; }"""
-  private val rabbitScript =
-    """for n in aodh ceilometer; do
-      |  podman exec rabbitmq rabbitmqctl delete_vhost $n || true
-      |  podman exec rabbitmq rabbitmqctl delete_user $n || true
-      |done
-      |echo "rabbitmq vhosts and users aodh and ceilometer removed"""".stripMargin
-
   def describe(target: Node): List[ApplyResource] =
     if target.name == dbNode then
       List(
-        command(
+        absentSqlDatabase(
           s"drop the $dbName database and the $dbUser user on the Galera cluster",
-          dropDatabaseScript,
-          onlyIf = databaseExists
+          List(dbName),
+          dbUser
         )
       )
     else if target.name == rabbitNode then
-      List(
-        command(
-          "remove the aodh and ceilometer vhosts and users from RabbitMQ",
-          rabbitScript,
-          onlyIf = rabbitHasTelemetry,
-          timeout = 60
+      List("aodh", "ceilometer").map(name =>
+        absentRabbitAccount(
+          s"remove the $name vhost and user from RabbitMQ",
+          name,
+          name
         )
       )
     else if target.name == promNode then
@@ -126,33 +86,28 @@ object telemetry_teardown extends OrpheraApply:
         )
       )
     else if computeNodes.contains(target.name) then
-      val stopped = command(
-        "stop and remove the ceilometer-compute container and unit",
-        stopScript(computeUnits),
-        onlyIf = anyUnit(computeUnits),
-        timeout = 240
-      )
+      val stopped =
+        absentContainerUnits(computeUnits.map(u => s"orphera-$u" -> u))
       // Typed removal, no script.
       val cleaned =
         dirs(computeUnits).map(
-          absentDirectory(_, recursive = true).after(stopped)
+          absentDirectory(_, recursive = true).after(stopped*)
         )
-      List(stopped) ++ cleaned
+      stopped ++ cleaned
     else
-      val unregistered = command(
-        "remove Aodh, Ceilometer and the Prometheus entry from Keystone",
-        unregisterScript,
-        onlyIf = hasHelper,
-        timeout = 120
+      val unregisteredAodh = absentKeystoneEntries(
+        "remove Aodh and the Prometheus entry from Keystone",
+        "aodh"
       )
-      val stopped = command(
-        "stop and remove the telemetry containers and units",
-        stopScript(nodeUnits),
-        onlyIf = anyUnit(nodeUnits),
-        timeout = 240
-      ).after(unregistered)
+      val unregisteredCeilometer =
+        absentKeystoneEntries("remove Ceilometer from Keystone", "ceilometer")
+      val unregistered = List(unregisteredAodh, unregisteredCeilometer)
+      val stopped =
+        absentContainerUnits(nodeUnits.map(u => s"orphera-$u" -> u))
+          .map(_.after(unregistered*))
       // Typed removal, no script: each directory with its contents, then the helper.
       val cleaned =
         (dirs(nodeUnits).map(absentDirectory(_, recursive = true)) :+
-          absentFile(helper)).map(_.after(stopped))
-      List(unregistered, stopped) ++ cleaned
+          absentFile(helper) :+ absentFile(keystoneHelperPath("aodh")) :+
+          absentFile(keystoneHelperPath("ceilometer"))).map(_.after(stopped*))
+      unregistered ++ stopped ++ cleaned

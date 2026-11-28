@@ -4,7 +4,7 @@ package orphera.rebootvm
 
 import scala.annotation.tailrec
 
-import orphera.nativeutils.{Bash, Out, Selection, Sources, VmCommon}
+import orphera.nativeutils.{Bash, NodesArg, Out, Selection, Sources, VmCommon}
 
 /** utils/reboot-vm.sh in Scala, for Scala Native: reboots VMs from the
   * hypervisor (--soft: virsh reboot; --hard: shut down, wait, start). Same
@@ -29,7 +29,7 @@ object Main:
     sys.exit(code)
 
   private def usage(src: Sources): Unit =
-    src.usage("reboot-vm.sh", "Usage: reboot-vm [--soft | --hard] [--wait SECONDS] [--force] [--parallel N] [--node-groups G] [--exclude-nodes V] <vm>...")
+    src.usage("reboot-vm.sh", "Usage: reboot-vm [--soft | --hard] [--wait SECONDS] [--force] [--parallel N] [--node-groups G] [--exclude-nodes V] --nodes <vm>,...")
 
   @tailrec
   private def parse(args: List[String], o: Opts, src: Sources): Opts =
@@ -43,6 +43,9 @@ object Main:
         o.sel.withOption(opt, rest.headOption) match
           case Some(s) => parse(rest.drop(1), o.copy(sel = s), src)
           case None    => sys.exit(2)
+      case "--nodes" :: rest =>
+        val sel = NodesArg.parse(rest.headOption).foldLeft(o.sel)(_.withName(_))
+        parse(rest.drop(1), o.copy(sel = sel), src)
       case "--soft" :: t  => parse(t, o.copy(hard = false), src)
       case "--hard" :: t  => parse(t, o.copy(hard = true), src)
       case "--force" :: t => parse(t, o.copy(force = true), src)
@@ -54,7 +57,7 @@ object Main:
         usage(src)
         sys.exit(0)
       case opt :: _ if opt.startsWith("-") => die(2, s"unknown option $opt")
-      case n :: t                          => parse(t, o.copy(sel = o.sel.withName(n)), src)
+      case n :: _ => NodesArg.unexpected(n)
 
   def run(args: List[String], src: Sources): Int =
     val o = parse(args, Opts(), src)

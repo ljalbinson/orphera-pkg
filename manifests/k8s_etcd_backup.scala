@@ -19,8 +19,9 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 //      newest 168 of each kind per node are kept there, a week of hourly runs).
 //
 // The upload uses a native RGW user `etcd-backup` with its own S3 keys, made by
-// `radosgw-admin` on tst0 and copied to the control-plane nodes as a root-only file
-// (/etc/etcd-backup/s3.cred); it does not depend on Keystone, so the backups can be
+// `radosgw-admin` on tst0 and written on the control-plane nodes as a root-only file
+// (/etc/etcd-backup/s3.cred); the keys are the secrets `k8s/etcd-s3-access` and
+// `k8s/etcd-s3-secret`; it does not depend on Keystone, so the backups can be
 // fetched when OpenStack is down. The object gateway speaks plain HTTP in this lab,
 // so the PKI archives cross the network unencrypted: acceptable here, not elsewhere.
 //
@@ -47,23 +48,45 @@ object k8s_etcd_backup extends OrpheraClusterPlaybook:
   private val cpNodes = List("tst30", "tst31", "tst32")
   private val rgw = s"{{nodes.$cephNode.cluster_ip}}:8080"
   private val bucket = "etcd-backups"
-  private val rgwUser = "etcd-backup"
-  private val credSource = s"/etc/ceph/$rgwUser.s3"
+  private val rgwUid = "etcd-backup"
   private val credDest = "/etc/etcd-backup/s3.cred"
   private val helper = "/usr/local/sbin/orphera-etcd-backup"
 
-  private val rgwUserScript =
-    s"""set -e
-       |if ! cephadm shell -- radosgw-admin user info --uid=$rgwUser >/dev/null 2>&1; then
-       |  cephadm shell -- radosgw-admin user create --uid=$rgwUser --display-name="etcd backups" >/dev/null
-       |  echo "RGW user $rgwUser created"
-       |fi
-       |JSON=$$(cephadm shell -- radosgw-admin user info --uid=$rgwUser 2>/dev/null)
-       |umask 077
-       |printf '%s' "$$JSON" | python3 -c 'import sys,json; k=json.load(sys.stdin)["keys"][0]; print(k["access_key"]); print(k["secret_key"])' > $credSource
-       |[ "$$(wc -l < $credSource)" -eq 2 ] || { echo "could not read the S3 keys of $rgwUser" >&2; exit 1; }
-       |echo "S3 keys of $rgwUser written to $credSource"
-       |""".stripMargin
+  // The S3 keys are fixed ones from the secret store (made at random on first use), so the
+  // gateway user and the credential file on each node are descriptions of the same two values.
+  private val s3Access = Secrets.secret("k8s/etcd-s3-access").reveal
+  private val s3Secret = Secrets.secret("k8s/etcd-s3-secret")
+
+  private val rgwUserPlan: ApplyPlan =
+    import Resources.*
+    ApplyPlan.orFail(
+      "etcd-backup-rgw-user",
+      List(
+        rgwUser(
+          s"the RGW user $rgwUid and its S3 keys",
+          rgwUid,
+          "etcd backups",
+          s3Access,
+          s3Secret
+        )
+      )
+    )
+
+  // Two lines, the access key and the secret key, as the helper reads them.
+  private val credentialsPlan: ApplyPlan =
+    import Resources.*
+    ApplyPlan.orFail(
+      "etcd-backup-credentials",
+      List(
+        secretFile(
+          credDest,
+          Secret(s"$s3Access\n${s3Secret.reveal}\n"),
+          mode = "0600",
+          owner = "root",
+          group = "root"
+        )
+      )
+    )
 
   private val helperPython =
     """#!/usr/bin/python3
@@ -269,44 +292,87 @@ else:
       .replace("@@BUCKET@@", bucket)
       .replace("@@CRED@@", credDest)
 
-  private val prepareScript =
-    """mkdir -p /etc/etcd-backup /var/backups/etcd
-      |chmod 700 /etc/etcd-backup /var/backups/etcd
-      |echo "directories ready"""".stripMargin
+  // The two directories only root may enter: the S3 keys, and the snapshots
+  // and PKI archives (which hold the cluster's keys).
+  private val directoriesPlan: ApplyPlan =
+    import Resources.*
+    ApplyPlan.orFail(
+      "etcd-backup-directories",
+      List(
+        directory(
+          "/etc/etcd-backup",
+          mode = "0700",
+          owner = "root",
+          group = "root"
+        ),
+        directory(
+          "/var/backups/etcd",
+          mode = "0700",
+          owner = "root",
+          group = "root"
+        )
+      )
+    )
 
-  private val installScript =
-    s"""set -e
-       |[ -s $credDest ] || { echo "$credDest is missing" >&2; exit 1; }
-       |chmod 600 $credDest
-       |cat > $helper <<'PYEOF'
-       |$helperText
-       |PYEOF
-       |chmod 700 $helper
-       |python3 -m py_compile $helper && rm -rf /usr/local/sbin/__pycache__
-       |case "$$(hostname -s)" in tst30) M=5;; tst31) M=25;; *) M=45;; esac
-       |cat > /etc/systemd/system/orphera-etcd-backup.service <<'EOF'
-       |[Unit]
-       |Description=etcd snapshot and PKI backup (Orphera)
-       |
-       |[Service]
-       |Type=oneshot
-       |ExecStart=$helper backup
-       |EOF
-       |cat > /etc/systemd/system/orphera-etcd-backup.timer <<EOF
-       |[Unit]
-       |Description=hourly etcd backup (Orphera)
-       |
-       |[Timer]
-       |OnCalendar=*-*-* *:$$M:00
-       |Persistent=true
-       |
-       |[Install]
-       |WantedBy=timers.target
-       |EOF
-       |systemctl daemon-reload
-       |systemctl enable --now orphera-etcd-backup.timer
-       |systemctl list-timers orphera-etcd-backup.timer --no-pager
-       |""".stripMargin
+  // The hour's minute is the node's own, so the three do not run together.
+  private def timerMinute(host: String): Int =
+    host match
+      case "tst30" => 5
+      case "tst31" => 25
+      case _       => 45
+
+  // The helper (a template: it carries the object gateway's address, rendered
+  // on the node), the oneshot service, the hourly timer, and the timer enabled
+  // and running, restarted when its file changed (`service` reloads systemd
+  // itself).
+  private def backupPlan(host: String): ApplyPlan =
+    import Resources.*
+    val timer = service("orphera-etcd-backup.timer")
+    val script = fileTemplate(
+      helper,
+      helperText + "\n",
+      mode = "0700",
+      owner = "root",
+      group = "root"
+    )
+    val serviceFile = file(
+      "/etc/systemd/system/orphera-etcd-backup.service",
+      s"""[Unit]
+         |Description=etcd snapshot and PKI backup (Orphera)
+         |
+         |[Service]
+         |Type=oneshot
+         |ExecStart=$helper backup
+         |""".stripMargin,
+      mode = "0644",
+      owner = "root",
+      group = "root"
+    )
+    val timerFile = file(
+      "/etc/systemd/system/orphera-etcd-backup.timer",
+      s"""[Unit]
+         |Description=hourly etcd backup (Orphera)
+         |
+         |[Timer]
+         |OnCalendar=*-*-* *:${timerMinute(host)}:00
+         |Persistent=true
+         |
+         |[Install]
+         |WantedBy=timers.target
+         |""".stripMargin,
+      mode = "0644",
+      owner = "root",
+      group = "root"
+    ).notifies(timer)
+    ApplyPlan.orFail(
+      s"etcd-backup-$host",
+      List(
+        script,
+        serviceFile,
+        timerFile,
+        timer.after(script, serviceFile, timerFile)
+      )
+    )
 
   private val firstRunScript = s"$helper backup"
 
@@ -325,24 +391,33 @@ else:
   val playbook: ClusterPlaybook =
     clusterPlaybook("k8s-etcd-backup")(
       stage("rgw-user", cephNode)
-        .task("create the RGW user and read its S3 keys")(
-          Task.RunCommand(List("sh", "-c", rgwUserScript), timeoutSeconds = 180)
+        .task("create the RGW user and its S3 keys")(
+          Task.Apply(rgwUserPlan)
         )
         .build,
       stage("prepare-nodes", cpNodes*)
         .task("create the backup directories")(
-          Task.RunCommand(List("sh", "-c", prepareScript))
+          Task.Apply(directoriesPlan)
         )
         .build,
       stage("send-credentials", cpNodes*)
-        .task("copy the S3 keys from tst0")(
-          Task
-            .DistributeFile(cephNode, credSource, credDest, "root", "root", 384)
+        .task("write the S3 keys")(
+          Task.Apply(credentialsPlan)
         )
         .build,
-      stage("install-backup", cpNodes*)
+      stage("install-backup-tst30", "tst30")
         .task("install the helper and the hourly timer")(
-          Task.RunCommand(List("sh", "-c", installScript), timeoutSeconds = 120)
+          Task.Apply(backupPlan("tst30"))
+        )
+        .build,
+      stage("install-backup-tst31", "tst31")
+        .task("install the helper and the hourly timer")(
+          Task.Apply(backupPlan("tst31"))
+        )
+        .build,
+      stage("install-backup-tst32", "tst32")
+        .task("install the helper and the hourly timer")(
+          Task.Apply(backupPlan("tst32"))
         )
         .build,
       stage("first-backup", cpNodes*)

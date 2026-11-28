@@ -75,58 +75,6 @@ object telemetry_compute extends OrpheraApply:
        |""".stripMargin
 
   private val image = computeContainer.image.ref
-  private val pullScript =
-    s"""${Pull.shellFunction(
-        "the Image(...) values in telemetry_compute.scala"
-      )}
-       |pull_retry $image || exit 1
-       |echo "image ready"""".stripMargin
-  private val imagePresent = s"podman image exists $image"
-
-  // Keystone's CA: the last certificate it presents (trust on first use), which must be self-signed. `chainTo
-  // DIR` leaves DIR/c1.pem ... DIR/cN.pem, each holding the certificate only: the text s_client prints after
-  // the last one differs on every handshake, and would make the comparison with the installed copy fail.
-  private val chainTo =
-    s"""chainTo() { openssl s_client -connect $ksFqdn:5000 -servername $ksFqdn -showcerts </dev/null 2>/dev/null | awk -v d="$$1" '/-----BEGIN CERTIFICATE-----/{n++; p=1} p{print > (d "/c" n ".pem")} /-----END CERTIFICATE-----/{p=0}'; }"""
-
-  private val trustTarget =
-    """if command -v update-ca-certificates >/dev/null 2>&1; then t=/usr/local/share/ca-certificates/orphera-test-ca.crt; else t=/etc/pki/ca-trust/source/anchors/orphera-test-ca.crt; fi"""
-
-  // Current when the installed CA is the one Keystone presents now, and is in the system trust store.
-  private val caCurrent =
-    s"""$chainTo
-       |D=$$(mktemp -d)
-       |chainTo $$D
-       |N=$$(ls $$D/c*.pem 2>/dev/null | wc -l)
-       |R=1
-       |if [ "$$N" -ge 2 ]; then
-       |  $trustTarget
-       |  cmp -s $$D/c$$N.pem $caCert && cmp -s $caCert "$$t" && R=0
-       |fi
-       |rm -rf $$D
-       |exit $$R""".stripMargin
-
-  private val caScript =
-    s"""set -e
-       |$chainTo
-       |mkdir -p $caDir
-       |D=$$(mktemp -d)
-       |trap 'rm -rf $$D' EXIT
-       |chainTo $$D
-       |COUNT=$$(ls $$D/c*.pem 2>/dev/null | wc -l)
-       |if [ "$$COUNT" -lt 2 ]; then
-       |  echo "keystone at $ksFqdn:5000 presented $$COUNT certificate(s); expected leaf + CA - apply keystone_single_node.scala (it must serve server-chain.crt)" >&2
-       |  exit 1
-       |fi
-       |cp $$D/c$$COUNT.pem $caCert
-       |openssl verify -CAfile $caCert $$D/c1.pem
-       |SUBJ=$$(openssl x509 -in $caCert -noout -subject | sed 's/^subject=//')
-       |ISS=$$(openssl x509 -in $caCert -noout -issuer | sed 's/^issuer=//')
-       |if [ "$$SUBJ" != "$$ISS" ]; then echo "last certificate is not self-signed: $$SUBJ / $$ISS" >&2; exit 1; fi
-       |$trustTarget
-       |cp $caCert "$$t"
-       |if command -v update-ca-certificates >/dev/null 2>&1; then update-ca-certificates; else update-ca-trust; fi
-       |echo "Keystone CA installed: $$SUBJ"""".stripMargin
 
   private def credentials(user: String, password: String, ca: String): String =
     s"""auth_type = password
@@ -188,17 +136,6 @@ object telemetry_compute extends OrpheraApply:
     """{"command": "ceilometer-polling --polling-namespaces compute --config-file /etc/ceilometer/ceilometer.conf", "config_files": [{"source": "/var/lib/kolla/config_files/ceilometer.conf", "dest": "/etc/ceilometer/ceilometer.conf", "owner": "ceilometer", "perm": "0600"}, {"source": "/var/lib/kolla/config_files/polling.yaml", "dest": "/etc/ceilometer/polling.yaml", "owner": "ceilometer", "perm": "0600"}, {"source": "/var/lib/kolla/config_files/ca.crt", "dest": "/etc/ceilometer/ssl/ca.crt", "owner": "ceilometer", "perm": "0644"}], "permissions": [{"path": "/var/log/kolla/ceilometer", "owner": "ceilometer:kolla", "recurse": true}, {"path": "/var/lib/ceilometer", "owner": "ceilometer:ceilometer", "recurse": true}]}
       |""".stripMargin
 
-  // The polling agent's exporter answers once the first poll cycle has started.
-  private val healthy =
-    s"curl -sf http://localhost:$exporterPort/metrics >/dev/null"
-  private val waitHealthy =
-    s"""for i in $$(seq 1 36); do
-       |  $healthy && exit 0
-       |  sleep 5
-       |done
-       |echo "the exporter on $exporterPort does not answer - see 'journalctl -xeu orphera-ceilometer-compute' and $ceilometerLogDir" >&2
-       |exit 1""".stripMargin
-
   def describe(target: Node): List[ApplyResource] =
     val tools = hostPackages.map(p => pkg(p, updateCache = true))
     val podman = tools(0)
@@ -208,19 +145,20 @@ object telemetry_compute extends OrpheraApply:
       registryMirror,
       mode = "0644"
     ).after(mirrorDir)
-    val pulled = command(
+    val pulled = pullImages(
       "pull the Ceilometer compute image",
-      pullScript,
-      unless = imagePresent,
+      List(image),
+      hint = "the Image(...) values in telemetry_compute.scala",
       timeout = 2400
     ).after(podman, mirror)
 
     val caDirectory = directory(caDir, mode = "0755").after(podman)
-    val ca = command(
+    val ca = serverCa(
       "fetch Keystone's CA from its TLS handshake",
-      caScript,
-      unless = caCurrent,
-      timeout = 60
+      ksFqdn,
+      5000,
+      caCert,
+      hint = "apply keystone_single_node.scala (it must serve server-chain.crt)"
     ).after(caDirectory, tools(1))
 
     val unit = service(computeContainer.unitName)
@@ -247,11 +185,9 @@ object telemetry_compute extends OrpheraApply:
       owner = "root",
       group = "root"
     ).after(dirRes).notifies(unit)
-    val kollaCa = command(
-      "copy Keystone's CA to the ceilometer-compute config",
-      s"cp $caCert $dir/ca.crt",
-      unless = s"cmp -s $caCert $dir/ca.crt"
-    ).after(ca, dirRes).notifies(unit)
+    val kollaCa = fileCopy(s"$dir/ca.crt", caCert, mode = "0644")
+      .after(ca, dirRes)
+      .notifies(unit)
     val json = file(
       s"$dir/config.json",
       configJson,
@@ -278,11 +214,13 @@ object telemetry_compute extends OrpheraApply:
       json,
       unitFile
     )
-    val answering = command(
+    // The polling agent's exporter answers once the first poll cycle has started.
+    val answering = waitForHttp(
       "the exporter answers on its port",
-      waitHealthy,
-      unless = healthy,
-      timeout = 240
+      s"http://localhost:$exporterPort/metrics",
+      timeout = 180,
+      hint =
+        s"see 'journalctl -xeu orphera-ceilometer-compute' and $ceilometerLogDir"
     ).after(running)
 
     tools ++ List(

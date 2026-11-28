@@ -66,23 +66,6 @@ object kolla_cache extends OrpheraApply:
 
   private val hostPackages = List("podman", "curl")
 
-  private val pullRegistryScript =
-    s"""${Pull.shellFunction(
-        "the registry image name in kolla_cache.scala; the pull is from Docker Hub"
-      )}
-       |pull_retry $registryImage || exit 1
-       |echo "registry image ready"""".stripMargin
-
-  private val answers =
-    s"""[ "$$(curl -s -o /dev/null -w '%{http_code}' http://localhost:$port/v2/)" = "200" ]"""
-  private val waitScript =
-    s"""for i in $$(seq 1 30); do
-       |  if $answers; then echo "the registry answers on $port"; exit 0; fi
-       |  sleep 2
-       |done
-       |echo "the registry does not answer on $port" >&2
-       |exit 1""".stripMargin
-
   // Pulling through localhost:<port> makes the registry fetch from quay.io and
   // keep the layers; the local podman copy is then deleted so the VM's own
   // image store does not hold a second copy. One script for the whole list.
@@ -106,10 +89,11 @@ object kolla_cache extends OrpheraApply:
   def describe(target: Node): List[ApplyResource] =
     val tools = hostPackages.map(p => pkg(p, updateCache = true))
     val podman = tools.head
-    val pulled = command(
+    val pulled = pullImages(
       "pull the registry image",
-      pullRegistryScript,
-      unless = s"podman image exists $registryImage",
+      List(registryImage),
+      hint =
+        "the registry image name in kolla_cache.scala; the pull is from Docker Hub",
       timeout = 600
     ).after(podman)
     val data = directory(dataDir)
@@ -122,11 +106,12 @@ object kolla_cache extends OrpheraApply:
       group = "root"
     ).notifies(unit)
     val running = unit.after(pulled, data, unitFile)
-    val answering = command(
+    val answering = waitForHttp(
       "the registry answers",
-      waitScript,
-      unless = answers,
-      timeout = 90
+      s"http://localhost:$port/v2/",
+      timeout = 60,
+      interval = 2,
+      hint = s"see 'journalctl -xeu ${cacheContainer.unitName}'"
     ).after(running, tools.last)
     val warmed = command(
       "pre-pull the Kolla images through the cache",

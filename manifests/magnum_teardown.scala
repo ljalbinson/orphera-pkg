@@ -4,9 +4,9 @@ import orphera.orchestrator.*
 
 // Undoes magnum_database.scala, magnum_rabbitmq.scala and magnum_single_node.scala, as a declarative description
 // (OrpheraApply, docs/APPLY-DESIGN.md): on tst23, through the helper if it is still there, deletes every Magnum
-// cluster (and waits for them to go), the cluster template, the flavor orphera.k8s, the key pair, the Kubernetes
-// node image, and removes Magnum from Keystone (service type container-infra, its endpoints, user magnum, domain
-// magnum); then the two containers, their units, the config, state (with the downloaded image file and the
+// cluster (and waits for them to go), the cluster template and the Kubernetes node image through it, the flavor
+// orphera.k8s and the key pair through their own helpers, then removes Magnum from Keystone (service type
+// container-infra, its endpoints, user magnum, domain magnum); then the two containers, their units, the config, state (with the downloaded image file and the
 // installed driver) and the helper. On tst10 it removes the `magnum` vhost and user from RabbitMQ (the broker
 // itself and the other services' use of it are untouched); on tst3 it drops the magnum database and user.
 // The management cluster (capi_management_cluster.scala) is left alone; run capi_management_cluster_teardown
@@ -30,29 +30,19 @@ object magnum_teardown extends OrpheraApply:
   private val rabbitVhost = "magnum"
   private val rabbitUser = "magnum"
   private val helper = "/usr/local/sbin/orphera-magnum-api"
+  private val flavorId = "orphera-k8s"
+  private val keypair = "orphera-magnum"
   private val units = List("magnum-api", "magnum-conductor")
 
   override def nodes: List[String] = List(dbNode, rabbitNode, node)
 
   // ---- tst23 ----
-  // The helper deletes the clusters, template, flavor, key pair, image and the Keystone entries; it is there
-  // until the last step removes it.
+  // The helper deletes the clusters, template and image; it is there until the last step removes it. The flavor
+  // and the key pair have helpers of their own (openstackFlavor, openstackKeypair). The Keystone entries are
+  // removed by their own helper after them.
   private val hasHelper = s"[ -x $helper ]"
   private val openstackScript =
     s"""$helper teardown || echo "openstack cleanup failed (continuing)""""
-
-  private val unitList = units.mkString(" ")
-  // True when ANY of the units has a unit file, or is active or enabled.
-  private val anyUnit =
-    s"""for u in $unitList; do if [ -f /etc/systemd/system/orphera-$$u.service ] || systemctl is-active --quiet orphera-$$u || systemctl is-enabled --quiet orphera-$$u; then exit 0; fi; done; exit 1"""
-  private val stopScript =
-    s"""for u in $unitList; do
-       |  systemctl disable --now orphera-$$u 2>/dev/null || true
-       |  rm -f /etc/systemd/system/orphera-$$u.service
-       |  if command -v podman >/dev/null 2>&1; then podman rm -f $$u 2>/dev/null || true; fi
-       |done
-       |systemctl daemon-reload
-       |echo "magnum containers and units removed"""".stripMargin
 
   // /etc/kolla/magnum is where the cluster playbook kept magnum.conf and the kubeconfig; it is listed so that a
   // node set up by the playbook is cleaned too.
@@ -65,57 +55,55 @@ object magnum_teardown extends OrpheraApply:
     "/var/log/kolla/magnum"
   )
 
-  // ---- tst10 ----
-  private val rabbitUp =
-    "podman ps -q --filter 'name=^rabbitmq$' 2>/dev/null | grep -q ."
-  // True when the vhost or user exists in a running broker; with no running broker there is nothing to remove.
-  private val rabbitHasMagnum =
-    s"""$rabbitUp && { podman exec rabbitmq rabbitmqctl list_vhosts -q | grep -qx '$rabbitVhost' || podman exec rabbitmq rabbitmqctl list_users -q | awk '{print $$1}' | grep -qx '$rabbitUser'; }"""
-  private val rabbitScript =
-    s"""podman exec rabbitmq rabbitmqctl delete_vhost '$rabbitVhost' || true
-       |podman exec rabbitmq rabbitmqctl delete_user '$rabbitUser' || true
-       |echo "rabbitmq vhost $rabbitVhost and user $rabbitUser removed"""".stripMargin
-
-  // ---- tst3 ----
-  private val dropDatabaseScript =
-    s"""mariadb -N -e "DROP DATABASE IF EXISTS $dbName; DROP USER IF EXISTS '$dbUser'@'%'; FLUSH PRIVILEGES;""""
-  // True when the database or the user exists. When MariaDB cannot be queried this is also true, so that the
-  // drop runs and fails with MariaDB's own message: a database that is down is not "nothing to remove".
-  private val databaseExists =
-    s"""OUT=$$(mariadb -N -e "SELECT 1 FROM information_schema.SCHEMATA WHERE SCHEMA_NAME='$dbName' UNION SELECT 1 FROM mysql.user WHERE User='$dbUser'" 2>/dev/null) || exit 0; [ -n "$$OUT" ]"""
-
   def describe(target: Node): List[ApplyResource] =
     if target.name == dbNode then
       List(
-        command(
+        absentSqlDatabase(
           s"drop the $dbName database and the $dbUser user on the Galera cluster",
-          dropDatabaseScript,
-          onlyIf = databaseExists
+          List(dbName),
+          dbUser
         )
       )
     else if target.name == rabbitNode then
       List(
-        command(
+        absentRabbitAccount(
           "remove the magnum vhost and user from RabbitMQ",
-          rabbitScript,
-          onlyIf = rabbitHasMagnum,
-          timeout = 60
+          rabbitVhost,
+          rabbitUser
         )
       )
     else
       val openstack = command(
-        "delete the clusters, template, flavor, key pair, image and the Keystone entries",
+        "delete the clusters, template and image",
         openstackScript,
         onlyIf = hasHelper,
         timeout = 3600
       )
-      val stopped = command(
-        "stop and remove the magnum containers and units",
-        stopScript,
-        onlyIf = anyUnit,
-        timeout = 240
-      ).after(openstack)
+      val flavorGone =
+        absentOpenstackFlavor("delete the Kubernetes node flavor", flavorId)
+          .after(openstack)
+      val keypairGone =
+        absentOpenstackKeypair("delete the Kubernetes node key pair", keypair)
+          .after(openstack)
+      val unregistered =
+        absentKeystoneEntries("remove Magnum from Keystone", "magnum").after(
+          openstack,
+          flavorGone,
+          keypairGone
+        )
+      val stopped = absentContainerUnits(units.map(u => s"orphera-$u" -> u))
+        .map(_.after(unregistered))
       // Typed removal, no script: each directory with its contents, then the helper.
-      val cleaned = (dirs.map(absentDirectory(_, recursive = true)) :+
-        absentFile(helper)).map(_.after(stopped))
-      List(openstack, stopped) ++ cleaned
+      val cleaned = (dirs.map(absentDirectory(_, recursive = true)) ++
+        List(
+          absentFile(helper),
+          absentFile(keystoneHelperPath("magnum")),
+          absentFile(openstackFlavorHelperPath(flavorId)),
+          absentFile(openstackKeypairHelperPath(keypair))
+        )).map(_.after(stopped*))
+      List(
+        openstack,
+        flavorGone,
+        keypairGone,
+        unregistered
+      ) ++ stopped ++ cleaned

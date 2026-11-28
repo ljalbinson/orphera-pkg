@@ -291,11 +291,20 @@ object kvm_native_vm_provision extends OrpheraClusterPlaybook:
        |rm -rf '$workingDir'
        |echo "'$vmName' destroyed/undefined if it existed; '$workingDir' removed if present"""".stripMargin
 
-  private val createFilesystemScript =
-    s"""mkdir -p '$workingDir'
-       |chown localadmin:localadmin '$workingDir'
-       |chmod 0755 '$workingDir'
-       |echo "directory '$workingDir' ready"""".stripMargin
+  // The VM's directory (made by the destroy stage's `rm -rf` and this one on every run), owned by localadmin.
+  private val vmDirectoryPlan: ApplyPlan =
+    import Resources.directory
+    ApplyPlan.orFail(
+      "vm-directory",
+      List(
+        directory(
+          workingDir,
+          mode = "0755",
+          owner = "localadmin",
+          group = "localadmin"
+        )
+      )
+    )
 
   // `cp --no-clobber` mirrors the original's `copy: ... force: false` —
   // never overwrite an image that's already there from a previous
@@ -421,10 +430,7 @@ object kvm_native_vm_provision extends OrpheraClusterPlaybook:
 
       stage("create-vm-directory", hypervisorNode)
         .task(s"create $workingDir and set ownership")(
-          Task.RunCommand(
-            List("sh", "-c", createFilesystemScript),
-            timeoutSeconds = 30
-          )
+          Task.Apply(vmDirectoryPlan)
         )
         .build,
 

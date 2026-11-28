@@ -62,19 +62,14 @@ object observability_stack extends OrpheraClusterPlaybook:
     allNodes.map(n => s"'{{nodes.$n.cluster_ip}}:9100'").mkString(", ")
 
   // Debian/Ubuntu's `prometheus-node-exporter` package auto-starts as a
-  // side effect of its own postinst (the same class of gotcha
-  // mariadb_galera_cluster.scala's and wordpress_site.scala's header
-  // comments both already document for their own packages) — applying
-  // that lesson proactively here rather than waiting to hit it again:
-  // explicit `restart` + an active-state check, not just `enable --now`.
-  private val startNodeExporterScript =
-    """systemctl enable --now prometheus-node-exporter
-      |systemctl restart prometheus-node-exporter
-      |if ! systemctl is-active --quiet prometheus-node-exporter; then
-      |  echo "prometheus-node-exporter failed to start — see 'journalctl -xeu prometheus-node-exporter' for the real reason" >&2
-      |  exit 1
-      |fi
-      |echo "node_exporter running on :9100"""".stripMargin
+  // side effect of its own postinst. The service is an apply description
+  // (enabled and running); there is no config of ours to restart it for.
+  private val nodeExporterPlan: ApplyPlan =
+    import Resources.*
+    ApplyPlan.orFail(
+      "node-exporter",
+      List(service("prometheus-node-exporter"))
+    )
 
   // tst7 only. Ubuntu's `prometheus` package ships a working default
   // config and systemd unit; this overwrites the scrape config with the
@@ -116,18 +111,29 @@ object observability_stack extends OrpheraClusterPlaybook:
   // header comment. `signed-by` (not the deprecated `apt-key add`) is
   // Debian/Ubuntu's current recommended way to scope a keyring to one
   // repo rather than trusting it for every repo on the system.
-  private val installGrafanaScript =
-    """apt-get install -y -qq apt-transport-https software-properties-common wget gpg
-      |mkdir -p /etc/apt/keyrings
-      |wget -q -O - https://apt.grafana.com/gpg.key | gpg --dearmor > /etc/apt/keyrings/grafana.gpg
-      |echo "deb [signed-by=/etc/apt/keyrings/grafana.gpg] https://apt.grafana.com stable main" > /etc/apt/sources.list.d/grafana.list
-      |for try in 1 2 3; do timeout -k 10 180 apt-get update -qq && break; done
-      |apt-get install -y -qq grafana
-      |echo "grafana package installed from apt.grafana.com"""".stripMargin
+  private val installGrafanaPlan: ApplyPlan =
+    import Resources.*
+    val tools = List(
+      pkg("curl", updateCache = true),
+      pkg("gpg"),
+      pkg("ca-certificates")
+    )
+    val repository = aptRepository(
+      "Grafana's apt repository",
+      "https://apt.grafana.com/gpg.key",
+      "/etc/apt/keyrings/grafana.gpg",
+      "/etc/apt/sources.list.d/grafana.list",
+      "https://apt.grafana.com stable main",
+      update = true
+    ).after(tools*)
+    ApplyPlan.orFail(
+      "install-grafana",
+      tools ::: List(repository, pkg("grafana").after(repository))
+    )
 
   // tst7 only. Grafana only reads its provisioning directory at startup,
   // so writing this file alone does nothing until the next restart —
-  // deliberately a separate task/script from installGrafanaScript so the
+  // deliberately a separate task/script from installGrafanaPlan so the
   // restart-and-check pattern below applies to both the initial install
   // AND this config change, not just the first one.
   //
@@ -200,32 +206,65 @@ object observability_stack extends OrpheraClusterPlaybook:
   // today's grafana.ini credential actually took effect on today's
   // account — there's no way to tell "stale admin, wrong password" apart
   // from "fresh admin, right password" from inside this script alone.
-  private val provisionDatasourceScript =
-    s"""mkdir -p /etc/grafana/provisioning/datasources
-      |cat > /etc/grafana/provisioning/datasources/prometheus.yaml <<EOF
-      |apiVersion: 1
-      |datasources:
-      |  - name: Prometheus
-      |    type: prometheus
-      |    access: proxy
-      |    url: http://localhost:9090
-      |    isDefault: true
-      |EOF
-      |sed -i '/# BEGIN orphera-admin-credentials/,/# END orphera-admin-credentials/d' /etc/grafana/grafana.ini
-      |cat >> /etc/grafana/grafana.ini <<EOF
+  // The provisioning is three steps now:
+  //   1. the admin credentials block in grafana.ini (a script: no apply kind
+  //      edits a marked block of a file). It rewrites grafana.ini, and restarts
+  //      grafana-server if it is running, only when the block changed;
+  //   2. the datasource file and the grafana-server service as an apply
+  //      description (grafanaPlan): the file notifies the service, which is
+  //      enabled and running, so it restarts on a change and only then;
+  //   3. waiting for Grafana to be ready and setting the admin password (a
+  //      script, as before).
+  private val grafanaIniScript =
+    s"""set -e
+      |INI=/etc/grafana/grafana.ini
+      |NEW=$$INI.orphera.new
+      |sed '/# BEGIN orphera-admin-credentials/,/# END orphera-admin-credentials/d' $$INI > $$NEW
+      |cat >> $$NEW <<EOF
       |# BEGIN orphera-admin-credentials
       |[security]
       |admin_user = $grafanaAdminUser
       |admin_password = $grafanaAdminPassword
       |# END orphera-admin-credentials
       |EOF
-      |systemctl enable --now grafana-server
-      |systemctl restart grafana-server
-      |if ! systemctl is-active --quiet grafana-server; then
-      |  echo "grafana-server failed to start — see 'journalctl -xeu grafana-server' for the real reason" >&2
-      |  exit 1
-      |fi
-      |READY=false
+      |if cmp -s $$NEW $$INI; then
+      |  rm -f $$NEW
+      |  echo "grafana.ini already has the admin credentials"
+      |else
+      |  cat $$NEW > $$INI
+      |  rm -f $$NEW
+      |  if systemctl is-active --quiet grafana-server; then systemctl restart grafana-server; fi
+      |  echo "grafana.ini: admin credentials written"
+      |fi""".stripMargin
+
+  private val grafanaPlan: ApplyPlan =
+    import Resources.*
+    val dir = directory("/etc/grafana/provisioning/datasources")
+    val unit = service("grafana-server")
+    ApplyPlan.orFail(
+      "grafana-datasource",
+      List(
+        dir,
+        file(
+          "/etc/grafana/provisioning/datasources/prometheus.yaml",
+          """apiVersion: 1
+            |datasources:
+            |  - name: Prometheus
+            |    type: prometheus
+            |    access: proxy
+            |    url: http://localhost:9090
+            |    isDefault: true
+            |""".stripMargin,
+          mode = "0644",
+          owner = "root",
+          group = "root"
+        ).after(dir).notifies(unit),
+        unit
+      )
+    )
+
+  private val grafanaReadyScript =
+    s"""READY=false
       |for i in $$(seq 1 30); do
       |  if curl -sf http://localhost:3000/api/health > /dev/null 2>&1 && journalctl -u grafana-server --no-pager 2>/dev/null | grep -q "Created default admin"; then
       |    READY=true
@@ -253,7 +292,7 @@ object observability_stack extends OrpheraClusterPlaybook:
   // replicated-row check and wordpress_site.scala's DB-error body check.
   //
   // Deliberately does NOT also check Grafana's /api/datasources here
-  // anymore — see provisionDatasourceScript's own header comment for why
+  // anymore — see the long comment above grafanaIniScript for why
   // a basic-auth call inside a script that gets polled every 5s is
   // exactly what caused a real Grafana brute-force login lockout. This
   // script only ever touches unauthenticated endpoints, so it's safe to
@@ -295,9 +334,7 @@ object observability_stack extends OrpheraClusterPlaybook:
             updateCache = true
           )
         )
-        .task("start node_exporter")(
-          Task.RunCommand(List("sh", "-c", startNodeExporterScript))
-        )
+        .task("start node_exporter")(Task.Apply(nodeExporterPlan))
         .build,
 
       stage("install-prometheus", monitoringNode)
@@ -311,15 +348,19 @@ object observability_stack extends OrpheraClusterPlaybook:
 
       stage("install-grafana", monitoringNode)
         .task("add Grafana's apt repo and install grafana")(
-          Task.RunCommand(
-            List("sh", "-c", installGrafanaScript),
-            timeoutSeconds = 720
-          )
+          Task.Apply(installGrafanaPlan)
         )
-        .task("provision Prometheus datasource and (re)start grafana-server")(
+        .task("set Grafana's admin credentials in grafana.ini")(
+          Task
+            .RunCommand(List("sh", "-c", grafanaIniScript), timeoutSeconds = 60)
+        )
+        .task("provision the Prometheus datasource and run grafana-server")(
+          Task.Apply(grafanaPlan)
+        )
+        .task("wait for Grafana and set the admin password")(
           Task.RunCommand(
-            List("sh", "-c", provisionDatasourceScript),
-            timeoutSeconds = 60
+            List("sh", "-c", grafanaReadyScript),
+            timeoutSeconds = 150
           )
         )
         .build,

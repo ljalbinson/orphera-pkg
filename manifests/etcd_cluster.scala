@@ -40,19 +40,29 @@ object etcd_cluster extends OrpheraClusterPlaybook:
   // the node itself, not the orchestrator host — these test nodes need
   // outbound internet access to github.com for this to work at all,
   // which is a real prerequisite worth confirming before running this
-  // for the first time.
-  private val installEtcdScript =
-    s"""test -x /usr/local/bin/etcd && test -x /usr/local/bin/etcdctl && exit 0
-       |set -e
-       |cd /tmp
-       |curl -fsSL -o etcd.tar.gz "https://github.com/etcd-io/etcd/releases/download/$etcdVersion/etcd-$etcdVersion-linux-amd64.tar.gz"
-       |tar xzf etcd.tar.gz
-       |install -m 0755 "etcd-$etcdVersion-linux-amd64/etcd" /usr/local/bin/etcd
-       |install -m 0755 "etcd-$etcdVersion-linux-amd64/etcdctl" /usr/local/bin/etcdctl
-       |rm -rf etcd.tar.gz "etcd-$etcdVersion-linux-amd64"
-       |id etcd >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin etcd
-       |mkdir -p /var/lib/etcd /etc/etcd
-       |chown etcd:etcd /var/lib/etcd""".stripMargin
+  // for the first time. The binaries come from the release archive, with the etcd user and its directories.
+  private val etcdBinariesPlan: ApplyPlan =
+    import Resources.*
+    val dir = s"etcd-$etcdVersion-linux-amd64"
+    val binaries = archiveFiles(
+      "the etcd binaries",
+      s"https://github.com/etcd-io/etcd/releases/download/$etcdVersion/$dir.tar.gz",
+      List(
+        s"$dir/etcd" -> "/usr/local/bin/etcd",
+        s"$dir/etcdctl" -> "/usr/local/bin/etcdctl"
+      )
+    )
+    val etcdUser = user("etcd", system = true, shell = "/usr/sbin/nologin")
+    ApplyPlan.orFail(
+      "etcd-binaries",
+      List(
+        binaries,
+        etcdUser,
+        directory("/var/lib/etcd", owner = "etcd", group = "etcd")
+          .after(etcdUser),
+        directory("/etc/etcd")
+      )
+    )
 
   // The only per-node-varying piece is $NAME (resolved remotely via
   // `hostname -s`, matching ceph_mon_quorum.scala's $MONID convention —
@@ -74,43 +84,35 @@ object etcd_cluster extends OrpheraClusterPlaybook:
   // real run shows systemd timing out waiting for the READY notification,
   // that's the first thing to try changing to `Type=simple`.
   //
-  // The ExecStart line's trailing `\` continuations below are for THIS
-  // SOURCE FILE's readability only: an unquoted heredoc (`<<EOF`, no
-  // quotes around the delimiter) has bash ignore every `\<newline>`
-  // sequence it contains, same as inside a double-quoted string — so
-  // those line breaks never make it into the written etcd.service at
-  // all, and ExecStart lands there as one long single line. That's
-  // functionally identical (systemd doesn't care either way) and not a
-  // bug, just worth knowing before "fixing" what looks like a missing
-  // continuation if you ever cat the deployed file.
-  private val configureAndStartScript =
-    """NAME=$(hostname -s)
-      |cat > /etc/systemd/system/etcd.service <<EOF
-      |[Unit]
-      |Description=etcd distributed key-value store (orphera etcd_cluster test)
-      |After=network.target
-      |
-      |[Service]
-      |Type=notify
-      |User=etcd
-      |ExecStart=/usr/local/bin/etcd \
-      |  --name $NAME \
-      |  --data-dir /var/lib/etcd \
-      |  --listen-peer-urls http://{{cluster_ip}}:2380 \
-      |  --listen-client-urls http://{{cluster_ip}}:2379,http://127.0.0.1:2379 \
-      |  --initial-advertise-peer-urls http://{{cluster_ip}}:2380 \
-      |  --advertise-client-urls http://{{cluster_ip}}:2379 \
-      |  --initial-cluster tst0=http://{{nodes.tst0.cluster_ip}}:2380,tst1=http://{{nodes.tst1.cluster_ip}}:2380,tst2=http://{{nodes.tst2.cluster_ip}}:2380 \
-      |  --initial-cluster-token orphera-etcd-test \
-      |  --initial-cluster-state new
-      |Restart=on-failure
-      |RestartSec=5
-      |
-      |[Install]
-      |WantedBy=multi-user.target
-      |EOF
-      |systemctl daemon-reload
-      |systemctl enable --now etcd""".stripMargin
+  // The unit and the service as an apply description: the file rendered on the
+  // node (`{{node_name}}`, `{{cluster_ip}}`, `{{nodes.<name>.cluster_ip}}`), then
+  // etcd enabled and started, and restarted only when the unit changed (`service`
+  // reloads systemd itself). ExecStart is one line, with the three spaces the old
+  // script's heredoc left where it dropped each `\`-newline, so a node the script
+  // built compares `unchanged`. `--name` is the node's inventory name, which the
+  // script took from `hostname -s`; the two are the same in the lab.
+  private val etcdUnitPlan: ApplyPlan =
+    import Resources.*
+    val unit = fileTemplate(
+      "/etc/systemd/system/etcd.service",
+      """[Unit]
+         |Description=etcd distributed key-value store (orphera etcd_cluster test)
+         |After=network.target
+         |
+         |[Service]
+         |Type=notify
+         |User=etcd
+         |ExecStart=/usr/local/bin/etcd   --name {{node_name}}   --data-dir /var/lib/etcd   --listen-peer-urls http://{{cluster_ip}}:2380   --listen-client-urls http://{{cluster_ip}}:2379,http://127.0.0.1:2379   --initial-advertise-peer-urls http://{{cluster_ip}}:2380   --advertise-client-urls http://{{cluster_ip}}:2379   --initial-cluster tst0=http://{{nodes.tst0.cluster_ip}}:2380,tst1=http://{{nodes.tst1.cluster_ip}}:2380,tst2=http://{{nodes.tst2.cluster_ip}}:2380   --initial-cluster-token orphera-etcd-test   --initial-cluster-state new
+         |Restart=on-failure
+         |RestartSec=5
+         |
+         |[Install]
+         |WantedBy=multi-user.target
+         |""".stripMargin,
+      mode = "0644"
+    )
+    val etcd = service("etcd")
+    ApplyPlan.orFail("etcd-unit", List(unit.notifies(etcd), etcd))
 
   private val healthCheckScript =
     "ETCDCTL_API=3 /usr/local/bin/etcdctl --endpoints=http://127.0.0.1:2379 endpoint health >/dev/null 2>&1"
@@ -122,16 +124,16 @@ object etcd_cluster extends OrpheraClusterPlaybook:
           Task.Install(packages = List("curl", "tar"), updateCache = true)
         )
         .task("download and install etcd binaries")(
-          Task.RunCommand(
-            List("sh", "-c", installEtcdScript),
-            timeoutSeconds = 120
-          )
+          Task.Apply(etcdBinariesPlan)
         )
         .build,
 
+      // One stage for all three nodes: etcd is `Type=notify`, so `systemctl start`
+      // returns only once the member is ready, which needs a quorum, so the three
+      // must start together (a stage per node timed out on the first node).
       stage("configure-and-start", "tst0", "tst1", "tst2")
         .task("write systemd unit and start etcd")(
-          Task.RunCommand(List("sh", "-c", configureAndStartScript))
+          Task.Apply(etcdUnitPlan)
         )
         .build,
 

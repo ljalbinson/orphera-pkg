@@ -113,11 +113,39 @@ object control_host_handover extends OrpheraClusterPlaybook:
   private def copy(src: Path, dest: String, mode: Int): Task =
     Task.Copy(src.toString, dest, user, user, mode)
 
-  private val dirsScript =
-    s"""set -e
-       |install -d -o $user -g $user -m 755 $remoteHome/orphera-pkg/certs
-       |install -d -o $user -g $user -m 700 $remoteHome/.config $remoteHome/.config/orphera $remoteHome/.ssh
-       |echo "directories ready"""".stripMargin
+  // The directories the files go in. Only `directory` is imported: this
+  // object's own `user` would clash with Resources.user.
+  private val directoriesPlan: ApplyPlan =
+    import Resources.directory
+    ApplyPlan.orFail(
+      "control-host-directories",
+      List(
+        directory(
+          s"$remoteHome/orphera-pkg/certs",
+          mode = "0755",
+          owner = user,
+          group = user
+        ),
+        directory(
+          s"$remoteHome/.config",
+          mode = "0700",
+          owner = user,
+          group = user
+        ),
+        directory(
+          s"$remoteHome/.config/orphera",
+          mode = "0700",
+          owner = user,
+          group = user
+        ),
+        directory(
+          s"$remoteHome/.ssh",
+          mode = "0700",
+          owner = user,
+          group = user
+        )
+      )
+    )
 
   private def asUser(script: String, timeout: Int): Task =
     Task.RunCommand(
@@ -147,7 +175,7 @@ object control_host_handover extends OrpheraClusterPlaybook:
   private val copies =
     stage("copy-ca-secrets-ssh-key", host)
       .task("create the destination directories")(
-        Task.RunCommand(List("sh", "-c", dirsScript), timeoutSeconds = 30)
+        Task.Apply(directoriesPlan)
       )
       .task("CA certificate")(
         copy(

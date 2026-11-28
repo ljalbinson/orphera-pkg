@@ -167,13 +167,6 @@ object kolla_build extends OrpheraApply:
     "ca-certificates"
   )
 
-  private val pullRegistryScript =
-    s"""${Pull.shellFunction(
-        "the registry image name in kolla_build.scala; the pull is from Docker Hub"
-      )}
-       |pull_retry $registryImage || exit 1
-       |echo "registry image ready"""".stripMargin
-
   // podman may talk to the local registry over plain HTTP (the registry is on this LAN, as tst9's is).
   private val registriesConf =
     s"""# Managed by Orphera (kolla_build.scala)
@@ -220,9 +213,7 @@ object kolla_build extends OrpheraApply:
       |/opt/devpi/bin/devpi-init --serverdir /var/lib/orphera/devpi
       |echo "devpi initialised"""".stripMargin
   // The image list is written once; after that it is the user's to edit.
-  private val imageListScript =
-    s"""printf '%s\\n' ${images.mkString(" ")} > /etc/kolla-build/images.txt
-       |echo "wrote /etc/kolla-build/images.txt"""".stripMargin
+  private val imageListText = images.mkString("", "\n", "\n")
   // kolla-build is installed through devpi, so wait for it first.
   private val installKollaScript =
     s"""set -e
@@ -361,20 +352,6 @@ esac
       .replace("@@PROJECTS@@", projects.mkString(" "))
   private val helperPath = "/usr/local/sbin/orphera-kolla-build"
 
-  private val servicesAnswer =
-    s"""curl -sf http://localhost:$registryPort/v2/ >/dev/null &&
-       |curl -sf http://localhost:$sourcesPort/ >/dev/null &&
-       |curl -sf http://localhost:$devpiPort/ >/dev/null""".stripMargin
-  private val waitServicesScript =
-    s"""for i in $$(seq 1 40); do
-       |  if $servicesAnswer; then echo "registry, sources and devpi answer"; exit 0; fi
-       |  sleep 3
-       |done
-       |curl -s -o /dev/null -w 'registry http=%{http_code}\\n' http://localhost:$registryPort/v2/ || true
-       |curl -s -o /dev/null -w 'sources http=%{http_code}\\n' http://localhost:$sourcesPort/ || true
-       |curl -s -o /dev/null -w 'devpi http=%{http_code}\\n' http://localhost:$devpiPort/ || true
-       |exit 1""".stripMargin
-
   // True when every project's tarball and the checksum list are there and the base image is in the registry.
   private val warm =
     s"""for p in ${projects.mkString(
@@ -398,10 +375,11 @@ esac
     val venvTools =
       List(byName("python3"), byName("python3-venv"), byName("python3-pip"))
 
-    val pulled = command(
+    val pulled = pullImages(
       "pull the registry image",
-      pullRegistryScript,
-      unless = s"podman image exists $registryImage",
+      List(registryImage),
+      hint =
+        "the registry image name in kolla_build.scala; the pull is from Docker Hub",
       timeout = 600
     ).after(podman)
     val registriesDir =
@@ -418,10 +396,13 @@ esac
     val devpiDir = directory("/var/lib/orphera/devpi")
     val registryData = directory(dataDir)
 
-    val imageList = command(
-      "write the list of images to build (once)",
-      imageListScript,
-      creates = "/etc/kolla-build/images.txt"
+    // seedFile: written when missing, never replaced; the list is the user's after that.
+    val imageList = seedFile(
+      "/etc/kolla-build/images.txt",
+      imageListText,
+      mode = "0644",
+      owner = "root",
+      group = "root"
     ).after(kollaBuildDir)
 
     // nginx serves the source tarballs.
@@ -504,12 +485,32 @@ esac
       byName("skopeo"),
       byName("curl")
     )
-    val answering = command(
-      "the registry, the source server and devpi answer",
-      waitServicesScript,
-      unless = servicesAnswer,
-      timeout = 150
-    ).after(registryRunning, nginxRunning, devpiRunning)
+    // curl -f counted any status below 400 as an answer, so redirects count here too.
+    val answerStatus = List(200, 301, 302)
+    val registryAnswers = waitForHttp(
+      "the registry answers",
+      s"http://localhost:$registryPort/v2/",
+      status = answerStatus,
+      timeout = 120,
+      interval = 3,
+      hint = s"see 'journalctl -xeu ${registryContainer.unitName}'"
+    ).after(registryRunning)
+    val sourcesAnswer = waitForHttp(
+      "the source server answers",
+      s"http://localhost:$sourcesPort/",
+      status = answerStatus,
+      timeout = 120,
+      interval = 3,
+      hint = "see 'journalctl -xeu nginx'"
+    ).after(nginxRunning)
+    val devpiAnswers = waitForHttp(
+      "devpi answers",
+      s"http://localhost:$devpiPort/",
+      status = answerStatus,
+      timeout = 120,
+      interval = 3,
+      hint = "see 'journalctl -xeu orphera-devpi'"
+    ).after(devpiRunning)
 
     tools ++ List(
       pulled,
@@ -534,5 +535,7 @@ esac
       kollaInstalled,
       helperFile,
       warmed,
-      answering
+      registryAnswers,
+      sourcesAnswer,
+      devpiAnswers
     )

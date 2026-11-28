@@ -26,7 +26,8 @@ import orphera.orchestrator.kolla.*
 //   - octavia-health-manager receives the heartbeats of the amphorae (UDP 5555) and fails over
 //   - octavia-housekeeping   removes spare and deleted amphorae, rotates certificates
 //
-// What it makes outside the containers (the helper's `plumbing`, all in project `service`):
+// What it makes outside the containers, all in project `service` (the network, the groups and the flavor are
+// typed resources: openstackNetwork, openstackSecurityGroup, openstackFlavor; the port is the helper's `plumbing`):
 //   - the network lb-mgmt-net (VXLAN) with the subnet 192.168.200.0/24 (DHCP on, no gateway): every amphora has
 //     one port on it, and the controller reaches the amphora agent (TCP 9443) there
 //   - the security groups lb-mgmt-sec-grp (TCP 9443, ICMP in) for the amphorae and lb-health-mgr-sec-grp
@@ -46,10 +47,10 @@ import orphera.orchestrator.kolla.*
 //     octavia/ca-passphrase. The keys and certificates are made once and kept; they are made again only if a
 //     file is missing or the passphrase no longer opens the key (existing amphorae then stop working).
 //
-// What it adds to Keystone (the helper's `register`): user `octavia` in project `service` with the admin role;
+// What it adds to Keystone (`keystoneEntries`): user `octavia` in project `service` with the admin role;
 // the roles load-balancer_admin, _member, _observer, _global_observer and _quota_admin; the service `octavia`
 // of type `load-balancer` with the endpoint http://<fqdn>:9876. The password of an existing user is changed
-// only if a login with the stored one fails (a change revokes its tokens).
+// only when the registration's check fails (a change revokes its tokens).
 //
 // Prerequisites, not checked here:
 //   - Galera + VIP, Keystone, RabbitMQ (tst10, rabbitmq_single_node.scala) healthy
@@ -61,8 +62,9 @@ import orphera.orchestrator.kolla.*
 // How it stays idempotent (as for Manila, Trove and Magnum):
 //   - Keystone's CA is compared as a certificate with the installed copy each run; the copies in the four
 //     Kolla directories are compared with it, and a service restarts when its copy changes.
-//   - The helper's `plumbing` is skipped while its read-only check `plumbing-ok` passes: the network, the
-//     groups, the flavor and the port exist, and ids.env says what Neutron has.
+//   - The network, the groups and the flavor are skipped while their helpers' checks pass. The helper's
+//     `plumbing` (the port and ids.env) is skipped while its read-only check `plumbing-ok` passes: the network,
+//     the groups, the flavor and the port exist, and ids.env says what Neutron has.
 //   - octavia.conf needs the ids of the amphora network and security group and the address of the health
 //     manager's port, which exist only after the plumbing. The template `octavia.conf.in` (a secret file) is
 //     declared; a command fills it in from ids.env, skipped while the result is the installed file. The
@@ -71,9 +73,9 @@ import orphera.orchestrator.kolla.*
 //     address and MAC on br-int, the unit is enabled and active, and the stamp of the script and unit matches.
 //   - `octavia-db-manage upgrade head` is skipped while its stamp matches and the `load_balancer` table
 //     exists (a query as the octavia user, through the VIP).
-//   - Octavia is registered in Keystone before the units start, skipped while the helper's `registered` passes.
+//   - Octavia is registered in Keystone before the units start, skipped while its check passes.
 //   - The amphora image is downloaded and uploaded in two steps (each prints a line every 20 seconds while it
-//     works), skipped while Glance has an active image with the tag `amphora`.
+//     works), skipped while Glance has an active image of that name with the tag `amphora` (openstackImage).
 //   - The load balancer test (an amphora is booted: several minutes) is made again only when its stamp changes
 //     (the configuration, the plug-in script, the image address, the server CA), so a repeated run does not
 //     boot one. manifests/test_octavia.sh makes one more by hand. Delete /var/lib/orphera/octavia/cycle.stamp to
@@ -200,18 +202,6 @@ object octavia_single_node extends OrpheraApply:
        |""".stripMargin
 
   private val images = octaviaServices.map(_.image.ref)
-  private val pullScript =
-    s"""${Pull.shellFunction(
-        "the Image(...) values in octavia_single_node.scala"
-      )}
-       |for img in ${images.mkString(" ")}; do
-       |  pull_retry $$img || exit 1
-       |done
-       |echo "images ready"""".stripMargin
-  private val imagesPresent =
-    s"""for img in ${images.mkString(
-        " "
-      )}; do podman image exists $$img || exit 1; done"""
 
   // Every command the units and the database step run must exist in its image.
   private val imageCheckScript: String =
@@ -232,51 +222,6 @@ object octavia_single_node extends OrpheraApply:
        |echo "the Octavia commands are in the images"""".stripMargin
 
   private val imageCheckOk = s"( $imageCheckScript ) >/dev/null 2>&1"
-
-  // Keystone's CA: the last certificate it presents (trust on first use), which must be self-signed.
-  // `chainTo DIR` leaves DIR/c1.pem ... DIR/cN.pem, each holding the certificate only: the text s_client
-  // prints after the last one differs on every handshake, and would make the comparison fail.
-  private val chainTo =
-    s"""chainTo() { openssl s_client -connect $ksFqdn:5000 -servername $ksFqdn -showcerts </dev/null 2>/dev/null | awk -v d="$$1" '/-----BEGIN CERTIFICATE-----/{n++; p=1} p{print > (d "/c" n ".pem")} /-----END CERTIFICATE-----/{p=0}'; }"""
-
-  private val trustTarget =
-    """if command -v update-ca-certificates >/dev/null 2>&1; then t=/usr/local/share/ca-certificates/orphera-test-ca.crt; else t=/etc/pki/ca-trust/source/anchors/orphera-test-ca.crt; fi"""
-
-  // Current when the installed CA is the one Keystone presents now, and is in the system trust store.
-  private val caCurrent =
-    s"""$chainTo
-       |D=$$(mktemp -d)
-       |chainTo $$D
-       |N=$$(ls $$D/c*.pem 2>/dev/null | wc -l)
-       |R=1
-       |if [ "$$N" -ge 2 ]; then
-       |  $trustTarget
-       |  cmp -s $$D/c$$N.pem $caCert && cmp -s $caCert "$$t" && R=0
-       |fi
-       |rm -rf $$D
-       |exit $$R""".stripMargin
-
-  private val caScript =
-    s"""set -e
-       |$chainTo
-       |mkdir -p $caDir
-       |D=$$(mktemp -d)
-       |trap 'rm -rf $$D' EXIT
-       |chainTo $$D
-       |COUNT=$$(ls $$D/c*.pem 2>/dev/null | wc -l)
-       |if [ "$$COUNT" -lt 2 ]; then
-       |  echo "keystone at $ksFqdn:5000 presented $$COUNT certificate(s); expected leaf + CA - apply keystone_single_node.scala (it must serve server-chain.crt)" >&2
-       |  exit 1
-       |fi
-       |cp $$D/c$$COUNT.pem $caCert
-       |openssl verify -CAfile $caCert $$D/c1.pem
-       |SUBJ=$$(openssl x509 -in $caCert -noout -subject | sed 's/^subject=//')
-       |ISS=$$(openssl x509 -in $caCert -noout -issuer | sed 's/^issuer=//')
-       |if [ "$$SUBJ" != "$$ISS" ]; then echo "last certificate is not self-signed: $$SUBJ / $$ISS" >&2; exit 1; fi
-       |$trustTarget
-       |cp $caCert "$$t"
-       |if command -v update-ca-certificates >/dev/null 2>&1; then update-ca-certificates; else update-ca-trust; fi
-       |echo "Keystone CA installed: $$SUBJ"""".stripMargin
 
   // ---- certificates ----------------------------------------------------
 
@@ -524,17 +469,10 @@ object octavia_single_node extends OrpheraApply:
     "client_ca.cert.pem",
     "client.cert-and-key.pem"
   )
-  private def certsCopyCurrent(dir: String): String =
-    s"""for f in ${certFiles.mkString(
-        " "
-      )}; do cmp -s $certDir/$$f $dir/$$f || exit 1; done"""
-  private def certsCopyScript(dir: String): String =
-    s"""set -e
-       |for f in ${certFiles.mkString(" ")}; do
-       |  case $$f in *.key.pem|*cert-and-key.pem) m=0600 ;; *) m=0644 ;; esac
-       |  install -m $$m $certDir/$$f $dir/$$f
-       |done
-       |echo "certificates copied to $dir"""".stripMargin
+  private def certMode(file: String): String =
+    if file.endsWith(".key.pem") || file.endsWith("cert-and-key.pem") then
+      "0600"
+    else "0644"
 
   // octavia-db-manage runs in a one-off container with octavia.conf bind-mounted (entrypoint overridden, so
   // kolla_set_configs does not run).
@@ -578,31 +516,10 @@ object octavia_single_node extends OrpheraApply:
     """heartbeat() { "$@" & P=$!; while kill -0 $P 2>/dev/null; do sleep 20; echo "still working ($(date +%H:%M:%S))"; done; wait $P; }"""
 
   private val amphoraFile = s"$stateDir/amphora.qcow2"
-  private val fetchImageScript =
-    s"""set -e
-       |$heartbeat
-       |IMG=$amphoraFile
-       |if [ ! -s $$IMG ]; then
-       |  if ! heartbeat curl -fsSL --retry 3 --connect-timeout 30 -o $$IMG.part $amphoraImageUrl; then
-       |    rm -f $$IMG.part
-       |    echo "cannot download $amphoraImageUrl - put the image file at $$IMG and run again" >&2
-       |    exit 1
-       |  fi
-       |  mv $$IMG.part $$IMG
-       |fi
-       |MAGIC=$$(head -c 3 $$IMG)
-       |if [ "$$MAGIC" != "QFI" ]; then
-       |  echo "$$IMG is not a qcow2 file - delete it and run again" >&2
-       |  exit 1
-       |fi
-       |ls -l $$IMG""".stripMargin
-  private val imageFileOk =
-    s"""[ "$$(head -c 3 $amphoraFile 2>/dev/null)" = "QFI" ]"""
-  private val imagePresent = s"$helperPath image-present >/dev/null 2>&1"
-  private val uploadImageScript =
-    s"""set -e
-       |$heartbeat
-       |heartbeat $helperPath image-upload $amphoraFile""".stripMargin
+  private val amphoraImageName = "amphora-x64-haproxy-test"
+  // The check of the helper that openstackImage writes: true while an active image of that name has the tag.
+  private val imagePresent =
+    s"${openstackImageHelperPath(amphoraImageName)} check >/dev/null 2>&1"
 
   // ---- the helper ----------------------------------------------------------
 
@@ -614,7 +531,6 @@ KS = 'https://@@KS@@:5000/v3'
 OCTAVIA = '@@OCTAVIA@@'
 NODE = '@@NODE@@'
 ADMIN_PW = '@@ADMINPW@@'
-OCTAVIA_PW = '@@OCTAVIAPW@@'
 CTX = ssl.create_default_context(cafile='@@CAFILE@@')
 STATE = '@@STATE@@'
 MGMT_NET = 'lb-mgmt-net'
@@ -624,10 +540,7 @@ MGMT_SG = 'lb-mgmt-sec-grp'
 HM_SG = 'lb-health-mgr-sec-grp'
 HM_PORT = 'octavia-hm-' + NODE
 FLAVOR_ID = '@@FLAVORID@@'
-FLAVOR_NAME = 'orphera.amphora'
-IMAGE_NAME = 'amphora-x64-haproxy-test'
 IMAGE_TAG = 'amphora'
-ROLES = ['load-balancer_admin', 'load-balancer_member', 'load-balancer_observer', 'load-balancer_global_observer', 'load-balancer_quota_admin']
 
 
 def call(method, url, body=None, token=None, timeout=60):
@@ -686,62 +599,6 @@ def find(token, path, key):
     return items[0] if items else None
 
 
-def ensure(token, what, path, key, body, create_key):
-    found = find(token, path, key)
-    if found is not None:
-        return found
-    s, p, _ = call('POST', KS + '/' + what, body, token)
-    if s != 201:
-        die('creating %s failed: HTTP %s %s' % (what, s, p))
-    return p[create_key]
-
-
-def register():
-    token, _ = admin()
-    project = ensure(token, 'projects', '/projects?name=service', 'projects', {'project': {'name': 'service', 'domain_id': 'default'}}, 'project')
-    user = find(token, '/users?name=octavia', 'users')
-    if user is None:
-        s, p, _ = call('POST', KS + '/users', {'user': {'name': 'octavia', 'domain_id': 'default', 'password': OCTAVIA_PW}}, token)
-        if s != 201:
-            die('creating user octavia failed: HTTP %s %s' % (s, p))
-        user = p['user']
-    else:
-        # A password change revokes the user's tokens, so change it only if the stored one does not work.
-        body = {'auth': {'identity': {'methods': ['password'], 'password': {'user': {'name': 'octavia', 'domain': {'name': 'Default'}, 'password': OCTAVIA_PW}}}}}
-        s, _, _ = call('POST', KS + '/auth/tokens', body)
-        if s != 201:
-            call('PATCH', KS + '/users/' + user['id'], {'user': {'password': OCTAVIA_PW}}, token)
-    admin_role = find(token, '/roles?name=admin', 'roles')
-    if admin_role is None:
-        die('role admin not found')
-    s, p, _ = call('PUT', KS + '/projects/%s/users/%s/roles/%s' % (project['id'], user['id'], admin_role['id']), None, token)
-    if s not in (200, 204):
-        die('granting admin to octavia failed: HTTP %s %s' % (s, p))
-    for name in ROLES:
-        ensure(token, 'roles', '/roles?name=' + name, 'roles', {'role': {'name': name}}, 'role')
-    service = ensure(token, 'services', '/services?type=load-balancer', 'services', {'service': {'name': 'octavia', 'type': 'load-balancer'}}, 'service')
-    for iface in ('public', 'internal', 'admin'):
-        ep = find(token, '/endpoints?service_id=%s&interface=%s' % (service['id'], iface), 'endpoints')
-        if ep is None:
-            s, p, _ = call('POST', KS + '/endpoints', {'endpoint': {'interface': iface, 'url': OCTAVIA, 'service_id': service['id'], 'region_id': 'RegionOne'}}, token)
-            if s != 201:
-                die('creating %s endpoint failed: HTTP %s %s' % (iface, s, p))
-        elif ep['url'] != OCTAVIA:
-            call('PATCH', KS + '/endpoints/' + ep['id'], {'endpoint': {'url': OCTAVIA}}, token)
-    print('registered octavia in keystone (user octavia, service type load-balancer, 3 endpoints, %d roles)' % len(ROLES))
-
-
-def unregister():
-    token, _ = admin()
-    service = find(token, '/services?type=load-balancer', 'services')
-    if service is not None:
-        call('DELETE', KS + '/services/' + service['id'], None, token)
-    user = find(token, '/users?name=octavia', 'users')
-    if user is not None:
-        call('DELETE', KS + '/users/' + user['id'], None, token)
-    print('removed octavia from keystone (service load-balancer, its endpoints, user octavia)')
-
-
 def catalog():
     _, p = admin()
     print('catalog types: ' + ' '.join(sorted(c['type'] for c in p['token']['catalog'])))
@@ -782,27 +639,6 @@ def first(cl, path, key, what):
     return items[0] if items else None
 
 
-def ensure_sg(cl, pid, name, rules):
-    sg = first(cl, '/security-groups?name=%s&project_id=%s' % (name, pid), 'security_groups', 'security group')
-    if sg is None:
-        s, p, _ = cl.n('POST', '/security-groups', {'security_group': {'name': name, 'description': 'Octavia, managed by Orphera', 'project_id': pid}})
-        if s != 201:
-            die('creating security group %s failed: HTTP %s %s' % (name, s, p))
-        sg = p['security_group']
-    have = set((r.get('direction'), r.get('protocol'), r.get('port_range_min')) for r in sg.get('security_group_rules', []))
-    for proto, port in rules:
-        if ('ingress', proto, port) in have:
-            continue
-        rule = {'security_group_id': sg['id'], 'direction': 'ingress', 'ethertype': 'IPv4', 'protocol': proto, 'remote_ip_prefix': '0.0.0.0/0'}
-        if port is not None:
-            rule['port_range_min'] = port
-            rule['port_range_max'] = port
-        s, p, _ = cl.n('POST', '/security-group-rules', {'security_group_rule': rule})
-        if s != 201:
-            die('creating a rule in %s failed: HTTP %s %s' % (name, s, p))
-    return sg['id']
-
-
 def ovs_host(cl):
     s, p, _ = cl.n('GET', '/agents?binary=neutron-openvswitch-agent')
     if s != 200:
@@ -818,29 +654,23 @@ def ovs_host(cl):
 def plumbing():
     cl = Clients()
     pid = service_project(cl)
+    # The network, its subnet, the two security groups and the flavor are made by the description
+    # (openstackNetwork, openstackSecurityGroup, openstackFlavor) before this runs; here they are looked up.
     net = first(cl, '/networks?name=%s&project_id=%s' % (MGMT_NET, pid), 'networks', 'network')
     if net is None:
-        s, p, _ = cl.n('POST', '/networks', {'network': {'name': MGMT_NET, 'project_id': pid}})
-        if s != 201:
-            die('creating %s failed: HTTP %s %s' % (MGMT_NET, s, p))
-        net = p['network']
+        die('network %s not found: the description makes it before the plumbing' % MGMT_NET)
     if net.get('provider:network_type') != 'vxlan':
         die('%s is %s, expected vxlan' % (MGMT_NET, net.get('provider:network_type')))
     sub = first(cl, '/subnets?network_id=' + net['id'], 'subnets', 'subnet')
     if sub is None:
-        s, p, _ = cl.n('POST', '/subnets', {'subnet': {'network_id': net['id'], 'ip_version': 4, 'cidr': MGMT_CIDR, 'name': MGMT_SUBNET, 'project_id': pid, 'enable_dhcp': True, 'gateway_ip': None}})
-        if s != 201:
-            die('creating %s failed: HTTP %s %s' % (MGMT_SUBNET, s, p))
-        sub = p['subnet']
-    mgmt_sg = ensure_sg(cl, pid, MGMT_SG, [('tcp', 9443), ('icmp', None)])
-    hm_sg = ensure_sg(cl, pid, HM_SG, [('udp', 5555), ('icmp', None)])
-    s, p, _ = cl.c('GET', '/flavors/' + FLAVOR_ID)
-    if s == 404:
-        s, p, _ = cl.c('POST', '/flavors', {'flavor': {'id': FLAVOR_ID, 'name': FLAVOR_NAME, 'ram': 1024, 'vcpus': 1, 'disk': 5, 'os-flavor-access:is_public': True}})
-        if s not in (200, 201):
-            die('creating flavor %s failed: HTTP %s %s' % (FLAVOR_ID, s, p))
-    elif s != 200:
-        die('flavor lookup failed: HTTP %s %s' % (s, p))
+        die('the subnet of %s is missing' % MGMT_NET)
+    mgmt_sg = sg_ok(cl, pid, MGMT_SG, [('tcp', 9443), ('icmp', None)])
+    hm_sg = sg_ok(cl, pid, HM_SG, [('udp', 5555), ('icmp', None)])
+    if mgmt_sg is None or hm_sg is None:
+        die('a security group or one of its rules is missing: the description makes them before the plumbing')
+    s, _, _ = cl.c('GET', '/flavors/' + FLAVOR_ID)
+    if s != 200:
+        die('flavor %s is missing (HTTP %s): the description makes it before the plumbing' % (FLAVOR_ID, s))
     host = ovs_host(cl)
     port = first(cl, '/ports?name=%s&network_id=%s' % (HM_PORT, net['id']), 'ports', 'port')
     if port is None:
@@ -886,49 +716,6 @@ def amphora_images(cl):
     if s != 200:
         die('image list failed: HTTP %s %s' % (s, p))
     return p.get('images', [])
-
-
-def image_present():
-    cl = Clients()
-    ok = [i for i in amphora_images(cl) if i.get('status') == 'active']
-    if ok:
-        print('amphora image %s (%s) is active in Glance' % (ok[0].get('name'), ok[0]['id']))
-        return
-    sys.exit(1)
-
-
-def image_upload(path):
-    cl = Clients()
-    for i in amphora_images(cl):
-        if i.get('status') != 'active':
-            cl.g('DELETE', '/images/' + i['id'])
-    body = {'name': IMAGE_NAME, 'disk_format': 'qcow2', 'container_format': 'bare', 'visibility': 'public', 'tags': [IMAGE_TAG]}
-    s, p, _ = cl.g('POST', '/images', body)
-    if s != 201:
-        die('image create failed: HTTP %s %s' % (s, p))
-    iid = p['id']
-    size = os.path.getsize(path)
-    with open(path, 'rb') as fh:
-        req = urllib.request.Request(cl.glance + '/images/%s/file' % iid, data=fh, method='PUT')
-        req.add_header('Content-Type', 'application/octet-stream')
-        req.add_header('Content-Length', str(size))
-        req.add_header('X-Auth-Token', cl.token)
-        try:
-            urllib.request.urlopen(req, timeout=1800).read()
-        except urllib.error.HTTPError as e:
-            die('image upload failed: HTTP %s %s' % (e.code, e.read().decode()[:300]))
-    end = time.time() + 300
-    status = None
-    while time.time() < end:
-        s, p, _ = cl.g('GET', '/images/' + iid)
-        status = p.get('status')
-        if status == 'active':
-            print('amphora image uploaded: %s (%s), %d bytes' % (IMAGE_NAME, iid, size))
-            return
-        if status in ('killed', 'deleted'):
-            break
-        time.sleep(3)
-    die('image %s did not become active (status %s)' % (iid, status))
 
 
 def providers():
@@ -1060,58 +847,9 @@ def teardown():
     for srv in p.get('servers', []) if s == 200 else []:
         if srv.get('tenant_id') == pid or srv.get('name', '').startswith('amphora-'):
             cl.c('DELETE', '/servers/' + srv['id'])
-    time.sleep(5)
-    net = first(cl, '/networks?name=%s&project_id=%s' % (MGMT_NET, pid), 'networks', 'network')
-    if net is not None:
-        s, p, _ = cl.n('GET', '/ports?network_id=' + net['id'])
-        for port in p.get('ports', []) if s == 200 else []:
-            if port.get('device_owner') != 'network:dhcp':
-                cl.n('DELETE', '/ports/' + port['id'])
-        end = time.time() + 120
-        while time.time() < end:
-            s, _, _ = cl.n('DELETE', '/networks/' + net['id'])
-            if s in (204, 404):
-                break
-            time.sleep(5)
-    for name in (MGMT_SG, HM_SG):
-        sg = first(cl, '/security-groups?name=%s&project_id=%s' % (name, pid), 'security_groups', 'security group')
-        if sg is not None:
-            cl.n('DELETE', '/security-groups/' + sg['id'])
-    cl.c('DELETE', '/flavors/' + FLAVOR_ID)
     for i in amphora_images(cl):
         cl.g('DELETE', '/images/' + i['id'])
-    unregister()
-    print('removed the Octavia network, security groups, flavor, image and Keystone entries')
-
-
-def registered():
-    # Exit 0 only when everything register() makes is in place: the user octavia (able to log in with the stored
-    # password) with the admin role on project service, the five load-balancer roles, and the service of type
-    # load-balancer with its three endpoints. Makes no change.
-    token, _ = admin()
-    project = find(token, '/projects?name=service', 'projects')
-    user = find(token, '/users?name=octavia', 'users')
-    admin_role = find(token, '/roles?name=admin', 'roles')
-    if project is None or user is None or admin_role is None:
-        die('project service, user octavia or role admin is missing')
-    body = {'auth': {'identity': {'methods': ['password'], 'password': {'user': {'name': 'octavia', 'domain': {'name': 'Default'}, 'password': OCTAVIA_PW}}}}}
-    s, _, _ = call('POST', KS + '/auth/tokens', body)
-    if s != 201:
-        die('user octavia cannot log in with the stored password')
-    s, _, _ = call('GET', KS + '/projects/%s/users/%s/roles/%s' % (project['id'], user['id'], admin_role['id']), None, token)
-    if s != 204:
-        die('user octavia has no admin role on project service (HTTP %s)' % s)
-    for name in ROLES:
-        if find(token, '/roles?name=' + name, 'roles') is None:
-            die('role %s is missing' % name)
-    service = find(token, '/services?type=load-balancer', 'services')
-    if service is None:
-        die('service of type load-balancer is missing')
-    for iface in ('public', 'internal', 'admin'):
-        ep = find(token, '/endpoints?service_id=%s&interface=%s' % (service['id'], iface), 'endpoints')
-        if ep is None or ep['url'] != OCTAVIA:
-            die('the %s endpoint is missing or differs' % iface)
-    print('octavia is registered in keystone')
+    print('removed the Octavia amphorae and image')
 
 
 def sg_ok(cl, pid, name, rules):
@@ -1175,18 +913,8 @@ def hm_active():
 
 if __name__ == '__main__':
     cmd = sys.argv[1] if len(sys.argv) > 1 else ''
-    if cmd == 'register':
-        register()
-    elif cmd == 'registered':
-        registered()
-    elif cmd == 'unregister':
-        unregister()
-    elif cmd == 'catalog':
+    if cmd == 'catalog':
         catalog()
-    elif cmd == 'image-present':
-        image_present()
-    elif cmd == 'image-upload' and len(sys.argv) > 2:
-        image_upload(sys.argv[2])
     elif cmd == 'plumbing':
         plumbing()
     elif cmd == 'plumbing-ok':
@@ -1202,7 +930,7 @@ if __name__ == '__main__':
     elif cmd == 'teardown':
         teardown()
     else:
-        die('usage: orphera-octavia-api register | registered | unregister | catalog | image-present | image-upload FILE | plumbing | plumbing-ok | wait-hm | hm-active | providers | lb-cycle | teardown')
+        die('usage: orphera-octavia-api catalog | plumbing | plumbing-ok | wait-hm | hm-active | providers | lb-cycle | teardown')
 """
 
   private val helper =
@@ -1211,21 +939,9 @@ if __name__ == '__main__':
       .replace("@@OCTAVIA@@", s"http://$fqdn:$apiPort")
       .replace("@@NODE@@", node)
       .replace("@@ADMINPW@@", adminPassword.reveal)
-      .replace("@@OCTAVIAPW@@", octaviaPassword.reveal)
       .replace("@@CAFILE@@", caCert)
       .replace("@@STATE@@", stateDir)
       .replace("@@FLAVORID@@", amphoraFlavorId)
-
-  // The API answers its version document without a token (200, or 300 for a list of versions).
-  private val healthy =
-    s"""CODE=$$(curl -s -o /dev/null -w '%{http_code}' http://localhost:$apiPort/); [ "$$CODE" = "200" ] || [ "$$CODE" = "300" ]"""
-  private val waitHealthy =
-    s"""for i in $$(seq 1 36); do
-       |  ( $healthy ) && exit 0
-       |  sleep 5
-       |done
-       |echo "octavia-api does not answer on $apiPort - see 'journalctl -xeu orphera-octavia-api' and $logDir" >&2
-       |exit 1""".stripMargin
 
   // The amphora provider appears once the API is up and the database is in place.
   private val providersListed = s"$helperPath providers >/dev/null 2>&1"
@@ -1273,10 +989,10 @@ if __name__ == '__main__':
       registryMirror,
       mode = "0644"
     ).after(mirrorDir)
-    val pulled = command(
+    val pulled = pullImages(
       "pull the Octavia images",
-      pullScript,
-      unless = imagesPresent,
+      images,
+      hint = "the Image(...) values in octavia_single_node.scala",
       timeout = 2400
     ).after(podman, mirror)
     val commandsOk = command(
@@ -1287,11 +1003,12 @@ if __name__ == '__main__':
     ).after(pulled)
 
     val caDirectory = directory(caDir, mode = "0755").after(podman)
-    val ca = command(
+    val ca = serverCa(
       "fetch Keystone's CA from its TLS handshake",
-      caScript,
-      unless = caCurrent,
-      timeout = 60
+      ksFqdn,
+      5000,
+      caCert,
+      hint = "apply keystone_single_node.scala (it must serve server-chain.crt)"
     ).after(caDirectory, opensslPkg)
 
     val logDirectory = directory(logDir)
@@ -1302,38 +1019,103 @@ if __name__ == '__main__':
 
     val helperFile = secretFile(
       helperPath,
-      Secret(helper), // it holds the admin and octavia passwords
+      Secret(helper), // it holds the admin password
       mode = "0700",
       owner = "root",
       group = "root"
     )
     // Registration comes before the services start.
-    val registered = command(
+    val (keystoneHelper, ensured) = keystoneEntries(
       "register Octavia in Keystone",
-      s"$helperPath register",
-      unless = s"$helperPath registered >/dev/null 2>&1",
-      timeout = 120
-    ).after(helperFile, ca)
+      "octavia",
+      octaviaPassword,
+      List(
+        KeystoneService("octavia", "load-balancer", s"http://$fqdn:$apiPort")
+      ),
+      ksUrl,
+      adminPassword,
+      caCert,
+      roles = List(
+        "load-balancer_admin",
+        "load-balancer_member",
+        "load-balancer_observer",
+        "load-balancer_global_observer",
+        "load-balancer_quota_admin"
+      )
+    )
+    val registered = ensured.after(ca)
 
-    val fetchedImage = command(
+    val fetchedImage = download(
       "download the amphora image",
-      fetchImageScript,
-      unless = s"$imagePresent || $imageFileOk",
+      amphoraImageUrl,
+      amphoraFile,
+      magic = "QFI",
+      skipIf = imagePresent,
       timeout = 1800
     ).after(stateDirectory, tools(2))
-    val uploadedImage = command(
+    val (imageHelper, ensuredImage) = openstackImage(
       "upload the amphora image to Glance",
-      uploadImageScript,
-      unless = imagePresent,
-      timeout = 1800
-    ).after(fetchedImage, helperFile, ca, registered)
+      amphoraImageName,
+      amphoraFile,
+      ksUrl,
+      adminPassword,
+      caCert,
+      tags = List("amphora")
+    )
+    val uploadedImage = ensuredImage.after(fetchedImage, ca, registered)
+
+    val (netHelper, netMade) = openstackNetwork(
+      "make the amphora network and its subnet",
+      "lb-mgmt-net",
+      ksUrl,
+      adminPassword,
+      caCert,
+      project = "service",
+      subnet = Some(OpenstackSubnet("lb-mgmt-subnet", "192.168.200.0/24"))
+    )
+    val (mgmtSgHelper, mgmtSgMade) = openstackSecurityGroup(
+      "make the amphora management security group",
+      "lb-mgmt-sec-grp",
+      "Octavia, managed by Orphera",
+      List(("tcp", Some(9443)), ("icmp", None)),
+      ksUrl,
+      adminPassword,
+      caCert,
+      project = "service"
+    )
+    val (hmSgHelper, hmSgMade) = openstackSecurityGroup(
+      "make the health manager security group",
+      "lb-health-mgr-sec-grp",
+      "Octavia, managed by Orphera",
+      List(("udp", Some(5555)), ("icmp", None)),
+      ksUrl,
+      adminPassword,
+      caCert,
+      project = "service"
+    )
+    val (flavorHelper, flavorMade) = openstackFlavor(
+      "make the amphora flavor",
+      amphoraFlavorId,
+      "orphera.amphora",
+      1024, // MB
+      1, // vCPU
+      5, // GB
+      ksUrl,
+      adminPassword,
+      caCert
+    )
+    val network = netMade.after(ca, registered)
+    val groups = List(mgmtSgMade, hmSgMade).map(_.after(ca, registered))
+    val flavor = flavorMade.after(ca, registered)
 
     val plumbing = command(
-      "make the amphora network, security groups, flavor and the health manager port",
+      "make the health manager port",
       s"$helperPath plumbing",
       unless = s"$helperPath plumbing-ok >/dev/null 2>&1",
       timeout = 180
-    ).after(helperFile, ca, stateDirectory, registered)
+    ).after(
+      (helperFile :: ca :: stateDirectory :: registered :: network :: flavor :: groups)*
+    )
 
     val hmScriptFile = file(
       "/usr/local/sbin/orphera-octavia-hm-port",
@@ -1393,23 +1175,24 @@ if __name__ == '__main__':
       val conf =
         fileCopy(s"$dir/octavia.conf", s"$srcDir/octavia.conf", mode = "0600")
           .after(rendered, dirRes)
+          .notifies(unitService)
       val kollaCa = fileCopy(
         s"$dir/ca.crt",
         caCert,
         mode = "0644"
-      ).after(ca, dirRes)
-      val certCopies = command(
-        s"copy the certificates to the $name config",
-        certsCopyScript(dir),
-        unless = certsCopyCurrent(dir)
-      ).after(certs, dirRes)
+      ).after(ca, dirRes).notifies(unitService)
+      val certCopies = certFiles.map { f =>
+        fileCopy(s"$dir/$f", s"$certDir/$f", mode = certMode(f))
+          .after(certs, dirRes)
+          .notifies(unitService)
+      }
       val kollaJson = file(
         s"$dir/config.json",
         configJson(name),
         mode = "0644",
         owner = "root",
         group = "root"
-      ).after(dirRes)
+      ).after(dirRes).notifies(unitService)
       val unitFile = file(
         c.unitPath,
         c.render,
@@ -1419,8 +1202,11 @@ if __name__ == '__main__':
       ).notifies(unitService)
       Svc(
         unitService,
-        List(dirRes, conf, kollaCa, certCopies, kollaJson, unitFile),
-        List(conf, kollaCa, certCopies, kollaJson, unitFile)
+        List(dirRes, conf, kollaCa) ::: certCopies ::: List(
+          kollaJson,
+          unitFile
+        ),
+        List(conf, kollaCa) ::: certCopies ::: List(kollaJson, unitFile)
       )
     }
 
@@ -1437,37 +1223,25 @@ if __name__ == '__main__':
       )
     }
 
-    // A container reads its configuration and CA at start. So each unit is restarted when the hash of its config
-    // directory and unit file differs from the one noted at its last restart here. The stamp is written after the
-    // restart, so a change that came while the unit was skipped (an earlier step failed) is still picked up by the
-    // next run. The first run restarts each unit once.
-    val restarts = octaviaServices.zip(running).map { case (c, r) =>
-      val dir = s"$confRoot/${c.name.value}"
-      val stampFile = s"$stateDir/${c.name.value}.restart.stamp"
-      val hash =
-        s"cat $dir/* ${c.unitPath} 2>/dev/null | sha256sum | cut -c1-32"
-      command(
-        s"restart ${c.unitName} when its configuration or CA changed",
-        s"""set -e
-           |systemctl restart ${c.unitName}
-           |$hash > $stampFile""".stripMargin,
-        unless = s"""[ "$$($hash)" = "$$(cat $stampFile 2>/dev/null)" ]""",
-        timeout = 180
-      ).after(r)
-    }
+    // A container reads its configuration and CA at start. Each of its config files, the CA, the certificate copies
+    // and the unit file notifies its unit, so the unit is restarted when one of them changed and only then. A
+    // notification that could not be delivered (an earlier step failed) is kept by the node and delivered by the
+    // next run.
 
-    val answering = command(
+    // The API answers its version document without a token (200, or 300 for a list of versions).
+    val answering = waitForHttp(
       "octavia-api answers on its port",
-      waitHealthy,
-      unless = healthy,
-      timeout = 240
-    ).after((running ++ restarts)*)
+      s"http://localhost:$apiPort/",
+      status = List(200, 300),
+      timeout = 180,
+      hint = s"see 'journalctl -xeu orphera-octavia-api' and $logDir"
+    ).after(running*)
     val providerListed = command(
       "the amphora provider is listed",
       waitProviders,
       unless = providersListed,
       timeout = 240
-    ).after((answering :: (running ++ restarts))*)
+    ).after((answering :: running)*)
     val cycle = command(
       "make a load balancer, send an HTTP request through its amphora, delete it",
       cycleScript,
@@ -1488,9 +1262,17 @@ if __name__ == '__main__':
       tmpDirectory,
       srcDirectory,
       helperFile,
+      keystoneHelper,
       registered,
       fetchedImage,
+      imageHelper,
       uploadedImage,
+      netHelper,
+      mgmtSgHelper,
+      hmSgHelper,
+      flavorHelper,
+      network,
+      flavor,
       plumbing,
       hmScriptFile,
       hmUnitFile,
@@ -1499,5 +1281,5 @@ if __name__ == '__main__':
       certs,
       confTemplate,
       rendered
-    ) ++ svcs.flatMap(_.resources) ++ List(dbSync) ++ running ++ restarts ++
+    ) ++ groups ++ svcs.flatMap(_.resources) ++ List(dbSync) ++ running ++
       List(answering, providerListed, cycle)

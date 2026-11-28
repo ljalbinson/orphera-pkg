@@ -180,17 +180,59 @@ print('client %s in realm %s ready: redirect %s/login/generic_oauth' % (CLIENT_I
 
   // ---- cluster side (tst30) ----------------------------------------------
 
-  private val prepareScript =
+  private def yamlQuote(text: String): String =
+    "\"" + text.flatMap {
+      case '\\' => "\\\\"
+      case '"'  => "\\\""
+      case '\n' => "\\n"
+      case c    => c.toString
+    } + "\""
+
+  // The CA file has to be there before the ConfigMap can be made (a message that says where it comes from).
+  private val caCheckScript =
     s"""set -e
        |[ -s $stateDir/ca.crt ] || { echo "$stateDir/ca.crt is missing; run k8s_cert_manager.scala first" >&2; exit 1; }
-       |$kc create namespace $ns --dry-run=client -o yaml | $kc apply -f -
-       |$kc -n $ns create configmap orphera-ca --from-file=ca.crt=$stateDir/ca.crt --dry-run=client -o yaml | $kc apply -f -
-       |$kc -n $ns create secret generic grafana-oauth \\
-       |  --from-literal=GF_AUTH_GENERIC_OAUTH_CLIENT_SECRET='${clientSecret.reveal}' \\
-       |  --dry-run=client -o yaml | $kc apply -f -
-       |umask 077
-       |cat > $stateDir/monitoring-values.yaml <<EOF
-       |fullnameOverride: kps
+       |echo "the CA file is there"
+       |""".stripMargin
+
+  // The namespace, the CA ConfigMap and the OAuth Secret as `kubeObjects` (a description: made again if deleted,
+  // applied again if the CA file or the client secret changes). The namespace is made here too: the ConfigMap and
+  // the Secret must be there before the pods start.
+  private val configPlan: ApplyPlan =
+    import Resources.*
+    val oauthSecret = yamlQuote(clientSecret.reveal)
+    val (helper, made) = kubeObjects(
+      "namespace, CA ConfigMap and OAuth Secret",
+      "monitoring-config",
+      Secret(s"""apiVersion: v1
+                |kind: Namespace
+                |metadata:
+                |  name: $ns
+                |---
+                |apiVersion: v1
+                |kind: ConfigMap
+                |metadata:
+                |  name: orphera-ca
+                |  namespace: $ns
+                |data:
+                |  ca.crt: |
+                |    @@CA@@
+                |---
+                |apiVersion: v1
+                |kind: Secret
+                |metadata:
+                |  name: grafana-oauth
+                |  namespace: $ns
+                |type: Opaque
+                |stringData:
+                |  GF_AUTH_GENERIC_OAUTH_CLIENT_SECRET: $oauthSecret
+                |""".stripMargin),
+      yamlFrom = List("CA" -> s"$stateDir/ca.crt")
+    )
+    ApplyPlan.orFail("monitoring-config", List(helper, made))
+
+  private val monitoringValues =
+    s"""fullnameOverride: kps
        |kubeEtcd:
        |  enabled: true
        |kubeScheduler:
@@ -199,6 +241,11 @@ print('client %s in realm %s ready: redirect %s/login/generic_oauth' % (CLIENT_I
        |  enabled: true
        |kubeProxy:
        |  enabled: false
+       |defaultRules:
+       |  disabled:
+       |    # metrics-server (two replicas) is briefly unavailable now and then, which fired this warning and its
+       |    # RESOLVED message every few hours. KubeAggregatedAPIErrors stays.
+       |    KubeAggregatedAPIDown: true
        |prometheus:
        |  prometheusSpec:
        |    nodeSelector:
@@ -268,46 +315,52 @@ print('client %s in realm %s ready: redirect %s/login/generic_oauth' % (CLIENT_I
        |      role_attribute_path: "contains(groups[*], 'k8s-admins') && 'Admin' || contains(groups[*], 'k8s-developers') && 'Editor' || contains(groups[*], 'k8s-viewers') && 'Viewer'"
        |      role_attribute_strict: true
        |      tls_client_ca: /etc/grafana/ca/ca.crt
-       |EOF
-       |echo "namespace, CA ConfigMap, OAuth Secret and values written"
        |""".stripMargin
 
-  private val installScript =
-    s"""set -e
-       |export KUBECONFIG=/etc/kubernetes/admin.conf
-       |helm repo add prometheus-community https://prometheus-community.github.io/helm-charts --force-update >/dev/null
-       |helm repo update >/dev/null
-       |VER=$$(helm show chart prometheus-community/kube-prometheus-stack | awk '/^version:/{print $$2}')
-       |echo "installing kube-prometheus-stack chart $$VER"
-       |# k8s_alertmanager.scala keeps the e-mail receiver in this file; without it a re-run would drop the receiver
-       |EXTRA=""
-       |[ -s $stateDir/alertmanager-values.yaml ] && EXTRA="-f $stateDir/alertmanager-values.yaml" && echo "keeping the Alertmanager settings from alertmanager-values.yaml"
-       |helm upgrade --install kps prometheus-community/kube-prometheus-stack --version "$$VER" \\
-       |  --namespace $ns -f $stateDir/monitoring-values.yaml $$EXTRA --wait --timeout 20m
-       |$kc -n $ns get pods -o wide
-       |echo "kube-prometheus-stack $$VER installed"
-       |""".stripMargin
+  // k8s_alertmanager.scala keeps the e-mail receiver in alertmanager-values.yaml; it is passed after these
+  // values when it exists, so a new install does not drop the receiver.
+  private val installPlan: ApplyPlan =
+    import Resources.*
+    val (helper, installed) = helmRelease(
+      "helm install kube-prometheus-stack",
+      "kps",
+      "prometheus-community/kube-prometheus-stack",
+      "https://prometheus-community.github.io/helm-charts",
+      ns,
+      values = Some(Secret(monitoringValues)),
+      minutes = 20,
+      valuesFiles = List(s"$stateDir/alertmanager-values.yaml")
+    )
+    ApplyPlan.orFail("monitoring", List(helper, installed))
 
-  private val routeScript =
+  // The route on the Gateway's https listener, as `kubeObjects`; the wait below is the check that the Gateway took it.
+  private val routePlan: ApplyPlan =
+    import Resources.*
+    val (helper, made) = kubeObjects(
+      s"HTTPRoute for $grafanaHost",
+      "grafana-route",
+      Secret(s"""apiVersion: gateway.networking.k8s.io/v1
+                |kind: HTTPRoute
+                |metadata:
+                |  name: grafana
+                |  namespace: $ns
+                |spec:
+                |  parentRefs:
+                |  - name: public
+                |    namespace: gateway
+                |    sectionName: https
+                |  hostnames:
+                |  - $grafanaHost
+                |  rules:
+                |  - backendRefs:
+                |    - name: grafana
+                |      port: 80
+                |""".stripMargin)
+    )
+    ApplyPlan.orFail("grafana-route", List(helper, made))
+
+  private val routeWaitScript =
     s"""set -e
-       |cat <<EOF | $kc apply -f -
-       |apiVersion: gateway.networking.k8s.io/v1
-       |kind: HTTPRoute
-       |metadata:
-       |  name: grafana
-       |  namespace: $ns
-       |spec:
-       |  parentRefs:
-       |  - name: public
-       |    namespace: gateway
-       |    sectionName: https
-       |  hostnames:
-       |  - $grafanaHost
-       |  rules:
-       |  - backendRefs:
-       |    - name: grafana
-       |      port: 80
-       |EOF
        |$kc -n $ns wait --for=jsonpath='{.status.parents[0].conditions[?(@.type=="Accepted")].status}'=True httproute/grafana --timeout=120s
        |""".stripMargin
 
@@ -347,19 +400,25 @@ print('client %s in realm %s ready: redirect %s/login/generic_oauth' % (CLIENT_I
         )
         .build,
       stage("monitoring-config", node)
-        .task("namespace, CA ConfigMap, OAuth Secret, Helm values")(
-          Task.RunCommand(List("sh", "-c", prepareScript), timeoutSeconds = 120)
+        .task("check that the CA file is there")(
+          Task.RunCommand(List("sh", "-c", caCheckScript), timeoutSeconds = 60)
+        )
+        .task("namespace, CA ConfigMap and OAuth Secret")(
+          Task.Apply(configPlan)
         )
         .build,
       stage("install-kube-prometheus-stack", node)
         .task("helm install kube-prometheus-stack")(
-          Task
-            .RunCommand(List("sh", "-c", installScript), timeoutSeconds = 1500)
+          Task.Apply(installPlan)
         )
         .build,
       stage("publish-grafana", node)
         .task(s"HTTPRoute for $grafanaHost")(
-          Task.RunCommand(List("sh", "-c", routeScript), timeoutSeconds = 180)
+          Task.Apply(routePlan)
+        )
+        .task(s"wait for the Gateway to accept the route for $grafanaHost")(
+          Task
+            .RunCommand(List("sh", "-c", routeWaitScript), timeoutSeconds = 180)
         )
         .build,
       stage("test-monitoring", node)

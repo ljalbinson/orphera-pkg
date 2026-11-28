@@ -6,7 +6,7 @@ import orphera.orchestrator.*
 // docs/APPLY-DESIGN.md): on tst25 deletes the test database instance if one is left and removes the database
 // helper; on tst3 removes the mysql datastore, its versions and their configuration parameters from the trove
 // database on Galera; on tst21 deletes the guest image from Glance and the flavor orphera.trove and removes the
-// image helper.
+// image and flavor helpers.
 //
 // Instances you made yourself are NOT removed: delete them first (`openstack database instance delete`), or
 // they keep running with no datastore behind them.
@@ -36,10 +36,6 @@ object trove_guest_image_teardown extends OrpheraApply:
     "/var/lib/orphera/trove/register-datastore.sh"
   private val cleanupInstance =
     s"""$dbHelper instance-cleanup || echo "instance cleanup failed (continuing)""""
-  private val removeNodeFiles =
-    s"""rm -f $dbHelper $registerScriptPath
-       |echo "database helper removed"""".stripMargin
-  private val nodeFilesExist = s"[ -e $dbHelper ] || [ -e $registerScriptPath ]"
 
   // ---- tst3 ----
   // Deletes the datastore rows in dependency order. The tables are those of Trove's schema.
@@ -63,25 +59,17 @@ object trove_guest_image_teardown extends OrpheraApply:
        |[ -n "$$OUT" ]""".stripMargin
 
   // ---- tst21 ----
-  private val imageHelper = "/usr/local/sbin/orphera-trove-image"
-  private val removeImage =
-    s"$imageHelper remove || echo \"Glance cleanup failed (continuing)\""
-  // True when Glance has a guest image or the flavor is there.
-  private val imageExists =
-    s"[ -x $imageHelper ] && $imageHelper exists >/dev/null 2>&1"
-  private val helperPaths = s"$imageHelper /var/lib/orphera/trove-image/ca.crt"
-  private val helperExists =
-    s"for p in $helperPaths; do [ -e \"$$p\" ] && exit 0; done; exit 1"
-  private val removeHelper =
-    s"""rm -f $helperPaths
-       |echo "image helper removed"""".stripMargin
-  private val buildPaths =
-    "/var/lib/orphera/trove-image /opt/diskimage-builder-env /var/cache/orphera-trove-dib /opt/trove-src"
-  private val buildExists =
-    s"for p in $buildPaths; do [ -e \"$$p\" ] && exit 0; done; exit 1"
-  private val removeBuildFiles =
-    s"""rm -rf $buildPaths
-       |echo "build files removed"""".stripMargin
+  private val imageName = "trove-guest-ubuntu-noble"
+  private val flavorId = "orphera-trove"
+  // The helper that older descriptions kept here, removed too.
+  private val legacyHelper = "/usr/local/sbin/orphera-trove-image"
+  private val buildDirectories =
+    List(
+      "/var/lib/orphera/trove-image",
+      "/opt/diskimage-builder-env",
+      "/var/cache/orphera-trove-dib",
+      "/opt/trove-src"
+    )
 
   def describe(target: Node): List[ApplyResource] =
     if target.name == dbNode then
@@ -99,33 +87,25 @@ object trove_guest_image_teardown extends OrpheraApply:
         onlyIf = s"[ -x $dbHelper ]",
         timeout = 1200
       )
-      val files = command(
-        "remove the database helper",
-        removeNodeFiles,
-        onlyIf = nodeFilesExist
-      ).after(instance)
-      List(instance, files)
+      val files = List(absentFile(dbHelper), absentFile(registerScriptPath))
+        .map(_.after(instance))
+      instance :: files
     else
-      val glance = command(
-        "delete the guest image and the flavor",
-        removeImage,
-        onlyIf = imageExists,
-        timeout = 300
-      )
-      val helper = command(
-        "remove the image helper and the Keystone CA copy",
-        removeHelper,
-        onlyIf = helperExists
-      ).after(glance)
+      val image =
+        absentOpenstackImage("delete the guest image from Glance", imageName)
+      val flavor =
+        absentOpenstackFlavor("delete the flavor orphera.trove", flavorId)
+          .after(image)
+      val glance = List(image, flavor)
+      val helper = List(
+        absentFile(openstackFlavorHelperPath(flavorId)),
+        absentFile(openstackImageHelperPath(imageName)),
+        absentFile(legacyHelper),
+        absentFile("/var/lib/orphera/trove-image/ca.crt")
+      ).map(_.after(glance*))
       if removeBuild then
-        List(
-          glance,
-          helper,
-          command(
-            "remove the built image, the build environment and the Trove source (TROVE_REMOVE_BUILD=1)",
-            removeBuildFiles,
-            onlyIf = buildExists,
-            timeout = 300
-          ).after(helper)
+        // The built image, the build environment and the Trove source (TROVE_REMOVE_BUILD=1).
+        glance ++ helper ++ buildDirectories.map(d =>
+          absentDirectory(d, recursive = true).after(helper*)
         )
-      else List(glance, helper)
+      else glance ++ helper

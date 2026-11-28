@@ -1641,7 +1641,7 @@ is ignored with a warning. Every disk gets a fixed QEMU serial (`<vm>-root`,
 `/dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_<serial>`, which provisioning prints
 for use in `inventory.yaml` (`osd_disks`/`zap_disks`). The VM is not marked
 **autostart** on the hypervisor unless `ORPHERA_VM_AUTOSTART=1` is set (or
-`utils/vmctl.sh autostart add <vm>` afterwards). After provisioning, run
+`utils/vmctl.sh autostart add --nodes <vm>` afterwards). After provisioning, run
 `orphera bootstrap --forget-host-key` to clear a stale `known_hosts` entry for a
 rebuilt host.
 
@@ -1665,22 +1665,22 @@ A failed start, resume or reset is tried again after 5 s, up to 3 more times by 
 `ORPHERA_VM_RETRIES=<n>` sets the number (0 turns it off). An undefined domain is not retried.
 Before a start it also removes stale Open vSwitch `vnetN` ports (no network device behind them) from the hypervisor's bridges: libvirt leaves them behind after an unclean stop and then fails a start with "vnetN is actually attached to bridge ...".
 
-`utils/vmctl.sh start|stop|reboot <vm>...` runs these three playbooks without the playbook path and
+`utils/vmctl.sh start|stop|reboot --nodes <vm>,...` runs these three playbooks without the playbook path and
 `--config`, and prints one line per step instead of the echoed script (`--retries N` for start, `--wait S` and
 `--force` for stop and reboot, `--hard` / `--soft` for reboot; the full output of a failed VM is kept in
 `/tmp/vmctl.<vm>.log`):
 
 ```bash
-utils/vmctl.sh start <vm>
-utils/vmctl.sh start --retries 5 <vm1> <vm2> <vm3>
+utils/vmctl.sh start --nodes <vm>
+utils/vmctl.sh start --retries 5 --nodes <vm1>,<vm2>,<vm3>
 ```
 
 `start`, `stop`, `reboot` and `autostart add|remove` also take `--node-groups g1,g2` and `--exclude-nodes a,b`, which
 work as they do for the `orphera` commands ([Targeting groups](#inventory)). Groups and VM names are handled one after
 another in the order they are given on the command line (a VM named twice keeps its first place), so
-`--node-groups lustre-servers 49 50` starts the servers before the clients and `49 50 --node-groups lustre-servers`
-the reverse. Options may come before or after the names. `--exclude-nodes` needs `--node-groups` or VM names with it;
-it never means every VM.
+`--node-groups lustre-servers --nodes 49,50` starts the servers before the clients and `--nodes 49,50 --node-groups lustre-servers`
+the reverse. VM names are always given after `--nodes`, as a comma-separated list; a bare name is refused with an error.
+`--exclude-nodes` needs `--node-groups` or `--nodes` with it; it never means every VM.
 
 ```bash
 utils/vmctl.sh stop --node-groups k8s --wait 300
@@ -1702,7 +1702,7 @@ utils/vmctl.sh start --parallel 4 --node-groups ceph,galera
 `utils/vmctl` (no `.sh`) is the same front end compiled to a native executable; see [Scala Native versions of the VM
 scripts](#scala-native-versions-of-the-vm-scripts).
 
-`utils/vmctl.sh shutdown-all <hypervisor>...` empties hypervisors before maintenance
+`utils/vmctl.sh shutdown-all --nodes <hypervisor>,...` empties hypervisors before maintenance
 (`manifests/kvm_shutdown_all.scala`; hypervisors are given by name, none is assumed). Without `--yes` it
 only lists the running VMs on each. With `--yes` it asks them all to shut down (`virsh shutdown`), waits
 (`--wait S`, default 120) and fails if any is still running, or powers those off with `--force`. The VM
@@ -1715,7 +1715,7 @@ its hypervisor boots) on or off for the VMs named, for every VM on the `--hyperv
 for every VM on every hypervisor with `--all`. Running VMs are not started or stopped by it, and a VM already as asked
 is left alone. `vmctl.sh list` shows the AUTOSTART column (`yes`, `no`, or `?` if libvirt did not say).
 
-`utils/vmctl.sh start-all <hypervisor>...` (`manifests/kvm_start_all.scala`) starts exactly those VMs again, so a VM
+`utils/vmctl.sh start-all --nodes <hypervisor>,...` (`manifests/kvm_start_all.scala`) starts exactly those VMs again, so a VM
 that was off before stays off, and drops each from the record once it is running (`--all`: every shut-off VM on
 the hypervisor instead; `--dry-run` to only list; `--retries N`, default 3; `--except`). It removes stale Open
 vSwitch ports first, as `kvm_vm_start.scala` does, and does not wait for the guests to boot. VMs that depend on each
@@ -1723,12 +1723,12 @@ other across hypervisors are not ordered: run it for one hypervisor at a time, i
 and use `galera_cold_start.scala` for Galera.
 
 ```bash
-utils/vmctl.sh shutdown-all gs2 st0           # list only
-utils/vmctl.sh shutdown-all --yes gs2         # shut them down
-utils/vmctl.sh start-all gs2                   # start them again
+utils/vmctl.sh shutdown-all --nodes gs2,st0    # list only
+utils/vmctl.sh shutdown-all --yes --nodes gs2   # shut them down
+utils/vmctl.sh start-all --nodes gs2           # start them again
 utils/vmctl.sh list                           # every VM on every hypervisor: state, vCPUs, memory, autostart
-utils/vmctl.sh list gs2 st0                   # just those hypervisors
-utils/vmctl.sh autostart add <vm>...          # libvirt starts the VM when its hypervisor boots
+utils/vmctl.sh list --nodes gs2,st0            # just those hypervisors
+utils/vmctl.sh autostart add --nodes <vm>,...  # libvirt starts the VM when its hypervisor boots
 utils/vmctl.sh autostart remove --hypervisor gs2   # turn it off for every VM on gs2
 utils/vmctl.sh autostart add --all            # every VM on every hypervisor
 ```
@@ -1965,7 +1965,7 @@ node isn't confirmed within the timeout, and it prints which ones.
 
   ```bash
   orphera secrets generate orphera/agent-token     # once
-  utils/set-agent-token.sh tst0 tst1 ...           # every node, over SSH
+  utils/set-agent-token.sh --nodes tst0,tst1,...  # every node, over SSH
   ```
 
   `utils/set-agent-token.sh` sends the token on SSH's standard input
@@ -2379,8 +2379,8 @@ The tarball unpacks as `orphera-<version>/` with `bin/`, `lib/orphera/` and `sha
 anywhere, set `ORPHERA_SITE_DIR` to a directory of your own, and run `<dir>/bin/orphera`.
 
 **Utility commands.** `vmctl`, `start-vm`, `stop-vm`, `reboot-vm`, `list-vms`, `move-vm`, `galera-cold-start`,
-`scan-vm-sizes` and `vbmc-vm` (the list is `packaging/cli/utilities`) are commands on the `PATH`, so `vmctl start 30` works
-from any directory as `utils/vmctl.sh start 30` does in the checkout. Where they come from depends on how `orphera` was
+`scan-vm-sizes` and `vbmc-vm` (the list is `packaging/cli/utilities`) are commands on the `PATH`, so `vmctl start --nodes 30` works
+from any directory as `utils/vmctl.sh start --nodes 30` does in the checkout. Where they come from depends on how `orphera` was
 installed:
 
 | Installed by | Where | What each one runs |
@@ -3465,7 +3465,7 @@ playbooks marked DRAFT there have been written but not all run on the lab.
 | `wordpress_site.scala`, `wordpress_teardown.scala` | A WordPress site (nginx, php-fpm) on tst7 with its database on the Galera cluster, and its removal |
 | `ceph_observability.scala` | Adds Ceph's own metrics to the Prometheus and Grafana stack on tst6 (see `manifests/Ceph-Observability-Lifecycle-Howto.md`) |
 | `ceph_performance_test.scala` | A `rados bench` run as a playbook, with pass or fail checks and cleanup |
-| `ceph_mon_keyring.scala`, `ceph_mon_quorum.scala`, `ceph_mgr.scala`, `ceph_admin_keyring.scala`, `ceph-osd.scala`, `ceph-health-fixes.scala`, `ceph_teardown.scala` | The steps of the manual Ceph path, in the order in `manifests/Ceph-Playbook-Usage.md`, and its teardown |
+| `ceph_mon_keyring.scala`, `ceph_mon_quorum.scala`, `ceph_mgr.scala`, `ceph_admin_keyring.scala`, `ceph-osd.scala`, `ceph_health_fixes.scala`, `ceph_teardown.scala` | The steps of the manual Ceph path, in the order in `manifests/Ceph-Playbook-Usage.md`, and its teardown |
 | `cephadm_add_mons.scala`, `cephadm_mon_rolling_upgrade.scala` | The cephadm path: adding monitors on tst1 and tst2, and a package-based rolling monitor upgrade with tst0 first (for a cephadm cluster, use `ceph_upgrade.scala`) |
 | `ceph_upgrade.scala` | Staged cephadm upgrade of the whole cluster to a new release, health-checked between stages (see [upgrading the Ceph cluster](#example-upgrading-the-ceph-cluster-cephadm)) |
 | `ceph_client_upgrade.scala`, `ceph_key_rotation.scala` | Ceph's own client for the OpenStack services and compute hosts, then their keys rotated to `aes256k` and the monitors set to `aes256k` only |

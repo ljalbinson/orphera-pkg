@@ -10,7 +10,7 @@ import java.util.regex.Pattern
 import scala.annotation.tailrec
 import scala.util.Try
 
-import orphera.nativeutils.{Bash, Out, Proc, Sources, VmCommon}
+import orphera.nativeutils.{Bash, NodesArg, Out, Proc, Sources, VmCommon}
 
 /** utils/vmctl.sh in Scala, for Scala Native: the same actions, options,
   * output, log files and exit codes. The VM playbooks in manifests/ do the
@@ -105,12 +105,14 @@ object Main:
         rest match
           case v :: t if v.nonEmpty => parse(t, o.copy(nexclude = o.nexclude :+ v), src)
           case _                    => die(2, "--exclude-nodes needs a VM name")
+      case "--nodes" :: rest =>
+        val names = NodesArg.parse(rest.headOption)
+        parse(rest.drop(1), o.copy(pos = o.pos ++ names, order = o.order ++ names.map(Item.Name(_))), src)
       case ("-h" | "--help") :: _ =>
         usage(src)
         sys.exit(0)
       case opt :: _ if opt.startsWith("-") => die(2, s"unknown option $opt")
-      case p :: t =>
-        parse(t, o.copy(pos = o.pos :+ p, order = o.order :+ Item.Name(p)), src)
+      case p :: _ => NodesArg.unexpected(p)
 
   /** The option combinations vmctl.sh refuses, with its messages, in its order. */
   private def check(action: String, o: Opts): Unit =
@@ -146,7 +148,7 @@ object Main:
     if o.ngroups.isEmpty && o.pos.isEmpty then
       die(
         2,
-        "--exclude-nodes takes VMs out of a selection: give --node-groups or VM names as well"
+        "--exclude-nodes takes VMs out of a selection: give --node-groups or --nodes as well"
       )
     val members: Map[String, String] =
       if o.ngroups.isEmpty then Map.empty

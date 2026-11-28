@@ -59,39 +59,74 @@ object file_server extends OrpheraPlaybook:
 
   private val packages = List("samba", "smbclient", "avahi-daemon")
 
-  private val userList = users.mkString(" ")
-
-  // Accounts and the share directories. Each user's lines are written out, with the password from the
-  // store; the password is on the node's command line while this runs (see "Secrets" in the README).
-
-  private val accountsScript: String =
+  // Accounts and the share directories, as one description. A name that is already an account on the node
+  // is left as it is (its shell and its home are not touched) and only added to the group; one that is not
+  // gets a login-less account (no home directory, no shell). Each user's Samba password is the stored one: a
+  // command that only runs when a login with it fails; the password is on the node's command line while it
+  // is checked or set (see "Secrets" in the README).
+  // Not `import Resources.*`: its `group` would clash with this object's `group`.
+  private val accountsPlan: ApplyPlan =
+    import Resources.{command, directory, user}
     if badUsers.nonEmpty then
       val shown = badUsers.mkString(" ").replaceAll("[^A-Za-z0-9_ -]", "?")
-      s"""echo "FILE_SERVER_USERS has names that are not valid account names: $shown" >&2
-         |exit 1""".stripMargin
+      ApplyPlan.orFail(
+        "file-server-accounts",
+        List(
+          command(
+            "refuse names that are not valid account names",
+            s"""echo "FILE_SERVER_USERS has names that are not valid account names: $shown" >&2
+               |exit 1""".stripMargin,
+            unless = "false"
+          )
+        )
+      )
     else
-      val perUser = users
-        .map { u =>
-          val pw = quoted(Secrets.secret(s"fileserver/$u").reveal)
-          s"""id -u $u >/dev/null 2>&1 || useradd --no-create-home --shell /usr/sbin/nologin $u
-             |usermod -aG $group $u
-             |printf '%s\\n%s\\n' $pw $pw | smbpasswd -s -a $u""".stripMargin
-        }
-        .mkString("\n")
-      val timeMachineDir =
-        if timeMachine then s"""mkdir -p $timeMachinePath
-             |chgrp $group $timeMachinePath
-             |chmod 2770 $timeMachinePath""".stripMargin
-        else ""
-      s"""set -e
-         |getent group $group >/dev/null || groupadd $group
-         |$perUser
-         |mkdir -p $sharePath
-         |chgrp $group $sharePath
-         |chmod 2775 $sharePath
-         |$timeMachineDir
-         |[ -f /etc/samba/smb.conf.orig ] || cp -p /etc/samba/smb.conf /etc/samba/smb.conf.orig
-         |echo "accounts and directories ready for: $userList"""".stripMargin
+      val fileUsers = Resources.group(group)
+      val perUser = users.flatMap { u =>
+        val made = command(
+          s"make the login-less account $u if it is missing",
+          s"useradd --no-create-home --shell /usr/sbin/nologin $u",
+          unless = s"id -u $u >/dev/null 2>&1"
+        )
+        val member = user(u, groups = List(group)).after(made, fileUsers)
+        val pw = quoted(Secrets.secret(s"fileserver/$u").reveal)
+        val smbPassword = command(
+          s"set the Samba password of $u",
+          s"""printf '%s\\n%s\\n' $pw $pw | smbpasswd -s -a $u""",
+          unless = s"""smbclient -L localhost -U ${quoted(
+              s"$u%" + Secrets.secret(s"fileserver/$u").reveal
+            )} >/dev/null 2>&1"""
+        ).after(member)
+        List(made, member, smbPassword)
+      }
+      val shareDirectory = directory(
+        sharePath,
+        mode = "2775",
+        owner = "root",
+        group = group
+      ).after(fileUsers)
+      val timeMachineDirectory =
+        if timeMachine then
+          List(
+            directory(
+              timeMachinePath,
+              mode = "2770",
+              owner = "root",
+              group = group
+            ).after(fileUsers)
+          )
+        else Nil
+      val keepOriginal = command(
+        "keep the original smb.conf",
+        "cp -p /etc/samba/smb.conf /etc/samba/smb.conf.orig",
+        creates = "/etc/samba/smb.conf.orig"
+      )
+      ApplyPlan.orFail(
+        "file-server-accounts",
+        fileUsers :: perUser ::: List(
+          shareDirectory
+        ) ::: timeMachineDirectory ::: List(keepOriginal)
+      )
 
   // The macOS settings are the ones the Samba project documents for vfs_fruit. `multicast dns register = no`
   // leaves announcing to Avahi, so the two do not both answer. Printing is off: nothing here shares a printer.
@@ -179,21 +214,64 @@ object file_server extends OrpheraPlaybook:
        |</service-group>
        |""".stripMargin
 
-  // testparm refuses a configuration Samba would not load, so a typo stops the playbook before the restart.
-  private val startScript: String =
-    s"""set -e
-       |testparm -s /etc/samba/smb.conf >/dev/null
-       |systemctl enable smbd avahi-daemon
-       |systemctl restart smbd avahi-daemon
-       |sleep 2
-       |systemctl is-active --quiet smbd || { echo "smbd is not running: journalctl -xeu smbd" >&2; exit 1; }
-       |systemctl is-active --quiet avahi-daemon || { echo "avahi-daemon is not running: journalctl -xeu avahi-daemon" >&2; exit 1; }
-       |if command -v ufw >/dev/null 2>&1 && ufw status | grep -q '^Status: active'; then
-       |  ufw allow Samba >/dev/null
-       |  ufw allow 5353/udp >/dev/null
-       |  echo "ufw: Samba and mDNS allowed"
-       |fi
-       |echo "smbd and avahi-daemon running"""".stripMargin
+  // smb.conf, the Avahi announcement and the two services as one description. Each file notifies its service,
+  // so smbd and avahi-daemon are restarted only when their own file changed (before: both restarted on every
+  // run, which dropped the connected clients). testparm refuses a configuration Samba would not load: it runs
+  // after smb.conf is written and, when it fails, stops before smbd is touched (smbd keeps running on the old
+  // configuration; the restart it was owed is delivered by the next run). The firewall rules are added only
+  // when ufw is active and one of them is missing.
+  private val servicesPlan: ApplyPlan =
+    import Resources.{command, file, service}
+    val smbd = service("smbd.service")
+    val avahi = service("avahi-daemon.service")
+    val smbConfFile = file(
+      "/etc/samba/smb.conf",
+      smbConf,
+      mode = "0644",
+      owner = "root",
+      group = "root"
+    ).notifies(smbd)
+    val avahiFile = file(
+      "/etc/avahi/services/orphera-fileserver.service",
+      avahiService,
+      mode = "0644",
+      owner = "root",
+      group = "root"
+    ).notifies(avahi)
+    val configOk = command(
+      "check smb.conf with testparm",
+      "testparm -s /etc/samba/smb.conf >/dev/null",
+      unless = "testparm -s /etc/samba/smb.conf >/dev/null 2>&1"
+    ).after(smbConfFile)
+    val smbdRunning = smbd.after(configOk)
+    val avahiRunning = avahi.after(avahiFile)
+    val firewall = command(
+      "allow Samba and mDNS through ufw",
+      """ufw allow Samba >/dev/null
+        |ufw allow 5353/udp >/dev/null
+        |echo "ufw: Samba and mDNS allowed"""".stripMargin,
+      onlyIf =
+        "command -v ufw >/dev/null 2>&1 && ufw status | grep -q '^Status: active' && { ! ufw status | grep -qw Samba || ! ufw status | grep -q '5353/udp'; }"
+    ).after(smbdRunning, avahiRunning)
+    val running = command(
+      "smbd and avahi-daemon are running",
+      """systemctl is-active --quiet smbd || { echo "smbd is not running: journalctl -xeu smbd" >&2; exit 1; }
+        |systemctl is-active --quiet avahi-daemon || { echo "avahi-daemon is not running: journalctl -xeu avahi-daemon" >&2; exit 1; }""".stripMargin,
+      unless =
+        "systemctl is-active --quiet smbd && systemctl is-active --quiet avahi-daemon"
+    ).after(smbdRunning, avahiRunning)
+    ApplyPlan.orFail(
+      "file-server-services",
+      List(
+        smbConfFile,
+        avahiFile,
+        configOk,
+        smbdRunning,
+        avahiRunning,
+        firewall,
+        running
+      )
+    )
 
   // A real login, a listing and a file written, read back and removed, through the share the way a client
   // does it. The first user is enough: the others have the same group and the same share.
@@ -224,28 +302,12 @@ object file_server extends OrpheraPlaybook:
         Task.Install(packages = packages, updateCache = true)
       )
       .task("make the accounts, the group and the share directories")(
-        Task.RunCommand(List("sh", "-c", accountsScript), timeoutSeconds = 120)
+        Task.Apply(accountsPlan)
       )
-      .task("write smb.conf")(
-        Task.WriteFile(
-          content = smbConf,
-          dest = "/etc/samba/smb.conf",
-          owner = "root",
-          group = "root",
-          mode = 420
-        )
-      )
-      .task("announce the server with avahi")(
-        Task.WriteFile(
-          content = avahiService,
-          dest = "/etc/avahi/services/orphera-fileserver.service",
-          owner = "root",
-          group = "root",
-          mode = 420
-        )
-      )
-      .task("check the configuration and start the services")(
-        Task.RunCommand(List("sh", "-c", startScript), timeoutSeconds = 120)
+      .task(
+        "write smb.conf and the Avahi announcement; run smbd and avahi-daemon"
+      )(
+        Task.Apply(servicesPlan)
       )
       .task("check the share by using it")(
         Task.RunCommand(List("sh", "-c", checkScript), timeoutSeconds = 60)

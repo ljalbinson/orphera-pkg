@@ -19,10 +19,10 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 //     tst3/tst4/tst5 — one exporter per node, each reading its own local
 //     mysqld over a unix socket, same "every node exports its own view"
 //     shape as node_exporter.
-// Then tst7's prometheus.yml is rewritten to scrape both, on top of the
-// node_exporter + self jobs observability_stack.scala already wrote —
-// this file assumes that one is already applied and healthy, and does
-// NOT repeat its stages.
+// Then tst7 scrapes both, through /etc/prometheus/scrape.d/orphera-extended.yml
+// next to the node_exporter + self jobs observability_stack.scala already put
+// in prometheus.yml — this file assumes that one is already applied and
+// healthy, and does NOT repeat its stages or rewrite prometheus.yml.
 //
 // haproxy's metrics endpoint is bound to {{cluster_ip}} specifically, on
 // a dedicated port (8404), not the wildcard — the exact same lesson
@@ -35,13 +35,11 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 // but the bind is still scoped deliberately rather than left wildcard
 // out of habit.
 //
-// The haproxy config block is appended idempotently: a `sed` delete of
-// any previously-appended block (bounded by BEGIN/END marker comments)
-// runs before every append, so re-running this manifest never duplicates
-// the frontend stanza — appending blindly on every run, the way
-// haproxy.cfg's own full-file rewrite in mariadb_haproxy_keepalived.scala
-// gets to just overwrite wholesale, isn't available here since this file
-// doesn't own that file's other content and can't risk clobbering it.
+// The haproxy metrics frontend is part of the haproxy.cfg that
+// mariadb_haproxy_keepalived.scala writes (BEGIN/END orphera-prometheus-metrics
+// block): that playbook rewrites the whole file, so a block appended from here
+// would be removed by its next run. This playbook only confirms the endpoint
+// answers.
 //
 // mysqld_exporter credentials: a dedicated, minimally-privileged
 // 'exporter'@'localhost' MariaDB user (PROCESS + REPLICATION CLIENT +
@@ -62,7 +60,7 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 // ("no user specified in section or parent" / "Error parsing host
 // config file=.my.cnf err=\"no configuration found\""). Its only
 // connection-config mechanism is `--config.my-cnf=<path>`, an ini-style
-// `[client]` file — fixed in configureMysqldExporterScript below, which
+// `[client]` file — fixed in mysqldExporterPlan below, which
 // writes that file explicitly rather than relying on an env var this
 // binary never reads. The `EnvironmentFile=/etc/default/<pkg>` +
 // `ExecStart=... $ARGS` mechanism itself WAS exactly as assumed
@@ -82,32 +80,13 @@ object observability_extended extends OrpheraClusterPlaybook:
   private val exporterUser = "exporter"
   private val exporterPassword = Secrets.secret("observability/mysqld-exporter")
 
-  // tst3/tst4/tst5 only. Appends (idempotently) a small Prometheus-format
-  // stats frontend to the haproxy.cfg that mariadb_haproxy_keepalived.scala
-  // already wrote — assumes that file is already applied; this does not
-  // write a full haproxy.cfg of its own.
+  // tst3/tst4/tst5 only. The Prometheus-format stats frontend itself is in the
+  // haproxy.cfg that mariadb_haproxy_keepalived.scala writes (it writes the file
+  // whole, so a block appended here would be removed by its next run). This only
+  // checks that the endpoint answers.
   private val haproxyMetricsScript =
-    s"""sed -i '/# BEGIN orphera-prometheus-metrics/,/# END orphera-prometheus-metrics/d' /etc/haproxy/haproxy.cfg
-       |cat >> /etc/haproxy/haproxy.cfg <<'EOF'
-       |# BEGIN orphera-prometheus-metrics
-       |frontend prometheus_metrics
-       |    bind {{cluster_ip}}:$haproxyMetricsPort
-       |    mode http
-       |    http-request use-service prometheus-exporter if { path /metrics }
-       |    no log
-       |# END orphera-prometheus-metrics
-       |EOF
-       |if ! haproxy -c -f /etc/haproxy/haproxy.cfg; then
-       |  echo "haproxy.cfg failed its own -c config check after adding the metrics frontend — see the haproxy output above" >&2
-       |  exit 1
-       |fi
-       |systemctl restart haproxy
-       |if ! systemctl is-active --quiet haproxy; then
-       |  echo "haproxy failed to restart after adding the metrics frontend — see 'journalctl -xeu haproxy' for the real reason" >&2
-       |  exit 1
-       |fi
-       |if ! curl -sf http://{{cluster_ip}}:$haproxyMetricsPort/metrics | grep -q '^haproxy_'; then
-       |  echo "haproxy is running but {{cluster_ip}}:$haproxyMetricsPort/metrics didn't return haproxy_* series" >&2
+    s"""if ! curl -sf http://{{cluster_ip}}:$haproxyMetricsPort/metrics | grep -q '^haproxy_'; then
+       |  echo "{{cluster_ip}}:$haproxyMetricsPort/metrics didn't return haproxy_* series: run mariadb_haproxy_keepalived.scala (its haproxy.cfg carries the metrics frontend), then this playbook again" >&2
        |  exit 1
        |fi
        |echo "haproxy prometheus-exporter frontend listening on :$haproxyMetricsPort"""".stripMargin
@@ -183,48 +162,69 @@ object observability_extended extends OrpheraClusterPlaybook:
   // time. Fixed with `systemctl reset-failed` immediately before
   // enabling/restarting, so this script's own restart is never starting
   // from a rate-limited state it didn't create.
-  private val configureMysqldExporterScript =
-    s"""cat > /etc/prometheus-mysqld-exporter.cnf <<EOF
-       |[client]
-       |user = $exporterUser
-       |password = ${exporterPassword.reveal}
-       |socket = /run/mysqld/mysqld.sock
-       |EOF
-       |chown root:prometheus /etc/prometheus-mysqld-exporter.cnf
-       |chmod 640 /etc/prometheus-mysqld-exporter.cnf
-       |cat > /etc/default/prometheus-mysqld-exporter <<EOF
-       |ARGS=--config.my-cnf=/etc/prometheus-mysqld-exporter.cnf
-       |EOF
-       |systemctl reset-failed prometheus-mysqld-exporter 2>/dev/null || true
-       |systemctl enable --now prometheus-mysqld-exporter
-       |systemctl restart prometheus-mysqld-exporter
-       |if ! systemctl is-active --quiet prometheus-mysqld-exporter; then
-       |  echo "prometheus-mysqld-exporter failed to start — see 'journalctl -xeu prometheus-mysqld-exporter' for the real reason" >&2
-       |  exit 1
-       |fi
-       |READY=false
-       |for i in $$(seq 1 10); do
-       |  if curl -sf http://localhost:9104/metrics 2>/dev/null | grep -q '^mysql_up'; then
-       |    READY=true
-       |    break
-       |  fi
-       |  sleep 1
-       |done
-       |if [ "$$READY" != "true" ]; then
-       |  echo "prometheus-mysqld-exporter is running but :9104/metrics never showed mysql_up after 10s — check /etc/prometheus-mysqld-exporter.cnf and 'journalctl -u prometheus-mysqld-exporter'" >&2
-       |  exit 1
-       |fi
-       |echo "mysqld_exporter running on :9104, reading this node's own mysqld over the local socket"""".stripMargin
+  private val exporterCnf = "/etc/prometheus-mysqld-exporter.cnf"
 
-  // tst7 only. Full rewrite of prometheus.yml, now four scrape jobs
-  // instead of observability_stack.scala's original two — node_exporter
-  // and the self-scrape job are carried over unchanged, haproxy and
-  // mysqld are new. This file owns the full prometheus.yml from this
-  // point on; re-running observability_stack.scala after this would
-  // overwrite these two new jobs back out, which is expected (that file
-  // doesn't know about this one) rather than a bug in either.
-  private val nodeExporterTargets =
-    allNodes.map(n => s"'{{nodes.$n.cluster_ip}}:9100'").mkString(", ")
+  // A package that has just been installed has already tried to start with no
+  // config and may sit inside systemd's start-limit; clear that so the
+  // service step below starts from a clean state.
+  private val resetFailedScript =
+    """systemctl reset-failed prometheus-mysqld-exporter 2>/dev/null || true
+      |echo "prometheus-mysqld-exporter: failed state cleared"""".stripMargin
+
+  // The exporter's connection file (it holds a password: root:prometheus 0640,
+  // content never shown), the file naming it for the unit, and the service:
+  // restarted by a change to either file, and only then.
+  private val mysqldExporterPlan: ApplyPlan =
+    import Resources.*
+    val unit = service("prometheus-mysqld-exporter")
+    ApplyPlan.orFail(
+      "mysqld-exporter",
+      List(
+        secretFile(
+          exporterCnf,
+          Secret(s"""[client]
+                    |user = $exporterUser
+                    |password = ${exporterPassword.reveal}
+                    |socket = /run/mysqld/mysqld.sock
+                    |""".stripMargin),
+          mode = "0640",
+          owner = "root",
+          group = "prometheus"
+        ).notifies(unit),
+        file(
+          "/etc/default/prometheus-mysqld-exporter",
+          s"ARGS=--config.my-cnf=$exporterCnf\n",
+          mode = "0644",
+          owner = "root",
+          group = "root"
+        ).notifies(unit),
+        unit
+      )
+    )
+
+  // `systemctl restart` returns once the process starts, but the exporter's
+  // HTTP listener binds a moment later: a short bounded poll, as before.
+  private val mysqldExporterReadyScript =
+    """READY=false
+      |for i in $(seq 1 10); do
+      |  if curl -sf http://localhost:9104/metrics 2>/dev/null | grep -q '^mysql_up'; then
+      |    READY=true
+      |    break
+      |  fi
+      |  sleep 1
+      |done
+      |if [ "$READY" != "true" ]; then
+      |  echo "prometheus-mysqld-exporter is running but :9104/metrics never showed mysql_up after 10s — check /etc/prometheus-mysqld-exporter.cnf and 'journalctl -u prometheus-mysqld-exporter'" >&2
+      |  exit 1
+      |fi
+      |echo "mysqld_exporter running on :9104, reading this node's own mysqld over the local socket"""".stripMargin
+
+  // tst7 only. The haproxy and mysqld jobs live in their own file under
+  // /etc/prometheus/scrape.d, which observability_stack.scala's prometheus.yml
+  // names with `scrape_config_files`. This playbook therefore no longer owns
+  // prometheus.yml, and re-running observability_stack.scala no longer removes
+  // these two jobs (it rewrites prometheus.yml, not this file). Needs that
+  // playbook applied first, as before.
   private val haproxyExporterTargets =
     haProxyNodes
       .map(n => s"'{{nodes.$n.cluster_ip}}:$haproxyMetricsPort'")
@@ -232,26 +232,14 @@ object observability_extended extends OrpheraClusterPlaybook:
   private val mysqldExporterTargets =
     haProxyNodes.map(n => s"'{{nodes.$n.cluster_ip}}:9104'").mkString(", ")
 
-  // prometheus.yml with the scrape targets (`{{nodes.<n>.cluster_ip}}` rendered
-  // on the node), as an apply description: the file, then prometheus restarted
-  // if it changed. The `/-/healthy` check the script ran after the restart is
-  // covered by the health stage below.
+  // The scrape file (`{{nodes.<n>.cluster_ip}}` rendered on the node), as an
+  // apply description: the file, then prometheus restarted if it changed.
   private val prometheusPlan: ApplyPlan =
     import Resources.*
     val dir = directory("/etc/prometheus/scrape.d", mode = "0755")
     val cfg = fileTemplate(
-      "/etc/prometheus/prometheus.yml",
-      s"""global:
-         |  scrape_interval: 15s
-         |
-         |scrape_config_files:
-         |  - /etc/prometheus/scrape.d/*.yml
-         |
-         |scrape_configs:
-         |  - job_name: 'node_exporter'
-         |    static_configs:
-         |      - targets: [$nodeExporterTargets]
-         |
+      "/etc/prometheus/scrape.d/orphera-extended.yml",
+      s"""scrape_configs:
          |  - job_name: 'haproxy'
          |    static_configs:
          |      - targets: [$haproxyExporterTargets]
@@ -259,16 +247,14 @@ object observability_extended extends OrpheraClusterPlaybook:
          |  - job_name: 'mysqld'
          |    static_configs:
          |      - targets: [$mysqldExporterTargets]
-         |
-         |  - job_name: 'prometheus'
-         |    static_configs:
-         |      - targets: ['localhost:9090']
          |""".stripMargin,
-      mode = "0644"
+      mode = "0644",
+      owner = "root",
+      group = "root"
     )
     val unit = service("prometheus")
     ApplyPlan.orFail(
-      "prometheus-config-extended",
+      "prometheus-scrape-extended",
       List(dir, cfg.after(dir).notifies(unit), unit)
     )
 
@@ -294,8 +280,8 @@ object observability_extended extends OrpheraClusterPlaybook:
 
   val playbook: ClusterPlaybook =
     clusterPlaybook("observability-extended")(
-      stage("add-haproxy-metrics-endpoint", haProxyNodes*)
-        .task("append prometheus-exporter frontend to haproxy.cfg and restart")(
+      stage("confirm-haproxy-metrics-endpoint", haProxyNodes*)
+        .task("confirm haproxy answers on its metrics port")(
           Task.RunCommand(
             List("sh", "-c", haproxyMetricsScript),
             timeoutSeconds = 60
@@ -318,16 +304,24 @@ object observability_extended extends OrpheraClusterPlaybook:
             updateCache = true
           )
         )
-        .task("configure and (re)start mysqld_exporter")(
+        .task("clear any failed state left by the package's own start")(
+          Task.RunCommand(List("sh", "-c", resetFailedScript))
+        )
+        .task("configure mysqld_exporter and run it")(
+          Task.Apply(mysqldExporterPlan)
+        )
+        .task("wait for mysqld_exporter's metrics")(
           Task.RunCommand(
-            List("sh", "-c", configureMysqldExporterScript),
+            List("sh", "-c", mysqldExporterReadyScript),
             timeoutSeconds = 60
           )
         )
         .build,
 
       stage("update-prometheus-scrape-config", monitoringNode)
-        .task("rewrite prometheus.yml with haproxy + mysqld jobs and restart")(
+        .task(
+          "write the haproxy and mysqld scrape jobs and restart prometheus"
+        )(
           Task.Apply(prometheusPlan)
         )
         .build,

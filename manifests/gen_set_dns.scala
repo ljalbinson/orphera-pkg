@@ -58,6 +58,16 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 // puts the stub symlink back, but only if the file still carries
 // Orphera's marker line — a hand-written resolv.conf is left alone.
 //
+// The step is an apply description (Task.Apply): files, a service and the
+// checks, with the choice between the two mechanisms made on each node by
+// gates (a question to the node; what comes after a "no" is skipped there).
+// So a node that already has the right files shows them unchanged, and
+// systemd-resolved is restarted (and NetworkManager reloaded) only when its
+// file changed. One difference from the script it replaces: a resolv.conf that
+// is a symlink is removed, then written, in two steps (a file does not
+// replace a link), so a node has no resolv.conf for a moment when it moves
+// from the resolved stub to a static file.
+//
 // Unlike kvm_vm_provision.scala, there's no hardcoded fallback when
 // --config is missing: the config file is the whole input here, so a
 // missing or bad one fails before any node is touched.
@@ -169,9 +179,8 @@ object gen_set_dns extends OrpheraClusterPlaybook:
   private val resolvConf = "/etc/resolv.conf"
   private val stubResolvConf = "/run/systemd/resolve/stub-resolv.conf"
 
-  // Static resolv.conf. `search` only when domains exist; `options rotate`
-  // only for round_robin. Trailing newline stripped because it's embedded
-  // in a heredoc below.
+  // Static resolv.conf, without its final newline (the file adds it). `search`
+  // only when domains exist; `options rotate` only for round_robin.
   private val staticContent: String =
     val nameservers = config.servers.map(s => s"nameserver $s\n").mkString
     val searchLine =
@@ -181,100 +190,134 @@ object gen_set_dns extends OrpheraClusterPlaybook:
     (s"$managedMarker — edits are overwritten.\n" +
       nameservers + searchLine + rotateLine).stripSuffix("\n")
 
-  private val dropInText: String = dropInContent.stripSuffix("\n")
+  // The mechanism is chosen on each node, so the description holds both
+  // branches and asks the node (gates, see Apply.scala) which one applies:
+  // what comes after a gate that answers no is skipped on that node.
+  private val resolvedLoaded =
+    """[ "$(systemctl show -p LoadState --value systemd-resolved.service 2>/dev/null)" = "loaded" ]"""
 
-  // WriteFile can't be used for the apply step: which file gets written
-  // depends on whether the NODE has systemd-resolved, which is only known
-  // at run time. So one script does the detection and the write, with
-  // the same temp-file-then-rename the agent's own file writes use. Values
-  // are validated IP literals / hostnames (see decode), so embedding them
-  // is safe; contents go in quoted heredocs, so nothing is expanded.
-  private val writeFileFn =
-    """write_file() {
-      |  tmp="$1.orphera-tmp"
-      |  cat > "$tmp"
-      |  chown root:root "$tmp"
-      |  chmod 0644 "$tmp"
-      |  mv -f "$tmp" "$1"
-      |}""".stripMargin
+  private val networkManagerActive =
+    "[ -x /usr/bin/nmcli ] && systemctl is-active --quiet NetworkManager"
 
-  // Writes the static file, then checks it: a regular file (not the
-  // resolved stub symlink), every server present, rotate present when asked.
-  private val staticBranch: String =
-    val serverChecks = config.servers
-      .map(s =>
-        s"""grep -qxF 'nameserver $s' $resolvConf || { echo 'missing: $s'; exit 1; }"""
+  // Every server is listed in resolv.conf (and the file is not the stub link),
+  // and `options rotate` is there when round_robin asks for it.
+  private val staticOk: String =
+    val servers =
+      config.servers.map(s => s"grep -qxF 'nameserver $s' $resolvConf")
+    val rotate =
+      if config.roundRobin then List(s"grep -qxF 'options rotate' $resolvConf")
+      else Nil
+    (s"[ ! -L $resolvConf ]" :: servers ::: rotate).mkString(" && ")
+
+  // `resolvectl dns` shows every server on its "Global:" line.
+  private val resolvedOk: String =
+    val servers =
+      config.servers.map(s => s"""echo "$$G" | grep -qwF '$s'""")
+    ("G=$(resolvectl dns 2>/dev/null | grep '^Global:'); " +
+      servers.mkString(" && "))
+
+  private val resolvedGate =
+    Resources.gate("this node has systemd-resolved", onlyIf = resolvedLoaded)
+  private val noResolvedGate =
+    Resources.gate(
+      "this node has no usable systemd-resolved",
+      unless = resolvedLoaded
+    )
+  private val networkManagerGate =
+    Resources.gate("NetworkManager is active", onlyIf = networkManagerActive)
+  // A resolv.conf Orphera wrote earlier (a regular file with its marker): the
+  // stub link goes back in its place; a hand-written file is left alone.
+  private val ownResolvConfGate =
+    Resources.gate(
+      "resolv.conf is a file Orphera wrote",
+      onlyIf =
+        s"[ ! -L $resolvConf ] && grep -qF -e '$managedMarker' -e '$legacyMarker' $resolvConf 2>/dev/null"
+    )
+
+  // Static /etc/resolv.conf: always with round_robin, otherwise on a node
+  // without a usable systemd-resolved. A resolv.conf that is a link (the
+  // resolved stub, or a dangling one) is removed first, since a file does not
+  // replace a link; the new file follows at once.
+  private def staticPlan(gates: List[ApplyResource]): List[ApplyResource] =
+    import Resources.*
+    val nmDir = directory("/etc/NetworkManager/conf.d", "0755", "root", "root")
+      .after((networkManagerGate :: gates)*)
+    val reload =
+      command(
+        "reload NetworkManager",
+        "systemctl reload NetworkManager",
+        onChangeOnly = true
       )
-      .mkString("\n")
-    val rotateCheck =
+    val nmFile = file(
+      "/etc/NetworkManager/conf.d/90-orphera-dns.conf",
+      s"$managedMarker\n[main]\ndns=none\n",
+      mode = "0644",
+      owner = "root",
+      group = "root"
+    ).after(nmDir).notifies(reload)
+    val unlink = command(
+      "remove the resolv.conf symlink",
+      s"rm -f -- $resolvConf",
+      onlyIf = s"[ -L $resolvConf ]"
+    ).after(gates*)
+    val staticFile = file(
+      resolvConf,
+      staticContent + "\n",
+      mode = "0644",
+      owner = "root",
+      group = "root"
+    ).after(unlink)
+    val verify = command(
+      "check resolv.conf lists every DNS server",
+      s"echo '$resolvConf does not list every DNS server (or is still a symlink)' >&2; cat $resolvConf >&2; exit 1",
+      unless = staticOk
+    ).after(staticFile)
+    List(nmDir, nmFile, reload, unlink, staticFile, verify)
+
+  // systemd-resolved: a drop-in in resolved.conf.d, resolved restarted when it
+  // changes, and a check of what resolved reports.
+  private def resolvedPlan: List[ApplyResource] =
+    import Resources.*
+    val stubLink =
+      symlink(resolvConf, stubResolvConf).after(ownResolvConfGate)
+    val dir = directory(dropInDir, "0755", "root", "root").after(resolvedGate)
+    val unit = service("systemd-resolved", enabled = None, running = Some(true))
+      .after(resolvedGate)
+    val dropInFile = file(
+      dropIn,
+      dropInContent,
+      mode = "0644",
+      owner = "root",
+      group = "root"
+    ).after(dir).notifies(unit)
+    val verify = command(
+      "check resolved lists every DNS server",
+      "echo 'resolvectl dns does not list every DNS server under Global:' >&2; resolvectl dns >&2; exit 1",
+      unless = resolvedOk
+    ).after(dropInFile, unit)
+    List(stubLink, dir, dropInFile, unit, verify)
+
+  private val dnsPlan: ApplyPlan =
+    import Resources.*
+    val resources: List[ApplyResource] =
       if config.roundRobin then
-        s"""grep -qxF 'options rotate' $resolvConf || { echo 'options rotate missing'; exit 1; }"""
-      else ""
-    s"""if [ -x /usr/bin/nmcli ] && systemctl is-active --quiet NetworkManager; then
-       |  echo "NetworkManager active: telling it not to manage $resolvConf"
-       |  mkdir -p /etc/NetworkManager/conf.d
-       |  write_file /etc/NetworkManager/conf.d/90-orphera-dns.conf <<'ORPHERA_EOF'
-       |$managedMarker
-       |[main]
-       |dns=none
-       |ORPHERA_EOF
-       |  systemctl reload NetworkManager
-       |fi
-       |write_file $resolvConf <<'ORPHERA_EOF'
-       |$staticContent
-       |ORPHERA_EOF
-       |cat $resolvConf
-       |if [ -L $resolvConf ]; then echo '$resolvConf is still a symlink'; exit 1; fi
-       |$serverChecks
-       |$rotateCheck""".stripMargin
-
-  // resolved path: put the stub symlink back if a round_robin run
-  // replaced it (only when the file carries our marker — a hand-written
-  // resolv.conf is left alone), write the drop-in, restart, and check
-  // `resolvectl dns`'s "Global:" line has every server.
-  private val resolvedBranch: String =
-    val checks = config.servers
-      .map(s =>
-        s"""echo "$$G" | grep -qwF '$s' || { echo 'missing: $s'; exit 1; }"""
-      )
-      .mkString("\n")
-    s"""echo "systemd-resolved present: using drop-in"
-       |if [ ! -L $resolvConf ] && grep -qF -e '$managedMarker' -e '$legacyMarker' $resolvConf 2>/dev/null; then
-       |  ln -sf $stubResolvConf $resolvConf
-       |  echo "restored $resolvConf -> $stubResolvConf"
-       |fi
-       |mkdir -p $dropInDir
-       |write_file $dropIn <<'ORPHERA_EOF'
-       |$dropInText
-       |ORPHERA_EOF
-       |systemctl restart systemd-resolved
-       |G=$$(resolvectl dns | grep '^Global:' || true)
-       |echo "$$G"
-       |$checks""".stripMargin
-
-  private val applyScript: String =
-    if config.roundRobin then
-      // Static file regardless of resolved; drop any drop-in left by a
-      // previous non-round_robin run.
-      s"""set -e
-         |$writeFileFn
-         |rm -f $dropIn
-         |$staticBranch""".stripMargin
-    else
-      s"""set -e
-         |$writeFileFn
-         |if [ "$$(systemctl show -p LoadState --value systemd-resolved.service 2>/dev/null)" = "loaded" ]; then
-         |$resolvedBranch
-         |else
-         |echo "no systemd-resolved on this node: writing static $resolvConf"
-         |$staticBranch
-         |fi""".stripMargin
+        // Static file regardless of resolved; a drop-in left by an earlier
+        // run without round_robin goes.
+        List(networkManagerGate, absentFile(dropIn)) ++ staticPlan(Nil)
+      else
+        List(
+          resolvedGate,
+          noResolvedGate,
+          ownResolvConfGate.after(resolvedGate),
+          networkManagerGate
+        ) ++ resolvedPlan ++ staticPlan(List(noResolvedGate))
+    ApplyPlan.orFail("gen-set-dns", resources)
 
   val playbook: ClusterPlaybook =
     clusterPlaybook("gen-set-dns")(
       stage("gen-set-dns", config.nodes*)
         .task("apply DNS config (resolved drop-in, or static resolv.conf)")(
-          Task.RunCommand(List("sh", "-c", applyScript), timeoutSeconds = 90)
+          Task.Apply(dnsPlan)
         )
         .build
     )

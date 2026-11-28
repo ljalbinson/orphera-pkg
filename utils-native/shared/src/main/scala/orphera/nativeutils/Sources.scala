@@ -217,3 +217,21 @@ object Out:
   def outBytes(bytes: Array[Byte]): Unit =
     System.out.write(bytes, 0, bytes.length)
     System.out.flush()
+
+/** `--nodes V1,V2` and the refusal of bare names, as `nodes_option` and
+  * `unexpected_arg` of utils/orphera-sources.sh: names are only taken after
+  * --nodes, a comma-separated list.
+  */
+object NodesArg:
+  /** The items of a --nodes value; exits 2 (after saying why) if there is none or the value looks like an option. */
+  def parse(value: Option[String]): Vector[String] =
+    val v = value.getOrElse("")
+    val items = if v.startsWith("-") then Vector.empty else v.split(",", -1).toVector.filter(_.nonEmpty)
+    if items.isEmpty then
+      Out.err("--nodes needs a comma-separated list of names, for example --nodes tst7,tst8")
+      sys.exit(2)
+    items
+
+  def unexpected(arg: String): Nothing =
+    Out.err(s"unexpected argument '$arg': names are given after --nodes (for example --nodes tst7,tst8)")
+    sys.exit(2)

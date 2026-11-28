@@ -26,9 +26,18 @@ object apt_cache_teardown extends OrpheraClusterPlaybook:
       "tst10"
     )
 
-  private val clientScript =
-    """rm -f /etc/apt/apt.conf.d/02orphera-apt-proxy /usr/local/sbin/orphera-apt-proxy
-      |echo "apt on this node no longer uses the cache"""".stripMargin
+  // The two files apt_cache_clients.scala puts on a client; a client that
+  // was already unpointed reports both as unchanged (before: a script that
+  // removed them and printed a line every run).
+  private val clientPlan: ApplyPlan =
+    import Resources.*
+    ApplyPlan.orFail(
+      "apt-cache-unpoint",
+      List(
+        absentFile("/etc/apt/apt.conf.d/02orphera-apt-proxy"),
+        absentFile("/usr/local/sbin/orphera-apt-proxy")
+      )
+    )
 
   private val cacheScript =
     """systemctl disable --now apt-cacher-ng 2>/dev/null || true
@@ -40,7 +49,7 @@ object apt_cache_teardown extends OrpheraClusterPlaybook:
     clusterPlaybook("apt-cache-teardown")(
       stage("unpoint-apt", clients*)
         .task("remove the apt cache settings")(
-          Task.RunCommand(List("sh", "-c", clientScript), timeoutSeconds = 60)
+          Task.Apply(clientPlan)
         )
         .build,
 

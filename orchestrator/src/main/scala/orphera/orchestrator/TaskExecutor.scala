@@ -1007,6 +1007,28 @@ object TaskExecutor:
             case Some(e) => IO.raiseError(e)
         )
 
+    // Notifications a run owed and could not deliver are kept on the node, one resource id per
+    // line, in a file named for the description, so that the next run delivers them.
+    private def pendingPath(plan: String): String =
+      s"/var/lib/orphera/apply-pending/${plan.replaceAll("[^A-Za-z0-9_.-]", "_")}"
+
+    override def pendingNotices(plan: String): IO[Set[String]] =
+      readText(pendingPath(plan)).map(
+        _.fold(Set.empty[String])(
+          _.linesIterator.map(_.trim).filter(_.nonEmpty).toSet
+        )
+      )
+
+    override def keepPendingNotices(plan: String, ids: Set[String]): IO[Unit] =
+      val path = Apply.quote(pendingPath(plan))
+      val script =
+        if ids.isEmpty then s"rm -f -- $path"
+        else
+          s"mkdir -p -- /var/lib/orphera/apply-pending && printf '%s\\n' ${ids.toList.sorted
+              .map(Apply.quote)
+              .mkString(" ")} > $path"
+      shell("record the notifications still owed", script, 60)
+
     def readText(path: String): IO[Option[String]] =
       val q = Apply.quote(path)
       quietly(
@@ -1095,7 +1117,8 @@ object TaskExecutor:
   ): IO[Map[String, Any]] =
     env.setFacts.snapshot.map { allSetFacts =>
       val ownInventoryVars: Map[String, Any] =
-        Inventory.groupVarsFor(node.name) ++
+        Map[String, Any]("node_name" -> node.name) ++
+          Inventory.groupVarsFor(node.name) ++
           Inventory.all
             .find(_.name == node.name)
             .map(_.vars)

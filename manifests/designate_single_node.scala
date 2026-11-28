@@ -54,8 +54,8 @@ import orphera.orchestrator.kolla.*
 //     it talks to central over RabbitMQ, and the worker and mdns start after it (they read the pool when
 //     they start). When pools.yaml changes later, the pool is loaded again and the worker and mdns are
 //     restarted.
-//   - Designate is registered in Keystone before the units start, skipped while the helper's `registered`
-//     check passes.
+//   - Designate is registered in Keystone before the units start, skipped while the
+//     registration check passes.
 //
 // Not done here, on purpose (later): Neutron's DNS integration and the notification sink, which
 // need changes to neutron_single_node.scala and nova_single_node.scala.
@@ -290,66 +290,6 @@ object designate_single_node extends OrpheraApply:
        |""".stripMargin
 
   private val images = allContainers.map(_.image.ref)
-  private val pullScript =
-    s"""${Pull.shellFunction(
-        "the Image(...) values in designate_single_node.scala"
-      )}
-       |for img in ${images.mkString(" ")}; do
-       |  pull_retry $$img || exit 1
-       |done
-       |echo "images ready"""".stripMargin
-  private val imagesPresent =
-    s"""for img in ${images.mkString(
-        " "
-      )}; do podman image exists $$img || exit 1; done"""
-
-  // Keystone's CA: the last certificate it presents (trust on first use),
-  // which must be self-signed. `chainTo DIR` leaves DIR/c1.pem ... DIR/cN.pem,
-  // each holding the certificate only: the text s_client prints after the
-  // last one (bytes read and written, session ticket) differs on every
-  // handshake, and would make the comparison with the installed copy fail.
-  private val chainTo =
-    s"""chainTo() { openssl s_client -connect $ksFqdn:5000 -servername $ksFqdn -showcerts </dev/null 2>/dev/null | awk -v d="$$1" '/-----BEGIN CERTIFICATE-----/{n++; p=1} p{print > (d "/c" n ".pem")} /-----END CERTIFICATE-----/{p=0}'; }"""
-
-  private val trustTarget =
-    """if command -v update-ca-certificates >/dev/null 2>&1; then t=/usr/local/share/ca-certificates/orphera-test-ca.crt; else t=/etc/pki/ca-trust/source/anchors/orphera-test-ca.crt; fi"""
-
-  // Current when the installed CA is the one Keystone presents now, and is in
-  // the system trust store.
-  private val caCurrent =
-    s"""$chainTo
-       |D=$$(mktemp -d)
-       |chainTo $$D
-       |N=$$(ls $$D/c*.pem 2>/dev/null | wc -l)
-       |R=1
-       |if [ "$$N" -ge 2 ]; then
-       |  $trustTarget
-       |  cmp -s $$D/c$$N.pem $caCert && cmp -s $caCert "$$t" && R=0
-       |fi
-       |rm -rf $$D
-       |exit $$R""".stripMargin
-
-  private val caScript =
-    s"""set -e
-       |$chainTo
-       |mkdir -p $caDir
-       |D=$$(mktemp -d)
-       |trap 'rm -rf $$D' EXIT
-       |chainTo $$D
-       |COUNT=$$(ls $$D/c*.pem 2>/dev/null | wc -l)
-       |if [ "$$COUNT" -lt 2 ]; then
-       |  echo "keystone at $ksFqdn:5000 presented $$COUNT certificate(s); expected leaf + CA - apply keystone_single_node.scala (it must serve server-chain.crt)" >&2
-       |  exit 1
-       |fi
-       |cp $$D/c$$COUNT.pem $caCert
-       |openssl verify -CAfile $caCert $$D/c1.pem
-       |SUBJ=$$(openssl x509 -in $caCert -noout -subject | sed 's/^subject=//')
-       |ISS=$$(openssl x509 -in $caCert -noout -issuer | sed 's/^issuer=//')
-       |if [ "$$SUBJ" != "$$ISS" ]; then echo "last certificate is not self-signed: $$SUBJ / $$ISS" >&2; exit 1; fi
-       |$trustTarget
-       |cp $caCert "$$t"
-       |if command -v update-ca-certificates >/dev/null 2>&1; then update-ca-certificates; else update-ca-trust; fi
-       |echo "Keystone CA installed: $$SUBJ"""".stripMargin
 
   // The files every Designate service's config.json copies in, and the ownership it sets.
   private val commonFiles =
@@ -502,7 +442,7 @@ object designate_single_node extends OrpheraApply:
 
   // Standard-library Python, as in the other services. Plain string filled in with replace().
   // Subcommands:
-  //   register | registered | unregister | catalog | zone-list | zone-create <name> <email> | zone-wait <id> |
+  //   catalog | zone-list | zone-create <name> <email> | zone-wait <id> |
   //   record-create <zone-id> <name> <ipv4> | record-wait <zone-id> <id> | zone-delete <id> | zone-cycle
   // zone-cycle is the whole path: a zone and an A record made through the API, BIND9 asked for them on
   // port 53, then the zone deleted.
@@ -514,7 +454,6 @@ KS = 'https://@@KS@@:5000/v3'
 DNS = '@@DNS@@'
 NS_IP = '@@NSIP@@'
 ADMIN_PW = '@@ADMINPW@@'
-DESIGNATE_PW = '@@DESIGNATEPW@@'
 CTX = ssl.create_default_context(cafile='@@CA@@')
 
 
@@ -552,78 +491,6 @@ def get_token(user, password, project):
 
 def admin_token():
     return get_token('admin', ADMIN_PW, 'admin')[0]
-
-
-def find(token, path, key):
-    status, parsed, _ = call('GET', KS + path, token=token)
-    items = parsed.get(key, [])
-    return items[0] if items else None
-
-
-def register():
-    token, _ = get_token('admin', ADMIN_PW, 'admin')
-    project = find(token, '/projects?name=service', 'projects')
-    if project is None:
-        s, p, _ = call('POST', KS + '/projects', {'project': {'name': 'service', 'domain_id': 'default'}}, token)
-        if s != 201:
-            die('creating project service failed: HTTP %s %s' % (s, p))
-        project = p['project']
-    user = find(token, '/users?name=designate', 'users')
-    if user is None:
-        s, p, _ = call('POST', KS + '/users', {'user': {'name': 'designate', 'domain_id': 'default', 'password': DESIGNATE_PW}}, token)
-        if s != 201:
-            die('creating user designate failed: HTTP %s %s' % (s, p))
-        user = p['user']
-    else:
-        call('PATCH', KS + '/users/' + user['id'], {'user': {'password': DESIGNATE_PW}}, token)
-    role = find(token, '/roles?name=admin', 'roles')
-    if role is None:
-        die('role admin not found')
-    s, p, _ = call('PUT', KS + '/projects/%s/users/%s/roles/%s' % (project['id'], user['id'], role['id']), None, token)
-    if s not in (200, 204):
-        die('granting admin to designate failed: HTTP %s %s' % (s, p))
-    service = find(token, '/services?type=dns', 'services')
-    if service is None:
-        s, p, _ = call('POST', KS + '/services', {'service': {'name': 'designate', 'type': 'dns'}}, token)
-        if s != 201:
-            die('creating service designate failed: HTTP %s %s' % (s, p))
-        service = p['service']
-    for iface in ('public', 'internal', 'admin'):
-        ep = find(token, '/endpoints?service_id=%s&interface=%s' % (service['id'], iface), 'endpoints')
-        if ep is None:
-            s, p, _ = call('POST', KS + '/endpoints', {'endpoint': {'interface': iface, 'url': DNS, 'service_id': service['id'], 'region_id': 'RegionOne'}}, token)
-            if s != 201:
-                die('creating %s endpoint failed: HTTP %s %s' % (iface, s, p))
-        elif ep['url'] != DNS:
-            call('PATCH', KS + '/endpoints/' + ep['id'], {'endpoint': {'url': DNS}}, token)
-    print('registered designate in keystone (project service, user designate, service type dns, 3 endpoints)')
-
-
-def registered():
-    # Exit 0 only when everything register() makes is in place: the designate user can get a token in project
-    # service (so it holds a role there), and the dns service has its three endpoints at the right URL.
-    # Makes no change.
-    get_token('designate', DESIGNATE_PW, 'service')
-    token, _ = get_token('admin', ADMIN_PW, 'admin')
-    service = find(token, '/services?type=dns', 'services')
-    if service is None:
-        die('no service of type dns')
-    for iface in ('public', 'internal', 'admin'):
-        ep = find(token, '/endpoints?service_id=%s&interface=%s' % (service['id'], iface), 'endpoints')
-        if ep is None or ep['url'] != DNS:
-            die('endpoint %s of dns missing or wrong' % iface)
-    print('designate is registered in keystone')
-
-
-def unregister():
-    token, _ = get_token('admin', ADMIN_PW, 'admin')
-    service = find(token, '/services?type=dns', 'services')
-    if service is not None:
-        call('DELETE', KS + '/services/' + service['id'], None, token)
-    user = find(token, '/users?name=designate', 'users')
-    if user is not None:
-        call('DELETE', KS + '/users/' + user['id'], None, token)
-    print('removed designate from keystone (service dns, its endpoints, user designate)')
 
 
 def catalog():
@@ -736,13 +603,7 @@ def zone_cycle():
 if __name__ == '__main__':
     cmd = sys.argv[1] if len(sys.argv) > 1 else ''
     args = sys.argv[2:]
-    if cmd == 'register':
-        register()
-    elif cmd == 'registered':
-        registered()
-    elif cmd == 'unregister':
-        unregister()
-    elif cmd == 'catalog':
+    if cmd == 'catalog':
         catalog()
     elif cmd == 'zone-list':
         zone_list()
@@ -759,7 +620,7 @@ if __name__ == '__main__':
     elif cmd == 'zone-cycle':
         zone_cycle()
     else:
-        die('usage: orphera-designate-api register | registered | unregister | catalog | zone-list | zone-create <name> <email> | zone-wait <id> | record-create <zone-id> <name> <ipv4> | record-wait <zone-id> <id> | zone-delete <id> | zone-cycle')
+        die('usage: orphera-designate-api catalog | zone-list | zone-create <name> <email> | zone-wait <id> | record-create <zone-id> <name> <ipv4> | record-wait <zone-id> <id> | zone-delete <id> | zone-cycle')
 """
 
   private val helper =
@@ -768,22 +629,8 @@ if __name__ == '__main__':
       .replace("@@DNS@@", s"http://$fqdn:$apiPort")
       .replace("@@NSIP@@", nodeIp)
       .replace("@@ADMINPW@@", adminPassword.reveal)
-      .replace("@@DESIGNATEPW@@", designatePassword.reveal)
       .replace("@@CA@@", caCert)
   private val helperPath = "/usr/local/sbin/orphera-designate-api"
-
-  // The API answers its version document without a token (200, or 300 for a list of versions), and BIND9
-  // answers on port 53 of the node's address (any reply, even REFUSED, ends dig with status 0; a timeout
-  // does not).
-  private val healthy =
-    s"""CODE=$$(curl -s -o /dev/null -w '%{http_code}' http://localhost:$apiPort/); { [ "$$CODE" = "200" ] || [ "$$CODE" = "300" ]; } && dig +time=3 +tries=1 @$nodeIp version.bind txt chaos >/dev/null"""
-  private val waitHealthy =
-    s"""for i in $$(seq 1 24); do
-       |  ( $healthy ) && exit 0
-       |  sleep 5
-       |done
-       |echo "designate-api on $apiPort or BIND9 on $nodeIp:$dnsPort does not answer - see 'journalctl -xeu orphera-designate-api' and $logDir" >&2
-       |exit 1""".stripMargin
 
   // The API accepts an admin token from Keystone and reaches its database.
   private val acceptsToken = s"$helperPath zone-list >/dev/null 2>&1"
@@ -811,19 +658,20 @@ if __name__ == '__main__':
       registryMirror,
       mode = "0644"
     ).after(mirrorDir)
-    val pulled = command(
+    val pulled = pullImages(
       "pull the Designate and BIND9 images",
-      pullScript,
-      unless = imagesPresent,
+      images,
+      hint = "the Image(...) values in designate_single_node.scala",
       timeout = 2400
     ).after(podman, mirror)
 
     val caDirectory = directory(caDir, mode = "0755").after(podman)
-    val ca = command(
+    val ca = serverCa(
       "fetch Keystone's CA from its TLS handshake",
-      caScript,
-      unless = caCurrent,
-      timeout = 60
+      ksFqdn,
+      5000,
+      caCert,
+      hint = "apply keystone_single_node.scala (it must serve server-chain.crt)"
     ).after(caDirectory, tools(1))
 
     val logDirectory = directory(logDir)
@@ -967,18 +815,22 @@ if __name__ == '__main__':
 
     val helperFile = secretFile(
       helperPath,
-      Secret(helper), // it holds the admin and designate passwords
+      Secret(helper), // it holds the admin password
       mode = "0700",
       owner = "root",
       group = "root"
     )
     // Registration comes before the services start.
-    val registered = command(
+    val (keystoneHelper, ensured) = keystoneEntries(
       "register Designate in Keystone",
-      s"$helperPath register",
-      unless = s"$helperPath registered >/dev/null 2>&1",
-      timeout = 120
-    ).after(helperFile, ca)
+      "designate",
+      designatePassword,
+      List(KeystoneService("designate", "dns", s"http://$fqdn:$apiPort")),
+      ksUrl,
+      adminPassword,
+      caCert
+    )
+    val registered = ensured.after(ca)
 
     def start(name: String, more: ApplyResource*): ApplyResource =
       val s = byName(name)
@@ -1007,18 +859,28 @@ if __name__ == '__main__':
       start("designate-worker", pool, bindRunning)
     )
 
-    val answering = command(
-      "designate-api and BIND9 answer on their ports",
-      waitHealthy,
-      unless = healthy,
-      timeout = 180
+    // The API answers its version document without a token (200, or 300 for a list of versions), and BIND9
+    // accepts connections on port 53 of the node's address.
+    val apiAnswers = waitForHttp(
+      "designate-api answers on its port",
+      s"http://localhost:$apiPort/",
+      status = List(200, 300),
+      timeout = 120,
+      hint = s"see 'journalctl -xeu orphera-designate-api' and $logDir"
+    ).after(running*)
+    val bindAnswers = waitForPort(
+      "BIND9 answers on its port",
+      nodeIp,
+      dnsPort,
+      timeout = 120,
+      hint = s"see 'journalctl -xeu ${bind9.unitName}'"
     ).after(running*)
     val authenticating = command(
       "the API accepts an admin token and reaches its database",
       waitAcceptsToken,
       unless = acceptsToken,
       timeout = 180
-    ).after((answering :: running)*)
+    ).after((apiAnswers :: bindAnswers :: running)*)
 
     tools ++ List(
       mirrorDir,
@@ -1029,5 +891,5 @@ if __name__ == '__main__':
       logDirectory,
       stateDirectory
     ) ++ bindResources ++ svcs.flatMap(_.resources) ++
-      List(dbSync, helperFile, registered, pool) ++ running ++
-      List(answering, authenticating)
+      List(dbSync, helperFile, keystoneHelper, registered, pool) ++ running ++
+      List(apiAnswers, bindAnswers, authenticating)

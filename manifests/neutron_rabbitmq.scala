@@ -31,40 +31,12 @@ object neutron_rabbitmq extends OrpheraApply:
   private val rabbitPassword = Secrets.secret("neutron/rabbit")
   private val rabbitVhost = "neutron"
 
-  // No {{...}} in any command: Orphera renders those as a template before running
-  // the command, so `podman ps --format '{{.Names}}'` arrives empty. Use filters.
-  private val createVhostAndUser =
-    s"""set -e
-       |if ! podman ps -q --filter 'name=^rabbitmq$$' | grep -q .; then
-       |  echo "no running 'rabbitmq' container on this node - apply rabbitmq_single_node.scala first" >&2
-       |  exit 1
-       |fi
-       |if ! podman exec rabbitmq rabbitmqctl list_vhosts -q | grep -qx '$rabbitVhost'; then
-       |  podman exec rabbitmq rabbitmqctl add_vhost '$rabbitVhost'
-       |fi
-       |if podman exec rabbitmq rabbitmqctl list_users -q | awk '{print $$1}' | grep -qx '$rabbitUser'; then
-       |  podman exec rabbitmq rabbitmqctl change_password '$rabbitUser' '${rabbitPassword.reveal}'
-       |else
-       |  podman exec rabbitmq rabbitmqctl add_user '$rabbitUser' '${rabbitPassword.reveal}'
-       |fi
-       |podman exec rabbitmq rabbitmqctl set_permissions -p '$rabbitVhost' '$rabbitUser' '.*' '.*' '.*'
-       |echo "rabbitmq vhost $rabbitVhost and user $rabbitUser ready"""".stripMargin
-
-  private val vhostExists =
-    s"""podman exec rabbitmq rabbitmqctl list_vhosts -q | grep -qx '$rabbitVhost'"""
-  private val canAuthenticate =
-    s"""podman exec rabbitmq rabbitmqctl authenticate_user '$rabbitUser' '${rabbitPassword.reveal}' >/dev/null 2>&1"""
-  private val hasFullPermissions =
-    s"""podman exec rabbitmq rabbitmqctl list_permissions -p '$rabbitVhost' -q | awk -F'\t' '$$1=="$rabbitUser" && $$2==".*" && $$3==".*" && $$4==".*" {found=1} END {exit !found}'"""
-  private val inPlace =
-    s"$vhostExists && $canAuthenticate && $hasFullPermissions"
-
   def describe(node: Node): List[ApplyResource] =
     List(
-      command(
+      rabbitAccount(
         s"the $rabbitVhost vhost and the $rabbitUser user on RabbitMQ",
-        createVhostAndUser,
-        unless = inPlace,
-        timeout = 120
+        rabbitVhost,
+        rabbitUser,
+        rabbitPassword
       )
     )

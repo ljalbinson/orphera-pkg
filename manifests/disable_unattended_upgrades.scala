@@ -20,6 +20,8 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 //   - stops, disables and masks apt-daily.timer, apt-daily-upgrade.timer and
 //     unattended-upgrades.service, so none of them can start again;
 //   - fails the stage if a timer is still active afterwards.
+// The first three are an apply description (Task.Apply); the last check, with
+// the note about a running upgrade, is a command.
 // If an upgrade is running when this is applied it says so; it finishes on its
 // own, and the node is quiet afterwards.
 //
@@ -90,29 +92,45 @@ object disable_unattended_upgrades extends OrpheraClusterPlaybook:
             )
           case Right(Some(list)) => list
 
-  private val disableScript =
-    """set -e
-      |mkdir -p /etc/apt/apt.conf.d
-      |cat > /etc/apt/apt.conf.d/20auto-upgrades <<'CONF'
-      |// Managed by Orphera (disable_unattended_upgrades.scala): no automatic
-      |// package-list updates and no unattended upgrades.
-      |APT::Periodic::Update-Package-Lists "0";
-      |APT::Periodic::Unattended-Upgrade "0";
-      |CONF
-      |# Timers first, so nothing new starts; the service units are masked without
-      |# --now so an upgrade already running is not interrupted part-way.
-      |systemctl stop apt-daily.timer apt-daily-upgrade.timer 2>/dev/null || true
-      |systemctl disable apt-daily.timer apt-daily-upgrade.timer 2>/dev/null || true
-      |systemctl mask apt-daily.timer apt-daily-upgrade.timer unattended-upgrades.service 2>/dev/null || true
-      |if pgrep -f '^/usr/bin/python3 /usr/bin/unattended-upgrade$' >/dev/null; then
+  // The setting file, the two timers stopped and disabled, and the three units
+  // masked: `systemctl mask` is a symlink to /dev/null in /etc/systemd/system,
+  // so each mask is a `symlink` described as such. The timers are stopped and
+  // disabled before they are masked (a masked unit cannot be disabled); the
+  // service unit is masked without being stopped, so an upgrade already
+  // running is not interrupted part-way. A unit a node does not have is left
+  // alone by the stop and disable, and still masked.
+  private val disablePlan: ApplyPlan =
+    import Resources.*
+    val timers = List("apt-daily.timer", "apt-daily-upgrade.timer")
+    val settings = file(
+      "/etc/apt/apt.conf.d/20auto-upgrades",
+      """// Managed by Orphera (disable_unattended_upgrades.scala): no automatic
+        |// package-list updates and no unattended upgrades.
+        |APT::Periodic::Update-Package-Lists "0";
+        |APT::Periodic::Unattended-Upgrade "0";
+        |""".stripMargin,
+      mode = "0644",
+      owner = "root",
+      group = "root"
+    )
+    val stopped =
+      timers.map(t => service(t, enabled = Some(false), running = Some(false)))
+    val masks = (timers :+ "unattended-upgrades.service").map(u =>
+      symlink(s"/etc/systemd/system/$u", "/dev/null")
+        .after(stopped*)
+    )
+    ApplyPlan.orFail(
+      "disable-unattended-upgrades",
+      settings :: stopped ::: masks
+    )
+
+  private val verifyScript =
+    """if pgrep -f '^/usr/bin/python3 /usr/bin/unattended-upgrade$' >/dev/null; then
       |  echo "NOTE: an unattended upgrade is still running; it will finish on its own (it may restart services, including orphera-agent)"
       |else
       |  echo "no upgrade running"
       |fi
-      |echo "automatic upgrades disabled"""".stripMargin
-
-  private val verifyScript =
-    """FAIL=0
+      |FAIL=0
       |for t in apt-daily.timer apt-daily-upgrade.timer; do
       |  if systemctl is-active --quiet "$t"; then echo "$t is still active" >&2; FAIL=1; fi
       |done
@@ -124,7 +142,7 @@ object disable_unattended_upgrades extends OrpheraClusterPlaybook:
     clusterPlaybook("disable-unattended-upgrades")(
       stage("disable-automatic-upgrades", nodes*)
         .task("turn off unattended-upgrades and the apt timers")(
-          Task.RunCommand(List("sh", "-c", disableScript), timeoutSeconds = 60)
+          Task.Apply(disablePlan)
         )
         .task("verify")(
           Task.RunCommand(List("sh", "-c", verifyScript), timeoutSeconds = 30)

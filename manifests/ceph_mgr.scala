@@ -13,8 +13,18 @@ object ceph_mgr extends OrpheraClusterPlaybook:
       |  -o /var/lib/ceph/mgr/ceph-$MGRID/keyring
       |chown -R ceph:ceph /var/lib/ceph/mgr/ceph-$MGRID""".stripMargin
 
-  private val startMgrServiceScript =
-    "systemctl reset-failed ceph-mgr@$(hostname -s) 2>/dev/null; systemctl enable --now ceph-mgr@$(hostname -s)"
+  // The mgr unit is enabled and running; a unit that failed earlier is reset first, as the script it replaces did.
+  private val startMgrPlan: ApplyPlan =
+    import Resources.{command, service}
+    val reset = command(
+      "reset the failed state of ceph-mgr@tst0",
+      "systemctl reset-failed ceph-mgr@tst0",
+      onlyIf = "systemctl is-failed --quiet ceph-mgr@tst0"
+    )
+    ApplyPlan.orFail(
+      "ceph-mgr-running",
+      List(reset, service("ceph-mgr@tst0").after(reset))
+    )
 
   private val confirmMgrScript =
     "ceph -s 2>/dev/null | grep -q 'mgr:.*active'"
@@ -36,7 +46,7 @@ object ceph_mgr extends OrpheraClusterPlaybook:
           Task.RunCommand(List("sh", "-c", bootstrapMgrScript))
         )
         .task("enable and start mgr service")(
-          Task.RunCommand(List("sh", "-c", startMgrServiceScript))
+          Task.Apply(startMgrPlan)
         )
         .build,
 

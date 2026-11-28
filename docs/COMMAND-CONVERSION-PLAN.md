@@ -1,6 +1,34 @@
 # Command steps: which could be typed actions
 
-Status: proposed 2026-11-20. Nothing built. Follows `docs/TYPED-ACTIONS-PLAN.md`, whose phases 1 to 5 are built.
+Status: proposed 2026-11-20. Group 1 is built (progress 2026-11-24 below); groups 2 to 6 are not started. Follows
+`docs/TYPED-ACTIONS-PLAN.md`, whose phases 1 to 5 are built.
+
+## Progress (2026-11-24)
+
+Group 1: 57 of its 69 listed steps are now typed (`Task.Apply` or an apply description with a typed resource); the
+CHANGELOG records them under "Group 1". `docs/command-conversion-steps.csv` has a `status` column (`done`, `open`, or
+`not started` for groups 2 to 6; `done` was worked out by checking whether the step is still a command, so it is
+as good as that check). Change-path tests (something broken by hand,
+the playbook run, the fix confirmed) have been done for `file_server`, `iperf3_test`, `virtualbmc`, `wordpress_site`,
+`octavia_single_node`, `nova_compute`, the manual Ceph path (tst15 only), `rpm_cache_teardown`, the signing directory of `dashboard_tls`, the
+containerd directories of `k8s_node_prep`, and swap off and the kubelet resolver file (`k8s_node_prep`,
+`k8s_kubeadm_config`, tst35); the append-key path of `cephadm_add_mons` is only unit-tested, and the others were tested
+only on the "already correct" path. The restart script of `file_server` (listed under group 6 as "check the
+configuration and start the services") was converted too: smbd and avahi-daemon are `service` resources notified by
+their files, so the row no longer matches a command. `docs/command-conversion.xlsx` now carries the status column. Swap off, the kubelet resolver file and the kubelet-config
+step stay scripts (no typed kind for a selective fstab edit, a generated file or a ConfigMap edit) but are guarded
+commands in a `Task.Apply`, so a node that is already set up reports them unchanged.
+
+The 12 open group 1 steps:
+
+| Steps | Why open |
+|---|---|
+| `ceph-mgr.yaml`, `ceph-mon-quorum.yaml`, `ceph-teardown.yaml` (4), `cephadm_add_mons.yaml` (1), `iperf3_test.yaml` (1) | the YAML form has no apply tasks. The `.scala` twins of the Ceph ones are converted (2026-11-24): the mon and mgr units are `service` resources and the teardown is typed; tested on tst15 only, not on tst0-2, which hold the cephadm cluster |
+| `cephadm_mon_rolling_upgrade` (2), `mariadb_galera_rolling_restart` (1) | a restart at a point in a rolling upgrade is an action, not a state (see the gap below). Assumed to stay commands |
+| `rpm_cache_clients` (1) | renaming the stock repository files has no typed resource |
+| `apply_kinds_demo` (2) | a demonstration of the kinds |
+
+Counts of steps by group below are as proposed on 2026-11-20.
 
 ## Why
 

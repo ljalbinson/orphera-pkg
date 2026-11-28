@@ -44,20 +44,30 @@ object etcd_grow_cluster extends OrpheraClusterPlaybook:
 
   private val etcdVersion = "v3.5.21"
 
-  // Identical to etcd_cluster.scala's installEtcdScript — duplicated
+  // Identical to etcd_cluster.scala's etcdBinariesPlan — duplicated
   // rather than shared, since each manifest here is a standalone object.
-  private val installEtcdScript =
-    s"""test -x /usr/local/bin/etcd && test -x /usr/local/bin/etcdctl && exit 0
-       |set -e
-       |cd /tmp
-       |curl -fsSL -o etcd.tar.gz "https://github.com/etcd-io/etcd/releases/download/$etcdVersion/etcd-$etcdVersion-linux-amd64.tar.gz"
-       |tar xzf etcd.tar.gz
-       |install -m 0755 "etcd-$etcdVersion-linux-amd64/etcd" /usr/local/bin/etcd
-       |install -m 0755 "etcd-$etcdVersion-linux-amd64/etcdctl" /usr/local/bin/etcdctl
-       |rm -rf etcd.tar.gz "etcd-$etcdVersion-linux-amd64"
-       |id etcd >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin etcd
-       |mkdir -p /var/lib/etcd /etc/etcd
-       |chown etcd:etcd /var/lib/etcd""".stripMargin
+  private val etcdBinariesPlan: ApplyPlan =
+    import Resources.*
+    val dir = s"etcd-$etcdVersion-linux-amd64"
+    val binaries = archiveFiles(
+      "the etcd binaries",
+      s"https://github.com/etcd-io/etcd/releases/download/$etcdVersion/$dir.tar.gz",
+      List(
+        s"$dir/etcd" -> "/usr/local/bin/etcd",
+        s"$dir/etcdctl" -> "/usr/local/bin/etcdctl"
+      )
+    )
+    val etcdUser = user("etcd", system = true, shell = "/usr/sbin/nologin")
+    ApplyPlan.orFail(
+      "etcd-binaries",
+      List(
+        binaries,
+        etcdUser,
+        directory("/var/lib/etcd", owner = "etcd", group = "etcd")
+          .after(etcdUser),
+        directory("/etc/etcd")
+      )
+    )
 
   private def etcdCtl(cmd: String) =
     s"ETCDCTL_API=3 /usr/local/bin/etcdctl --endpoints=http://127.0.0.1:2379 $cmd"
@@ -117,45 +127,33 @@ object etcd_grow_cluster extends OrpheraClusterPlaybook:
   // `raw"""..."""`, not `s"""..."""`: this string needs $-interpolation
   // (name/clusterIp/initialCluster) but also contains literal `\` line
   // continuations in ExecStart below. An interpolated triple-quoted
-  // string (`s"""`) still validates escape sequences the same as a
-  // normal string, unlike a bare `"""..."""` (fully raw, which is what
-  // etcd_cluster.scala's non-interpolated configureAndStartScript relies
-  // on) — a bare `\` before a newline isn't one of the recognized escapes
-  // ([\b,\t,\n,\f,\r,\\,\",\',\uxxxx]) and fails to compile under `s`.
-  // `raw` keeps $-interpolation but skips escape validation entirely, so
-  // the backslashes pass through untouched — caught by a real compile
-  // error the first time this file was actually run.
-  private def joinScript(
-      name: String,
-      clusterIp: String,
-      initialCluster: String
-  ) =
-    raw"""cat > /etc/systemd/system/etcd.service <<EOF
-       |[Unit]
-       |Description=etcd distributed key-value store (orphera etcd_cluster test)
-       |After=network.target
-       |
-       |[Service]
-       |Type=notify
-       |User=etcd
-       |ExecStart=/usr/local/bin/etcd \
-       |  --name $name \
-       |  --data-dir /var/lib/etcd \
-       |  --listen-peer-urls http://$clusterIp:2380 \
-       |  --listen-client-urls http://$clusterIp:2379,http://127.0.0.1:2379 \
-       |  --initial-advertise-peer-urls http://$clusterIp:2380 \
-       |  --advertise-client-urls http://$clusterIp:2379 \
-       |  --initial-cluster $initialCluster \
-       |  --initial-cluster-token orphera-etcd-test \
-       |  --initial-cluster-state existing
-       |Restart=on-failure
-       |RestartSec=5
-       |
-       |[Install]
-       |WantedBy=multi-user.target
-       |EOF
-       |systemctl daemon-reload
-       |systemctl enable --now etcd""".stripMargin
+  // The unit and the service as an apply description: the file rendered on the
+  // node (`{{cluster_ip}}`, `{{nodes.<name>.cluster_ip}}`), then etcd enabled and
+  // started, and restarted only if the unit changed (`service` reloads systemd
+  // itself). ExecStart is one line, as the old script's heredoc wrote it (it
+  // dropped each `\`-newline and kept the next line's two spaces).
+  private def joinPlan(name: String, initialCluster: String): ApplyPlan =
+    import Resources.*
+    val unit = fileTemplate(
+      "/etc/systemd/system/etcd.service",
+      s"""[Unit]
+         |Description=etcd distributed key-value store (orphera etcd_cluster test)
+         |After=network.target
+         |
+         |[Service]
+         |Type=notify
+         |User=etcd
+         |ExecStart=/usr/local/bin/etcd   --name $name   --data-dir /var/lib/etcd   --listen-peer-urls http://{{cluster_ip}}:2380   --listen-client-urls http://{{cluster_ip}}:2379,http://127.0.0.1:2379   --initial-advertise-peer-urls http://{{cluster_ip}}:2380   --advertise-client-urls http://{{cluster_ip}}:2379   --initial-cluster $initialCluster   --initial-cluster-token orphera-etcd-test   --initial-cluster-state existing
+         |Restart=on-failure
+         |RestartSec=5
+         |
+         |[Install]
+         |WantedBy=multi-user.target
+         |""".stripMargin,
+      mode = "0644"
+    )
+    val etcd = service("etcd")
+    ApplyPlan.orFail(s"etcd-join-$name", List(unit.notifies(etcd), etcd))
 
   // Built once per joining node from static inventory vars — same
   // {{nodes.<name>.cluster_ip}} templating etcd_cluster.scala uses, not
@@ -177,10 +175,7 @@ object etcd_grow_cluster extends OrpheraClusterPlaybook:
           Task.Install(packages = List("curl", "tar"), updateCache = true)
         )
         .task("download and install etcd binaries")(
-          Task.RunCommand(
-            List("sh", "-c", installEtcdScript),
-            timeoutSeconds = 120
-          )
+          Task.Apply(etcdBinariesPlan)
         )
         .build,
 
@@ -209,13 +204,7 @@ object etcd_grow_cluster extends OrpheraClusterPlaybook:
 
       stage("join-tst3", "tst3")
         .task("write systemd unit and start etcd")(
-          Task.RunCommand(
-            List(
-              "sh",
-              "-c",
-              joinScript("tst3", "{{cluster_ip}}", clusterAtThreePlusTst3)
-            )
-          )
+          Task.Apply(joinPlan("tst3", clusterAtThreePlusTst3))
         )
         .build,
 
@@ -272,13 +261,7 @@ object etcd_grow_cluster extends OrpheraClusterPlaybook:
 
       stage("join-tst4", "tst4")
         .task("write systemd unit and start etcd")(
-          Task.RunCommand(
-            List(
-              "sh",
-              "-c",
-              joinScript("tst4", "{{cluster_ip}}", clusterAtFourPlusTst4)
-            )
-          )
+          Task.Apply(joinPlan("tst4", clusterAtFourPlusTst4))
         )
         .build,
 

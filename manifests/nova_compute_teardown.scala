@@ -33,7 +33,11 @@ object nova_compute_teardown extends OrpheraApply:
   private val unregisterScript =
     s"""$helper unregister "$$(hostname -s)" || echo "nova/neutron cleanup failed (continuing)""""
 
-  // True when ANY unit has a unit file, or is active or enabled, or a bridge exists.
+  // True while a libvirt domain is still defined: the warning below is for the person who deletes the node.
+  private val domainsLeft =
+    """command -v virsh >/dev/null 2>&1 && [ "$(virsh -c qemu:///system list --all --name 2>/dev/null | grep -c .)" -gt 0 ]"""
+  // True when ANY unit has a unit file, or is active or enabled, or a bridge exists: the warning comes before the
+  // first removal only, so a second run changes nothing.
   private val anyRunning =
     s"""for u in $unitList; do if [ -f /etc/systemd/system/orphera-$$u.service ] || systemctl is-active --quiet orphera-$$u || systemctl is-enabled --quiet orphera-$$u; then exit 0; fi; done
        |if command -v ovs-vsctl >/dev/null 2>&1; then
@@ -41,24 +45,9 @@ object nova_compute_teardown extends OrpheraApply:
        |  ovs-vsctl br-exists br-int 2>/dev/null && exit 0
        |fi
        |exit 1""".stripMargin
-  private val stopScript =
-    s"""if command -v virsh >/dev/null 2>&1; then
-       |  LEFT=$$(virsh -c qemu:///system list --all --name 2>/dev/null | grep -c .)
-       |  if [ "$$LEFT" -gt 0 ]; then
-       |    echo "WARNING: $$LEFT libvirt domain(s) still defined on this node; delete the instances through Nova first" >&2
-       |  fi
-       |fi
-       |for u in $unitList; do
-       |  systemctl disable --now orphera-$$u 2>/dev/null || true
-       |  rm -f /etc/systemd/system/orphera-$$u.service
-       |  if command -v podman >/dev/null 2>&1; then podman rm -f $$u 2>/dev/null || true; fi
-       |done
-       |systemctl daemon-reload
-       |if command -v ovs-vsctl >/dev/null 2>&1; then
-       |  ovs-vsctl --if-exists del-br br-provider || true
-       |  ovs-vsctl --if-exists del-br br-int || true
-       |fi
-       |echo "nova-compute and the Open vSwitch agent, their units and bridges removed"""".stripMargin
+  private val warnScript =
+    """LEFT=$(virsh -c qemu:///system list --all --name 2>/dev/null | grep -c .)
+      |echo "WARNING: $LEFT libvirt domain(s) still defined on this node; delete the instances through Nova first" >&2""".stripMargin
 
   // /etc/kolla/nova-compute-src and neutron-agent-src are where the cluster playbook kept its sources; they
   // are listed so that a node set up by the playbook is cleaned too.
@@ -75,19 +64,24 @@ object nova_compute_teardown extends OrpheraApply:
   )
 
   def describe(target: Node): List[ApplyResource] =
-    val stopped = command(
-      "stop and remove the nova-compute and OVS agent containers, units and bridges",
-      stopScript,
-      onlyIf = anyRunning,
-      timeout = 240
+    val warned = command(
+      "warn that libvirt domains are still defined",
+      warnScript,
+      onlyIf = s"$domainsLeft && { $anyRunning; }"
     )
+    val stopped = absentContainerUnits(units.map(u => s"orphera-$u" -> u))
+      .map(_.after(warned))
+    val bridges = absentOvsBridge(
+      "delete the Open vSwitch bridges br-provider and br-int",
+      List("br-provider", "br-int")
+    ).after(stopped*)
     val unregistered = command(
       "remove the node's nova-compute service and Neutron agents",
       unregisterScript,
       onlyIf = registered,
       timeout = 120
-    ).after(stopped)
+    ).after(stopped*)
     // Typed removal, no script: each directory with its contents, then the helper.
     val cleaned = (dirs.map(absentDirectory(_, recursive = true)) :+
-      absentFile(helper)).map(_.after(unregistered))
-    List(stopped, unregistered) ++ cleaned
+      absentFile(helper)).map(_.after(unregistered, bridges))
+    List(warned) ++ stopped ++ List(bridges, unregistered) ++ cleaned

@@ -8,7 +8,7 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 // Prometheus, which picks up every ServiceMonitor). Safe to repeat.
 //
 // This changes only the Helm values of the existing release `cilium` (`helm upgrade
-// --reuse-values`, same chart version), so the cluster network is not rebuilt. The
+// --reuse-values`, same chart version, a `helmRelease` with `reuseValues`), so the cluster network is not rebuilt. The
 // Cilium agents restart one node at a time (the DaemonSet rolls); the datapath keeps
 // running while an agent restarts. Switched on:
 //   - agent metrics (port 9962), operator metrics (9963), Envoy metrics (9964)
@@ -20,8 +20,8 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 // egress allowed by k8s_network_lockdown_monitoring.scala; kube-system has no network
 // policies.
 //
-// Re-running k8s_cilium.scala installs Cilium from its own values file and drops these
-// settings: run this playbook again afterwards.
+// k8s_cilium.scala passes the values file written here after its own when it exists, so
+// installing Cilium again keeps these settings.
 //
 // The test waits for the Cilium DaemonSet and Prometheus, then needs: every Cilium
 // agent target and every Hubble target up (one per node), the operator up, flows
@@ -38,16 +38,18 @@ object k8s_cilium_metrics extends OrpheraClusterPlaybook:
   private val kc = "kubectl --kubeconfig /etc/kubernetes/admin.conf"
   private val nodeCount = 10
 
-  private val applyScript =
+  private val crdScript =
     s"""set -e
-       |export KUBECONFIG=/etc/kubernetes/admin.conf
        |$kc get crd servicemonitors.monitoring.coreos.com >/dev/null \\
        |  || { echo "the ServiceMonitor CRD is missing; run k8s_monitoring.scala first" >&2; exit 1; }
-       |CHART=$$(helm list -n kube-system --filter '^cilium$$' -o json | python3 -c 'import sys,json; print(json.load(sys.stdin)[0]["chart"])')
-       |VER=$${CHART#cilium-}
-       |echo "release cilium uses chart $$VER"
-       |cat > $stateDir/cilium-metrics-values.yaml <<EOF
-       |prometheus:
+       |echo "the ServiceMonitor CRD is there"
+       |""".stripMargin
+
+  private val metricsFile = s"$stateDir/cilium-metrics-values.yaml"
+
+  // The values are also written to a file that k8s_cilium.scala passes when it installs Cilium again.
+  private val metricsValues =
+    """prometheus:
        |  enabled: true
        |  serviceMonitor:
        |    enabled: true
@@ -70,11 +72,31 @@ object k8s_cilium_metrics extends OrpheraClusterPlaybook:
        |      enabled: true
        |dashboards:
        |  enabled: true
-       |EOF
-       |helm repo add cilium https://helm.cilium.io/ --force-update >/dev/null
-       |helm repo update >/dev/null
-       |helm upgrade cilium cilium/cilium --version "$$VER" --namespace kube-system \\
-       |  --reuse-values -f $stateDir/cilium-metrics-values.yaml --wait --timeout 15m
+       |""".stripMargin
+
+  // Laid over the values the release has (`--reuse-values`, the chart version it has), so the network is not
+  // rebuilt; the Cilium agents restart one node at a time.
+  private val applyPlan: ApplyPlan =
+    import Resources.*
+    val values = file(metricsFile, metricsValues, mode = "0644")
+    val (helper, applied) = helmRelease(
+      "switch on Cilium and Hubble metrics",
+      "cilium",
+      "cilium/cilium",
+      "https://helm.cilium.io/",
+      "kube-system",
+      values = Some(Secret(metricsValues)),
+      minutes = 15,
+      reuseValues = true,
+      variant = "metrics"
+    )
+    ApplyPlan.orFail(
+      "cilium-metrics",
+      List(values, helper, applied.after(values))
+    )
+
+  private val rolloutScript =
+    s"""set -e
        |$kc -n kube-system rollout status daemonset/cilium --timeout=900s
        |$kc -n kube-system get servicemonitors | grep -i -E 'cilium|hubble' || true
        |echo "Cilium and Hubble metrics switched on"
@@ -109,10 +131,15 @@ object k8s_cilium_metrics extends OrpheraClusterPlaybook:
   val playbook: ClusterPlaybook =
     clusterPlaybook("k8s-cilium-metrics")(
       stage("cilium-metrics-config", node)
-        .task(
-          "switch on Cilium and Hubble metrics (helm upgrade --reuse-values)"
-        )(
-          Task.RunCommand(List("sh", "-c", applyScript), timeoutSeconds = 1800)
+        .task("check the ServiceMonitor CRD")(
+          Task.RunCommand(List("sh", "-c", crdScript), timeoutSeconds = 60)
+        )
+        .task("switch on Cilium and Hubble metrics")(
+          Task.Apply(applyPlan)
+        )
+        .task("wait for the Cilium DaemonSet to roll out")(
+          Task
+            .RunCommand(List("sh", "-c", rolloutScript), timeoutSeconds = 1000)
         )
         .build,
       stage("cilium-metrics-test", node)

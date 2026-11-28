@@ -11,11 +11,11 @@ import orphera.orchestrator.*
 //   orphera apply manifests/glance_ceph.scala --check
 //   orphera apply manifests/glance_ceph.scala
 //
-// The check is on the cluster itself: the pool exists, and client.glance has
-// the key from the secret store and the capabilities for that pool. Where all
-// three hold, nothing is changed. Otherwise the pool is created (an existing
-// pool is left as it is), initialised for RBD, and the user is imported with the
-// key, so a rotated key is applied by running this again.
+// The check is on the cluster itself: the pool exists (cephPool), and client.glance
+// has the key from the secret store and the capabilities for that pool
+// (cephUser). Where both hold, nothing is changed. Otherwise the pool is created
+// (an existing pool is left as it is) and initialised for RBD, and the user is
+// imported with the key, so a rotated key is applied by running this again.
 //
 // The key is a FIXED test key from the secret store (`glance/ceph-key`), as for
 // Cinder: a description cannot capture another node's output. The cipher rule
@@ -28,33 +28,14 @@ object glance_ceph extends OrpheraApply:
 
   // Keep in step with glance_single_node.scala.
   private val cephKey = Secrets.secret("glance/ceph-key")
-  private val cephPool = "images"
-
-  private val createPoolAndUser =
-    s"""set -e
-       |${CephKeys.allowCiphersFor(cephKey.reveal, "client.glance")}
-       |cephadm shell -- ceph osd pool create $cephPool
-       |cephadm shell -- rbd pool init $cephPool
-       |cat > /tmp/glance.keyring <<'KEYRING'
-       |[client.glance]
-       |    key = ${cephKey.reveal}
-       |    caps mon = "profile rbd"
-       |    caps osd = "profile rbd pool=$cephPool"
-       |KEYRING
-       |cephadm shell --mount /tmp/glance.keyring -- ceph auth import -i /mnt/glance.keyring
-       |rm -f /tmp/glance.keyring
-       |cephadm shell -- ceph auth get client.glance >/dev/null
-       |echo "pool $cephPool and client.glance ready"""".stripMargin
-
-  private val inPlace =
-    s"""cephadm shell -- ceph osd pool ls 2>/dev/null | grep -qx $cephPool && [ "$$(cephadm shell -- ceph auth get-key client.glance 2>/dev/null)" = "${cephKey.reveal}" ] && cephadm shell -- ceph auth get client.glance 2>/dev/null | grep -q 'pool=$cephPool'"""
+  private val imagesPool = "images"
 
   def describe(node: Node): List[ApplyResource] =
-    List(
-      command(
-        s"the $cephPool pool and the client.glance cephx user",
-        createPoolAndUser,
-        unless = inPlace,
-        timeout = 180
-      )
-    )
+    val pool = cephPool(s"the $imagesPool pool", imagesPool)
+    val user = cephUser(
+      "the client.glance cephx user and its key",
+      "client.glance",
+      cephKey,
+      List("mon" -> "profile rbd", "osd" -> s"profile rbd pool=$imagesPool")
+    ).after(pool)
+    List(pool, user)

@@ -4,8 +4,9 @@ import orphera.orchestrator.*
 
 // Undoes octavia_database.scala, octavia_rabbitmq.scala and octavia_single_node.scala, as a declarative
 // description (OrpheraApply, docs/APPLY-DESIGN.md): on tst19, through the helper if it is still there, deletes
-// the amphora VMs (Nova servers named amphora-*), the health manager port, the network lb-mgmt-net, the two
-// security groups, the flavor orphera.amphora and the amphora image, and removes Octavia from Keystone (service
+// the amphora VMs (Nova servers named amphora-*) and the amphora image, then (through the helpers of
+// openstackNetwork, openstackSecurityGroup and openstackFlavor) the network lb-mgmt-net with the health manager
+// port, the two security groups and the flavor orphera.amphora, then removes Octavia from Keystone (service
 // type load-balancer, its endpoints, user octavia). Then it stops and removes the four containers, their units
 // and the o-hm0 unit, deletes the o-hm0 port from br-int, and removes the config (with the certificates), the
 // state (with the downloaded image file) and the helper. On tst10 it removes the `octavia` vhost and user from
@@ -42,7 +43,8 @@ object octavia_teardown extends OrpheraApply:
   override def nodes: List[String] = List(dbNode, rabbitNode, node)
 
   // ---- tst19 ----
-  // The helper removes the OpenStack side; it is there until the last step removes it.
+  // The helper deletes the amphorae and the image; it is there until the last step removes it. The network, the
+  // groups and the flavor have helpers of their own.
   private val hasHelper = s"[ -x $helper ]"
   private val openstackScript =
     s"""$helper teardown || echo "openstack cleanup failed (continuing)""""
@@ -63,90 +65,93 @@ object octavia_teardown extends OrpheraApply:
        |systemctl daemon-reload
        |echo "octavia containers and units removed"""".stripMargin
 
-  // True when o-hm0 is a port of br-int.
-  private val hasHmPort =
-    "command -v ovs-vsctl >/dev/null 2>&1 && ovs-vsctl list-ports br-int 2>/dev/null | grep -qx o-hm0"
-  private val unplugScript =
-    """ovs-vsctl --if-exists del-port br-int o-hm0
-      |echo "o-hm0 removed from br-int"""".stripMargin
-
   // /etc/kolla/octavia is where the config and the certificates are kept.
-  private val paths =
-    (List(
+  private val directories =
+    List(
       "/etc/kolla/octavia",
       "/etc/kolla/octavia-ca",
       "/var/lib/orphera/octavia",
-      "/var/log/kolla/octavia",
-      helper
-    ) ++
-      units.map(u => s"/etc/kolla/$u")).mkString(" ")
-  // True when ANY of them exists.
-  private val filesExist =
-    s"for p in $paths; do [ -e \"$$p\" ] && exit 0; done; exit 1"
-  private val cleanupScript =
-    s"""rm -rf $paths
-       |echo "octavia config, certificates, state and helper removed"""".stripMargin
-
-  // ---- tst10 ----
-  private val rabbitUp =
-    "podman ps -q --filter 'name=^rabbitmq$' 2>/dev/null | grep -q ."
-  // True when the vhost or user exists in a running broker; with no running broker there is nothing to remove.
-  private val rabbitHasOctavia =
-    s"""$rabbitUp && { podman exec rabbitmq rabbitmqctl list_vhosts -q | grep -qx '$rabbitVhost' || podman exec rabbitmq rabbitmqctl list_users -q | awk '{print $$1}' | grep -qx '$rabbitUser'; }"""
-  private val rabbitScript =
-    s"""podman exec rabbitmq rabbitmqctl delete_vhost '$rabbitVhost' || true
-       |podman exec rabbitmq rabbitmqctl delete_user '$rabbitUser' || true
-       |echo "rabbitmq vhost $rabbitVhost and user $rabbitUser removed"""".stripMargin
-
-  // ---- tst3 ----
-  private val dropDatabaseScript =
-    s"""mariadb -N -e "DROP DATABASE IF EXISTS $dbName; DROP USER IF EXISTS '$dbUser'@'%'; FLUSH PRIVILEGES;""""
-  // True when the database or the user exists. When MariaDB cannot be queried this is also true, so that the
-  // drop runs and fails with MariaDB's own message: a database that is down is not "nothing to remove".
-  private val databaseExists =
-    s"""OUT=$$(mariadb -N -e "SELECT 1 FROM information_schema.SCHEMATA WHERE SCHEMA_NAME='$dbName' UNION SELECT 1 FROM mysql.user WHERE User='$dbUser'" 2>/dev/null) || exit 0; [ -n "$$OUT" ]"""
+      "/var/log/kolla/octavia"
+    ) ++ units.map(u => s"/etc/kolla/$u")
 
   def describe(target: Node): List[ApplyResource] =
     if target.name == dbNode then
       List(
-        command(
+        absentSqlDatabase(
           s"drop the $dbName database and the $dbUser user on the Galera cluster",
-          dropDatabaseScript,
-          onlyIf = databaseExists
+          List(dbName),
+          dbUser
         )
       )
     else if target.name == rabbitNode then
       List(
-        command(
+        absentRabbitAccount(
           "remove the octavia vhost and user from RabbitMQ",
-          rabbitScript,
-          onlyIf = rabbitHasOctavia,
-          timeout = 60
+          rabbitVhost,
+          rabbitUser
         )
       )
     else
       val openstack = command(
-        "delete the amphorae, network, security groups, flavor, image and the Keystone entries",
+        "delete the amphorae and the image",
         openstackScript,
         onlyIf = hasHelper,
         timeout = 900
       )
+      // The network goes first (with its ports); the groups can only be deleted once no port uses them.
+      val networkGone = absentOpenstackNetwork(
+        "delete the amphora network",
+        "lb-mgmt-net",
+        "service"
+      ).after(openstack)
+      val groupsGone = List("lb-mgmt-sec-grp", "lb-health-mgr-sec-grp").map(g =>
+        absentOpenstackSecurityGroup(
+          s"delete the security group $g",
+          g,
+          "service"
+        ).after(networkGone)
+      )
+      val flavorGone =
+        absentOpenstackFlavor("delete the amphora flavor", "orphera-amphora")
+          .after(openstack)
+      val gone = networkGone :: flavorGone :: groupsGone
+      val unregistered =
+        absentKeystoneEntries("remove Octavia from Keystone", "octavia").after(
+          gone*
+        )
       val stopped = command(
         "stop and remove the octavia containers and units",
         stopScript,
         onlyIf = anyUnit,
         timeout = 240
-      ).after(openstack)
-      val unplugged = command(
+      ).after(unregistered)
+      val unplugged = absentOvsPort(
         "remove the health manager port o-hm0 from br-int",
-        unplugScript,
-        onlyIf = hasHmPort,
-        timeout = 60
-      ).after(stopped)
-      val cleaned = command(
-        "remove octavia files, certificates, state and the helper",
-        cleanupScript,
-        onlyIf = filesExist,
-        timeout = 120
-      ).after(unplugged)
-      List(openstack, stopped, unplugged, cleaned)
+        "br-int",
+        "o-hm0"
+      )
+        .after(stopped)
+      // The helper goes with the files: the first step above needed it, and runs before them.
+      val cleaned =
+        (directories.map(absentDirectory(_, recursive = true)) ++
+          List(
+            absentFile(helper),
+            absentFile(keystoneHelperPath("octavia")),
+            absentFile(openstackImageHelperPath("amphora-x64-haproxy-test")),
+            absentFile(openstackNetworkHelperPath("lb-mgmt-net", "service")),
+            absentFile(
+              openstackSecurityGroupHelperPath("lb-mgmt-sec-grp", "service")
+            ),
+            absentFile(
+              openstackSecurityGroupHelperPath(
+                "lb-health-mgr-sec-grp",
+                "service"
+              )
+            ),
+            absentFile(openstackFlavorHelperPath("orphera-amphora"))
+          )).map(_.after(unplugged))
+      List(openstack) ++ gone ++ List(
+        unregistered,
+        stopped,
+        unplugged
+      ) ++ cleaned

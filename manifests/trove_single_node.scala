@@ -27,12 +27,14 @@ import orphera.orchestrator.kolla.*
 //     tst10. So the guests must reach 10.10.5.22:5672 and Docker Hub: the provider network (flat, VLAN 106)
 //     routes to both on this lab.
 //   - The guests' management network is the provider network, found by name (`provider`, or
-//     TROVE_MGMT_NETWORK in the environment of the run). The helper also makes a security group `trove-mgmt`
-//     (ssh and ping in) and a keypair `trove-mgmt` in project `service`, where Trove makes its guests; the
-//     private key is kept in /var/lib/orphera/trove/trove-mgmt.pem on tst25 for troubleshooting.
+//     TROVE_MGMT_NETWORK in the environment of the run). The description makes a security group `trove-mgmt`
+//     (ssh and ping in; openstackSecurityGroup) and a keypair `trove-mgmt` of the trove user (openstackKeypair)
+//     in project `service`, where Trove makes its guests; the private key is kept in
+//     /var/lib/orphera/trove/trove-mgmt.pem on tst25 for troubleshooting. The helper only looks the network
+//     and the group up and writes their ids.
 //   - `default_neutron_networks` is the same network, so a database can be created without `--nic`.
 //
-// What it adds to Keystone (done by the helper's `register`, repeatable): the user `trove` in project `service`
+// What it adds to Keystone (done by `keystoneEntries`, repeatable): the user `trove` in project `service`
 // with the admin role; the service `trove` of type `database` with the endpoints
 // http://<fqdn>:8779/v1.0/$(tenant_id)s.
 //
@@ -47,16 +49,15 @@ import orphera.orchestrator.kolla.*
 //   - Keystone's CA is compared as a certificate with the installed copy each run; when it changes the
 //     three services are restarted (they mount the host's CA bundle).
 //   - trove.conf holds the ids of the guest network and security group, which only exist once the helper's
-//     `mgmt-resources` has run. The file with placeholders (trove.conf.tmpl, a secret file) is declared; a
+//     `mgmt-state` has run. The file with placeholders (trove.conf.tmpl, a secret file) is declared; a
 //     command fills the placeholders from /var/lib/orphera/trove/mgmt.json and writes the result to
 //     /etc/kolla/trove (which trove_guest_image.scala mounts) and to each service's directory. It is skipped
 //     while all of them are identical to what it would write.
-//   - `mgmt-resources` is skipped while the helper's `mgmt-ready` passes: mgmt.json names the network that
+//   - `mgmt-state` is skipped while the helper's `mgmt-ready` passes: mgmt.json names the network that
 //     the name resolves to now, and the security group and keypair it names exist.
 //   - `trove-manage db_sync` is skipped while its stamp matches and the `datastores` table exists (a query as
 //     the trove user, through the VIP).
-//   - Trove is registered in Keystone before the units start, skipped while the helper's `registered`
-//     check passes.
+//   - Trove is registered in Keystone before the units start, skipped while its check passes.
 //
 // Facts this was written from, to check if a run fails: the Kolla commands are `trove-api`,
 // `trove-taskmanager` and `trove-conductor` with --config-file /etc/trove/trove.conf, user `trove`; the options
@@ -160,68 +161,11 @@ object trove_single_node extends OrpheraApply:
        |""".stripMargin
 
   private val images = containers.map(_.image.ref)
-  private val pullScript =
-    s"""${Pull.shellFunction(
-        "the Image(...) values in trove_single_node.scala"
-      )}
-       |for img in ${images.mkString(" ")}; do
-       |  pull_retry $$img || exit 1
-       |done
-       |echo "images ready"""".stripMargin
-  private val imagesPresent =
-    s"""for img in ${images.mkString(
-        " "
-      )}; do podman image exists $$img || exit 1; done"""
-
-  // Keystone's CA: the last certificate it presents (trust on first use), which must be self-signed.
-  // `chainTo DIR` leaves DIR/c1.pem ... DIR/cN.pem, each holding the certificate only: the text s_client
-  // prints after the last one differs on every handshake, and would make the comparison fail.
-  private val chainTo =
-    s"""chainTo() { openssl s_client -connect $ksFqdn:5000 -servername $ksFqdn -showcerts </dev/null 2>/dev/null | awk -v d="$$1" '/-----BEGIN CERTIFICATE-----/{n++; p=1} p{print > (d "/c" n ".pem")} /-----END CERTIFICATE-----/{p=0}'; }"""
-
-  private val trustTarget =
-    """if command -v update-ca-certificates >/dev/null 2>&1; then t=/usr/local/share/ca-certificates/orphera-test-ca.crt; else t=/etc/pki/ca-trust/source/anchors/orphera-test-ca.crt; fi"""
-
-  // Current when the installed CA is the one Keystone presents now, and is in the system trust store.
-  private val caCurrent =
-    s"""$chainTo
-       |D=$$(mktemp -d)
-       |chainTo $$D
-       |N=$$(ls $$D/c*.pem 2>/dev/null | wc -l)
-       |R=1
-       |if [ "$$N" -ge 2 ]; then
-       |  $trustTarget
-       |  cmp -s $$D/c$$N.pem $caCert && cmp -s $caCert "$$t" && R=0
-       |fi
-       |rm -rf $$D
-       |exit $$R""".stripMargin
-
-  private val caScript =
-    s"""set -e
-       |$chainTo
-       |mkdir -p $caDir
-       |D=$$(mktemp -d)
-       |trap 'rm -rf $$D' EXIT
-       |chainTo $$D
-       |COUNT=$$(ls $$D/c*.pem 2>/dev/null | wc -l)
-       |if [ "$$COUNT" -lt 2 ]; then
-       |  echo "keystone at $ksFqdn:5000 presented $$COUNT certificate(s); expected leaf + CA - apply keystone_single_node.scala (it must serve server-chain.crt)" >&2
-       |  exit 1
-       |fi
-       |cp $$D/c$$COUNT.pem $caCert
-       |openssl verify -CAfile $caCert $$D/c1.pem
-       |SUBJ=$$(openssl x509 -in $caCert -noout -subject | sed 's/^subject=//')
-       |ISS=$$(openssl x509 -in $caCert -noout -issuer | sed 's/^issuer=//')
-       |if [ "$$SUBJ" != "$$ISS" ]; then echo "last certificate is not self-signed: $$SUBJ / $$ISS" >&2; exit 1; fi
-       |$trustTarget
-       |cp $caCert "$$t"
-       |if command -v update-ca-certificates >/dev/null 2>&1; then update-ca-certificates; else update-ca-trust; fi
-       |echo "Keystone CA installed: $$SUBJ"""".stripMargin
 
   // ---- configuration ---------------------------------------------------
 
   // @@MGMTNET@@ and @@MGMTSG@@ are put in on the node from $stateDir/mgmt.json, which the helper's
-  // `mgmt-resources` writes (see `render` below).
+  // `mgmt-state` writes (see `render` below).
   private val troveConfTemplate: String =
     s"""# Managed by Orphera (trove_single_node.scala)
        |[DEFAULT]
@@ -365,11 +309,11 @@ object trove_single_node extends OrpheraApply:
 
   // Standard-library Python, as in the other service descriptions. Plain string filled in with replace().
   // Subcommands:
-  //   register | registered | unregister | mgmt-resources | mgmt-ready | check | catalog
-  // mgmt-resources finds the management network by name and makes the security group and the keypair of the
-  // guests in project service; it writes the result to /var/lib/orphera/trove/mgmt.json.
+  //   mgmt-state | mgmt-ready | check | catalog
+  // mgmt-state finds the management network by name and the security group of the guests in project service
+  // (both made by typed steps of the description) and writes the ids to /var/lib/orphera/trove/mgmt.json.
   // mgmt-ready is the check for it (no change). check calls the Trove API with an admin token and looks at
-  // what mgmt-resources made.
+  // what the description made.
   private val apiHelperPython =
     """#!/usr/bin/python3
 import json, os, ssl, sys, urllib.parse, urllib.request, urllib.error
@@ -415,22 +359,6 @@ def get_token(user, password, project):
     return headers['X-Subject-Token'], parsed
 
 
-def find(token, path, key):
-    status, parsed, _ = call('GET', KS + path, token=token)
-    items = parsed.get(key, [])
-    return items[0] if items else None
-
-
-def ensure(token, what, path, key, body, create_key):
-    found = find(token, path, key)
-    if found is not None:
-        return found
-    s, p, _ = call('POST', KS + '/' + what, body, token)
-    if s != 201:
-        die('creating %s failed: HTTP %s %s' % (what, s, p))
-    return p[create_key]
-
-
 def endpoint(token_body, stype):
     for c in token_body['token']['catalog']:
         if c['type'] == stype:
@@ -438,58 +366,6 @@ def endpoint(token_body, stype):
                 if e['interface'] == 'public':
                     return e['url'].rstrip('/')
     die('no public endpoint of service type %s in the Keystone catalog' % stype)
-
-
-def ensure_user(token, project, admin_role, name, password):
-    user = find(token, '/users?name=' + name, 'users')
-    if user is None:
-        s, p, _ = call('POST', KS + '/users', {'user': {'name': name, 'domain_id': 'default', 'password': password}}, token)
-        if s != 201:
-            die('creating user %s failed: HTTP %s %s' % (name, s, p))
-        user = p['user']
-    else:
-        call('PATCH', KS + '/users/' + user['id'], {'user': {'password': password}}, token)
-    s, p, _ = call('PUT', KS + '/projects/%s/users/%s/roles/%s' % (project['id'], user['id'], admin_role['id']), None, token)
-    if s not in (200, 204):
-        die('granting admin to %s failed: HTTP %s %s' % (name, s, p))
-
-
-def ensure_endpoints(token, stype, sname, url):
-    service = ensure(token, 'services', '/services?type=' + stype, 'services', {'service': {'name': sname, 'type': stype}}, 'service')
-    for iface in ('public', 'internal', 'admin'):
-        ep = find(token, '/endpoints?service_id=%s&interface=%s' % (service['id'], iface), 'endpoints')
-        if ep is None:
-            s, p, _ = call('POST', KS + '/endpoints', {'endpoint': {'interface': iface, 'url': url, 'service_id': service['id'], 'region_id': 'RegionOne'}}, token)
-            if s != 201:
-                die('creating %s endpoint of %s failed: HTTP %s %s' % (iface, stype, s, p))
-        elif ep['url'] != url:
-            call('PATCH', KS + '/endpoints/' + ep['id'], {'endpoint': {'url': url}}, token)
-
-
-def register():
-    token, _ = get_token('admin', ADMIN_PW, 'admin')
-    project = ensure(token, 'projects', '/projects?name=service', 'projects', {'project': {'name': 'service', 'domain_id': 'default'}}, 'project')
-    admin_role = find(token, '/roles?name=admin', 'roles')
-    if admin_role is None:
-        die('role admin not found')
-    ensure_user(token, project, admin_role, 'trove', TROVE_PW)
-    ensure_endpoints(token, 'database', 'trove', TROVE)
-    print('registered in keystone (user trove, service type database, 3 endpoints)')
-
-
-def registered():
-    # Exit 0 only when everything register() makes is in place: the trove user can get a token in project
-    # service, and the database service has its three endpoints at the right URL. Makes no change.
-    get_token('trove', TROVE_PW, 'service')
-    token, _ = get_token('admin', ADMIN_PW, 'admin')
-    service = find(token, '/services?type=database', 'services')
-    if service is None:
-        die('no service of type database')
-    for iface in ('public', 'internal', 'admin'):
-        ep = find(token, '/endpoints?service_id=%s&interface=%s' % (service['id'], iface), 'endpoints')
-        if ep is None or ep['url'] != TROVE:
-            die('endpoint %s of database missing or wrong' % iface)
-    print('trove is registered in keystone')
 
 
 def verify_guest(st, token, body):
@@ -518,7 +394,9 @@ def mgmt_ready():
     print('guest management resources are in place')
 
 
-def mgmt_resources():
+def mgmt_state():
+    # Finds the management network by name and the guest security group, and writes their ids to mgmt.json.
+    # The group and the key pair are made by the description's typed steps before this runs.
     atoken, abody = get_token('admin', ADMIN_PW, 'admin')
     neutron = endpoint(abody, 'network')
     s, p, _ = call('GET', neutron + '/v2.0/networks?name=' + urllib.parse.quote(MGMT_NET), None, atoken)
@@ -530,64 +408,16 @@ def mgmt_resources():
     token, body = get_token('trove', TROVE_PW, 'service')
     project_id = body['token']['project']['id']
     neutron = endpoint(body, 'network')
-    nova = endpoint(body, 'compute')
-
     s, p, _ = call('GET', neutron + '/v2.0/security-groups?name=trove-mgmt&project_id=' + project_id, None, token)
     groups = p.get('security_groups', []) if s == 200 else []
-    if groups:
-        sg_id = groups[0]['id']
-    else:
-        s, p, _ = call('POST', neutron + '/v2.0/security-groups', {'security_group': {'name': 'trove-mgmt', 'description': 'Trove guest management port'}}, token)
-        if s != 201:
-            die('creating the security group trove-mgmt failed: HTTP %s %s' % (s, p))
-        sg_id = p['security_group']['id']
-        for rule in ({'protocol': 'tcp', 'port_range_min': 22, 'port_range_max': 22}, {'protocol': 'icmp'}):
-            r = {'security_group_id': sg_id, 'direction': 'ingress', 'ethertype': 'IPv4'}
-            r.update(rule)
-            s, p, _ = call('POST', neutron + '/v2.0/security-group-rules', {'security_group_rule': r}, token)
-            if s not in (201, 409):
-                die('adding a rule to trove-mgmt failed: HTTP %s %s' % (s, p))
-
-    s, p, _ = call('GET', nova + '/os-keypairs/trove-mgmt', None, token)
-    if s != 200:
-        s, p, _ = call('POST', nova + '/os-keypairs', {'keypair': {'name': 'trove-mgmt'}}, token)
-        if s != 200:
-            die('creating the keypair trove-mgmt failed: HTTP %s %s' % (s, p))
-        os.makedirs(STATE, exist_ok=True)
-        key = STATE + '/trove-mgmt.pem'
-        fd = os.open(key, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, 'w') as f:
-            f.write(p['keypair']['private_key'])
+    if not groups:
+        die('no security group trove-mgmt in project service (HTTP %s)' % s)
+    sg_id = groups[0]['id']
+    verify_guest({'security_group_id': sg_id, 'keypair': 'trove-mgmt'}, token, body)
     os.makedirs(STATE, exist_ok=True)
     with open(STATE + '/mgmt.json', 'w') as f:
         json.dump({'network_id': net_id, 'security_group_id': sg_id, 'keypair': 'trove-mgmt'}, f)
     print('guest management: network %s (%s), security group trove-mgmt %s, keypair trove-mgmt' % (MGMT_NET, net_id, sg_id))
-
-
-def cleanup_mgmt():
-    try:
-        token, body = get_token('trove', TROVE_PW, 'service')
-    except SystemExit:
-        return
-    project_id = body['token']['project']['id']
-    neutron = endpoint(body, 'network')
-    nova = endpoint(body, 'compute')
-    s, p, _ = call('GET', neutron + '/v2.0/security-groups?name=trove-mgmt&project_id=' + project_id, None, token)
-    for g in (p.get('security_groups', []) if s == 200 else []):
-        call('DELETE', neutron + '/v2.0/security-groups/' + g['id'], None, token)
-    call('DELETE', nova + '/os-keypairs/trove-mgmt', None, token)
-
-
-def unregister():
-    cleanup_mgmt()
-    token, _ = get_token('admin', ADMIN_PW, 'admin')
-    service = find(token, '/services?type=database', 'services')
-    if service is not None:
-        call('DELETE', KS + '/services/' + service['id'], None, token)
-    user = find(token, '/users?name=trove', 'users')
-    if user is not None:
-        call('DELETE', KS + '/users/' + user['id'], None, token)
-    print('removed trove, its security group and keypair from keystone, neutron and nova')
 
 
 def catalog():
@@ -614,22 +444,16 @@ def check():
 
 if __name__ == '__main__':
     cmd = sys.argv[1] if len(sys.argv) > 1 else ''
-    if cmd == 'register':
-        register()
-    elif cmd == 'registered':
-        registered()
-    elif cmd == 'mgmt-ready':
+    if cmd == 'mgmt-ready':
         mgmt_ready()
-    elif cmd == 'unregister':
-        unregister()
-    elif cmd == 'mgmt-resources':
-        mgmt_resources()
+    elif cmd == 'mgmt-state':
+        mgmt_state()
     elif cmd == 'check':
         check()
     elif cmd == 'catalog':
         catalog()
     else:
-        die('usage: orphera-trove-api register | registered | unregister | mgmt-resources | mgmt-ready | check | catalog')
+        die('usage: orphera-trove-api mgmt-state | mgmt-ready | check | catalog')
 """
 
   private val helper =
@@ -641,17 +465,6 @@ if __name__ == '__main__':
       .replace("@@MGMTNET@@", mgmtNetwork)
       .replace("@@STATE@@", stateDir)
       .replace("@@CA@@", caCert)
-
-  // The API answers its version document without a token (200, or 300 for a list of versions).
-  private val healthy =
-    s"""CODE=$$(curl -s -o /dev/null -w '%{http_code}' http://localhost:$trovePort/); [ "$$CODE" = "200" ] || [ "$$CODE" = "300" ]"""
-  private val waitHealthy =
-    s"""for i in $$(seq 1 36); do
-       |  ( $healthy ) && exit 0
-       |  sleep 5
-       |done
-       |echo "trove-api does not answer on $trovePort - see 'journalctl -xeu orphera-trove-api' and $logDir" >&2
-       |exit 1""".stripMargin
 
   // The API accepts an admin token and the guest resources are there.
   private val acceptsToken = s"$helperPath check >/dev/null 2>&1"
@@ -670,10 +483,10 @@ if __name__ == '__main__':
       registryMirror,
       mode = "0644"
     ).after(mirrorDir)
-    val pulled = command(
+    val pulled = pullImages(
       "pull the Trove images",
-      pullScript,
-      unless = imagesPresent,
+      images,
+      hint = "the Image(...) values in trove_single_node.scala",
       timeout = 2400
     ).after(podman, mirror)
 
@@ -684,11 +497,12 @@ if __name__ == '__main__':
 
     val caDirectory = directory(caDir, mode = "0755").after(podman)
     // The units mount the host's CA bundle, which this rewrites; they restart when it changes.
-    val ca = command(
+    val ca = serverCa(
       "fetch Keystone's CA from its TLS handshake",
-      caScript,
-      unless = caCurrent,
-      timeout = 60
+      ksFqdn,
+      5000,
+      caCert,
+      hint = "apply keystone_single_node.scala (it must serve server-chain.crt)"
     ).after(caDirectory, tools(1)).notifies(allUnits*)
 
     val logDirectory = directory(logDir)
@@ -705,18 +519,48 @@ if __name__ == '__main__':
       group = "root"
     )
     // Registration comes before the services start.
-    val registered = command(
+    val (keystoneHelper, ensured) = keystoneEntries(
       "register Trove in Keystone",
-      s"$helperPath register",
-      unless = s"$helperPath registered >/dev/null 2>&1",
-      timeout = 120
-    ).after(helperFile, ca)
+      "trove",
+      trovePassword,
+      List(
+        KeystoneService("trove", "database", s"$troveUrl/v1.0/$$(tenant_id)s")
+      ),
+      ksUrl,
+      adminPassword,
+      caCert
+    )
+    val registered = ensured.after(ca)
+    // The guest security group (ssh and ping in) in project service, and the key pair `trove-mgmt` of the trove
+    // user there, whose private half stays in $stateDir/trove-mgmt.pem for troubleshooting.
+    val (groupHelper, groupMade) = openstackSecurityGroup(
+      "make the guest security group",
+      "trove-mgmt",
+      "Trove guest management port",
+      List(("tcp", Some(22)), ("icmp", None)),
+      ksUrl,
+      adminPassword,
+      caCert,
+      project = "service"
+    )
+    val (pairHelper, pairMade) = openstackKeypair(
+      "make the guest key pair",
+      "trove-mgmt",
+      ksUrl,
+      adminPassword,
+      caCert,
+      owner = Some(("trove", trovePassword)),
+      project = "service",
+      privateKeyFile = Some(s"$stateDir/trove-mgmt.pem")
+    )
+    val groupReady = groupMade.after(registered)
+    val pairReady = pairMade.after(registered, stateDirectory)
     val mgmt = command(
-      "make the guest security group and keypair, find the management network",
-      s"$helperPath mgmt-resources",
+      "find the management network and write its ids",
+      s"$helperPath mgmt-state",
       unless = s"$helperPath mgmt-ready >/dev/null 2>&1",
       timeout = 120
-    ).after(helperFile, registered, stateDirectory)
+    ).after(helperFile, groupReady, pairReady, stateDirectory)
 
     val tmplFile = secretFile(
       template,
@@ -789,11 +633,13 @@ if __name__ == '__main__':
       )
     }
 
-    val answering = command(
+    // The API answers its version document without a token (200, or 300 for a list of versions).
+    val answering = waitForHttp(
       "trove-api answers on its port",
-      waitHealthy,
-      unless = healthy,
-      timeout = 240
+      s"http://localhost:$trovePort/",
+      status = List(200, 300),
+      timeout = 180,
+      hint = s"see 'journalctl -xeu orphera-trove-api' and $logDir"
     ).after(running*)
     val authenticating = command(
       "the API accepts an admin token and the guest resources exist",
@@ -814,7 +660,12 @@ if __name__ == '__main__':
       troveTmp,
       srcDirectory,
       helperFile,
+      keystoneHelper,
       registered,
+      groupHelper,
+      groupReady,
+      pairHelper,
+      pairReady,
       mgmt,
       tmplFile
     ) ++ perService.flatMap(_._3) ++

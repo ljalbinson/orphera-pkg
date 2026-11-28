@@ -34,7 +34,7 @@ import orphera.orchestrator.kolla.*
 // share need only NFS (v4.1) and a route to nfsIp; they need no Ceph client and no key. Access is by client IP
 // (access rules of type `ip`).
 //
-// What it adds to Keystone (done by the helper's `register`, repeatable): user `manila` in project `service`
+// What it adds to Keystone (done by keystoneEntries, repeatable): user `manila` in project `service`
 // with the admin role; the service `manilav2` of type `sharev2` with the endpoint http://<fqdn>:8786/v2. The
 // share type `default_share_type` (driver_handles_share_servers False) is made by the helper's `share-type`.
 //
@@ -58,7 +58,7 @@ import orphera.orchestrator.kolla.*
 //     and the keyring) are declared files; a new key restarts manila-share.
 //   - `manila-manage db sync` is skipped while its stamp matches and the `shares` table exists (a query as the
 //     manila user, through the VIP).
-//   - Manila is registered in Keystone before the units start, skipped while the helper's `registered` passes.
+//   - Manila is registered in Keystone before the units start, skipped while its check passes.
 //   - The last steps (the scheduler and share service report up, the share type exists, and a share is made,
 //     mounted over NFS, written, read back and deleted) each run only while they do not hold; the share round
 //     trip is its own guard.
@@ -194,18 +194,6 @@ object manila_single_node extends OrpheraApply:
        |""".stripMargin
 
   private val images = containers.map(_.image.ref)
-  private val pullScript =
-    s"""${Pull.shellFunction(
-        "the Image(...) values in manila_single_node.scala"
-      )}
-       |for img in ${images.mkString(" ")}; do
-       |  pull_retry $$img || exit 1
-       |done
-       |echo "images ready"""".stripMargin
-  private val imagesPresent =
-    s"""for img in ${images.mkString(
-        " "
-      )}; do podman image exists $$img || exit 1; done"""
 
   // The share service imports rados and cephfs; without them it starts and then fails with an import error.
   private val shareImageHasCeph =
@@ -217,51 +205,6 @@ object manila_single_node extends OrpheraApply:
        |  exit 1
        |fi
        |echo "the share image has the Ceph Python bindings"""".stripMargin
-
-  // Keystone's CA: the last certificate it presents (trust on first use), which must be self-signed.
-  // `chainTo DIR` leaves DIR/c1.pem ... DIR/cN.pem, each holding the certificate only: the text s_client
-  // prints after the last one differs on every handshake, and would make the comparison fail.
-  private val chainTo =
-    s"""chainTo() { openssl s_client -connect $ksFqdn:5000 -servername $ksFqdn -showcerts </dev/null 2>/dev/null | awk -v d="$$1" '/-----BEGIN CERTIFICATE-----/{n++; p=1} p{print > (d "/c" n ".pem")} /-----END CERTIFICATE-----/{p=0}'; }"""
-
-  private val trustTarget =
-    """if command -v update-ca-certificates >/dev/null 2>&1; then t=/usr/local/share/ca-certificates/orphera-test-ca.crt; else t=/etc/pki/ca-trust/source/anchors/orphera-test-ca.crt; fi"""
-
-  // Current when the installed CA is the one Keystone presents now, and is in the system trust store.
-  private val caCurrent =
-    s"""$chainTo
-       |D=$$(mktemp -d)
-       |chainTo $$D
-       |N=$$(ls $$D/c*.pem 2>/dev/null | wc -l)
-       |R=1
-       |if [ "$$N" -ge 2 ]; then
-       |  $trustTarget
-       |  cmp -s $$D/c$$N.pem $caCert && cmp -s $caCert "$$t" && R=0
-       |fi
-       |rm -rf $$D
-       |exit $$R""".stripMargin
-
-  private val caScript =
-    s"""set -e
-       |$chainTo
-       |mkdir -p $caDir
-       |D=$$(mktemp -d)
-       |trap 'rm -rf $$D' EXIT
-       |chainTo $$D
-       |COUNT=$$(ls $$D/c*.pem 2>/dev/null | wc -l)
-       |if [ "$$COUNT" -lt 2 ]; then
-       |  echo "keystone at $ksFqdn:5000 presented $$COUNT certificate(s); expected leaf + CA - apply keystone_single_node.scala (it must serve server-chain.crt)" >&2
-       |  exit 1
-       |fi
-       |cp $$D/c$$COUNT.pem $caCert
-       |openssl verify -CAfile $caCert $$D/c1.pem
-       |SUBJ=$$(openssl x509 -in $caCert -noout -subject | sed 's/^subject=//')
-       |ISS=$$(openssl x509 -in $caCert -noout -issuer | sed 's/^issuer=//')
-       |if [ "$$SUBJ" != "$$ISS" ]; then echo "last certificate is not self-signed: $$SUBJ / $$ISS" >&2; exit 1; fi
-       |$trustTarget
-       |cp $caCert "$$t"
-       |if command -v update-ca-certificates >/dev/null 2>&1; then update-ca-certificates; else update-ca-trust; fi
-       |echo "Keystone CA installed: $$SUBJ"""".stripMargin
 
   // ---- configuration ---------------------------------------------------
 
@@ -448,7 +391,6 @@ KS = 'https://@@KS@@:5000/v3'
 MANILA = '@@MANILA@@'
 NODE_IP = '@@NODEIP@@'
 ADMIN_PW = '@@ADMINPW@@'
-MANILA_PW = '@@MANILAPW@@'
 CTX = ssl.create_default_context(cafile='@@CA@@')
 # Manila's own header is the one older releases read; the generic one is for newer releases. Without a
 # version the API serves 2.0, which has no /services and a different access call (404).
@@ -497,78 +439,6 @@ def get_token(user, password, project):
 
 def admin_token():
     return get_token('admin', ADMIN_PW, 'admin')[0]
-
-
-def find(token, path, key):
-    status, parsed, _ = call('GET', KS + path, token=token)
-    items = parsed.get(key, [])
-    return items[0] if items else None
-
-
-def ensure(token, what, path, key, body, create_key):
-    # the first object that matches `path`, or the one made from `body`
-    found = find(token, path, key)
-    if found is not None:
-        return found
-    s, p, _ = call('POST', KS + '/' + what, body, token)
-    if s != 201:
-        die('creating %s failed: HTTP %s %s' % (what, s, p))
-    return p[create_key]
-
-
-def register():
-    token, _ = get_token('admin', ADMIN_PW, 'admin')
-    project = ensure(token, 'projects', '/projects?name=service', 'projects', {'project': {'name': 'service', 'domain_id': 'default'}}, 'project')
-    user = find(token, '/users?name=manila', 'users')
-    if user is None:
-        s, p, _ = call('POST', KS + '/users', {'user': {'name': 'manila', 'domain_id': 'default', 'password': MANILA_PW}}, token)
-        if s != 201:
-            die('creating user manila failed: HTTP %s %s' % (s, p))
-        user = p['user']
-    else:
-        call('PATCH', KS + '/users/' + user['id'], {'user': {'password': MANILA_PW}}, token)
-    admin_role = find(token, '/roles?name=admin', 'roles')
-    if admin_role is None:
-        die('role admin not found')
-    s, p, _ = call('PUT', KS + '/projects/%s/users/%s/roles/%s' % (project['id'], user['id'], admin_role['id']), None, token)
-    if s not in (200, 204):
-        die('granting admin to manila failed: HTTP %s %s' % (s, p))
-    service = ensure(token, 'services', '/services?type=sharev2', 'services', {'service': {'name': 'manilav2', 'type': 'sharev2'}}, 'service')
-    for iface in ('public', 'internal', 'admin'):
-        ep = find(token, '/endpoints?service_id=%s&interface=%s' % (service['id'], iface), 'endpoints')
-        if ep is None:
-            s, p, _ = call('POST', KS + '/endpoints', {'endpoint': {'interface': iface, 'url': MANILA, 'service_id': service['id'], 'region_id': 'RegionOne'}}, token)
-            if s != 201:
-                die('creating %s endpoint failed: HTTP %s %s' % (iface, s, p))
-        elif ep['url'] != MANILA:
-            call('PATCH', KS + '/endpoints/' + ep['id'], {'endpoint': {'url': MANILA}}, token)
-    print('registered manila in keystone (user manila, service type sharev2, 3 endpoints)')
-
-
-def registered():
-    # Exit 0 only when everything register() makes is in place: the manila user can get a token in project
-    # service, and the sharev2 service has its three endpoints at the right URL. Makes no change.
-    get_token('manila', MANILA_PW, 'service')
-    token, _ = get_token('admin', ADMIN_PW, 'admin')
-    service = find(token, '/services?type=sharev2', 'services')
-    if service is None:
-        die('no service of type sharev2')
-    for iface in ('public', 'internal', 'admin'):
-        ep = find(token, '/endpoints?service_id=%s&interface=%s' % (service['id'], iface), 'endpoints')
-        if ep is None or ep['url'] != MANILA:
-            die('endpoint %s of sharev2 missing or wrong' % iface)
-    print('manila is registered in keystone')
-
-
-def unregister():
-    token, _ = get_token('admin', ADMIN_PW, 'admin')
-    service = find(token, '/services?type=sharev2', 'services')
-    if service is not None:
-        call('DELETE', KS + '/services/' + service['id'], None, token)
-    user = find(token, '/users?name=manila', 'users')
-    if user is not None:
-        call('DELETE', KS + '/users/' + user['id'], None, token)
-    print('removed manila from keystone (service sharev2, its endpoints, user manila)')
 
 
 def catalog():
@@ -735,13 +605,7 @@ def share_cycle():
 
 if __name__ == '__main__':
     cmd = sys.argv[1] if len(sys.argv) > 1 else ''
-    if cmd == 'register':
-        register()
-    elif cmd == 'registered':
-        registered()
-    elif cmd == 'unregister':
-        unregister()
-    elif cmd == 'catalog':
+    if cmd == 'catalog':
         catalog()
     elif cmd == 'services':
         services()
@@ -754,7 +618,7 @@ if __name__ == '__main__':
     elif cmd == 'share-cycle':
         share_cycle()
     else:
-        die('usage: orphera-manila-api register | registered | unregister | catalog | services | services-up | share-type | share-type-ok | share-cycle')
+        die('usage: orphera-manila-api catalog | services | services-up | share-type | share-type-ok | share-cycle')
 """
 
   private val helper =
@@ -763,19 +627,7 @@ if __name__ == '__main__':
       .replace("@@MANILA@@", s"http://$fqdn:$apiPort/v2")
       .replace("@@NODEIP@@", nodeIp)
       .replace("@@ADMINPW@@", adminPassword.reveal)
-      .replace("@@MANILAPW@@", manilaPassword.reveal)
       .replace("@@CA@@", caCert)
-
-  // The API answers its version document without a token (200, or 300 for a list of versions).
-  private val healthy =
-    s"""CODE=$$(curl -s -o /dev/null -w '%{http_code}' http://localhost:$apiPort/); [ "$$CODE" = "200" ] || [ "$$CODE" = "300" ]"""
-  private val waitHealthy =
-    s"""for i in $$(seq 1 36); do
-       |  ( $healthy ) && exit 0
-       |  sleep 5
-       |done
-       |echo "manila-api does not answer on $apiPort - see 'journalctl -xeu orphera-manila-api' and $logDir" >&2
-       |exit 1""".stripMargin
 
   // The scheduler and the share service report in every few seconds; give them three minutes to appear as `up`
   // through the API.
@@ -803,10 +655,10 @@ if __name__ == '__main__':
       registryMirror,
       mode = "0644"
     ).after(mirrorDir)
-    val pulled = command(
+    val pulled = pullImages(
       "pull the Manila images",
-      pullScript,
-      unless = imagesPresent,
+      images,
+      hint = "the Image(...) values in manila_single_node.scala",
       timeout = 2400
     ).after(podman, mirror)
     val shareImageOk = command(
@@ -817,11 +669,12 @@ if __name__ == '__main__':
     ).after(pulled)
 
     val caDirectory = directory(caDir, mode = "0755").after(podman)
-    val ca = command(
+    val ca = serverCa(
       "fetch Keystone's CA from its TLS handshake",
-      caScript,
-      unless = caCurrent,
-      timeout = 60
+      ksFqdn,
+      5000,
+      caCert,
+      hint = "apply keystone_single_node.scala (it must serve server-chain.crt)"
     ).after(caDirectory, tools(1))
 
     val logDirectory = directory(logDir)
@@ -918,18 +771,22 @@ if __name__ == '__main__':
 
     val helperFile = secretFile(
       helperPath,
-      Secret(helper), // it holds the admin and manila passwords
+      Secret(helper), // it holds the admin password
       mode = "0700",
       owner = "root",
       group = "root"
     )
     // Registration comes before the services start.
-    val registered = command(
+    val (keystoneHelper, ensured) = keystoneEntries(
       "register Manila in Keystone",
-      s"$helperPath register",
-      unless = s"$helperPath registered >/dev/null 2>&1",
-      timeout = 120
-    ).after(helperFile, ca)
+      "manila",
+      manilaPassword,
+      List(KeystoneService("manilav2", "sharev2", s"http://$fqdn:$apiPort/v2")),
+      ksUrl,
+      adminPassword,
+      caCert
+    )
+    val registered = ensured.after(ca)
 
     val running = svcs.map { s =>
       s.unit.after(
@@ -937,11 +794,13 @@ if __name__ == '__main__':
       )
     }
 
-    val answering = command(
+    // The API answers its version document without a token (200, or 300 for a list of versions).
+    val answering = waitForHttp(
       "manila-api answers on its port",
-      waitHealthy,
-      unless = healthy,
-      timeout = 240
+      s"http://localhost:$apiPort/",
+      status = List(200, 300),
+      timeout = 180,
+      hint = s"see 'journalctl -xeu orphera-manila-api' and $logDir"
     ).after(running*)
     val reporting = command(
       "scheduler and share service report up through the API",
@@ -972,5 +831,10 @@ if __name__ == '__main__':
       logDirectory,
       stateDirectory,
       tmpDirectory
-    ) ++ svcs.flatMap(_.resources) ++ List(dbSync, helperFile, registered) ++
+    ) ++ svcs.flatMap(_.resources) ++ List(
+      dbSync,
+      helperFile,
+      keystoneHelper,
+      registered
+    ) ++
       running ++ List(answering, reporting, shareType, shareCycle)

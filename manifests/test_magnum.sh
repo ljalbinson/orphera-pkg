@@ -87,8 +87,11 @@ assert_contains "the conductor has the management cluster kubeconfig" "kubeconfi
 OUT=$(run_on "sudo $HELPER image-present")
 assert_contains "Glance has an active Kubernetes image" "is active in Glance" "$OUT"
 
-OUT=$(run_on "sudo $HELPER resources")
-assert_contains "the flavor and key pair exist" "resources ready" "$OUT"
+OUT=$(run_on "sudo /usr/local/sbin/orphera-flavor-orphera-k8s check")
+assert_contains "the flavor orphera.k8s is as wanted" "is as wanted" "$OUT"
+
+OUT=$(run_on "sudo /usr/local/sbin/orphera-keypair-orphera-magnum check")
+assert_contains "the key pair orphera-magnum exists" "exists" "$OUT"
 
 OUT=$(run_on "sudo $HELPER template")
 assert_contains "the cluster template orphera-k8s exists" "cluster template orphera-k8s ready" "$OUT"

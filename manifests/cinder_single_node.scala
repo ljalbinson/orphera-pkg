@@ -51,7 +51,7 @@ import orphera.orchestrator.conf.*
 //   - `cinder-manage db sync` is skipped while its stamp matches and the
 //     `volumes` table exists (a query as the cinder user, through the VIP).
 //   - Cinder is registered in Keystone before the units start. The registration
-//     is skipped while the helper's `registered` check passes.
+//     is skipped while its check passes.
 //
 // Test-only credentials from the secret store (`orphera secrets`), as before.
 object cinder_single_node extends OrpheraApply:
@@ -221,66 +221,6 @@ object cinder_single_node extends OrpheraApply:
        |""".stripMargin
 
   private val images = cinderServices.map(_.image.ref)
-  private val pullScript =
-    s"""${Pull.shellFunction(
-        "the Image(...) in cinderContainer in cinder_single_node.scala"
-      )}
-       |for img in ${images.mkString(" ")}; do
-       |  pull_retry $$img || exit 1
-       |done
-       |echo "images ready"""".stripMargin
-  private val imagesPresent =
-    s"""for img in ${images.mkString(
-        " "
-      )}; do podman image exists $$img || exit 1; done"""
-
-  // Keystone's CA: the last certificate it presents (trust on first use),
-  // which must be self-signed. `chainTo DIR` leaves DIR/c1.pem ... DIR/cN.pem,
-  // each holding the certificate only: the text s_client prints after the
-  // last one (bytes read and written, session ticket) differs on every
-  // handshake, and would make the comparison with the installed copy fail.
-  private val chainTo =
-    s"""chainTo() { openssl s_client -connect $ksFqdn:5000 -servername $ksFqdn -showcerts </dev/null 2>/dev/null | awk -v d="$$1" '/-----BEGIN CERTIFICATE-----/{n++; p=1} p{print > (d "/c" n ".pem")} /-----END CERTIFICATE-----/{p=0}'; }"""
-
-  private val trustTarget =
-    """if command -v update-ca-certificates >/dev/null 2>&1; then t=/usr/local/share/ca-certificates/orphera-test-ca.crt; else t=/etc/pki/ca-trust/source/anchors/orphera-test-ca.crt; fi"""
-
-  // Current when the installed CA is the one Keystone presents now, and is in
-  // the system trust store.
-  private val caCurrent =
-    s"""$chainTo
-       |D=$$(mktemp -d)
-       |chainTo $$D
-       |N=$$(ls $$D/c*.pem 2>/dev/null | wc -l)
-       |R=1
-       |if [ "$$N" -ge 2 ]; then
-       |  $trustTarget
-       |  cmp -s $$D/c$$N.pem $caCert && cmp -s $caCert "$$t" && R=0
-       |fi
-       |rm -rf $$D
-       |exit $$R""".stripMargin
-
-  private val caScript =
-    s"""set -e
-       |$chainTo
-       |mkdir -p $caDir
-       |D=$$(mktemp -d)
-       |trap 'rm -rf $$D' EXIT
-       |chainTo $$D
-       |COUNT=$$(ls $$D/c*.pem 2>/dev/null | wc -l)
-       |if [ "$$COUNT" -lt 2 ]; then
-       |  echo "keystone at $ksFqdn:5000 presented $$COUNT certificate(s); expected leaf + CA - apply keystone_single_node.scala (it must serve server-chain.crt)" >&2
-       |  exit 1
-       |fi
-       |cp $$D/c$$COUNT.pem $caCert
-       |openssl verify -CAfile $caCert $$D/c1.pem
-       |SUBJ=$$(openssl x509 -in $caCert -noout -subject | sed 's/^subject=//')
-       |ISS=$$(openssl x509 -in $caCert -noout -issuer | sed 's/^issuer=//')
-       |if [ "$$SUBJ" != "$$ISS" ]; then echo "last certificate is not self-signed: $$SUBJ / $$ISS" >&2; exit 1; fi
-       |$trustTarget
-       |cp $caCert "$$t"
-       |if command -v update-ca-certificates >/dev/null 2>&1; then update-ca-certificates; else update-ca-trust; fi
-       |echo "Keystone CA installed: $$SUBJ"""".stripMargin
 
   // The files every service's config.json copies in, and the ownership it sets.
   private val commonFiles =
@@ -374,7 +314,7 @@ object cinder_single_node extends OrpheraApply:
 
   // Standard-library Python, as in the other services. Plain string filled in
   // with replace(). Subcommands:
-  //   register | registered | unregister | catalog | volume-services |
+  //   catalog | volume-services |
   //   volume-create | volume-delete <id>
   private val apiHelperPython =
     """#!/usr/bin/python3
@@ -383,7 +323,6 @@ import json, ssl, sys, time, urllib.request, urllib.error
 KS = 'https://@@KS@@:5000/v3'
 CINDER = '@@CINDER@@'
 ADMIN_PW = '@@ADMINPW@@'
-CINDER_PW = '@@CINDERPW@@'
 CTX = ssl.create_default_context(cafile='@@CA@@')
 
 
@@ -431,72 +370,6 @@ def find(token, path, key):
 
 
 ENDPOINT = CINDER + '/v3/%(project_id)s'
-
-
-def register():
-    token, _ = admin()
-    project = find(token, '/projects?name=service', 'projects')
-    if project is None:
-        s, p, _ = call('POST', KS + '/projects', {'project': {'name': 'service', 'domain_id': 'default'}}, token)
-        if s != 201:
-            die('creating project service failed: HTTP %s %s' % (s, p))
-        project = p['project']
-    user = find(token, '/users?name=cinder', 'users')
-    if user is None:
-        s, p, _ = call('POST', KS + '/users', {'user': {'name': 'cinder', 'domain_id': 'default', 'password': CINDER_PW}}, token)
-        if s != 201:
-            die('creating user cinder failed: HTTP %s %s' % (s, p))
-        user = p['user']
-    else:
-        call('PATCH', KS + '/users/' + user['id'], {'user': {'password': CINDER_PW}}, token)
-    role = find(token, '/roles?name=admin', 'roles')
-    if role is None:
-        die('role admin not found')
-    s, p, _ = call('PUT', KS + '/projects/%s/users/%s/roles/%s' % (project['id'], user['id'], role['id']), None, token)
-    if s not in (200, 204):
-        die('granting admin to cinder failed: HTTP %s %s' % (s, p))
-    service = find(token, '/services?type=volumev3', 'services')
-    if service is None:
-        s, p, _ = call('POST', KS + '/services', {'service': {'name': 'cinderv3', 'type': 'volumev3'}}, token)
-        if s != 201:
-            die('creating service volumev3 failed: HTTP %s %s' % (s, p))
-        service = p['service']
-    for iface in ('public', 'internal', 'admin'):
-        ep = find(token, '/endpoints?service_id=%s&interface=%s' % (service['id'], iface), 'endpoints')
-        if ep is None:
-            s, p, _ = call('POST', KS + '/endpoints', {'endpoint': {'interface': iface, 'url': ENDPOINT, 'service_id': service['id'], 'region_id': 'RegionOne'}}, token)
-            if s != 201:
-                die('creating %s endpoint failed: HTTP %s %s' % (iface, s, p))
-        elif ep['url'] != ENDPOINT:
-            call('PATCH', KS + '/endpoints/' + ep['id'], {'endpoint': {'url': ENDPOINT}}, token)
-    print('registered cinder in keystone (project service, user cinder, service volumev3, 3 endpoints)')
-
-
-def registered():
-    # Exit 0 only when everything register() makes is in place: the cinder user
-    # can get a token in project service, and service volumev3 has the three
-    # endpoints at ENDPOINT. Makes no change.
-    get_token('cinder', CINDER_PW, 'service')
-    token, _ = admin()
-    service = find(token, '/services?type=volumev3', 'services')
-    if service is None:
-        die('no service of type volumev3')
-    for iface in ('public', 'internal', 'admin'):
-        ep = find(token, '/endpoints?service_id=%s&interface=%s' % (service['id'], iface), 'endpoints')
-        if ep is None or ep['url'] != ENDPOINT:
-            die('endpoint %s missing or wrong' % iface)
-    print('cinder is registered in keystone')
-
-
-def unregister():
-    token, _ = admin()
-    service = find(token, '/services?type=volumev3', 'services')
-    if service is not None:
-        call('DELETE', KS + '/services/' + service['id'], None, token)
-    user = find(token, '/users?name=cinder', 'users')
-    if user is not None:
-        call('DELETE', KS + '/users/' + user['id'], None, token)
-    print('removed cinder from keystone (service volumev3, its endpoints, user cinder)')
 
 
 def catalog():
@@ -551,13 +424,7 @@ def volume_delete(vid):
 
 if __name__ == '__main__':
     cmd = sys.argv[1] if len(sys.argv) > 1 else ''
-    if cmd == 'register':
-        register()
-    elif cmd == 'registered':
-        registered()
-    elif cmd == 'unregister':
-        unregister()
-    elif cmd == 'catalog':
+    if cmd == 'catalog':
         catalog()
     elif cmd == 'volume-services':
         volume_services()
@@ -566,7 +433,7 @@ if __name__ == '__main__':
     elif cmd == 'volume-delete' and len(sys.argv) > 2:
         volume_delete(sys.argv[2])
     else:
-        die('usage: orphera-openstack-api register | registered | unregister | catalog | volume-services | volume-create | volume-delete <id>')
+        die('usage: orphera-openstack-api catalog | volume-services | volume-create | volume-delete <id>')
 """
 
   private val helper =
@@ -574,20 +441,8 @@ if __name__ == '__main__':
       .replace("@@KS@@", ksFqdn)
       .replace("@@CINDER@@", s"http://$fqdn:$apiPort")
       .replace("@@ADMINPW@@", adminPassword.reveal)
-      .replace("@@CINDERPW@@", cinderPassword.reveal)
       .replace("@@CA@@", caCert)
   private val helperPath = "/usr/local/sbin/orphera-openstack-api"
-
-  // Cinder answers with a version document (HTTP 200 or 300) once Apache is up.
-  private val healthy =
-    s"""CODE=$$(curl -s -o /dev/null -w '%{http_code}' http://localhost:$apiPort/); [ "$$CODE" = "200" ] || [ "$$CODE" = "300" ]"""
-  private val waitHealthy =
-    s"""for i in $$(seq 1 24); do
-       |  $healthy && exit 0
-       |  sleep 5
-       |done
-       |echo "cinder-api does not answer on http://localhost:$apiPort - see 'journalctl -xeu orphera-cinder-api' and $logDir" >&2
-       |exit 1""".stripMargin
 
   // The scheduler and volume services report in every few seconds; give them a
   // minute and a half to appear as `up` through the API.
@@ -616,19 +471,20 @@ if __name__ == '__main__':
       registryMirror,
       mode = "0644"
     ).after(mirrorDir)
-    val pulled = command(
+    val pulled = pullImages(
       "pull the Cinder images",
-      pullScript,
-      unless = imagesPresent,
+      images,
+      hint = "the Image(...) in cinderContainer in cinder_single_node.scala",
       timeout = 2400
     ).after(podman, mirror)
 
     val caDirectory = directory(caDir, mode = "0755").after(podman)
-    val ca = command(
+    val ca = serverCa(
       "fetch Keystone's CA from its TLS handshake",
-      caScript,
-      unless = caCurrent,
-      timeout = 60
+      ksFqdn,
+      5000,
+      caCert,
+      hint = "apply keystone_single_node.scala (it must serve server-chain.crt)"
     ).after(caDirectory, tools(1))
 
     val logDirectory = directory(logDir)
@@ -728,22 +584,34 @@ if __name__ == '__main__':
       group = "root"
     )
     // Registration comes before the services start, as for Nova.
-    val registered = command(
+    val (keystoneHelper, ensured) = keystoneEntries(
       "register Cinder in Keystone",
-      s"$helperPath register",
-      unless = s"$helperPath registered >/dev/null 2>&1",
-      timeout = 120
-    ).after(helperFile, ca)
+      "cinder",
+      cinderPassword,
+      List(
+        KeystoneService(
+          "cinderv3",
+          "volumev3",
+          s"http://$fqdn:$apiPort/v3/%(project_id)s"
+        )
+      ),
+      s"https://$ksFqdn:5000",
+      adminPassword,
+      caCert
+    )
+    val registered = ensured.after(ca)
 
     val running = svcs.map { s =>
       s.unit.after((dbSync :: registered :: s.deps)*)
     }
 
-    val answering = command(
+    // Cinder answers with a version document (HTTP 200 or 300) once Apache is up.
+    val answering = waitForHttp(
       "cinder-api answers on its port",
-      waitHealthy,
-      unless = healthy,
-      timeout = 180
+      s"http://localhost:$apiPort/",
+      status = List(200, 300),
+      timeout = 120,
+      hint = s"see 'journalctl -xeu orphera-cinder-api' and $logDir"
     ).after(running*)
     val reporting = command(
       "scheduler and volume services report up through the API",
@@ -760,5 +628,10 @@ if __name__ == '__main__':
       ca,
       logDirectory,
       stateDirectory
-    ) ++ svcs.flatMap(_.resources) ++ List(dbSync, helperFile, registered) ++
+    ) ++ svcs.flatMap(_.resources) ++ List(
+      dbSync,
+      helperFile,
+      keystoneHelper,
+      registered
+    ) ++
       running ++ List(answering, reporting)

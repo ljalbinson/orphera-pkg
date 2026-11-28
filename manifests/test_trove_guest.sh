@@ -24,7 +24,8 @@ set -uo pipefail
 
 BUILD_NODE="tst21"
 NODE="tst25"
-IMAGE_HELPER="/usr/local/sbin/orphera-trove-image"
+IMAGE_HELPER="/usr/local/sbin/orphera-image-trove-guest-ubuntu-noble"
+FLAVOR_HELPER="/usr/local/sbin/orphera-flavor-orphera-trove"
 DB_HELPER="/usr/local/sbin/orphera-trove-db"
 VERSION="${TROVE_MYSQL_VERSION:-8.0.29}"
 
@@ -54,8 +55,10 @@ if [ -z "${NO_APPLY:-}" ]; then
   done
 fi
 
-OUT=$(RUN_TIMEOUT=120 run_on "$IMAGE_HELPER present" "$BUILD_NODE")
-assert_contains "the guest image is active in Glance with the tags trove and mysql, and the flavor exists" "is active and flavor orphera-trove exists" "$OUT"
+OUT=$(RUN_TIMEOUT=120 run_on "$IMAGE_HELPER check" "$BUILD_NODE")
+assert_contains "the guest image is active in Glance with the tags trove and mysql" "trove-guest-ubuntu-noble" "$OUT"
+OUT=$(RUN_TIMEOUT=120 run_on "$FLAVOR_HELPER check" "$BUILD_NODE")
+assert_contains "the flavor orphera-trove exists as wanted" "flavor orphera-trove is as wanted" "$OUT"
 
 OUT=$(run_on "$DB_HELPER datastores")
 assert_contains "the Trove API lists the datastore mysql with $VERSION as the default version" "default $VERSION" "$OUT"

@@ -99,33 +99,41 @@ object mariadb_galera_cluster extends OrpheraClusterPlaybook:
   // address:port, and mysqld's wildcard bind was claiming the VIP the
   // instant keepalived added it to the interface, before HAProxy ever
   // got a chance to.
-  // NAME is resolved via `hostname -s`, not a Scala parameter — there is
-  // no built-in {{node_name}}/{{name}} template var in Orphera (checked
-  // against the real DSL/runner source rather than assumed, after
-  // getting bitten by a similarly wrong assumption earlier in this
-  // project's etcd work). {{cluster_ip}} works because it's a literal
-  // per-node var in inventory.yaml; a node's own name isn't exposed the
-  // same way, so this uses the exact same `$(hostname -s)` convention as
-  // ceph_mon_quorum.scala/etcd_cluster.scala's own equivalent, with the
-  // same assumption: each node's hostname matches its inventory name
-  // (tst3/tst4/tst5).
-  private val galeraConfigScript =
-    s"""NAME=$$(hostname -s)
-       |cat > /etc/mysql/mariadb.conf.d/60-galera.cnf <<EOF
-       |[mariadbd]
-       |wsrep_on=ON
-       |wsrep_provider=/usr/lib/galera/libgalera_smm.so
-       |wsrep_cluster_name="$clusterName"
-       |wsrep_cluster_address="$galeraPeers"
-       |wsrep_node_address="{{cluster_ip}}"
-       |wsrep_node_name="$$NAME"
-       |wsrep_sst_method=mariabackup
-       |wsrep_sst_auth="sst_user:${sstPassword.reveal}"
-       |binlog_format=ROW
-       |default_storage_engine=InnoDB
-       |innodb_autoinc_lock_mode=2
-       |bind-address={{cluster_ip}}
-       |EOF""".stripMargin
+  // The same file as an apply description: rendered on the node (`{{node_name}}`
+  // is the inventory name, which the script took from `hostname -s`, `{{cluster_ip}}`
+  // its address), compared with what is there and written only if it differs. No
+  // service step: the nodes are started by the stages below, as before. The SST
+  // password is in the text (it is a registered secret, so masked in output). One
+  // change on purpose: the script left the file world-readable (mode 0644, root);
+  // it is now 0640 root:mysql, which the server can read and other users cannot.
+  // A node built by the script therefore shows the file `changed` once (mode only).
+  private val galeraConfigPlan: ApplyPlan =
+    import Resources.*
+    ApplyPlan.orFail(
+      "galera-config",
+      List(
+        fileTemplate(
+          "/etc/mysql/mariadb.conf.d/60-galera.cnf",
+          s"""[mariadbd]
+             |wsrep_on=ON
+             |wsrep_provider=/usr/lib/galera/libgalera_smm.so
+             |wsrep_cluster_name="$clusterName"
+             |wsrep_cluster_address="$galeraPeers"
+             |wsrep_node_address="{{cluster_ip}}"
+             |wsrep_node_name="{{node_name}}"
+             |wsrep_sst_method=mariabackup
+             |wsrep_sst_auth="sst_user:${sstPassword.reveal}"
+             |binlog_format=ROW
+             |default_storage_engine=InnoDB
+             |innodb_autoinc_lock_mode=2
+             |bind-address={{cluster_ip}}
+             |""".stripMargin,
+          mode = "0640",
+          owner = "root",
+          group = "mysql"
+        )
+      )
+    )
 
   // Empty/zero specifically means "wsrep is off" (a fresh standalone
   // instance, per the header comment's gotcha) or "not running at all" —
@@ -258,7 +266,7 @@ object mariadb_galera_cluster extends OrpheraClusterPlaybook:
       // delay writing it until just before each node's own start step.
       stage("write-galera-config", "tst3", "tst4", "tst5")
         .task("write /etc/mysql/mariadb.conf.d/60-galera.cnf")(
-          Task.RunCommand(List("sh", "-c", galeraConfigScript))
+          Task.Apply(galeraConfigPlan)
         )
         .build,
 

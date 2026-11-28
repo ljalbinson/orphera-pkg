@@ -79,9 +79,10 @@ import orphera.orchestrator.kolla.*
 //     /var/lib/orphera/magnum/driver.stamp to take a newer release.
 //   - `magnum-db-manage upgrade` is skipped while its stamp matches and the `cluster_template` table exists (a
 //     query as the magnum user, through the VIP).
-//   - Magnum is registered in Keystone before the units start, skipped while the helper's `registered` passes.
-//   - The flavor and key pair, the node image and the cluster template each run only while their read-only
-//     checks (`resources-ok`, `image-present`, `template-ok`) fail.
+//   - Magnum is registered in Keystone before the units start, skipped while its check passes.
+//   - The flavor and key pair are typed (openstackFlavor, openstackKeypair, each with a small helper of its own);
+//     the node image and the cluster template run only while their read-only checks (`image-present`,
+//     `template-ok`) fail.
 //   - The test cluster (a control-plane node and a worker are made, the API answers /version, the cluster is
 //     deleted: 15 to 40 minutes) is made again only when its stamp changes (a hash of magnum.conf, the driver
 //     stamp, the DNS server and the Kubernetes image choice), so a repeated run does not build a cluster.
@@ -202,18 +203,6 @@ object magnum_single_node extends OrpheraApply:
        |""".stripMargin
 
   private val images = List(apiBase, conductorBase)
-  private val pullScript =
-    s"""${Pull.shellFunction(
-        "the Image(...) values in magnum_single_node.scala"
-      )}
-       |for img in ${images.mkString(" ")}; do
-       |  pull_retry $$img || exit 1
-       |done
-       |echo "images ready"""".stripMargin
-  private val imagesPresent =
-    s"""for img in ${images.mkString(
-        " "
-      )}; do podman image exists $$img || exit 1; done"""
 
   // The commands the service needs are in its image, and the image can switch off the other Cluster API driver.
   private val imageCommandsScript =
@@ -230,51 +219,6 @@ object magnum_single_node extends OrpheraApply:
        |fi
        |echo "the Magnum commands are in the images"""".stripMargin
   private val imageCommandsOk = s"( $imageCommandsScript ) >/dev/null 2>&1"
-
-  // Keystone's CA: the last certificate it presents (trust on first use), which must be self-signed.
-  // `chainTo DIR` leaves DIR/c1.pem ... DIR/cN.pem, each holding the certificate only: the text s_client
-  // prints after the last one differs on every handshake, and would make the comparison fail.
-  private val chainTo =
-    s"""chainTo() { openssl s_client -connect $ksFqdn:5000 -servername $ksFqdn -showcerts </dev/null 2>/dev/null | awk -v d="$$1" '/-----BEGIN CERTIFICATE-----/{n++; p=1} p{print > (d "/c" n ".pem")} /-----END CERTIFICATE-----/{p=0}'; }"""
-
-  private val trustTarget =
-    """if command -v update-ca-certificates >/dev/null 2>&1; then t=/usr/local/share/ca-certificates/orphera-test-ca.crt; else t=/etc/pki/ca-trust/source/anchors/orphera-test-ca.crt; fi"""
-
-  // Current when the installed CA is the one Keystone presents now, and is in the system trust store.
-  private val caCurrent =
-    s"""$chainTo
-       |D=$$(mktemp -d)
-       |chainTo $$D
-       |N=$$(ls $$D/c*.pem 2>/dev/null | wc -l)
-       |R=1
-       |if [ "$$N" -ge 2 ]; then
-       |  $trustTarget
-       |  cmp -s $$D/c$$N.pem $caCert && cmp -s $caCert "$$t" && R=0
-       |fi
-       |rm -rf $$D
-       |exit $$R""".stripMargin
-
-  private val caScript =
-    s"""set -e
-       |$chainTo
-       |mkdir -p $caDir
-       |D=$$(mktemp -d)
-       |trap 'rm -rf $$D' EXIT
-       |chainTo $$D
-       |COUNT=$$(ls $$D/c*.pem 2>/dev/null | wc -l)
-       |if [ "$$COUNT" -lt 2 ]; then
-       |  echo "keystone at $ksFqdn:5000 presented $$COUNT certificate(s); expected leaf + CA - apply keystone_single_node.scala (it must serve server-chain.crt)" >&2
-       |  exit 1
-       |fi
-       |cp $$D/c$$COUNT.pem $caCert
-       |openssl verify -CAfile $caCert $$D/c1.pem
-       |SUBJ=$$(openssl x509 -in $caCert -noout -subject | sed 's/^subject=//')
-       |ISS=$$(openssl x509 -in $caCert -noout -issuer | sed 's/^issuer=//')
-       |if [ "$$SUBJ" != "$$ISS" ]; then echo "last certificate is not self-signed: $$SUBJ / $$ISS" >&2; exit 1; fi
-       |$trustTarget
-       |cp $caCert "$$t"
-       |if command -v update-ca-certificates >/dev/null 2>&1; then update-ca-certificates; else update-ca-trust; fi
-       |echo "Keystone CA installed: $$SUBJ"""".stripMargin
 
   // ---- the Cluster API driver --------------------------------------------
 
@@ -321,10 +265,7 @@ import json, os, ssl, subprocess, sys, time, urllib.request, urllib.error
 KS = 'https://@@KS@@:5000/v3'
 MAGNUM = '@@MAGNUM@@'
 ADMIN_PW = '@@ADMINPW@@'
-MAGNUM_PW = '@@MAGNUMPW@@'
-DOMAIN_PW = '@@DOMAINPW@@'
 CTX = ssl.create_default_context(cafile='@@CAFILE@@')
-FLAVOR_ID = '@@FLAVORID@@'
 FLAVOR_NAME = 'orphera.k8s'
 TEMPLATE = 'orphera-k8s'
 KEYPAIR = 'orphera-magnum'
@@ -379,22 +320,6 @@ def versioned(url, suffix):
     return url if url.endswith(suffix) else url + suffix
 
 
-def find(token, path, key):
-    status, parsed, _ = call('GET', KS + path, token=token)
-    items = parsed.get(key, [])
-    return items[0] if items else None
-
-
-def ensure(token, what, path, key, body, create_key):
-    found = find(token, path, key)
-    if found is not None:
-        return found
-    s, p, _ = call('POST', KS + '/' + what, body, token)
-    if s != 201:
-        die('creating %s failed: HTTP %s %s' % (what, s, p))
-    return p[create_key]
-
-
 class Clients(object):
     def __init__(self):
         self.token, parsed = get_token('admin', ADMIN_PW, 'admin')
@@ -416,53 +341,6 @@ class Clients(object):
         return call(method, MAGNUM + '/v1' + path, body, self.token, {'OpenStack-API-Version': 'container-infra latest'}, 120)
 
 
-def register():
-    token, _ = get_token('admin', ADMIN_PW, 'admin')
-    project = ensure(token, 'projects', '/projects?name=service', 'projects', {'project': {'name': 'service', 'domain_id': 'default'}}, 'project')
-    user = find(token, '/users?name=magnum', 'users')
-    if user is None:
-        s, p, _ = call('POST', KS + '/users', {'user': {'name': 'magnum', 'domain_id': 'default', 'password': MAGNUM_PW}}, token)
-        if s != 201:
-            die('creating user magnum failed: HTTP %s %s' % (s, p))
-        user = p['user']
-    else:
-        body = {'auth': {'identity': {'methods': ['password'], 'password': {'user': {'name': 'magnum', 'domain': {'name': 'Default'}, 'password': MAGNUM_PW}}}}}
-        s, _, _ = call('POST', KS + '/auth/tokens', body)
-        if s != 201:
-            call('PATCH', KS + '/users/' + user['id'], {'user': {'password': MAGNUM_PW}}, token)
-    admin_role = find(token, '/roles?name=admin', 'roles')
-    if admin_role is None:
-        die('role admin not found')
-    s, p, _ = call('PUT', KS + '/projects/%s/users/%s/roles/%s' % (project['id'], user['id'], admin_role['id']), None, token)
-    if s not in (200, 204):
-        die('granting admin to magnum failed: HTTP %s %s' % (s, p))
-    service = ensure(token, 'services', '/services?type=container-infra', 'services', {'service': {'name': 'magnum', 'type': 'container-infra'}}, 'service')
-    for iface in ('public', 'internal', 'admin'):
-        ep = find(token, '/endpoints?service_id=%s&interface=%s' % (service['id'], iface), 'endpoints')
-        if ep is None:
-            s, p, _ = call('POST', KS + '/endpoints', {'endpoint': {'interface': iface, 'url': MAGNUM + '/v1', 'service_id': service['id'], 'region_id': 'RegionOne'}}, token)
-            if s != 201:
-                die('creating %s endpoint failed: HTTP %s %s' % (iface, s, p))
-        elif ep['url'] != MAGNUM + '/v1':
-            call('PATCH', KS + '/endpoints/' + ep['id'], {'endpoint': {'url': MAGNUM + '/v1'}}, token)
-    domain = ensure(token, 'domains', '/domains?name=magnum', 'domains', {'domain': {'name': 'magnum', 'description': 'Owns users and projects created by magnum'}}, 'domain')
-    dadmin = find(token, '/users?name=magnum_domain_admin&domain_id=' + domain['id'], 'users')
-    if dadmin is None:
-        s, p, _ = call('POST', KS + '/users', {'user': {'name': 'magnum_domain_admin', 'domain_id': domain['id'], 'password': DOMAIN_PW}}, token)
-        if s != 201:
-            die('creating user magnum_domain_admin failed: HTTP %s %s' % (s, p))
-        dadmin = p['user']
-    else:
-        body = {'auth': {'identity': {'methods': ['password'], 'password': {'user': {'name': 'magnum_domain_admin', 'domain': {'name': 'magnum'}, 'password': DOMAIN_PW}}}}}
-        s, _, _ = call('POST', KS + '/auth/tokens', body)
-        if s != 201:
-            call('PATCH', KS + '/users/' + dadmin['id'], {'user': {'password': DOMAIN_PW}}, token)
-    s, p, _ = call('PUT', KS + '/domains/%s/users/%s/roles/%s' % (domain['id'], dadmin['id'], admin_role['id']), None, token)
-    if s not in (200, 204):
-        die('granting admin on the domain failed: HTTP %s %s' % (s, p))
-    print('registered magnum in keystone (user magnum, service type container-infra, 3 endpoints, domain magnum with magnum_domain_admin)')
-
-
 def catalog():
     _, p = get_token('admin', ADMIN_PW, 'admin')
     print('catalog types: ' + ' '.join(sorted(c['type'] for c in p['token']['catalog'])))
@@ -478,23 +356,6 @@ def mservices():
     print('mservices: %d' % len(svcs))
     if not any(x.get('binary') == 'magnum-conductor' and x.get('state') == 'up' for x in svcs):
         die('magnum-conductor is not up')
-
-
-def resources():
-    cl = Clients()
-    s, p, _ = cl.c('GET', '/flavors/' + FLAVOR_ID)
-    if s == 404:
-        s, p, _ = cl.c('POST', '/flavors', {'flavor': {'id': FLAVOR_ID, 'name': FLAVOR_NAME, 'ram': 3072, 'vcpus': 2, 'disk': 30, 'os-flavor-access:is_public': True}})
-        if s not in (200, 201):
-            die('creating flavor %s failed: HTTP %s %s' % (FLAVOR_ID, s, p))
-    elif s != 200:
-        die('flavor lookup failed: HTTP %s %s' % (s, p))
-    s, p, _ = cl.c('GET', '/os-keypairs/' + KEYPAIR)
-    if s == 404:
-        s, p, _ = cl.c('POST', '/os-keypairs', {'keypair': {'name': KEYPAIR}})
-        if s not in (200, 201):
-            die('creating key pair failed: HTTP %s %s' % (s, p))
-    print('resources ready: flavor %s, key pair %s' % (FLAVOR_ID, KEYPAIR))
 
 
 def k8s_images(cl):
@@ -659,21 +520,6 @@ def delete_clusters():
     die('clusters are still there after 30 minutes')
 
 
-def unregister():
-    token, _ = get_token('admin', ADMIN_PW, 'admin')
-    service = find(token, '/services?type=container-infra', 'services')
-    if service is not None:
-        call('DELETE', KS + '/services/' + service['id'], None, token)
-    user = find(token, '/users?name=magnum', 'users')
-    if user is not None:
-        call('DELETE', KS + '/users/' + user['id'], None, token)
-    domain = find(token, '/domains?name=magnum', 'domains')
-    if domain is not None:
-        call('PATCH', KS + '/domains/' + domain['id'], {'domain': {'enabled': False}}, token)
-        call('DELETE', KS + '/domains/' + domain['id'], None, token)
-    print('removed magnum from keystone (service container-infra, its endpoints, user magnum, domain magnum)')
-
-
 def teardown():
     cl = Clients()
     s, p, _ = cl.m('GET', '/clusters')
@@ -689,65 +535,9 @@ def teardown():
     for t in p.get('clustertemplates', []) if s == 200 else []:
         if t.get('name') == TEMPLATE:
             cl.m('DELETE', '/clustertemplates/' + t['uuid'])
-    cl.c('DELETE', '/flavors/' + FLAVOR_ID)
-    cl.c('DELETE', '/os-keypairs/' + KEYPAIR)
     for i in k8s_images(cl):
         cl.g('DELETE', '/images/' + i['id'])
-    unregister()
-    print('removed the Magnum clusters, template, flavor, key pair, image and Keystone entries')
-
-
-def registered():
-    # Exit 0 only when everything register() makes is in place: the user magnum (able to log in with the stored
-    # password) with the admin role on project service, the service of type container-infra with its three
-    # endpoints, the trustee domain magnum and its admin user (able to log in, with the admin role on the
-    # domain). Makes no change.
-    token, _ = get_token('admin', ADMIN_PW, 'admin')
-    project = find(token, '/projects?name=service', 'projects')
-    user = find(token, '/users?name=magnum', 'users')
-    admin_role = find(token, '/roles?name=admin', 'roles')
-    if project is None or user is None or admin_role is None:
-        die('project service, user magnum or role admin is missing')
-    body = {'auth': {'identity': {'methods': ['password'], 'password': {'user': {'name': 'magnum', 'domain': {'name': 'Default'}, 'password': MAGNUM_PW}}}}}
-    s, _, _ = call('POST', KS + '/auth/tokens', body)
-    if s != 201:
-        die('user magnum cannot log in with the stored password')
-    s, _, _ = call('GET', KS + '/projects/%s/users/%s/roles/%s' % (project['id'], user['id'], admin_role['id']), None, token)
-    if s != 204:
-        die('user magnum has no admin role on project service (HTTP %s)' % s)
-    service = find(token, '/services?type=container-infra', 'services')
-    if service is None:
-        die('service of type container-infra is missing')
-    for iface in ('public', 'internal', 'admin'):
-        ep = find(token, '/endpoints?service_id=%s&interface=%s' % (service['id'], iface), 'endpoints')
-        if ep is None or ep['url'] != MAGNUM + '/v1':
-            die('the %s endpoint is missing or differs' % iface)
-    domain = find(token, '/domains?name=magnum', 'domains')
-    if domain is None:
-        die('domain magnum is missing')
-    dadmin = find(token, '/users?name=magnum_domain_admin&domain_id=' + domain['id'], 'users')
-    if dadmin is None:
-        die('user magnum_domain_admin is missing')
-    body = {'auth': {'identity': {'methods': ['password'], 'password': {'user': {'name': 'magnum_domain_admin', 'domain': {'name': 'magnum'}, 'password': DOMAIN_PW}}}}}
-    s, _, _ = call('POST', KS + '/auth/tokens', body)
-    if s != 201:
-        die('user magnum_domain_admin cannot log in with the stored password')
-    s, _, _ = call('GET', KS + '/domains/%s/users/%s/roles/%s' % (domain['id'], dadmin['id'], admin_role['id']), None, token)
-    if s != 204:
-        die('user magnum_domain_admin has no admin role on domain magnum (HTTP %s)' % s)
-    print('magnum is registered in keystone')
-
-
-def resources_ok():
-    # Exit 0 when the flavor and the key pair that resources() makes exist. Makes no change.
-    cl = Clients()
-    s, _, _ = cl.c('GET', '/flavors/' + FLAVOR_ID)
-    if s != 200:
-        die('flavor %s is missing (HTTP %s)' % (FLAVOR_ID, s))
-    s, _, _ = cl.c('GET', '/os-keypairs/' + KEYPAIR)
-    if s != 200:
-        die('key pair %s is missing (HTTP %s)' % (KEYPAIR, s))
-    print('flavor %s and key pair %s exist' % (FLAVOR_ID, KEYPAIR))
+    print('removed the Magnum clusters, template and image')
 
 
 def template_ok():
@@ -769,20 +559,10 @@ def template_ok():
 
 if __name__ == '__main__':
     cmd = sys.argv[1] if len(sys.argv) > 1 else ''
-    if cmd == 'register':
-        register()
-    elif cmd == 'registered':
-        registered()
-    elif cmd == 'unregister':
-        unregister()
-    elif cmd == 'catalog':
+    if cmd == 'catalog':
         catalog()
     elif cmd == 'mservices':
         mservices()
-    elif cmd == 'resources':
-        resources()
-    elif cmd == 'resources-ok':
-        resources_ok()
     elif cmd == 'image-present':
         image_present()
     elif cmd == 'image-upload' and len(sys.argv) > 4:
@@ -798,7 +578,7 @@ if __name__ == '__main__':
     elif cmd == 'teardown':
         teardown()
     else:
-        die('usage: orphera-magnum-api register | registered | unregister | catalog | mservices | resources | resources-ok | image-present | image-upload FILE KUBE_VERSION OS_VERSION | template | template-ok | cluster-cycle | delete-clusters | teardown')
+        die('usage: orphera-magnum-api catalog | mservices | image-present | image-upload FILE KUBE_VERSION OS_VERSION | template | template-ok | cluster-cycle | delete-clusters | teardown')
 """
 
   private val helper =
@@ -806,10 +586,7 @@ if __name__ == '__main__':
       .replace("@@KS@@", ksFqdn)
       .replace("@@MAGNUM@@", s"http://$fqdn:$apiPort")
       .replace("@@ADMINPW@@", adminPassword.reveal)
-      .replace("@@MAGNUMPW@@", magnumPassword.reveal)
-      .replace("@@DOMAINPW@@", domainAdminPassword.reveal)
       .replace("@@CAFILE@@", caCert)
-      .replace("@@FLAVORID@@", k8sFlavorId)
       .replace("@@DNS@@", dnsServer)
 
   // ---- magnum.conf ---------------------------------------------------------
@@ -1055,17 +832,6 @@ if __name__ == '__main__':
   private val imageFetched =
     s"""$imagePresent || ( [ -s $stateDir/image.current ] && . $stateDir/image.current && [ "$$CHOICE" = "$imageChoice" ] && [ -s "$$IMG" ] )"""
 
-  // The API answers its version document without a token (200, or 300 for a list of versions).
-  private val healthy =
-    s"""CODE=$$(curl -s -o /dev/null -w '%{http_code}' http://localhost:$apiPort/); [ "$$CODE" = "200" ] || [ "$$CODE" = "300" ]"""
-  private val waitHealthy =
-    s"""for i in $$(seq 1 36); do
-       |  ( $healthy ) && exit 0
-       |  sleep 5
-       |done
-       |echo "magnum-api does not answer on $apiPort - see 'journalctl -xeu orphera-magnum-api' and $logDir" >&2
-       |exit 1""".stripMargin
-
   // The conductor reports in every few seconds; give it three minutes to appear as `up` through the API.
   private val conductorUp = s"$helperPath mservices >/dev/null 2>&1"
   private val waitConductorUp =
@@ -1109,10 +875,10 @@ if __name__ == '__main__':
       registryMirror,
       mode = "0644"
     ).after(mirrorDir)
-    val pulled = command(
+    val pulled = pullImages(
       "pull the Magnum images",
-      pullScript,
-      unless = imagesPresent,
+      images,
+      hint = "the Image(...) values in magnum_single_node.scala",
       timeout = 2400
     ).after(podman, mirror)
     val commandsOk = command(
@@ -1123,11 +889,12 @@ if __name__ == '__main__':
     ).after(pulled)
 
     val caDirectory = directory(caDir, mode = "0755").after(podman)
-    val ca = command(
+    val ca = serverCa(
       "fetch Keystone's CA from its TLS handshake",
-      caScript,
-      unless = caCurrent,
-      timeout = 60
+      ksFqdn,
+      5000,
+      caCert,
+      hint = "apply keystone_single_node.scala (it must serve server-chain.crt)"
     ).after(caDirectory, tools(1))
 
     val logDirectory = directory(logDir)
@@ -1208,18 +975,36 @@ if __name__ == '__main__':
       helperPath,
       Secret(
         helper
-      ), // it holds the admin, magnum and trustee domain admin passwords
+      ), // it holds the admin password
       mode = "0700",
       owner = "root",
       group = "root"
     )
     // Registration comes before the services start.
-    val registered = command(
+    val (keystoneHelper, ensured) = keystoneEntries(
       "register Magnum and its trustee domain in Keystone",
-      s"$helperPath register",
-      unless = s"$helperPath registered >/dev/null 2>&1",
-      timeout = 120
-    ).after(helperFile, ca)
+      "magnum",
+      magnumPassword,
+      List(
+        KeystoneService(
+          "magnum",
+          "container-infra",
+          s"http://$fqdn:$apiPort/v1"
+        )
+      ),
+      ksUrl,
+      adminPassword,
+      caCert,
+      domain = Some(
+        KeystoneDomain(
+          "magnum",
+          "Owns users and projects created by magnum",
+          "magnum_domain_admin",
+          domainAdminPassword
+        )
+      )
+    )
+    val registered = ensured.after(ca)
 
     val running = svcs.map { s =>
       s.unit.after(
@@ -1227,11 +1012,13 @@ if __name__ == '__main__':
       )
     }
 
-    val answering = command(
+    // The API answers its version document without a token (200, or 300 for a list of versions).
+    val answering = waitForHttp(
       "magnum-api answers on its port",
-      waitHealthy,
-      unless = healthy,
-      timeout = 240
+      s"http://localhost:$apiPort/",
+      status = List(200, 300),
+      timeout = 180,
+      hint = s"see 'journalctl -xeu orphera-magnum-api' and $logDir"
     ).after(running*)
     val reporting = command(
       "the conductor reports up through the API",
@@ -1239,18 +1026,32 @@ if __name__ == '__main__':
       unless = conductorUp,
       timeout = 240
     ).after((answering :: running)*)
-    val flavor = command(
-      "make the Kubernetes node flavor and key pair",
-      s"$helperPath resources",
-      unless = s"$helperPath resources-ok >/dev/null 2>&1",
-      timeout = 120
-    ).after(reporting)
+    val (flavorHelper, flavorMade) = openstackFlavor(
+      "make the Kubernetes node flavor",
+      k8sFlavorId,
+      "orphera.k8s",
+      3072, // MB
+      2, // vCPUs
+      30, // GB
+      ksUrl,
+      adminPassword,
+      caCert
+    )
+    val (keypairHelper, keypairMade) = openstackKeypair(
+      "make the Kubernetes node key pair",
+      "orphera-magnum",
+      ksUrl,
+      adminPassword,
+      caCert
+    )
+    val flavor = flavorMade.after(reporting)
+    val keypair = keypairMade.after(reporting)
     val fetchedImage = command(
       "download the Kubernetes node image",
       fetchImageScript,
       unless = imageFetched,
       timeout = 3600
-    ).after(flavor, stateDirectory)
+    ).after(flavor, keypair, stateDirectory)
     val nodeImage = command(
       "upload the Kubernetes node image to Glance",
       uploadImageScript,
@@ -1289,11 +1090,19 @@ if __name__ == '__main__':
       buildDirectory,
       pylibDirectory,
       driver
-    ) ++ svcs.flatMap(_.resources) ++ List(dbSync, helperFile, registered) ++
+    ) ++ svcs.flatMap(_.resources) ++ List(
+      dbSync,
+      helperFile,
+      keystoneHelper,
+      registered
+    ) ++
       running ++ List(
         answering,
         reporting,
+        flavorHelper,
         flavor,
+        keypairHelper,
+        keypair,
         fetchedImage,
         nodeImage,
         clusterTemplate,

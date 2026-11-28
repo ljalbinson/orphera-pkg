@@ -19,14 +19,17 @@ import orphera.orchestrator.*
 //   - the RGW options, set with `ceph config set client.rgw.orphera ...`: Keystone as the identity service
 //     (v3, user `rgw` in project `service`), the accepted roles `member` and `admin`, one namespace per
 //     project (implicit tenants), the account in the Swift URL, and S3 requests checked against Keystone's
-//     EC2 credentials. The daemon is restarted only when this configuration changes (a hash of it is kept in
-//     /var/lib/orphera/rgw-applied-sha), so a repeated run does not interrupt service. The hash also covers
-//     /var/lib/orphera/rgw-keystone-state, which `register` updates when the `rgw` user is new or its password was
-//     set: RGW keeps the admin token it got at start-up, so after a Keystone rebuild it needs a restart.
+//     EC2 credentials. cephConfig sets them only when `ceph config get` differs, and cephOrchService applies
+//     the spec only when its hash (kept in /var/lib/orphera/ceph-orch-rgw.orphera.sha) changed or the service
+//     is not listed (cephadm redeploys the daemon itself when the spec changed). The daemon is restarted only
+//     when an option changed or the Keystone entries below were made or put right in this run (the step
+//     "restart RGW so it takes its new Keystone token and options", which a change of either triggers): RGW
+//     keeps the admin token it got at start-up, and a new `rgw` user (Keystone was rebuilt) or a changed
+//     password makes that token useless. A repeated run interrupts nothing.
 //   The pools (.rgw.root, default.rgw.*) are made by RGW itself when it first runs.
 //
-// What it adds to Keystone (done by the helper's `register`, skipped while `registered` passes): user `rgw` in
-// project `service` with the admin role; the service `swift` of type `object-store` with the endpoints
+// What it adds to Keystone (keystoneEntries, skipped while its check passes): user `rgw` in project `service`
+// with the admin role, and the role `member`; the service `swift` of type `object-store` with the endpoints
 // http://<rgwIp>:8080/swift/v1/AUTH_%(project_id)s (public and internal) and .../swift/v1 (admin); the
 // service `s3` of type `s3` with the endpoint http://<rgwIp>:8080.
 //
@@ -44,9 +47,9 @@ import orphera.orchestrator.*
 // How it stays idempotent (as for the other services):
 //   - Each step that changes the node is a command with a guard that tests what it makes: Keystone's CA
 //     compared as a certificate with the installed copy and the trust store, the Keystone registration (the
-//     helper's `registered`), and the RGW configuration (the hash above equals the one last applied, and the
-//     orchestrator lists the daemon as running). The step that applies the spec and options ends by waiting
-//     for the Swift capabilities document to answer three times in a row.
+//     helper's `registered`), the RGW options (`ceph config get`), the service (spec hash and listing) and the
+//     Swift capabilities document answering. The restart step and the wait step end by waiting for it to
+//     answer three times in a row.
 //   - The last two steps make a container and an object through Swift with a Keystone token, and a bucket and
 //     an object through S3 with EC2 credentials made for the run and removed again; each is skipped while its
 //     round trip works.
@@ -66,6 +69,7 @@ object rgw_single_node extends OrpheraApply:
   private val node = "tst0"
   private val rgwIp = "10.10.5.12"
   private val rgwPort = 8080
+  private val rgwUrl = s"http://$rgwIp:$rgwPort"
   private val serviceId = "orphera"
 
   override def nodes: List[String] = List(node)
@@ -78,68 +82,23 @@ object rgw_single_node extends OrpheraApply:
 
   private val caDir = "/etc/orphera/rgw-ca"
   private val caCert = s"$caDir/ca.crt"
-  private val stateDir = "/var/lib/orphera"
 
   private val hostPackages =
     List("openssl", "curl", "ca-certificates", "python3")
 
-  // Keystone's CA: the last certificate it presents (trust on first use), which must be self-signed.
-  // `chainTo DIR` leaves DIR/c1.pem ... DIR/cN.pem, each holding the certificate only: the text s_client
-  // prints after the last one differs on every handshake, and would make the comparison fail. Installed into
-  // the host's trust store, which RGW then gets as its bundle.
-  private val chainTo =
-    s"""chainTo() { openssl s_client -connect $ksFqdn:5000 -servername $ksFqdn -showcerts </dev/null 2>/dev/null | awk -v d="$$1" '/-----BEGIN CERTIFICATE-----/{n++; p=1} p{print > (d "/c" n ".pem")} /-----END CERTIFICATE-----/{p=0}'; }"""
-  private val trustTarget =
-    """if command -v update-ca-certificates >/dev/null 2>&1; then t=/usr/local/share/ca-certificates/orphera-test-ca.crt; else t=/etc/pki/ca-trust/source/anchors/orphera-test-ca.crt; fi"""
-  private val caCurrent =
-    s"""$chainTo
-       |D=$$(mktemp -d)
-       |chainTo $$D
-       |N=$$(ls $$D/c*.pem 2>/dev/null | wc -l)
-       |R=1
-       |if [ "$$N" -ge 2 ]; then
-       |  $trustTarget
-       |  cmp -s $$D/c$$N.pem $caCert && cmp -s $caCert "$$t" && R=0
-       |fi
-       |rm -rf $$D
-       |exit $$R""".stripMargin
-  private val caScript =
-    s"""set -e
-       |$chainTo
-       |mkdir -p $caDir
-       |D=$$(mktemp -d)
-       |trap 'rm -rf $$D' EXIT
-       |chainTo $$D
-       |COUNT=$$(ls $$D/c*.pem 2>/dev/null | wc -l)
-       |if [ "$$COUNT" -lt 2 ]; then
-       |  echo "keystone at $ksFqdn:5000 presented $$COUNT certificate(s); expected leaf + CA - apply keystone_single_node.scala (it must serve server-chain.crt)" >&2
-       |  exit 1
-       |fi
-       |cp $$D/c$$COUNT.pem $caCert
-       |openssl verify -CAfile $caCert $$D/c1.pem
-       |SUBJ=$$(openssl x509 -in $caCert -noout -subject | sed 's/^subject=//')
-       |ISS=$$(openssl x509 -in $caCert -noout -issuer | sed 's/^issuer=//')
-       |if [ "$$SUBJ" != "$$ISS" ]; then echo "last certificate is not self-signed: $$SUBJ / $$ISS" >&2; exit 1; fi
-       |$trustTarget
-       |cp $caCert "$$t"
-       |if command -v update-ca-certificates >/dev/null 2>&1; then update-ca-certificates; else update-ca-trust; fi
-       |echo "Keystone CA installed: $$SUBJ"""".stripMargin
-
   // Standard-library Python, as in the other service descriptions. Plain string filled in with replace().
-  // Subcommands: register | registered | unregister | catalog | swift-cycle | s3-cycle
-  // registered: read-only; user rgw gets a token and both services have the endpoints register makes
+  // Subcommands: catalog | swift-cycle | s3-cycle (the Keystone entries are made by keystoneEntries, below)
   // swift-cycle: with an admin token, the object-store URL from the catalog (so the %(project_id)s
   // substitution is exercised), a container and an object are created, read back, and deleted.
   // s3-cycle: EC2 credentials are made in Keystone for the admin user and project, a bucket and an object are
   // created with an AWS Signature V4 request, read back and deleted, and the credentials are removed.
   private val apiHelperPython =
     """#!/usr/bin/python3
-import hashlib, hmac, json, os, ssl, sys, time, urllib.request, urllib.error
+import hashlib, hmac, json, ssl, sys, time, urllib.request, urllib.error
 
 KS = 'https://@@KS@@:5000/v3'
 RGW = 'http://@@RGW@@'
 ADMIN_PW = '@@ADMINPW@@'
-RGW_PW = '@@RGWPW@@'
 CTX = ssl.create_default_context(cafile='@@CA@@')
 
 
@@ -187,117 +146,6 @@ def get_token(user, password, project):
     return headers['X-Subject-Token'], parsed
 
 
-def find(token, path, key):
-    status, parsed, _ = call('GET', KS + path, token=token)
-    items = parsed.get(key, [])
-    return items[0] if items else None
-
-
-def ensure(token, what, path, key, body, create_key):
-    found = find(token, path, key)
-    if found is not None:
-        return found
-    s, p, _ = call('POST', KS + '/' + what, body, token)
-    if s != 201:
-        die('creating %s failed: HTTP %s %s' % (what, s, p))
-    return p[create_key]
-
-
-def ensure_endpoint(token, service, iface, url):
-    ep = find(token, '/endpoints?service_id=%s&interface=%s' % (service['id'], iface), 'endpoints')
-    if ep is None:
-        s, p, _ = call('POST', KS + '/endpoints', {'endpoint': {'interface': iface, 'url': url, 'service_id': service['id'], 'region_id': 'RegionOne'}}, token)
-        if s != 201:
-            die('creating %s endpoint for %s failed: HTTP %s %s' % (iface, service['type'], s, p))
-    elif ep['url'] != url:
-        call('PATCH', KS + '/endpoints/' + ep['id'], {'endpoint': {'url': url}}, token)
-
-
-STATE_FILE = '/var/lib/orphera/rgw-keystone-state'
-
-
-def note_identity(user_id, patched):
-    # RGW keeps the admin token it got for user rgw until it restarts. A new rgw user (Keystone was rebuilt) or
-    # a changed password (Keystone revokes the old tokens) makes that token useless, so the description mixes this
-    # file into the hash that decides whether to restart the daemon: its number goes up when either happens.
-    old = ''
-    try:
-        with open(STATE_FILE) as f:
-            old = f.read()
-    except OSError:
-        pass
-    parts = old.split()
-    gen = int(parts[1]) if len(parts) == 2 and parts[1].isdigit() else 0
-    if len(parts) != 2 or parts[0] != user_id or patched:
-        gen += 1
-    os.makedirs(os.path.dirname(STATE_FILE), exist_ok=True)
-    with open(STATE_FILE, 'w') as f:
-        f.write('%s %d\n' % (user_id, gen))
-
-
-def register():
-    token, _ = get_token('admin', ADMIN_PW, 'admin')
-    project = ensure(token, 'projects', '/projects?name=service', 'projects', {'project': {'name': 'service', 'domain_id': 'default'}}, 'project')
-    user = find(token, '/users?name=rgw', 'users')
-    patched = False
-    if user is None:
-        s, p, _ = call('POST', KS + '/users', {'user': {'name': 'rgw', 'domain_id': 'default', 'password': RGW_PW}}, token)
-        if s != 201:
-            die('creating user rgw failed: HTTP %s %s' % (s, p))
-        user = p['user']
-    else:
-        # Setting a password makes Keystone revoke every token the user holds. RGW keeps its admin token and
-        # does not renew it on the s3tokens path, so S3 requests then fail until RGW restarts. Only set the
-        # password when the current one does not work.
-        probe = {'auth': {'identity': {'methods': ['password'], 'password': {'user': {'name': 'rgw', 'domain': {'name': 'Default'}, 'password': RGW_PW}}}}}
-        status, _, _ = call('POST', KS + '/auth/tokens', probe)
-        if status != 201:
-            call('PATCH', KS + '/users/' + user['id'], {'user': {'password': RGW_PW}}, token)
-            patched = True
-    note_identity(user['id'], patched)
-    admin_role = find(token, '/roles?name=admin', 'roles')
-    if admin_role is None:
-        die('role admin not found')
-    s, p, _ = call('PUT', KS + '/projects/%s/users/%s/roles/%s' % (project['id'], user['id'], admin_role['id']), None, token)
-    if s not in (200, 204):
-        die('granting admin to rgw failed: HTTP %s %s' % (s, p))
-    ensure(token, 'roles', '/roles?name=member', 'roles', {'role': {'name': 'member'}}, 'role')
-    swift = ensure(token, 'services', '/services?type=object-store', 'services', {'service': {'name': 'swift', 'type': 'object-store'}}, 'service')
-    ensure_endpoint(token, swift, 'public', RGW + '/swift/v1/AUTH_%(project_id)s')
-    ensure_endpoint(token, swift, 'internal', RGW + '/swift/v1/AUTH_%(project_id)s')
-    ensure_endpoint(token, swift, 'admin', RGW + '/swift/v1')
-    s3 = ensure(token, 'services', '/services?type=s3', 'services', {'service': {'name': 's3', 'type': 's3'}}, 'service')
-    for iface in ('public', 'internal', 'admin'):
-        ensure_endpoint(token, s3, iface, RGW)
-    print('registered rgw in keystone (user rgw, role member, service types object-store and s3, endpoints)')
-
-
-def registered():
-    get_token('rgw', RGW_PW, 'service')
-    token, _ = get_token('admin', ADMIN_PW, 'admin')
-    for typ, urls in (('object-store', {'public': RGW + '/swift/v1/AUTH_%(project_id)s', 'internal': RGW + '/swift/v1/AUTH_%(project_id)s', 'admin': RGW + '/swift/v1'}), ('s3', {'public': RGW, 'internal': RGW, 'admin': RGW})):
-        service = find(token, '/services?type=' + typ, 'services')
-        if service is None:
-            die('service type %s is not registered' % typ)
-        for iface, url in urls.items():
-            ep = find(token, '/endpoints?service_id=%s&interface=%s' % (service['id'], iface), 'endpoints')
-            if ep is None or ep['url'] != url:
-                die('%s %s endpoint is missing or differs' % (typ, iface))
-    print('rgw is registered in keystone')
-
-
-def unregister():
-    token, _ = get_token('admin', ADMIN_PW, 'admin')
-    for typ in ('object-store', 's3'):
-        service = find(token, '/services?type=' + typ, 'services')
-        if service is not None:
-            call('DELETE', KS + '/services/' + service['id'], None, token)
-    user = find(token, '/users?name=rgw', 'users')
-    if user is not None:
-        call('DELETE', KS + '/users/' + user['id'], None, token)
-    print('removed rgw from keystone (services object-store and s3, their endpoints, user rgw)')
-
-
 def catalog():
     _, p = get_token('admin', ADMIN_PW, 'admin')
     print('catalog types: ' + ' '.join(sorted(c['type'] for c in p['token']['catalog'])))
@@ -317,7 +165,7 @@ def swift_cycle():
                 if e['interface'] == 'public':
                     url = e['url']
     if not url:
-        die('no object-store endpoint in the catalog; run register')
+        die('no object-store endpoint in the catalog; apply rgw_single_node.scala again)')
     if '%(' in url:
         die('the catalog URL still has an unreplaced placeholder: %s' % url)
     h = {'X-Auth-Token': token}
@@ -399,20 +247,14 @@ def s3_cycle():
 
 if __name__ == '__main__':
     cmd = sys.argv[1] if len(sys.argv) > 1 else ''
-    if cmd == 'register':
-        register()
-    elif cmd == 'registered':
-        registered()
-    elif cmd == 'unregister':
-        unregister()
-    elif cmd == 'catalog':
+    if cmd == 'catalog':
         catalog()
     elif cmd == 'swift-cycle':
         swift_cycle()
     elif cmd == 's3-cycle':
         s3_cycle()
     else:
-        die('usage: orphera-rgw-api register | registered | unregister | catalog | swift-cycle | s3-cycle')
+        die('usage: orphera-rgw-api catalog | swift-cycle | s3-cycle')
 """
 
   private val helper =
@@ -420,7 +262,6 @@ if __name__ == '__main__':
       .replace("@@KS@@", ksFqdn)
       .replace("@@RGW@@", s"$rgwIp:$rgwPort")
       .replace("@@ADMINPW@@", adminPassword.reveal)
-      .replace("@@RGWPW@@", rgwPassword.reveal)
       .replace("@@CA@@", caCert)
   private val helperPath = "/usr/local/sbin/orphera-rgw-api"
 
@@ -440,80 +281,25 @@ if __name__ == '__main__':
     "rgw_s3_auth_use_keystone" -> "true"
   )
 
-  // The Ceph host that has the address rgwIp.
-  private val hostSnippet =
-    s"""HOST=$$(cephadm shell -- ceph orch host ls --format json 2>/dev/null | python3 -c "import sys, json
-       |for h in json.load(sys.stdin):
-       |    if h.get('addr') == '$rgwIp':
-       |        print(h['hostname'])
-       |        break")""".stripMargin
-
-  private val hashInput = rgwOptions.map((k, v) => s"$k=$v").mkString("\n")
-  // `spec` prints the service spec, `newhash` the hash of spec + options + the Keystone state file: the value
-  // kept in rgw-applied-sha. The same text is used by the guard and by the step, so they agree.
-  private val hashFns =
-    s"""spec() {
-       |cat <<SPEC
-       |service_type: rgw
+  // The cephadm service spec; @@HOST@@ becomes the orchestrator host that has the address rgwIp (or the name
+  // `node`). The daemon gets the host's CA bundle where its libcurl looks for one.
+  private val rgwSpec =
+    s"""service_type: rgw
        |service_id: $serviceId
        |placement:
        |  hosts:
-       |    - $$HOST
+       |    - @@HOST@@
        |  count_per_host: 1
        |spec:
        |  rgw_frontend_port: $rgwPort
        |extra_container_args:
        |  - "-v"
-       |  - "/etc/ssl/certs/ca-certificates.crt:/etc/pki/tls/certs/ca-bundle.crt:ro"
-       |SPEC
-       |}
-       |newhash() {
-       |  { spec; cat <<'OPTS'
-       |$hashInput
-       |OPTS
-       |cat $stateDir/rgw-keystone-state 2>/dev/null || true
-       |} | sha256sum | cut -d' ' -f1
-       |}""".stripMargin
+       |  - "/etc/ssl/certs/ca-certificates.crt:/etc/pki/tls/certs/ca-bundle.crt:ro"""".stripMargin
 
-  // The spec and the options go in through `cephadm shell`; --mount makes a file visible at /mnt/<name>.
-  // `orch apply` of an unchanged spec is a no-op, `config set` is a set, and the daemon is restarted only
-  // when the hash of spec + options differs from the last applied one.
-  private val rgwScript: String =
-    val sets = rgwOptions
-      .map((k, v) =>
-        s"cephadm shell -- ceph config set client.rgw.$serviceId $k '$v'"
-      )
-      .mkString("\n       |")
-    s"""set -e
-       |$hostSnippet
-       |if [ -z "$$HOST" ]; then
-       |  echo "no Ceph orchestrator host with address $rgwIp (ceph orch host ls)" >&2
-       |  exit 1
-       |fi
-       |$hashFns
-       |# Ceph 20 (Tentacle) has no rgw_keystone_api_version (Keystone v3 is the only one it speaks) and refuses to
-       |# set it; a node set up with an older Ceph may still hold it, so it is cleared.
-       |cephadm shell -- ceph config rm client.rgw.$serviceId rgw_keystone_api_version 2>/dev/null || true
-       |$sets
-       |spec > /tmp/rgw-spec.yaml
-       |cephadm shell --mount /tmp/rgw-spec.yaml -- ceph orch apply -i /mnt/rgw-spec.yaml
-       |NEW=$$(newhash)
-       |rm -f /tmp/rgw-spec.yaml
-       |mkdir -p $stateDir
-       |OLD=$$(cat $stateDir/rgw-applied-sha 2>/dev/null || true)
-       |STATE=unchanged
-       |if [ "$$NEW" != "$$OLD" ]; then
-       |  # cephadm makes the daemon later; one that is not there yet starts with the options already set
-       |  if cephadm shell -- ceph orch ps --daemon-type rgw 2>/dev/null | grep -q 'rgw.$serviceId'; then
-       |    STATE="changed, daemon restarted"
-       |    cephadm shell -- ceph orch restart rgw.$serviceId
-       |  else
-       |    STATE="changed, daemon starting"
-       |  fi
-       |  echo "$$NEW" > $stateDir/rgw-applied-sha
-       |fi
-       |echo "RGW configuration $$STATE"
-       |# RGW answers on its port while it starts or stops, so wait for the Swift capabilities document (HTTP 200
+  // Waits for the Swift capabilities document: RGW answers on its port while it starts or stops, so the wait is for
+  // HTTP 200 on /info or /swift/info three times in a row, three seconds apart. Ends the script (0 or 1).
+  private val waitForSwift: String =
+    s"""# RGW answers on its port while it starts or stops, so wait for the Swift capabilities document (HTTP 200
        |# on /info or /swift/info) three times in a row, three seconds apart.
        |OK=0
        |for i in $$(seq 1 100); do
@@ -526,58 +312,124 @@ if __name__ == '__main__':
        |echo "RGW is not serving Swift on $rgwIp:$rgwPort after 5 minutes - check 'ceph orch ps --daemon-type rgw' and 'cephadm logs --name rgw.$serviceId...'" >&2
        |exit 1""".stripMargin
 
-  // True when the configuration last applied is the one wanted now, and the orchestrator lists the daemon as
-  // running.
-  private val rgwCurrent =
-    s"""$hostSnippet
-       |[ -n "$$HOST" ] && [ -f $stateDir/rgw-applied-sha ] || exit 1
-       |$hashFns
-       |[ "$$(newhash)" = "$$(cat $stateDir/rgw-applied-sha)" ] || exit 1
-       |cephadm shell -- ceph orch ps --daemon-type rgw 2>/dev/null | grep -q 'rgw.$serviceId.*running'""".stripMargin
+  // Restarts the daemon, when the orchestrator lists one, and waits for it to serve Swift again. It runs when the
+  // Keystone entries were made or put right: RGW keeps the admin token it got for user rgw until it restarts, and
+  // setting a user's password makes Keystone revoke the tokens it holds (after a Keystone rebuild the user is new).
+  private val restartScript: String =
+    s"""set -e
+       |if ! cephadm shell -- ceph orch ps --daemon-type rgw 2>/dev/null | grep -q 'rgw.$serviceId'; then
+       |  echo "no RGW daemon to restart"
+       |  exit 0
+       |fi
+       |cephadm shell -- ceph orch restart rgw.$serviceId
+       |$waitForSwift""".stripMargin
+  private val daemonListed =
+    s"cephadm shell -- ceph orch ps --daemon-type rgw 2>/dev/null | grep -q 'rgw.$serviceId'"
+
+  // One answer from the Swift capabilities document (the step that follows waits for three in a row).
+  private val swiftAnswers =
+    s"""[ "$$(curl -s -o /dev/null -w '%{http_code}' http://$rgwIp:$rgwPort/info || true)" = "200" ] || [ "$$(curl -s -o /dev/null -w '%{http_code}' http://$rgwIp:$rgwPort/swift/info || true)" = "200" ]"""
 
   def describe(target: Node): List[ApplyResource] =
     val tools = hostPackages.map(p => pkg(p, updateCache = true))
 
     val caDirectory = directory(caDir, mode = "0755").after(tools*)
-    val ca = command(
+    val ca = serverCa(
       "fetch Keystone's CA from its TLS handshake",
-      caScript,
-      unless = caCurrent,
-      timeout = 60
+      ksFqdn,
+      5000,
+      caCert,
+      hint = "apply keystone_single_node.scala (it must serve server-chain.crt)"
     ).after(caDirectory)
 
     val helperFile = secretFile(
       helperPath,
-      Secret(helper), // it holds the admin and rgw passwords
+      Secret(helper), // it holds the admin password
       mode = "0700",
       owner = "root",
       group = "root"
     ).after(ca)
-    val registered = command(
+    val (keystoneHelper, ensured) = keystoneEntries(
       "register object-store and s3 in Keystone",
-      s"$helperPath register",
-      unless = s"$helperPath registered >/dev/null 2>&1",
-      timeout = 120
-    ).after(helperFile)
+      "rgw",
+      rgwPassword,
+      List(
+        KeystoneService(
+          "swift",
+          "object-store",
+          s"$rgwUrl/swift/v1/AUTH_%(project_id)s",
+          Some(s"$rgwUrl/swift/v1")
+        ),
+        KeystoneService("s3", "s3", rgwUrl)
+      ),
+      ksUrl,
+      adminPassword,
+      caCert,
+      roles = List("member")
+    )
+    val registered = ensured.after(ca)
 
-    val rgw = command(
-      "apply the RGW service and its Keystone options",
-      rgwScript,
-      unless = rgwCurrent,
-      timeout = 900
-    ).after(registered, ca)
+    // The old option that Ceph 20 refuses (a node set up with an older Ceph may still hold it) is cleared first.
+    val oldOption = absentCephConfig(
+      "clear the Keystone API version option (Ceph 20 has none)",
+      s"client.rgw.$serviceId",
+      "rgw_keystone_api_version"
+    ).after(registered)
+    val config = cephConfig(
+      "set the RGW Keystone options",
+      s"client.rgw.$serviceId",
+      rgwOptions
+    )
+      .after(oldOption, ca)
+    // The options go in before the service, so a daemon that is new starts with them.
+    val service = cephOrchService(
+      "apply the RGW service",
+      "rgw",
+      serviceId,
+      rgwSpec,
+      rgwIp,
+      node
+    ).after(config)
+    val restarted = command(
+      "restart RGW so it takes its new Keystone token and options",
+      restartScript,
+      onlyIf = daemonListed,
+      onChangeOnly = true,
+      timeout = 600
+    ).after(service)
+    val waited = command(
+      s"wait for RGW to serve Swift on $rgwIp:$rgwPort",
+      waitForSwift,
+      unless = swiftAnswers,
+      timeout = 360
+    ).after(restarted)
+    val registeredAndNotifying = registered.notifies(restarted)
+    val configAndNotifying = config.notifies(restarted)
 
     val swift = command(
       "a container and an object through the Swift API with a Keystone token",
       s"$helperPath swift-cycle",
       unless = s"$helperPath swift-cycle >/dev/null 2>&1",
       timeout = 180
-    ).after(rgw)
+    ).after(waited)
     val s3 = command(
       "a bucket and an object through the S3 API with EC2 credentials",
       s"$helperPath s3-cycle",
       unless = s"$helperPath s3-cycle >/dev/null 2>&1",
       timeout = 180
-    ).after(rgw)
+    ).after(waited)
 
-    tools ++ List(caDirectory, ca, helperFile, registered, rgw, swift, s3)
+    tools ++ List(
+      caDirectory,
+      ca,
+      helperFile,
+      keystoneHelper,
+      registeredAndNotifying,
+      oldOption,
+      configAndNotifying,
+      service,
+      restarted,
+      waited,
+      swift,
+      s3
+    )

@@ -36,7 +36,7 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 //    `resolvConf` in /var/lib/kubelet/config.yaml and in the kube-system/kubelet-config
 //    ConfigMap. CoreDNS is restarted to pick it up, and a test pod on the host
 //    network must show exactly the servers once.
-// 5. The Helm release kps is upgraded (same chart version, other values kept)
+// 5. The Helm release kps is upgraded (same chart version, other values kept; a helmRelease description)
 //    with the etcd, scheduler and controller-manager scrape jobs on; the last
 //    task asks Prometheus whether all three are up on all three nodes.
 //
@@ -116,10 +116,30 @@ print(json.dumps(cm))
        |echo "resolver file $resolvFile written"
        |""".stripMargin
 
+  // The resolver file is rewritten only when what the script would write differs from what is
+  // there (before: written every run).
+  private val resolverFilePlan: ApplyPlan =
+    import Resources.*
+    ApplyPlan.orFail(
+      "kubelet-resolver-file",
+      List(
+        command(
+          "give kubelet a resolver file with each server once",
+          kubeletResolvScript,
+          unless =
+            s"""{ grep '^nameserver' /run/systemd/resolve/resolv.conf | awk '!seen[$$2]++' | head -3; grep '^search' /run/systemd/resolve/resolv.conf | head -1; } | cmp -s - $resolvFile""",
+          timeout = 180
+        )
+      )
+    )
+
   // kubelet's config names the resolver file: an apply description (kind
-  // lineInFile) that replaces the resolvConf line, or adds it.
+  // lineInFile) that replaces the resolvConf line, or adds it. kubelet is
+  // restarted by the change, and only by it; the restart returns when the unit
+  // is active.
   private val kubeletResolvPlan: ApplyPlan =
     import Resources.*
+    val kubelet = service("kubelet")
     ApplyPlan.orFail(
       "kubelet-resolv-conf",
       List(
@@ -127,17 +147,10 @@ print(json.dumps(cm))
           "/var/lib/kubelet/config.yaml",
           s"resolvConf: $resolvFile",
           "^resolvConf:"
-        )
+        ).notifies(kubelet),
+        kubelet
       )
     )
-
-  private val kubeletRestartScript =
-    s"""set -e
-       |systemctl restart kubelet
-       |for I in $$(seq 1 30); do systemctl is-active --quiet kubelet && break; sleep 2; done
-       |systemctl is-active --quiet kubelet || { echo "kubelet did not restart" >&2; exit 1; }
-       |echo "$$(hostname): kubelet resolver file: $$(grep -c '^nameserver' $resolvFile) nameserver(s)"
-       |""".stripMargin
 
   private val kubeletConfigScript =
     s"""set -e
@@ -152,6 +165,25 @@ print(json.dumps(cm))
        |$kc -n kube-system rollout restart deployment/coredns
        |$kc -n kube-system rollout status deployment/coredns --timeout=180s
        |""".stripMargin
+
+  // The kubelet-config ConfigMap is replaced, and CoreDNS restarted, only while the ConfigMap does
+  // not name the resolver file yet (before: both on every run, so CoreDNS was restarted each time). A
+  // cluster that cannot be queried fails the step: the guard then says "needed" and the script fails
+  // with kubectl's own message.
+  private val kubeletConfigPlan: ApplyPlan =
+    import Resources.*
+    ApplyPlan.orFail(
+      "kubelet-config-resolv-conf",
+      List(
+        command(
+          "record it in kubelet-config, restart CoreDNS",
+          kubeletConfigScript,
+          unless =
+            s"""$kc -n kube-system get configmap kubelet-config -o jsonpath='{.data.kubelet}' | grep -qx 'resolvConf: $resolvFile'""",
+          timeout = 300
+        )
+      )
+    )
 
   private val dnsTestScript =
     s"""set -e
@@ -270,25 +302,27 @@ sys.exit(1 if bad else 0)
        |echo "$$(hostname): an upgrade to $$VER would keep the Keycloak login, the encryption and the metrics settings"
        |""".stripMargin
 
-  private val helmScript =
-    s"""set -e
-       |export KUBECONFIG=/etc/kubernetes/admin.conf
-       |CHART=$$(helm list -n monitoring -f '^kps$$' -o json | python3 -c 'import sys,json; r=json.load(sys.stdin); print(r[0]["chart"] if r else "")')
-       |[ -n "$$CHART" ] || { echo "the Helm release kps is not installed; run k8s_monitoring.scala (it now has these jobs on)" >&2; exit 1; }
-       |VER=$${CHART#kube-prometheus-stack-}
-       |echo "upgrading kps ($$CHART) with the etcd, scheduler and controller-manager jobs on"
-       |helm upgrade kps prometheus-community/kube-prometheus-stack --version "$$VER" --namespace monitoring --reuse-values \\
-       |  --set kubeEtcd.enabled=true --set kubeScheduler.enabled=true --set kubeControllerManager.enabled=true --wait --timeout 10m
-       |if [ -f $stateDir/monitoring-values.yaml ]; then
-       |  python3 - <<'PYEOF'
-       |p = '$stateDir/monitoring-values.yaml'
-       |s = open(p).read()
-       |for k in ('kubeEtcd', 'kubeScheduler', 'kubeControllerManager'):
-       |    s = s.replace(k + ':\\n  enabled: false', k + ':\\n  enabled: true')
-       |open(p, 'w').write(s)
-       |PYEOF
-       |fi
-       |""".stripMargin
+  // Laid over the values the release has (`--reuse-values`, the chart version it has);
+  // nothing else moves. A cluster without the release stops with Helm's message: run
+  // k8s_monitoring.scala first (it has these jobs on).
+  private val scrapePlan: ApplyPlan =
+    import Resources.*
+    val (helper, applied) = helmRelease(
+      "turn on the three scrape jobs",
+      "kps",
+      "prometheus-community/kube-prometheus-stack",
+      "https://prometheus-community.github.io/helm-charts",
+      "monitoring",
+      set = List(
+        "kubeEtcd.enabled" -> "true",
+        "kubeScheduler.enabled" -> "true",
+        "kubeControllerManager.enabled" -> "true"
+      ),
+      minutes = 10,
+      reuseValues = true,
+      variant = "scrape-jobs"
+    )
+    ApplyPlan.orFail("scrape-jobs", List(helper, applied))
 
   private val testScript =
     s"""FAIL=0
@@ -331,25 +365,15 @@ sys.exit(1 if bad else 0)
         .build,
       stage("kubelet-resolver", (30 to 39).map(n => s"tst$n")*)
         .task("give kubelet a resolver file with each server once")(
-          Task.RunCommand(
-            List("sh", "-c", kubeletResolvScript),
-            timeoutSeconds = 180
-          )
+          Task.Apply(resolverFilePlan)
         )
-        .task("point kubelet's config at it")(Task.Apply(kubeletResolvPlan))
-        .task("restart kubelet and wait for it")(
-          Task.RunCommand(
-            List("sh", "-c", kubeletRestartScript),
-            timeoutSeconds = 180
-          )
+        .task("point kubelet's config at it and restart it")(
+          Task.Apply(kubeletResolvPlan)
         )
         .build,
       stage("kubelet-config-and-dns-test", "tst30")
         .task("record it in kubelet-config, restart CoreDNS")(
-          Task.RunCommand(
-            List("sh", "-c", kubeletConfigScript),
-            timeoutSeconds = 300
-          )
+          Task.Apply(kubeletConfigPlan)
         )
         .task("a host-network pod sees two nameservers")(
           Task.RunCommand(List("sh", "-c", dnsTestScript), timeoutSeconds = 300)
@@ -357,7 +381,7 @@ sys.exit(1 if bad else 0)
         .build,
       stage("scrape-control-plane", "tst30")
         .task("turn on the three scrape jobs")(
-          Task.RunCommand(List("sh", "-c", helmScript), timeoutSeconds = 800)
+          Task.Apply(scrapePlan)
         )
         .task("Prometheus sees them")(
           Task.RunCommand(List("sh", "-c", testScript), timeoutSeconds = 600)

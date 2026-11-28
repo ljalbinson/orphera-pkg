@@ -104,68 +104,12 @@ object horizon_single_node extends OrpheraApply:
        |insecure = true
        |""".stripMargin
 
-  private val pullScript =
-    s"""${Pull.shellFunction(
-        "the Image(...) in horizonWeb in horizon_single_node.scala"
-      )}
-       |pull_retry $webImage || exit 1
-       |echo "image ready"""".stripMargin
-  private val imagePresent = s"podman image exists $webImage"
-
   // The certificate files dashboard_tls.scala leaves on the node.
   private val tlsPresent =
     s"[ -f $tlsDir/server-chain.crt ] && [ -f $tlsDir/server.key ] && [ -f $tlsDir/ca.crt ]"
   private val tlsMissing =
     s"""echo "no certificate in $tlsDir - run: orphera cluster-playbook manifests/dashboard_tls.scala" >&2
        |exit 1""".stripMargin
-
-  // Keystone's CA: the last certificate it presents (trust on first use),
-  // which must be self-signed. `chainTo DIR` leaves DIR/c1.pem ... DIR/cN.pem,
-  // each holding the certificate only: the text s_client prints after the
-  // last one (bytes read and written, session ticket) differs on every
-  // handshake, and would make the comparison with the installed copy fail.
-  private val chainTo =
-    s"""chainTo() { openssl s_client -connect $ksFqdn:5000 -servername $ksFqdn -showcerts </dev/null 2>/dev/null | awk -v d="$$1" '/-----BEGIN CERTIFICATE-----/{n++; p=1} p{print > (d "/c" n ".pem")} /-----END CERTIFICATE-----/{p=0}'; }"""
-
-  private val trustTarget =
-    """if command -v update-ca-certificates >/dev/null 2>&1; then t=/usr/local/share/ca-certificates/orphera-test-ca.crt; else t=/etc/pki/ca-trust/source/anchors/orphera-test-ca.crt; fi"""
-
-  // Current when the installed CA is the one Keystone presents now, and is in
-  // the system trust store.
-  private val caCurrent =
-    s"""$chainTo
-       |D=$$(mktemp -d)
-       |chainTo $$D
-       |N=$$(ls $$D/c*.pem 2>/dev/null | wc -l)
-       |R=1
-       |if [ "$$N" -ge 2 ]; then
-       |  $trustTarget
-       |  cmp -s $$D/c$$N.pem $caCert && cmp -s $caCert "$$t" && R=0
-       |fi
-       |rm -rf $$D
-       |exit $$R""".stripMargin
-
-  private val caScript =
-    s"""set -e
-       |$chainTo
-       |mkdir -p $caDir
-       |D=$$(mktemp -d)
-       |trap 'rm -rf $$D' EXIT
-       |chainTo $$D
-       |COUNT=$$(ls $$D/c*.pem 2>/dev/null | wc -l)
-       |if [ "$$COUNT" -lt 2 ]; then
-       |  echo "keystone at $ksFqdn:5000 presented $$COUNT certificate(s); expected leaf + CA - apply keystone_single_node.scala (it must serve server-chain.crt)" >&2
-       |  exit 1
-       |fi
-       |cp $$D/c$$COUNT.pem $caCert
-       |openssl verify -CAfile $caCert $$D/c1.pem
-       |SUBJ=$$(openssl x509 -in $caCert -noout -subject | sed 's/^subject=//')
-       |ISS=$$(openssl x509 -in $caCert -noout -issuer | sed 's/^issuer=//')
-       |if [ "$$SUBJ" != "$$ISS" ]; then echo "last certificate is not self-signed: $$SUBJ / $$ISS" >&2; exit 1; fi
-       |$trustTarget
-       |cp $caCert "$$t"
-       |if command -v update-ca-certificates >/dev/null 2>&1; then update-ca-certificates; else update-ca-trust; fi
-       |echo "Keystone CA installed: $$SUBJ"""".stripMargin
 
   // Sessions are files in the container's /tmp, which both WSGI processes share; the browser holds only the
   // session id. They used to be signed cookies, but a session made by a single sign-on login (the federated
@@ -424,17 +368,6 @@ if __name__ == '__main__':
       .replace("@@ADMINPW@@", adminPassword.reveal)
   private val helperPath = "/usr/local/sbin/orphera-horizon-check"
 
-  // The login page answers 200 (the root redirects to it).
-  private val healthy =
-    s"""CODE=$$(curl -s --cacert $tlsDir/ca.crt --resolve $fqdn:$port:127.0.0.1 -o /dev/null -w '%{http_code}' https://$fqdn:$port/auth/login/); [ "$$CODE" = "200" ]"""
-  private val waitHealthy =
-    s"""for i in $$(seq 1 24); do
-       |  $healthy && exit 0
-       |  sleep 5
-       |done
-       |echo "horizon does not answer on https://$fqdn:$port/auth/login/ - see 'journalctl -xeu orphera-horizon' and $logDir" >&2
-       |exit 1""".stripMargin
-
   private val signedIn = s"$helperPath login >/dev/null 2>&1"
 
   def describe(target: Node): List[ApplyResource] =
@@ -452,19 +385,20 @@ if __name__ == '__main__':
       registryMirror,
       mode = "0644"
     ).after(mirrorDir)
-    val pulled = command(
+    val pulled = pullImages(
       "pull the Horizon image",
-      pullScript,
-      unless = imagePresent,
+      List(webImage),
+      hint = "the Image(...) in horizonWeb in horizon_single_node.scala",
       timeout = 1800
     ).after(podman, mirror)
 
     val caDirectory = directory(caDir, mode = "0755").after(podman)
-    val ca = command(
+    val ca = serverCa(
       "fetch Keystone's CA from its TLS handshake",
-      caScript,
-      unless = caCurrent,
-      timeout = 60
+      ksFqdn,
+      5000,
+      caCert,
+      hint = "apply keystone_single_node.scala (it must serve server-chain.crt)"
     ).after(caDirectory, tools(1))
 
     val logDirectory = directory(logDir)
@@ -483,14 +417,15 @@ if __name__ == '__main__':
       caCert,
       mode = "0644"
     ).after(ca, web).notifies(unitService)
-    val certCopy = command(
-      "copy the certificate chain and key to the Kolla config",
-      s"""cp $tlsDir/server-chain.crt $webDir/server-chain.crt
-         |cp $tlsDir/server.key $webDir/server.key
-         |chmod 600 $webDir/server.key
-         |echo "certificate and key copied"""".stripMargin,
-      unless =
-        s"cmp -s $tlsDir/server-chain.crt $webDir/server-chain.crt && cmp -s $tlsDir/server.key $webDir/server.key"
+    val chainCopy = fileCopy(
+      s"$webDir/server-chain.crt",
+      s"$tlsDir/server-chain.crt",
+      mode = "0644"
+    ).after(tls, web).notifies(unitService)
+    val keyCopy = fileCopy(
+      s"$webDir/server.key",
+      s"$tlsDir/server.key",
+      mode = "0600"
     ).after(tls, web).notifies(unitService)
     val vhost = command(
       "write the Apache vhost and the Kolla config.json",
@@ -515,12 +450,15 @@ if __name__ == '__main__':
     )
 
     val running =
-      unitService.after(settings, kollaCa, certCopy, vhost, unitFile)
-    val answering = command(
+      unitService.after(settings, kollaCa, chainCopy, keyCopy, vhost, unitFile)
+    // The login page answers 200 (the root redirects to it).
+    val answering = waitForHttp(
       "horizon answers on its port",
-      waitHealthy,
-      unless = healthy,
-      timeout = 180
+      s"https://$fqdn:$port/auth/login/",
+      ca = s"$tlsDir/ca.crt",
+      resolve = s"$fqdn:$port:127.0.0.1",
+      timeout = 120,
+      hint = s"see 'journalctl -xeu orphera-horizon' and $logDir"
     ).after(running)
     val login = command(
       "sign in as admin like a browser would",
@@ -540,7 +478,8 @@ if __name__ == '__main__':
       web,
       settings,
       kollaCa,
-      certCopy,
+      chainCopy,
+      keyCopy,
       vhost,
       unitFile,
       helperFile,

@@ -55,15 +55,6 @@ object apt_cache extends OrpheraApply:
       |VfileUseRangeOps: 0
       |""".stripMargin
 
-  private val healthy =
-    s"""[ "$$(curl -s -o /dev/null -w '%{http_code}' http://localhost:$port/acng-report.html)" = "200" ]"""
-
-  // Up to a minute for the cache to answer after a (re)start.
-  private val waitHealthy =
-    s"""for i in $$(seq 1 20); do $healthy && exit 0; sleep 3; done
-       |echo "apt-cacher-ng does not answer on port $port - see 'journalctl -xeu apt-cacher-ng'" >&2
-       |exit 1""".stripMargin
-
   // Through the proxy with CONNECT: any HTTP status from the far side counts; a
   // proxy refusal makes curl fail.
   private val tunnels =
@@ -80,8 +71,14 @@ object apt_cache extends OrpheraApply:
   def describe(node: Node): List[ApplyResource] =
     val acng = pkg("apt-cacher-ng", updateCache = true)
     val cacher = service("apt-cacher-ng").after(acng)
-    val answering =
-      command("the cache answers", waitHealthy, unless = healthy).after(cacher)
+    // Up to a minute for the cache to answer after a (re)start.
+    val answering = waitForHttp(
+      "the cache answers",
+      s"http://localhost:$port/acng-report.html",
+      timeout = 60,
+      interval = 3,
+      hint = "see 'journalctl -xeu apt-cacher-ng'"
+    ).after(cacher)
     val tunnelling = command(
       "tunnelling through the cache is allowed",
       "echo 'a CONNECT tunnel through apt-cacher-ng failed: refused (check PassThroughPattern), or download.ceph.com unreachable' >&2; exit 1",

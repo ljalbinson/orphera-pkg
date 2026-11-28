@@ -9,12 +9,13 @@ import orphera.orchestrator.*
 //   orphera apply manifests/telemetry_prometheus.scala
 //
 // The scrape job goes in its own file, /etc/prometheus/scrape.d/openstack-telemetry.yml, named by a
-// `scrape_config_files` line in prometheus.yml (Prometheus 2.43 or later). observability_stack.scala and
-// observability_extended.scala rewrite prometheus.yml whole and both carry that line, so a re-run of either
-// keeps the job. This description does not touch the rest of prometheus.yml: it adds the line when it is
-// missing (the old file is kept as prometheus.yml.orphera-bak and put back if promtool rejects the new one),
-// writes the job file, has promtool check the configuration and restarts Prometheus only when one of them
-// changed.
+// `scrape_config_files` line in prometheus.yml (Prometheus 2.43 or later). observability_stack.scala writes
+// prometheus.yml with that line, and observability_extended.scala and ceph_observability.scala keep their jobs
+// in scrape.d files of their own, so a re-run of any of them keeps this job. This description does not touch
+// the rest of prometheus.yml: it adds the line when it is missing (the old file is kept as
+// prometheus.yml.orphera-bak and put back if promtool rejects the new one), writes the job file, has promtool
+// check the configuration and restarts Prometheus only when one of them changed. Adding the line is a
+// two-line edit of a YAML file with a rollback, which no apply kind describes, so that step stays a command.
 //
 // Prerequisite, not checked here: Prometheus running on tst7 (observability_stack.scala).
 object telemetry_prometheus extends OrpheraApply:
@@ -62,15 +63,6 @@ object telemetry_prometheus extends OrpheraApply:
   private val configCheck =
     "promtool check config /etc/prometheus/prometheus.yml"
 
-  private val healthy = "curl -sf http://localhost:9090/-/healthy >/dev/null"
-  private val waitHealthy =
-    s"""for i in $$(seq 1 12); do
-       |  $healthy && exit 0
-       |  sleep 5
-       |done
-       |echo "prometheus did not come back healthy - see 'journalctl -xeu prometheus'" >&2
-       |exit 1""".stripMargin
-
   def describe(target: Node): List[ApplyResource] =
     val prometheus = service("prometheus")
     val scrapeDir = directory("/etc/prometheus/scrape.d")
@@ -94,10 +86,10 @@ object telemetry_prometheus extends OrpheraApply:
       timeout = 60
     ).after(job, line)
     val running = prometheus.after(accepted, job, line)
-    val answering = command(
+    val answering = waitForHttp(
       "prometheus answers",
-      waitHealthy,
-      unless = healthy,
-      timeout = 90
+      "http://localhost:9090/-/healthy",
+      timeout = 60,
+      hint = "see 'journalctl -xeu prometheus'"
     ).after(running)
     List(scrapeDir, job, line, accepted, running, answering)

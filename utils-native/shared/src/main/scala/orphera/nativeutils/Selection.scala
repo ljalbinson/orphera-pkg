@@ -44,7 +44,7 @@ final case class Selection(
       Out.err(msg)
       sys.exit(2)
     if groups.isEmpty && names.isEmpty then
-      die("--exclude-nodes takes VMs out of a selection: give --node-groups or VM names as well")
+      die("--exclude-nodes takes VMs out of a selection: give --node-groups or --nodes as well")
     val members: Map[String, String] =
       if groups.isEmpty then Map.empty
       else

@@ -39,21 +39,17 @@ object apply_kinds_demo extends OrpheraApply:
   def describe(node: Node): List[ApplyResource] =
     if sys.env.get("DEMO_REMOVE").contains("yes") then
       // Stop and disable it while its unit file is still there (a second removal finds nothing to do).
-      val stop = command(
-        "stop orphera-demo",
-        "systemctl disable --now orphera-demo.service",
-        onlyIf = s"test -e $unitPath"
+      val stop = service(
+        "orphera-demo.service",
+        enabled = Some(false),
+        running = Some(false)
       )
       val reload = command(
         "reload systemd",
         "systemctl daemon-reload",
         onChangeOnly = true
       )
-      val clear = command(
-        "remove the demo directory",
-        s"rm -rf $dir",
-        onlyIf = s"test -d $dir"
-      )
+      val clear = absentDirectory(dir, recursive = true)
       val gone = absentUser("orphera-demo").after(stop, clear)
       List(
         stop,

@@ -19,17 +19,20 @@ object k8s_metrics_server extends OrpheraClusterPlaybook:
   private val node = "tst30"
   private val kc = "kubectl --kubeconfig /etc/kubernetes/admin.conf"
 
-  private val installScript =
-    """set -e
-      |export KUBECONFIG=/etc/kubernetes/admin.conf
-      |helm repo add metrics-server https://kubernetes-sigs.github.io/metrics-server/ --force-update >/dev/null
-      |helm repo update >/dev/null
-      |VER=$(helm show chart metrics-server/metrics-server | awk '/^version:/{print $2}')
-      |echo "installing metrics-server chart $VER"
-      |helm upgrade --install metrics-server metrics-server/metrics-server --version "$VER" \
-      |  --namespace kube-system --set replicas=2 --set 'args={--kubelet-insecure-tls}' --wait --timeout 10m
-      |echo "metrics-server $VER installed"
-      |""".stripMargin
+  // The chart as a `helmRelease`: a helper on tst30 installs it with `helm upgrade --install --wait`, skipped
+  // while the description last installed is the one below and Helm lists the release as deployed. No version is
+  // given, so the newest chart is installed the first time and again only when this description changes.
+  private val installPlan: ApplyPlan =
+    import Resources.*
+    val (helper, installed) = helmRelease(
+      "helm install metrics-server",
+      "metrics-server",
+      "metrics-server/metrics-server",
+      "https://kubernetes-sigs.github.io/metrics-server/",
+      "kube-system",
+      set = List("replicas" -> "2", "args" -> "{--kubelet-insecure-tls}")
+    )
+    ApplyPlan.orFail("metrics-server", List(helper, installed))
 
   private val topScript =
     s"""for I in $$(seq 1 30); do
@@ -44,7 +47,7 @@ object k8s_metrics_server extends OrpheraClusterPlaybook:
     clusterPlaybook("k8s-metrics-server")(
       stage("install-metrics-server", node)
         .task("helm install metrics-server")(
-          Task.RunCommand(List("sh", "-c", installScript), timeoutSeconds = 900)
+          Task.Apply(installPlan)
         )
         .task("kubectl top nodes answers")(
           Task.RunCommand(List("sh", "-c", topScript), timeoutSeconds = 200)

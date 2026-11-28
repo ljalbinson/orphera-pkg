@@ -28,7 +28,7 @@ import orphera.orchestrator.kolla.*
 // it starts. A Kolla-style split into apiserver and console containers needs that file made by hand.
 //
 // What it does:
-//   - the Keystone user `skyline` (project `service`, role admin), made by the helper's `register`; Skyline
+//   - the Keystone user `skyline` (project `service`, role admin), made by keystoneEntries; Skyline
 //     itself has no service entry in the catalog;
 //   - skyline.yaml (database, Keystone URL, the service password, a secret key from the secret store, the
 //     Prometheus on tst7 for the monitoring pages, `ssl_enabled: true` because the console is served over
@@ -150,57 +150,6 @@ object skyline_single_node extends OrpheraApply:
     s"""echo "no certificate in $tlsDir - run: orphera cluster-playbook manifests/dashboard_tls.scala" >&2
        |exit 1""".stripMargin
 
-  private val pullScript =
-    s"""${Pull.shellFunction(
-        "SKYLINE_IMAGE or the Image in skyline_single_node.scala"
-      )}
-       |pull_retry $imageRef || exit 1
-       |echo "image ready: $$(podman images -q $imageRef | head -1)"""".stripMargin
-  private val imagePresent = s"podman image exists $imageRef"
-
-  // Keystone's CA: the last certificate it presents (trust on first use), which must be self-signed.
-  // `chainTo DIR` leaves DIR/c1.pem ... DIR/cN.pem, each holding the certificate only: the text s_client
-  // prints after the last one differs on every handshake, and would make the comparison fail.
-  private val chainTo =
-    s"""chainTo() { openssl s_client -connect $ksFqdn:5000 -servername $ksFqdn -showcerts </dev/null 2>/dev/null | awk -v d="$$1" '/-----BEGIN CERTIFICATE-----/{n++; p=1} p{print > (d "/c" n ".pem")} /-----END CERTIFICATE-----/{p=0}'; }"""
-  private val trustTarget =
-    """if command -v update-ca-certificates >/dev/null 2>&1; then t=/usr/local/share/ca-certificates/orphera-test-ca.crt; else t=/etc/pki/ca-trust/source/anchors/orphera-test-ca.crt; fi"""
-  // Current when the installed CA is the one Keystone presents now, and is in the system trust store.
-  private val caCurrent =
-    s"""$chainTo
-       |D=$$(mktemp -d)
-       |chainTo $$D
-       |N=$$(ls $$D/c*.pem 2>/dev/null | wc -l)
-       |R=1
-       |if [ "$$N" -ge 2 ]; then
-       |  $trustTarget
-       |  cmp -s $$D/c$$N.pem $caCert && cmp -s $caCert "$$t" && R=0
-       |fi
-       |rm -rf $$D
-       |exit $$R""".stripMargin
-  // update-ca-certificates also puts it in /etc/ssl/certs/ca-certificates.crt, which the container mounts.
-  private val caScript =
-    s"""set -e
-       |$chainTo
-       |mkdir -p $caDir
-       |D=$$(mktemp -d)
-       |trap 'rm -rf $$D' EXIT
-       |chainTo $$D
-       |COUNT=$$(ls $$D/c*.pem 2>/dev/null | wc -l)
-       |if [ "$$COUNT" -lt 2 ]; then
-       |  echo "keystone at $ksFqdn:5000 presented $$COUNT certificate(s); expected leaf + CA - apply keystone_single_node.scala (it must serve server-chain.crt)" >&2
-       |  exit 1
-       |fi
-       |cp $$D/c$$COUNT.pem $caCert
-       |openssl verify -CAfile $caCert $$D/c1.pem
-       |SUBJ=$$(openssl x509 -in $caCert -noout -subject | sed 's/^subject=//')
-       |ISS=$$(openssl x509 -in $caCert -noout -issuer | sed 's/^issuer=//')
-       |if [ "$$SUBJ" != "$$ISS" ]; then echo "last certificate is not self-signed: $$SUBJ / $$ISS" >&2; exit 1; fi
-       |$trustTarget
-       |cp $caCert "$$t"
-       |if command -v update-ca-certificates >/dev/null 2>&1; then update-ca-certificates; else update-ca-trust; fi
-       |echo "Keystone CA installed: $$SUBJ"""".stripMargin
-
   // The key goes to a directory of Skyline's own, owned by the user the image runs as, whoever that is.
   private val skylineTlsScript =
     s"""set -e
@@ -310,7 +259,7 @@ object skyline_single_node extends OrpheraApply:
   // ---- the helper ------------------------------------------------------
 
   // Standard-library Python, as in the other service playbooks. Plain string filled in with replace().
-  // Subcommands: register | registered | unregister | catalog-hash | login-check
+  // Subcommands: catalog-hash | login-check
   private val apiHelperPython =
     """#!/usr/bin/python3
 import hashlib, json, ssl, sys, urllib.error, urllib.request
@@ -319,7 +268,6 @@ KS = 'https://@@KS@@:5000/v3'
 SKY = 'https://@@FQDN@@:@@PORT@@'
 REGION = '@@REGION@@'
 ADMIN_PW = '@@ADMINPW@@'
-SKYLINE_PW = '@@SKYLINEPW@@'
 CTX = ssl.create_default_context(cafile='@@CA@@')
 # The test CA has no keyUsage extension, which Python 3.13 and later reject by default.
 CTX.verify_flags &= ~getattr(ssl, 'VERIFY_X509_STRICT', 0)
@@ -357,51 +305,6 @@ def get_token(user, password, project):
     return headers['X-Subject-Token'], parsed
 
 
-def find(token, path, key):
-    status, parsed, _ = call('GET', KS + path, token=token)
-    items = parsed.get(key, [])
-    return items[0] if items else None
-
-
-def register():
-    token, _ = get_token('admin', ADMIN_PW, 'admin')
-    project = find(token, '/projects?name=service', 'projects')
-    if project is None:
-        s, p, _ = call('POST', KS + '/projects', {'project': {'name': 'service', 'domain_id': 'default'}}, token)
-        if s != 201:
-            die('creating project service failed: HTTP %s %s' % (s, p))
-        project = p['project']
-    user = find(token, '/users?name=skyline', 'users')
-    if user is None:
-        s, p, _ = call('POST', KS + '/users', {'user': {'name': 'skyline', 'domain_id': 'default', 'password': SKYLINE_PW}}, token)
-        if s != 201:
-            die('creating user skyline failed: HTTP %s %s' % (s, p))
-        user = p['user']
-    else:
-        call('PATCH', KS + '/users/' + user['id'], {'user': {'password': SKYLINE_PW}}, token)
-    role = find(token, '/roles?name=admin', 'roles')
-    if role is None:
-        die('role admin not found')
-    s, p, _ = call('PUT', KS + '/projects/%s/users/%s/roles/%s' % (project['id'], user['id'], role['id']), None, token)
-    if s not in (200, 204):
-        die('granting admin to skyline failed: HTTP %s %s' % (s, p))
-    print('registered skyline in keystone (user skyline, role admin in project service)')
-
-
-def registered():
-    # The Skyline user exists, has its password from the secret store and a role in project service.
-    get_token('skyline', SKYLINE_PW, 'service')
-    print('skyline is registered in keystone')
-
-
-def unregister():
-    token, _ = get_token('admin', ADMIN_PW, 'admin')
-    user = find(token, '/users?name=skyline', 'users')
-    if user is not None:
-        call('DELETE', KS + '/users/' + user['id'], None, token)
-    print('removed user skyline from keystone')
-
-
 def catalog_hash():
     _, p = get_token('admin', ADMIN_PW, 'admin')
     rows = []
@@ -428,18 +331,12 @@ def login_check():
 
 if __name__ == '__main__':
     cmd = sys.argv[1] if len(sys.argv) > 1 else ''
-    if cmd == 'register':
-        register()
-    elif cmd == 'registered':
-        registered()
-    elif cmd == 'unregister':
-        unregister()
-    elif cmd == 'catalog-hash':
+    if cmd == 'catalog-hash':
         catalog_hash()
     elif cmd == 'login-check':
         login_check()
     else:
-        die('usage: orphera-skyline-api register | registered | unregister | catalog-hash | login-check')
+        die('usage: orphera-skyline-api catalog-hash | login-check')
 """
 
   private val helper =
@@ -449,18 +346,8 @@ if __name__ == '__main__':
       .replace("@@FQDN@@", fqdn)
       .replace("@@REGION@@", region)
       .replace("@@ADMINPW@@", adminPassword.reveal)
-      .replace("@@SKYLINEPW@@", skylinePassword.reveal)
       .replace("@@CA@@", caCert)
 
-  private val healthy =
-    s"""CODE=$$(curl -s --cacert $tlsDir/ca.crt --resolve $fqdn:$port:127.0.0.1 -o /dev/null -w '%{http_code}' https://$fqdn:$port/); [ "$$CODE" = "200" ]"""
-  private val waitHealthy =
-    s"""for i in $$(seq 1 36); do
-       |  $healthy && exit 0
-       |  sleep 5
-       |done
-       |echo "skyline does not answer on https://$fqdn:$port/ - see 'journalctl -xeu orphera-skyline' and $logDir" >&2
-       |exit 1""".stripMargin
   private val loggedIn = s"$helperPath login-check >/dev/null 2>&1"
 
   def describe(target: Node): List[ApplyResource] =
@@ -472,10 +359,10 @@ if __name__ == '__main__':
     val tools = hostPackages.map(p => pkg(p, updateCache = true))
     val podman = tools(0)
 
-    val pulled = command(
+    val pulled = pullImages(
       "pull the Skyline image",
-      pullScript,
-      unless = imagePresent,
+      List(imageRef),
+      hint = "SKYLINE_IMAGE or the Image in skyline_single_node.scala",
       timeout = 1800
     ).after(podman)
 
@@ -489,11 +376,12 @@ if __name__ == '__main__':
 
     val unitService = service(skylineContainer.unitName)
 
-    val ca = command(
+    val ca = serverCa(
       "fetch Keystone's CA from its TLS handshake",
-      caScript,
-      unless = caCurrent,
-      timeout = 60
+      ksFqdn,
+      5000,
+      caCert,
+      hint = "apply keystone_single_node.scala (it must serve server-chain.crt)"
     ).after(caDirectory, tools(1)).notifies(unitService)
     val tlsCopy = command(
       "give Skyline its copy of the certificate and key",
@@ -504,17 +392,21 @@ if __name__ == '__main__':
 
     val helperFile = secretFile(
       helperPath,
-      Secret(helper), // it holds the admin and skyline passwords
+      Secret(helper), // it holds the admin password
       mode = "0700",
       owner = "root",
       group = "root"
     ).after(ca)
-    val registered = command(
+    val (keystoneHelper, ensured) = keystoneEntries(
       "register the Skyline user in Keystone",
-      s"$helperPath register",
-      unless = s"$helperPath registered >/dev/null 2>&1",
-      timeout = 120
-    ).after(helperFile)
+      "skyline",
+      skylinePassword,
+      Nil,
+      ksUrl,
+      adminPassword,
+      caCert
+    )
+    val registered = ensured.after(ca)
 
     val driver = command(
       "install the PyMySQL driver with the image's Python",
@@ -567,11 +459,13 @@ if __name__ == '__main__':
       unless = catalogCurrent,
       timeout = 180
     ).after(running, helperFile)
-    val answering = command(
+    val answering = waitForHttp(
       "skyline answers on its port",
-      waitHealthy,
-      unless = healthy,
-      timeout = 200
+      s"https://$fqdn:$port/",
+      ca = s"$tlsDir/ca.crt",
+      resolve = s"$fqdn:$port:127.0.0.1",
+      timeout = 180,
+      hint = s"see 'journalctl -xeu orphera-skyline' and $logDir"
     ).after(catalogRestart)
     val login = command(
       "the console, the API docs and an admin login answer",
@@ -592,6 +486,7 @@ if __name__ == '__main__':
       ca,
       tlsCopy,
       helperFile,
+      keystoneHelper,
       registered,
       driver,
       config,

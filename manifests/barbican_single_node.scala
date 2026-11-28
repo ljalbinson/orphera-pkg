@@ -32,7 +32,7 @@ import orphera.orchestrator.kolla.*
 // `barbican/kek` in the secret store, so it is the same on every run; LOSE IT AND EVERY STORED SECRET IS
 // UNREADABLE (back up the secret store). A real deployment uses a hardware module (PKCS#11) or Vault.
 //
-// What it adds to Keystone (done by the helper's `register`, repeatable): user `barbican` in project
+// What it adds to Keystone (done by keystoneEntries, repeatable): user `barbican` in project
 // `service` with the admin role; the roles `creator`, `observer` and `audit` (the users of a project who may
 // create, read and audit secrets; admin may do all); the service `barbican` of type `key-manager`.
 //
@@ -52,7 +52,7 @@ import orphera.orchestrator.kolla.*
 //   - `barbican-manage db upgrade` is skipped while its stamp matches and the `secrets` table exists (a query
 //     as the barbican user, through the VIP).
 //   - Barbican is registered in Keystone before the units start. The registration is skipped while the
-//     helper's `registered` check passes.
+//     registration check passes.
 //
 // Facts about Barbican this was written from, to check if a run fails: the database connection is
 // given in both [DEFAULT] sql_connection and [database] connection, because releases have used either;
@@ -196,66 +196,6 @@ object barbican_single_node extends OrpheraApply:
        |""".stripMargin
 
   private val images = barbicanServices.map(_.image.ref)
-  private val pullScript =
-    s"""${Pull.shellFunction(
-        "the Image(...) values in barbican_single_node.scala"
-      )}
-       |for img in ${images.mkString(" ")}; do
-       |  pull_retry $$img || exit 1
-       |done
-       |echo "images ready"""".stripMargin
-  private val imagesPresent =
-    s"""for img in ${images.mkString(
-        " "
-      )}; do podman image exists $$img || exit 1; done"""
-
-  // Keystone's CA: the last certificate it presents (trust on first use),
-  // which must be self-signed. `chainTo DIR` leaves DIR/c1.pem ... DIR/cN.pem,
-  // each holding the certificate only: the text s_client prints after the
-  // last one (bytes read and written, session ticket) differs on every
-  // handshake, and would make the comparison with the installed copy fail.
-  private val chainTo =
-    s"""chainTo() { openssl s_client -connect $ksFqdn:5000 -servername $ksFqdn -showcerts </dev/null 2>/dev/null | awk -v d="$$1" '/-----BEGIN CERTIFICATE-----/{n++; p=1} p{print > (d "/c" n ".pem")} /-----END CERTIFICATE-----/{p=0}'; }"""
-
-  private val trustTarget =
-    """if command -v update-ca-certificates >/dev/null 2>&1; then t=/usr/local/share/ca-certificates/orphera-test-ca.crt; else t=/etc/pki/ca-trust/source/anchors/orphera-test-ca.crt; fi"""
-
-  // Current when the installed CA is the one Keystone presents now, and is in
-  // the system trust store.
-  private val caCurrent =
-    s"""$chainTo
-       |D=$$(mktemp -d)
-       |chainTo $$D
-       |N=$$(ls $$D/c*.pem 2>/dev/null | wc -l)
-       |R=1
-       |if [ "$$N" -ge 2 ]; then
-       |  $trustTarget
-       |  cmp -s $$D/c$$N.pem $caCert && cmp -s $caCert "$$t" && R=0
-       |fi
-       |rm -rf $$D
-       |exit $$R""".stripMargin
-
-  private val caScript =
-    s"""set -e
-       |$chainTo
-       |mkdir -p $caDir
-       |D=$$(mktemp -d)
-       |trap 'rm -rf $$D' EXIT
-       |chainTo $$D
-       |COUNT=$$(ls $$D/c*.pem 2>/dev/null | wc -l)
-       |if [ "$$COUNT" -lt 2 ]; then
-       |  echo "keystone at $ksFqdn:5000 presented $$COUNT certificate(s); expected leaf + CA - apply keystone_single_node.scala (it must serve server-chain.crt)" >&2
-       |  exit 1
-       |fi
-       |cp $$D/c$$COUNT.pem $caCert
-       |openssl verify -CAfile $caCert $$D/c1.pem
-       |SUBJ=$$(openssl x509 -in $caCert -noout -subject | sed 's/^subject=//')
-       |ISS=$$(openssl x509 -in $caCert -noout -issuer | sed 's/^issuer=//')
-       |if [ "$$SUBJ" != "$$ISS" ]; then echo "last certificate is not self-signed: $$SUBJ / $$ISS" >&2; exit 1; fi
-       |$trustTarget
-       |cp $caCert "$$t"
-       |if command -v update-ca-certificates >/dev/null 2>&1; then update-ca-certificates; else update-ca-trust; fi
-       |echo "Keystone CA installed: $$SUBJ"""".stripMargin
 
   // The files both services' config.json copy in, and the ownership it sets.
   private val commonFiles =
@@ -348,7 +288,7 @@ object barbican_single_node extends OrpheraApply:
 
   // Standard-library Python, as in the other services. Plain string filled in with replace().
   // Subcommands:
-  //   register | registered | unregister | catalog | secret-list | secret-cycle | order-cycle
+  //   catalog | secret-list | secret-cycle | order-cycle
   // secret-cycle stores a secret, reads its payload back, deletes it and checks it is gone. order-cycle asks
   // for a 256 bit AES key, which the WORKER has to make from the queue, waits for the order to be ACTIVE,
   // reads the 32 bytes of the key back, and deletes the secret and the order.
@@ -359,7 +299,6 @@ import json, ssl, sys, time, urllib.request, urllib.error
 KS = 'https://@@KS@@:5000/v3'
 BARBICAN = '@@BARBICAN@@'
 ADMIN_PW = '@@ADMINPW@@'
-BARBICAN_PW = '@@BARBICANPW@@'
 CTX = ssl.create_default_context(cafile='@@CA@@')
 
 
@@ -408,84 +347,6 @@ def get_token(user, password, project):
 
 def admin_token():
     return get_token('admin', ADMIN_PW, 'admin')[0]
-
-
-def find(token, path, key):
-    status, parsed, _ = call('GET', KS + path, token=token)
-    items = parsed.get(key, [])
-    return items[0] if items else None
-
-
-def ensure(token, what, path, key, body, create_key):
-    # the first object that matches `path`, or the one made from `body`
-    found = find(token, path, key)
-    if found is not None:
-        return found
-    s, p, _ = call('POST', KS + '/' + what, body, token)
-    if s != 201:
-        die('creating %s failed: HTTP %s %s' % (what, s, p))
-    return p[create_key]
-
-
-def register():
-    token, _ = get_token('admin', ADMIN_PW, 'admin')
-    project = ensure(token, 'projects', '/projects?name=service', 'projects', {'project': {'name': 'service', 'domain_id': 'default'}}, 'project')
-    user = find(token, '/users?name=barbican', 'users')
-    if user is None:
-        s, p, _ = call('POST', KS + '/users', {'user': {'name': 'barbican', 'domain_id': 'default', 'password': BARBICAN_PW}}, token)
-        if s != 201:
-            die('creating user barbican failed: HTTP %s %s' % (s, p))
-        user = p['user']
-    else:
-        call('PATCH', KS + '/users/' + user['id'], {'user': {'password': BARBICAN_PW}}, token)
-    admin_role = find(token, '/roles?name=admin', 'roles')
-    if admin_role is None:
-        die('role admin not found')
-    s, p, _ = call('PUT', KS + '/projects/%s/users/%s/roles/%s' % (project['id'], user['id'], admin_role['id']), None, token)
-    if s not in (200, 204):
-        die('granting admin to barbican failed: HTTP %s %s' % (s, p))
-    for role in ('creator', 'observer', 'audit'):
-        ensure(token, 'roles', '/roles?name=' + role, 'roles', {'role': {'name': role}}, 'role')
-    service = ensure(token, 'services', '/services?type=key-manager', 'services', {'service': {'name': 'barbican', 'type': 'key-manager'}}, 'service')
-    for iface in ('public', 'internal', 'admin'):
-        ep = find(token, '/endpoints?service_id=%s&interface=%s' % (service['id'], iface), 'endpoints')
-        if ep is None:
-            s, p, _ = call('POST', KS + '/endpoints', {'endpoint': {'interface': iface, 'url': BARBICAN, 'service_id': service['id'], 'region_id': 'RegionOne'}}, token)
-            if s != 201:
-                die('creating %s endpoint failed: HTTP %s %s' % (iface, s, p))
-        elif ep['url'] != BARBICAN:
-            call('PATCH', KS + '/endpoints/' + ep['id'], {'endpoint': {'url': BARBICAN}}, token)
-    print('registered barbican in keystone (user barbican, roles creator observer audit, service type key-manager, 3 endpoints)')
-
-
-def registered():
-    # Exit 0 only when everything register() makes is in place: the barbican user can get a token in project
-    # service (so it holds a role there), the three roles, and the key-manager service with its three
-    # endpoints at the right URL. Makes no change.
-    get_token('barbican', BARBICAN_PW, 'service')
-    token, _ = get_token('admin', ADMIN_PW, 'admin')
-    for role in ('creator', 'observer', 'audit'):
-        if find(token, '/roles?name=' + role, 'roles') is None:
-            die('role %s missing' % role)
-    service = find(token, '/services?type=key-manager', 'services')
-    if service is None:
-        die('no service of type key-manager')
-    for iface in ('public', 'internal', 'admin'):
-        ep = find(token, '/endpoints?service_id=%s&interface=%s' % (service['id'], iface), 'endpoints')
-        if ep is None or ep['url'] != BARBICAN:
-            die('endpoint %s of key-manager missing or wrong' % iface)
-    print('barbican is registered in keystone')
-
-
-def unregister():
-    token, _ = get_token('admin', ADMIN_PW, 'admin')
-    service = find(token, '/services?type=key-manager', 'services')
-    if service is not None:
-        call('DELETE', KS + '/services/' + service['id'], None, token)
-    user = find(token, '/users?name=barbican', 'users')
-    if user is not None:
-        call('DELETE', KS + '/users/' + user['id'], None, token)
-    print('removed barbican from keystone (service key-manager, its endpoints, user barbican)')
 
 
 def catalog():
@@ -561,13 +422,7 @@ def order_cycle():
 
 if __name__ == '__main__':
     cmd = sys.argv[1] if len(sys.argv) > 1 else ''
-    if cmd == 'register':
-        register()
-    elif cmd == 'registered':
-        registered()
-    elif cmd == 'unregister':
-        unregister()
-    elif cmd == 'catalog':
+    if cmd == 'catalog':
         catalog()
     elif cmd == 'secret-list':
         secret_list()
@@ -576,7 +431,7 @@ if __name__ == '__main__':
     elif cmd == 'order-cycle':
         order_cycle()
     else:
-        die('usage: orphera-barbican-api register | registered | unregister | catalog | secret-list | secret-cycle | order-cycle')
+        die('usage: orphera-barbican-api catalog | secret-list | secret-cycle | order-cycle')
 """
 
   private val helper =
@@ -584,20 +439,8 @@ if __name__ == '__main__':
       .replace("@@KS@@", ksFqdn)
       .replace("@@BARBICAN@@", s"http://$fqdn:$apiPort")
       .replace("@@ADMINPW@@", adminPassword.reveal)
-      .replace("@@BARBICANPW@@", barbicanPassword.reveal)
       .replace("@@CA@@", caCert)
   private val helperPath = "/usr/local/sbin/orphera-barbican-api"
-
-  // The API answers its version document without a token (200, or 300 for a list of versions).
-  private val healthy =
-    s"""CODE=$$(curl -s -o /dev/null -w '%{http_code}' http://localhost:$apiPort/); [ "$$CODE" = "200" ] || [ "$$CODE" = "300" ]"""
-  private val waitHealthy =
-    s"""for i in $$(seq 1 24); do
-       |  ( $healthy ) && exit 0
-       |  sleep 5
-       |done
-       |echo "barbican-api does not answer on $apiPort - see 'journalctl -xeu orphera-barbican-api' and $logDir" >&2
-       |exit 1""".stripMargin
 
   // The API accepts an admin token from Keystone (it validated it with the barbican user's credentials) and
   // reaches its database.
@@ -625,19 +468,20 @@ if __name__ == '__main__':
       registryMirror,
       mode = "0644"
     ).after(mirrorDir)
-    val pulled = command(
+    val pulled = pullImages(
       "pull the Barbican images",
-      pullScript,
-      unless = imagesPresent,
+      images,
+      hint = "the Image(...) values in barbican_single_node.scala",
       timeout = 2400
     ).after(podman, mirror)
 
     val caDirectory = directory(caDir, mode = "0755").after(podman)
-    val ca = command(
+    val ca = serverCa(
       "fetch Keystone's CA from its TLS handshake",
-      caScript,
-      unless = caCurrent,
-      timeout = 60
+      ksFqdn,
+      5000,
+      caCert,
+      hint = "apply keystone_single_node.scala (it must serve server-chain.crt)"
     ).after(caDirectory, tools(1))
 
     val logDirectory = directory(logDir)
@@ -703,28 +547,37 @@ if __name__ == '__main__':
 
     val helperFile = secretFile(
       helperPath,
-      Secret(helper), // it holds the admin and barbican passwords
+      Secret(helper), // it holds the admin password
       mode = "0700",
       owner = "root",
       group = "root"
     )
     // Registration comes before the services start.
-    val registered = command(
+    val (keystoneHelper, ensured) = keystoneEntries(
       "register Barbican in Keystone",
-      s"$helperPath register",
-      unless = s"$helperPath registered >/dev/null 2>&1",
-      timeout = 120
-    ).after(helperFile, ca)
+      "barbican",
+      barbicanPassword,
+      List(
+        KeystoneService("barbican", "key-manager", s"http://$fqdn:$apiPort")
+      ),
+      ksUrl,
+      adminPassword,
+      caCert,
+      roles = List("creator", "observer", "audit")
+    )
+    val registered = ensured.after(ca)
 
     val running = svcs.map { s =>
       s.unit.after((dbSync :: registered :: s.deps)*)
     }
 
-    val answering = command(
+    // The API answers its version document without a token (200, or 300 for a list of versions).
+    val answering = waitForHttp(
       "barbican-api answers on its port",
-      waitHealthy,
-      unless = healthy,
-      timeout = 180
+      s"http://localhost:$apiPort/",
+      status = List(200, 300),
+      timeout = 120,
+      hint = s"see 'journalctl -xeu orphera-barbican-api' and $logDir"
     ).after(running*)
     val authenticating = command(
       "the API accepts an admin token and reaches its database",
@@ -741,5 +594,10 @@ if __name__ == '__main__':
       ca,
       logDirectory,
       stateDirectory
-    ) ++ svcs.flatMap(_.resources) ++ List(dbSync, helperFile, registered) ++
+    ) ++ svcs.flatMap(_.resources) ++ List(
+      dbSync,
+      helperFile,
+      keystoneHelper,
+      registered
+    ) ++
       running ++ List(answering, authenticating)

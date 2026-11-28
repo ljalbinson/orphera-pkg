@@ -31,30 +31,13 @@ object cinder_teardown extends OrpheraApply:
   private val cephNode = "tst0"
   private val dbName = "cinder"
   private val dbUser = "cinder"
-  private val cephPool = "volumes"
+  private val volumesPool = "volumes"
   private val helper = "/usr/local/sbin/orphera-openstack-api"
   private val units = List("cinder-api", "cinder-scheduler", "cinder-volume")
 
   override def nodes: List[String] = List(dbNode, cephNode, node)
 
   // ---- tst10 ----
-  private val registeredInKeystone =
-    s"[ -x $helper ] && $helper registered >/dev/null 2>&1"
-  private val unregisterScript =
-    s"""$helper unregister || echo "keystone cleanup failed (continuing)""""
-
-  private val unitList = units.mkString(" ")
-  // True when ANY of the units has a unit file, or is active or enabled.
-  private val anyUnit =
-    s"""for u in $unitList; do if [ -f /etc/systemd/system/orphera-$$u.service ] || systemctl is-active --quiet orphera-$$u || systemctl is-enabled --quiet orphera-$$u; then exit 0; fi; done; exit 1"""
-  private val stopScript =
-    s"""for u in $unitList; do
-       |  systemctl disable --now orphera-$$u 2>/dev/null || true
-       |  rm -f /etc/systemd/system/orphera-$$u.service
-       |  if command -v podman >/dev/null 2>&1; then podman rm -f $$u 2>/dev/null || true; fi
-       |done
-       |systemctl daemon-reload
-       |echo "cinder containers and units removed"""".stripMargin
 
   private val dirs = List(
     "/etc/kolla/cinder",
@@ -67,63 +50,28 @@ object cinder_teardown extends OrpheraApply:
   )
 
   // ---- tst0 ----
-  // True when the pool or the user exists. When Ceph cannot be queried this is
-  // also true, so that the removal runs and fails with Ceph's own message.
-  private val cephHasCinder =
-    s"""OUT=$$(cephadm shell -- ceph osd pool ls 2>/dev/null) || exit 0
-       |echo "$$OUT" | grep -qx $cephPool && exit 0
-       |cephadm shell -- ceph auth get client.cinder >/dev/null 2>&1 && exit 0
-       |exit 1""".stripMargin
-  private val cephScript =
-    s"""R=0
-       |cephadm shell -- ceph config set mon mon_allow_pool_delete true || R=1
-       |cephadm shell -- ceph osd pool delete $cephPool $cephPool --yes-i-really-really-mean-it || R=1
-       |cephadm shell -- ceph config set mon mon_allow_pool_delete false || R=1
-       |cephadm shell -- ceph auth del client.cinder || R=1
-       |[ "$$R" = 0 ] && echo "pool $cephPool and client.cinder removed"
-       |exit $$R""".stripMargin
-
-  // ---- tst3 ----
-  private val dropDatabaseScript =
-    s"""mariadb -N -e "DROP DATABASE IF EXISTS $dbName; DROP USER IF EXISTS '$dbUser'@'%'; FLUSH PRIVILEGES;""""
-  // True when the database or user exists. When MariaDB cannot be queried this is
-  // also true, so that the drop runs and fails with MariaDB's own message: a
-  // database that is down is not "nothing to remove".
-  private val databaseExists =
-    s"""OUT=$$(mariadb -N -e "SELECT 1 FROM information_schema.SCHEMATA WHERE SCHEMA_NAME='$dbName' UNION SELECT 1 FROM mysql.user WHERE User='$dbUser'" 2>/dev/null) || exit 0; [ -n "$$OUT" ]"""
-
   def describe(target: Node): List[ApplyResource] =
     if target.name == dbNode then
       List(
-        command(
+        absentSqlDatabase(
           s"drop the $dbName database and the $dbUser user on the Galera cluster",
-          dropDatabaseScript,
-          onlyIf = databaseExists
+          List(dbName),
+          dbUser
         )
       )
     else if target.name == cephNode then
-      List(
-        command(
-          s"delete the $cephPool pool and the client.cinder cephx user",
-          cephScript,
-          onlyIf = cephHasCinder,
-          timeout = 180
-        )
-      )
+      val user =
+        absentCephUser("remove the client.cinder cephx user", "client.cinder")
+      val pool =
+        absentCephPool(s"delete the $volumesPool pool", volumesPool).after(user)
+      List(user, pool)
     else
-      val unregistered = command(
-        "remove Cinder from Keystone",
-        unregisterScript,
-        onlyIf = registeredInKeystone,
-        timeout = 120
-      )
-      val stopped = command(
-        "stop and remove the cinder containers and units",
-        stopScript,
-        onlyIf = anyUnit,
-        timeout = 240
-      ).after(unregistered)
+      val unregistered =
+        absentKeystoneEntries("remove Cinder from Keystone", "cinder")
+      val stopped = absentContainerUnits(units.map(u => s"orphera-$u" -> u))
+        .map(_.after(unregistered))
       // Typed removal, no script: each directory with its contents, then the helper.
       val cleaned = (dirs.map(absentDirectory(_, recursive = true)) :+
-        absentFile(helper)).map(_.after(stopped))
-      List(unregistered, stopped) ++ cleaned
+        absentFile(helper) :+ absentFile(keystoneHelperPath("cinder")))
+        .map(_.after(stopped*))
+      List(unregistered) ++ stopped ++ cleaned

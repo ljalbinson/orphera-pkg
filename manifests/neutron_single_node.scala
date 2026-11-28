@@ -23,9 +23,10 @@ import orphera.orchestrator.conf.*
 // here opens a firewall), so tenant ports get an MTU of 1450 from Neutron's own
 // calculation. The flat provider network `provider` (plain layer 2 on the second
 // NIC) is the external network: routers take their gateway address from it and
-// floating IPs come from it. Mark that network external (`openstack network set
-// --external <name>`); the L3 agent does the NAT in router namespaces on this
-// node. There is no metadata agent: Nova's metadata API is not deployed, so
+// floating IPs come from it. The last step of this description makes it (flat,
+// shared, external, 10.10.6.0/24 with DHCP, pool .200-.220) and keeps it that
+// way; Magnum, Trove and the compute boot test find it by name. The L3 agent
+// does the NAT in router namespaces on this node. There is no metadata agent: Nova's metadata API is not deployed, so
 // instances use a config drive. The compute nodes need the matching VXLAN
 // settings (nova_compute.scala); apply that description after this one.
 //
@@ -58,7 +59,7 @@ import orphera.orchestrator.conf.*
 //     restarts only when its own files or the CA changed.
 //   - `neutron-db-manage upgrade heads` is skipped while its stamp matches and a
 //     query as the neutron user finds the `networks` table.
-//   - The Keystone registration is skipped while the helper's `registered` check
+//   - The Keystone registration is skipped while the registration check
 //     passes. Registration comes before the units start.
 //
 // Test-only credentials from the secret store (`orphera secrets`), as before.
@@ -231,19 +232,6 @@ object neutron_single_node extends OrpheraApply:
        |$stripPython
        |PY""".stripMargin
 
-  // Open vSwitch comes from the host (apt). br-provider's only physical port is
-  // the provider NIC; the OVS agent in the container creates br-int and the
-  // patch ports.
-  private val bridgeScript =
-    s"""set -e
-       |ovs-vsctl --may-exist add-br $providerBridge
-       |ovs-vsctl --may-exist add-port $providerBridge $providerNic
-       |ip link set $providerBridge up
-       |ovs-vsctl show
-       |echo "$providerBridge has $providerNic"""".stripMargin
-  private val bridgeDone =
-    s"""ovs-vsctl br-exists $providerBridge && ovs-vsctl list-ports $providerBridge | grep -qx $providerNic && ip -o link show $providerBridge | grep -q '<[^>]*UP'"""
-
   // The Kolla cache as a mirror of quay.io (podman registries.conf.d drop-in).
   private val registryMirror =
     s"""[[registry]]
@@ -260,18 +248,6 @@ object neutron_single_node extends OrpheraApply:
        |""".stripMargin
 
   private val images = neutronServices.map(_.image.ref)
-  private val pullScript =
-    s"""${Pull.shellFunction(
-        "the Image(...) in neutronContainer in neutron_single_node.scala"
-      )}
-       |for img in ${images.mkString(" ")}; do
-       |  pull_retry $$img || exit 1
-       |done
-       |echo "images ready"""".stripMargin
-  private val imagesPresent =
-    s"""for img in ${images.mkString(
-        " "
-      )}; do podman image exists $$img || exit 1; done"""
 
   // The server's command and the rootwrap config must be in the images.
   private val imagesCarry =
@@ -397,54 +373,6 @@ object neutron_single_node extends OrpheraApply:
   private val dhcpText: String = dhcpAgentIni.render
   private val l3Text: String = l3AgentIni.render
 
-  // Keystone's CA: the last certificate it presents (trust on first use),
-  // which must be self-signed. `chainTo DIR` leaves DIR/c1.pem ... DIR/cN.pem,
-  // each holding the certificate only: the text s_client prints after the
-  // last one (bytes read and written, session ticket) differs on every
-  // handshake, and would make the comparison with the installed copy fail.
-  private val chainTo =
-    s"""chainTo() { openssl s_client -connect $ksFqdn:5000 -servername $ksFqdn -showcerts </dev/null 2>/dev/null | awk -v d="$$1" '/-----BEGIN CERTIFICATE-----/{n++; p=1} p{print > (d "/c" n ".pem")} /-----END CERTIFICATE-----/{p=0}'; }"""
-
-  private val trustTarget =
-    """if command -v update-ca-certificates >/dev/null 2>&1; then t=/usr/local/share/ca-certificates/orphera-test-ca.crt; else t=/etc/pki/ca-trust/source/anchors/orphera-test-ca.crt; fi"""
-
-  // Current when the installed CA is the one Keystone presents now, and is in
-  // the system trust store.
-  private val caCurrent =
-    s"""$chainTo
-       |D=$$(mktemp -d)
-       |chainTo $$D
-       |N=$$(ls $$D/c*.pem 2>/dev/null | wc -l)
-       |R=1
-       |if [ "$$N" -ge 2 ]; then
-       |  $trustTarget
-       |  cmp -s $$D/c$$N.pem $caCert && cmp -s $caCert "$$t" && R=0
-       |fi
-       |rm -rf $$D
-       |exit $$R""".stripMargin
-
-  private val caScript =
-    s"""set -e
-       |$chainTo
-       |mkdir -p $caDir
-       |D=$$(mktemp -d)
-       |trap 'rm -rf $$D' EXIT
-       |chainTo $$D
-       |COUNT=$$(ls $$D/c*.pem 2>/dev/null | wc -l)
-       |if [ "$$COUNT" -lt 2 ]; then
-       |  echo "keystone at $ksFqdn:5000 presented $$COUNT certificate(s); expected leaf + CA - apply keystone_single_node.scala (it must serve server-chain.crt)" >&2
-       |  exit 1
-       |fi
-       |cp $$D/c$$COUNT.pem $caCert
-       |openssl verify -CAfile $caCert $$D/c1.pem
-       |SUBJ=$$(openssl x509 -in $caCert -noout -subject | sed 's/^subject=//')
-       |ISS=$$(openssl x509 -in $caCert -noout -issuer | sed 's/^issuer=//')
-       |if [ "$$SUBJ" != "$$ISS" ]; then echo "last certificate is not self-signed: $$SUBJ / $$ISS" >&2; exit 1; fi
-       |$trustTarget
-       |cp $caCert "$$t"
-       |if command -v update-ca-certificates >/dev/null 2>&1; then update-ca-certificates; else update-ca-trust; fi
-       |echo "Keystone CA installed: $$SUBJ"""".stripMargin
-
   // The files every service's config.json copies in, and the ownership it sets.
   private val commonFiles =
     """{"source": "/var/lib/kolla/config_files/neutron.conf", "dest": "/etc/neutron/neutron.conf", "owner": "neutron", "perm": "0600"}, {"source": "/var/lib/kolla/config_files/ca.crt", "dest": "/etc/neutron/ssl/ca.crt", "owner": "neutron", "perm": "0644"}"""
@@ -524,8 +452,8 @@ object neutron_single_node extends OrpheraApply:
 
   // Standard-library Python, as in the other service playbooks. Plain string filled
   // in with replace(). Subcommands:
-  //   register | registered | unregister | catalog | agents | agents-up |
-  //   net-list | net-create | net-delete <id> | tenant-cycle | provider-net
+  //   catalog | agents | agents-up |
+  //   net-list | net-create | net-delete <id> | tenant-cycle
   // (net-create makes a flat network on the physical network `provider` and a
   // subnet with DHCP off, net-delete removes both: that exercises the API, the
   // database and the ML2 flat type driver. Only one flat network can exist per
@@ -535,9 +463,9 @@ object neutron_single_node extends OrpheraApply:
   // and its ports to go ACTIVE, and removes everything. It uses the existing external network,
   // or a temporary flat external one if there is none; it refuses to run if the only flat
   // network on the physical network is not marked external.
-  // provider-net makes the persistent flat network `provider` (shared, external, subnet
-  // 10.10.6.0/24 with DHCP, pool .200-.220) if it is missing, or marks the existing one shared
-  // and external; Magnum, Trove and nova_compute.scala's boot test use it. Idempotent.)
+  // The persistent flat network `provider` (shared, external, subnet 10.10.6.0/24 with DHCP, pool
+  // .200-.220), which Magnum, Trove and nova_compute.scala's boot test use, is made by the
+  // description with openstackNetwork, not by this helper.)
   private val apiHelperPython =
     """#!/usr/bin/python3
 import json, ssl, sys, time, urllib.request, urllib.error
@@ -545,7 +473,6 @@ import json, ssl, sys, time, urllib.request, urllib.error
 KS = 'https://@@KS@@:5000/v3'
 NEUTRON = '@@NEUTRON@@'
 ADMIN_PW = '@@ADMINPW@@'
-NEUTRON_PW = '@@NEUTRONPW@@'
 PHYSNET = '@@PHYSNET@@'
 CTX = ssl.create_default_context(cafile='@@CA@@')
 
@@ -580,78 +507,6 @@ def get_token(user, password, project):
     if status != 201:
         die('token request for %s failed: HTTP %s %s' % (user, status, parsed))
     return headers['X-Subject-Token'], parsed
-
-
-def find(token, path, key):
-    status, parsed, _ = call('GET', KS + path, token=token)
-    items = parsed.get(key, [])
-    return items[0] if items else None
-
-
-def register():
-    token, _ = get_token('admin', ADMIN_PW, 'admin')
-    project = find(token, '/projects?name=service', 'projects')
-    if project is None:
-        s, p, _ = call('POST', KS + '/projects', {'project': {'name': 'service', 'domain_id': 'default'}}, token)
-        if s != 201:
-            die('creating project service failed: HTTP %s %s' % (s, p))
-        project = p['project']
-    user = find(token, '/users?name=neutron', 'users')
-    if user is None:
-        s, p, _ = call('POST', KS + '/users', {'user': {'name': 'neutron', 'domain_id': 'default', 'password': NEUTRON_PW}}, token)
-        if s != 201:
-            die('creating user neutron failed: HTTP %s %s' % (s, p))
-        user = p['user']
-    else:
-        call('PATCH', KS + '/users/' + user['id'], {'user': {'password': NEUTRON_PW}}, token)
-    role = find(token, '/roles?name=admin', 'roles')
-    if role is None:
-        die('role admin not found')
-    s, p, _ = call('PUT', KS + '/projects/%s/users/%s/roles/%s' % (project['id'], user['id'], role['id']), None, token)
-    if s not in (200, 204):
-        die('granting admin to neutron failed: HTTP %s %s' % (s, p))
-    service = find(token, '/services?type=network', 'services')
-    if service is None:
-        s, p, _ = call('POST', KS + '/services', {'service': {'name': 'neutron', 'type': 'network'}}, token)
-        if s != 201:
-            die('creating service neutron failed: HTTP %s %s' % (s, p))
-        service = p['service']
-    for iface in ('public', 'internal', 'admin'):
-        ep = find(token, '/endpoints?service_id=%s&interface=%s' % (service['id'], iface), 'endpoints')
-        if ep is None:
-            s, p, _ = call('POST', KS + '/endpoints', {'endpoint': {'interface': iface, 'url': NEUTRON, 'service_id': service['id'], 'region_id': 'RegionOne'}}, token)
-            if s != 201:
-                die('creating %s endpoint failed: HTTP %s %s' % (iface, s, p))
-        elif ep['url'] != NEUTRON:
-            call('PATCH', KS + '/endpoints/' + ep['id'], {'endpoint': {'url': NEUTRON}}, token)
-    print('registered neutron in keystone (project service, user neutron, service type network, 3 endpoints)')
-
-
-def registered():
-    # Exit 0 only when everything register() makes is in place: the neutron
-    # user can get a token in project service, and service `network` has the
-    # three endpoints at NEUTRON. Makes no change.
-    get_token('neutron', NEUTRON_PW, 'service')
-    token, _ = get_token('admin', ADMIN_PW, 'admin')
-    service = find(token, '/services?type=network', 'services')
-    if service is None:
-        die('no service of type network')
-    for iface in ('public', 'internal', 'admin'):
-        ep = find(token, '/endpoints?service_id=%s&interface=%s' % (service['id'], iface), 'endpoints')
-        if ep is None or ep['url'] != NEUTRON:
-            die('endpoint %s missing or wrong' % iface)
-    print('neutron is registered in keystone')
-
-
-def unregister():
-    token, _ = get_token('admin', ADMIN_PW, 'admin')
-    service = find(token, '/services?type=network', 'services')
-    if service is not None:
-        call('DELETE', KS + '/services/' + service['id'], None, token)
-    user = find(token, '/users?name=neutron', 'users')
-    if user is not None:
-        call('DELETE', KS + '/users/' + user['id'], None, token)
-    print('removed neutron from keystone (service network, its endpoints, user neutron)')
 
 
 def catalog():
@@ -724,52 +579,6 @@ def net_delete(nid):
     if s != 404:
         die('network %s still present: HTTP %s' % (nid, s))
     print('deleted ' + nid)
-
-
-PROVIDER_NAME = 'provider'
-PROVIDER_CIDR = '10.10.6.0/24'
-PROVIDER_GATEWAY = '10.10.6.1'
-PROVIDER_POOL = ('10.10.6.200', '10.10.6.220')
-
-
-def provider_net():
-    # The one flat network on PHYSNET, kept for good: shared and external. Magnum takes its
-    # external network from it and Trove its guests' management network (by the name
-    # `provider`); the compute boot test reuses it. Idempotent.
-    token, _ = get_token('admin', ADMIN_PW, 'admin')
-    flat = [n for n in get_json(token, '/networks').get('networks', [])
-            if n.get('provider:network_type') == 'flat' and n.get('provider:physical_network') == PHYSNET]
-    if flat:
-        n = flat[0]
-        if n.get('name') != PROVIDER_NAME:
-            die('a flat network %s (%s) already uses physical network %s; delete it (orphera-neutron-api net-delete %s) and run again' % (n.get('name'), n['id'], PHYSNET, n['id']))
-        change = {}
-        if not n.get('router:external'):
-            change['router:external'] = True
-        if not n.get('shared'):
-            change['shared'] = True
-        if change:
-            s, p, _ = call('PUT', NEUTRON + '/v2.0/networks/' + n['id'], {'network': change}, token)
-            if s != 200:
-                die('network update failed: HTTP %s %s' % (s, p))
-        nid = n['id']
-    else:
-        body = {'network': {'name': PROVIDER_NAME, 'shared': True, 'router:external': True,
-                            'provider:network_type': 'flat', 'provider:physical_network': PHYSNET}}
-        s, p, _ = call('POST', NEUTRON + '/v2.0/networks', body, token)
-        if s not in (200, 201):
-            die('network create failed: HTTP %s %s' % (s, p))
-        nid = p['network']['id']
-    subs = get_json(token, '/subnets?network_id=' + nid).get('subnets', [])
-    if not subs:
-        body = {'subnet': {'network_id': nid, 'ip_version': 4, 'name': PROVIDER_NAME, 'cidr': PROVIDER_CIDR,
-                           'gateway_ip': PROVIDER_GATEWAY, 'enable_dhcp': True,
-                           'allocation_pools': [{'start': PROVIDER_POOL[0], 'end': PROVIDER_POOL[1]}]}}
-        s, p, _ = call('POST', NEUTRON + '/v2.0/subnets', body, token)
-        if s not in (200, 201):
-            die('subnet create failed: HTTP %s %s' % (s, p))
-        subs = [p['subnet']]
-    print('provider network ready: %s (%s), flat on %s, shared, external, subnet %s' % (PROVIDER_NAME, nid, PHYSNET, subs[0].get('cidr')))
 
 
 def get_json(token, path):
@@ -859,13 +668,7 @@ def tenant_cycle():
 
 if __name__ == '__main__':
     cmd = sys.argv[1] if len(sys.argv) > 1 else ''
-    if cmd == 'register':
-        register()
-    elif cmd == 'registered':
-        registered()
-    elif cmd == 'unregister':
-        unregister()
-    elif cmd == 'catalog':
+    if cmd == 'catalog':
         catalog()
     elif cmd == 'agents':
         agents()
@@ -879,10 +682,8 @@ if __name__ == '__main__':
         net_delete(sys.argv[2])
     elif cmd == 'tenant-cycle':
         tenant_cycle()
-    elif cmd == 'provider-net':
-        provider_net()
     else:
-        die('usage: orphera-neutron-api register | registered | unregister | catalog | agents | agents-up | net-list | net-create | net-delete <id> | tenant-cycle | provider-net')
+        die('usage: orphera-neutron-api catalog | agents | agents-up | net-list | net-create | net-delete <id> | tenant-cycle')
 """
 
   private val helper =
@@ -890,21 +691,9 @@ if __name__ == '__main__':
       .replace("@@KS@@", ksFqdn)
       .replace("@@NEUTRON@@", s"http://$fqdn:$apiPort")
       .replace("@@ADMINPW@@", adminPassword.reveal)
-      .replace("@@NEUTRONPW@@", neutronPassword.reveal)
       .replace("@@PHYSNET@@", physnet)
       .replace("@@CA@@", caCert)
   private val helperPath = "/usr/local/sbin/orphera-neutron-api"
-
-  // The root answers its version document without a token (200, or 300).
-  private val healthy =
-    s"""CODE=$$(curl -s -o /dev/null -w '%{http_code}' http://localhost:$apiPort/); [ "$$CODE" = "200" ] || [ "$$CODE" = "300" ]"""
-  private val waitHealthy =
-    s"""for i in $$(seq 1 24); do
-       |  $healthy && exit 0
-       |  sleep 5
-       |done
-       |echo "neutron-server does not answer on http://localhost:$apiPort - see 'journalctl -xeu orphera-neutron-server' and $logDir" >&2
-       |exit 1""".stripMargin
 
   private val agentsUp = s"$helperPath agents-up >/dev/null 2>&1"
   private val waitAgentsUp =
@@ -924,11 +713,10 @@ if __name__ == '__main__':
       unless = addressDropped,
       timeout = 120
     ).after(tools*)
-    val bridge = command(
+    val bridge = ovsBridge(
       s"create $providerBridge with $providerNic as its port",
-      bridgeScript,
-      unless = bridgeDone,
-      timeout = 60
+      providerBridge,
+      List(providerNic)
     ).after(ovsService, noAddress)
 
     val mirrorDir = directory("/etc/containers/registries.conf.d").after(podman)
@@ -937,10 +725,10 @@ if __name__ == '__main__':
       registryMirror,
       mode = "0644"
     ).after(mirrorDir)
-    val pulled = command(
+    val pulled = pullImages(
       "pull the Neutron images",
-      pullScript,
-      unless = imagesPresent,
+      images,
+      hint = "the Image(...) in neutronContainer in neutron_single_node.scala",
       timeout = 2400
     ).after(podman, mirror)
     val carried = command(
@@ -951,11 +739,12 @@ if __name__ == '__main__':
     ).after(pulled)
 
     val caDirectory = directory(caDir, mode = "0755").after(podman)
-    val ca = command(
+    val ca = serverCa(
       "fetch Keystone's CA from its TLS handshake",
-      caScript,
-      unless = caCurrent,
-      timeout = 60
+      ksFqdn,
+      5000,
+      caCert,
+      hint = "apply keystone_single_node.scala (it must serve server-chain.crt)"
     ).after(caDirectory, tools(1))
 
     val logDirectory = directory(logDir)
@@ -1019,28 +808,34 @@ if __name__ == '__main__':
 
     val helperFile = secretFile(
       helperPath,
-      Secret(helper), // it holds the admin and neutron passwords
+      Secret(helper), // it holds the admin password
       mode = "0700",
       owner = "root",
       group = "root"
     )
     // Registration comes before the services start, as for Nova.
-    val registered = command(
+    val (keystoneHelper, ensured) = keystoneEntries(
       "register Neutron in Keystone",
-      s"$helperPath register",
-      unless = s"$helperPath registered >/dev/null 2>&1",
-      timeout = 120
-    ).after(helperFile, ca)
+      "neutron",
+      neutronPassword,
+      List(KeystoneService("neutron", "network", s"http://$fqdn:$apiPort")),
+      ksUrl,
+      adminPassword,
+      caCert
+    )
+    val registered = ensured.after(ca)
 
     val running = units.map { (unitService, _, deps) =>
       unitService.after((dbSync :: registered :: bridge :: carried :: deps)*)
     }
 
-    val answering = command(
+    // The root answers its version document without a token (200, or 300).
+    val answering = waitForHttp(
       "neutron-server answers on its port",
-      waitHealthy,
-      unless = healthy,
-      timeout = 180
+      s"http://localhost:$apiPort/",
+      status = List(200, 300),
+      timeout = 120,
+      hint = s"see 'journalctl -xeu orphera-neutron-server' and $logDir"
     ).after(running*)
     val reporting = command(
       "the Open vSwitch, DHCP and L3 agents report in through the API",
@@ -1048,6 +843,28 @@ if __name__ == '__main__':
       unless = agentsUp,
       timeout = 240
     ).after((answering :: running)*)
+
+    // Magnum, Trove and the compute boot test need this network and find it by name, so the description makes it
+    // (openstackNetwork: a helper of its own, `check` is its read-only test).
+    val (providerHelper, providerMade) = openstackNetwork(
+      "make the flat provider network with its subnet",
+      "provider",
+      ksUrl,
+      adminPassword,
+      caCert,
+      flat = Some(physnet),
+      shared = true,
+      external = true,
+      subnet = Some(
+        OpenstackSubnet(
+          "provider",
+          "10.10.6.0/24",
+          Some("10.10.6.1"),
+          Some(("10.10.6.200", "10.10.6.220"))
+        )
+      )
+    )
+    val providerNet = providerMade.after(reporting)
 
     tools ++ List(
       ovsService,
@@ -1061,5 +878,6 @@ if __name__ == '__main__':
       ca,
       logDirectory,
       stateDirectory
-    ) ++ units.flatMap(_._2) ++ List(dbSync, helperFile, registered) ++
-      running ++ List(answering, reporting)
+    ) ++ units
+      .flatMap(_._2) ++ List(dbSync, helperFile, keystoneHelper, registered) ++
+      running ++ List(answering, reporting, providerHelper, providerNet)

@@ -11,13 +11,12 @@ import orphera.orchestrator.*
 //   orphera apply manifests/manila_ceph.scala --check
 //   orphera apply manifests/manila_ceph.scala
 //
-// Every step is a command with a guard that asks the cluster, so a second run changes nothing:
-//   - the filesystem is created (`ceph fs volume create`, which also starts the MDS daemons) only if
-//     `ceph fs ls` does not list it;
-//   - the run then waits for an active MDS, only while there is none;
-//   - the NFS cluster is created on the orchestrator host that has the address `nfsIp` (or the name `nfsNode`)
-//     only if `ceph nfs cluster ls` does not list it;
-//   - the run then waits for NFS-Ganesha to answer on `nfsIp`:2049, only while it does not;
+// Every step asks the cluster first, so a second run changes nothing:
+//   - cephFilesystem creates the filesystem (`ceph fs volume create`, which also starts the MDS daemons) only if
+//     `ceph fs ls` does not list it, and waits for an active MDS, only while there is none;
+//   - cephNfsCluster creates the NFS cluster on the orchestrator host that has the address `nfsIp` (or the name
+//     `nfsNode`) only if `ceph nfs cluster ls` does not list it, and waits for NFS-Ganesha to answer on
+//     `nfsIp`:2049, only while it does not;
 //   - client.manila is imported only when the key in Ceph differs from the one in the secret store or the
 //     capabilities (mon "allow r", mgr "allow rw") are missing, so a rotated key is applied by running this
 //     again.
@@ -64,104 +63,21 @@ object manila_ceph extends OrpheraApply:
       Secrets.register(derived)
       derived
 
-  // ---- the filesystem ----------------------------------------------------
-
-  private val fsListed =
-    s"""cephadm shell -- ceph fs ls 2>/dev/null | grep -q '^name: $cephFs,'"""
-  private val fsScript =
-    s"""set -e
-       |cephadm shell -- ceph fs volume create $cephFs
-       |echo "filesystem $cephFs created"""".stripMargin
-
-  private val mdsActive =
-    """cephadm shell -- ceph mds stat 2>/dev/null | grep -q 'up:active'"""
-  private val mdsScript =
-    s"""for i in $$(seq 1 60); do
-       |  if $mdsActive; then echo "an MDS is active for $cephFs"; exit 0; fi
-       |  sleep 5
-       |done
-       |echo "no active MDS for $cephFs after 5 minutes - check 'ceph fs status'" >&2
-       |exit 1""".stripMargin
-
-  // ---- the NFS cluster ---------------------------------------------------
-
-  private val nfsListed =
-    // cephadm shell may return carriage returns or a JSON list, so the name is matched as a word.
-    s"""cephadm shell -- ceph nfs cluster ls 2>/dev/null | tr -d '\\r' | grep -qw '$nfsCluster'"""
-  private val nfsScript =
-    s"""set -e
-       |HOST=$$(cephadm shell -- ceph orch host ls --format json 2>/dev/null | python3 -c "import sys, json
-       |for h in json.load(sys.stdin):
-       |    if h.get('addr') == '$nfsIp' or h.get('hostname', '').split('.')[0] == '$nfsNode':
-       |        print(h['hostname'])
-       |        break")
-       |if [ -z "$$HOST" ]; then
-       |  echo "no Ceph orchestrator host with address $nfsIp or name $nfsNode (ceph orch host ls)" >&2
-       |  exit 1
-       |fi
-       |cephadm shell -- ceph nfs cluster create $nfsCluster "$$HOST"
-       |echo "NFS cluster $nfsCluster created on $$HOST"""".stripMargin
-
-  private val nfsUp =
-    s"""python3 -c "import socket; socket.create_connection(('$nfsIp', 2049), 3).close()" 2>/dev/null"""
-  private val nfsWaitScript =
-    s"""for i in $$(seq 1 60); do
-       |  if $nfsUp; then echo "NFS-Ganesha answers on $nfsIp:2049"; exit 0; fi
-       |  sleep 5
-       |done
-       |echo "NFS-Ganesha does not answer on $nfsIp:2049 after 5 minutes - check 'ceph nfs cluster info $nfsCluster'" >&2
-       |exit 1""".stripMargin
-
-  // ---- client.manila -----------------------------------------------------
-
-  private val clientScript =
-    s"""set -e
-       |# Same cephx cipher rule as cinder_ceph.scala: `aes` is allowed only for an `aes` key.
-       |${CephKeys.allowCiphersFor(cephKey, "client.manila")}
-       |cat > /tmp/manila.keyring <<'KEYRING'
-       |[client.manila]
-       |    key = $cephKey
-       |    caps mon = "allow r"
-       |    caps mgr = "allow rw"
-       |KEYRING
-       |cephadm shell --mount /tmp/manila.keyring -- ceph auth import -i /mnt/manila.keyring
-       |rm -f /tmp/manila.keyring
-       |cephadm shell -- ceph auth get client.manila >/dev/null
-       |echo "client.manila ready"""".stripMargin
-
-  // True when the key in Ceph is the one wanted and both capabilities are there.
-  private val clientInPlace =
-    s"""[ "$$(cephadm shell -- ceph auth get-key client.manila 2>/dev/null)" = "$cephKey" ] && CAPS=$$(cephadm shell -- ceph auth get client.manila 2>/dev/null) && echo "$$CAPS" | grep -q 'caps mon = "allow r"' && echo "$$CAPS" | grep -q 'caps mgr = "allow rw"'"""
-
   def describe(target: Node): List[ApplyResource] =
-    val fs = command(
-      s"create the CephFS filesystem $cephFs",
-      fsScript,
-      unless = fsListed,
-      timeout = 300
+    val fs = cephFilesystem(
+      s"create the CephFS filesystem $cephFs and wait for an active MDS",
+      cephFs
     )
-    val mds = command(
-      s"wait for an active MDS of $cephFs",
-      mdsScript,
-      unless = mdsActive,
-      timeout = 360
+    val nfs = cephNfsCluster(
+      s"create the NFS cluster $nfsCluster and wait for NFS-Ganesha on $nfsIp:2049",
+      nfsCluster,
+      nfsIp,
+      nfsNode
     ).after(fs)
-    val nfs = command(
-      s"create the NFS cluster $nfsCluster",
-      nfsScript,
-      unless = nfsListed,
-      timeout = 300
-    ).after(mds)
-    val nfsWait = command(
-      s"wait for NFS-Ganesha on $nfsIp:2049",
-      nfsWaitScript,
-      unless = nfsUp,
-      timeout = 360
-    ).after(nfs)
-    val client = command(
+    val client = cephUser(
       "the client.manila cephx user and its key",
-      clientScript,
-      unless = clientInPlace,
-      timeout = 180
+      "client.manila",
+      Secret(cephKey),
+      List("mon" -> "allow r", "mgr" -> "allow rw")
     )
-    List(fs, mds, nfs, nfsWait, client)
+    List(fs, nfs, client)

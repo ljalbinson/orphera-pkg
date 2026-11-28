@@ -127,76 +127,86 @@ t() {  # <tool> <args...>
 }
 
 t start-vm
-t start-vm tst1
-t start-vm 1 2 config/tst3.yaml
-t start-vm long
-t start-vm badvm
-t start-vm silentvm
-t start-vm nosuch
+t start-vm --nodes tst1
+t start-vm --nodes 1,2,config/tst3.yaml
+t start-vm --nodes long
+t start-vm --nodes badvm
+t start-vm --nodes silentvm
+t start-vm --nodes nosuch
 t start-vm -h
-t start-vm tst1 badvm nosuch silentvm 2
+t start-vm --nodes tst1,badvm,nosuch,silentvm,2
 t start-vm -x 1
 t start-vm --node-groups web
 t start-vm --node-groups web,mixed --exclude-nodes silentvm
-t start-vm 3 --node-groups web 1
-t start-vm --node-groups web config/tst3.yaml
+t start-vm --nodes 3 --node-groups web --nodes 1
+t start-vm --node-groups web --nodes config/tst3.yaml
 t start-vm --node-groups nosuch
 t start-vm --node-groups
 t start-vm --exclude-nodes tst1
-t start-vm --exclude-nodes tst1 1 2 3
+t start-vm --exclude-nodes tst1 --nodes 1,2,3
 t start-vm --node-groups web --exclude-nodes tst1,tst2
-t start-vm --node-groups web unknownvm
-t start-vm --parallel 3 1 2 badvm nosuch silentvm 3
-t start-vm --parallel 1 1 badvm
-t start-vm --parallel 0 1
-t start-vm --parallel x 1
-t start-vm 1 --parallel
-t start-vm --retries 0 1
-t start-vm --retries 5 tst1 badvm
-t start-vm 1 --retries 007
-t start-vm --retries x 1
+t start-vm --node-groups web --nodes unknownvm
+t start-vm --parallel 3 --nodes 1,2,badvm,nosuch,silentvm,3
+t start-vm --parallel 1 --nodes 1,badvm
+t start-vm --parallel 0 --nodes 1
+t start-vm --parallel x --nodes 1
+t start-vm --nodes 1 --parallel
+t start-vm --retries 0 --nodes 1
+t start-vm --retries 5 --nodes tst1,badvm
+t start-vm --nodes 1 --retries 007
+t start-vm --retries x --nodes 1
 t start-vm --retries
-t start-vm --retries -1 1
+t start-vm --retries -1 --nodes 1
+t start-vm tst1
+t start-vm 1 2
+t start-vm --nodes
+t start-vm --nodes ''
+t start-vm --nodes ,
+t start-vm --nodes --retries 1
 
 t stop-vm
 t stop-vm --help
 t stop-vm --wait
-t stop-vm --wait x 1
-t stop-vm --wait '' 1
+t stop-vm --wait x --nodes 1
+t stop-vm --wait '' --nodes 1
 t stop-vm --force
 t stop-vm -z 1
-t stop-vm 1 2
-t stop-vm --wait 300 --force 1 badvm
-t stop-vm --wait 010 1
-t stop-vm 1 --force
+t stop-vm --nodes 1,2
+t stop-vm --wait 300 --force --nodes 1,badvm
+t stop-vm --wait 010 --nodes 1
+t stop-vm --nodes 1 --force
 t stop-vm --node-groups mixed --wait 60
-t stop-vm --force --node-groups web --exclude-nodes tst2 3
+t stop-vm --force --node-groups web --exclude-nodes tst2 --nodes 3
 t stop-vm --exclude-nodes
 t stop-vm --wait x --node-groups web
 t stop-vm --parallel 2 --wait 60 --node-groups mixed
-t stop-vm --parallel 010 --force 1 2 3 badvm
+t stop-vm --parallel 010 --force --nodes 1,2,3,badvm
+t stop-vm 1 2
 
 t reboot-vm
 t reboot-vm --help
 t reboot-vm -x 1
-t reboot-vm 1
-t reboot-vm --soft 1 silentvm
-t reboot-vm --hard 1
-t reboot-vm --hard --wait 60 --force 1 badvm
-t reboot-vm --hard --soft 2
-t reboot-vm --wait 015 --hard 3
+t reboot-vm --nodes 1
+t reboot-vm --soft --nodes 1,silentvm
+t reboot-vm --hard --nodes 1
+t reboot-vm --hard --wait 60 --force --nodes 1,badvm
+t reboot-vm --hard --soft --nodes 2
+t reboot-vm --wait 015 --hard --nodes 3
 t reboot-vm --wait
 t reboot-vm --node-groups web
 t reboot-vm --hard --node-groups mixed --exclude-nodes badvm
-t reboot-vm 2 --hard --node-groups web
-t reboot-vm --hard --parallel 4 1 2 3 silentvm
-t reboot-vm --parallel 2 1 nosuch 2
+t reboot-vm --nodes 2 --hard --node-groups web
+t reboot-vm --hard --parallel 4 --nodes 1,2,3,silentvm
+t reboot-vm --parallel 2 --nodes 1,nosuch,2
+t reboot-vm 1
 
 t list-vms
+t list-vms --nodes gs1
+t list-vms --nodes gs1,gsdown,gs2
+t list-vms --nodes gs1 --nodes gs2
+t list-vms --nodes gsdown
 t list-vms gs1
-t list-vms gs1 gsdown gs2
-t list-vms 'gs1  gs2'
-t list-vms gsdown
+t list-vms --nodes
 
 # --parallel must overlap the runs: four VMs that each take 1 s, 4 at a time, in well under 4 s.
 slow=0
@@ -205,7 +215,7 @@ for side in a b; do
   rm -rf "$tmp/$side"; setup "$tmp/$side"
   start=$(date +%s%N)
   (cd "$tmp/$side" && PATH="$tmp/bin:$PATH" STUB_DIR="$tmp/$side/stub" STUB_SLEEP=1 ORPHERA_CONFIG_DIR= \
-    "$prog" --parallel 4 1 2 3 badvm >/dev/null 2>&1 </dev/null)
+    "$prog" --parallel 4 --nodes 1,2,3,badvm >/dev/null 2>&1 </dev/null)
   ms=$(( ($(date +%s%N) - start) / 1000000 ))
   if [ "$ms" -lt 2500 ]; then
     printf '  ok    stop-vm --parallel 4, four VMs of 1 s each: %s ms (%s)\n' "$ms" "$([ $side = a ] && echo shell || echo native)"

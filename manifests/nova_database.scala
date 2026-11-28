@@ -33,30 +33,15 @@ object nova_database extends OrpheraApply:
   private val dbUser = "nova"
   private val dbPassword = Secrets.secret("nova/db")
 
-  private val createStatements =
-    dbs.map(d => "CREATE DATABASE IF NOT EXISTS " + d + "; ").mkString
-  private val grantStatements =
-    dbs
-      .map(d => "GRANT ALL PRIVILEGES ON " + d + ".* TO '" + dbUser + "'@'%'; ")
-      .mkString
-  private val createDatabases =
-    s"""mariadb -N -e "${createStatements}CREATE USER IF NOT EXISTS '$dbUser'@'%' IDENTIFIED BY '${dbPassword.reveal}'; ALTER USER '$dbUser'@'%' IDENTIFIED BY '${dbPassword.reveal}'; ${grantStatements}FLUSH PRIVILEGES;""""
-
-  // A real login as the nova user through the VIP to each of the three databases.
-  private val canLogIn =
-    dbs
-      .map(d =>
-        "MYSQL_PWD='" + dbPassword.reveal + "' mariadb -N -h " + vip + " -u " + dbUser + " " + d + " -e 'SELECT 1' >/dev/null 2>&1"
-      )
-      .mkString(" && ")
-
   def describe(node: Node): List[ApplyResource] =
     List(
-      command(
+      sqlDatabase(
         "the " + dbs.mkString(
           ", "
         ) + " databases and the " + dbUser + " user on the Galera cluster",
-        createDatabases,
-        unless = canLogIn
+        dbs,
+        dbUser,
+        dbPassword,
+        vip
       )
     )

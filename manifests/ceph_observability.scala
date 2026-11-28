@@ -6,14 +6,13 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 // Ninth infrastructure exercise, and a follow-up to both
 // observability_extended.scala AND the cephadm lifecycle
 // (cephadm_install/cephadm_add_mons/cephadm_add_osds.scala): wires Ceph's
-// own metrics into the SAME tst6 Prometheus/Grafana stack those two
+// own metrics into the SAME tst7 Prometheus/Grafana stack those two
 // manifests already stood up, rather than standing up a second
-// monitoring stack. This assumes BOTH chains are already applied:
+// monitoring stack. This assumes the Ceph chain is already applied:
 // cephadm_install -> cephadm_add_mons -> cephadm_add_osds (so there's a
-// live 3-mon/3-osd cluster on tst0/tst1/tst2 to scrape), and
-// observability_stack -> observability_extended (so tst6's
-// prometheus.yml already has the node_exporter/haproxy/mysqld/self
-// jobs this file extends rather than replaces).
+// live 3-mon/3-osd cluster on tst0/tst1/tst2 to scrape), and that
+// observability_stack.scala has been applied (so tst7's prometheus.yml
+// names /etc/prometheus/scrape.d/*.yml, where this file puts its job).
 //
 // Note the node reuse: tst0/tst1/tst2 already run Galera + haproxy
 // (mariadb_galera_cluster.scala / mariadb_haproxy_keepalived.scala) AND
@@ -21,13 +20,13 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 // two unrelated clustered services, consistent with every other node in
 // this lab being reused across exercises rather than kept single-purpose
 // (same reasoning observability_stack.scala's header comment gives for
-// why tst6 is a fresh node rather than reusing tst5).
+// why the monitoring node is a fresh node rather than reusing tst5).
 //
 // Deliberately does NOT use cephadm's own built-in monitoring stack
 // (Prometheus/Grafana/node-exporter/alertmanager, auto-deployed unless
 // skipped) — cephadm_install.scala already passes
 // `--skip-dashboard --skip-monitoring-stack` at bootstrap specifically
-// so Ceph's metrics land in THIS project's existing tst6 stack instead
+// so Ceph's metrics land in THIS project's existing tst7 stack instead
 // of a second, parallel one.
 //
 // Mechanism: Ceph's mgr daemon ships a built-in `prometheus` module
@@ -54,15 +53,8 @@ import orphera.orchestrator.ClusterPlaybookDsl.*
 object ceph_observability extends OrpheraClusterPlaybook:
 
   private val mgrNode = "tst0"
-  private val monitoringNode = "tst6"
+  private val monitoringNode = "tst7"
   private val cephMetricsPort = 9283
-
-  // Carried forward unchanged from observability_extended.scala — this
-  // file's prometheus.yml rewrite has to restate every existing job,
-  // the same way that file restated observability_stack.scala's
-  // node_exporter + self jobs when it added haproxy + mysqld.
-  private val haProxyNodes = List("tst0", "tst1", "tst2")
-  private val allNodes = List("tst0", "tst1", "tst2", "tst3", "tst4", "tst5")
 
   // `ceph mgr module enable` is idempotent — enabling an
   // already-enabled module is a no-op success, not an error — so no
@@ -83,75 +75,47 @@ object ceph_observability extends OrpheraClusterPlaybook:
        |fi
        |echo "ceph mgr prometheus module active on :$cephMetricsPort"""".stripMargin
 
-  // tst6 only. Fifth scrape job added on top of observability_extended.scala's
-  // four (node_exporter, haproxy, mysqld, prometheus-self) — this file
-  // owns the full prometheus.yml from this point on, same "last writer
-  // wins, re-running an earlier manifest after this one overwrites these
-  // new jobs back out, and that's expected" relationship
-  // observability_extended.scala already has with observability_stack.scala.
-  private val nodeExporterTargets =
-    allNodes.map(n => s"'{{nodes.$n.cluster_ip}}:9100'").mkString(", ")
-  private val haproxyExporterTargets =
-    haProxyNodes.map(n => s"'{{nodes.$n.cluster_ip}}:8404'").mkString(", ")
-  private val mysqldExporterTargets =
-    haProxyNodes.map(n => s"'{{nodes.$n.cluster_ip}}:9104'").mkString(", ")
+  // The monitoring node only. The ceph job is a file of its own under
+  // /etc/prometheus/scrape.d, which observability_stack.scala's prometheus.yml
+  // names with `scrape_config_files`: this playbook no longer rewrites
+  // prometheus.yml, so it can no longer remove the jobs of
+  // observability_stack.scala or observability_extended.scala, and re-running
+  // those does not remove this one.
   private val cephExporterTarget =
     s"'{{nodes.$mgrNode.cluster_ip}}:$cephMetricsPort'"
 
-  // prometheus.yml with the scrape targets (`{{nodes.<n>.cluster_ip}}` rendered
-  // on the node), as an apply description: the file, then prometheus restarted
-  // if it changed. The `/-/healthy` check the script ran after the restart is
-  // covered by the health stage below.
+  // The scrape file (`{{nodes.<n>.cluster_ip}}` rendered on the node), as an
+  // apply description: the file, then prometheus restarted if it changed.
   private val prometheusPlan: ApplyPlan =
     import Resources.*
+    val dir = directory("/etc/prometheus/scrape.d", mode = "0755")
     val cfg = fileTemplate(
-      "/etc/prometheus/prometheus.yml",
-      s"""global:
-         |  scrape_interval: 15s
-         |
-         |scrape_configs:
-         |  - job_name: 'node_exporter'
-         |    static_configs:
-         |      - targets: [$nodeExporterTargets]
-         |
-         |  - job_name: 'haproxy'
-         |    static_configs:
-         |      - targets: [$haproxyExporterTargets]
-         |
-         |  - job_name: 'mysqld'
-         |    static_configs:
-         |      - targets: [$mysqldExporterTargets]
-         |
+      "/etc/prometheus/scrape.d/orphera-ceph.yml",
+      s"""scrape_configs:
          |  - job_name: 'ceph'
          |    static_configs:
          |      - targets: [$cephExporterTarget]
-         |
-         |  - job_name: 'prometheus'
-         |    static_configs:
-         |      - targets: ['localhost:9090']
          |""".stripMargin,
-      mode = "0644"
+      mode = "0644",
+      owner = "root",
+      group = "root"
     )
     val unit = service("prometheus")
-    ApplyPlan.orFail("prometheus-config-ceph", List(cfg.notifies(unit), unit))
+    ApplyPlan.orFail(
+      "prometheus-scrape-ceph",
+      List(dir, cfg.after(dir).notifies(unit), unit)
+    )
 
-  // node_exporter(6) + haproxy(3) + mysqld(3) + ceph(1) + prometheus-self(1) = 14.
-  private val expectedTargets =
-    allNodes.length + haProxyNodes.length + haProxyNodes.length + 1 + 1
-
-  private val extendedHealthScript =
-    s"""TARGETS=$$(curl -s http://localhost:9090/api/v1/targets)
-       |# Only this playbook's own jobs count: other playbooks add jobs of their own under
-       |# /etc/prometheus/scrape.d (telemetry_single_node.scala's ceilometer job, for one), and
-       |# on a rebuild their targets can be down until those playbooks run again.
-       |COUNTS=$$(echo "$$TARGETS" | python3 -c 'import json,sys; jobs=set(sys.argv[1].split(",")); t=[x for x in json.load(sys.stdin)["data"]["activeTargets"] if x["labels"].get("job") in jobs]; print(sum(x["health"]=="up" for x in t), sum(x["health"]=="down" for x in t))' node_exporter,haproxy,mysqld,ceph,prometheus 2>/dev/null)
-       |UP=$${COUNTS% *}
-       |DOWN=$${COUNTS#* }
-       |if [ "$$DOWN" != "0" ] || [ "$$UP" -lt "$expectedTargets" ]; then
-       |  echo "prometheus targets not all healthy yet: up=$$UP down=$$DOWN (want $expectedTargets up, 0 down)" >&2
-       |  exit 1
-       |fi
-       |exit 0""".stripMargin
+  // Only this playbook's own job counts: the ceph mgr is one target.
+  private val cephHealthScript =
+    """COUNTS=$(curl -s http://localhost:9090/api/v1/targets | python3 -c 'import json,sys; t=[x for x in json.load(sys.stdin)["data"]["activeTargets"] if x["labels"].get("job")=="ceph"]; print(sum(x["health"]=="up" for x in t), sum(x["health"]=="down" for x in t))' 2>/dev/null)
+      |UP=${COUNTS% *}
+      |DOWN=${COUNTS#* }
+      |if [ "$DOWN" != "0" ] || [ "$UP" -lt "1" ]; then
+      |  echo "the ceph scrape target is not healthy yet: up=$UP down=$DOWN (want 1 up, 0 down)" >&2
+      |  exit 1
+      |fi
+      |exit 0""".stripMargin
 
   val playbook: ClusterPlaybook =
     clusterPlaybook("ceph-observability")(
@@ -167,7 +131,7 @@ object ceph_observability extends OrpheraClusterPlaybook:
         .build,
 
       stage("update-prometheus-scrape-config-for-ceph", monitoringNode)
-        .task("rewrite prometheus.yml with the ceph job and restart")(
+        .task("write the ceph scrape job and restart prometheus")(
           Task.Apply(prometheusPlan)
         )
         .build,
@@ -181,16 +145,16 @@ object ceph_observability extends OrpheraClusterPlaybook:
         .waitFor(
           HealthCheck.Command(
             onNode = monitoringNode,
-            command = List("sh", "-c", extendedHealthScript),
+            command = List("sh", "-c", cephHealthScript),
             pollIntervalSeconds = 5,
             timeoutSeconds = 60
           )
         )
         .task("ceph observability confirmed")(
           Task.Debug(
-            s"Prometheus at http://tst6.ljalbinson.com:9090 now also scraping ceph mgr's prometheus module " +
-              s"(:$cephMetricsPort/metrics on $mgrNode), $expectedTargets targets total, all up. " +
-              "In Grafana (http://tst6.ljalbinson.com:3000), Dashboards -> New -> Import -> ID 2842 " +
+            s"Prometheus at http://tst7.ljalbinson.com:9090 now also scraping ceph mgr's prometheus module " +
+              s"(:$cephMetricsPort/metrics on $mgrNode), target up. " +
+              "In Grafana (http://tst7.ljalbinson.com:3000), Dashboards -> New -> Import -> ID 2842 " +
               "(\"Ceph - Cluster\") against the existing Prometheus datasource."
           )
         )

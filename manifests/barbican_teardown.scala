@@ -34,23 +34,6 @@ object barbican_teardown extends OrpheraApply:
   override def nodes: List[String] = List(dbNode, rabbitNode, node)
 
   // ---- tst20 ----
-  private val registeredInKeystone =
-    s"[ -x $helper ] && $helper registered >/dev/null 2>&1"
-  private val unregisterScript =
-    s"""$helper unregister || echo "keystone cleanup failed (continuing)""""
-
-  private val unitList = units.mkString(" ")
-  // True when ANY of the units has a unit file, or is active or enabled.
-  private val anyUnit =
-    s"""for u in $unitList; do if [ -f /etc/systemd/system/orphera-$$u.service ] || systemctl is-active --quiet orphera-$$u || systemctl is-enabled --quiet orphera-$$u; then exit 0; fi; done; exit 1"""
-  private val stopScript =
-    s"""for u in $unitList; do
-       |  systemctl disable --now orphera-$$u 2>/dev/null || true
-       |  rm -f /etc/systemd/system/orphera-$$u.service
-       |  if command -v podman >/dev/null 2>&1; then podman rm -f $$u 2>/dev/null || true; fi
-       |done
-       |systemctl daemon-reload
-       |echo "barbican containers and units removed"""".stripMargin
 
   // /etc/kolla/barbican is where the cluster playbook kept barbican.conf; it is listed
   // so that a node set up by the playbook is cleaned too.
@@ -63,59 +46,30 @@ object barbican_teardown extends OrpheraApply:
     "/var/log/kolla/barbican"
   )
 
-  // ---- tst10 ----
-  private val rabbitUp =
-    "podman ps -q --filter 'name=^rabbitmq$' 2>/dev/null | grep -q ."
-  // True when the vhost or user exists in a running broker; with no running
-  // broker there is nothing to remove.
-  private val rabbitHasBarbican =
-    s"""$rabbitUp && { podman exec rabbitmq rabbitmqctl list_vhosts -q | grep -qx barbican || podman exec rabbitmq rabbitmqctl list_users -q | awk '{print $$1}' | grep -qx barbican; }"""
-  private val rabbitScript =
-    """podman exec rabbitmq rabbitmqctl delete_vhost barbican || true
-      |podman exec rabbitmq rabbitmqctl delete_user barbican || true
-      |echo "rabbitmq vhost barbican and user barbican removed"""".stripMargin
-
-  // ---- tst3 ----
-  private val dropDatabaseScript =
-    s"""mariadb -N -e "DROP DATABASE IF EXISTS $dbName; DROP USER IF EXISTS '$dbUser'@'%'; FLUSH PRIVILEGES;""""
-  // True when the database or the user exists. When MariaDB cannot be
-  // queried this is also true, so that the drop runs and fails with MariaDB's own
-  // message: a database that is down is not "nothing to remove".
-  private val databaseExists =
-    s"""OUT=$$(mariadb -N -e "SELECT 1 FROM information_schema.SCHEMATA WHERE SCHEMA_NAME='$dbName' UNION SELECT 1 FROM mysql.user WHERE User='$dbUser'" 2>/dev/null) || exit 0; [ -n "$$OUT" ]"""
-
   def describe(target: Node): List[ApplyResource] =
     if target.name == dbNode then
       List(
-        command(
+        absentSqlDatabase(
           s"drop the $dbName database and the $dbUser user on the Galera cluster",
-          dropDatabaseScript,
-          onlyIf = databaseExists
+          List(dbName),
+          dbUser
         )
       )
     else if target.name == rabbitNode then
       List(
-        command(
+        absentRabbitAccount(
           "remove the barbican vhost and user from RabbitMQ",
-          rabbitScript,
-          onlyIf = rabbitHasBarbican,
-          timeout = 60
+          "barbican",
+          "barbican"
         )
       )
     else
-      val unregistered = command(
-        "remove Barbican from Keystone",
-        unregisterScript,
-        onlyIf = registeredInKeystone,
-        timeout = 120
-      )
-      val stopped = command(
-        "stop and remove the barbican containers and units",
-        stopScript,
-        onlyIf = anyUnit,
-        timeout = 240
-      ).after(unregistered)
+      val unregistered =
+        absentKeystoneEntries("remove Barbican from Keystone", "barbican")
+      val stopped = absentContainerUnits(units.map(u => s"orphera-$u" -> u))
+        .map(_.after(unregistered))
       // Typed removal, no script: each directory with its contents, then the helper.
       val cleaned = (dirs.map(absentDirectory(_, recursive = true)) :+
-        absentFile(helper)).map(_.after(stopped))
-      List(unregistered, stopped) ++ cleaned
+        absentFile(helper) :+ absentFile(keystoneHelperPath("barbican")))
+        .map(_.after(stopped*))
+      List(unregistered) ++ stopped ++ cleaned
