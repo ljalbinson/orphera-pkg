@@ -2902,6 +2902,48 @@ esac
       timeout = timeout
     )
 
+  /** Every pool whose name is one of `exact` or starts with one of `prefixes`
+    * gone, with all the objects in them, as a description: for a service that
+    * makes pools of its own whose list is not fixed (the object gateway's
+    * `.rgw.root` and `default.rgw.*`). A name is matched whole, or as the
+    * beginning of the pool name, never as a pattern. The monitors are allowed
+    * to delete pools only while it runs. It is wanted while a pool matches or
+    * when Ceph cannot be queried, and does nothing when none matches.
+    */
+  def absentCephPools(
+      label: String,
+      exact: List[String] = Nil,
+      prefixes: List[String] = Nil,
+      timeout: Int = 600
+  ): ApplyResource =
+    require(
+      exact.nonEmpty || prefixes.nonEmpty,
+      "absentCephPools needs at least one pool name or prefix"
+    )
+    exact.foreach(cephName("a pool name", _))
+    prefixes.foreach(cephName("a pool name prefix", _))
+    def literal(name: String): String = name.replace(".", "\\.")
+    val pattern =
+      (exact.map(literal(_) + "$") ++ prefixes.map(literal)).mkString("|")
+    command(
+      label,
+      s"""OUT=$$(cephadm shell -- ceph osd pool ls 2>/dev/null) || { echo "cannot list the pools" >&2; exit 1; }
+         |POOLS=$$(echo "$$OUT" | tr -d '\\r' | grep -E '^($pattern)' || true)
+         |if [ -z "$$POOLS" ]; then echo "no matching pools"; exit 0; fi
+         |R=0
+         |cephadm shell -- ceph config set mon mon_allow_pool_delete true || R=1
+         |for p in $$POOLS; do
+         |  cephadm shell -- ceph osd pool delete $$p $$p --yes-i-really-really-mean-it || R=1
+         |done
+         |cephadm shell -- ceph config set mon mon_allow_pool_delete false || R=1
+         |[ "$$R" = 0 ] || exit 1
+         |echo "pools removed:" $$POOLS""".stripMargin,
+      onlyIf =
+        s"""OUT=$$(cephadm shell -- ceph osd pool ls 2>/dev/null) || exit 0
+           |echo "$$OUT" | tr -d '\\r' | grep -Eq '^($pattern)'""".stripMargin,
+      timeout = timeout
+    )
+
   /** A cephx user (`client.cinder`) with a fixed key and capabilities, as a
     * description, for a node with `cephadm`. `caps` are pairs such as
     * `"mon" -> "profile rbd"` and `"osd" -> "profile rbd pool=volumes"`. It is
