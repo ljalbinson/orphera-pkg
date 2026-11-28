@@ -5539,6 +5539,73 @@ json.dump(S, open(P, 'w'))
       "absentCephPool: a pool that is not there fails the removal",
       sh(part(noPool, _.run))._1 != 0
     )
+    val rgwPools = absentCephPools(
+      "remove the RGW pools",
+      exact = List(".rgw.root"),
+      prefixes = List("default.rgw.")
+    )
+    check(
+      "absentCephPools: nothing matches yet, so nothing is wanted",
+      sh(part(rgwPools, _.onlyIf))._1 != 0
+    )
+    check(
+      "absentCephPools: and it does nothing when it runs",
+      sh(part(rgwPools, _.run))._1 == 0
+    )
+    for p <- List(
+        ".rgw.root",
+        ".rgw.root2",
+        "rgw.root",
+        "default.rgw.log",
+        "default.rgw.buckets.data",
+        "default.rgwx",
+        "volumes"
+      )
+    do sh(s"cephadm shell -- ceph osd pool create $p 8")
+    check(
+      "absentCephPools: it is wanted while a pool matches",
+      sh(part(rgwPools, _.onlyIf))._1 == 0
+    )
+    check(
+      "absentCephPools: and when Ceph cannot be queried",
+      sh(part(rgwPools, _.onlyIf), down = true)._1 == 0
+    )
+    val rgwGone = sh(part(rgwPools, _.run))
+    check(
+      "absentCephPools: it removes the pools that match",
+      rgwGone._1 == 0 && rgwGone._2.contains("pools removed:") &&
+        !dump.contains("\".rgw.root\"") &&
+        !dump.contains("\"default.rgw.log\"") &&
+        !dump.contains("\"default.rgw.buckets.data\""),
+      rgwGone.toString + dump
+    )
+    check(
+      "absentCephPools: pools with a similar name stay",
+      dump.contains("\".rgw.root2\"") && dump.contains("\"rgw.root\"") &&
+        dump.contains("\"default.rgwx\"") && dump.contains("\"volumes\""),
+      dump
+    )
+    check(
+      "absentCephPools: and sets pool deletion back to false",
+      dump.contains("\"mon_allow_pool_delete\": \"false\""),
+      dump
+    )
+    check(
+      "absentCephPools: nothing to do afterwards",
+      sh(part(rgwPools, _.onlyIf))._1 != 0
+    )
+    check(
+      "absentCephPools: a cluster that is down fails the removal",
+      sh(part(rgwPools, _.run), down = true)._1 != 0
+    )
+    check(
+      "absentCephPools: a name with a space is refused",
+      scala.util.Try(absentCephPools("x", exact = List("a b"))).isFailure
+    )
+    check(
+      "absentCephPools: no name at all is refused",
+      scala.util.Try(absentCephPools("x")).isFailure
+    )
     // configuration options
     val optsRes = cephConfig(
       "the RGW options",

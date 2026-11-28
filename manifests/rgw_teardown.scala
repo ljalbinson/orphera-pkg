@@ -44,16 +44,6 @@ object rgw_teardown extends OrpheraApply:
       helper
     )
 
-  private val poolsExist =
-    """cephadm shell -- ceph osd pool ls 2>/dev/null | grep -qE '^(\.rgw\.root|default\.rgw\.)'"""
-  private val purgeScript =
-    """set -e
-      |cephadm shell -- ceph config set mon mon_allow_pool_delete true
-      |for p in $(cephadm shell -- ceph osd pool ls 2>/dev/null | grep -E '^(\.rgw\.root|default\.rgw\.)'); do
-      |  cephadm shell -- ceph osd pool rm $p $p --yes-i-really-really-mean-it
-      |done
-      |echo "RGW pools removed (RGW_PURGE_POOLS=yes)"""".stripMargin
-
   def describe(target: Node): List[ApplyResource] =
     val unregistered =
       absentKeystoneEntries("remove object storage from Keystone", "rgw")
@@ -73,11 +63,10 @@ object rgw_teardown extends OrpheraApply:
     val keystoneHelperGone =
       absentFile(keystoneHelperPath("rgw")).after(unregistered)
     if purgePools then
-      val purged = command(
+      val purged = absentCephPools(
         "delete the RGW pools and every object in them (RGW_PURGE_POOLS=yes)",
-        purgeScript,
-        onlyIf = poolsExist,
-        timeout = 600
+        exact = List(".rgw.root"),
+        prefixes = List("default.rgw.")
       ).after(options)
       List(unregistered, keystoneHelperGone, service) ++ removed ++ List(purged)
     else List(unregistered, keystoneHelperGone, service) ++ removed

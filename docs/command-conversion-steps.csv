@@ -376,7 +376,7 @@ manifests/rgw_single_node.scala,377,apply command,restart RGW so it takes its ne
 manifests/rgw_teardown.scala,55,apply command,remove the RGW service,4,New product-specific kinds,Ceph pool/key/orch,cephPool / cephKey / Ceph config option / orchestrator spec,done
 manifests/rgw_teardown.scala,56,apply command,remove the RGW options from the monitors' configuration,4,New product-specific kinds,Ceph pool/key/orch,cephPool / cephKey / Ceph config option / orchestrator spec,done
 manifests/rgw_teardown.scala,62,apply command,"remove the helper, the state files and the CA copy",1,Existing kinds,directory/file,directory / file / authorizedKey / kernelModule / mount / pkg,done
-manifests/rgw_teardown.scala,66,apply command,delete the RGW pools and every object in them (RGW_PURGE_POOLS=yes),4,New product-specific kinds,Ceph pool/key/orch,cephPool / cephKey / Ceph config option / orchestrator spec,not started
+manifests/rgw_teardown.scala,66,apply command,delete the RGW pools and every object in them (RGW_PURGE_POOLS=yes),4,New product-specific kinds,Ceph pool/key/orch,cephPool / cephKey / Ceph config option / orchestrator spec,done
 manifests/k8s_alertmanager.scala,192,apply command,set the Alertmanager receivers,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),done
 manifests/k8s_alertmanager.scala,162,apply command,make the SMTP password Secret,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),done
 manifests/k8s_argocd.scala,226,apply command,helm install argo-cd,4,New product-specific kinds,Helm release / k8s object,helmRelease / Kubernetes object (applied manifest),done
