@@ -21,7 +21,11 @@ before_script:
   - export PATH="/usr/local/sbt/bin:$PATH"
   - export SBT_OPTS="-Dsbt.ivy.home=$CI_PROJECT_DIR/.ivy2 -Dsbt.global.base=$CI_PROJECT_DIR/.sbt"
 
-compile_and_test:
+# The two build jobs are written once, as hidden templates, and used twice: on every
+# branch push they only build and test (nothing is kept), and on a release tag
+# (v0.1.220, say) the *_release twins run the same steps and keep the files.
+# A job cannot make its artifacts conditional, hence the pairs.
+.compile_and_test:
   stage: build
   script:
     - utils/check-no-secrets.sh
@@ -30,29 +34,13 @@ compile_and_test:
     - sbt clean compile "scalafixAll --check" test
     - apt-get install -y -qq make rpm
     - make deb rpm cli-package
-  # The three jars and the packages built from them (the Scala agent's .deb and
-  # .rpm; the command line's .deb, .rpm and tarball), from the same commit that
-  # just passed the checks above. Artifacts are kept for a successful job only.
-  # Download them from the job page. The Go agent's packages are the go_agent job's.
-  artifacts:
-    name: "orphera-$CI_COMMIT_SHORT_SHA"
-    expire_in: 2 weeks
-    paths:
-      - agent/target/scala-3.8.4/agent-assembly-*.jar
-      - orchestrator/target/scala-3.8.4/orchestrator-assembly-*.jar
-      - scripting/target/scala-3.8.4/scripting-assembly-*.jar
-      - orphera-agent_*_amd64.deb
-      - orphera-agent-*.noarch.rpm
-      - orphera_*_all.deb
-      - orphera-[0-9]*.noarch.rpm
-      - orphera-[0-9]*.tar.gz
 
 # The Go agent: vet and tests with the race detector (`make test`, which `deb` and
 # `rpm` run first), then the amd64 packages. Same Docker runner as the job above,
 # with its own image, so nothing is installed on the runner. The Go version is the
 # `go` line of agent-go/go.mod. The global before_script is for sbt, so this job
 # replaces it with the one tool it needs, rpmbuild.
-go_agent:
+.go_agent:
   stage: build
   image: golang:1.22
   variables:
@@ -66,12 +54,64 @@ go_agent:
   script:
     - go version
     - make -C agent-go deb rpm
+
+compile_and_test:
+  extends: .compile_and_test
+  rules:
+    - if: $CI_COMMIT_TAG == null
+
+go_agent:
+  extends: .go_agent
+  rules:
+    - if: $CI_COMMIT_TAG == null
+
+# Release tags (v followed by a digit): build again from the tagged commit and keep
+# the three jars, the Scala agent's .deb and .rpm, and the command line's .deb, .rpm
+# and tarball. Download them from the job page. Kept until deleted by hand.
+compile_and_test_release:
+  extends: .compile_and_test
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v[0-9]/
   artifacts:
-    name: "orphera-agent-go-$CI_COMMIT_SHORT_SHA"
-    expire_in: 2 weeks
+    name: "orphera-$CI_COMMIT_TAG"
+    expire_in: never
+    paths:
+      - agent/target/scala-3.8.4/agent-assembly-*.jar
+      - orchestrator/target/scala-3.8.4/orchestrator-assembly-*.jar
+      - scripting/target/scala-3.8.4/scripting-assembly-*.jar
+      - orphera-agent_*_amd64.deb
+      - orphera-agent-*.noarch.rpm
+      - orphera_*_all.deb
+      - orphera-[0-9]*.noarch.rpm
+      - orphera-[0-9]*.tar.gz
+
+go_agent_release:
+  extends: .go_agent
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v[0-9]/
+  artifacts:
+    name: "orphera-agent-go-$CI_COMMIT_TAG"
+    expire_in: never
     paths:
       - agent-go/orphera-agent_*_amd64.deb
       - agent-go/orphera-agent-*.x86_64.rpm
+
+# The Scaladoc of the common, agent and orchestrator modules, published with GitLab
+# Pages from the default branch (the job must be called `pages` and leave `public/`).
+# `needs: []` starts it at once. The same docs go to GitHub Pages (.github/workflows/docs.yml).
+pages:
+  stage: build
+  needs: []
+  script:
+    - sbt common/doc agent/doc orchestrator/doc
+    - mkdir -p public
+    - for m in common agent orchestrator; do cp -r "$m"/target/scala-*/api "public/$m"; done
+    - echo '<!doctype html><meta charset="utf-8"><title>Orphera API documentation</title><h1>Orphera API documentation</h1><ul><li><a href="orchestrator/index.html">orchestrator</a> (the apply DSL is orphera.orchestrator.Resources)</li><li><a href="agent/index.html">agent</a></li><li><a href="common/index.html">common</a></li></ul>' > public/index.html
+  artifacts:
+    paths:
+      - public
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
 
 # Runs on runner0 (shell executor, tag orphera): see docs/GITLAB-RUNNER.md. The
 # global image, cache and before_script above are for the Docker runners, so this
